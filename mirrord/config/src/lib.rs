@@ -339,6 +339,7 @@ mod tests {
                 startup_timeout: None,
                 network_interface: None,
                 pause: Some(false),
+                flush_connections: Some(false),
             }),
             feature: Some(FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true).into(),

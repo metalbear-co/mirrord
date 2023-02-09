@@ -73,6 +73,16 @@ pub struct AgentConfig {
     /// the agent.
     #[config(env = "MIRRORD_PAUSE", default = false, unstable)]
     pub pause: bool,
+
+    /// Temporary fix for issue [#1029]().
+    ///
+    /// Makes the stealer feature use `conntrack --flush` to flush connections.
+    #[config(
+        env = "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS",
+        default = false,
+        unstable
+    )]
+    pub flush_connections: bool,
 }
 
 #[cfg(test)]

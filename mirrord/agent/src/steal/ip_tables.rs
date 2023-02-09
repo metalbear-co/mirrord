@@ -2,7 +2,7 @@ use mirrord_protocol::Port;
 use nix::unistd::getgid;
 use rand::distributions::{Alphanumeric, DistString};
 use tokio::process::Command;
-use tracing::info;
+use tracing::debug;
 
 use crate::error::{AgentError, Result};
 
@@ -177,14 +177,18 @@ where
         self.add_redirect(redirected_port, target_port)
             .and_then(|_| self.add_bypass_own_packets())?;
 
-        let conntrack = Command::new("conntrack")
-            .args(["--flush", IPTABLES_TABLE_NAME])
-            .output()
-            .await;
-        info!("conntrack result is \n{conntrack:#?}\n");
+        if let Ok(flush) = std::env::var("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS") &&
+            let Ok(flush) = flush.parse::<bool>() &&
+            flush {
+                let conntrack = Command::new("conntrack")
+                    .args(["--flush"])
+                    .output()
+                    .await;
+                debug!("conntrack result is \n{conntrack:#?}\n");
 
-        let output = conntrack?;
-        info!("conntrack output is \n{output:#?}\n");
+                let output = conntrack?;
+                debug!("conntrack output is \n{output:#?}\n");
+        }
 
         Ok(())
     }
