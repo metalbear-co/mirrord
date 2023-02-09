@@ -9,16 +9,16 @@ import kotlinx.collections.immutable.toImmutableMap
 
 /**
  * Functions to be called when one of our entry points to the program is called - when process is
- * launched, when go entrypoint, etc It will check to see if it already occured for current run and
+ * launched, when go entrypoint, etc. It will check to see if it already occurred for current run and
  * if it did, it will do nothing
  */
 object MirrordExecManager {
     var enabled: Boolean = false
 
-    private fun chooseTarget(wslDistribution: WSLDistribution?, project: Project): String? {
+    private fun chooseTarget(wslDistribution: WSLDistribution?, project: Project, configPath: String?): String? {
         val pods =
             MirrordApi.listPods(
-                MirrordConfigAPI.getNamespace(project),
+                MirrordConfigAPI.getNamespace(project, configPath),
                 project,
                 wslDistribution
             )
@@ -55,17 +55,24 @@ object MirrordExecManager {
 
         MirrordVersionCheck.checkVersion(project)
 
-        var target: String? = null
         var config: String? = null
-        if (!MirrordConfigAPI.isTargetSet(project)) {
+        ApplicationManager.getApplication()
+            .executeOnPooledThread {
+                ApplicationManager.getApplication().invokeAndWait {
+                    config = chooseConfig(project)
+                }
+            }
+            .get()
+
+        var target: String? = null
+        if (!MirrordConfigAPI.isTargetSet(project, config)) {
             // In some cases, we're executing from a `ReadAction` context, which means we
             // can't block and wait for a WriteAction (such as invokeAndWait).
             // Executing it in a thread pool seems to fix, fml.
             ApplicationManager.getApplication()
                 .executeOnPooledThread {
-                    ApplicationManager.getApplication().invokeAndWait() {
-                        target = chooseTarget(wslDistribution, project)
-                        config = chooseConfig(project)
+                    ApplicationManager.getApplication().invokeAndWait {
+                        target = chooseTarget(wslDistribution, project, config)
                     }
                 }
                 .get()
@@ -76,7 +83,7 @@ object MirrordExecManager {
             }
         }
 
-        var env = MirrordApi.exec(target, getConfigPath(project), project, wslDistribution)
+        val env = MirrordApi.exec(target, config, project, wslDistribution)
 
         env["DEBUGGER_IGNORE_PORTS_PATCH"] = "45000-65535"
         return env.toImmutableMap()

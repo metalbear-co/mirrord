@@ -65,8 +65,8 @@ object MirrordConfigAPI {
     /**
      * Retrieves config file and parses it if available.
      */
-    private fun getConfigData(project: Project): ConfigData? {
-        val configPath = getConfigPath(project)
+    private fun getConfigData(project: Project, configPath: String?): ConfigData? {
+        val configPath = Path.of(configPath)
         if (!configPath.exists()) {
             return null
         }
@@ -78,16 +78,16 @@ object MirrordConfigAPI {
     /**
      * Gets target set in config file, if any.
      */
-    private fun getTarget(project: Project): String? {
-        val configData = getConfigData(project)
+    private fun getTarget(project: Project, configPath: String?): String? {
+        val configData = getConfigData(project, configPath)
         return configData?.target?.path
     }
 
     /**
      * Gets namespace set in config file, if any.
      */
-    fun getNamespace(project: Project): String? {
-        val configData = getConfigData(project)
+    fun getNamespace(project: Project, configPath: String?): String? {
+        val configData = getConfigData(project, configPath)
         return configData?.target?.namespace
     }
 
@@ -95,7 +95,7 @@ object MirrordConfigAPI {
     /**
      * Returns whether target is set in config.
      */
-    fun isTargetSet(project: Project): Boolean {
-        return getTarget(project) != null
+    fun isTargetSet(project: Project, configPath: String?): Boolean {
+        return getTarget(project, configPath) != null
     }
 }
