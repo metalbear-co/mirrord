@@ -122,7 +122,8 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_OPERATOR_ENABLE", default = true)]
     pub operator: bool,
 
-    /// Custom path to the kubeconfig file
+    /// Path to a kubeconfig file, if not specified, will use KUBECONFIG or ~/.kube/config or the
+    /// in-cluster config.
     #[config(env = "MIRRORD_KUBECONFIG")]
     pub kubeconfig: Option<String>,
 }
