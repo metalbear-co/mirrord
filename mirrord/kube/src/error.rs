@@ -13,6 +13,9 @@ pub enum KubeApiError {
     #[error("mirrord-layer: Failed to get `KubeConfig`!")]
     KubeConfigError(#[from] kube::config::InferConfigError),
 
+    #[error("mirrord-layer: Failed to get the custom path for `KubeConfig`!")]
+    KubeConfigPathError(#[from] kube::config::KubeconfigError),
+
     #[error("mirrord-layer: JSON convert error")]
     JSONConvertError(#[from] serde_json::Error),
 

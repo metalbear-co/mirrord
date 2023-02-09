@@ -121,6 +121,11 @@ pub struct LayerConfig {
     /// Allow to lookup if operator is installed on cluster and use it
     #[config(env = "MIRRORD_OPERATOR_ENABLE", default = true)]
     pub operator: bool,
+
+    /// Path to a kubeconfig file, if not specified, will use KUBECONFIG or ~/.kube/config or the
+    /// in-cluster config.
+    #[config(env = "MIRRORD_KUBECONFIG")]
+    pub kubeconfig: Option<String>,
 }
 
 impl LayerConfig {
@@ -318,6 +323,7 @@ mod tests {
 
         let expect = LayerFileConfig {
             accept_invalid_certificates: Some(false),
+            kubeconfig: None,
             connect_agent_name: None,
             connect_agent_port: None,
             target: Some(TargetFileConfig::Advanced {
