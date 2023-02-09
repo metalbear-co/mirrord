@@ -181,7 +181,7 @@ where
             let Ok(flush) = flush.parse::<bool>() &&
             flush {
                 let conntrack = Command::new("conntrack")
-                    .args(["--flush"])
+                    .args(["--delete", "--proto", "tcp", "--orig-port-dst", &target_port.to_string()])
                     .output()
                     .await;
                 debug!("conntrack result is \n{conntrack:#?}\n");
