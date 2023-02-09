@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- IntelliJ-ext: change the dialog to provide a sorted list and make it searchable, resolves [#1031](https://github.com/metalbear-co/mirrord/issues/1031).
+
 ## 3.23.0
 
 ### Fixed

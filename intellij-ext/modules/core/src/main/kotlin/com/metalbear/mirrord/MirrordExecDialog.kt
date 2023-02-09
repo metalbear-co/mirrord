@@ -7,6 +7,8 @@ import com.intellij.ui.components.JBScrollPane
 import java.awt.*
 import javax.swing.*
 import javax.swing.border.EmptyBorder
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
 
 
 object MirrordExecDialog {
@@ -14,11 +16,23 @@ object MirrordExecDialog {
     private const val targetLabel = "Select Target"
 
     fun selectTargetDialog(targets: List<String>): String? {
-        val jbTargets = targets.asJBList()
-        val result = DialogBuilder(). apply {
+        val jbTargets = targets.sorted().asJBList()
+        val searchField = JTextField()
+        searchField.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = updateList()
+            override fun removeUpdate(e: DocumentEvent) = updateList()
+            override fun changedUpdate(e: DocumentEvent) = updateList()
 
+            private fun updateList() {
+                val searchTerm = searchField.text
+                val filteredTargets = targets.filter { it.contains(searchTerm, true) }.sorted()
+                jbTargets.setListData(filteredTargets.toTypedArray())
+            }
+
+        })
+        val result = DialogBuilder().apply {
             setCenterPanel(JPanel(BorderLayout()).apply {
-                add(createSelectionDialog(targetLabel, jbTargets), BorderLayout.WEST)
+                add(createSelectionDialog(targetLabel, jbTargets, searchField), BorderLayout.WEST)
             })
             setTitle(dialogHeading)
         }.show()
@@ -32,7 +46,7 @@ object MirrordExecDialog {
         selectionMode = ListSelectionModel.SINGLE_SELECTION
     }
 
-    private fun createSelectionDialog(label: String, items: JBList<String>): JPanel =
+    private fun createSelectionDialog(label: String, items: JBList<String>, searchField: JTextField): JPanel =
         JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             border = EmptyBorder(10, 5, 10, 5)
@@ -40,6 +54,11 @@ object MirrordExecDialog {
                 alignmentX = JLabel.LEFT_ALIGNMENT
             })
             add(Box.createRigidArea(Dimension(0, 5)))
+            add(searchField.apply {
+                alignmentX = JBScrollPane.LEFT_ALIGNMENT
+                preferredSize = Dimension(250, 30)
+                size = Dimension(250, 30)
+            })
             add(JBScrollPane(items).apply {
                 alignmentX = JBScrollPane.LEFT_ALIGNMENT
                 preferredSize = Dimension(250, 350)
