@@ -56,6 +56,13 @@
         }
       ]
     },
+    "kubeconfig": {
+      "description": "Path to a kubeconfig file, if not specified, will use KUBECONFIG or ~/.kube/config or the in-cluster config.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "operator": {
       "description": "Allow to lookup if operator is installed on cluster and use it",
       "type": [
