@@ -8,15 +8,16 @@ import com.intellij.util.io.exists
 import com.intellij.util.io.write
 import com.google.gson.Gson
 import com.intellij.util.io.readText
+import java.io.File
 import java.nio.file.Path
 
 
-data class Target (
+data class Target(
     val namespace: String?,
     val path: String?
 )
 
-data class ConfigData (
+data class ConfigData(
     val target: Target?
 )
 
@@ -40,8 +41,13 @@ object MirrordConfigAPI {
     """
 
     fun getConfigPath(project: Project): Path {
-        val basePath = project.basePath ?: throw Error("couldn't resolve project path");
+        val basePath = project.basePath ?: throw Error("couldn't resolve project path")
         return Path.of(basePath, ".mirrord", "mirrord.json")
+    }
+
+    fun searchConfigPaths(project: Project): List<String> {
+        val basePath = project.basePath ?: throw Error("couldn't resolve project path")
+        return File(basePath).walkTopDown().filter { it.name == "mirrord.json" }.map { it.toPath().toString() }.toList()
     }
 
     /**

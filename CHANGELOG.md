@@ -10,6 +10,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 
 - Add a field to mirrord-config to specify custom path for kubeconfig , resolves [#1027](https://github.com/metalbear-co/mirrord/issues/1027).
+- IntelliJ-ext: if multiple configs are present, provide a dialog to choose, resolves [#1030](https://github.com/metalbear-co/mirrord/issues/1030).
 
 ### Changed
 

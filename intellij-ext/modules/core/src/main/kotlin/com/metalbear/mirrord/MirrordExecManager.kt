@@ -17,12 +17,21 @@ object MirrordExecManager {
 
     private fun chooseTarget(wslDistribution: WSLDistribution?, project: Project): String? {
         val pods =
-                MirrordApi.listPods(
-                        MirrordConfigAPI.getNamespace(project),
-                        project,
-                        wslDistribution
-                )
+            MirrordApi.listPods(
+                MirrordConfigAPI.getNamespace(project),
+                project,
+                wslDistribution
+            )
         return MirrordExecDialog.selectTargetDialog(pods)
+    }
+
+    private fun chooseConfig(project: Project): String? {
+        val configPaths = MirrordConfigAPI.searchConfigPaths(project)
+        return if (configPaths.size > 1) {
+            MirrordExecDialog.selectConfigDialog(configPaths)
+        } else {
+            getConfigPath(project)
+        }
     }
 
     private fun getConfigPath(project: Project): String? {
@@ -33,6 +42,7 @@ object MirrordExecManager {
             null
         }
     }
+
     /** Starts mirrord, shows dialog for selecting pod if target not set and returns env to set. */
     fun start(wslDistribution: WSLDistribution?, project: Project): Map<String, String>? {
         if (!enabled) {
@@ -46,17 +56,19 @@ object MirrordExecManager {
         MirrordVersionCheck.checkVersion(project)
 
         var target: String? = null
+        var config: String? = null
         if (!MirrordConfigAPI.isTargetSet(project)) {
             // In some cases, we're executing from a `ReadAction` context, which means we
             // can't block and wait for a WriteAction (such as invokeAndWait).
             // Executing it in a thread pool seems to fix, fml.
             ApplicationManager.getApplication()
-                    .executeOnPooledThread {
-                        ApplicationManager.getApplication().invokeAndWait() {
-                            target = chooseTarget(wslDistribution, project)
-                        }
+                .executeOnPooledThread {
+                    ApplicationManager.getApplication().invokeAndWait() {
+                        target = chooseTarget(wslDistribution, project)
+                        config = chooseConfig(project)
                     }
-                    .get()
+                }
+                .get()
 
             if (target == null) {
                 MirrordNotifier.progress("mirrord loading canceled.", project)
