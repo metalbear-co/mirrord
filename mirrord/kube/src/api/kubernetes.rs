@@ -160,8 +160,8 @@ pub async fn create_kube_api(config: Option<LayerConfig>) -> Result<Client> {
 
         #[cfg_attr(not(feature = "env_guard"), allow(unused_mut))]
         if config.accept_invalid_certificates {
-            // Only warn the first time connecting to the agent, not on child processes.
             kube_config.accept_invalid_certs = true;
+            // Only warn the first time connecting to the agent, not on child processes.
             if config.connect_agent_name.is_none() {
                 warn!("Accepting invalid certificates");
             }
