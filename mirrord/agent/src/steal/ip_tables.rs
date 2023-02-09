@@ -2,7 +2,7 @@ use mirrord_protocol::Port;
 use nix::unistd::getgid;
 use rand::distributions::{Alphanumeric, DistString};
 use tokio::process::Command;
-use tracing::debug;
+use tracing::warn;
 
 use crate::error::{AgentError, Result};
 
@@ -64,6 +64,7 @@ pub(crate) struct SafeIpTables<IPT: IPTables> {
     inner: IPT,
     chain_name: String,
     formatter: IPTableFormatter,
+    flush_connections: bool,
 }
 
 const IPTABLES_TABLE_NAME: &str = "nat";
@@ -76,7 +77,7 @@ impl<IPT> SafeIpTables<IPT>
 where
     IPT: IPTables,
 {
-    pub(super) fn new(ipt: IPT) -> Result<Self> {
+    pub(super) fn new(ipt: IPT, flush_connections: bool) -> Result<Self> {
         let formatter = IPTableFormatter::detect(&ipt)?;
 
         let chain_name = Self::get_chain_name();
@@ -89,6 +90,7 @@ where
             inner: ipt,
             chain_name,
             formatter,
+            flush_connections,
         })
     }
 
@@ -177,17 +179,21 @@ where
         self.add_redirect(redirected_port, target_port)
             .and_then(|_| self.add_bypass_own_packets())?;
 
-        if let Ok(flush) = std::env::var("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS") &&
-            let Ok(flush) = flush.parse::<bool>() &&
-            flush {
-                let conntrack = Command::new("conntrack")
-                    .args(["--delete", "--proto", "tcp", "--orig-port-dst", &target_port.to_string()])
-                    .output()
-                    .await;
-                debug!("conntrack result is \n{conntrack:#?}\n");
+        if self.flush_connections {
+            let conntrack = Command::new("conntrack")
+                .args([
+                    "--delete",
+                    "--proto",
+                    "tcp",
+                    "--orig-port-dst",
+                    &target_port.to_string(),
+                ])
+                .output()
+                .await?;
 
-                let output = conntrack?;
-                debug!("conntrack output is \n{output:#?}\n");
+            if !conntrack.status.success() && conntrack.status.code() != Some(256) {
+                warn!("`conntrack` output is {conntrack:#?}");
+            }
         }
 
         Ok(())
@@ -318,7 +324,7 @@ mod tests {
             .times(1)
             .returning(|_, _| Ok(()));
 
-        let ipt = SafeIpTables::new(mock).expect("Create Failed");
+        let ipt = SafeIpTables::new(mock, false).expect("Create Failed");
 
         assert!(ipt.add_redirect(69, 420).is_ok());
 
@@ -370,7 +376,7 @@ mod tests {
             .times(1)
             .returning(|_, _| Ok(()));
 
-        let ipt = SafeIpTables::new(mock).expect("Create Failed");
+        let ipt = SafeIpTables::new(mock, false).expect("Create Failed");
 
         assert!(ipt.add_redirect(69, 420).is_ok());
 

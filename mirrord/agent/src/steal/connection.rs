@@ -389,7 +389,15 @@ impl TcpConnectionStealer {
 
     /// Initialize iptables member, which creates an iptables chain for our rules.
     fn init_iptables(&mut self) -> Result<()> {
-        self.iptables = Some(SafeIpTables::new(iptables::new(false).unwrap())?);
+        let flush_connections = std::env::var("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS")
+            .ok()
+            .and_then(|var| var.parse::<bool>().ok())
+            .unwrap_or_default();
+
+        self.iptables = Some(SafeIpTables::new(
+            iptables::new(false).unwrap(),
+            flush_connections,
+        )?);
         Ok(())
     }
 
