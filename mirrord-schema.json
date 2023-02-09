@@ -11,6 +11,13 @@
         "null"
       ]
     },
+    "kubeconfig": {
+      "description": "Path to a kubeconfig file, if not specified, will use KUBECONFIG or ~/.kube/config or the in-cluster config.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "agent": {
       "description": "Agent configuration, see [`agent::AgentFileConfig`].",
       "anyOf": [
