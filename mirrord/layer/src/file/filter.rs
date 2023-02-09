@@ -101,6 +101,7 @@ fn generate_remote_ro_set() -> RegexSet {
         // "file not exist" for identity caches (AWS)
         r".aws/cli/cache/.+\.json$",
         r".aws/credentials$",
+        r".aws/config$",
         // for dns resolving
         r"^/etc/resolv.conf$",
         r"^/etc/hosts$",
