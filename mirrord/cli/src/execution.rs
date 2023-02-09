@@ -108,10 +108,6 @@ impl MirrordExecution {
             AgentConnectInfo::Operator => {}
         };
 
-        // Let layer know we already brought env var for it. Remove after removing that part from
-        // there.
-        env_vars.insert("MIRRORD_EXTERNAL_ENV".to_string(), "true".to_string());
-
         Ok(Self {
             environment: env_vars,
         })
