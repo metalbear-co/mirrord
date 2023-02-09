@@ -3,7 +3,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use k8s_openapi::api::core::v1::Pod;
-use kube::{Api, Client, Config};
+use kube::{
+    config::{KubeConfigOptions, Kubeconfig},
+    Api, Client, Config,
+};
 use mirrord_config::{agent::AgentConfig, target::TargetConfig, LayerConfig};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
@@ -148,16 +151,22 @@ pub async fn create_kube_api(config: Option<LayerConfig>) -> Result<Client> {
     let mut kube_config = Config::infer().await?;
 
     if let Some(config) = config {
+        if let Some(kube_config_file) = config.kubeconfig {
+            let parsed_kube_config = Kubeconfig::read_from(kube_config_file)?;
+            kube_config =
+                Config::from_custom_kubeconfig(parsed_kube_config, &KubeConfigOptions::default())
+                    .await?;
+        }
+
         #[cfg_attr(not(feature = "env_guard"), allow(unused_mut))]
         if config.accept_invalid_certificates {
-            kube_config.accept_invalid_certs = true;
             // Only warn the first time connecting to the agent, not on child processes.
+            kube_config.accept_invalid_certs = true;
             if config.connect_agent_name.is_none() {
                 warn!("Accepting invalid certificates");
             }
         }
     }
-
     #[cfg(feature = "env_guard")]
     _guard.prepare_config(&mut kube_config);
 
