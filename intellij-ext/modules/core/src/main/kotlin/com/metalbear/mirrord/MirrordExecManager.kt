@@ -18,7 +18,7 @@ object MirrordExecManager {
     private fun chooseTarget(wslDistribution: WSLDistribution?, project: Project, configPath: String?): String? {
         val pods =
             MirrordApi.listPods(
-                MirrordConfigAPI.getNamespace(project, configPath),
+                MirrordConfigAPI.getNamespace(configPath),
                 project,
                 wslDistribution
             )
@@ -65,7 +65,7 @@ object MirrordExecManager {
             .get()
 
         var target: String? = null
-        if (!MirrordConfigAPI.isTargetSet(project, config)) {
+        if (!MirrordConfigAPI.isTargetSet(config)) {
             // In some cases, we're executing from a `ReadAction` context, which means we
             // can't block and wait for a WriteAction (such as invokeAndWait).
             // Executing it in a thread pool seems to fix, fml.
