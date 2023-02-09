@@ -177,7 +177,10 @@ where
         self.add_redirect(redirected_port, target_port)
             .and_then(|_| self.add_bypass_own_packets())?;
 
-        let conntrack = Command::new("conntrack").args(["--flush"]).output().await;
+        let conntrack = Command::new("conntrack")
+            .args(["--flush", IPTABLES_TABLE_NAME])
+            .output()
+            .await;
         info!("conntrack result is \n{conntrack:#?}\n");
 
         let output = conntrack?;
