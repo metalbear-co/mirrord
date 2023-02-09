@@ -326,6 +326,8 @@ impl ContainerApi for EphemeralContainer {
             agent_command_line.push(timeout.to_string());
         }
 
+        let flush_connections = agent.flush_connections.to_string();
+
         let ephemeral_container: KubeEphemeralContainer = serde_json::from_value(json!({
             "name": mirrord_agent_name,
             "image": agent_image,
@@ -338,7 +340,10 @@ impl ContainerApi for EphemeralContainer {
             },
             "imagePullPolicy": agent.image_pull_policy,
             "targetContainerName": runtime_data.container_name,
-            "env": [{"name": "RUST_LOG", "value": agent.log_level}],
+            "env": [
+                {"name": "RUST_LOG", "value": agent.log_level},
+                { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": flush_connections }
+            ],
             "command": agent_command_line,
         }))?;
         debug!("Requesting ephemeral_containers_subresource");
