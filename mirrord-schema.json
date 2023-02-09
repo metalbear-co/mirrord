@@ -166,6 +166,13 @@
             "null"
           ]
         },
+        "flush_connections": {
+          "description": "Temporary fix for issue [#1029]().\n\nMakes the stealer feature use `conntrack --flush` to flush connections.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "image": {
           "description": "Name of the agent's docker image.\n\nUseful when a custom build of mirrord-agent is required, or when using an internal registry.\n\nDefaults to the latest stable image.",
           "type": [
