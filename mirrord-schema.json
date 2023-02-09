@@ -167,7 +167,7 @@
           ]
         },
         "flush_connections": {
-          "description": "Temporary fix for issue [#1029]().\n\nMakes the stealer feature use `conntrack --flush` to flush connections.",
+          "description": "Flushes existing connections when starting to steal, might fix issues where connections aren't stolen (due to being already established)\n\nTemporary fix for issue [#1029](https://github.com/metalbear-co/mirrord/issues/1029).",
           "type": [
             "boolean",
             "null"
