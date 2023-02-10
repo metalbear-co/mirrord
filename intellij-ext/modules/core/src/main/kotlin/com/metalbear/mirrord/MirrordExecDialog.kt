@@ -14,10 +14,9 @@ import javax.swing.event.DocumentListener
 object MirrordExecDialog {
     private const val dialogHeading: String = "mirrord"
     private const val targetLabel = "Select Target"
-    private const val configLabel = "Select Config"
 
-    private fun selectionDialog(items: List<String>, label: String): String? {
-        val jbTargets = items.sorted().asJBList()
+    fun selectTargetDialog(targets: List<String>): String? {
+        val jbTargets = targets.sorted().asJBList()
         val searchField = JTextField()
         searchField.document.addDocumentListener(object : DocumentListener {
             override fun insertUpdate(e: DocumentEvent) = updateList()
@@ -26,14 +25,14 @@ object MirrordExecDialog {
 
             private fun updateList() {
                 val searchTerm = searchField.text
-                val filteredTargets = items.filter { it.contains(searchTerm, true) }.sorted()
+                val filteredTargets = targets.filter { it.contains(searchTerm, true) }.sorted()
                 jbTargets.setListData(filteredTargets.toTypedArray())
             }
 
         })
         val result = DialogBuilder().apply {
             setCenterPanel(JPanel(BorderLayout()).apply {
-                add(createSelectionDialog(label, jbTargets, searchField), BorderLayout.WEST)
+                add(createSelectionDialog(targetLabel, jbTargets, searchField), BorderLayout.WEST)
             })
             setTitle(dialogHeading)
         }.show()
@@ -41,14 +40,6 @@ object MirrordExecDialog {
             return jbTargets.selectedValue
         }
         return null
-    }
-
-    fun selectTargetDialog(targets: List<String>): String? {
-        return selectionDialog(targets, targetLabel)
-    }
-
-    fun selectConfigDialog(configs: List<String>): String? {
-        return selectionDialog(configs, configLabel)
     }
 
     private fun List<String>.asJBList() = JBList(this).apply {

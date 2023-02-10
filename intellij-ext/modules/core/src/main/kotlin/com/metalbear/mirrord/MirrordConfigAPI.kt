@@ -42,7 +42,11 @@ object MirrordConfigAPI {
 
     fun getConfigPath(project: Project): Path {
         val basePath = project.basePath ?: throw Error("couldn't resolve project path")
-        return Path.of(basePath, ".mirrord", "mirrord.json")
+        val resolvedConfigPath = when (val configPath = MirrordConfigDropDown.selectedConfig) {
+            "Select Configuration", "Default Configuration" -> Path.of(basePath, ".mirrord", "mirrord.json")
+            else -> Path.of(configPath)
+        }
+        return resolvedConfigPath
     }
 
     fun searchConfigPaths(project: Project): List<String> {
@@ -54,19 +58,21 @@ object MirrordConfigAPI {
      * Opens the config file in the editor, creating it if didn't exist before
      */
     fun openConfig(project: Project) {
-        val configPath = getConfigPath(project);
+        val configPath = getConfigPath(project)
         if (!configPath.exists()) {
             configPath.write(defaultConfig, createParentDirs = true)
         }
-        val file = VirtualFileManager.getInstance().refreshAndFindFileByNioPath(configPath)!!
+        val file = VirtualFileManager.getInstance().refreshAndFindFileByNioPath(configPath)
+            ?: throw Error("File not found")
         FileEditorManager.getInstance(project).openFile(file, true)
     }
+
 
     /**
      * Retrieves config file and parses it if available.
      */
-    private fun getConfigData(configPath: String?): ConfigData? {
-        val configPath = Path.of(configPath ?: return null)
+    private fun getConfigData(project: Project): ConfigData? {
+        val configPath = getConfigPath(project)
         if (!configPath.exists()) {
             return null
         }
@@ -78,16 +84,16 @@ object MirrordConfigAPI {
     /**
      * Gets target set in config file, if any.
      */
-    private fun getTarget(configPath: String?): String? {
-        val configData = getConfigData(configPath)
+    private fun getTarget(project: Project): String? {
+        val configData = getConfigData(project)
         return configData?.target?.path
     }
 
     /**
      * Gets namespace set in config file, if any.
      */
-    fun getNamespace(configPath: String?): String? {
-        val configData = getConfigData(configPath)
+    fun getNamespace(project: Project): String? {
+        val configData = getConfigData(project)
         return configData?.target?.namespace
     }
 
@@ -95,7 +101,7 @@ object MirrordConfigAPI {
     /**
      * Returns whether target is set in config.
      */
-    fun isTargetSet(configPath: String?): Boolean {
-        return getTarget(configPath) != null
+    fun isTargetSet(project: Project): Boolean {
+        return getTarget(project) != null
     }
 }

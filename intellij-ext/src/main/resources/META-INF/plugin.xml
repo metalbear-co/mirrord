@@ -42,6 +42,9 @@
                     text="Open mirrord configuration file"
                     description="Opens/creates the default mirrord configuration file"
                     icon="AllIcons.General.GearPlain"/>
+            <action id="MirrordConfigDropDown" class="com.metalbear.mirrord.MirrordConfigDropDown"
+                    text="Select mirrord configuration file"
+                    description="Selects the mirrord configuration file to use"/>
             <separator/>
 
             <add-to-group group-id="ToolbarRunGroup" anchor="first"/>
