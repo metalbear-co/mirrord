@@ -15,9 +15,10 @@ class MirrordConfigDropDown : ComboBoxAction() {
     override fun createPopupActionGroup(button: JComponent?): DefaultActionGroup {
         val actionGroup = DefaultActionGroup()
         configPaths.forEach { configPath ->
+            val trimmedPath = configPath.split("/").takeLast(3).joinToString("/")
             actionGroup.add(object : AnAction(configPath) {
                 override fun actionPerformed(e: AnActionEvent) {
-                    selectedConfig = configPath
+                    selectedConfig = trimmedPath
                     e.presentation.text = selectedConfig
                 }
             })
