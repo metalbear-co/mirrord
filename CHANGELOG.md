@@ -17,6 +17,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - IntelliJ-ext: change the dialog to provide a sorted list and make it searchable, resolves [#1031](https://github.com/metalbear-co/mirrord/issues/1031).
 - mirrord-layer: Changed default to read AWS credentials + config from remote pod.
 - Removed unused env var (`MIRRORD_EXTERNAL_ENV`)
+- mirrord-agent: Use `conntrack` to flush stealer connections (temporary fix for
+  [#1029](https://github.com/metalbear-co/mirrord/issues/1029)).
 
 ## 3.23.0
 

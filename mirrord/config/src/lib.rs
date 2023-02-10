@@ -207,7 +207,8 @@ mod tests {
                             "image_pull_policy": "",
                             "ttl": 60,
                             "ephemeral": false,
-                            "pause": false
+                            "pause": false,
+                            "flush_connections": false
                         },
                         "feature": {
                             "env": true,
@@ -242,6 +243,7 @@ mod tests {
                     ttl = 60
                     ephemeral = false
                     pause = false
+                    flush_connections = false
 
                     [feature]
                     env = true
@@ -273,6 +275,7 @@ mod tests {
                         ttl: 60
                         ephemeral: false
                         pause: false
+                        flush_connections: false
 
                     feature:
                         env: true
@@ -345,6 +348,7 @@ mod tests {
                 startup_timeout: None,
                 network_interface: None,
                 pause: Some(false),
+                flush_connections: Some(false),
             }),
             feature: Some(FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true).into(),

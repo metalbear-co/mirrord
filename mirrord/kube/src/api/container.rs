@@ -158,8 +158,10 @@ impl ContainerApi for JobContainer {
             agent_command_line.push("--pause".to_owned());
         }
 
-        let agent_pod: Job =
-            serde_json::from_value(json!({ // Only Jobs support self deletion after completion
+        let flush_connections = agent.flush_connections.to_string();
+
+        let agent_pod: Job = serde_json::from_value(
+            json!({ // Only Jobs support self deletion after completion
                     "metadata": {
                         "name": mirrord_agent_job_name,
                         "labels": {
@@ -221,7 +223,10 @@ impl ContainerApi for JobContainer {
                                     }
                                 ],
                                 "command": agent_command_line,
-                                "env": [{"name": "RUST_LOG", "value": agent.log_level}],
+                                "env": [
+                                    { "name": "RUST_LOG", "value": agent.log_level },
+                                    { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": flush_connections }
+                                ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                                 {
                                     "requests":
@@ -236,7 +241,8 @@ impl ContainerApi for JobContainer {
                 }
             }
                 }
-            ))?;
+            ),
+        )?;
         let job_api = get_k8s_resource_api(client, agent.namespace.as_deref());
 
         job_api
@@ -320,6 +326,8 @@ impl ContainerApi for EphemeralContainer {
             agent_command_line.push(timeout.to_string());
         }
 
+        let flush_connections = agent.flush_connections.to_string();
+
         let ephemeral_container: KubeEphemeralContainer = serde_json::from_value(json!({
             "name": mirrord_agent_name,
             "image": agent_image,
@@ -332,7 +340,10 @@ impl ContainerApi for EphemeralContainer {
             },
             "imagePullPolicy": agent.image_pull_policy,
             "targetContainerName": runtime_data.container_name,
-            "env": [{"name": "RUST_LOG", "value": agent.log_level}],
+            "env": [
+                {"name": "RUST_LOG", "value": agent.log_level},
+                { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": flush_connections }
+            ],
             "command": agent_command_line,
         }))?;
         debug!("Requesting ephemeral_containers_subresource");
