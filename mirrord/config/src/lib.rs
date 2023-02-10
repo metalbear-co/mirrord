@@ -208,7 +208,7 @@ mod tests {
                             "ttl": 60,
                             "ephemeral": false,
                             "pause": false,
-                            "flush_connections": false,
+                            "flush_connections": false
                         },
                         "feature": {
                             "env": true,
