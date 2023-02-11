@@ -155,8 +155,8 @@ impl UdpOutgoingApi {
                                             .unwrap() as ConnectionId;
 
                                         debug!("interceptor_task -> mirror_socket {:#?}", mirror_socket);
-                                        let peer_address = mirror_socket.peer_addr().unwrap();
-
+                                        let peer_address = mirror_socket.peer_addr()?;
+                                        let local_address = mirror_stream.local_addr()?;
                                         let framed = UdpFramed::new(mirror_socket, BytesCodec::new());
                                         debug!("interceptor_task -> framed {:#?}", framed);
                                         let (sink, stream): (
@@ -170,6 +170,7 @@ impl UdpOutgoingApi {
                                         DaemonConnect {
                                             connection_id,
                                             remote_address,
+                                            local_address
                                         }
                                     });
 
