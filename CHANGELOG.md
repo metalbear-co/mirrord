@@ -22,6 +22,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - mirrord-agent: Use `conntrack` to flush stealer connections (temporary fix for
   [#1029](https://github.com/metalbear-co/mirrord/issues/1029)).
 
+### Fixed
+
+- Added env guard to be used in cli + extension to prevent (self) misconfigurations (our kube settings being used from remote).
+
 ## 3.23.0
 
 ### Fixed
