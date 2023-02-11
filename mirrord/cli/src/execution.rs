@@ -4,6 +4,7 @@ use std::{
 };
 
 use mirrord_config::LayerConfig;
+use mirrord_kube::api::MIRRORD_GUARDED_ENVS;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
 use serde::Serialize;
@@ -96,6 +97,11 @@ impl MirrordExecution {
         } else {
             env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
         };
+
+        // Propogate env guard to extension
+        if let Ok(guard) = std::env::var(MIRRORD_GUARDED_ENVS) {
+            env_vars.insert(MIRRORD_GUARDED_ENVS.to_string(), guard);
+        }
 
         // Depending on how we plan to connect to the agent, we do different things.
         // 1. if no operator, then we provide name and port so layer can port forward to
