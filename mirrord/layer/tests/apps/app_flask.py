@@ -6,7 +6,7 @@ from enum import Enum, unique
 from os import getpid, kill
 from signal import SIGTERM
 
-from flask import Flask
+from flask import Flask, request
 
 log = logging.getLogger("werkzeug")
 log.disabled = True
@@ -38,6 +38,7 @@ def kill_later():
 
 
 def handle_request(method: HttpMethod):
+    assert request.server == ("10.253.155.218", 58161)
     print(f'{method}: Request completed')
     done[method] = True
     if all(done.values()):
