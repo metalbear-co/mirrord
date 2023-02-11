@@ -68,6 +68,7 @@ async fn layer_recv(
             .map_err(From::from)
             .and_then(|remote_stream| {
                 let remote_stream = remote_stream?;
+                let local_address = remote_stream.local_addr()?;
                 let connection_id = allocator
                     .next_index()
                     .ok_or_else(|| ResponseError::AllocationFailure("layer_recv".to_string()))
@@ -82,6 +83,7 @@ async fn layer_recv(
                 Ok(DaemonConnect {
                     connection_id,
                     remote_address,
+                    local_address,
                 })
             });
 

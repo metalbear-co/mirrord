@@ -16,12 +16,15 @@ pub(crate) mod udp;
 
 /// Wrapper type for the (layer) socket address that intercepts the user's socket messages.
 #[derive(Debug)]
-pub(crate) struct MirrorAddress(pub(crate) SocketAddr);
+pub(crate) struct RemoteConnectResult {
+    pub(crate) mirror_address: SocketAddr,
+    pub(crate) local_address: SocketAddr,
+}
 
 #[derive(Debug)]
 pub(crate) struct Connect {
     pub(crate) remote_address: SocketAddr,
-    pub(crate) channel_tx: ResponseChannel<MirrorAddress>,
+    pub(crate) channel_tx: ResponseChannel<RemoteConnectResult>,
 }
 
 pub(crate) struct Write {

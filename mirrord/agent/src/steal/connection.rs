@@ -318,7 +318,8 @@ impl TcpConnectionStealer {
             connection_id,
             destination_port: port,
             source_port: address.port(),
-            address: address.ip(),
+            remote_address: address.ip(),
+            local_address: stream.local_addr()?.ip(),
         });
 
         // Send new connection to subscribed layer.

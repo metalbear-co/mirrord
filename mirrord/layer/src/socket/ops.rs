@@ -21,7 +21,7 @@ use crate::{
     dns::GetAddrInfo,
     error::HookError,
     file::OPEN_FILES,
-    outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, MirrorAddress},
+    outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnectResult},
     port_debug_patch,
     tcp::{Listen, TcpIncoming},
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,
@@ -264,7 +264,10 @@ fn connect_outgoing<const TYPE: ConnectType>(
     };
 
     blocking_send_hook_message(hook_message)?;
-    let MirrorAddress(mirror_address) = mirror_rx.blocking_recv()??;
+    let RemoteConnectResult {
+        mirror_address,
+        local_address,
+    } = mirror_rx.blocking_recv()??;
 
     let connect_to = SockAddr::from(mirror_address);
 
@@ -282,7 +285,7 @@ fn connect_outgoing<const TYPE: ConnectType>(
 
     let connected = Connected {
         remote_address,
-        mirror_address,
+        local_address,
     };
 
     Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
@@ -433,7 +436,7 @@ pub(super) fn getsockname(
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
-                SocketState::Connected(connected) => Detour::Success(connected.mirror_address),
+                SocketState::Connected(connected) => Detour::Success(connected.local_address),
                 SocketState::Bound(bound) => Detour::Success(bound.address),
                 SocketState::Listening(bound) => Detour::Success(bound.address),
                 _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
@@ -455,25 +458,25 @@ pub(super) fn accept(
     address_len: *mut socklen_t,
     new_fd: RawFd,
 ) -> Detour<RawFd> {
-    let (local_address, domain, protocol, type_) = {
+    let (domain, protocol, type_) = {
         SOCKETS
             .lock()?
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
-                SocketState::Listening(bound) => {
-                    Detour::Success((bound.address, socket.domain, socket.protocol, socket.type_))
+                SocketState::Listening(_) => {
+                    Detour::Success((socket.domain, socket.protocol, socket.type_))
                 }
                 _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
     };
 
-    let remote_address = {
+    let (local_address, remote_address) = {
         CONNECTION_QUEUE
             .lock()?
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
-            .map(|socket| socket.address)?
+            .map(|socket| (socket.local_address, socket.remote_address))?
     };
 
     let new_socket = UserSocket {
@@ -482,7 +485,7 @@ pub(super) fn accept(
         type_,
         state: SocketState::Connected(Connected {
             remote_address,
-            mirror_address: local_address,
+            local_address,
         }),
         kind: type_.try_into()?,
     };

@@ -30,7 +30,10 @@ pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
 /// Struct sent over the socket once created to pass metadata to the hook
 #[derive(Debug)]
 pub struct SocketInformation {
-    pub address: SocketAddr,
+    /// Address of the incoming peer
+    pub remote_address: SocketAddr,
+    /// Address of the local peer (our IP)
+    pub local_address: SocketAddr,
 }
 
 /// poll_agent loop inserts connection data into this queue, and accept reads it.
@@ -57,21 +60,20 @@ impl ConnectionQueue {
 }
 
 impl SocketInformation {
-    pub fn new(address: SocketAddr) -> Self {
-        Self { address }
+    pub fn new(remote_address: SocketAddr, local_address: SocketAddr) -> Self {
+        Self {
+            remote_address,
+            local_address,
+        }
     }
-}
-
-trait GetPeerName {
-    fn get_peer_name(&self) -> SocketAddr;
 }
 
 #[derive(Debug)]
 pub struct Connected {
     /// Remote address we're connected to
     remote_address: SocketAddr,
-    /// Local address it's connected from
-    mirror_address: SocketAddr,
+    /// Local address (pod-wise)
+    local_address: SocketAddr,
 }
 
 #[derive(Debug, Clone, Copy)]

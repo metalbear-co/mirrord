@@ -40,7 +40,7 @@ pub(crate) struct TcpOutgoingHandler {
 
     /// Holds the connection requests from the `connect` hook. It's main use is to reply back with
     /// the `SocketAddr` of the socket that'll be used to intercept the user's socket operations.
-    connect_queue: ResponseDeque<MirrorAddress>,
+    connect_queue: ResponseDeque<RemoteConnectResult>,
 
     /// Channel used to pass messages (currently only `Write`) from an intercepted socket to the
     /// main `layer` loop.
@@ -209,6 +209,7 @@ impl TcpOutgoingHandler {
                         |DaemonConnect {
                              connection_id,
                              remote_address,
+                             local_address,
                          }| async move {
                             let _ = DetourGuard::new();
 
@@ -231,11 +232,11 @@ impl TcpOutgoingHandler {
                                 }
                             };
 
-                            Ok((connection_id, mirror_listener))
+                            Ok((connection_id, mirror_listener, local_address))
                         },
                     )
                     .await
-                    .and_then(|(connection_id, listener)| {
+                    .and_then(|(connection_id, listener, local_address)| {
                         // Incoming remote channel (in the direction of agent -> layer).
                         // When the layer gets data from the agent, it writes it in via the
                         // remote_tx end. the interceptor_task then reads
@@ -246,7 +247,7 @@ impl TcpOutgoingHandler {
                         let (remote_tx, remote_rx) = channel::<Vec<u8>>(1000);
 
                         let _ = DetourGuard::new();
-                        let mirror_address = MirrorAddress(listener.local_addr()?);
+                        let mirror_address = listener.local_addr()?;
 
                         self.mirrors
                             .insert(connection_id, ConnectionMirror(remote_tx));
@@ -260,7 +261,10 @@ impl TcpOutgoingHandler {
                             remote_rx,
                         ));
 
-                        Ok(mirror_address)
+                        Ok(RemoteConnectResult {
+                            local_address,
+                            mirror_address,
+                        })
                     });
 
                 self.connect_queue

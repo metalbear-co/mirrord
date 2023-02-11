@@ -217,9 +217,10 @@ impl LayerConnection {
             .send(DaemonMessage::Tcp(DaemonTcp::NewConnection(
                 NewTcpConnection {
                     connection_id: new_connection_id,
-                    address: "127.0.0.1".parse().unwrap(),
+                    remote_address: "127.0.0.1".parse().unwrap(),
                     destination_port: "80".parse().unwrap(),
                     source_port: "31415".parse().unwrap(),
+                    local_address: "1.1.1.1".parse().unwrap(),
                 },
             )))
             .await
