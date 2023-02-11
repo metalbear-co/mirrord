@@ -16,6 +16,9 @@ use crate::error::{KubeApiError, Result};
 pub mod container;
 #[cfg(feature = "env_guard")]
 mod env_guard;
+#[cfg(feature = "env_guard")]
+pub use env_guard::MIRRORD_GUARDED_ENVS;
+
 pub mod kubernetes;
 mod runtime;
 
