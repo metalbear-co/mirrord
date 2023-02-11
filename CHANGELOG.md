@@ -24,7 +24,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - `getsockname` now returns the **remote** local address of the socket, instead of the
   **local fake** address of the socket.
-  This should fix issues with Akka or other software that checks the local address and expects it to match the **local ip of the pod**. This breaks agent protocol (agent/layer need to match).
+  This should fix issues with Akka or other software that checks the local address and 
+  expects it to match the **local ip of the pod**.
+  This breaks agent protocol (agent/layer need to match).
 
 ## 3.23.0
 
