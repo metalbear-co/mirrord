@@ -77,7 +77,7 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
     raw_name: *mut c_char,
     name_length: usize,
 ) -> c_int {
-    gethostname(name_length)
+    gethostname()
         .map(|host| {
             raw_name.copy_from_nonoverlapping(
                 host.as_ptr(),

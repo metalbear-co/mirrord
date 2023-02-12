@@ -1,14 +1,14 @@
 use alloc::ffi::CString;
 use core::{ffi::CStr, mem};
 use std::{
-    cmp, io,
+    io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     ptr,
     sync::{Arc, OnceLock},
 };
 
-use libc::{c_char, c_int, sockaddr, socklen_t};
+use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::{dns::LookupRecord, file::OpenOptionsInternal};
 use socket2::SockAddr;
 use tokio::sync::oneshot;
@@ -28,7 +28,7 @@ use crate::{
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,
 };
 
-pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();
+pub(crate) static HOSTNAME: OnceLock<Option<CString>> = OnceLock::new();
 
 /// Helper struct for connect results where we want to hold the original errno
 /// when result is -1 (error) because sometimes it's not a real error (EINPROGRESS/EINTR)
@@ -635,8 +635,8 @@ pub(super) fn getaddrinfo(
     Detour::Success(result)
 }
 
-fn remote_read_into_string(path: &str, read_length: usize) -> Detour<CString> {
-    let hostname_path = CString::new(path)?;
+fn remote_hostname_string() -> Option<CString> {
+    let hostname_path = CString::new("/etc/hostname").ok()?;
 
     let hostname_fd = file::ops::open(
         Some(&hostname_path),
@@ -644,32 +644,33 @@ fn remote_read_into_string(path: &str, read_length: usize) -> Detour<CString> {
             read: true,
             ..Default::default()
         },
-    )?;
+    )
+    .ok()?;
 
-    let hostname_file = file::ops::fgets(hostname_fd, read_length)?;
+    let hostname_file = file::ops::fgets(hostname_fd, 256).ok()?;
 
     close_layer_fd(hostname_fd);
 
-    Detour::Success(CString::new(
+    CString::new(
         hostname_file
             .bytes
             .into_iter()
-            .take(hostname_file.read_amount as usize)
+            .take(hostname_file.read_amount as usize - 1)
             .collect::<Vec<_>>(),
-    )?)
+    )
+    .ok()
 }
 
 /// Resolve the fake local address to the real local address.
-#[tracing::instrument(level = "trace", skip(name_length))]
-pub(super) fn gethostname(name_length: usize) -> Detour<CString> {
-    let hostname = match HOSTNAME.get() {
-        Some(hostname) => hostname,
-        None => {
-            let hostname = remote_read_into_string("/etc/hostname", name_length)?;
+#[tracing::instrument(level = "trace")]
+pub(super) fn gethostname() -> Detour<CString> {
+    let hostname = HOSTNAME.get_or_init(|| {
+        remote_hostname_string().or_else(|| {
+            warn!("couldn't get remote hostname");
 
-            HOSTNAME.get_or_init(|| hostname)
-        }
-    };
+            None
+        })
+    });
 
-    Detour::Success(hostname.clone())
+    Detour::Success(hostname.clone()?)
 }

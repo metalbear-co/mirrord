@@ -298,6 +298,17 @@ impl<S> Detour<S> {
             _ => default,
         }
     }
+    /// Return the contained `Success` wrapped in `Some` and swallows `Bypass` or `Error` in
+    /// exchange for `None`
+    ///
+    /// To be used in hooks that are deemed non-essential, and the run should continue even if they
+    /// fail.
+    pub(crate) fn ok(self) -> Option<S> {
+        match self {
+            Detour::Success(s) => Some(s),
+            _ => None,
+        }
+    }
 }
 
 impl<S> Detour<S>
