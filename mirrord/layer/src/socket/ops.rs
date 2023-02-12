@@ -635,7 +635,7 @@ pub(super) fn getaddrinfo(
     Detour::Success(result)
 }
 
-fn read_file_string(path: &str, read_length: usize) -> Detour<String> {
+fn remote_read_into_string(path: &str, read_length: usize) -> Detour<String> {
     let hostname_path = CString::new(path).unwrap();
 
     let hostname_fd = file::ops::open(
@@ -668,7 +668,7 @@ pub(super) fn gethostname(raw_name: *mut c_char, name_length: usize) -> Detour<i
     let host = match HOSTNAME.get() {
         Some(hostname) => CString::new(hostname.as_str()),
         None => {
-            let hostname = read_file_string("/etc/hostname", name_length)?
+            let hostname = remote_read_into_string("/etc/hostname", name_length)?
                 .trim()
                 .to_owned();
 
