@@ -10,5 +10,4 @@ class Hostname(unittest.TestCase):
 		self.assertEqual(hostname.rstrip(), hostname)
 
 if __name__ == "__main__":
-	print("{} socket".format(socket.gethostname()))
 	unittest.main()
