@@ -303,6 +303,8 @@ impl TcpConnectionStealer {
     ) -> Result<()> {
         let connection_id = self.index_allocator.next_index().unwrap();
 
+        let local_address = stream.local_addr()?.ip();
+
         let (read_half, write_half) = tokio::io::split(stream);
         self.write_streams.insert(connection_id, write_half);
         self.read_streams
@@ -318,7 +320,8 @@ impl TcpConnectionStealer {
             connection_id,
             destination_port: port,
             source_port: address.port(),
-            address: address.ip(),
+            remote_address: address.ip(),
+            local_address,
         });
 
         // Send new connection to subscribed layer.
@@ -389,7 +392,15 @@ impl TcpConnectionStealer {
 
     /// Initialize iptables member, which creates an iptables chain for our rules.
     fn init_iptables(&mut self) -> Result<()> {
-        self.iptables = Some(SafeIpTables::new(iptables::new(false).unwrap())?);
+        let flush_connections = std::env::var("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS")
+            .ok()
+            .and_then(|var| var.parse::<bool>().ok())
+            .unwrap_or_default();
+
+        self.iptables = Some(SafeIpTables::new(
+            iptables::new(false).unwrap(),
+            flush_connections,
+        )?);
         Ok(())
     }
 
@@ -449,7 +460,7 @@ impl TcpConnectionStealer {
 
         if first_subscriber && let Ok(port) = steal_port {
             self.iptables()?
-                .add_stealer_iptables_rules(port, self.stealer.local_addr()?.port())?;
+                .add_stealer_iptables_rules(port, self.stealer.local_addr()?.port()).await?;
         }
 
         self.send_message_to_single_client(&client_id, DaemonTcp::SubscribeResult(steal_port))

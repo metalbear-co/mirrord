@@ -73,6 +73,17 @@ pub struct AgentConfig {
     /// the agent.
     #[config(env = "MIRRORD_PAUSE", default = false, unstable)]
     pub pause: bool,
+
+    /// Flushes existing connections when starting to steal, might fix issues where connections
+    /// aren't stolen (due to being already established)
+    ///
+    /// Temporary fix for issue [#1029](https://github.com/metalbear-co/mirrord/issues/1029).
+    #[config(
+        env = "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS",
+        default = false,
+        unstable
+    )]
+    pub flush_connections: bool,
 }
 
 #[cfg(test)]
