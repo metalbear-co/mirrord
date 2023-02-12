@@ -660,9 +660,9 @@ fn remote_read_into_string(path: &str, read_length: usize) -> Detour<CString> {
 }
 
 /// Resolve the fake local address to the real local address.
-#[tracing::instrument(level = "trace", skip(raw_name, name_length))]
-pub(super) fn gethostname(raw_name: *mut c_char, name_length: usize) -> Detour<i32> {
-    let host = match HOSTNAME.get() {
+#[tracing::instrument(level = "trace", skip(name_length))]
+pub(super) fn gethostname(name_length: usize) -> Detour<CString> {
+    let hostname = match HOSTNAME.get() {
         Some(hostname) => hostname,
         None => {
             let hostname = remote_read_into_string("/etc/hostname", name_length)?;
@@ -671,10 +671,5 @@ pub(super) fn gethostname(raw_name: *mut c_char, name_length: usize) -> Detour<i
         }
     };
 
-    unsafe {
-        raw_name
-            .copy_from_nonoverlapping(host.as_ptr(), cmp::min(name_length, host.as_bytes().len()));
-    }
-
-    Detour::Success(0)
+    Detour::Success(hostname.clone())
 }

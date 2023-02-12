@@ -1,5 +1,5 @@
 use alloc::ffi::CString;
-use core::{ffi::CStr, mem};
+use core::{cmp, ffi::CStr, mem};
 use std::{
     collections::HashSet,
     os::unix::io::RawFd,
@@ -77,7 +77,14 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
     raw_name: *mut c_char,
     name_length: usize,
 ) -> c_int {
-    gethostname(raw_name, name_length)
+    gethostname(name_length)
+        .map(|host| {
+            raw_name.copy_from_nonoverlapping(
+                host.as_ptr(),
+                cmp::min(name_length, host.as_bytes().len()),
+            );
+            0
+        })
         .unwrap_or_bypass_with(|_| FN_GETHOSTNAME(raw_name, name_length))
 }
 
