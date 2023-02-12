@@ -38,6 +38,7 @@ def kill_later():
 
 
 def handle_request(method: HttpMethod):
+    print(request.server)
     assert request.server == ("10.253.155.218", 58161)
     print(f'{method}: Request completed')
     done[method] = True
