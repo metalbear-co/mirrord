@@ -18,6 +18,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 
 - VSCode extension: update dialog message
+- JetBrains: can now change focus from search field to targets using tab/shift+tab (for backwrad)
 
 ## 3.24.0
 
