@@ -18,6 +18,20 @@ const GENERAL_HELP: &str = r#"
 
 "#;
 
+
+#[derive(Debug, Error, Diagnostic)]
+pub(crate) enum InternalProxyError {
+    #[error("Couldn't listen for connections {0:#?}")]
+    ListenError(std::io::Error),
+    #[error("Couldn't get local port{0:#?}")]
+    LocalPortError(std::io::Error),
+    #[error("Couldn't accept connection before timeout")]
+    FirstConnectionTimeout,
+    #[error("Couldn't accept connection {0:#?}")]
+    AcceptError(std::io::Error),
+}
+
+
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum CliError {
     #[error("Failed to connect to the operator. We have found the operator and unable to connect to it. {0:#?}")]
@@ -149,4 +163,6 @@ pub(crate) enum CliError {
     JsonSerializeError(#[from] serde_json::Error),
     #[error("Failed connecting to mirrord console for logging {0:#?}")]
     ConsoleConnectError(#[from] ConsoleError),
+    #[error("Internal proxy error: {0:#?}")]
+    InternalProxyError(#[from] InternalProxyError),
 }
