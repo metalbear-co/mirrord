@@ -40,6 +40,7 @@ pub struct LayerClose {
 pub struct DaemonConnect {
     pub connection_id: ConnectionId,
     pub remote_address: SocketAddr,
+    pub local_address: SocketAddr,
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]

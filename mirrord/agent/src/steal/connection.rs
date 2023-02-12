@@ -303,6 +303,8 @@ impl TcpConnectionStealer {
     ) -> Result<()> {
         let connection_id = self.index_allocator.next_index().unwrap();
 
+        let local_address = stream.local_addr()?.ip();
+
         let (read_half, write_half) = tokio::io::split(stream);
         self.write_streams.insert(connection_id, write_half);
         self.read_streams
@@ -318,7 +320,8 @@ impl TcpConnectionStealer {
             connection_id,
             destination_port: port,
             source_port: address.port(),
-            address: address.ip(),
+            remote_address: address.ip(),
+            local_address,
         });
 
         // Send new connection to subscribed layer.
