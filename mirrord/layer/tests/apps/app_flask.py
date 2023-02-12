@@ -6,7 +6,7 @@ from enum import Enum, unique
 from os import getpid, kill
 from signal import SIGTERM
 
-from flask import Flask, request
+from flask import Flask
 
 log = logging.getLogger("werkzeug")
 log.disabled = True

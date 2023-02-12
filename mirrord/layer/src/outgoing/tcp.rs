@@ -40,7 +40,7 @@ pub(crate) struct TcpOutgoingHandler {
 
     /// Holds the connection requests from the `connect` hook. It's main use is to reply back with
     /// the `SocketAddr` of the socket that'll be used to intercept the user's socket operations.
-    connect_queue: ResponseDeque<RemoteConnectResult>,
+    connect_queue: ResponseDeque<RemoteConnection>,
 
     /// Channel used to pass messages (currently only `Write`) from an intercepted socket to the
     /// main `layer` loop.
@@ -261,7 +261,7 @@ impl TcpOutgoingHandler {
                             remote_rx,
                         ));
 
-                        Ok(RemoteConnectResult {
+                        Ok(RemoteConnection {
                             local_address,
                             mirror_address,
                         })

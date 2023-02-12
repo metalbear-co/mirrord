@@ -21,7 +21,7 @@ use crate::{
     dns::GetAddrInfo,
     error::HookError,
     file::OPEN_FILES,
-    outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnectResult},
+    outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
     port_debug_patch,
     tcp::{Listen, TcpIncoming},
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,
@@ -264,7 +264,7 @@ fn connect_outgoing<const TYPE: ConnectType>(
     };
 
     blocking_send_hook_message(hook_message)?;
-    let RemoteConnectResult {
+    let RemoteConnection {
         mirror_address,
         local_address,
     } = mirror_rx.blocking_recv()??;
