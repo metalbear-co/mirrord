@@ -636,7 +636,7 @@ pub(super) fn getaddrinfo(
 }
 
 fn remote_read_into_string(path: &str, read_length: usize) -> Detour<CString> {
-    let hostname_path = CString::new(path).unwrap();
+    let hostname_path = CString::new(path)?;
 
     let hostname_fd = file::ops::open(
         Some(&hostname_path),
