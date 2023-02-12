@@ -15,6 +15,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   expects it to match the **local ip of the pod**.
   This breaks agent protocol (agent/layer need to match).
 
+### Changed
+
+- VSCode extension: update dialog message
+
 ## 3.24.0
 
 ### Added
