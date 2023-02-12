@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use kube::Config;
 
-const MIRRORD_GUARDED_ENVS: &str = "MIRRORD_GUARDED_ENVS";
+pub const MIRRORD_GUARDED_ENVS: &str = "MIRRORD_GUARDED_ENVS";
 
 #[derive(Debug)]
 pub struct EnvVarGuard {

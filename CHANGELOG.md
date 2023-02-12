@@ -7,6 +7,16 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- `getsockname` now returns the **remote** local address of the socket, instead of the
+  **local fake** address of the socket.
+  This should fix issues with Akka or other software that checks the local address and
+  expects it to match the **local ip of the pod**.
+  This breaks agent protocol (agent/layer need to match).
+
+## 3.24.0
+
 ### Added
 
 - Add a field to mirrord-config to specify custom path for kubeconfig , resolves [#1027](https://github.com/metalbear-co/mirrord/issues/1027).
@@ -22,11 +32,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 
-- `getsockname` now returns the **remote** local address of the socket, instead of the
-  **local fake** address of the socket.
-  This should fix issues with Akka or other software that checks the local address and
-  expects it to match the **local ip of the pod**.
-  This breaks agent protocol (agent/layer need to match).
+- Added env guard to be used in cli + extension to prevent (self) misconfigurations (our kube settings being used from remote).
 
 ## 3.23.0
 
