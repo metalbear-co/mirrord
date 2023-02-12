@@ -148,7 +148,7 @@ impl UdpOutgoingApi {
                         LayerUdpOutgoing::Connect(LayerConnect { remote_address }) => {
                             let daemon_connect = connect(remote_address)
                                     .await
-                                    .map(|mirror_socket| {
+                                    .and_then(|mirror_socket| {
                                         let connection_id = allocator
                                             .next_index()
                                             .ok_or_else(|| ResponseError::AllocationFailure("interceptor_task".to_string()))
@@ -156,7 +156,7 @@ impl UdpOutgoingApi {
 
                                         debug!("interceptor_task -> mirror_socket {:#?}", mirror_socket);
                                         let peer_address = mirror_socket.peer_addr()?;
-                                        let local_address = mirror_stream.local_addr()?;
+                                        let local_address = mirror_socket.local_addr()?;
                                         let framed = UdpFramed::new(mirror_socket, BytesCodec::new());
                                         debug!("interceptor_task -> framed {:#?}", framed);
                                         let (sink, stream): (
@@ -167,11 +167,11 @@ impl UdpOutgoingApi {
                                         writers.insert(connection_id, (sink, peer_address));
                                         readers.insert(connection_id, stream);
 
-                                        DaemonConnect {
+                                        Ok(DaemonConnect {
                                             connection_id,
                                             remote_address,
                                             local_address
-                                        }
+                                        })
                                     });
 
                             let daemon_message = DaemonUdpOutgoing::Connect(daemon_connect);
