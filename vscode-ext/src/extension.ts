@@ -235,7 +235,7 @@ async function checkVersion(version: string) {
 			const config = vscode.workspace.getConfiguration();
 			if (config.get('mirrord.promptOutdated') !== false) {
 				if (semver.lt(version, d.toString())) {
-					vscode.window.showInformationMessage('Your version of mirrord is outdated, you should update.', 'Update', "Don't show again").then(item => {
+					vscode.window.showInformationMessage('New version of mirrord is available!', 'Update', "Don't show again").then(item => {
 						if (item === 'Update') {
 							vscode.env.openExternal(vscode.Uri.parse('vscode:extension/MetalBear.mirrord'));
 						} else if (item === "Don't show again") {
