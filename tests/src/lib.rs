@@ -692,6 +692,22 @@ mod utils {
         .await
     }
 
+    /// Service that listens on port 80 and returns "remote: <DATA>" when getting "<DATA>" directly
+    /// over TCP, not HTTP.
+    #[fixture]
+    pub async fn hostname_service(#[future] kube_client: Client) -> KubeService {
+        service(
+            kube_client,
+            "default",
+            "NodePort",
+            "ghcr.io/metalbear-co/mirrord-pytest:latest",
+            "hostname-echo",
+            false,
+            true,
+        )
+        .await
+    }
+
     pub fn resolve_node_host() -> String {
         if (cfg!(target_os = "linux") && !wsl::is_wsl()) || std::env::var("USE_MINIKUBE").is_ok() {
             let output = std::process::Command::new("minikube")
