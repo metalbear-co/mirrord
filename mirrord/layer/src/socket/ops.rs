@@ -28,7 +28,7 @@ use crate::{
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,
 };
 
-pub(crate) static HOSTNAME: OnceLock<String> = OnceLock::new();
+pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();
 
 /// Helper struct for connect results where we want to hold the original errno
 /// when result is -1 (error) because sometimes it's not a real error (EINPROGRESS/EINTR)
@@ -635,7 +635,7 @@ pub(super) fn getaddrinfo(
     Detour::Success(result)
 }
 
-fn remote_read_into_string(path: &str, read_length: usize) -> Detour<String> {
+fn remote_read_into_string(path: &str, read_length: usize) -> Detour<CString> {
     let hostname_path = CString::new(path).unwrap();
 
     let hostname_fd = file::ops::open(
@@ -646,37 +646,30 @@ fn remote_read_into_string(path: &str, read_length: usize) -> Detour<String> {
         },
     )?;
 
-    let hostname_file = file::ops::read(hostname_fd, read_length as u64)?;
+    let hostname_file = file::ops::fgets(hostname_fd, read_length)?;
 
     close_layer_fd(hostname_fd);
 
-    Detour::Success(
-        String::from_utf8(
-            hostname_file
-                .bytes
-                .into_iter()
-                .take(hostname_file.read_amount as usize)
-                .collect(),
-        )
-        .unwrap(),
-    )
+    Detour::Success(CString::new(
+        hostname_file
+            .bytes
+            .into_iter()
+            .take(hostname_file.read_amount as usize)
+            .collect::<Vec<_>>(),
+    )?)
 }
 
 /// Resolve the fake local address to the real local address.
 #[tracing::instrument(level = "trace", skip(raw_name, name_length))]
 pub(super) fn gethostname(raw_name: *mut c_char, name_length: usize) -> Detour<i32> {
     let host = match HOSTNAME.get() {
-        Some(hostname) => CString::new(hostname.as_str()),
+        Some(hostname) => hostname,
         None => {
-            let hostname = remote_read_into_string("/etc/hostname", name_length)?
-                .trim()
-                .to_owned();
+            let hostname = remote_read_into_string("/etc/hostname", name_length)?;
 
-            let _ = HOSTNAME.set(hostname.clone());
-
-            CString::new(hostname)
+            HOSTNAME.get_or_init(|| hostname)
         }
-    }?;
+    };
 
     unsafe {
         raw_name
