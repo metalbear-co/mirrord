@@ -702,7 +702,7 @@ mod utils {
             "NodePort",
             "ghcr.io/metalbear-co/mirrord-pytest:latest",
             "hostname-echo",
-            false,
+            true,
             true,
         )
         .await
