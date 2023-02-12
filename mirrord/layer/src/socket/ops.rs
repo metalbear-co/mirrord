@@ -1,31 +1,34 @@
 use alloc::ffi::CString;
 use core::{ffi::CStr, mem};
 use std::{
-    io,
+    cmp, io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     ptr,
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
-use libc::{c_int, sockaddr, socklen_t};
-use mirrord_protocol::dns::LookupRecord;
+use libc::{c_char, c_int, sockaddr, socklen_t};
+use mirrord_protocol::{dns::LookupRecord, file::OpenOptionsInternal};
 use socket2::SockAddr;
 use tokio::sync::oneshot;
 use tracing::{debug, error, trace};
 
 use super::{hooks::*, *};
 use crate::{
+    close_layer_fd,
     common::{blocking_send_hook_message, HookMessage},
     detour::{Detour, OptionExt},
     dns::GetAddrInfo,
     error::HookError,
-    file::OPEN_FILES,
+    file::{self, OPEN_FILES},
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, MirrorAddress},
     port_debug_patch,
     tcp::{Listen, TcpIncoming},
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,
 };
+
+pub(crate) static HOSTNAME: OnceLock<String> = OnceLock::new();
 
 /// Helper struct for connect results where we want to hold the original errno
 /// when result is -1 (error) because sometimes it's not a real error (EINPROGRESS/EINTR)
@@ -627,4 +630,55 @@ pub(super) fn getaddrinfo(
     debug!("getaddrinfo -> result {:#?}", result);
 
     Detour::Success(result)
+}
+
+fn read_file_string(path: &str, read_length: usize) -> Detour<String> {
+    let hostname_path = CString::new(path).unwrap();
+
+    let hostname_fd = file::ops::open(
+        Some(&hostname_path),
+        OpenOptionsInternal {
+            read: true,
+            ..Default::default()
+        },
+    )?;
+
+    let hostname_file = file::ops::read(hostname_fd, read_length as u64)?;
+
+    close_layer_fd(hostname_fd);
+
+    Detour::Success(
+        String::from_utf8(
+            hostname_file
+                .bytes
+                .into_iter()
+                .take(hostname_file.read_amount as usize)
+                .collect(),
+        )
+        .unwrap(),
+    )
+}
+
+/// Resolve the fake local address to the real local address.
+#[tracing::instrument(level = "trace", skip(raw_name, name_length))]
+pub(super) fn gethostname(raw_name: *mut c_char, name_length: usize) -> Detour<i32> {
+    let host = match HOSTNAME.get() {
+        Some(hostname) => CString::new(hostname.as_str()),
+        None => {
+            let hostname = read_file_string("/etc/hostname", name_length)?
+                .trim()
+                .to_owned();
+
+            let _ = HOSTNAME.set(hostname.clone());
+
+            CString::new(hostname)
+        }
+    }?;
+
+    unsafe {
+        raw_name
+            .copy_from_nonoverlapping(host.as_ptr(), cmp::min(name_length, host.as_bytes().len()));
+    }
+
+    Detour::Success(0)
 }

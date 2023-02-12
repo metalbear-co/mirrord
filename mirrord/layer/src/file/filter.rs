@@ -103,6 +103,7 @@ fn generate_remote_ro_set() -> RegexSet {
         // for dns resolving
         r"^/etc/resolv.conf$",
         r"^/etc/hosts$",
+        r"^/etc/hostname$",
     ];
     RegexSetBuilder::new(patterns)
         .case_insensitive(true)

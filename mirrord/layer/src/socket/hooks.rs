@@ -73,6 +73,15 @@ pub(crate) unsafe extern "C" fn getsockname_detour(
 }
 
 #[hook_guard_fn]
+pub(crate) unsafe extern "C" fn gethostname_detour(
+    raw_name: *mut c_char,
+    name_length: usize,
+) -> c_int {
+    gethostname(raw_name, name_length)
+        .unwrap_or_bypass_with(|_| FN_GETHOSTNAME(raw_name, name_length))
+}
+
+#[hook_guard_fn]
 pub(crate) unsafe extern "C" fn accept_detour(
     sockfd: c_int,
     address: *mut sockaddr,
@@ -296,6 +305,14 @@ pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled
         getsockname_detour,
         FnGetsockname,
         FN_GETSOCKNAME
+    );
+
+    replace!(
+        hook_manager,
+        "gethostname",
+        gethostname_detour,
+        FnGethostname,
+        FN_GETHOSTNAME
     );
 
     #[cfg(target_os = "linux")]
