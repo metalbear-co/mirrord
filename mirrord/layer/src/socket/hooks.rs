@@ -6,7 +6,8 @@ use std::{
     sync::{LazyLock, Mutex},
 };
 
-use libc::{c_char, c_int, sockaddr, socklen_t};
+use errno::{set_errno, Errno};
+use libc::{c_char, c_int, sockaddr, socklen_t, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 
 use super::ops::*;
@@ -79,11 +80,16 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
 ) -> c_int {
     gethostname()
         .map(|host| {
-            raw_name.copy_from_nonoverlapping(
-                host.as_ptr(),
-                cmp::min(name_length, host.as_bytes().len()),
-            );
-            0
+            let host_len = host.as_bytes().len();
+
+            if host_len <= name_length {
+                raw_name.copy_from_nonoverlapping(host.as_ptr(), cmp::min(name_length, host_len));
+                0
+            } else {
+                set_errno(Errno(EINVAL));
+
+                -1
+            }
         })
         .unwrap_or_bypass_with(|_| FN_GETHOSTNAME(raw_name, name_length))
 }

@@ -647,7 +647,7 @@ fn remote_hostname_string() -> Option<CString> {
     )
     .ok()?;
 
-    let hostname_file = file::ops::fgets(hostname_fd, 256).ok()?;
+    let hostname_file = file::ops::read(hostname_fd, 256).ok()?;
 
     close_layer_fd(hostname_fd);
 
