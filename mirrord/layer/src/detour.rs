@@ -354,7 +354,9 @@ impl<T> OptionExt for Option<T> {
     }
 }
 
+/// Extends [`OnceLock`] with a helper function to initialize it with a [`Detour`].
 pub(crate) trait OnceLockExt<T> {
+    /// Initializes a [`OnceLock`] with a [`Detour`] (similar to [`OnceLock::get_or_try_init`]).
     fn get_or_detour_init<F>(&self, f: F) -> Detour<&T>
     where
         F: FnOnce() -> Detour<T>;
