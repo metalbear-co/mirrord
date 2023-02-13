@@ -28,10 +28,6 @@ pub(crate) enum InternalProxyError {
     FirstConnectionTimeout,
     #[error("Couldn't accept connection {0:#?}")]
     AcceptError(std::io::Error),
-    #[error("Couldn't get connection parameters")]
-    MissingConnectionParameters,
-    #[error("Bad connection parameters {0:#?}")]
-    BadConnectionParameters(String),
     #[error("Couldn't connect to operator ")]
     OperatorConnectionError,
     #[error("Couldn't connect to agent via TCP {0:#?}")]

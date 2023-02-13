@@ -14,7 +14,7 @@ use tokio::{
 use tracing::trace;
 
 use crate::{
-    connection::{create_and_connect, AgentConnectInfo},
+    connection::{create_and_connect},
     error::CliError,
     extract::extract_library,
     Result,
@@ -40,7 +40,7 @@ impl MirrordExecution {
     {
         let lib_path = extract_library(None, progress, true)?;
         let mut env_vars = HashMap::new();
-        let (connect_info, mut connection) = create_and_connect(config, progress).await?;
+        let (_connect_info, mut connection) = create_and_connect(config, progress).await?;
         let (env_vars_exclude, env_vars_include) = match (
             config
                 .feature
@@ -109,7 +109,7 @@ impl MirrordExecution {
             .spawn()
             .map_err(CliError::InternalProxyExecutionFailed)?;
 
-        let mut stdout = proxy_process
+        let stdout = proxy_process
             .stdout
             .ok_or(CliError::InternalProxyStdoutError)?;
 

@@ -14,22 +14,16 @@ use std::{
 
 use futures::{stream::StreamExt, SinkExt};
 use mirrord_config::LayerConfig;
-use mirrord_kube::{
-    api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment, Connection},
-    error::KubeApiError,
-};
-use mirrord_operator::client::{OperatorApi, OperatorApiError};
-use mirrord_progress::NoProgress;
+use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
+use mirrord_operator::client::OperatorApi;
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage};
 use tokio::{
-    io::{AsyncRead, AsyncWrite},
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::mpsc::{self},
     task::JoinSet,
     time::timeout,
 };
-use tracing::log::info;
 
 use crate::error::{InternalProxyError, Result};
 
@@ -38,7 +32,7 @@ const FIRST_CONNECTION_TIMEOUT: u64 = 5;
 fn print_port(listener: &TcpListener) -> Result<()> {
     let port = listener
         .local_addr()
-        .map_err(|e| InternalProxyError::LocalPortError(e))?
+        .map_err(InternalProxyError::LocalPortError)?
         .port();
     println!("{port:?}\n");
     Ok(())
@@ -51,14 +45,14 @@ async fn handle_connection(
     agent_connection: (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
 ) {
     let mut layer_connection = actix_codec::Framed::new(stream, DaemonCodec::new());
-    let (mut agent_sender, mut agent_receiver) = agent_connection;
+    let (agent_sender, mut agent_receiver) = agent_connection;
     loop {
         select! {
             Some(layer_message) = layer_connection.next() => {
-                agent_sender.send(layer_message.expect("invalid layer message")).await;
+                agent_sender.send(layer_message.expect("invalid layer message")).await.expect("failed to send layer message to agent");
             },
             Some(agent_message) = agent_receiver.recv() => {
-                layer_connection.send(agent_message).await;
+                layer_connection.send(agent_message).await.expect("failed to send agent message to layer");
             }
             else => {
                 break;
@@ -71,13 +65,13 @@ pub(crate) async fn proxy() -> Result<()> {
     // Let it assign port for us then print it for the user.
     let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
         .await
-        .map_err(|e| InternalProxyError::ListenError(e))?;
+        .map_err(InternalProxyError::ListenError)?;
 
     let config = LayerConfig::from_env()?;
     // Create a main connection, that will be held until proxy is closed.
     // This will guarantee agent staying alive and will enable us to
     // make the agent close on last connection close immediately (will help in tests)
-    let main_connection = connect(&config).await?;
+    let _main_connection = connect(&config).await?;
     print_port(&listener)?;
 
     // wait for first connection `FIRST_CONNECTION_TIMEOUT` seconds, or timeout.
@@ -87,7 +81,7 @@ pub(crate) async fn proxy() -> Result<()> {
     )
     .await
     .map_err(|_| InternalProxyError::FirstConnectionTimeout)?
-    .map_err(|e| InternalProxyError::AcceptError(e))?;
+    .map_err(InternalProxyError::AcceptError)?;
 
     let mut active_connections = JoinSet::new();
 
@@ -123,10 +117,12 @@ async fn connect(
         (&config.connect_agent_name, config.connect_agent_port)
     {
         let k8s_api = KubernetesAPI::create(config).await?;
-        let connection = k8s_api.create_connection((agent_name.clone(), port)).await?;
+        let connection = k8s_api
+            .create_connection((agent_name.clone(), port))
+            .await?;
         Ok(connection)
     } else {
-        let connection = OperatorApi::discover(&config).await?;
+        let connection = OperatorApi::discover(config).await?;
         Ok(connection.ok_or(InternalProxyError::OperatorConnectionError)?)
     }
 }
