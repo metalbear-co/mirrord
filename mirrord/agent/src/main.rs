@@ -489,7 +489,7 @@ async fn start_agent() -> Result<()> {
                     dns_sender.clone(),
                     args.ephemeral_container,
                     pid
-                ).map(| client | clients.push(client))?;
+                ).await?.map(| client | clients.push(client));
             },
             // Logic here is if we have already accepted a client, then we drop immediately when all clients disconnect.
             // if not, we wait for the communication timeout to expire before dropping. (to have more time for the first
