@@ -464,7 +464,7 @@ async fn start_agent() -> Result<()> {
                     args.ephemeral_container,
                     pid,
                 )
-                .await
+                .await?
                 .map(|client| clients.push(client))?;
         }
         Ok(Err(err)) => {
