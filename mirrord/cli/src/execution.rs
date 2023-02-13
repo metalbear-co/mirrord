@@ -14,7 +14,7 @@ use tokio::{
 use tracing::trace;
 
 use crate::{
-    connection::{create_and_connect},
+    connection::{create_and_connect, AgentConnectInfo},
     error::CliError,
     extract::extract_library,
     Result,
@@ -40,7 +40,7 @@ impl MirrordExecution {
     {
         let lib_path = extract_library(None, progress, true)?;
         let mut env_vars = HashMap::new();
-        let (_connect_info, mut connection) = create_and_connect(config, progress).await?;
+        let (connect_info, mut connection) = create_and_connect(config, progress).await?;
         let (env_vars_exclude, env_vars_include) = match (
             config
                 .feature
@@ -102,10 +102,22 @@ impl MirrordExecution {
         };
 
         // stderr is inherited so we can see logs/errors.
-        let proxy_process = Command::new(std::env::current_exe().map_err(CliError::CliPathError)?)
+        let mut proxy_command = Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
+
+        proxy_command
             .arg("intproxy")
             .stdout(std::process::Stdio::piped())
-            .stdin(std::process::Stdio::null())
+            .stdin(std::process::Stdio::null());
+
+        match &connect_info {
+            AgentConnectInfo::DirectKubernetes(name, port) => {
+                proxy_command.env("MIRRORD_CONNECT_AGENT".to_string(), name.to_string());
+                proxy_command.env("MIRRORD_CONNECT_PORT".to_string(), port.to_string());
+            }
+            AgentConnectInfo::Operator => {}
+        };
+
+        let proxy_process = proxy_command
             .spawn()
             .map_err(CliError::InternalProxyExecutionFailed)?;
 
