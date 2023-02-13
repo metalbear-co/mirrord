@@ -9,7 +9,7 @@ use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
-use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf};
+use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf, sync::OnceLock};
 
 use crate::error::HookError;
 
@@ -85,7 +85,7 @@ impl Drop for DetourGuard {
 /// to simplify calls to the original functions as `FN_ORIGINAL()`, instead of
 /// `FN_ORIGINAL.get().unwrap()`.
 #[derive(Debug)]
-pub(crate) struct HookFn<T>(std::sync::OnceLock<T>);
+pub(crate) struct HookFn<T>(OnceLock<T>);
 
 impl<T> Deref for HookFn<T> {
     type Target = T;
@@ -97,7 +97,7 @@ impl<T> Deref for HookFn<T> {
 
 impl<T> const Default for HookFn<T> {
     fn default() -> Self {
-        Self(std::sync::OnceLock::new())
+        Self(OnceLock::new())
     }
 }
 
@@ -298,17 +298,6 @@ impl<S> Detour<S> {
             _ => default,
         }
     }
-    /// Return the contained `Success` wrapped in `Some` and swallows `Bypass` or `Error` in
-    /// exchange for `None`
-    ///
-    /// To be used in hooks that are deemed non-essential, and the run should continue even if they
-    /// fail.
-    pub(crate) fn ok(self) -> Option<S> {
-        match self {
-            Detour::Success(s) => Some(s),
-            _ => None,
-        }
-    }
 }
 
 impl<S> Detour<S>
@@ -362,5 +351,26 @@ impl<T> OptionExt for Option<T> {
             Some(v) => Detour::Success(v),
             None => Detour::Bypass(value),
         }
+    }
+}
+
+pub(crate) trait OnceLockExt<T> {
+    fn get_or_detour_init<F>(&self, f: F) -> Detour<&T>
+    where
+        F: FnOnce() -> Detour<T>;
+}
+
+impl<T> OnceLockExt<T> for OnceLock<T> {
+    fn get_or_detour_init<F>(&self, f: F) -> Detour<&T>
+    where
+        F: FnOnce() -> Detour<T>,
+    {
+        if let Some(value) = self.get() {
+            return Detour::Success(value);
+        }
+
+        let value = f()?;
+
+        Detour::Success(self.get_or_init(|| value))
     }
 }

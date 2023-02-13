@@ -18,7 +18,7 @@ use super::{hooks::*, *};
 use crate::{
     close_layer_fd,
     common::{blocking_send_hook_message, HookMessage},
-    detour::{Detour, OptionExt},
+    detour::{Detour, OnceLockExt, OptionExt},
     dns::GetAddrInfo,
     error::HookError,
     file::{self, OPEN_FILES},
@@ -28,7 +28,7 @@ use crate::{
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,
 };
 
-pub(crate) static HOSTNAME: OnceLock<Option<CString>> = OnceLock::new();
+pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();
 
 /// Helper struct for connect results where we want to hold the original errno
 /// when result is -1 (error) because sometimes it's not a real error (EINPROGRESS/EINTR)
@@ -663,13 +663,5 @@ fn remote_hostname_string() -> Detour<CString> {
 /// Resolve the fake local address to the real local address.
 #[tracing::instrument(level = "trace")]
 pub(super) fn gethostname() -> Detour<&'static CString> {
-    let hostname = HOSTNAME.get_or_init(|| {
-        remote_hostname_string().ok().or_else(|| {
-            warn!("couldn't get remote hostname");
-
-            None
-        })
-    });
-
-    Detour::Success(hostname.as_ref()?)
+    HOSTNAME.get_or_detour_init(remote_hostname_string)
 }
