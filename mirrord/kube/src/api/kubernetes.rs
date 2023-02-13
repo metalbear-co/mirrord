@@ -82,7 +82,7 @@ impl AgentManagment for KubernetesAPI {
         .await
         .map_err(|_| KubeApiError::AgentReadyTimeout)??;
 
-        wrap_raw_connection(conn)
+        Ok(wrap_raw_connection(conn))
     }
 
     #[cfg(not(feature = "incluster"))]
@@ -94,7 +94,11 @@ impl AgentManagment for KubernetesAPI {
         trace!("port-forward to pod {}:{}", &pod_agent_name, &agent_port);
         let mut port_forwarder = pod_api.portforward(&pod_agent_name, &[agent_port]).await?;
 
-        wrap_raw_connection(port_forwarder.take_stream(agent_port).unwrap())
+        Ok(wrap_raw_connection(
+            port_forwarder
+                .take_stream(agent_port)
+                .ok_or(KubeApiError::PortForwardFailed)?,
+        ))
     }
 
     async fn create_agent<P>(&self, progress: &P) -> Result<Self::AgentRef, Self::Err>

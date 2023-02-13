@@ -54,4 +54,7 @@ pub enum KubeApiError {
 
     #[error("mirrord-layer: Timeout waiting for agent to be ready")]
     AgentReadyTimeout,
+
+    #[error("Port not found in port forward")]
+    PortForwardFailed,
 }

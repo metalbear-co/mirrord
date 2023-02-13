@@ -31,8 +31,8 @@ mod error;
 mod execution;
 mod extension;
 mod extract;
-mod operator;
 mod internal_proxy;
+mod operator;
 
 pub(crate) use error::{CliError, Result};
 

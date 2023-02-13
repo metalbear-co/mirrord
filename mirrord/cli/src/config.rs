@@ -34,7 +34,7 @@ pub(super) enum Commands {
     ExtensionExec(Box<ExtensionExecArgs>),
 
     /// Internal proxy - used to aggregate connections from multiple layers
-    #[command(hide = true, name = "ext")]
+    #[command(hide = true, name = "intproxy")]
     InternalProxy,
 }
 

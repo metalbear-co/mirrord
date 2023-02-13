@@ -358,7 +358,14 @@ fn layer_start(config: LayerConfig) {
         std::env::args()
     );
 
-    let (tx, rx) = RUNTIME.block_on(connection::connect(&config));
+    let address = config
+        .connect_tcp
+        .as_ref()
+        .expect("layer loaded without proxy address to connect to")
+        .parse()
+        .expect("couldn't parse proxy address");
+
+    let (tx, rx) = RUNTIME.block_on(connection::connect(address));
 
     let (sender, receiver) = channel::<HookMessage>(1000);
     HOOK_SENDER
