@@ -1,5 +1,5 @@
 #![feature(assert_matches)]
-use std::{path::PathBuf, time::Duration};
+use std::{path::Path, time::Duration};
 
 #[cfg(not(target_os = "macos"))]
 use futures::SinkExt;
@@ -25,7 +25,7 @@ use tokio_stream::StreamExt;
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
-async fn test_bash_script(dylib_path: &PathBuf) {
+async fn test_bash_script(dylib_path: &Path) {
     let application = Application::EnvBashCat;
     let executable = application.get_executable().await; // Own it.
     println!("Using executable: {}", &executable);
@@ -76,6 +76,12 @@ async fn test_bash_script(dylib_path: &PathBuf) {
             .await
             .unwrap();
     }
+
+    cat_layer_connection
+        .expect_file_open_for_reading("/etc/hostname", 2)
+        .await;
+
+    cat_layer_connection.expect_file_read("foobar\n", 2).await;
 
     cat_layer_connection
         .expect_file_read("Very interesting contents.", fd)
