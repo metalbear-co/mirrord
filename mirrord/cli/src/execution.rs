@@ -112,8 +112,8 @@ impl MirrordExecution {
 
         match &connect_info {
             AgentConnectInfo::DirectKubernetes(name, port) => {
-                proxy_command.env("MIRRORD_CONNECT_AGENT".to_string(), name.to_string());
-                proxy_command.env("MIRRORD_CONNECT_PORT".to_string(), port.to_string());
+                proxy_command.env("MIRRORD_CONNECT_AGENT", name);
+                proxy_command.env("MIRRORD_CONNECT_PORT", port.to_string());
             }
             AgentConnectInfo::Operator => {}
         };
