@@ -43,8 +43,10 @@ async fn test_bash_script(dylib_path: &Path) {
     let mut bash_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     // Accept the connection from the layer in the cat binary and verify initial messages.
 
+    let fd: u64 = 1;
+
     bash_layer_connection
-        .expect_file_open_for_reading("/etc/hostname", 1)
+        .expect_file_open_for_reading("/etc/hostname", fd)
         .await;
 
     #[cfg(not(target_os = "macos"))]
@@ -53,7 +55,7 @@ async fn test_bash_script(dylib_path: &Path) {
             bash_layer_connection.codec.next().await.unwrap().unwrap(),
             ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
                 path: None,
-                fd: Some(1),
+                fd: Some(fd),
                 follow_symlink: true
             }))
         );
@@ -73,12 +75,12 @@ async fn test_bash_script(dylib_path: &Path) {
             .unwrap();
     }
 
-    bash_layer_connection.expect_file_read("foobar\n", 1).await;
+    bash_layer_connection.expect_file_read("foobar\n", fd).await;
+
+    bash_layer_connection.expect_file_close(fd).await;
 
     let mut cat_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     // TODO: theoretically the connections arrival order could be different, should we handle it?
-
-    let fd: u64 = 1;
 
     cat_layer_connection
         .expect_file_open_for_reading("/very_interesting_file", fd)
