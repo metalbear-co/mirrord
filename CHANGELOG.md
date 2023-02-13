@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- `gethostname` detour that returns contents of `/etc/hostname` from target pod. See relevant [#1041](https://github.com/metalbear-co/mirrord/issues/1041).
+
 ### Fixed
 
 - `getsockname` now returns the **remote** local address of the socket, instead of the
