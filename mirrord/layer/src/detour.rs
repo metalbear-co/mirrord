@@ -366,11 +366,11 @@ impl<T> OnceLockExt<T> for OnceLock<T> {
         F: FnOnce() -> Detour<T>,
     {
         if let Some(value) = self.get() {
-            return Detour::Success(value);
+            Detour::Success(value)
+        } else {
+            let value = f()?;
+
+            Detour::Success(self.get_or_init(|| value))
         }
-
-        let value = f()?;
-
-        Detour::Success(self.get_or_init(|| value))
     }
 }

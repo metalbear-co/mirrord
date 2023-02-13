@@ -82,13 +82,14 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
         .map(|host| {
             let host_len = host.as_bytes().len();
 
-            if host_len <= name_length {
-                raw_name.copy_from_nonoverlapping(host.as_ptr(), cmp::min(name_length, host_len));
-                0
-            } else {
+            raw_name.copy_from_nonoverlapping(host.as_ptr(), cmp::min(name_length, host_len));
+
+            if host_len > name_length {
                 set_errno(Errno(EINVAL));
 
                 -1
+            } else {
+                0
             }
         })
         .unwrap_or_bypass_with(|_| FN_GETHOSTNAME(raw_name, name_length))
