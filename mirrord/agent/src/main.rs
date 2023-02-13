@@ -28,6 +28,7 @@ use tokio::{
     net::{TcpListener, TcpStream},
     select,
     sync::mpsc::{self, Sender},
+    task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace};
@@ -126,8 +127,10 @@ impl State {
         stealer_command_tx: Sender<StealerCommand>,
         cancellation_token: CancellationToken,
         dns_sender: Sender<DnsRequest>,
+        ephemeral_container: bool,
+        pid: Option<u64>,
     ) -> Result<Option<JoinHandle<u32>>> {
-        match state.new_client().await {
+        match self.new_client().await {
             Ok(client_id) => {
                 let client = tokio::spawn(async move {
                     match ClientConnectionHandler::new(
@@ -459,16 +462,19 @@ async fn start_agent() -> Result<()> {
                     stealer_command_tx.clone(),
                     cancellation_token.clone(),
                     dns_sender.clone(),
+                    args.ephemeral_container,
+                    pid,
                 )
+                .await
                 .map(|client| clients.push(client))?;
         }
         Ok(Err(err)) => {
             error!("start -> Failed to accept connection: {:?}", err);
             return Err(err.into());
         }
-        Err(_) => {
+        Err(e) => {
             error!("start -> Failed to accept first connection: timeout");
-            return Err(anyhow!("Failed to accept connection: timeout"));
+            return Err(err.into());
         }
     }
 
