@@ -1,9 +1,12 @@
 //! Internal proxy is accepting connection from local layers and forward it to agent
 //! while having 1:1 relationship - each layer connection is another agent connection.
+//!
 //! This might be changed later on.
+//!
 //! The main advantage of this design is that we remove kube logic from the layer itself,
 //! thus eliminating bugs that happen due to mix of remote env vars in our code
 //! (previously was solved using envguard which wasn't good enough)
+//!
 //! The proxy will either directly connect to an existing agent (currently only used for tests),
 //! or let the [`OperatorApi`] handle the connection.
 
