@@ -465,7 +465,7 @@ async fn start_agent() -> Result<()> {
                     pid,
                 )
                 .await?
-                .map(|client| clients.push(client))?;
+                .map(|client| clients.push(client));
         }
         Ok(Err(err)) => {
             error!("start -> Failed to accept connection: {:?}", err);
