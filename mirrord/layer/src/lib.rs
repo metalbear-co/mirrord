@@ -365,7 +365,7 @@ fn layer_start(config: LayerConfig) {
         .parse()
         .expect("couldn't parse proxy address");
 
-    let (tx, rx) = RUNTIME.block_on(connection::connect(address));
+    let (tx, rx) = RUNTIME.block_on(connection::connect_to_proxy(address));
 
     let (sender, receiver) = channel::<HookMessage>(1000);
     HOOK_SENDER

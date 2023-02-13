@@ -13,7 +13,9 @@ use tracing::log::{error, info};
 
 use crate::graceful_exit;
 
+/// Size of the channel used in [`wrap_raw_connection`] for [`ClientMessage`]s.
 const CONNECTION_CHANNEL_SIZE: usize = 1000;
+
 const FAIL_STILL_STUCK: &str = r#"
 - If you're still stuck and everything looks fine:
 
@@ -26,7 +28,9 @@ const FAIL_STILL_STUCK: &str = r#"
 /// Connects to the internal proxy in given `SocketAddr`
 /// layer uses to communicate with it, in the form of a [`Sender`] for [`ClientMessage`]s, and a
 /// [`Receiver`] for [`DaemonMessage`]s.
-pub(crate) async fn connect(addr: SocketAddr) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
+pub(crate) async fn connect_to_proxy(
+    addr: SocketAddr,
+) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
     let stream = match TcpStream::connect(addr).await {
         Ok(stream) => stream,
         Err(e) => {
@@ -37,18 +41,20 @@ pub(crate) async fn connect(addr: SocketAddr) -> (Sender<ClientMessage>, Receive
     wrap_raw_connection(stream)
 }
 
+/// Creates the task that handles the messaging between layer/agent.
+/// It does the encoding/decoding of protocol.
 fn wrap_raw_connection(
     stream: TcpStream,
 ) -> (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>) {
     let mut codec = actix_codec::Framed::new(stream, ClientCodec::new());
 
-    let (in_tx, mut in_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
-    let (out_tx, out_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
+    let (client_in_tx, mut client_in_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
+    let (daemon_out_tx, daemon_out_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
 
     tokio::spawn(async move {
         loop {
             tokio::select! {
-                msg = in_rx.recv() => {
+                msg = client_in_rx.recv() => {
                     match msg {
                         Some(msg) => {
                             if let Err(fail) = codec.send(msg).await {
@@ -66,7 +72,7 @@ fn wrap_raw_connection(
                 daemon_message = codec.next() => {
                     match daemon_message {
                         Some(Ok(msg)) => {
-                            if let Err(fail) = out_tx.send(msg).await {
+                            if let Err(fail) = daemon_out_tx.send(msg).await {
                                 error!("DaemonMessage dropped: {:#?}", fail);
 
                                 break;
@@ -87,5 +93,5 @@ fn wrap_raw_connection(
         }
     });
 
-    (in_tx, out_rx)
+    (client_in_tx, daemon_out_rx)
 }

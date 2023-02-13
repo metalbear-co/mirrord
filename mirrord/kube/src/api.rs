@@ -31,6 +31,8 @@ where
     }
 }
 
+/// Creates the task that handles the messaging between layer/agent.
+/// It does the encoding/decoding of protocol.
 pub fn wrap_raw_connection(
     stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
 ) -> (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>) {

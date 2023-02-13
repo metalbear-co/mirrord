@@ -27,8 +27,12 @@ use tokio::{
 
 use crate::error::{InternalProxyError, Result};
 
+/// Launch timeout until we get first connection.
+/// If layer doesn't connect in this time, we timeout and exit.
 const FIRST_CONNECTION_TIMEOUT: u64 = 5;
 
+/// Print the port for the caller (mirrord cli execution flow) so it can pass it
+/// back to the layer instances via env var.
 fn print_port(listener: &TcpListener) -> Result<()> {
     let port = listener
         .local_addr()
@@ -40,7 +44,7 @@ fn print_port(listener: &TcpListener) -> Result<()> {
 
 /// Supposed to run as an async detached task, proxying the connection.
 /// We parse the protocol so we might add some logic here in the future?
-async fn handle_connection(
+async fn connection_task(
     stream: TcpStream,
     agent_connection: (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
 ) {
@@ -61,6 +65,8 @@ async fn handle_connection(
     }
 }
 
+/// Main entry point for the internal proxy.
+/// It listens for inbound layer connect and forwards to agent.
 pub(crate) async fn proxy() -> Result<()> {
     // Let it assign port for us then print it for the user.
     let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
@@ -86,13 +92,13 @@ pub(crate) async fn proxy() -> Result<()> {
     let mut active_connections = JoinSet::new();
 
     let agent_connection = connect(&config).await?;
-    active_connections.spawn(handle_connection(stream, agent_connection));
+    active_connections.spawn(connection_task(stream, agent_connection));
 
     loop {
         tokio::select! {
             Ok((stream, _)) = listener.accept() => {
                 let agent_connection = connect(&config).await?;
-                active_connections.spawn(handle_connection(stream, agent_connection));
+                active_connections.spawn(connection_task(stream, agent_connection));
             },
             _ = active_connections.join_next() => {},
             _ = tokio::time::sleep(Duration::from_secs(2)) => {
@@ -105,6 +111,15 @@ pub(crate) async fn proxy() -> Result<()> {
     Ok(())
 }
 
+/// Connects to an agent pod depending on how [`LayerConfig`] is set-up:
+///
+/// - `connect_tcp`: connects directly to the `address` specified, and calls [`wrap_raw_connection`]
+///   on the [`TcpStream`];
+///
+/// - `connect_agent_name`: Connects to an agent with `connect_agent_name` on `connect_agent_port`
+///   using [`KubernetesAPI];
+///
+/// - None of the above: uses the [`OperatorApi`] to establish the connection.
 async fn connect(
     config: &LayerConfig,
 ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
