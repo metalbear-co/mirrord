@@ -842,13 +842,3 @@ pub(crate) unsafe extern "C" fn uv_fs_close(a: usize, b: usize, fd: c_int, c: us
     close_layer_fd(fd);
     FN_UV_FS_CLOSE(a, b, fd, c)
 }
-
-/// Message presented to the user as a sort of footer when mirrord crashes.
-pub(crate) const FAIL_STILL_STUCK: &str = r#"
-- If you're still stuck and everything looks fine:
-
->> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
-
->> Or join our discord https://discord.com/invite/J5YSrStDKD and request help in #mirrord-help.
-
-"#;

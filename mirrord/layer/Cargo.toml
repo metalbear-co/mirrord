@@ -19,7 +19,6 @@ mirrord-config = { path = "../config"}
 mirrord-protocol = { path = "../protocol"}
 mirrord-layer-macro = { path = "./macro"}
 mirrord-progress = { path = "../progress" }
-mirrord-kube = { path = "../kube" }
 mirrord-operator = { path = "../operator", features = ["client"] }
 mirrord-console = { path = "../console" }
 
@@ -31,7 +30,6 @@ tracing-subscriber.workspace = true
 tracing-appender = { git = "https://github.com/metalbear-co/tracing", package = "tracing-appender", branch = "worker_options_non_blocking_v1" }
 frida-gum = { git = "https://github.com/metalbear-co/frida-rust", version = "0.8", features = ["auto-download"], branch="metalbear2" }
 futures.workspace = true
-kube.workspace = true
 
 tokio.workspace = true
 serde_json.workspace = true
