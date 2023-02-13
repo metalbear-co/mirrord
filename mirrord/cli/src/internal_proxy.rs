@@ -34,7 +34,7 @@ fn print_port(listener: &TcpListener) -> Result<()> {
         .local_addr()
         .map_err(InternalProxyError::LocalPortError)?
         .port();
-    println!("{port:?}\n");
+    println!("{port}\n");
     Ok(())
 }
 
