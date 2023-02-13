@@ -16,8 +16,6 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tracing::{info, trace, warn};
 
-#[cfg(feature = "env_guard")]
-use crate::api::env_guard::EnvVarGuard;
 use crate::{
     api::{
         container::{ContainerApi, EphemeralContainer, JobContainer},
@@ -145,9 +143,6 @@ impl AgentManagment for KubernetesAPI {
 }
 
 pub async fn create_kube_api(config: Option<LayerConfig>) -> Result<Client> {
-    #[cfg(feature = "env_guard")]
-    let _guard = EnvVarGuard::new();
-
     let mut kube_config = Config::infer().await?;
 
     if let Some(config) = config {
@@ -158,7 +153,6 @@ pub async fn create_kube_api(config: Option<LayerConfig>) -> Result<Client> {
                     .await?;
         }
 
-        #[cfg_attr(not(feature = "env_guard"), allow(unused_mut))]
         if config.accept_invalid_certificates {
             kube_config.accept_invalid_certs = true;
             // Only warn the first time connecting to the agent, not on child processes.
@@ -167,8 +161,6 @@ pub async fn create_kube_api(config: Option<LayerConfig>) -> Result<Client> {
             }
         }
     }
-    #[cfg(feature = "env_guard")]
-    _guard.prepare_config(&mut kube_config);
 
     Client::try_from(kube_config).map_err(KubeApiError::from)
 }

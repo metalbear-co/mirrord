@@ -169,7 +169,7 @@ jobs:
         with:
           key: ${{matrix.os}}
       - run: |
-          cargo test -p mirrord-kube --all-features -- --skip env_guard
+          cargo test -p mirrord-kube --all-features
 
   test_mirrord_sip:
     runs-on: macos-latest
@@ -389,7 +389,6 @@ jobs:
         with:
           name: layer-lib
           path: target/debug/
-      - run: cargo test -p mirrord-kube --features env_guard api::env_guard
       - run: cargo test -p mirrord-layer
 
   integration_tests_macos:

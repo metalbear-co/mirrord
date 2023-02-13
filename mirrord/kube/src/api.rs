@@ -14,11 +14,6 @@ use tracing::{error, info};
 use crate::error::{KubeApiError, Result};
 
 pub mod container;
-#[cfg(feature = "env_guard")]
-mod env_guard;
-#[cfg(feature = "env_guard")]
-pub use env_guard::MIRRORD_GUARDED_ENVS;
-
 pub mod kubernetes;
 mod runtime;
 
@@ -36,58 +31,6 @@ where
     }
 }
 
-pub(crate) fn wrap_raw_connection(
-    stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
-) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-    let mut codec = actix_codec::Framed::new(stream, ClientCodec::new());
-
-    let (in_tx, mut in_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
-    let (out_tx, out_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
-
-    tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                msg = in_rx.recv() => {
-                    match msg {
-                        Some(msg) => {
-                            if let Err(fail) = codec.send(msg).await {
-                                error!("Error sending client message: {:#?}", fail);
-                                break;
-                            }
-                        }
-                        None => {
-                            info!("mirrord-kube: initiated disconnect from agent");
-
-                            break;
-                        }
-                    }
-                }
-                daemon_message = codec.next() => {
-                    match daemon_message {
-                        Some(Ok(msg)) => {
-                            if let Err(fail) = out_tx.send(msg).await {
-                                error!("DaemonMessage dropped: {:#?}", fail);
-
-                                break;
-                            }
-                        }
-                        Some(Err(err)) => {
-                            error!("Error receiving daemon message: {:?}", err);
-                            break;
-                        }
-                        None => {
-                            error!("agent disconnected");
-
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    });
-
-    Ok((in_tx, out_rx))
-}
 
 #[async_trait]
 pub trait AgentManagment {
@@ -115,31 +58,4 @@ pub trait AgentManagment {
     async fn create_agent<P>(&self, progress: &P) -> Result<Self::AgentRef, Self::Err>
     where
         P: Progress + Send + Sync;
-}
-
-pub struct Connection<T: ToSocketAddrs>(pub T); // TODO: Replace with generic address
-
-#[async_trait]
-impl<T> AgentManagment for Connection<T>
-where
-    T: ToSocketAddrs + Send + Sync,
-{
-    type AgentRef = TcpStream;
-    type Err = KubeApiError;
-
-    async fn create_connection(
-        &self,
-        stream: Self::AgentRef,
-    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        wrap_raw_connection(stream)
-    }
-
-    async fn create_agent<P>(&self, _: &P) -> Result<Self::AgentRef, Self::Err>
-    where
-        P: Progress + Send + Sync,
-    {
-        TcpStream::connect(&self.0)
-            .await
-            .map_err(KubeApiError::from)
-    }
 }
