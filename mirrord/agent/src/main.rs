@@ -29,6 +29,7 @@ use tokio::{
     select,
     sync::mpsc::{self, Sender},
     task::JoinHandle,
+    time::{timeout, Duration},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace};
@@ -137,7 +138,7 @@ impl State {
                         client_id,
                         stream,
                         pid,
-                        args.ephemeral_container,
+                        ephemeral_container,
                         sniffer_command_tx,
                         stealer_command_tx,
                         dns_sender,
@@ -167,9 +168,7 @@ impl State {
                 Ok(None)
             }
             // Propagate all errors that are not ConnectionLimitReached.
-            err => {
-                err?;
-            }
+            Err(err) => Err(err),
         }
     }
 
@@ -447,7 +446,7 @@ async fn start_agent() -> Result<()> {
 
     // For the first client, we use communication_timeout, then we exit when no more
     // no connections.
-    match tokio::time::timeout(
+    match timeout(
         Duration::from_secs(args.communication_timeout.into()),
         listener.accept(),
     )
@@ -472,7 +471,7 @@ async fn start_agent() -> Result<()> {
             error!("start -> Failed to accept connection: {:?}", err);
             return Err(err.into());
         }
-        Err(e) => {
+        Err(err) => {
             error!("start -> Failed to accept first connection: timeout");
             return Err(err.into());
         }
@@ -487,7 +486,10 @@ async fn start_agent() -> Result<()> {
                     sniffer_command_tx.clone(),
                     stealer_command_tx.clone(),
                     cancellation_token.clone(),
-                    dns_sender.clone()).map(| client | clients.push(client))?;
+                    dns_sender.clone(),
+                    args.ephemeral_container,
+                    pid
+                ).map(| client | clients.push(client))?;
             },
             // Logic here is if we have already accepted a client, then we drop immediately when all clients disconnect.
             // if not, we wait for the communication timeout to expire before dropping. (to have more time for the first
