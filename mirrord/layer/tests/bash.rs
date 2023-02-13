@@ -40,8 +40,41 @@ async fn test_bash_script(dylib_path: &Path) {
     // Accept the connection from the layer in the env binary and verify initial messages.
     let _env_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     // Accept the connection from the layer in the bash binary and verify initial messages.
-    let _bash_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    let mut bash_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     // Accept the connection from the layer in the cat binary and verify initial messages.
+
+    bash_layer_connection
+        .expect_file_open_for_reading("/etc/hostname", 1)
+        .await;
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        assert_eq!(
+            bash_layer_connection.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
+                path: None,
+                fd: Some(1),
+                follow_symlink: true
+            }))
+        );
+
+        let metadata = MetadataInternal {
+            size: 100,
+            blocks: 2,
+            ..Default::default()
+        };
+
+        bash_layer_connection
+            .codec
+            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                XstatResponse { metadata },
+            ))))
+            .await
+            .unwrap();
+    }
+
+    bash_layer_connection.expect_file_read("foobar\n", 1).await;
+
     let mut cat_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     // TODO: theoretically the connections arrival order could be different, should we handle it?
 
@@ -57,7 +90,7 @@ async fn test_bash_script(dylib_path: &Path) {
             cat_layer_connection.codec.next().await.unwrap().unwrap(),
             ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
                 path: None,
-                fd: Some(1),
+                fd: Some(fd),
                 follow_symlink: true
             }))
         );
@@ -76,12 +109,6 @@ async fn test_bash_script(dylib_path: &Path) {
             .await
             .unwrap();
     }
-
-    cat_layer_connection
-        .expect_file_open_for_reading("/etc/hostname", 2)
-        .await;
-
-    cat_layer_connection.expect_file_read("foobar\n", 2).await;
 
     cat_layer_connection
         .expect_file_read("Very interesting contents.", fd)
