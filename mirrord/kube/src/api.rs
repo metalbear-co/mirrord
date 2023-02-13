@@ -9,7 +9,7 @@ use tokio::{
     net::{TcpStream, ToSocketAddrs},
     sync::mpsc,
 };
-use tracing::{error, info, trace};
+use tracing::{error, info};
 
 use crate::error::{KubeApiError, Result};
 
