@@ -28,6 +28,7 @@ use crate::{
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,
 };
 
+/// Hostname initialized from the agent with [`gethostname`].
 pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();
 
 /// Helper struct for connect results where we want to hold the original errno
@@ -635,6 +636,7 @@ pub(super) fn getaddrinfo(
     Detour::Success(result)
 }
 
+/// Retrieves the `hostname` from the agent's `/etc/hostname` to be used by [`gethostname`]
 fn remote_hostname_string() -> Detour<CString> {
     let hostname_path = CString::new("/etc/hostname")?;
 
@@ -660,7 +662,7 @@ fn remote_hostname_string() -> Detour<CString> {
     .map(Detour::Success)?
 }
 
-/// Resolve the fake local address to the real local address.
+/// Resolve hostname from remote host with caching for the result
 #[tracing::instrument(level = "trace")]
 pub(super) fn gethostname() -> Detour<&'static CString> {
     HOSTNAME.get_or_detour_init(remote_hostname_string)

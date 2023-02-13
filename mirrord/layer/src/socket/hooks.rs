@@ -73,6 +73,10 @@ pub(crate) unsafe extern "C" fn getsockname_detour(
         .unwrap_or_bypass_with(|_| FN_GETSOCKNAME(sockfd, address, address_len))
 }
 
+/// Hook for `libc::gethostname`.
+///
+/// Reads remote hostname bytes into `raw_name`, will rais EINVAL errno and return -1 if hostname
+/// read more than `name_length`
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn gethostname_detour(
     raw_name: *mut c_char,
