@@ -443,17 +443,23 @@ async fn start_agent() -> Result<()> {
                     err => { err?; },
                 }
             },
-            Some(client) = clients.next() => {
-                let client_id = client?;
-                state.remove_client(client_id).await?;
-            },
             // Logic here is if we have already accepted a client, then we drop immediately when all clients disconnect.
             // if not, we wait for the communication timeout to expire before dropping. (to have more time for the first
             // client to connect)
-            None = clients.next(), if first_accepted => {
-                trace!("Main thread timeout, no clients left.");
-                break;
-            }
+            client = clients.next() => {
+                match client {
+                    Some(client) => {
+                        let client_id = client?;
+                        state.remove_client(client_id).await?;
+                    }
+                    None => {
+                        if first_accepted {
+                            trace!("Main thread timeout, no clients left.");
+                            break
+                        }
+                    }
+                }
+            },
             _ = tokio::time::sleep(std::time::Duration::from_secs(args.communication_timeout.into())), if !first_accepted => {
                 if state.no_clients_left() {
                     trace!("Main thread timeout, no clients connected at all.");
