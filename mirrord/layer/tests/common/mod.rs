@@ -554,6 +554,15 @@ impl LayerConnection {
         }
         message
     }
+
+    /// Expect all the requested requests for gethostname hook
+    pub async fn expect_gethostname(&mut self, fd: u64) {
+        self.expect_file_open_for_reading("/etc/hostname", fd).await;
+
+        self.expect_single_file_read("foobar\n", fd).await;
+
+        self.expect_file_close(fd).await;
+    }
 }
 
 #[derive(Debug)]
