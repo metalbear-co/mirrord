@@ -11,6 +11,12 @@
       Read more <a href="https://mirrord.dev/docs/overview/introduction/">here</a>.
     ]]></description>
 
+    <projectListeners>
+        <listener class="com.metalbear.mirrord.MirrordConfigFileRefresher"
+                  topic="com.intellij.openapi.vfs.newvfs.BulkFileListener"
+                  activeInHeadlessMode="false"/>
+    </projectListeners>
+
     <depends>com.intellij.modules.lang</depends>
 
     <extensions defaultExtensionNs="com.intellij">
@@ -43,8 +49,8 @@
                     description="Opens/creates the default mirrord configuration file"
                     icon="AllIcons.General.GearPlain"/>
             <action id="MirrordConfigDropDown" class="com.metalbear.mirrord.MirrordConfigDropDown"
-                    text="Select mirrord configuration file"
-                    description="Selects the mirrord configuration file to use"/>
+                    text="Select Configuration"
+                    description="Selects the configuration file for mirrord"/>
             <separator/>
 
             <add-to-group group-id="ToolbarRunGroup" anchor="first"/>
