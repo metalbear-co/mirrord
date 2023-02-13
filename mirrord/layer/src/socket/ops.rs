@@ -635,8 +635,8 @@ pub(super) fn getaddrinfo(
     Detour::Success(result)
 }
 
-fn remote_hostname_string() -> Option<CString> {
-    let hostname_path = CString::new("/etc/hostname").ok()?;
+fn remote_hostname_string() -> Detour<CString> {
+    let hostname_path = CString::new("/etc/hostname")?;
 
     let hostname_fd = file::ops::open(
         Some(&hostname_path),
@@ -644,10 +644,9 @@ fn remote_hostname_string() -> Option<CString> {
             read: true,
             ..Default::default()
         },
-    )
-    .ok()?;
+    )?;
 
-    let hostname_file = file::ops::read(hostname_fd, 256).ok()?;
+    let hostname_file = file::ops::read(hostname_fd, 256)?;
 
     close_layer_fd(hostname_fd);
 
@@ -658,19 +657,19 @@ fn remote_hostname_string() -> Option<CString> {
             .take(hostname_file.read_amount as usize - 1)
             .collect::<Vec<_>>(),
     )
-    .ok()
+    .map(Detour::Success)?
 }
 
 /// Resolve the fake local address to the real local address.
 #[tracing::instrument(level = "trace")]
-pub(super) fn gethostname() -> Detour<CString> {
+pub(super) fn gethostname() -> Detour<&'static CString> {
     let hostname = HOSTNAME.get_or_init(|| {
-        remote_hostname_string().or_else(|| {
+        remote_hostname_string().ok().or_else(|| {
             warn!("couldn't get remote hostname");
 
             None
         })
     });
 
-    Detour::Success(hostname.clone()?)
+    Detour::Success(hostname.as_ref()?)
 }
