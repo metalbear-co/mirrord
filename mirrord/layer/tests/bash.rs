@@ -49,32 +49,6 @@ async fn test_bash_script(dylib_path: &Path) {
         .expect_file_open_for_reading("/etc/hostname", fd)
         .await;
 
-    #[cfg(not(target_os = "macos"))]
-    {
-        assert_eq!(
-            bash_layer_connection.codec.next().await.unwrap().unwrap(),
-            ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
-                path: None,
-                fd: Some(fd),
-                follow_symlink: true
-            }))
-        );
-
-        let metadata = MetadataInternal {
-            size: 100,
-            blocks: 2,
-            ..Default::default()
-        };
-
-        bash_layer_connection
-            .codec
-            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-                XstatResponse { metadata },
-            ))))
-            .await
-            .unwrap();
-    }
-
     bash_layer_connection.expect_file_read("foobar\n", fd).await;
 
     bash_layer_connection.expect_file_close(fd).await;
