@@ -35,7 +35,7 @@ pub(crate) enum InternalProxyError {
     #[error("Couldn't connect to operator ")]
     OperatorConnectionError,
     #[error("Couldn't connect to agent via TCP {0:#?}")]
-    TcpConnectError(std::io::Error),
+    TcpConnectError(std::io::Error)
 }
 
 #[derive(Debug, Error, Diagnostic)]
@@ -48,7 +48,7 @@ pub(crate) enum CliError {
     2. You have sufficient permissions to port forward to the operator.
     {GENERAL_HELP}"#
     ))]
-    OperatorConnectionFailed(OperatorApiError),
+    OperatorConnectionFailed(#[from] OperatorApiError),
     #[error("Failed to create Kubernetes API. {0:#?}")]
     #[diagnostic(help(
         r#"
@@ -56,7 +56,7 @@ pub(crate) enum CliError {
     Test your connection with `kubectl get pods`.
     {GENERAL_HELP}"#
     ))]
-    KubernetesApiFailed(KubeApiError),
+    KubernetesApiFailed(#[from] KubeApiError),
     #[error("Agent wasn't ready in time")]
     #[diagnostic(help(
         r#"

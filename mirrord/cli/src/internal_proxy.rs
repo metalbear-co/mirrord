@@ -12,6 +12,7 @@ use std::{
     time::Duration,
 };
 
+use futures::{stream::StreamExt, SinkExt};
 use mirrord_config::LayerConfig;
 use mirrord_kube::{
     api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment, Connection},
@@ -28,7 +29,6 @@ use tokio::{
     task::JoinSet,
     time::timeout,
 };
-use futures::{SinkExt, stream::StreamExt};
 use tracing::log::info;
 
 use crate::error::{InternalProxyError, Result};
@@ -114,13 +114,16 @@ pub(crate) async fn proxy() -> Result<()> {
 async fn connect(
     config: &LayerConfig,
 ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-    if let Some(address) = config.connect_tcp {
-        let stream = TcpStream::connect(address).await.map_err(InternalProxyError::TcpConnectError)?;
+    if let Some(address) = &config.connect_tcp {
+        let stream = TcpStream::connect(address)
+            .await
+            .map_err(InternalProxyError::TcpConnectError)?;
         Ok(wrap_raw_connection(stream))
-    } else if let Some((agent_name, port)) = (config.pod_agent_name, config.agent_port) {
+    } else if let (Some(agent_name), Some(port)) =
+        (&config.connect_agent_name, config.connect_agent_port)
+    {
         let k8s_api = KubernetesAPI::create(config).await?;
-        let agent_ref = AgentManagment::agent_ref(agent_name);
-        let connection = k8s_api.create_connection(agent_ref).await?;
+        let connection = k8s_api.create_connection((agent_name.clone(), port)).await?;
         Ok(connection)
     } else {
         let connection = OperatorApi::discover(&config).await?;
