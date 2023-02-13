@@ -104,7 +104,7 @@ pub(crate) async fn proxy() -> Result<()> {
                 active_connections.spawn(connection_task(stream, agent_connection));
             },
             _ = active_connections.join_next() => {},
-            _ = tokio::time::sleep(Duration::from_secs(2)) => {
+            _ = tokio::time::sleep(Duration::from_secs(1)) => {
                 if active_connections.is_empty() {
                     break;
                 }
