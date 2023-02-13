@@ -31,7 +31,7 @@ pub(crate) enum InternalProxyError {
     #[error("Couldn't connect to operator ")]
     OperatorConnectionError,
     #[error("Couldn't connect to agent via TCP {0:#?}")]
-    TcpConnectError(std::io::Error)
+    TcpConnectError(std::io::Error),
 }
 
 #[derive(Debug, Error, Diagnostic)]

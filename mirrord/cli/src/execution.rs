@@ -102,7 +102,8 @@ impl MirrordExecution {
         };
 
         // stderr is inherited so we can see logs/errors.
-        let mut proxy_command = Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
+        let mut proxy_command =
+            Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
 
         proxy_command
             .arg("intproxy")
