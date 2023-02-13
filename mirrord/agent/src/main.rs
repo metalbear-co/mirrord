@@ -121,6 +121,7 @@ impl State {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn new_connection(
         &mut self,
         stream: TcpStream,
@@ -454,7 +455,7 @@ async fn start_agent() -> Result<()> {
     {
         Ok(Ok((stream, addr))) => {
             trace!("start -> Connection accepted from {:?}", addr);
-            state
+            if let Some(client) = state
                 .new_connection(
                     stream,
                     sniffer_command_tx.clone(),
@@ -465,7 +466,9 @@ async fn start_agent() -> Result<()> {
                     pid,
                 )
                 .await?
-                .map(|client| clients.push(client));
+            {
+                clients.push(client)
+            };
         }
         Ok(Err(err)) => {
             error!("start -> Failed to accept connection: {:?}", err);
@@ -481,7 +484,7 @@ async fn start_agent() -> Result<()> {
         select! {
             Ok((stream, addr)) = listener.accept() => {
                 trace!("start -> Connection accepted from {:?}", addr);
-                state.new_connection(
+                if let Some(client) = state.new_connection(
                     stream,
                     sniffer_command_tx.clone(),
                     stealer_command_tx.clone(),
@@ -489,7 +492,7 @@ async fn start_agent() -> Result<()> {
                     dns_sender.clone(),
                     args.ephemeral_container,
                     pid
-                ).await?.map(| client | clients.push(client));
+                ).await? {clients.push(client) };
             },
             // Logic here is if we have already accepted a client, then we drop immediately when all clients disconnect.
             // if not, we wait for the communication timeout to expire before dropping. (to have more time for the first
