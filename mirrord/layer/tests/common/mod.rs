@@ -382,7 +382,7 @@ impl LayerConnection {
             assert_eq!(expected_fd, requested_fd);
             return buffer_size;
         }
-        panic!("Expected Read FileRequest.");
+        panic!("Expected Read FileRequest. Got {message:?}");
     }
 
     /// Verify the layer hooks a read of `expected_fd`, return buffer size.
