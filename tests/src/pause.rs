@@ -115,6 +115,5 @@ mod pause {
         // Verify that the deployed app resumes after the local app is done.
         let log_from_deployed_after_resume = get_next_log(&mut log_stream).await;
         assert_eq!(log_from_deployed_after_resume, hi_from_deployed_app);
-        println!("passed");
     }
 }

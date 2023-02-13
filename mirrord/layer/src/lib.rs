@@ -340,7 +340,6 @@ fn layer_start(config: LayerConfig) {
             .with(
                 tracing_subscriber::fmt::layer()
                     .with_thread_ids(true)
-                    .with_ansi(false) // remove
                     .with_span_events(FmtSpan::ACTIVE)
                     .compact()
                     .with_writer(std::io::stderr),

@@ -446,7 +446,7 @@ async fn start_agent() -> Result<()> {
             // Logic here is if we have already accepted a client, then we drop immediately when all clients disconnect.
             // if not, we wait for the communication timeout to expire before dropping. (to have more time for the first
             // client to connect)
-            client = clients.next() => {
+            client = clients.next(), if !state.no_clients_left() && first_accepted => {
                 match client {
                     Some(client) => {
                         let client_id = client?;
