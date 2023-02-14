@@ -18,6 +18,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   This should fix issues with Akka or other software that checks the local address and
   expects it to match the **local ip of the pod**.
   This breaks agent protocol (agent/layer need to match).
+- GoLand debug fails because of reading `/private/var/folders` remotely (trying to access self file?). fixed with filter change (see below)
 
 ### Changed
 
@@ -25,6 +26,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - JetBrains: can now change focus from search field to targets using tab/shift+tab (for backwrad)
 - Refactor - mirrord cli now spawns `internal proxy` which does the Kubernetes operations for
   the layer, so layer need not interact with k8s (solves issues with remote/local env mix)
+- filter: add `/private/var/folders" to default local read override
+- filter: fixed regex for `/tmp` default local read override
 
 ## 3.24.0
 
