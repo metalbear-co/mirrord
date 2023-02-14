@@ -18,12 +18,14 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   This should fix issues with Akka or other software that checks the local address and
   expects it to match the **local ip of the pod**.
   This breaks agent protocol (agent/layer need to match).
+- GoLand debug fails because of reading `/private/var/folders` remotely (trying to access self file?). fixed with filter change (see below)
 
 ### Changed
 
 - VSCode extension: update dialog message
 - JetBrains: can now change focus from search field to targets using tab/shift+tab (for backwrad)
-
+- filter: add `/private/var/folders" to default local read override
+- filter: fixed regex for `/tmp` default local read ovveride
 ## 3.24.0
 
 ### Added
