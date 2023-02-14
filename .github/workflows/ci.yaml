@@ -559,7 +559,7 @@ jobs:
           minikube start --container-runtime=docker
           minikube image load /tmp/test.tar
       - name: test with docker runtime
-        run: cargo test -p tests -- --nocapture
+        run: cargo test -p tests
       - name: Collect logs
         if: ${{ failure() }}
         run: |
