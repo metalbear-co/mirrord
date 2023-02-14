@@ -237,8 +237,6 @@ mod steal {
                 Some(flags),
                 Some(vec![
                     ("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes"),
-                    // set time out to 1 to avoid two agents conflict
-                    ("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "3"),
                 ]),
             )
             .await;
@@ -311,8 +309,6 @@ mod steal {
                 Some(flags),
                 Some(vec![
                     ("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes"),
-                    // set time out to 1 to avoid two agents conflict
-                    ("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "3"),
                 ]),
             )
             .await;
