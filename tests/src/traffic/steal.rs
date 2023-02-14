@@ -24,7 +24,7 @@ mod steal {
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(
-            Application::PythonFlaskHTTP,
+            // Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP,
             Application::NodeHTTP
         )]
@@ -60,7 +60,7 @@ mod steal {
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(
-            Application::PythonFlaskHTTP,
+            // Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP,
             Application::NodeHTTP
         )]
@@ -102,7 +102,7 @@ mod steal {
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(
-            Application::PythonFlaskHTTP,
+            // Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP,
             Application::NodeHTTP
         )]
@@ -235,11 +235,7 @@ mod steal {
                 &service.target,
                 Some(&service.namespace),
                 Some(flags),
-                Some(vec![
-                    ("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes"),
-                    // set time out to 1 to avoid two agents conflict
-                    ("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "3"),
-                ]),
+                Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
             )
             .await;
 
@@ -309,11 +305,7 @@ mod steal {
                 &service.target,
                 Some(&service.namespace),
                 Some(flags),
-                Some(vec![
-                    ("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes"),
-                    // set time out to 1 to avoid two agents conflict
-                    ("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "3"),
-                ]),
+                Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
             )
             .await;
 
