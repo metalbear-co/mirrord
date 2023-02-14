@@ -9,7 +9,7 @@ use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
-use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf};
+use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf, sync::OnceLock};
 
 use crate::error::HookError;
 
@@ -85,7 +85,7 @@ impl Drop for DetourGuard {
 /// to simplify calls to the original functions as `FN_ORIGINAL()`, instead of
 /// `FN_ORIGINAL.get().unwrap()`.
 #[derive(Debug)]
-pub(crate) struct HookFn<T>(std::sync::OnceLock<T>);
+pub(crate) struct HookFn<T>(OnceLock<T>);
 
 impl<T> Deref for HookFn<T> {
     type Target = T;
@@ -97,7 +97,7 @@ impl<T> Deref for HookFn<T> {
 
 impl<T> const Default for HookFn<T> {
     fn default() -> Self {
-        Self(std::sync::OnceLock::new())
+        Self(OnceLock::new())
     }
 }
 
@@ -350,6 +350,29 @@ impl<T> OptionExt for Option<T> {
         match self {
             Some(v) => Detour::Success(v),
             None => Detour::Bypass(value),
+        }
+    }
+}
+
+/// Extends [`OnceLock`] with a helper function to initialize it with a [`Detour`].
+pub(crate) trait OnceLockExt<T> {
+    /// Initializes a [`OnceLock`] with a [`Detour`] (similar to [`OnceLock::get_or_try_init`]).
+    fn get_or_detour_init<F>(&self, f: F) -> Detour<&T>
+    where
+        F: FnOnce() -> Detour<T>;
+}
+
+impl<T> OnceLockExt<T> for OnceLock<T> {
+    fn get_or_detour_init<F>(&self, f: F) -> Detour<&T>
+    where
+        F: FnOnce() -> Detour<T>,
+    {
+        if let Some(value) = self.get() {
+            Detour::Success(value)
+        } else {
+            let value = f()?;
+
+            Detour::Success(self.get_or_init(|| value))
         }
     }
 }
