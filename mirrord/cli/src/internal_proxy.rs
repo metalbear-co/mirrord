@@ -59,10 +59,13 @@ async fn connection_task(
             layer_message = layer_connection.next() => {
                 match layer_message {
                     Some(Ok(layer_message)) => {
-                        let _ = agent_sender.send(layer_message).await;
+                        if let Err(err) = agent_sender.send(layer_message).await {
+                            trace!("Error sending layer message to agent: {err:#?}");
+                            break;
+                        }
                     },
                     Some(Err(fail)) => {
-                        error!("Error receiving layer message: {:#?}", fail);
+                        error!("Error receiving layer message: {fail:#?}");
                         break;
                     },
                     None => {
@@ -74,7 +77,10 @@ async fn connection_task(
             agent_message = agent_receiver.recv() => {
                 match agent_message {
                     Some(agent_message) => {
-                        let _ = layer_connection.send(agent_message).await;
+                        if let Err(err) = layer_connection.send(agent_message).await {
+                            trace!("Error sending agent message to layer: {err:#?}");
+                            break;
+                        }
                     },
                     None => {
                         trace!("agent connection closed");
