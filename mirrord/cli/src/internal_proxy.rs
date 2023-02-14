@@ -86,7 +86,6 @@ async fn connection_task(
     }
 }
 
-
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
 pub(crate) async fn proxy() -> Result<()> {
