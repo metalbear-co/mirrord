@@ -117,11 +117,19 @@ pub(crate) async fn proxy() -> Result<()> {
 
     loop {
         tokio::select! {
-            Ok((stream, _)) = listener.accept() => {
-                let agent_connection = connect(&config).await?;
-                active_connections.spawn(connection_task(stream, agent_connection));
+            res = listener.accept() => {
+                match res {
+                    Ok((stream, _)) => {
+                        let agent_connection = connect(&config).await?;
+                        active_connections.spawn(connection_task(stream, agent_connection));
+                    },
+                    Err(err) => {
+                        error!("Error accepting connection: {err:#?}");
+                        break;
+                    }
+                }
             },
-            Some(_) = active_connections.join_next(), if !active_connections.is_empty() => {},
+            _ = active_connections.join_next(), if !active_connections.is_empty() => {},
             _ = tokio::time::sleep(Duration::from_secs(1)) => {
                 if active_connections.is_empty() {
                     break;
