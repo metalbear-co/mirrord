@@ -104,7 +104,7 @@ pub(crate) async fn proxy() -> Result<()> {
     // Create a main connection, that will be held until proxy is closed.
     // This will guarantee agent staying alive and will enable us to
     // make the agent close on last connection close immediately (will help in tests)
-    let _main_connection = connect(&config).await?;
+    let _main_connection = connect_and_ping(&config).await?;
     print_port(&listener)?;
 
     // wait for first connection `FIRST_CONNECTION_TIMEOUT` seconds, or timeout.
@@ -118,7 +118,7 @@ pub(crate) async fn proxy() -> Result<()> {
 
     let mut active_connections = JoinSet::new();
 
-    let agent_connection = connect(&config).await?;
+    let agent_connection = connect_and_ping(&config).await?;
     active_connections.spawn(connection_task(stream, agent_connection));
 
     loop {
@@ -126,7 +126,7 @@ pub(crate) async fn proxy() -> Result<()> {
             res = listener.accept() => {
                 match res {
                     Ok((stream, _)) => {
-                        let agent_connection = connect(&config).await?;
+                        let agent_connection = connect_and_ping(&config).await?;
                         active_connections.spawn(connection_task(stream, agent_connection));
                     },
                     Err(err) => {
@@ -144,6 +144,29 @@ pub(crate) async fn proxy() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Connect and send ping - this is useful when working using k8s
+/// port forward since it only creates the connection after
+/// sending the first message
+async fn connect_and_ping(
+    config: &LayerConfig,
+) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+    let (mut sender, mut receiver) = connect(config).await?;
+    ping(&mut sender, &mut receiver).await?;
+    Ok((sender, receiver))
+}
+
+/// Sends a ping the connection and expects a pong.
+async fn ping(
+    sender: &mut mpsc::Sender<ClientMessage>,
+    receiver: &mut mpsc::Receiver<DaemonMessage>,
+) -> Result<(), InternalProxyError> {
+    sender.send(ClientMessage::Ping).await?;
+    match receiver.recv().await {
+        Some(DaemonMessage::Pong) => Ok(()),
+        _ => Err(InternalProxyError::AgentClosedConnection),
+    }
 }
 
 /// Connects to an agent pod depending on how [`LayerConfig`] is set-up:

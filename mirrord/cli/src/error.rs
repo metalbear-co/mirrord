@@ -32,6 +32,10 @@ pub(crate) enum InternalProxyError {
     OperatorConnectionError,
     #[error("Couldn't connect to agent via TCP {0:#?}")]
     TcpConnectError(std::io::Error),
+    #[error("Agent closed connection on ping/pong, image version/arch mismatch?")]
+    AgentClosedConnection,
+    #[error("Ping error {0:#?} - image version/arch mismatch?")]
+    PingError(#[from] tokio::sync::mpsc::error::SendError<mirrord_protocol::ClientMessage>),
 }
 
 #[derive(Debug, Error, Diagnostic)]
