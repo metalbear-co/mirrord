@@ -19,6 +19,26 @@ const GENERAL_HELP: &str = r#"
 "#;
 
 #[derive(Debug, Error, Diagnostic)]
+pub(crate) enum InternalProxyError {
+    #[error("Couldn't listen for connections {0:#?}")]
+    ListenError(std::io::Error),
+    #[error("Couldn't get local port{0:#?}")]
+    LocalPortError(std::io::Error),
+    #[error("Couldn't accept connection before timeout")]
+    FirstConnectionTimeout,
+    #[error("Couldn't accept connection {0:#?}")]
+    AcceptError(std::io::Error),
+    #[error("Couldn't connect to operator ")]
+    OperatorConnectionError,
+    #[error("Couldn't connect to agent via TCP {0:#?}")]
+    TcpConnectError(std::io::Error),
+    #[error("Agent closed connection on ping/pong, image version/arch mismatch?")]
+    AgentClosedConnection,
+    #[error("Ping error {0:#?} - image version/arch mismatch?")]
+    PingError(#[from] tokio::sync::mpsc::error::SendError<mirrord_protocol::ClientMessage>),
+}
+
+#[derive(Debug, Error, Diagnostic)]
 pub(crate) enum CliError {
     #[error("Failed to connect to the operator. We have found the operator and unable to connect to it. {0:#?}")]
     #[diagnostic(help(
@@ -28,7 +48,7 @@ pub(crate) enum CliError {
     2. You have sufficient permissions to port forward to the operator.
     {GENERAL_HELP}"#
     ))]
-    OperatorConnectionFailed(OperatorApiError),
+    OperatorConnectionFailed(#[from] OperatorApiError),
     #[error("Failed to create Kubernetes API. {0:#?}")]
     #[diagnostic(help(
         r#"
@@ -36,7 +56,7 @@ pub(crate) enum CliError {
     Test your connection with `kubectl get pods`.
     {GENERAL_HELP}"#
     ))]
-    KubernetesApiFailed(KubeApiError),
+    KubernetesApiFailed(#[from] KubeApiError),
     #[error("Agent wasn't ready in time")]
     #[diagnostic(help(
         r#"
@@ -149,4 +169,24 @@ pub(crate) enum CliError {
     JsonSerializeError(#[from] serde_json::Error),
     #[error("Failed connecting to mirrord console for logging {0:#?}")]
     ConsoleConnectError(#[from] ConsoleError),
+    #[error("Couldn't get stdout of internal proxy")]
+    #[diagnostic(help(
+        r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
+    ))]
+    InternalProxyStdoutError,
+    #[error("Couldn't get port of internal proxy")]
+    #[diagnostic(help(
+        r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
+    ))]
+    InternalProxyPortReadError,
+    #[error("Internal proxy read error: {0:#?}")]
+    InternalProxyReadError(std::io::Error),
+    #[error("Internal proxy error: {0:#?}")]
+    InternalProxyError(#[from] InternalProxyError),
+    #[error("Getting cli path failed {0:#?}")]
+    CliPathError(std::io::Error),
+    #[error("Executing internal proxy failed {0:#?}")]
+    InternalProxyExecutionFailed(std::io::Error),
+    #[error("Internal proxy port parse error: {0:#?}")]
+    InternalProxyPortParseError(std::num::ParseIntError),
 }

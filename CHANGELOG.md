@@ -24,6 +24,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - VSCode extension: update dialog message
 - JetBrains: can now change focus from search field to targets using tab/shift+tab (for backwrad)
+- Refactor - mirrord cli now spawns `internal proxy` which does the Kubernetes operations for
+  the layer, so layer need not interact with k8s (solves issues with remote/local env mix)
 - filter: add `/private/var/folders" to default local read override
 - filter: fixed regex for `/tmp` default local read override
 

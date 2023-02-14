@@ -358,7 +358,14 @@ fn layer_start(config: LayerConfig) {
         std::env::args()
     );
 
-    let (tx, rx) = RUNTIME.block_on(connection::connect(&config));
+    let address = config
+        .connect_tcp
+        .as_ref()
+        .expect("layer loaded without proxy address to connect to")
+        .parse()
+        .expect("couldn't parse proxy address");
+
+    let (tx, rx) = RUNTIME.block_on(connection::connect_to_proxy(address));
 
     let (sender, receiver) = channel::<HookMessage>(1000);
     HOOK_SENDER
@@ -835,13 +842,3 @@ pub(crate) unsafe extern "C" fn uv_fs_close(a: usize, b: usize, fd: c_int, c: us
     close_layer_fd(fd);
     FN_UV_FS_CLOSE(a, b, fd, c)
 }
-
-/// Message presented to the user as a sort of footer when mirrord crashes.
-pub(crate) const FAIL_STILL_STUCK: &str = r#"
-- If you're still stuck and everything looks fine:
-
->> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
-
->> Or join our discord https://discord.com/invite/J5YSrStDKD and request help in #mirrord-help.
-
-"#;

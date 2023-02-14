@@ -14,15 +14,10 @@ use tracing::{error, info};
 use crate::error::{KubeApiError, Result};
 
 pub mod container;
-#[cfg(feature = "env_guard")]
-mod env_guard;
-#[cfg(feature = "env_guard")]
-pub use env_guard::MIRRORD_GUARDED_ENVS;
-
 pub mod kubernetes;
 mod runtime;
 
-static CONNECTION_CHANNEL_SIZE: usize = 1000;
+const CONNECTION_CHANNEL_SIZE: usize = 1000;
 
 pub fn get_k8s_resource_api<K>(client: &Client, namespace: Option<&str>) -> Api<K>
 where
@@ -36,9 +31,11 @@ where
     }
 }
 
-pub(crate) fn wrap_raw_connection(
+/// Creates the task that handles the messaging between layer/agent.
+/// It does the encoding/decoding of protocol.
+pub fn wrap_raw_connection(
     stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
-) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+) -> (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>) {
     let mut codec = actix_codec::Framed::new(stream, ClientCodec::new());
 
     let (in_tx, mut in_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
@@ -76,7 +73,7 @@ pub(crate) fn wrap_raw_connection(
                             break;
                         }
                         None => {
-                            error!("agent disconnected");
+                            info!("agent disconnected");
 
                             break;
                         }
@@ -86,7 +83,7 @@ pub(crate) fn wrap_raw_connection(
         }
     });
 
-    Ok((in_tx, out_rx))
+    (in_tx, out_rx)
 }
 
 #[async_trait]
@@ -131,7 +128,7 @@ where
         &self,
         stream: Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        wrap_raw_connection(stream)
+        Ok(wrap_raw_connection(stream))
     }
 
     async fn create_agent<P>(&self, _: &P) -> Result<Self::AgentRef, Self::Err>

@@ -19,17 +19,19 @@ edition.workspace = true
 mirrord-auth = { path="../auth", features = ["webbrowser"] }
 mirrord-operator = { path = "../operator", features = ["client", "license-fetch", "setup"] }
 mirrord-progress = { path = "../progress" }
-mirrord-kube = { path = "../kube", features = ["env_guard"] }
+mirrord-kube = { path = "../kube" }
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
 mirrord-console = { path = "../console" }
 
+actix-codec.workspace = true
 clap.workspace = true
 tracing.workspace = true
 rand.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 tracing-subscriber.workspace = true
+futures.workspace = true
 regex = "1.6.0"
 errno = "0.2"
 exec = "0.3"
@@ -37,7 +39,7 @@ anyhow.workspace = true
 reqwest.workspace = true
 semver = "1"
 const-random = "0.1.15"
-tokio.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "macros", "process"]}
 kube.workspace = true
 k8s-openapi.workspace = true
 miette = { version = "5", features = ["fancy"] }

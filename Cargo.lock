@@ -2056,11 +2056,13 @@ dependencies = [
 name = "mirrord"
 version = "3.24.0"
 dependencies = [
+ "actix-codec",
  "anyhow",
  "clap",
  "const-random",
  "errno",
  "exec",
+ "futures",
  "humantime",
  "k8s-openapi",
  "kube",
@@ -2232,11 +2234,9 @@ dependencies = [
  "hyper 1.0.0-rc.2",
  "itertools",
  "k8s-openapi",
- "kube",
  "libc",
  "mirrord-config",
  "mirrord-console",
- "mirrord-kube",
  "mirrord-layer-macro",
  "mirrord-operator",
  "mirrord-progress",
