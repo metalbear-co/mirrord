@@ -86,6 +86,7 @@ async fn connection_task(
     }
 }
 
+
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
 pub(crate) async fn proxy() -> Result<()> {
@@ -121,7 +122,7 @@ pub(crate) async fn proxy() -> Result<()> {
                 let agent_connection = connect(&config).await?;
                 active_connections.spawn(connection_task(stream, agent_connection));
             },
-            Some(_) = active_connections.join_next() => {},
+            Some(_) = active_connections.join_next(), if !active_connections.is_empty() => {},
             _ = tokio::time::sleep(Duration::from_secs(1)) => {
                 if active_connections.is_empty() {
                     break;
