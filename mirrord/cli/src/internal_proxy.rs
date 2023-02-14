@@ -27,12 +27,13 @@ use tokio::{
     task::JoinSet,
     time::timeout,
 };
+use tracing::{error, log::trace};
 
 use crate::error::{InternalProxyError, Result};
 
 /// Launch timeout until we get first connection.
 /// If layer doesn't connect in this time, we timeout and exit.
-const FIRST_CONNECTION_TIMEOUT: u64 = 2;
+const FIRST_CONNECTION_TIMEOUT: u64 = 5;
 
 /// Print the port for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.
@@ -55,14 +56,31 @@ async fn connection_task(
     let (agent_sender, mut agent_receiver) = agent_connection;
     loop {
         select! {
-            Some(layer_message) = layer_connection.next() => {
-                agent_sender.send(layer_message.expect("invalid layer message")).await.expect("failed to send layer message to agent");
+            layer_message = layer_connection.next() => {
+                match layer_message {
+                    Some(Ok(layer_message)) => {
+                        let _ = agent_sender.send(layer_message).await;
+                    },
+                    Some(Err(fail)) => {
+                        error!("Error receiving layer message: {:#?}", fail);
+                        break;
+                    },
+                    None => {
+                        trace!("layer connection closed");
+                        break;
+                    }
+                }
             },
-            Some(agent_message) = agent_receiver.recv() => {
-                layer_connection.send(agent_message).await.expect("failed to send agent message to layer");
-            }
-            else => {
-                break;
+            agent_message = agent_receiver.recv() => {
+                match agent_message {
+                    Some(agent_message) => {
+                        let _ = layer_connection.send(agent_message).await;
+                    },
+                    None => {
+                        trace!("agent connection closed");
+                        break;
+                    }
+                }
             }
         }
     }

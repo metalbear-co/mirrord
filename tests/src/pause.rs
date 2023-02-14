@@ -47,7 +47,7 @@ mod pause {
         #[future] kube_client: Client,
     ) {
         println!(
-            "{:#?}: starting test",
+            "{}: starting test",
             chrono::Local::now().format("%Y-%m-%d][%H:%M:%S")
         );
         let logger_service = http_logger_service.await;
@@ -89,7 +89,7 @@ mod pause {
         assert_eq!(first_log, hi_from_deployed_app);
 
         println!(
-            "{:#?}: Running local app with mirrord.",
+            "{}: Running local app with mirrord.",
             chrono::Local::now().format("%Y-%m-%d][%H:%M:%S")
         );
         let mut process = run_exec(
@@ -102,7 +102,7 @@ mod pause {
         .await;
         let res = process.child.wait().await.unwrap();
         println!(
-            "{:#?}: mirrord done running.",
+            "{}: mirrord done running.",
             chrono::Local::now().format("%Y-%m-%d][%H:%M:%S")
         );
         assert!(res.success());
