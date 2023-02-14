@@ -46,7 +46,10 @@ mod pause {
         #[future] http_log_requester_service: KubeService,
         #[future] kube_client: Client,
     ) {
-        println!("{:#?}: starting test", std::time::SystemTime::now());
+        println!(
+            "{:#?}: starting test",
+            chrono::Local().format("%Y-%m-%d][%H:%M:%S")
+        );
         let logger_service = http_logger_service.await;
         let requester_service = http_log_requester_service.await; // Impersonate a pod of this service, to reach internal.
         let kube_client = kube_client.await;
@@ -87,7 +90,7 @@ mod pause {
 
         println!(
             "{:#?}: Running local app with mirrord.",
-            std::time::SystemTime::now()
+            chrono::Local().format("%Y-%m-%d][%H:%M:%S")
         );
         let mut process = run_exec(
             command.clone(),
@@ -98,7 +101,10 @@ mod pause {
         )
         .await;
         let res = process.child.wait().await.unwrap();
-        println!("{:#?}: mirrord done running.", std::time::SystemTime::now());
+        println!(
+            "{:#?}: mirrord done running.",
+            chrono::Local().format("%Y-%m-%d][%H:%M:%S")
+        );
         assert!(res.success());
 
         println!("Spooling logs forward to get to local app's first log.");
