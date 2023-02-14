@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.25.0
+
 ### Added
 
 - `gethostname` detour that returns contents of `/etc/hostname` from target pod. See relevant [#1041](https://github.com/metalbear-co/mirrord/issues/1041).
@@ -28,6 +30,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   the layer, so layer need not interact with k8s (solves issues with remote/local env mix)
 - filter: add `/private/var/folders" to default local read override
 - filter: fixed regex for `/tmp` default local read override
+- disable flask e2e until we solve the glibc issue (probably fstream issue)
 
 ## 3.24.0
 

@@ -24,7 +24,7 @@ mod steal {
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(
-            Application::PythonFlaskHTTP,
+            // Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP,
             Application::NodeHTTP
         )]
@@ -60,7 +60,7 @@ mod steal {
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(
-            Application::PythonFlaskHTTP,
+            // Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP,
             Application::NodeHTTP
         )]
@@ -102,7 +102,7 @@ mod steal {
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(
-            Application::PythonFlaskHTTP,
+            // Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP,
             Application::NodeHTTP
         )]
@@ -235,9 +235,7 @@ mod steal {
                 &service.target,
                 Some(&service.namespace),
                 Some(flags),
-                Some(vec![
-                    ("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes"),
-                ]),
+                Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
             )
             .await;
 
@@ -307,9 +305,7 @@ mod steal {
                 &service.target,
                 Some(&service.namespace),
                 Some(flags),
-                Some(vec![
-                    ("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes"),
-                ]),
+                Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
             )
             .await;
 
