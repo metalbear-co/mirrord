@@ -11,7 +11,8 @@ mod traffic {
     use rstest::*;
 
     use crate::utils::{
-        kube_client, run_exec, service, udp_logger_service, KubeService, CONTAINER_NAME,
+        hostname_service, kube_client, run_exec, service, udp_logger_service, KubeService,
+        CONTAINER_NAME,
     };
 
     #[rstest]
@@ -294,6 +295,17 @@ mod traffic {
         let service = service.await;
         let node_command = vec!["node", "node-e2e/listen/test_listen_localhost.mjs"];
         let mut process = run_exec(node_command, &service.target, None, None, None).await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_gethostname_remote_result(#[future] hostname_service: KubeService) {
+        let service = hostname_service.await;
+        let node_command = vec!["python3", "-u", "python-e2e/hostname.py"];
+        let mut process = run_exec(node_command, &service.target, None, None, None).await;
+
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
     }
