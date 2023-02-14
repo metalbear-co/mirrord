@@ -32,7 +32,7 @@ use crate::error::{InternalProxyError, Result};
 
 /// Launch timeout until we get first connection.
 /// If layer doesn't connect in this time, we timeout and exit.
-const FIRST_CONNECTION_TIMEOUT: u64 = 5;
+const FIRST_CONNECTION_TIMEOUT: u64 = 2;
 
 /// Print the port for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.
@@ -103,7 +103,7 @@ pub(crate) async fn proxy() -> Result<()> {
                 let agent_connection = connect(&config).await?;
                 active_connections.spawn(connection_task(stream, agent_connection));
             },
-            _ = active_connections.join_next() => {},
+            Some(_) = active_connections.join_next() => {},
             _ = tokio::time::sleep(Duration::from_secs(1)) => {
                 if active_connections.is_empty() {
                     break;
