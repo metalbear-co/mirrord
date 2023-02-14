@@ -552,14 +552,14 @@ jobs:
           path: /tmp
       - run: minikube image load /tmp/test.tar
       - name: cargo test
-        run: cargo test -p tests -- --test-threads=4
+        run: cargo test -p tests
       - name: switch minikube runtime
         run: |
           minikube delete
           minikube start --container-runtime=docker
           minikube image load /tmp/test.tar
       - name: test with docker runtime
-        run: cargo test -p tests -- --test-threads=4
+        run: cargo test -p tests
       - name: Collect logs
         if: ${{ failure() }}
         run: |
