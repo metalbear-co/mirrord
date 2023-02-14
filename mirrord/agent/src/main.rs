@@ -494,9 +494,6 @@ async fn start_agent() -> Result<()> {
                     pid
                 ).await? {clients.push(client) };
             },
-            // Logic here is if we have already accepted a client, then we drop immediately when all clients disconnect.
-            // if not, we wait for the communication timeout to expire before dropping. (to have more time for the first
-            // client to connect)
             client = clients.next() => {
                 match client {
                     Some(client) => {
