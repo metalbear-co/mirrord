@@ -48,7 +48,7 @@ mod pause {
     ) {
         println!(
             "{:#?}: starting test",
-            chrono::Local().format("%Y-%m-%d][%H:%M:%S")
+            chrono::Local::now().format("%Y-%m-%d][%H:%M:%S")
         );
         let logger_service = http_logger_service.await;
         let requester_service = http_log_requester_service.await; // Impersonate a pod of this service, to reach internal.
@@ -90,7 +90,7 @@ mod pause {
 
         println!(
             "{:#?}: Running local app with mirrord.",
-            chrono::Local().format("%Y-%m-%d][%H:%M:%S")
+            chrono::Local::now().format("%Y-%m-%d][%H:%M:%S")
         );
         let mut process = run_exec(
             command.clone(),
@@ -103,7 +103,7 @@ mod pause {
         let res = process.child.wait().await.unwrap();
         println!(
             "{:#?}: mirrord done running.",
-            chrono::Local().format("%Y-%m-%d][%H:%M:%S")
+            chrono::Local::now().format("%Y-%m-%d][%H:%M:%S")
         );
         assert!(res.success());
 
