@@ -1,4 +1,5 @@
 use std::{
+    assert_matches::assert_matches,
     cmp::min,
     collections::HashMap,
     fmt::Debug,
@@ -12,8 +13,12 @@ use fancy_regex::Regex;
 use futures::{SinkExt, StreamExt};
 use k8s_openapi::chrono::Utc;
 use mirrord_protocol::{
+    file::{
+        AccessFileRequest, AccessFileResponse, OpenOptionsInternal, SeekFromInternal, XstatRequest,
+        XstatResponse,
+    },
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
-    ClientMessage, DaemonCodec, DaemonMessage,
+    ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse,
 };
 use rstest::fixture;
 use tokio::{
@@ -163,6 +168,7 @@ impl LayerConnection {
     /// Accept the library's connection and verify initial ENV message
     pub async fn get_initialized_connection(listener: &TcpListener) -> LayerConnection {
         let codec = Self::accept_library_connection(listener).await;
+        println!("Got connection from layer.");
         LayerConnection {
             codec,
             num_connections: 0,
@@ -211,9 +217,10 @@ impl LayerConnection {
             .send(DaemonMessage::Tcp(DaemonTcp::NewConnection(
                 NewTcpConnection {
                     connection_id: new_connection_id,
-                    address: "127.0.0.1".parse().unwrap(),
+                    remote_address: "127.0.0.1".parse().unwrap(),
                     destination_port: "80".parse().unwrap(),
                     source_port: "31415".parse().unwrap(),
+                    local_address: "1.1.1.1".parse().unwrap(),
                 },
             )))
             .await
@@ -252,22 +259,80 @@ impl LayerConnection {
         self.send_close(new_connection_id).await;
     }
 
-    /// Verify layer hooks an `open` of file `file_name`, send back answer with given `fd`.
+    /// Verify layer hooks an `open` of file `file_name` with only read flag set. Send back answer
+    /// with given `fd`.
     pub async fn expect_file_open_for_reading(&mut self, file_name: &str, fd: u64) {
+        self.expect_file_open_with_options(
+            file_name,
+            fd,
+            OpenOptionsInternal {
+                read: true,
+                write: false,
+                append: false,
+                truncate: false,
+                create: false,
+                create_new: false,
+            },
+        )
+        .await
+    }
+
+    /// Verify layer hooks an `open` of file `file_name` with read flag set, and any other flags.
+    /// Send back answer with given `fd`.
+    pub async fn expect_file_open_with_read_flag(&mut self, file_name: &str, fd: u64) {
+        // Verify the app tries to open the expected file.
+        assert_matches!(
+            self.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(FileRequest::Open(
+                mirrord_protocol::file::OpenFileRequest {
+                    path,
+                    open_options: OpenOptionsInternal { read: true, .. },
+                }
+            )) if path.to_str().unwrap() == file_name
+        );
+
+        // Answer open.
+        self.codec
+            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Open(
+                Ok(mirrord_protocol::file::OpenFileResponse { fd }),
+            )))
+            .await
+            .unwrap();
+    }
+
+    /// Verify layer hooks an `open` of file `file_name` with write, truncate and create flags set.
+    /// Send back answer with given `fd`.
+    pub async fn expect_file_open_for_writing(&mut self, file_name: &str, fd: u64) {
+        self.expect_file_open_with_options(
+            file_name,
+            fd,
+            OpenOptionsInternal {
+                read: true,
+                write: true,
+                append: false,
+                truncate: true,
+                create: true,
+                create_new: false,
+            },
+        )
+        .await
+    }
+
+    /// Verify layer hooks an `open` of file `file_name` with given open options, send back answer
+    /// with given `fd`.
+    pub async fn expect_file_open_with_options(
+        &mut self,
+        file_name: &str,
+        fd: u64,
+        open_options: OpenOptionsInternal,
+    ) {
         // Verify the app tries to open the expected file.
         assert_eq!(
             self.codec.next().await.unwrap().unwrap(),
-            ClientMessage::FileRequest(mirrord_protocol::FileRequest::Open(
+            ClientMessage::FileRequest(FileRequest::Open(
                 mirrord_protocol::file::OpenFileRequest {
                     path: file_name.to_string().into(),
-                    open_options: mirrord_protocol::file::OpenOptionsInternal {
-                        read: true,
-                        write: false,
-                        append: false,
-                        truncate: false,
-                        create: false,
-                        create_new: false,
-                    },
+                    open_options,
                 }
             ))
         );
@@ -281,56 +346,222 @@ impl LayerConnection {
             .unwrap();
     }
 
-    /// Verify the layer hooks a read of `expected_fd`, return buffer size.
-    pub async fn expect_file_read(&mut self, expected_fd: u64) -> u64 {
+    /// Like the other expect_file_open_... but where we don't compare to predefined open options.
+    pub async fn expect_file_open_with_whatever_options(&mut self, file_name: &str, fd: u64) {
+        // Verify the app tries to open the expected file.
+        assert_matches!(
+            self.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(FileRequest::Open(
+                mirrord_protocol::file::OpenFileRequest {
+                    path,
+                    open_options: _,
+                }
+            )) if path.to_str().unwrap() == file_name
+        );
+
+        // Answer open.
+        self.codec
+            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Open(
+                Ok(mirrord_protocol::file::OpenFileResponse { fd }),
+            )))
+            .await
+            .unwrap();
+    }
+
+    /// Verify that the passed message (not the next message from self.codec!) is a file read.
+    /// Return buffer size.
+    pub async fn expect_message_file_read(message: ClientMessage, expected_fd: u64) -> u64 {
         // Verify the app reads the file.
-        if let ClientMessage::FileRequest(mirrord_protocol::FileRequest::Read(
+        if let ClientMessage::FileRequest(FileRequest::Read(
             mirrord_protocol::file::ReadFileRequest {
                 remote_fd: requested_fd,
                 buffer_size,
             },
-        )) = self.codec.next().await.unwrap().unwrap()
+        )) = message
         {
             assert_eq!(expected_fd, requested_fd);
             return buffer_size;
         }
-        panic!("Expected Read FileRequest.");
+        panic!("Expected Read FileRequest. Got {message:?}");
+    }
+
+    /// Verify the layer hooks a read of `expected_fd`, return buffer size.
+    pub async fn expect_only_file_read(&mut self, expected_fd: u64) -> u64 {
+        // Verify the app reads the file.
+        Self::expect_message_file_read(self.codec.next().await.unwrap().unwrap(), expected_fd).await
     }
 
     /// Send file read response with given `contents`.
     pub async fn answer_file_read(&mut self, contents: Vec<u8>) {
         let read_amount = contents.len();
         self.codec
-            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Read(
-                Ok(mirrord_protocol::file::ReadFileResponse {
+            .send(DaemonMessage::File(FileResponse::Read(Ok(
+                mirrord_protocol::file::ReadFileResponse {
                     bytes: contents,
                     read_amount: read_amount as u64,
-                }),
-            )))
+                },
+            ))))
             .await
             .unwrap();
     }
 
-    /// Verify the layer hooks a read of `expected_fd`, return buffer size.
-    pub async fn expect_and_answer_file_read(&mut self, contents: &str, expected_fd: u64) {
-        let buffer_size = self.expect_file_read(expected_fd).await;
+    /// Answer an already verified file read request, then expect another one and answer with 0
+    /// bytes.
+    pub async fn answer_file_read_twice(
+        &mut self,
+        contents: &str,
+        expected_fd: u64,
+        buffer_size: u64,
+    ) {
         let read_amount = min(buffer_size, contents.len() as u64);
         let contents = contents.as_bytes()[0..read_amount as usize].to_vec();
         self.answer_file_read(contents).await;
-        // last call should return 0.
-        let _buffer_size = self.expect_file_read(expected_fd).await;
+        // last call returns 0.
+        let _buffer_size = self.expect_only_file_read(expected_fd).await;
         self.answer_file_read(vec![]).await;
     }
 
-    /// Read next layer message and verify it's close.
-    /// Answer that close.
+    /// Verify the layer hooks a read of `expected_fd`, return buffer size.
+    pub async fn expect_file_read(&mut self, contents: &str, expected_fd: u64) {
+        let buffer_size = self.expect_only_file_read(expected_fd).await;
+        self.answer_file_read_twice(contents, expected_fd, buffer_size)
+            .await
+    }
+
+    /// Verify the layer hooks a read of `expected_fd`, return buffer size.
+    pub async fn consume_xstats_then_expect_file_read(&mut self, contents: &str, expected_fd: u64) {
+        let message = self.consume_xstats().await;
+        let buffer_size = Self::expect_message_file_read(message, expected_fd).await;
+        self.answer_file_read_twice(contents, expected_fd, buffer_size)
+            .await
+    }
+
+    /// For when the application does not keep reading until it gets 0 bytes.
+    pub async fn expect_single_file_read(&mut self, contents: &str, expected_fd: u64) {
+        let buffer_size = self.expect_only_file_read(expected_fd).await;
+        let read_amount = min(buffer_size, contents.len() as u64);
+        let contents = contents.as_bytes()[0..read_amount as usize].to_vec();
+        self.answer_file_read(contents).await;
+    }
+
+    /// Verify that the layer sends a file write request with the expected contents.
+    /// Send back response.
+    pub async fn consume_xstats_then_expect_file_write(&mut self, contents: &str, fd: u64) {
+        let message = self.consume_xstats().await;
+        assert_eq!(
+            message,
+            ClientMessage::FileRequest(FileRequest::Write(
+                mirrord_protocol::file::WriteFileRequest {
+                    fd,
+                    write_bytes: contents.as_bytes().to_vec()
+                }
+            ))
+        );
+
+        let written_amount = contents.len() as u64;
+        self.codec
+            .send(DaemonMessage::File(FileResponse::Write(Ok(
+                mirrord_protocol::file::WriteFileResponse { written_amount },
+            ))))
+            .await
+            .unwrap();
+    }
+
+    /// Verify that the layer sends a file write request with the expected contents.
+    /// Send back response.
+    pub async fn consume_xstats_then_expect_file_lseek(
+        &mut self,
+        seek_from: SeekFromInternal,
+        fd: u64,
+    ) {
+        let message = self.consume_xstats().await;
+        assert_eq!(
+            message,
+            ClientMessage::FileRequest(FileRequest::Seek(
+                mirrord_protocol::file::SeekFileRequest { fd, seek_from }
+            ))
+        );
+
+        self.codec
+            .send(DaemonMessage::File(FileResponse::Seek(Ok(
+                mirrord_protocol::file::SeekFileResponse { result_offset: 0 },
+            ))))
+            .await
+            .unwrap();
+    }
+
+    /// Read next layer message and verify it's a close request.
     pub async fn expect_file_close(&mut self, fd: u64) {
         assert_eq!(
             self.codec.next().await.unwrap().unwrap(),
-            ClientMessage::FileRequest(mirrord_protocol::FileRequest::Close(
+            ClientMessage::FileRequest(FileRequest::Close(
                 mirrord_protocol::file::CloseFileRequest { fd }
             ))
         );
+    }
+
+    /// Verify the next message from the layer is an access to the given path with the given mode.
+    /// Send back a response.
+    pub async fn expect_file_access(&mut self, pathname: PathBuf, mode: u8) {
+        assert_eq!(
+            self.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(FileRequest::Access(AccessFileRequest { pathname, mode }))
+        );
+
+        self.codec
+            .send(DaemonMessage::File(FileResponse::Access(Ok(
+                AccessFileResponse {},
+            ))))
+            .await
+            .unwrap();
+    }
+
+    /// Assert that the layer sends an xstat request with the given fd, answer the request.
+    pub async fn expect_xstat(&mut self, path: Option<PathBuf>, fd: Option<u64>) {
+        assert_eq!(
+            self.codec.next().await.unwrap().unwrap(),
+            ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
+                path,
+                fd,
+                follow_symlink: true,
+            }))
+        );
+
+        self.codec
+            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                XstatResponse {
+                    metadata: Default::default(),
+                },
+            ))))
+            .await
+            .unwrap();
+    }
+
+    /// Consume messages from the codec and return the first non-xstat message.
+    pub async fn consume_xstats(&mut self) -> ClientMessage {
+        let mut message = self.codec.next().await.unwrap().unwrap();
+        while let ClientMessage::FileRequest(FileRequest::Xstat(_xstat_request)) = message {
+            // Answer xstat.
+            self.codec
+                .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                    XstatResponse {
+                        metadata: Default::default(),
+                    },
+                ))))
+                .await
+                .unwrap();
+            message = self.codec.next().await.unwrap().unwrap();
+        }
+        message
+    }
+
+    /// Expect all the requested requests for gethostname hook
+    pub async fn expect_gethostname(&mut self, fd: u64) {
+        self.expect_file_open_for_reading("/etc/hostname", fd).await;
+
+        self.expect_single_file_read("foobar\n", fd).await;
+
+        self.expect_file_close(fd).await;
     }
 }
 
@@ -357,6 +588,19 @@ pub enum Application {
     Go18Issue834,
     NodeSpawn,
     BashShebang,
+    Go18Read,
+    Go19Read,
+    Go20Read,
+    Go18Write,
+    Go19Write,
+    Go20Write,
+    Go18LSeek,
+    Go19LSeek,
+    Go20LSeek,
+    Go18FAccessAt,
+    Go19FAccessAt,
+    Go20FAccessAt,
+    Go19SelfOpen,
 }
 
 impl Application {
@@ -409,6 +653,19 @@ impl Application {
             Application::Go20DirBypass => String::from("tests/apps/dir_go_bypass/20"),
             Application::NodeSpawn => String::from("node"),
             Application::BashShebang => String::from("tests/apps/nothing.sh"),
+            Application::Go18Read => String::from("tests/apps/read_go/18"),
+            Application::Go19Read => String::from("tests/apps/read_go/19"),
+            Application::Go20Read => String::from("tests/apps/read_go/20"),
+            Application::Go18Write => String::from("tests/apps/write_go/18"),
+            Application::Go19Write => String::from("tests/apps/write_go/19"),
+            Application::Go20Write => String::from("tests/apps/write_go/20"),
+            Application::Go18LSeek => String::from("tests/apps/lseek_go/18"),
+            Application::Go19LSeek => String::from("tests/apps/lseek_go/19"),
+            Application::Go20LSeek => String::from("tests/apps/lseek_go/20"),
+            Application::Go18FAccessAt => String::from("tests/apps/faccessat_go/18"),
+            Application::Go19FAccessAt => String::from("tests/apps/faccessat_go/19"),
+            Application::Go20FAccessAt => String::from("tests/apps/faccessat_go/20"),
+            Application::Go19SelfOpen => String::from("tests/apps/self_open/19"),
         }
     }
 
@@ -457,9 +714,22 @@ impl Application {
             | Application::Go20Issue834
             | Application::Go19Issue834
             | Application::Go18Issue834
+            | Application::Go20Read
+            | Application::Go19Read
+            | Application::Go18Read
+            | Application::Go20Write
+            | Application::Go19Write
+            | Application::Go18Write
+            | Application::Go20LSeek
+            | Application::Go19LSeek
+            | Application::Go18LSeek
+            | Application::Go20FAccessAt
+            | Application::Go19FAccessAt
+            | Application::Go18FAccessAt
             | Application::RustFileOps
             | Application::EnvBashCat
             | Application::BashShebang
+            | Application::Go19SelfOpen
             | Application::Go19DirBypass
             | Application::Go20DirBypass => vec![],
         }
@@ -483,14 +753,80 @@ impl Application {
             | Application::Go20Issue834
             | Application::Go19Issue834
             | Application::Go18Issue834
+            | Application::Go20Read
+            | Application::Go19Read
+            | Application::Go18Read
+            | Application::Go20Write
+            | Application::Go19Write
+            | Application::Go18Write
+            | Application::Go20LSeek
+            | Application::Go19LSeek
+            | Application::Go18LSeek
+            | Application::Go20FAccessAt
+            | Application::Go19FAccessAt
+            | Application::Go18FAccessAt
             | Application::Go19DirBypass
             | Application::Go20DirBypass
+            | Application::Go19SelfOpen
             | Application::Go19Dir
             | Application::Go20Dir => {
                 unimplemented!("shouldn't get here")
             }
             Application::PythonSelfConnect => 1337,
         }
+    }
+
+    /// Start the test process with the given env.
+    async fn get_test_process(&self, env: HashMap<&str, &str>) -> TestProcess {
+        let executable = self.get_executable().await;
+        println!("Using executable: {}", &executable);
+
+        TestProcess::start_process(executable, self.get_args(), env).await
+    }
+
+    /// Start the test process and return the started process and a tcp listener that the layer is
+    /// supposed to connect to.
+    pub async fn get_test_process_and_listener(
+        &self,
+        dylib_path: &PathBuf,
+        extra_env_vars: Vec<(&str, &str)>,
+    ) -> (TestProcess, TcpListener) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        println!("Listening for messages from the layer on {addr}");
+        let env = get_env(dylib_path.to_str().unwrap(), &addr, extra_env_vars);
+        let test_process = self.get_test_process(env).await;
+
+        (test_process, listener)
+    }
+
+    /// Start the process of this application, with the layer lib loaded.
+    /// Will start it with env from `get_env` plus whatever is passed in `extra_env_vars`.
+    pub async fn start_process_with_layer(
+        &self,
+        dylib_path: &PathBuf,
+        extra_env_vars: Vec<(&str, &str)>,
+    ) -> (TestProcess, LayerConnection) {
+        let (test_process, listener) = self
+            .get_test_process_and_listener(dylib_path, extra_env_vars)
+            .await;
+        let layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+        (test_process, layer_connection)
+    }
+
+    /// Like `start_process_with_layer`, but also verify a port subscribe.
+    pub async fn start_process_with_layer_and_port(
+        &self,
+        dylib_path: &PathBuf,
+        extra_env_vars: Vec<(&str, &str)>,
+    ) -> (TestProcess, LayerConnection) {
+        let (test_process, listener) = self
+            .get_test_process_and_listener(dylib_path, extra_env_vars)
+            .await;
+        let layer_connection =
+            LayerConnection::get_initialized_connection_with_port(&listener, self.get_app_port())
+                .await;
+        (test_process, layer_connection)
     }
 }
 
@@ -518,7 +854,11 @@ pub fn dylib_path() -> PathBuf {
     }
 }
 
-pub fn get_env<'a>(dylib_path_str: &'a str, addr: &'a str) -> HashMap<&'a str, &'a str> {
+pub fn get_env<'a>(
+    dylib_path_str: &'a str,
+    addr: &'a str,
+    extra_vars: Vec<(&'a str, &'a str)>,
+) -> HashMap<&'a str, &'a str> {
     let mut env = HashMap::new();
     env.insert("RUST_LOG", "warn,mirrord=trace");
     env.insert("MIRRORD_IMPERSONATED_TARGET", "pod/mock-target"); // Just pass some value.
@@ -526,6 +866,9 @@ pub fn get_env<'a>(dylib_path_str: &'a str, addr: &'a str) -> HashMap<&'a str, &
     env.insert("MIRRORD_REMOTE_DNS", "false");
     env.insert("DYLD_INSERT_LIBRARIES", dylib_path_str);
     env.insert("LD_PRELOAD", dylib_path_str);
+    for (key, value) in extra_vars {
+        env.insert(key, value);
+    }
     env
 }
 

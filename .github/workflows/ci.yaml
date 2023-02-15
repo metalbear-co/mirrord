@@ -169,7 +169,7 @@ jobs:
         with:
           key: ${{matrix.os}}
       - run: |
-          cargo test -p mirrord-kube --all-features -- --skip env_guard
+          cargo test -p mirrord-kube --all-features
 
   test_mirrord_sip:
     runs-on: macos-latest
@@ -197,7 +197,10 @@ jobs:
           toolchain: nightly
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
-      - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
+      - run: |
+          sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
+          sudo chown runner -R /home/runner
+          sudo chmod u+rwx -R /home/runner
 
   test_agent_image:
     runs-on: ubuntu-latest
@@ -321,6 +324,18 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/dir_go_bypass
           go build -o 20
+      - run: |
+          cd mirrord/layer/tests/apps/read_go
+          go build -o 20
+      - run: |
+          cd mirrord/layer/tests/apps/write_go
+          go build -o 20
+      - run: |
+          cd mirrord/layer/tests/apps/lseek_go
+          go build -o 20
+      - run: |
+          cd mirrord/layer/tests/apps/faccessat_go
+          go build -o 20
       - uses: actions/setup-go@v3
         with:
           go-version: "1.19.5"
@@ -339,11 +354,35 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/dir_go_bypass
           go build -o 19
+      - run: |
+          cd mirrord/layer/tests/apps/read_go
+          go build -o 19
+      - run: |
+          cd mirrord/layer/tests/apps/write_go
+          go build -o 19
+      - run: |
+          cd mirrord/layer/tests/apps/lseek_go
+          go build -o 19
+      - run: |
+          cd mirrord/layer/tests/apps/faccessat_go
+          go build -o 19
       - uses: actions/setup-go@v3
         with:
           go-version: "1.18.10"
       - run: |
           cd mirrord/layer/tests/apps/issue834
+          go build -o 18
+      - run: |
+          cd mirrord/layer/tests/apps/read_go
+          go build -o 18
+      - run: |
+          cd mirrord/layer/tests/apps/write_go
+          go build -o 18
+      - run: |
+          cd mirrord/layer/tests/apps/lseek_go
+          go build -o 18
+      - run: |
+          cd mirrord/layer/tests/apps/faccessat_go
           go build -o 18
       - run: |
           cd mirrord/layer/tests/apps/fileops
@@ -353,7 +392,6 @@ jobs:
         with:
           name: layer-lib
           path: target/debug/
-      - run: cargo test -p mirrord-kube --features env_guard api::env_guard
       - run: cargo test -p mirrord-layer
 
   integration_tests_macos:
@@ -374,28 +412,34 @@ jobs:
           cache-on-failure: true
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
-          go-version: "1.19.0"
-      - run: | # Build Go app to test http mirroring with.
+          go-version: "1.18"
+      - run: | # Build Go test apps.
+          cd mirrord/layer/tests/apps/read_go
+          for go_app in read_go write_go lseek_go faccessat_go
+          do
+          cd ../$go_app
+          go build -o 18
+          done
+      - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
+        with:
+          go-version: "1.19"
+      - run: | # Build Go test apps.
           cd mirrord/layer/tests/apps/self_open
+          for go_app in self_open app_go dir_go dir_go_bypass read_go write_go lseek_go faccessat_go
+          do
+          cd ../$go_app
           go build -o 19
-          cd ../app_go
-          go build -o 19
-          cd ../dir_go
-          go build -o 19
-          cd ../dir_go_bypass
-          go build -o 19
+          done
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
           go-version: "1.20.0-rc.3"
       - run: | # Build Go app to test http mirroring with.
           cd mirrord/layer/tests/apps/self_open
+          for go_app in self_open app_go dir_go dir_go_bypass read_go write_go lseek_go faccessat_go
+          do
+          cd ../$go_app
           go build -o 20
-          cd ../app_go
-          go build -o 20
-          cd ../dir_go
-          go build -o 20
-          cd ../dir_go_bypass
-          go build -o 20
+          done
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
@@ -448,9 +492,6 @@ jobs:
           cd tests/go-e2e
           go build -o 18
       - run: |
-          cd tests/go-e2e-fileops
-          go build -o 18
-      - run: |
           cd tests/go-e2e-env
           go build -o 18
       - run: |
@@ -467,9 +508,6 @@ jobs:
           go-version: "1.19.0"
       - run: |
           cd tests/go-e2e
-          go build -o 19
-      - run: |
-          cd tests/go-e2e-fileops
           go build -o 19
       - run: |
           cd tests/go-e2e-env
@@ -490,9 +528,6 @@ jobs:
           go version
       - run: |
           cd tests/go-e2e
-          go build -o 20
-      - run: |
-          cd tests/go-e2e-fileops
           go build -o 20
       - run: |
           cd tests/go-e2e-env

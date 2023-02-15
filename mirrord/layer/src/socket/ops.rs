@@ -5,27 +5,31 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     ptr,
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 use libc::{c_int, sockaddr, socklen_t};
-use mirrord_protocol::dns::LookupRecord;
+use mirrord_protocol::{dns::LookupRecord, file::OpenOptionsInternal};
 use socket2::SockAddr;
 use tokio::sync::oneshot;
 use tracing::{debug, error, trace};
 
 use super::{hooks::*, *};
 use crate::{
+    close_layer_fd,
     common::{blocking_send_hook_message, HookMessage},
-    detour::{Detour, OptionExt},
+    detour::{Detour, OnceLockExt, OptionExt},
     dns::GetAddrInfo,
     error::HookError,
-    file::OPEN_FILES,
-    outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, MirrorAddress},
+    file::{self, OPEN_FILES},
+    outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
     port_debug_patch,
     tcp::{Listen, TcpIncoming},
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,
 };
+
+/// Hostname initialized from the agent with [`gethostname`].
+pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();
 
 /// Helper struct for connect results where we want to hold the original errno
 /// when result is -1 (error) because sometimes it's not a real error (EINPROGRESS/EINTR)
@@ -264,7 +268,10 @@ fn connect_outgoing<const TYPE: ConnectType>(
     };
 
     blocking_send_hook_message(hook_message)?;
-    let MirrorAddress(mirror_address) = mirror_rx.blocking_recv()??;
+    let RemoteConnection {
+        mirror_address,
+        local_address,
+    } = mirror_rx.blocking_recv()??;
 
     let connect_to = SockAddr::from(mirror_address);
 
@@ -282,7 +289,7 @@ fn connect_outgoing<const TYPE: ConnectType>(
 
     let connected = Connected {
         remote_address,
-        mirror_address,
+        local_address,
     };
 
     Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
@@ -433,7 +440,7 @@ pub(super) fn getsockname(
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
-                SocketState::Connected(connected) => Detour::Success(connected.mirror_address),
+                SocketState::Connected(connected) => Detour::Success(connected.local_address),
                 SocketState::Bound(bound) => Detour::Success(bound.address),
                 SocketState::Listening(bound) => Detour::Success(bound.address),
                 _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
@@ -455,25 +462,25 @@ pub(super) fn accept(
     address_len: *mut socklen_t,
     new_fd: RawFd,
 ) -> Detour<RawFd> {
-    let (local_address, domain, protocol, type_) = {
+    let (domain, protocol, type_) = {
         SOCKETS
             .lock()?
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
-                SocketState::Listening(bound) => {
-                    Detour::Success((bound.address, socket.domain, socket.protocol, socket.type_))
+                SocketState::Listening(_) => {
+                    Detour::Success((socket.domain, socket.protocol, socket.type_))
                 }
                 _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
     };
 
-    let remote_address = {
+    let (local_address, remote_address) = {
         CONNECTION_QUEUE
             .lock()?
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
-            .map(|socket| socket.address)?
+            .map(|socket| (socket.local_address, socket.remote_address))?
     };
 
     let new_socket = UserSocket {
@@ -482,7 +489,7 @@ pub(super) fn accept(
         type_,
         state: SocketState::Connected(Connected {
             remote_address,
-            mirror_address: local_address,
+            local_address,
         }),
         kind: type_.try_into()?,
     };
@@ -627,4 +634,36 @@ pub(super) fn getaddrinfo(
     debug!("getaddrinfo -> result {:#?}", result);
 
     Detour::Success(result)
+}
+
+/// Retrieves the `hostname` from the agent's `/etc/hostname` to be used by [`gethostname`]
+fn remote_hostname_string() -> Detour<CString> {
+    let hostname_path = CString::new("/etc/hostname")?;
+
+    let hostname_fd = file::ops::open(
+        Some(&hostname_path),
+        OpenOptionsInternal {
+            read: true,
+            ..Default::default()
+        },
+    )?;
+
+    let hostname_file = file::ops::read(hostname_fd, 256)?;
+
+    close_layer_fd(hostname_fd);
+
+    CString::new(
+        hostname_file
+            .bytes
+            .into_iter()
+            .take(hostname_file.read_amount as usize - 1)
+            .collect::<Vec<_>>(),
+    )
+    .map(Detour::Success)?
+}
+
+/// Resolve hostname from remote host with caching for the result
+#[tracing::instrument(level = "trace")]
+pub(super) fn gethostname() -> Detour<&'static CString> {
+    HOSTNAME.get_or_detour_init(remote_hostname_string)
 }

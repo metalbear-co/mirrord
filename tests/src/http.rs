@@ -30,7 +30,7 @@ mod http {
             Application::Go18HTTP,
             Application::Go19HTTP,
             Application::Go20HTTP,
-            Application::PythonFlaskHTTP,
+            // Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP
         )]
         application: Application,

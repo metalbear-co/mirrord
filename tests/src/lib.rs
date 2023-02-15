@@ -103,9 +103,6 @@ mod utils {
     #[derive(Debug)]
     pub enum FileOps {
         Python,
-        Go18,
-        Go19,
-        Go20,
         Rust,
         GoDir18,
         GoDir19,
@@ -276,9 +273,6 @@ mod utils {
                 FileOps::Python => {
                     vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"]
                 }
-                FileOps::Go18 => vec!["go-e2e-fileops/18"],
-                FileOps::Go19 => vec!["go-e2e-fileops/19"],
-                FileOps::Go20 => vec!["go-e2e-fileops/20"],
                 FileOps::Rust => vec!["../target/debug/rust-e2e-fileops"],
                 FileOps::GoDir18 => vec!["go-e2e-dir/18"],
                 FileOps::GoDir19 => vec!["go-e2e-dir/19"],
@@ -701,6 +695,22 @@ mod utils {
             "websocket",
             true,
             false,
+        )
+        .await
+    }
+
+    /// Service that listens on port 80 and returns "remote: <DATA>" when getting "<DATA>" directly
+    /// over TCP, not HTTP.
+    #[fixture]
+    pub async fn hostname_service(#[future] kube_client: Client) -> KubeService {
+        service(
+            kube_client,
+            "default",
+            "NodePort",
+            "ghcr.io/metalbear-co/mirrord-pytest:latest",
+            "hostname-echo",
+            true,
+            true,
         )
         .await
     }

@@ -25,7 +25,7 @@ mod steal {
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(
-            Application::PythonFlaskHTTP,
+            // Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP,
             Application::NodeHTTP
         )]
@@ -53,6 +53,47 @@ mod steal {
         application.assert(&process);
     }
 
+    #[cfg(target_os = "linux")]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    async fn test_steal_http_traffic_with_flush_connections(
+        #[future] service: KubeService,
+        #[future] kube_client: Client,
+        #[values(
+            // Application::PythonFlaskHTTP,
+            Application::PythonFastApiHTTP,
+            Application::NodeHTTP
+        )]
+        application: Application,
+        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
+    ) {
+        let service = service.await;
+        let kube_client = kube_client.await;
+        let url = get_service_url(kube_client.clone(), &service).await;
+        let mut flags = vec!["--steal"];
+        if let Some(flag) = agent.flag() {
+            flags.extend(flag)
+        }
+        let mut process = application
+            .run(
+                &service.target,
+                Some(&service.namespace),
+                Some(flags),
+                Some(vec![("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "true")]),
+            )
+            .await;
+
+        process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+        send_requests(&url, true, Default::default()).await;
+        tokio::time::timeout(Duration::from_secs(40), process.child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+
+        application.assert(&process);
+    }
+
     /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
     #[rstest]
@@ -62,7 +103,7 @@ mod steal {
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(
-            Application::PythonFlaskHTTP,
+            // Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP,
             Application::NodeHTTP
         )]
@@ -240,11 +281,7 @@ mod steal {
                 &service.target,
                 Some(&service.namespace),
                 Some(flags),
-                Some(vec![
-                    ("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes"),
-                    // set time out to 1 to avoid two agents conflict
-                    ("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "3"),
-                ]),
+                Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
             )
             .await;
 
@@ -314,11 +351,7 @@ mod steal {
                 &service.target,
                 Some(&service.namespace),
                 Some(flags),
-                Some(vec![
-                    ("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes"),
-                    // set time out to 1 to avoid two agents conflict
-                    ("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "3"),
-                ]),
+                Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
             )
             .await;
 

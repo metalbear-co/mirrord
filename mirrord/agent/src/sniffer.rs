@@ -508,7 +508,8 @@ impl TcpConnectionSniffer {
                     destination_port: dest_port,
                     source_port,
                     connection_id: id,
-                    address: IpAddr::V4(identifier.source_addr),
+                    remote_address: IpAddr::V4(identifier.source_addr),
+                    local_address: IpAddr::V4(identifier.dest_addr),
                 });
                 trace!("message {:#?}", message);
 

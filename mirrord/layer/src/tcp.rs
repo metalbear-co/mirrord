@@ -136,10 +136,14 @@ pub(crate) trait TcpHandler {
 
         let addr: SocketAddr = listen.into();
 
-        let info = SocketInformation::new(SocketAddr::new(
-            tcp_connection.address,
-            tcp_connection.source_port,
-        ));
+        let info = SocketInformation::new(
+            SocketAddr::new(tcp_connection.remote_address, tcp_connection.source_port),
+            SocketAddr::new(
+                tcp_connection.local_address,
+                tcp_connection.destination_port,
+            ),
+        );
+
         {
             CONNECTION_QUEUE.lock().unwrap().add(&listen.fd, info);
         }

@@ -16,9 +16,10 @@ use crate::{ConnectionId, Port, RemoteResult, RequestId};
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NewTcpConnection {
     pub connection_id: ConnectionId,
-    pub address: IpAddr,
+    pub remote_address: IpAddr,
     pub destination_port: Port,
     pub source_port: Port,
+    pub local_address: IpAddr,
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]

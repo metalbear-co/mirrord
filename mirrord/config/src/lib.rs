@@ -121,6 +121,11 @@ pub struct LayerConfig {
     /// Allow to lookup if operator is installed on cluster and use it
     #[config(env = "MIRRORD_OPERATOR_ENABLE", default = true)]
     pub operator: bool,
+
+    /// Path to a kubeconfig file, if not specified, will use KUBECONFIG or ~/.kube/config or the
+    /// in-cluster config.
+    #[config(env = "MIRRORD_KUBECONFIG")]
+    pub kubeconfig: Option<String>,
 }
 
 impl LayerConfig {
@@ -202,7 +207,8 @@ mod tests {
                             "image_pull_policy": "",
                             "ttl": 60,
                             "ephemeral": false,
-                            "pause": false
+                            "pause": false,
+                            "flush_connections": false
                         },
                         "feature": {
                             "env": true,
@@ -237,6 +243,7 @@ mod tests {
                     ttl = 60
                     ephemeral = false
                     pause = false
+                    flush_connections = false
 
                     [feature]
                     env = true
@@ -268,6 +275,7 @@ mod tests {
                         ttl: 60
                         ephemeral: false
                         pause: false
+                        flush_connections: false
 
                     feature:
                         env: true
@@ -318,6 +326,7 @@ mod tests {
 
         let expect = LayerFileConfig {
             accept_invalid_certificates: Some(false),
+            kubeconfig: None,
             connect_agent_name: None,
             connect_agent_port: None,
             target: Some(TargetFileConfig::Advanced {
@@ -339,6 +348,7 @@ mod tests {
                 startup_timeout: None,
                 network_interface: None,
                 pause: Some(false),
+                flush_connections: Some(false),
             }),
             feature: Some(FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true).into(),

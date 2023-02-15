@@ -3,7 +3,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use k8s_openapi::api::core::v1::Pod;
-use kube::{Api, Client, Config};
+use kube::{
+    config::{KubeConfigOptions, Kubeconfig},
+    Api, Client, Config,
+};
 use mirrord_config::{agent::AgentConfig, target::TargetConfig, LayerConfig};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
@@ -13,8 +16,6 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tracing::{info, trace, warn};
 
-#[cfg(feature = "env_guard")]
-use crate::api::env_guard::EnvVarGuard;
 use crate::{
     api::{
         container::{ContainerApi, EphemeralContainer, JobContainer},
@@ -81,7 +82,7 @@ impl AgentManagment for KubernetesAPI {
         .await
         .map_err(|_| KubeApiError::AgentReadyTimeout)??;
 
-        wrap_raw_connection(conn)
+        Ok(wrap_raw_connection(conn))
     }
 
     #[cfg(not(feature = "incluster"))]
@@ -93,7 +94,11 @@ impl AgentManagment for KubernetesAPI {
         trace!("port-forward to pod {}:{}", &pod_agent_name, &agent_port);
         let mut port_forwarder = pod_api.portforward(&pod_agent_name, &[agent_port]).await?;
 
-        wrap_raw_connection(port_forwarder.take_stream(agent_port).unwrap())
+        Ok(wrap_raw_connection(
+            port_forwarder
+                .take_stream(agent_port)
+                .ok_or(KubeApiError::PortForwardFailed)?,
+        ))
     }
 
     async fn create_agent<P>(&self, progress: &P) -> Result<Self::AgentRef, Self::Err>
@@ -142,13 +147,16 @@ impl AgentManagment for KubernetesAPI {
 }
 
 pub async fn create_kube_api(config: Option<LayerConfig>) -> Result<Client> {
-    #[cfg(feature = "env_guard")]
-    let _guard = EnvVarGuard::new();
-
     let mut kube_config = Config::infer().await?;
 
     if let Some(config) = config {
-        #[cfg_attr(not(feature = "env_guard"), allow(unused_mut))]
+        if let Some(kube_config_file) = config.kubeconfig {
+            let parsed_kube_config = Kubeconfig::read_from(kube_config_file)?;
+            kube_config =
+                Config::from_custom_kubeconfig(parsed_kube_config, &KubeConfigOptions::default())
+                    .await?;
+        }
+
         if config.accept_invalid_certificates {
             kube_config.accept_invalid_certs = true;
             // Only warn the first time connecting to the agent, not on child processes.
@@ -157,9 +165,6 @@ pub async fn create_kube_api(config: Option<LayerConfig>) -> Result<Client> {
             }
         }
     }
-
-    #[cfg(feature = "env_guard")]
-    _guard.prepare_config(&mut kube_config);
 
     Client::try_from(kube_config).map_err(KubeApiError::from)
 }

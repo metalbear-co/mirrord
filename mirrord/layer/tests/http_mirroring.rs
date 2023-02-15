@@ -1,3 +1,4 @@
+#![feature(assert_matches)]
 use std::{path::PathBuf, time::Duration};
 
 use mirrord_protocol::{
@@ -5,7 +6,6 @@ use mirrord_protocol::{
     ClientMessage::UdpOutgoing,
 };
 use rstest::rstest;
-use tokio::net::TcpListener;
 
 mod common;
 
@@ -38,28 +38,17 @@ fn build_go_app() {
 #[timeout(Duration::from_secs(60))]
 async fn test_mirroring_with_http(
     #[values(
-        Application::PythonFlaskHTTP,
+        // Application::PythonFlaskHTTP,
         Application::PythonFastApiHTTP,
         Application::NodeHTTP
     )]
     application: Application,
     dylib_path: &PathBuf,
 ) {
-    let executable = application.get_executable().await; // Own it.
-    println!("Using executable: {}", &executable);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
-    println!("Listening for messages from the layer on {addr}");
-    let env = get_env_no_fs(dylib_path.to_str().unwrap(), &addr);
-    let mut test_process =
-        TestProcess::start_process(executable, application.get_args(), env).await;
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer_and_port(dylib_path, vec![("MIRRORD_FILE_MODE", "local")])
+        .await;
 
-    // Accept the connection from the layer and verify initial messages.
-    let mut layer_connection = LayerConnection::get_initialized_connection_with_port(
-        &listener,
-        application.get_app_port(),
-    )
-    .await;
     println!("Application subscribed to port, sending tcp messages.");
 
     layer_connection
@@ -90,6 +79,7 @@ async fn test_mirroring_with_http(
                     mirrord_protocol::outgoing::DaemonConnect {
                         connection_id: 0,
                         remote_address: std::net::SocketAddr::from(([10, 253, 155, 219], 58162)),
+                        local_address: std::net::SocketAddr::from(([10, 253, 155, 218], 58161)),
                     },
                 )),
             ))

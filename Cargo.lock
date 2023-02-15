@@ -77,9 +77,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.68"
+version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cb2f989d18dd141ab8ae82f64d1a8cdd37e0840f73a406896cf5e99502fab61"
+checksum = "224afbd727c3d6e4b90103ece64b8d1b67fbb1973b1046c2281eed3f3803f800"
 
 [[package]]
 name = "asn1-rs"
@@ -766,12 +766,12 @@ dependencies = [
 
 [[package]]
 name = "darling"
-version = "0.14.2"
+version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0dd3cd20dc6b5a876612a6e5accfe7f3dd883db6d07acfbf14c128f61550dfa"
+checksum = "c0808e1bd8671fb44a113a14e13497557533369847788fa2ae912b6ebfce9fa8"
 dependencies = [
- "darling_core 0.14.2",
- "darling_macro 0.14.2",
+ "darling_core 0.14.3",
+ "darling_macro 0.14.3",
 ]
 
 [[package]]
@@ -790,9 +790,9 @@ dependencies = [
 
 [[package]]
 name = "darling_core"
-version = "0.14.2"
+version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a784d2ccaf7c98501746bf0be29b2022ba41fd62a2e622af997a03e9f972859f"
+checksum = "001d80444f28e193f30c2f293455da62dcf9a6b29918a4253152ae2b1de592cb"
 dependencies = [
  "fnv",
  "ident_case",
@@ -815,11 +815,11 @@ dependencies = [
 
 [[package]]
 name = "darling_macro"
-version = "0.14.2"
+version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7618812407e9402654622dd402b0a89dff9ba93badd6540781526117b92aab7e"
+checksum = "b36230598a2d5de7ec1c6f51f72d8a99a9208daff41de2084d06e3fd3ea56685"
 dependencies = [
- "darling_core 0.14.2",
+ "darling_core 0.14.3",
  "quote",
  "syn",
 ]
@@ -1036,21 +1036,21 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.22.0"
+version = "3.25.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "filetime"
-version = "0.2.19"
+version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e884668cd0c7480504233e951174ddc3b382f7c2666e3b7310b5c4e7b0c37f9"
+checksum = "8a3de6e8d11b22ff9edc6d916f890800597d60f8b2da1caf2955c274638d6412"
 dependencies = [
  "cfg-if",
  "libc",
  "redox_syscall",
- "windows-sys 0.42.0",
+ "windows-sys 0.45.0",
 ]
 
 [[package]]
@@ -1327,6 +1327,12 @@ checksum = "ee512640fe35acbfb4bb779db6f0d80704c2cacfa2e39b601ef3e3f47d1ae4c7"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "hermit-abi"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fed44880c466736ef9a5c5b5facefb5ed0785676d0c02d612db14e54f0d84286"
 
 [[package]]
 name = "hex"
@@ -1639,14 +1645,14 @@ dependencies = [
 
 [[package]]
 name = "is-terminal"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28dfb6c8100ccc63462345b67d1bbc3679177c75ee4bf59bf29c8b1d110b8189"
+checksum = "22e18b0a45d56fe973d6db23972bf5bc46f988a4a2385deac9cc29572f09daef"
 dependencies = [
- "hermit-abi 0.2.6",
+ "hermit-abi 0.3.1",
  "io-lifetimes",
  "rustix",
- "windows-sys 0.42.0",
+ "windows-sys 0.45.0",
 ]
 
 [[package]]
@@ -1820,7 +1826,7 @@ version = "0.77.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93ef49d30d03c5de8041e2ab5dc421d671d6225ffd53975571d4a5b18d5e50fb"
 dependencies = [
- "darling 0.14.2",
+ "darling 0.14.3",
  "proc-macro2",
  "quote",
  "serde_json",
@@ -2048,13 +2054,15 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.22.0"
+version = "3.25.0"
 dependencies = [
+ "actix-codec",
  "anyhow",
  "clap",
  "const-random",
  "errno",
  "exec",
+ "futures",
  "humantime",
  "k8s-openapi",
  "kube",
@@ -2083,7 +2091,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.22.0"
+version = "3.25.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -2127,7 +2135,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.22.0"
+version = "3.25.0"
 dependencies = [
  "lazy_static",
  "rand 0.8.5",
@@ -2140,7 +2148,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.22.0"
+version = "3.25.0"
 dependencies = [
  "anyhow",
  "mirrord-config-derive",
@@ -2156,7 +2164,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.22.0"
+version = "3.25.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -2166,7 +2174,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.22.0"
+version = "3.25.0"
 dependencies = [
  "axum",
  "futures",
@@ -2183,7 +2191,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.22.0"
+version = "3.25.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -2207,7 +2215,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.22.0"
+version = "3.25.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -2226,11 +2234,9 @@ dependencies = [
  "hyper 1.0.0-rc.2",
  "itertools",
  "k8s-openapi",
- "kube",
  "libc",
  "mirrord-config",
  "mirrord-console",
- "mirrord-kube",
  "mirrord-layer-macro",
  "mirrord-operator",
  "mirrord-progress",
@@ -2262,7 +2268,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.22.0"
+version = "3.25.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2271,7 +2277,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.22.0"
+version = "3.25.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -2299,7 +2305,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.22.0"
+version = "3.25.0"
 dependencies = [
  "atty",
  "serde",
@@ -2309,7 +2315,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "3.22.0"
+version = "3.25.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -2327,7 +2333,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.22.0"
+version = "3.25.0"
 dependencies = [
  "memchr",
  "object 0.29.0",
@@ -2776,9 +2782,9 @@ checksum = "478c572c3d73181ff3c2539045f6eb99e5491218eae919370993b890cdbdd98e"
 
 [[package]]
 name = "petgraph"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6d5014253a1331579ce62aa67443b4a658c5e7dd03d4bc6d302b94474888143"
+checksum = "4dd7d28ee937e54fe3080c91faa1c3a46c06de6252988a7f4592ba2310ef22a4"
 dependencies = [
  "fixedbitset",
  "indexmap",
@@ -3365,7 +3371,7 @@ dependencies = [
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.22.0"
+version = "3.25.0"
 dependencies = [
  "libc",
 ]
@@ -3411,7 +3417,7 @@ dependencies = [
  "io-lifetimes",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.42.0",
+ "windows-sys 0.45.0",
 ]
 
 [[package]]
@@ -3629,9 +3635,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.91"
+version = "1.0.93"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "877c235533714907a8c2464236f5c4b2a17262ef1bd71f38f35ea592c8da6883"
+checksum = "cad406b69c91885b5107daf2c29572f6c8cdb3c66826821e286c533490c0bc76"
 dependencies = [
  "indexmap",
  "itoa 1.0.5",
@@ -4019,10 +4025,11 @@ dependencies = [
 
 [[package]]
 name = "thread_local"
-version = "1.1.4"
+version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5516c27b78311c50bf42c071425c560ac799b11c30b31f87e3081965fe5e0180"
+checksum = "d805f96b7e61fce8728f142e213a3eb2f6b10538efff2d637c923efa4bfca048"
 dependencies = [
+ "cfg-if",
  "once_cell",
 ]
 

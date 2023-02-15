@@ -108,7 +108,8 @@ mod tests {
             new_conn_msg,
             DaemonMessage::Tcp(DaemonTcp::NewConnection(NewTcpConnection {
                 connection_id: 0,
-                address: IpAddr::V4("127.0.0.1".parse().unwrap()),
+                remote_address: IpAddr::V4("127.0.0.1".parse().unwrap()),
+                local_address: IpAddr::V4("127.0.0.1".parse().unwrap()),
                 destination_port: 1337,
                 source_port: port
             }))
