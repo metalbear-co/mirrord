@@ -11,6 +11,7 @@ class MirrordConfigDropDown : ComboBoxAction() {
     companion object {
         private var project: Project? = null
         private val configPaths by lazy { arrayListOf<String>() }
+        private var shouldUpdatePaths = true
         var selectedConfig = "Select Configuration"
 
         fun updatePaths() {
@@ -44,8 +45,9 @@ class MirrordConfigDropDown : ComboBoxAction() {
     override fun update(e: AnActionEvent) {
         e.presentation.apply {
             project = project ?: e.project
-            if (configPaths.isEmpty()) {
+            if (shouldUpdatePaths) {
                 updatePaths()
+                shouldUpdatePaths = false
             }
             isVisible = when (configPaths.size) {
                 0, 1 -> false
