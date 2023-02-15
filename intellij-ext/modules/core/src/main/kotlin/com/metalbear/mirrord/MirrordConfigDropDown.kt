@@ -8,41 +8,44 @@ import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import javax.swing.JComponent
 
 class MirrordConfigDropDown : ComboBoxAction() {
-    private var project: Project? = null
-    private var configPaths: ArrayList<String> = ArrayList()
-
     companion object {
+        private var project: Project? = null
+        private val configPaths by lazy { arrayListOf<String>() }
         var selectedConfig = "Select Configuration"
-    }
 
-    override fun createPopupActionGroup(button: JComponent, dataContext: DataContext): DefaultActionGroup {
-        project = dataContext.getData(CommonDataKeys.PROJECT)
-        configPaths = MirrordConfigAPI.searchConfigPaths(project!!) as ArrayList<String>
-
-        return DefaultActionGroup().apply {
-            configPaths.forEach { configPath ->
-                add(object : AnAction(configPath) {
-                    override fun actionPerformed(e: AnActionEvent) {
-                        selectedConfig = configPath
-                        //  e.presentation.text = selectedConfig
-                        //  ^ apparently nothing happens when text is updated here,
-                        //  so I guess need to update it in update()?
-                    }
-                })
+        fun updatePaths() {
+            project?.let { prj ->
+                val paths = MirrordConfigAPI.searchConfigPaths(prj) as? ArrayList<String>
+                if (!paths.isNullOrEmpty()) {
+                    configPaths.clear()
+                    configPaths.addAll(paths)
+                    selectedConfig = "Select Configuration"
+                }
             }
         }
     }
 
-    fun updatePaths() {
-        project?.let {
-            configPaths = MirrordConfigAPI.searchConfigPaths(it) as ArrayList<String>
-            selectedConfig = "Select Configuration"
+    override fun createPopupActionGroup(button: JComponent, dataContext: DataContext): DefaultActionGroup {
+        val actions = configPaths.map { configPath ->
+            object : AnAction(configPath) {
+                override fun actionPerformed(e: AnActionEvent) {
+                    selectedConfig = configPath
+                }
+            }
         }
+        return DefaultActionGroup().apply { addAll(actions) }
     }
 
     override fun update(e: AnActionEvent) {
         e.presentation.apply {
-            isEnabledAndVisible = configPaths.size > 1
+            project = project ?: e.project
+            if (configPaths.isEmpty()) {
+                updatePaths()
+            }
+            isVisible = when (configPaths.size) {
+                0, 1 -> false
+                else -> true
+            }
             text = selectedConfig
         }
     }
@@ -50,6 +53,6 @@ class MirrordConfigDropDown : ComboBoxAction() {
 
 class MirrordConfigFileRefresher : BulkFileListener {
     override fun before(events: MutableList<out VFileEvent>) {
-        MirrordConfigDropDown().updatePaths()
+        MirrordConfigDropDown.updatePaths()
     }
 }
