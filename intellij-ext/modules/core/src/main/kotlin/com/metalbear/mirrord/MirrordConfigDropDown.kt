@@ -30,7 +30,7 @@ class MirrordConfigDropDown : ComboBoxAction() {
         }
     }
 
-        override fun createPopupActionGroup(button: JComponent, dataContext: DataContext): DefaultActionGroup {
+    override fun createPopupActionGroup(button: JComponent, dataContext: DataContext): DefaultActionGroup {
         val actions = configPaths.map { configPath ->
             object : AnAction(configPath) {
                 override fun actionPerformed(e: AnActionEvent) {
