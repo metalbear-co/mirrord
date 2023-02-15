@@ -7,6 +7,8 @@ import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.util.io.exists
 import com.intellij.util.io.write
 import com.google.gson.Gson
+import com.intellij.psi.search.FilenameIndex
+import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.util.io.readText
 import java.io.File
 import java.nio.file.Path
@@ -50,8 +52,10 @@ object MirrordConfigAPI {
     }
 
     fun searchConfigPaths(project: Project): List<String> {
-        val basePath = project.basePath ?: throw Error("couldn't resolve project path")
-        return File(basePath).walkTopDown().filter { it.name == "mirrord.json" }.map { it.toPath().toString() }.toList()
+        return FilenameIndex.getAllFilesByExt(project, "json", GlobalSearchScope.projectScope(project))
+            .filter { it.name == "mirrord.json" }
+            .map { it.path }
+                as ArrayList<String>
     }
 
     /**
