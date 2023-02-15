@@ -18,8 +18,6 @@ edition.workspace = true
 mirrord-config = { path = "../config"}
 mirrord-protocol = { path = "../protocol"}
 mirrord-layer-macro = { path = "./macro"}
-mirrord-progress = { path = "../progress" }
-mirrord-operator = { path = "../operator", features = ["client"] }
 mirrord-console = { path = "../console" }
 
 ctor = "0.1"
@@ -50,7 +48,6 @@ async-trait.workspace = true
 socket2 = "0.4"
 anyhow.workspace = true
 streammap-ext.workspace = true
-stacker = "0.1"
 urlencoding = "2"
 itertools = "0.10"
 os_info = "3"

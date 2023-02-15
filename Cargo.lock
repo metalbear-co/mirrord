@@ -2150,7 +2150,6 @@ dependencies = [
 name = "mirrord-config"
 version = "3.25.0"
 dependencies = [
- "anyhow",
  "mirrord-config-derive",
  "rstest 0.15.0",
  "schemars",
@@ -2238,8 +2237,6 @@ dependencies = [
  "mirrord-config",
  "mirrord-console",
  "mirrord-layer-macro",
- "mirrord-operator",
- "mirrord-progress",
  "mirrord-protocol",
  "mirrord-sip",
  "nix 0.24.3",
@@ -2251,7 +2248,6 @@ dependencies = [
  "rstest 0.15.0",
  "serde_json",
  "socket2",
- "stacker",
  "streammap-ext",
  "test-cdylib",
  "thiserror",
@@ -3083,15 +3079,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "psm"
-version = "0.1.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5787f7cda34e3033a72192c018bc5883100330f362ef279a8cbccfce8bb4e874"
-dependencies = [
- "cc",
-]
-
-[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3784,19 +3771,6 @@ name = "spin"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
-
-[[package]]
-name = "stacker"
-version = "0.1.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c886bd4480155fd3ef527d45e9ac8dd7118a898a46530b7b94c3e21866259fce"
-dependencies = [
- "cc",
- "cfg-if",
- "libc",
- "psm",
- "winapi",
-]
 
 [[package]]
 name = "streammap-ext"
