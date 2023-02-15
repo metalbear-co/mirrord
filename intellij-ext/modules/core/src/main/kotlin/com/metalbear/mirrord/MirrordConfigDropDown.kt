@@ -14,18 +14,23 @@ class MirrordConfigDropDown : ComboBoxAction() {
         var selectedConfig = "Select Configuration"
 
         fun updatePaths() {
-            project?.let { prj ->
-                val paths = MirrordConfigAPI.searchConfigPaths(prj) as? ArrayList<String>
-                if (!paths.isNullOrEmpty()) {
-                    configPaths.clear()
-                    configPaths.addAll(paths)
+            project?.takeIf { it.isInitialized }?.let { prj ->
+                val paths = MirrordConfigAPI.searchConfigPaths(prj)
+                configPaths.clear()
+                configPaths.addAll(paths)
+                if (configPaths.isNotEmpty()) {
+                    if (!paths.contains(project?.basePath + "/.mirrord/mirrord.json")) {
+                        configPaths.add(0, "Default Configuration")
+                    }
                     selectedConfig = "Select Configuration"
                 }
+            } ?: run {
+                configPaths.clear()
             }
         }
     }
 
-    override fun createPopupActionGroup(button: JComponent, dataContext: DataContext): DefaultActionGroup {
+        override fun createPopupActionGroup(button: JComponent, dataContext: DataContext): DefaultActionGroup {
         val actions = configPaths.map { configPath ->
             object : AnAction(configPath) {
                 override fun actionPerformed(e: AnActionEvent) {
