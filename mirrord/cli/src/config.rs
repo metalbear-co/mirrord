@@ -32,6 +32,10 @@ pub(super) enum Commands {
     /// Extension execution - used by extension to execute binaries.
     #[command(hide = true, name = "ext")]
     ExtensionExec(Box<ExtensionExecArgs>),
+
+    /// Internal proxy - used to aggregate connections from multiple layers
+    #[command(hide = true, name = "intproxy")]
+    InternalProxy,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]

@@ -10,6 +10,8 @@
       It’s meant to provide the benefits of running your service on a cloud environment (e.g. staging) without actually going through the hassle of deploying it there, and without disrupting the environment by deploying untested code.
       Read more <a href="https://mirrord.dev/docs/overview/introduction/">here</a>.
     ]]></description>
+    
+    <idea-version since-build="223"/>
 
     <projectListeners>
         <listener class="com.metalbear.mirrord.MirrordConfigFileRefresher"

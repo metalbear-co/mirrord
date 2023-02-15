@@ -4,7 +4,6 @@ use errno::set_errno;
 use ignore_codes::*;
 use libc::{c_char, DIR, FILE};
 use mirrord_config::config::ConfigError;
-use mirrord_kube::error::KubeApiError;
 use mirrord_protocol::{tcp::LayerTcp, ClientMessage, ConnectionId, ResponseError};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
@@ -143,9 +142,6 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Unmatched pong!")]
     UnmatchedPong,
-
-    #[error(transparent)]
-    KubeError(#[from] KubeApiError),
 
     #[error("mirrord-layer: JSON convert error")]
     JSONConvertError(#[from] serde_json::Error),

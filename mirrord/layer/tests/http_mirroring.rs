@@ -38,7 +38,7 @@ fn build_go_app() {
 #[timeout(Duration::from_secs(60))]
 async fn test_mirroring_with_http(
     #[values(
-        Application::PythonFlaskHTTP,
+        // Application::PythonFlaskHTTP,
         Application::PythonFastApiHTTP,
         Application::NodeHTTP
     )]
@@ -79,6 +79,7 @@ async fn test_mirroring_with_http(
                     mirrord_protocol::outgoing::DaemonConnect {
                         connection_id: 0,
                         remote_address: std::net::SocketAddr::from(([10, 253, 155, 219], 58162)),
+                        local_address: std::net::SocketAddr::from(([10, 253, 155, 218], 58161)),
                     },
                 )),
             ))

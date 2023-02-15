@@ -40,7 +40,7 @@ pub(crate) struct UdpOutgoingHandler {
 
     /// Holds the connection requests from the `connect` hook. It's main use is to reply back with
     /// the `SocketAddr` of the socket that'll be used to intercept the user's socket operations.
-    connect_queue: ResponseDeque<MirrorAddress>,
+    connect_queue: ResponseDeque<RemoteConnection>,
 
     /// Channel used to pass messages (currently only `Write`) from an intercepted socket to the
     /// main `layer` loop.
@@ -248,6 +248,7 @@ impl UdpOutgoingHandler {
                         |DaemonConnect {
                              connection_id,
                              remote_address,
+                             local_address,
                          }| async move {
                             let _ = DetourGuard::new();
 
@@ -263,15 +264,15 @@ impl UdpOutgoingHandler {
                             }
                             .await?;
 
-                            Ok((connection_id, mirror_socket))
+                            Ok((connection_id, mirror_socket, local_address))
                         },
                     )
                     .await
-                    .and_then(|(connection_id, socket)| {
+                    .and_then(|(connection_id, socket, local_address)| {
                         let (remote_tx, remote_rx) = channel::<Vec<u8>>(1000);
 
                         let _ = DetourGuard::new();
-                        let mirror_address = MirrorAddress(socket.local_addr()?);
+                        let mirror_address = socket.local_addr()?;
 
                         // user and interceptor sockets are connected to each other, so now we spawn
                         // a new task to pair their reads/writes.
@@ -285,7 +286,10 @@ impl UdpOutgoingHandler {
                         self.mirrors
                             .insert(connection_id, ConnectionMirror(remote_tx));
 
-                        Ok(mirror_address)
+                        Ok(RemoteConnection {
+                            local_address,
+                            mirror_address,
+                        })
                     });
 
                 self.connect_queue

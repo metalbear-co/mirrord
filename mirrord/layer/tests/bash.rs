@@ -1,5 +1,5 @@
 #![feature(assert_matches)]
-use std::{path::PathBuf, time::Duration};
+use std::{path::Path, time::Duration};
 
 #[cfg(not(target_os = "macos"))]
 use futures::SinkExt;
@@ -25,7 +25,7 @@ use tokio_stream::StreamExt;
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
-async fn test_bash_script(dylib_path: &PathBuf) {
+async fn test_bash_script(dylib_path: &Path) {
     let application = Application::EnvBashCat;
     let executable = application.get_executable().await; // Own it.
     println!("Using executable: {}", &executable);
@@ -40,12 +40,15 @@ async fn test_bash_script(dylib_path: &PathBuf) {
     // Accept the connection from the layer in the env binary and verify initial messages.
     let _env_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     // Accept the connection from the layer in the bash binary and verify initial messages.
-    let _bash_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    let mut bash_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     // Accept the connection from the layer in the cat binary and verify initial messages.
-    let mut cat_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    // TODO: theoretically the connections arrival order could be different, should we handle it?
 
     let fd: u64 = 1;
+
+    bash_layer_connection.expect_gethostname(fd).await;
+
+    let mut cat_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    // TODO: theoretically the connections arrival order could be different, should we handle it?
 
     cat_layer_connection
         .expect_file_open_for_reading("/very_interesting_file", fd)
@@ -57,7 +60,7 @@ async fn test_bash_script(dylib_path: &PathBuf) {
             cat_layer_connection.codec.next().await.unwrap().unwrap(),
             ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
                 path: None,
-                fd: Some(1),
+                fd: Some(fd),
                 follow_symlink: true
             }))
         );

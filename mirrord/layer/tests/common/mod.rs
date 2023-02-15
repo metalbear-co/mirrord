@@ -217,9 +217,10 @@ impl LayerConnection {
             .send(DaemonMessage::Tcp(DaemonTcp::NewConnection(
                 NewTcpConnection {
                     connection_id: new_connection_id,
-                    address: "127.0.0.1".parse().unwrap(),
+                    remote_address: "127.0.0.1".parse().unwrap(),
                     destination_port: "80".parse().unwrap(),
                     source_port: "31415".parse().unwrap(),
+                    local_address: "1.1.1.1".parse().unwrap(),
                 },
             )))
             .await
@@ -381,7 +382,7 @@ impl LayerConnection {
             assert_eq!(expected_fd, requested_fd);
             return buffer_size;
         }
-        panic!("Expected Read FileRequest.");
+        panic!("Expected Read FileRequest. Got {message:?}");
     }
 
     /// Verify the layer hooks a read of `expected_fd`, return buffer size.
@@ -552,6 +553,15 @@ impl LayerConnection {
             message = self.codec.next().await.unwrap().unwrap();
         }
         message
+    }
+
+    /// Expect all the requested requests for gethostname hook
+    pub async fn expect_gethostname(&mut self, fd: u64) {
+        self.expect_file_open_for_reading("/etc/hostname", fd).await;
+
+        self.expect_single_file_read("foobar\n", fd).await;
+
+        self.expect_file_close(fd).await;
     }
 }
 

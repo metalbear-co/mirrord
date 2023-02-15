@@ -169,7 +169,7 @@ jobs:
         with:
           key: ${{matrix.os}}
       - run: |
-          cargo test -p mirrord-kube --all-features -- --skip env_guard
+          cargo test -p mirrord-kube --all-features
 
   test_mirrord_sip:
     runs-on: macos-latest
@@ -197,7 +197,10 @@ jobs:
           toolchain: nightly
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
-      - run: sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
+      - run: |
+          sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
+          sudo chown runner -R /home/runner
+          sudo chmod u+rwx -R /home/runner
 
   test_agent_image:
     runs-on: ubuntu-latest
@@ -389,7 +392,6 @@ jobs:
         with:
           name: layer-lib
           path: target/debug/
-      - run: cargo test -p mirrord-kube --features env_guard api::env_guard
       - run: cargo test -p mirrord-layer
 
   integration_tests_macos:

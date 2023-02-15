@@ -1,12 +1,13 @@
 use alloc::ffi::CString;
-use core::{ffi::CStr, mem};
+use core::{cmp, ffi::CStr, mem};
 use std::{
     collections::HashSet,
     os::unix::io::RawFd,
     sync::{LazyLock, Mutex},
 };
 
-use libc::{c_char, c_int, sockaddr, socklen_t};
+use errno::{set_errno, Errno};
+use libc::{c_char, c_int, sockaddr, socklen_t, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 
 use super::ops::*;
@@ -70,6 +71,32 @@ pub(crate) unsafe extern "C" fn getsockname_detour(
 ) -> c_int {
     getsockname(sockfd, address, address_len)
         .unwrap_or_bypass_with(|_| FN_GETSOCKNAME(sockfd, address, address_len))
+}
+
+/// Hook for `libc::gethostname`.
+///
+/// Reads remote hostname bytes into `raw_name`, will rais EINVAL errno and return -1 if hostname
+/// read more than `name_length`
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn gethostname_detour(
+    raw_name: *mut c_char,
+    name_length: usize,
+) -> c_int {
+    gethostname()
+        .map(|host| {
+            let host_len = host.as_bytes().len();
+
+            raw_name.copy_from_nonoverlapping(host.as_ptr(), cmp::min(name_length, host_len));
+
+            if host_len > name_length {
+                set_errno(Errno(EINVAL));
+
+                -1
+            } else {
+                0
+            }
+        })
+        .unwrap_or_bypass_with(|_| FN_GETHOSTNAME(raw_name, name_length))
 }
 
 #[hook_guard_fn]
@@ -296,6 +323,14 @@ pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled
         getsockname_detour,
         FnGetsockname,
         FN_GETSOCKNAME
+    );
+
+    replace!(
+        hook_manager,
+        "gethostname",
+        gethostname_detour,
+        FnGethostname,
+        FN_GETHOSTNAME
     );
 
     #[cfg(target_os = "linux")]

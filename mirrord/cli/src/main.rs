@@ -31,6 +31,7 @@ mod error;
 mod execution;
 mod extension;
 mod extract;
+mod internal_proxy;
 mod operator;
 
 pub(crate) use error::{CliError, Result};
@@ -309,6 +310,7 @@ async fn main() -> miette::Result<()> {
         Commands::Login(args) => login(args)?,
         Commands::Operator(args) => operator_command(*args).await?,
         Commands::ExtensionExec(args) => extension_exec(*args).await?,
+        Commands::InternalProxy => internal_proxy::proxy().await?,
     }
 
     Ok(())

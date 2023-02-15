@@ -58,7 +58,9 @@ fn generate_local_set() -> RegexSet {
         r"^/dev/.*$",
         r"^/opt/.*$",
         r"^/home/.*$",
-        r"^/tmp.*$",
+        r"^/tmp/.*$",
+        // macOS' temp
+        r"^/private/var/folders/.*$",
         r"^/snap/.*$",
         // support for nixOS.
         r"^/nix/.*$",
@@ -100,9 +102,12 @@ fn generate_remote_ro_set() -> RegexSet {
         // AWS cli cache
         // "file not exist" for identity caches (AWS)
         r".aws/cli/cache/.+\.json$",
+        r".aws/credentials$",
+        r".aws/config$",
         // for dns resolving
         r"^/etc/resolv.conf$",
         r"^/etc/hosts$",
+        r"^/etc/hostname$",
     ];
     RegexSetBuilder::new(patterns)
         .case_insensitive(true)

@@ -5,6 +5,8 @@ import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import java.awt.*
+import java.awt.event.KeyEvent
+import java.awt.event.KeyListener
 import javax.swing.*
 import javax.swing.border.EmptyBorder
 import javax.swing.event.DocumentEvent
@@ -29,6 +31,27 @@ object MirrordExecDialog {
                 jbTargets.setListData(filteredTargets.toTypedArray())
             }
 
+        })
+
+        // Add focus logic then we can change back and forth from search field
+        // to target selection using tab/shift+tab
+        searchField.addKeyListener(object: KeyListener {
+            override fun keyTyped(p0: KeyEvent?) {
+            }
+
+            override fun keyPressed(e: KeyEvent?) {
+                if (e?.keyCode === KeyEvent.VK_TAB) {
+                    if (e.modifiersEx > 0) {
+                        searchField.transferFocusBackward()
+                    } else {
+                        searchField.transferFocus()
+                    }
+                    e.consume()
+                }
+            }
+
+            override fun keyReleased(p0: KeyEvent?) {
+            }
         })
         val result = DialogBuilder().apply {
             setCenterPanel(JPanel(BorderLayout()).apply {

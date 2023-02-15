@@ -7,13 +7,53 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix cache does not work on test-agent workflow. See [#251](https://github.com/metalbear-co/mirrord/issues/251).
+
+## 3.25.0
+
+### Added
+
+- `gethostname` detour that returns contents of `/etc/hostname` from target pod. See relevant [#1041](https://github.com/metalbear-co/mirrord/issues/1041).
+
+### Fixed
+
+- `getsockname` now returns the **remote** local address of the socket, instead of the
+  **local fake** address of the socket.
+  This should fix issues with Akka or other software that checks the local address and
+  expects it to match the **local ip of the pod**.
+  This breaks agent protocol (agent/layer need to match).
+- GoLand debug fails because of reading `/private/var/folders` remotely (trying to access self file?). fixed with filter change (see below)
+
+### Changed
+
+- VSCode extension: update dialog message
+- JetBrains: can now change focus from search field to targets using tab/shift+tab (for backwrad)
+- Refactor - mirrord cli now spawns `internal proxy` which does the Kubernetes operations for
+  the layer, so layer need not interact with k8s (solves issues with remote/local env mix)
+- filter: add `/private/var/folders" to default local read override
+- filter: fixed regex for `/tmp` default local read override
+- disable flask e2e until we solve the glibc issue (probably fstream issue)
+
+## 3.24.0
+
 ### Added
 
 - Add a field to mirrord-config to specify custom path for kubeconfig , resolves [#1027](https://github.com/metalbear-co/mirrord/issues/1027).
 
 ### Changed
 
+- Removed limit on future builds `untilBuild` in JetBrains plugin.
 - IntelliJ-ext: change the dialog to provide a sorted list and make it searchable, resolves [#1031](https://github.com/metalbear-co/mirrord/issues/1031).
+- mirrord-layer: Changed default to read AWS credentials + config from remote pod.
+- Removed unused env var (`MIRRORD_EXTERNAL_ENV`)
+- mirrord-agent: Use `conntrack` to flush stealer connections (temporary fix for
+  [#1029](https://github.com/metalbear-co/mirrord/issues/1029)).
+
+### Fixed
+
+- Added env guard to be used in cli + extension to prevent (self) misconfigurations (our kube settings being used from remote).
 
 ## 3.23.0
 

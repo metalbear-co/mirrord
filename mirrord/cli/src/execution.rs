@@ -7,6 +7,10 @@ use mirrord_config::LayerConfig;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
 use serde::Serialize;
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    process::Command,
+};
 use tracing::trace;
 
 use crate::{
@@ -97,20 +101,45 @@ impl MirrordExecution {
             env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
         };
 
-        // Depending on how we plan to connect to the agent, we do different things.
-        // 1. if no operator, then we provide name and port so layer can port forward to
-        // 2. if operator, then we provide nothing as layer will find it on its own.
+        // stderr is inherited so we can see logs/errors.
+        let mut proxy_command =
+            Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
+
+        proxy_command
+            .arg("intproxy")
+            .stdout(std::process::Stdio::piped())
+            .stdin(std::process::Stdio::null());
+
         match &connect_info {
             AgentConnectInfo::DirectKubernetes(name, port) => {
-                env_vars.insert("MIRRORD_CONNECT_AGENT".to_string(), name.to_string());
-                env_vars.insert("MIRRORD_CONNECT_PORT".to_string(), port.to_string());
+                proxy_command.env("MIRRORD_CONNECT_AGENT", name);
+                proxy_command.env("MIRRORD_CONNECT_PORT", port.to_string());
             }
             AgentConnectInfo::Operator => {}
         };
 
-        // Let layer know we already brought env var for it. Remove after removing that part from
-        // there.
-        env_vars.insert("MIRRORD_EXTERNAL_ENV".to_string(), "true".to_string());
+        let proxy_process = proxy_command
+            .spawn()
+            .map_err(CliError::InternalProxyExecutionFailed)?;
+
+        let stdout = proxy_process
+            .stdout
+            .ok_or(CliError::InternalProxyStdoutError)?;
+
+        let port: u16 = BufReader::new(stdout)
+            .lines()
+            .next_line()
+            .await
+            .map_err(CliError::InternalProxyReadError)?
+            .ok_or(CliError::InternalProxyPortReadError)?
+            .parse()
+            .map_err(CliError::InternalProxyPortParseError)?;
+
+        // Provide details for layer to connect to agent via internal proxy
+        env_vars.insert(
+            "MIRRORD_CONNECT_TCP".to_string(),
+            format!("127.0.0.1:{port}"),
+        );
 
         Ok(Self {
             environment: env_vars,
