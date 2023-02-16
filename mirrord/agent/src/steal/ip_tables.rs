@@ -250,9 +250,9 @@ impl IPTableFormatter {
                         .then_some(IPTableFormatter::MESH_NAMES[index])
                 })
         }) {
-            /// We extract --uid-owner value from the mesh's rules to get messages only from them
-            /// and not other processes sendning messages from localhost like healthprobe for grpc.
-            /// This to more closely match behavior with non meshed services
+            // We extract --uid-owner value from the mesh's rules to get messages only from them
+            // and not other processes sendning messages from localhost like healthprobe for grpc.
+            // This to more closely match behavior with non meshed services
             let filter = ipt
                 .list_rules(mesh_ipt_chain)?
                 .iter()
