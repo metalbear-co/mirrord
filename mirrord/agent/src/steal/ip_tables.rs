@@ -257,7 +257,7 @@ impl IPTableFormatter {
         match self {
             IPTableFormatter::Normal => redirect_rule,
             IPTableFormatter::Mesh => {
-                format!("-o lo {redirect_rule}")
+                format!("-m owner --uid-owner 2102 {redirect_rule}")
             }
         }
     }
