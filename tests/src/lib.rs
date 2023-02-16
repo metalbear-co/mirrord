@@ -43,13 +43,8 @@ mod utils {
         process::{Child, Command},
         task::JoinHandle,
     };
-    use tokio_tungstenite::tungstenite::handshake::client;
     // 0.8
     use tokio_util::sync::{CancellationToken, DropGuard};
-
-    pub(crate) type HttpV = bool;
-    pub(crate) const HTTP_1: HttpV = false;
-    pub(crate) const HTTP_2: HttpV = true;
 
     static TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
     pub const CONTAINER_NAME: &str = "test";
