@@ -85,7 +85,7 @@ mod steal {
             .await;
 
         process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
-        send_requests(&url, true, Default::default()).await;
+        send_requests::<HTTP_1>(&url, true, Default::default()).await;
         tokio::time::timeout(Duration::from_secs(40), process.child.wait())
             .await
             .unwrap()
