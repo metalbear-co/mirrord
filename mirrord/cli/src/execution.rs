@@ -6,6 +6,8 @@ use std::{
 use mirrord_config::LayerConfig;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
+#[cfg(target_os = "macos")]
+use mirrord_sip::sip_patch;
 use serde::Serialize;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -31,13 +33,19 @@ const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
 #[derive(Debug, Serialize)]
 pub(crate) struct MirrordExecution {
     pub environment: HashMap<String, String>,
+
     #[serde(skip)]
     child: Child,
+
+    /// The path to the patched binary, if patched.
+    pub patched_path: Option<String>,
 }
 
 impl MirrordExecution {
     pub(crate) async fn start<P>(
         config: &LayerConfig,
+        // We only need the executable on macos, for SIP handling.
+        #[cfg(target_os = "macos")] executable: Option<&str>,
         progress: &P,
         timeout: Option<u64>,
     ) -> Result<Self>
@@ -155,9 +163,29 @@ impl MirrordExecution {
             format!("127.0.0.1:{port}"),
         );
 
+        #[cfg(target_os = "macos")]
+        let patched_path = executable
+            .and_then(|exe| {
+                sip_patch(
+                    exe,
+                    &config
+                        .sip_binaries
+                        .clone()
+                        .map(|x| x.to_vec())
+                        .unwrap_or_default(),
+                )
+                .transpose() // We transpose twice to propagate a possible error out of this
+                             // closure.
+            })
+            .transpose()?;
+
+        #[cfg(not(target_os = "macos"))]
+        let patched_path = None;
+
         Ok(Self {
             environment: env_vars,
             child: proxy_process,
+            patched_path,
         })
     }
 
