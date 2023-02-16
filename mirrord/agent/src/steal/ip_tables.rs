@@ -11,6 +11,7 @@ use crate::error::{AgentError, Result};
 
 pub(crate) static MIRRORD_IPTABLE_CHAIN_ENV: &str = "MIRRORD_IPTABLE_CHAIN_NAME";
 
+/// [`Regex`] used to select the `owner` rule from the list of `iptables` rules.
 static UID_LOOKUP_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"-m owner --uid-owner \d+").unwrap());
 
@@ -249,6 +250,9 @@ impl IPTableFormatter {
                         .then_some(IPTableFormatter::MESH_NAMES[index])
                 })
         }) {
+            /// We extract --uid-owner value from the mesh's rules to get messages only from them
+            /// and not other processes sendning messages from localhost like healthprobe for grpc.
+            /// This to more closely match behavior with non meshed services
             let filter = ipt
                 .list_rules(mesh_ipt_chain)?
                 .iter()
