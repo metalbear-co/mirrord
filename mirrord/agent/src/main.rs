@@ -555,14 +555,14 @@ async fn start_iptable_guard() -> Result<()> {
 
     let result = spawn_child_agent();
 
-    run_thread_in_namespace(
+    let _ = run_thread_in_namespace(
         clear_iptable_chain(chain_name),
         "clear iptables".to_owned(),
         pid,
         "net",
     )
     .join()
-    .map_err(|_| AgentError::JoinTask)??;
+    .map_err(|_| AgentError::JoinTask)?;
 
     result
 }
