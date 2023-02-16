@@ -14,7 +14,7 @@ server.on('stream', (stream, headers) => {
         ':status': 200,
     });
 
-    stream.end('<h1>Hello World</h1>');
+    stream.end('<h1>Hello World: from local</h1>');
 
     stream.on('error', (fail) => {
         console.error(`Stream failed with ${fail}!`);

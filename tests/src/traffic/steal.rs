@@ -147,12 +147,7 @@ mod steal {
     async fn test_filter_with_single_client_and_only_matching_requests_http2(
         #[future] service: KubeService,
         #[future] kube_client: Client,
-        #[values(
-            Application::PythonFlaskHTTP,
-            Application::PythonFastApiHTTP,
-            Application::NodeHTTP
-        )]
-        application: Application,
+        #[values(Application::NodeHTTP2)] application: Application,
         #[values(Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
