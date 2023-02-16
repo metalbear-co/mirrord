@@ -249,8 +249,6 @@ impl IPTableFormatter {
                         .then_some(IPTableFormatter::MESH_NAMES[index])
                 })
         }) {
-            let filter_reg = Regex::new(filter_reg).unwrap();
-
             let filter = ipt
                 .list_rules(mesh_ipt_chain)?
                 .iter()
