@@ -211,7 +211,7 @@ async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<St
         .map_err(CliError::KubernetesApiFailed)?;
     let api: Api<Pod> = get_k8s_resource_api(&client, namespace);
     let pods = api
-        .list(&ListParams::default())
+        .list(&ListParams::default().labels("app!=mirrord"))
         .await
         .map_err(KubeApiError::from)
         .map_err(CliError::KubernetesApiFailed)?;
