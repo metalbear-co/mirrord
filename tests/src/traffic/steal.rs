@@ -13,8 +13,7 @@ mod steal {
 
     use crate::utils::{
         get_service_host_and_port, get_service_url, kube_client, send_request, send_requests,
-        service, tcp_echo_service, websocket_service, Agent, Application, KubeService, HTTP_1,
-        HTTP_2,
+        service, tcp_echo_service, websocket_service, Agent, Application, KubeService,
     };
 
     #[cfg(target_os = "linux")]

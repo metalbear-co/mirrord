@@ -9,7 +9,6 @@ mod http {
 
     use crate::utils::{
         get_service_url, kube_client, send_requests, service, Agent, Application, KubeService,
-        HTTP_1,
     };
 
     #[ignore]
