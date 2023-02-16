@@ -12,7 +12,7 @@ use tokio::{
     net::TcpStream,
     sync::mpsc::{Receiver, Sender},
 };
-use tracing::{debug, error};
+use tracing::{error, trace};
 
 use super::{handle_response, ConnectionTask};
 use crate::{detour::DetourGuard, tcp_steal::http_forwarding::HttpForwarderError};
@@ -58,6 +58,7 @@ impl V2 {
     }
 }
 
+// TODO(alex): Import this from `hyper-util` when the crate is actually published.
 /// Future executor that utilises `tokio` threads.
 #[non_exhaustive]
 #[derive(Default, Debug, Clone)]
@@ -69,7 +70,7 @@ where
     Fut::Output: Send + 'static,
 {
     fn execute(&self, fut: Fut) {
-        debug!("starting tokio executor for hyper HTTP/2");
+        trace!("starting tokio executor for hyper HTTP/2");
         tokio::spawn(async move {
             let _ = DetourGuard::new();
             fut.await

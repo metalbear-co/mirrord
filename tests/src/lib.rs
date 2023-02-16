@@ -796,7 +796,7 @@ mod utils {
         }
     }
 
-    pub async fn send_requests<const HTTP_VERSION: HttpV>(
+    pub async fn send_requests(
         url: &str,
         expect_response: bool,
         headers: reqwest::header::HeaderMap,
@@ -806,11 +806,7 @@ mod utils {
         println!("{url}");
         let client_builder = reqwest::Client::builder();
 
-        let client = match HTTP_VERSION {
-            HTTP_1 => client_builder.build(),
-            HTTP_2 => client_builder.http2_prior_knowledge().build(),
-        }
-        .unwrap();
+        let client = client_builder.build().unwrap();
 
         let req_builder = client.get(url);
         send_request(

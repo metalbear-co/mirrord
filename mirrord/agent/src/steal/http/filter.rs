@@ -15,7 +15,7 @@ use tokio::{
     net::TcpStream,
     sync::{mpsc::Sender, oneshot},
 };
-use tracing::{debug, error, trace};
+use tracing::{error, trace};
 
 use super::{
     error::HttpTrafficError,
@@ -27,6 +27,7 @@ use crate::{steal::HandlerHttpRequest, util::ClientId};
 const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
 const DEFAULT_HTTP_VERSION_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
+// TODO(alex): Import this from `hyper-util` when the crate is actually published.
 /// Future executor that utilises `tokio` threads.
 #[non_exhaustive]
 #[derive(Default, Debug, Clone)]
@@ -38,7 +39,7 @@ where
     Fut::Output: Send + 'static,
 {
     fn execute(&self, fut: Fut) {
-        debug!("starting tokio executor for hyper HTTP/2");
+        trace!("starting tokio executor for hyper HTTP/2");
         tokio::spawn(fut);
     }
 }
@@ -168,7 +169,7 @@ pub(super) async fn filter_task(
                         .send(connection_id)
                         .await
                         .inspect_err(|connection_id| {
-                            error!("Main TcpConnectionStealer dropped connection close channel while HTTP filter is still running. \
+                            error!("Main TcpConnectionStealer dropped connection close channel while HTTP2 filter is still running. \
                             Cannot report the closing of connection {connection_id}.");
                         }).map_err(From::from)
                 }

@@ -44,7 +44,7 @@ mod steal {
             .await;
 
         process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
-        send_requests::<HTTP_1>(&url, true, Default::default()).await;
+        send_requests(&url, true, Default::default()).await;
         tokio::time::timeout(Duration::from_secs(40), process.child.wait())
             .await
             .unwrap()
@@ -85,7 +85,7 @@ mod steal {
             .await;
 
         process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
-        send_requests::<HTTP_1>(&url, true, Default::default()).await;
+        send_requests(&url, true, Default::default()).await;
         tokio::time::timeout(Duration::from_secs(40), process.child.wait())
             .await
             .unwrap()
@@ -131,7 +131,7 @@ mod steal {
 
         let mut headers = HeaderMap::default();
         headers.insert("x-filter", "yes".parse().unwrap());
-        send_requests::<HTTP_1>(&url, true, headers).await;
+        send_requests(&url, true, headers).await;
 
         tokio::time::timeout(Duration::from_secs(40), client.child.wait())
             .await
@@ -158,7 +158,7 @@ mod steal {
             flags.extend(flag)
         }
 
-        let mut client = application
+        let mut mirrored_process = application
             .run(
                 &service.target,
                 Some(&service.namespace),
@@ -167,18 +167,29 @@ mod steal {
             )
             .await;
 
-        client.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+        mirrored_process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
 
+        // Send a GET that should be matched and stolen.
+        let client = reqwest::Client::builder()
+            .http2_prior_knowledge()
+            .build()
+            .unwrap();
+        let req_builder = client.get(&url);
         let mut headers = HeaderMap::default();
         headers.insert("x-filter", "yes".parse().unwrap());
-        send_requests::<HTTP_2>(&url, true, headers).await;
+        send_request(
+            req_builder,
+            Some("<h1>Hello World: from local</h1>"),
+            headers.clone(),
+        )
+        .await;
 
-        tokio::time::timeout(Duration::from_secs(40), client.child.wait())
+        tokio::time::timeout(Duration::from_secs(40), mirrored_process.child.wait())
             .await
             .unwrap()
             .unwrap();
 
-        application.assert(&client);
+        application.assert(&mirrored_process);
     }
 
     /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`
