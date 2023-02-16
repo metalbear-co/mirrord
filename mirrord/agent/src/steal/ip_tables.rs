@@ -221,6 +221,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum IPTableFormatter {
     Normal,
     Mesh(String),
@@ -229,7 +230,7 @@ pub(crate) enum IPTableFormatter {
 impl IPTableFormatter {
     const MESH_OUTPUTS: [&'static str; 2] = ["-j PROXY_INIT_OUTPUT", "-j ISTIO_OUTPUT"];
     const MESH_FILTERS: [(&'static str, &'static str); 2] = [
-        ("PROXY_INIT_OUTPUT", r"-m owner --uid-owner /d+"),
+        ("PROXY_INIT_OUTPUT", r"-m owner --uid-owner \d+"),
         ("ISTIO_OUTPUT", r"-o lo"),
     ];
 
@@ -268,6 +269,7 @@ impl IPTableFormatter {
         }
     }
 
+    #[tracing::instrument(level = "trace", ret)]
     fn redirect_rule(&self, redirected_port: Port, target_port: Port) -> String {
         let redirect_rule =
             format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
