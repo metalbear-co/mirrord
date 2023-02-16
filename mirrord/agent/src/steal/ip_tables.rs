@@ -360,6 +360,14 @@ mod tests {
             .with(eq("OUTPUT"))
             .returning(|_| Ok(vec!["-j PROXY_INIT_OUTPUT".to_owned()]));
 
+        mock.expect_list_rules()
+            .with(eq("PROXY_INIT_OUTPUT"))
+            .returning(|_| Ok(vec![
+                "-N PROXY_INIT_OUTPUT".to_owned(),
+                "-A PROXY_INIT_OUTPUT -m owner --uid-owner 2102 -m comment --comment \"proxy-init/ignore-proxy-user-id/1676542558\" -j RETURN".to_owned(),
+                "-A PROXY_INIT_OUTPUT -o lo -m comment --comment \"proxy-init/ignore-loopback/1676542558\" -j RETURN".to_owned(),
+            ]));
+
         mock.expect_create_chain()
             .with(str::starts_with("MIRRORD_REDIRECT_"))
             .times(1)
@@ -378,7 +386,7 @@ mod tests {
         mock.expect_insert_rule()
             .with(
                 str::starts_with("MIRRORD_REDIRECT_"),
-                eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                eq("-m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(1),
             )
             .times(1)
@@ -392,7 +400,7 @@ mod tests {
         mock.expect_remove_rule()
             .with(
                 str::starts_with("MIRRORD_REDIRECT_"),
-                eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                eq("-m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
             .returning(|_, _| Ok(()));
