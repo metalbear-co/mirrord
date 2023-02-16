@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use fancy_regex::Regex;
 use mirrord_protocol::Port;
 use nix::unistd::getgid;
@@ -8,6 +10,9 @@ use tracing::warn;
 use crate::error::{AgentError, Result};
 
 pub(crate) static MIRRORD_IPTABLE_CHAIN_ENV: &str = "MIRRORD_IPTABLE_CHAIN_NAME";
+
+static UID_LOOKUP_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"-m owner --uid-owner \d+").unwrap());
 
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait IPTables {
@@ -229,34 +234,32 @@ pub(crate) enum IPTableFormatter {
 
 impl IPTableFormatter {
     const MESH_OUTPUTS: [&'static str; 2] = ["-j PROXY_INIT_OUTPUT", "-j ISTIO_OUTPUT"];
-    const MESH_FILTERS: [(&'static str, &'static str); 2] = [
-        ("PROXY_INIT_OUTPUT", r"-m owner --uid-owner \d+"),
-        ("ISTIO_OUTPUT", r"-o lo"),
-    ];
+    const MESH_NAMES: [&'static str; 2] = ["PROXY_INIT_OUTPUT", "ISTIO_OUTPUT"];
 
     #[tracing::instrument(level = "trace", skip_all)]
     pub(crate) fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Self> {
         let output = ipt.list_rules("OUTPUT")?;
 
-        if let Some((ipt_chain, filter_reg)) = output.iter().find_map(|rule| {
+        if let Some(mesh_ipt_chain) = output.iter().find_map(|rule| {
             IPTableFormatter::MESH_OUTPUTS
                 .iter()
                 .enumerate()
                 .find_map(|(index, mesh_output)| {
                     rule.contains(mesh_output)
-                        .then_some(IPTableFormatter::MESH_FILTERS[index])
+                        .then_some(IPTableFormatter::MESH_NAMES[index])
                 })
         }) {
             let filter_reg = Regex::new(filter_reg).unwrap();
 
             let filter = ipt
-                .list_rules(ipt_chain)?
+                .list_rules(mesh_ipt_chain)?
                 .iter()
-                .find_map(|rule| filter_reg.find(rule).ok().flatten())
-                .map(|m| m.as_str().to_owned())
-                .unwrap_or_else(|| "-o lo".to_owned());
+                .find_map(|rule| UID_LOOKUP_REGEX.find(rule).ok().flatten())
+                .map(|m| m.as_str().to_owned());
 
-            Ok(IPTableFormatter::Mesh(filter))
+            Ok(IPTableFormatter::Mesh(
+                filter.unwrap_or_else(|| "-o lo".to_owned()),
+            ))
         } else {
             Ok(IPTableFormatter::Normal)
         }
