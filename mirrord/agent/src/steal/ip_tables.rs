@@ -1,3 +1,4 @@
+use fancy_regex::Regex;
 use mirrord_protocol::Port;
 use nix::unistd::getgid;
 use rand::distributions::{Alphanumeric, DistString};
@@ -222,22 +223,39 @@ where
 
 pub(crate) enum IPTableFormatter {
     Normal,
-    Mesh,
+    Mesh(String),
 }
 
 impl IPTableFormatter {
     const MESH_OUTPUTS: [&'static str; 2] = ["-j PROXY_INIT_OUTPUT", "-j ISTIO_OUTPUT"];
+    const MESH_FILTERS: [(&'static str, &'static str); 2] = [
+        ("PROXY_INIT_OUTPUT", r"-m owner --uid-owner /d+"),
+        ("ISTIO_OUTPUT", r"-o lo"),
+    ];
 
     #[tracing::instrument(level = "trace", skip_all)]
     pub(crate) fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Self> {
         let output = ipt.list_rules("OUTPUT")?;
 
-        if output.iter().any(|rule| {
+        if let Some((ipt_chain, filter_reg)) = output.iter().find_map(|rule| {
             IPTableFormatter::MESH_OUTPUTS
                 .iter()
-                .any(|mesh_output| rule.contains(mesh_output))
+                .enumerate()
+                .find_map(|(index, mesh_output)| {
+                    rule.contains(mesh_output)
+                        .then_some(IPTableFormatter::MESH_FILTERS[index])
+                })
         }) {
-            Ok(IPTableFormatter::Mesh)
+            let filter_reg = Regex::new(filter_reg).unwrap();
+
+            let filter = ipt
+                .list_rules(ipt_chain)?
+                .iter()
+                .find_map(|rule| filter_reg.find(rule).ok().flatten())
+                .map(|m| m.as_str().to_owned())
+                .unwrap_or_else(|| "-o lo".to_owned());
+
+            Ok(IPTableFormatter::Mesh(filter))
         } else {
             Ok(IPTableFormatter::Normal)
         }
@@ -246,7 +264,7 @@ impl IPTableFormatter {
     fn entrypoint(&self) -> &str {
         match self {
             IPTableFormatter::Normal => "PREROUTING",
-            IPTableFormatter::Mesh => "OUTPUT",
+            IPTableFormatter::Mesh(_) => "OUTPUT",
         }
     }
 
@@ -256,8 +274,8 @@ impl IPTableFormatter {
 
         match self {
             IPTableFormatter::Normal => redirect_rule,
-            IPTableFormatter::Mesh => {
-                format!("-m owner --uid-owner 2102 {redirect_rule}")
+            IPTableFormatter::Mesh(filter) => {
+                format!("{filter} {redirect_rule}")
             }
         }
     }
@@ -265,7 +283,7 @@ impl IPTableFormatter {
     fn bypass_own_packets_rule(&self) -> Option<String> {
         match self {
             IPTableFormatter::Normal => None,
-            IPTableFormatter::Mesh => {
+            IPTableFormatter::Mesh(_) => {
                 let gid = getgid();
                 Some(format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))
             }
