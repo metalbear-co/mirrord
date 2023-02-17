@@ -17,7 +17,7 @@ mod main {
         read::macho::{FatArch, MachHeader},
         Architecture, Endianness, FileKind,
     };
-    use tracing::trace;
+    use tracing::{error, trace, warn};
     use which::which;
 
     use super::*;
@@ -194,10 +194,25 @@ mod main {
         // If which fails, try using the given path as is.
         let complete_path = which(path).unwrap_or_else(|_| PathBuf::from(&path));
         if !complete_path.exists() {
+            warn!(
+                "mirrord could not find file {} which is supposed to be executed, and therefore \
+                cannot check its SIP status.",
+                complete_path.to_string_lossy()
+            );
             return Err(FileNotFound(complete_path.to_string_lossy().to_string()));
         }
         let canonical_path = complete_path.canonicalize()?;
+
+        // TODO: Don't recursively follow the shebangs, instead only read the first one because on
+        //  macOS a shebang cannot lead to a script only to a binary. Then there should be no danger
+        //  of recursing over a cycle of shebangs until a stack overflow, so this check and keeping
+        //  the seen_paths could all be removed.
         if seen_paths.contains(&canonical_path) {
+            warn!(
+                "The script that you are trying to run has a shebang that points into a shebang \
+                cycle. mirrord cannot check the SIP status because it cannot know what binary is \
+                supposed to run.",
+            );
             return Err(CyclicShebangs(canonical_path.to_string_lossy().to_string()));
         }
         seen_paths.insert(canonical_path);
@@ -314,13 +329,29 @@ mod main {
     /// If it is not, `Ok(None)`.
     /// Propagate errors.
     pub fn sip_patch(binary_path: &str) -> Result<Option<String>> {
-        if let SipStatus::SomeSIP(path, shebang_target) = get_sip_status(binary_path)? {
-            let tmp_dir = temp_dir().join(MIRRORD_PATCH_DIR);
-            trace!("Using temp dir: {:?} for sip patches", &tmp_dir);
-            Some(patch_some_sip(&path, shebang_target, tmp_dir)).transpose()
-        } else {
-            trace!("No SIP detected on {:?}", binary_path);
-            Ok(None)
+        match get_sip_status(binary_path) {
+            Ok(SipStatus::SomeSIP(path, shebang_target)) => {
+                let tmp_dir = temp_dir().join(MIRRORD_PATCH_DIR);
+                trace!("Using temp dir: {:?} for sip patches", &tmp_dir);
+                Some(patch_some_sip(&path, shebang_target, tmp_dir)).transpose()
+            }
+            Ok(SipStatus::NoSIP) => {
+                trace!("No SIP detected on {:?}", binary_path);
+                Ok(None)
+            }
+            Err(err) => {
+                error!(
+                    "Checking the SIP status of {binary_path} (or of the binary in its shebang, if \
+                    applicable) failed with error {err:?}. Continuing without SIP-sidestepping."
+                );
+                // We don't exit here so that execution fails in the same way it normally does when
+                // some file that should exist does not exist (or whatever the problem is), so that
+                // the user gets that feedback and can change whatever is wrong.
+                // Exiting on SIP-check confused users.
+                // (Or if the check failed because of a bug in mirrord, the user can still keep
+                // using it in case the file is not SIP.)
+                Ok(None)
+            }
         }
     }
 
