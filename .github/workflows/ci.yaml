@@ -625,6 +625,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: CI succeeded
+        # We want this to run even if some of the required jobs got skipped
+        if: always()
         # We have to do it in the shell since if it's in the if condition
         # then skipping is considered success by branch protection rules
         env:
