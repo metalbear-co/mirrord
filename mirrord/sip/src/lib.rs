@@ -458,8 +458,8 @@ mod main {
             let _ = sip_patch(path_str).unwrap().unwrap();
         }
 
-        /// Run `sip_patch` on a file that has a shebang that points to itself and verify that
-        /// a `CyclicShebangs` error is returned.
+        /// Run `sip_patch` on a file that has a shebang that points to itself and verify that we
+        /// don't get stuck in a recursion until the stack overflows.
         #[test]
         fn cyclic_shebangs() {
             let mut script = tempfile::NamedTempFile::new().unwrap();
@@ -467,7 +467,7 @@ mod main {
             script.write(contents.as_bytes()).unwrap();
             script.flush().unwrap();
             let res = sip_patch(script.path().to_str().unwrap());
-            assert!(matches!(res, Err(CyclicShebangs(_))));
+            assert!(matches!(res, Ok(None)));
         }
     }
 }
