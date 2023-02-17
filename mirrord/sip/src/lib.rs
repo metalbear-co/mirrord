@@ -17,7 +17,7 @@ mod main {
         read::macho::{FatArch, MachHeader},
         Architecture, Endianness, FileKind,
     };
-    use tracing::{error, trace, warn};
+    use tracing::{error, trace};
     use which::which;
 
     use super::*;
@@ -194,11 +194,6 @@ mod main {
         // If which fails, try using the given path as is.
         let complete_path = which(path).unwrap_or_else(|_| PathBuf::from(&path));
         if !complete_path.exists() {
-            warn!(
-                "mirrord could not find file {} which is supposed to be executed, and therefore \
-                cannot check its SIP status.",
-                complete_path.to_string_lossy()
-            );
             return Err(FileNotFound(complete_path.to_string_lossy().to_string()));
         }
         let canonical_path = complete_path.canonicalize()?;
@@ -208,11 +203,6 @@ mod main {
         //  of recursing over a cycle of shebangs until a stack overflow, so this check and keeping
         //  the seen_paths could all be removed.
         if seen_paths.contains(&canonical_path) {
-            warn!(
-                "The script that you are trying to run has a shebang that points into a shebang \
-                cycle. mirrord cannot check the SIP status because it cannot know what binary is \
-                supposed to run.",
-            );
             return Err(CyclicShebangs(canonical_path.to_string_lossy().to_string()));
         }
         seen_paths.insert(canonical_path);
