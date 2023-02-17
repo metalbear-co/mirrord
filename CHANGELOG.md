@@ -11,6 +11,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - mirrord-agent: localhost traffic (like healthprobes) won't be stolen by mirrord on meshed targets to allign behavior with non meshed targets. See [#1070](https://github.com/metalbear-co/mirrord/pull/1070)
 - Filter out agent pods from `mirrord ls`, for better IDE UX. Closes [#1045](https://github.com/metalbear-co/mirrord/issues/1045).
+- Not exiting on SIP-check fail. Instead, logging an error and letting the program fail as it would without mirrord.
+  See [#951](https://github.com/metalbear-co/mirrord/issues/951).
 
 ### Fixed
 
