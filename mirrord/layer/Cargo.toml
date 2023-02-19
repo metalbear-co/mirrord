@@ -61,6 +61,7 @@ null-terminated = "0.3"
 
 [dev-dependencies]
 k8s-openapi.workspace = true
+chrono = { version = "0.4", features = ["clock"] }
 base64 = "0.13"
 http-body = "0.4"
 hyper = "0.14"
