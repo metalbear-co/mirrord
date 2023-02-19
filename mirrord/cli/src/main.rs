@@ -248,7 +248,7 @@ async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<St
 /// ]```
 async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
     let pods = get_kube_pods(args.namespace.as_deref()).await?;
-    let target_vector = pods
+    let mut target_vector = pods
         .iter()
         .flat_map(|(pod, containers)| {
             if containers.len() == 1 {
@@ -261,6 +261,9 @@ async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
             }
         })
         .collect::<Vec<String>>();
+
+    target_vector.sort();
+
     let json_obj = json!(target_vector);
     println!("{json_obj}");
     Ok(())

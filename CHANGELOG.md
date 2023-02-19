@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- VSCode Extenstion: Prevent double prompting of the user to select the target if not specified in config. See [#1080](https://github.com/metalbear-co/mirrord/issues/1080).
+
 ## 3.26.0
 
 ### Changed
