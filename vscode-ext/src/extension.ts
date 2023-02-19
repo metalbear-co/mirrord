@@ -312,7 +312,8 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 			return config;
 		}
 
-		if (config.env?.["__MIRRORD_EXT_INJECTED"] === 'true') {
+		// For some reason resolveDebugConfiguration runs twice for Node projects. __parentId is populated.
+		if (config.__parentId || config.env?.["__MIRRORD_EXT_INJECTED"] === 'true') {
 			return config;
 		}
 
@@ -323,10 +324,6 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 				globalContext.globalState.update('lastChecked', Date.now());
 			}
 		}
-
-
-		const mode = globalContext.extensionMode;
-		const extensionPath = globalContext.extensionPath;
 
 		let mirrordApi = new MirrordAPI(globalContext);
 
