@@ -327,7 +327,7 @@ fn layer_start(config: LayerConfig) {
                     .with_writer(tracing_util::file_tracing_writer())
                     .with_ansi(false)
                     .with_thread_ids(true)
-                    .with_span_events(FmtSpan::ACTIVE),
+                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE),
             )
             .with(tracing_subscriber::EnvFilter::new("mirrord=trace"))
             .init();
@@ -340,7 +340,7 @@ fn layer_start(config: LayerConfig) {
             .with(
                 tracing_subscriber::fmt::layer()
                     .with_thread_ids(true)
-                    .with_span_events(FmtSpan::ACTIVE)
+                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
                     .compact()
                     .with_writer(std::io::stderr),
             )
