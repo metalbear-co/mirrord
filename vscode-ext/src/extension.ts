@@ -99,12 +99,12 @@ class MirrordAPI {
 			"MIRRORD_PROGRESS_MODE": "json",
 			...process.env,
 		};
-		return spawn(this.cliPath, args, { "env": env });
+		return spawn(this.cliPath, args, { env });
 	}
 
 
 	/// Uses `mirrord ls` to get a list of all targets.
-	async listTargets(targetNamespace: string | null | undefined): Promise<[string]> {
+	async listTargets(targetNamespace: string | null | undefined): Promise<string[]> {
 		const args = ['ls'];
 
 		if (targetNamespace) {
@@ -303,22 +303,17 @@ export async function activate(context: vscode.ExtensionContext) {
 		context.subscriptions.push(button);
 		button.show();
 	};
-
 }
-
-
-
 
 class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 	async resolveDebugConfiguration(folder: vscode.WorkspaceFolder | undefined, config: vscode.DebugConfiguration, token: vscode.CancellationToken): Promise<vscode.DebugConfiguration | null | undefined> {
+
 		if (!globalContext.workspaceState.get('enabled')) {
-			return new Promise(resolve => { resolve(config); });
+			return config;
 		}
 
-		if (config.__parentId) { // For some reason resolveDebugConfiguration runs twice for Node projects. __parentId is populated.
-			return new Promise(resolve => {
-				return resolve(config);
-			});
+		if (config.env?.["__MIRRORD_EXT_INJECTED"] === 'true') {
+			return config;
 		}
 
 		if (vscode.env.isTelemetryEnabled) {
@@ -338,19 +333,15 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		config.env ||= {};
 		let target = null;
 
-		// If target wasn't specified in the config file, let user choose pod from dropdown			
+		// If target wasn't specified in the config file, let user choose pod from dropdown         
 		if (!await isTargetInFile()) {
 			let targetNamespace = await parseNamespace();
 			let targets = await mirrordApi.listTargets(targetNamespace);
-			await vscode.window.showQuickPick(targets, { placeHolder: 'Select a target path to mirror' }).then(async targetName => {
-				return new Promise(async resolve => {
-					if (!targetName) {
-						return;
-					}
-					target = targetName;
-					return resolve(config);
-				});
-			});
+			let targetName = await vscode.window.showQuickPick(targets, { placeHolder: 'Select a target path to mirror' });
+
+			if (targetName) {
+				target = targetName;	
+			}
 		}
 
 		let configPath = await configFilePath();
@@ -365,8 +356,9 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 
 		let env = await mirrordApi.binaryExecute(target, configPath);
 		config.env = Object.assign({}, config.env, env);
-		return new Promise(resolve => {
-			return resolve(config);
-		});
+
+		config.env["__MIRRORD_EXT_INJECTED"] = 'true';
+
+		return config;
 	}
 }
