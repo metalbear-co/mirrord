@@ -9,9 +9,9 @@ use std::{
 };
 
 use actix_codec::Framed;
+use chrono::Utc;
 use fancy_regex::Regex;
 use futures::{SinkExt, StreamExt};
-use k8s_openapi::chrono::Utc;
 use mirrord_protocol::{
     file::{
         AccessFileRequest, AccessFileResponse, OpenOptionsInternal, SeekFromInternal, XstatRequest,
