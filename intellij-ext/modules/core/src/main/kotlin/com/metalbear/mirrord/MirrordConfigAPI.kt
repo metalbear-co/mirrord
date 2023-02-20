@@ -81,7 +81,9 @@ object MirrordConfigAPI {
      * Gets namespace set in config file, if any.
      */
     fun getNamespace(project: Project): String? {
+        MirrordLogger.logger.debug("getting namespace from config data")
         val configData = getConfigData(project)
+        MirrordLogger.logger.debug("returning from getconfigdata")
         return configData?.target?.namespace
     }
 

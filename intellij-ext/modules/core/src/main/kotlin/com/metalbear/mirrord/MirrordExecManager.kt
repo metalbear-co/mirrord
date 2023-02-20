@@ -16,12 +16,14 @@ object MirrordExecManager {
     var enabled: Boolean = false
 
     private fun chooseTarget(wslDistribution: WSLDistribution?, project: Project): String? {
+        MirrordLogger.logger.debug("choose target called")
         val pods =
                 MirrordApi.listPods(
                         MirrordConfigAPI.getNamespace(project),
                         project,
                         wslDistribution
                 )
+        MirrordLogger.logger.debug("returning pods")
         return MirrordExecDialog.selectTargetDialog(pods)
     }
 
@@ -36,6 +38,7 @@ object MirrordExecManager {
     /** Starts mirrord, shows dialog for selecting pod if target not set and returns env to set. */
     fun start(wslDistribution: WSLDistribution?, project: Project): Map<String, String>? {
         if (!enabled) {
+            MirrordLogger.logger.debug("disabled, returning")
             return null
         }
         if (SystemInfo.isWindows && wslDistribution == null) {
@@ -43,16 +46,21 @@ object MirrordExecManager {
             return null
         }
 
+        MirrordLogger.logger.debug("version check trigger")
         MirrordVersionCheck.checkVersion(project)
 
+        MirrordLogger.logger.debug("target selection")
         var target: String? = null
         if (!MirrordConfigAPI.isTargetSet(project)) {
+            MirrordLogger.logger.debug("target not selected, showing dialog")
             // In some cases, we're executing from a `ReadAction` context, which means we
             // can't block and wait for a WriteAction (such as invokeAndWait).
             // Executing it in a thread pool seems to fix, fml.
             ApplicationManager.getApplication()
                     .executeOnPooledThread {
+                        MirrordLogger.logger.debug("executing on pooled thread")
                         ApplicationManager.getApplication().invokeAndWait() {
+                            MirrordLogger.logger.debug("choosing target from invoke")
                             target = chooseTarget(wslDistribution, project)
                         }
                     }
