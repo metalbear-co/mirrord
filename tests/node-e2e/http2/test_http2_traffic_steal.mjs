@@ -2,47 +2,35 @@ import http2 from 'node:http2';
 
 const server = http2.createServer();
 
-server.on('error', (err) => {
-  console.error(err);
-  process.exit(-1);
+// Listen to the request event
+server.on('request', (request, response) => {
+  console.log(`> Request ${JSON.stringify(request.headers)}`);
+
+  response.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+  });
+
+  response.end('<h1>Hello World: <b>from local app</b></h1>');
+
+  response.on('finish', () => {
+    console.log(`> response is done.`);
+    server.close();
+  });
 });
 
-server.on('stream', (stream, headers) => {
-  console.log(`> Request ${JSON.stringify(headers)}`);
+server.on('error', (fail) => {
+  console.error(`> server failed with ${fail}!`);
+  process.exit(-2);
+});
 
-  // stream is a Duplex
-  stream.respond({
-    'content-type': 'text/html; charset=utf-8',
-    ':status': 200,
-  });
+server.on('aborted', () => {
+  console.error(`> server was aborted!`);
+  process.exit(-3);
+});
 
-  stream.end('<h1>Hello World: <b>from local app</b></h1>');
-
-  stream.on('error', (fail) => {
-    console.error(`> Stream failed with ${fail}!`);
-    process.exit(-2);
-  });
-
-  stream.on('aborted', () => {
-    console.error(`> Stream was aborted!`);
-    process.exit(-3);
-  });
-
-  stream.on('timeout', () => {
-    console.error(`> Stream timed out!`);
-    process.exit(-4);
-  });
-
-  stream.on('end', () => {
-    console.log(`> Stream is done.`);
-    stream.close();
-  });
-
-  stream.on('close', () => {
-    console.log('> stream closed');
-    server.close();
-    process.kill(process.pid);
-  })
+server.on('timeout', () => {
+  console.error(`> server timed out!`);
+  process.exit(-4);
 });
 
 server.on('close', () => {
