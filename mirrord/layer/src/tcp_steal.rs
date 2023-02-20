@@ -208,7 +208,7 @@ impl TcpStealHandler {
         let _ = self.http_request_senders.remove(&connection_id);
     }
 
-    /// Remove the connection from all struct memebers, and return a message to notify the agent.
+    /// Remove the connection from all struct members, and return a message to notify the agent.
     fn app_closed_connection(&mut self, connection_id: ConnectionId) -> ClientMessage {
         self.remove_connection(connection_id);
         ClientMessage::TcpSteal(LayerTcpSteal::ConnectionUnsubscribe(connection_id))
