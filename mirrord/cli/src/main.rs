@@ -176,7 +176,7 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
         }
     }
 
-    let execution_info = MirrordExecution::start(&config, progress).await?;
+    let execution_info = MirrordExecution::start(&config, progress, None).await?;
 
     // Stop confusion with layer
     std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
@@ -313,7 +313,7 @@ async fn main() -> miette::Result<()> {
         Commands::Login(args) => login(args)?,
         Commands::Operator(args) => operator_command(*args).await?,
         Commands::ExtensionExec(args) => extension_exec(*args).await?,
-        Commands::InternalProxy => internal_proxy::proxy().await?,
+        Commands::InternalProxy(args) => internal_proxy::proxy(*args).await?,
     }
 
     Ok(())

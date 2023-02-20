@@ -675,14 +675,19 @@ async fn thread_loop(
             daemon_message = layer.rx.recv() => {
                 match daemon_message {
                     Some(message) => {
-                        if let Err(err) = layer.handle_daemon_message(
-                            message).await {
-                            if let LayerError::SendErrorConnection(_) = err {
+                        match layer.handle_daemon_message(message).await {
+                            Err(LayerError::SendErrorConnection(_)) => {
                                 info!("Connection closed by agent");
                                 continue;
                             }
-                            error!("Error handling daemon message: {:?}", err);
-                            break;
+                            Err(LayerError::AppClosedConnection(connection_unsubscribe)) => {
+                                layer.send(connection_unsubscribe).await.unwrap();
+                            }
+                            Err(err) => {
+                                error!("Error handling daemon message: {:?}", err);
+                                break;
+                            }
+                            Ok(()) => {}
                         }
                     },
                     None => {
