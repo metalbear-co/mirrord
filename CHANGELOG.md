@@ -7,6 +7,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- mirrord now handles it when the local app closes a forwarded stolen tcp connection instead of exiting with an error.
+  Potential fix for [#1063](https://github.com/metalbear-co/mirrord/issues/1063).
+
 ### Changed
 
 - internal proxy - set different timeout for `mirrord exec` and running from extension

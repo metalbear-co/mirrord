@@ -166,6 +166,9 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Agent closed connection with error: {0}")]
     AgentErrorClosed(String),
+
+    #[error("mirrord-layer: local app closed the connection with mirrord.")]
+    AppClosedConnection(ClientMessage),
 }
 
 // Cannot have a generic `From<T>` implementation for this error, so explicitly implemented here.
