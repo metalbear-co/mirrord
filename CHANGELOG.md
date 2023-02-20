@@ -9,6 +9,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 
+- internal proxy - set different timeout for `mirrord exec` and running from extension
+  fixing race conditions when running from IntelliJ/VSCode.
 - Changed `with_span_events` from `FmtSpan::Active` to `FmtSpan::NEW | FmtSpan::CLOSE`.
   Practically this means we will have less logs on enter/exit to span and only when it's first created
   and when it's closed.
