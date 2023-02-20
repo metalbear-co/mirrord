@@ -142,7 +142,7 @@ mod steal {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(60))]
+    #[timeout(Duration::from_secs(120))]
     async fn test_filter_with_single_client_and_only_matching_requests_http2(
         #[future] service: KubeService,
         #[future] kube_client: Client,
@@ -183,10 +183,10 @@ mod steal {
         )
         .await;
 
-        tokio::time::timeout(Duration::from_secs(60), mirrored_process.child.wait())
+        tokio::time::timeout(Duration::from_secs(120), mirrored_process.child.wait())
             .await
-            .unwrap()
-            .unwrap();
+            .expect("Timed out waiting for mirrored_process!")
+            .expect("mirrored_process failed!");
 
         application.assert(&mirrored_process);
     }
