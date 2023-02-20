@@ -37,7 +37,7 @@ data class MirrordExecution(
  */
 object MirrordApi {
     private const val cliBinary = "mirrord"
-    private val logger = Logger.getInstance("mirrord")
+    private val logger = MirrordLogger.logger
     private fun cliPath(wslDistribution: WSLDistribution?): String {
         val path = MirrordPathManager.getBinary(cliBinary, true)!!
         wslDistribution?.let {
@@ -47,28 +47,35 @@ object MirrordApi {
     }
 
     fun listPods(namespace: String?, project: Project?, wslDistribution: WSLDistribution?): List<String> {
+        MirrordLogger.logger.debug("listing pods")
         var commandLine = GeneralCommandLine(cliPath(wslDistribution), "ls", "-o", "json")
         namespace?.let {
+            MirrordLogger.logger.debug("adding namespace to command line")
             commandLine.addParameter("-n")
             commandLine.addParameter(namespace)
         }
 
 
         wslDistribution?.let {
+            MirrordLogger.logger.debug("patching to use WSL")
             val wslOptions = WSLCommandLineOptions()
             wslOptions.isLaunchWithWslExe = true
             it.patchCommandLine(commandLine, project, wslOptions)
         }
 
+        MirrordLogger.logger.debug("creating command line and executing")
         val process = commandLine.toProcessBuilder()
             .redirectOutput(ProcessBuilder.Redirect.PIPE)
             .redirectError(ProcessBuilder.Redirect.PIPE)
             .start()
 
+        MirrordLogger.logger.debug("waiting for process to finish")
         process.waitFor(60, TimeUnit.SECONDS)
 
+        MirrordLogger.logger.debug("process wait finished, reading output")
         val data = process.inputStream.bufferedReader().readText();
         val gson = Gson();
+        MirrordLogger.logger.debug("parsing")
         return gson.fromJson(data, Array<String>::class.java).asList()
 
     }
@@ -104,7 +111,6 @@ object MirrordApi {
         val bufferedReader = process.inputStream.reader().buffered()
         val gson = Gson();
         for (line in bufferedReader.lines()) {
-            logger.info("mirrord output: %s".format(line))
             val message = gson.fromJson(line, Message::class.java)
             // See if it's the final message
             if (message.name == "mirrord preparing to launch"
