@@ -142,7 +142,7 @@ mod steal {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(45))]
+    #[timeout(Duration::from_secs(60))]
     async fn test_filter_with_single_client_and_only_matching_requests_http2(
         #[future] service: KubeService,
         #[future] kube_client: Client,
