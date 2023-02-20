@@ -34,7 +34,11 @@ pub(crate) struct MirrordExecution {
 }
 
 impl MirrordExecution {
-    pub(crate) async fn start<P>(config: &LayerConfig, progress: &P) -> Result<Self>
+    pub(crate) async fn start<P>(
+        config: &LayerConfig,
+        progress: &P,
+        timeout: Option<u64>,
+    ) -> Result<Self>
     where
         P: Progress + Send + Sync,
     {
@@ -105,10 +109,17 @@ impl MirrordExecution {
         let mut proxy_command =
             Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
 
+        // Set timeout when running from extension to be 30 seconds
+        // since it might need to compile, build until it runs the actual process
+        // and layer connects
         proxy_command
             .arg("intproxy")
             .stdout(std::process::Stdio::piped())
             .stdin(std::process::Stdio::null());
+
+        if let Some(timeout) = timeout {
+            proxy_command.arg("-t").arg(timeout.to_string());
+        }
 
         match &connect_info {
             AgentConnectInfo::DirectKubernetes(name, port) => {
