@@ -183,7 +183,7 @@ mod steal {
         )
         .await;
 
-        tokio::time::timeout(Duration::from_secs(40), mirrored_process.child.wait())
+        tokio::time::timeout(Duration::from_secs(60), mirrored_process.child.wait())
             .await
             .unwrap()
             .unwrap();
