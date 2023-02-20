@@ -32,7 +32,7 @@ use tokio::{
     time::{timeout, Duration},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, log::warn, trace};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -262,6 +262,10 @@ impl ClientConnectionHandler {
     /// Breaks upon receiver/sender drop.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn start(mut self, cancellation_token: CancellationToken) -> Result<()> {
+        // use to prevent closing when sniffer is not avilable
+        // while avoiding possible busy loop (infinite iteration of None)
+        let mut sniffer_available = true;
+
         loop {
             select! {
                 message = self.stream.next() => {
@@ -281,12 +285,12 @@ impl ClientConnectionHandler {
                         break;
                     }
                 },
-                message = self.tcp_sniffer_api.recv() => {
+                message = self.tcp_sniffer_api.recv(), if sniffer_available => {
                     if let Some(message) = message {
                         self.respond(DaemonMessage::Tcp(message)).await?;
                     } else {
-                        error!("tcp sniffer stopped?");
-                        break;
+                        sniffer_available = false;
+                        warn!("tcp sniffer stopped?");
                     }
                 },
                 message = self.tcp_stealer_api.recv() => {

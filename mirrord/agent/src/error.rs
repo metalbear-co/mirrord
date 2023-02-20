@@ -121,6 +121,13 @@ pub enum AgentError {
 
     #[error("Failed to encode a an HTTP response with error: `{0}`")]
     HttpEncoding(#[from] hyper::http::Error),
+
+    #[error(
+        r#"Couldn't send message to sniffer (mirror) api, sniffer probably not running. 
+        Possible reason can be node kernel version before 4.20
+        Check agent logs for errors and please report a bug if kernel version >=4.20"#
+    )]
+    SnifferApiError,
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;
