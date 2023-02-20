@@ -178,7 +178,7 @@ mod steal {
         headers.insert("x-filter", "yes".parse().unwrap());
         send_request(
             req_builder,
-            Some("<h1>Hello World: from local</h1>"),
+            Some("<h1>Hello World: <b>from local app</b></h1>"),
             headers.clone(),
         )
         .await;
