@@ -15,7 +15,7 @@ use rand::Rng;
 #[cfg(feature = "incluster")]
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tracing::{info, trace, warn};
+use tracing::{info, trace};
 
 use crate::{
     api::{
@@ -35,7 +35,11 @@ pub struct KubernetesAPI {
 
 impl KubernetesAPI {
     pub async fn create(config: &LayerConfig) -> Result<Self> {
-        let client = create_kube_api(config.accept_invalid_certificates, config.kubeconfig).await?;
+        let client = create_kube_api(
+            config.accept_invalid_certificates,
+            config.kubeconfig.clone(),
+        )
+        .await?;
 
         Ok(KubernetesAPI::new(
             client,
@@ -154,7 +158,7 @@ pub async fn create_kube_api<P>(
 where
     P: AsRef<Path>,
 {
-    let config = if let Some(kubeconfig) = kubeconfig {
+    let mut config = if let Some(kubeconfig) = kubeconfig {
         let parsed_kube_config = Kubeconfig::read_from(kubeconfig)?;
         Config::from_custom_kubeconfig(parsed_kube_config, &KubeConfigOptions::default()).await?
     } else {
