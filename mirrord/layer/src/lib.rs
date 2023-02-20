@@ -328,7 +328,7 @@ fn layer_start(config: LayerConfig) {
                     .with_writer(tracing_util::file_tracing_writer())
                     .with_ansi(false)
                     .with_thread_ids(true)
-                    .with_span_events(FmtSpan::ACTIVE),
+                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE),
             )
             .with(tracing_subscriber::EnvFilter::new("mirrord=trace"))
             .init();
@@ -343,7 +343,7 @@ fn layer_start(config: LayerConfig) {
             .with(
                 tracing_subscriber::fmt::layer()
                     .with_thread_ids(true)
-                    .with_span_events(FmtSpan::ACTIVE)
+                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
                     .compact()
                     .with_writer(std::io::stderr),
             )
@@ -678,14 +678,19 @@ async fn thread_loop(
             daemon_message = layer.rx.recv() => {
                 match daemon_message {
                     Some(message) => {
-                        if let Err(err) = layer.handle_daemon_message(
-                            message).await {
-                            if let LayerError::SendErrorConnection(_) = err {
+                        match layer.handle_daemon_message(message).await {
+                            Err(LayerError::SendErrorConnection(_)) => {
                                 info!("Connection closed by agent");
                                 continue;
                             }
-                            error!("Error handling daemon message: {:?}", err);
-                            break;
+                            Err(LayerError::AppClosedConnection(connection_unsubscribe)) => {
+                                layer.send(connection_unsubscribe).await.unwrap();
+                            }
+                            Err(err) => {
+                                error!("Error handling daemon message: {:?}", err);
+                                break;
+                            }
+                            Ok(()) => {}
                         }
                     },
                     None => {

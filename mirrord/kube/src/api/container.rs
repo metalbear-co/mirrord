@@ -182,6 +182,9 @@ impl ContainerApi for JobContainer {
                                 {
                                     "sidecar.istio.io/inject": "false",
                                     "linkerd.io/inject": "disabled"
+                                },
+                                "labels": {
+                                    "app": "mirrord"
                                 }
                             },
 

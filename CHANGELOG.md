@@ -9,7 +9,43 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 
+- mirrord now handles it when the local app closes a forwarded stolen tcp connection instead of exiting with an error.
+  Potential fix for [#1063](https://github.com/metalbear-co/mirrord/issues/1063).
+
+### Changed
+
+- layer: Don't print error when tcp socket faces error as it can be a normal flow.
+- internal proxy - set different timeout for `mirrord exec` and running from extension
+  fixing race conditions when running from IntelliJ/VSCode.
+- Changed `with_span_events` from `FmtSpan::Active` to `FmtSpan::NEW | FmtSpan::CLOSE`.
+  Practically this means we will have less logs on enter/exit to span and only when it's first created
+  and when it's closed.
+- JetBrains Plugin: Add debug logs for investigating user issues.
+- JetBrains compatability: set limit from 222 (2022.2.4) since 221 isn't supported by us.
+
+## 3.26.1
+
+### Fixed
+
+- VSCode Extension: Prevent double prompting of the user to select the target if not specified in config. See [#1080](https://github.com/metalbear-co/mirrord/issues/1080).
+
+### Changed
+
+- JetBrains enable support from 2021.3 (like we had in 3.14.3).
+
+## 3.26.0
+
+### Changed
+
+- mirrord-agent: localhost traffic (like healthprobes) won't be stolen by mirrord on meshed targets to allign behavior with non meshed targets. See [#1070](https://github.com/metalbear-co/mirrord/pull/1070)
+- Filter out agent pods from `mirrord ls`, for better IDE UX. Closes [#1045](https://github.com/metalbear-co/mirrord/issues/1045).
+- Not exiting on SIP-check fail. Instead, logging an error and letting the program fail as it would without mirrord.
+  See [#951](https://github.com/metalbear-co/mirrord/issues/951).
+
+### Fixed
+
 - Fix cache does not work on test-agent workflow. See [#251](https://github.com/metalbear-co/mirrord/issues/251).
+- CI: merge queue + branch protection issues
 
 ## 3.25.0
 

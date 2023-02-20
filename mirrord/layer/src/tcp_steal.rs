@@ -22,7 +22,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::{error, trace, warn};
+use tracing::{error, info, trace, warn};
 
 use crate::{
     error::LayerError,
@@ -136,25 +136,42 @@ impl TcpHandler for TcpStealHandler {
         Ok(())
     }
 
+    /// Forward incoming data from the agent to the local app.
+    /// Browser -> agent -> layer -> local-app
+    ///                           ^-- You are here.
+    /// # Errors
+    /// If the local connection with the app was closed, returns a
+    /// [`LayerError::AppClosedConnection`] error, which contains a message to send to the agent
+    /// to inform it of the close.
     #[tracing::instrument(level = "trace", skip(self), fields(data = data.connection_id))]
     async fn handle_new_data(&mut self, data: TcpData) -> Result<(), LayerError> {
-        // TODO: "remove -> op -> insert" pattern here, maybe we could improve the overlying
-        // abstraction to use something that has mutable access.
-        let mut connection = self
-            .write_streams
-            .remove(&data.connection_id)
-            .ok_or(LayerError::NoConnectionId(data.connection_id))?;
+        let connection = if let Some(conn) = self.write_streams.get_mut(&data.connection_id) {
+            conn
+        } else {
+            trace!(
+                "mirrord got new stolen incoming tcp data for a connection that is already closed: \
+                {:?}",
+                data.connection_id,
+            );
+            return Ok(());
+        };
 
         trace!(
             "handle_new_data -> writing {:#?} bytes to id {:#?}",
             data.bytes.len(),
             data.connection_id
         );
-        // TODO: Due to the above, if we fail here this connection is leaked (-agent won't be told
-        // that we just removed it).
-        connection.write_all(&data.bytes[..]).await?;
 
-        self.write_streams.insert(data.connection_id, connection);
+        // Returns AppClosedConnection Error with message to send to agent if this fails.
+        let _ = connection.write_all(&data.bytes[..]).await.map_err(|err| {
+            trace!(
+                "mirrord could not forward all the incoming data in connection id {}. \
+                    Got error: {:?}",
+                data.connection_id,
+                err
+            );
+            LayerError::AppClosedConnection(self.app_closed_connection(data.connection_id))
+        })?;
 
         Ok(())
     }
@@ -186,9 +203,7 @@ impl TcpHandler for TcpStealHandler {
         let TcpClose { connection_id } = close;
 
         // Dropping the connection -> Sender drops -> Receiver disconnects -> tcp_tunnel ends
-        let _ = self.read_streams.remove(&connection_id);
-        let _ = self.write_streams.remove(&connection_id);
-        let _ = self.http_request_senders.remove(&connection_id);
+        self.remove_connection(connection_id);
 
         Ok(())
     }
@@ -245,6 +260,20 @@ impl TcpStealHandler {
         }
     }
 
+    /// Remove a layer<->local-app connection.
+    /// If the connection is still open, it will be closed, by dropping its read and write streams.
+    fn remove_connection(&mut self, connection_id: ConnectionId) {
+        let _ = self.read_streams.remove(&connection_id);
+        let _ = self.write_streams.remove(&connection_id);
+        let _ = self.http_request_senders.remove(&connection_id);
+    }
+
+    /// Remove the connection from all struct members, and return a message to notify the agent.
+    fn app_closed_connection(&mut self, connection_id: ConnectionId) -> ClientMessage {
+        self.remove_connection(connection_id);
+        ClientMessage::TcpSteal(LayerTcpSteal::ConnectionUnsubscribe(connection_id))
+    }
+
     #[tracing::instrument(level = "trace", skip(self))]
     pub async fn next(&mut self) -> Option<ClientMessage> {
         let (connection_id, value) = self.read_streams.next().await?;
@@ -254,12 +283,12 @@ impl TcpStealHandler {
                 bytes: bytes.to_vec(),
             }))),
             Some(Err(err)) => {
-                error!("connection id {connection_id:?} read error: {err:?}");
-                None
+                info!("connection id {connection_id:?} read error: {err:?}");
+                Some(ClientMessage::TcpSteal(
+                    LayerTcpSteal::ConnectionUnsubscribe(connection_id),
+                ))
             }
-            None => Some(ClientMessage::TcpSteal(
-                LayerTcpSteal::ConnectionUnsubscribe(connection_id),
-            )),
+            None => Some(self.app_closed_connection(connection_id)),
         }
     }
 

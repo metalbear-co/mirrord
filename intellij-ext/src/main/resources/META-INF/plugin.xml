@@ -11,7 +11,7 @@
       Read more <a href="https://mirrord.dev/docs/overview/introduction/">here</a>.
     ]]></description>
 
-    <idea-version since-build="223"/>
+    <idea-version since-build="222"/>
 
     <depends>com.intellij.modules.lang</depends>
 

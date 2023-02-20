@@ -176,7 +176,7 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
         }
     }
 
-    let execution_info = MirrordExecution::start(&config, progress).await?;
+    let execution_info = MirrordExecution::start(&config, progress, None).await?;
 
     // Stop confusion with layer
     std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
@@ -211,7 +211,7 @@ async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<St
         .map_err(CliError::KubernetesApiFailed)?;
     let api: Api<Pod> = get_k8s_resource_api(&client, namespace);
     let pods = api
-        .list(&ListParams::default())
+        .list(&ListParams::default().labels("app!=mirrord"))
         .await
         .map_err(KubeApiError::from)
         .map_err(CliError::KubernetesApiFailed)?;
@@ -248,7 +248,7 @@ async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<St
 /// ]```
 async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
     let pods = get_kube_pods(args.namespace.as_deref()).await?;
-    let target_vector = pods
+    let mut target_vector = pods
         .iter()
         .flat_map(|(pod, containers)| {
             if containers.len() == 1 {
@@ -261,6 +261,9 @@ async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
             }
         })
         .collect::<Vec<String>>();
+
+    target_vector.sort();
+
     let json_obj = json!(target_vector);
     println!("{json_obj}");
     Ok(())
@@ -310,7 +313,7 @@ async fn main() -> miette::Result<()> {
         Commands::Login(args) => login(args)?,
         Commands::Operator(args) => operator_command(*args).await?,
         Commands::ExtensionExec(args) => extension_exec(*args).await?,
-        Commands::InternalProxy => internal_proxy::proxy().await?,
+        Commands::InternalProxy(args) => internal_proxy::proxy(*args).await?,
     }
 
     Ok(())

@@ -1,3 +1,6 @@
+use std::sync::LazyLock;
+
+use fancy_regex::Regex;
 use mirrord_protocol::Port;
 use nix::unistd::getgid;
 use rand::distributions::{Alphanumeric, DistString};
@@ -7,6 +10,10 @@ use tracing::warn;
 use crate::error::{AgentError, Result};
 
 pub(crate) static MIRRORD_IPTABLE_CHAIN_ENV: &str = "MIRRORD_IPTABLE_CHAIN_NAME";
+
+/// [`Regex`] used to select the `owner` rule from the list of `iptables` rules.
+static UID_LOOKUP_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"-m owner --uid-owner \d+").unwrap());
 
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait IPTables {
@@ -220,24 +227,41 @@ where
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum IPTableFormatter {
     Normal,
-    Mesh,
+    Mesh(String),
 }
 
 impl IPTableFormatter {
     const MESH_OUTPUTS: [&'static str; 2] = ["-j PROXY_INIT_OUTPUT", "-j ISTIO_OUTPUT"];
+    const MESH_NAMES: [&'static str; 2] = ["PROXY_INIT_OUTPUT", "ISTIO_OUTPUT"];
 
     #[tracing::instrument(level = "trace", skip_all)]
     pub(crate) fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Self> {
         let output = ipt.list_rules("OUTPUT")?;
 
-        if output.iter().any(|rule| {
+        if let Some(mesh_ipt_chain) = output.iter().find_map(|rule| {
             IPTableFormatter::MESH_OUTPUTS
                 .iter()
-                .any(|mesh_output| rule.contains(mesh_output))
+                .enumerate()
+                .find_map(|(index, mesh_output)| {
+                    rule.contains(mesh_output)
+                        .then_some(IPTableFormatter::MESH_NAMES[index])
+                })
         }) {
-            Ok(IPTableFormatter::Mesh)
+            // We extract --uid-owner value from the mesh's rules to get messages only from them
+            // and not other processes sendning messages from localhost like healthprobe for grpc.
+            // This to more closely match behavior with non meshed services
+            let filter = ipt
+                .list_rules(mesh_ipt_chain)?
+                .iter()
+                .find_map(|rule| UID_LOOKUP_REGEX.find(rule).ok().flatten())
+                .map(|m| m.as_str().to_owned());
+
+            Ok(IPTableFormatter::Mesh(
+                filter.unwrap_or_else(|| "-o lo".to_owned()),
+            ))
         } else {
             Ok(IPTableFormatter::Normal)
         }
@@ -246,18 +270,19 @@ impl IPTableFormatter {
     fn entrypoint(&self) -> &str {
         match self {
             IPTableFormatter::Normal => "PREROUTING",
-            IPTableFormatter::Mesh => "OUTPUT",
+            IPTableFormatter::Mesh(_) => "OUTPUT",
         }
     }
 
+    #[tracing::instrument(level = "trace", ret)]
     fn redirect_rule(&self, redirected_port: Port, target_port: Port) -> String {
         let redirect_rule =
             format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
 
         match self {
             IPTableFormatter::Normal => redirect_rule,
-            IPTableFormatter::Mesh => {
-                format!("-o lo {redirect_rule}")
+            IPTableFormatter::Mesh(filter) => {
+                format!("{filter} {redirect_rule}")
             }
         }
     }
@@ -265,7 +290,7 @@ impl IPTableFormatter {
     fn bypass_own_packets_rule(&self) -> Option<String> {
         match self {
             IPTableFormatter::Normal => None,
-            IPTableFormatter::Mesh => {
+            IPTableFormatter::Mesh(_) => {
                 let gid = getgid();
                 Some(format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))
             }
@@ -339,6 +364,14 @@ mod tests {
             .with(eq("OUTPUT"))
             .returning(|_| Ok(vec!["-j PROXY_INIT_OUTPUT".to_owned()]));
 
+        mock.expect_list_rules()
+            .with(eq("PROXY_INIT_OUTPUT"))
+            .returning(|_| Ok(vec![
+                "-N PROXY_INIT_OUTPUT".to_owned(),
+                "-A PROXY_INIT_OUTPUT -m owner --uid-owner 2102 -m comment --comment \"proxy-init/ignore-proxy-user-id/1676542558\" -j RETURN".to_owned(),
+                "-A PROXY_INIT_OUTPUT -o lo -m comment --comment \"proxy-init/ignore-loopback/1676542558\" -j RETURN".to_owned(),
+            ]));
+
         mock.expect_create_chain()
             .with(str::starts_with("MIRRORD_REDIRECT_"))
             .times(1)
@@ -357,7 +390,7 @@ mod tests {
         mock.expect_insert_rule()
             .with(
                 str::starts_with("MIRRORD_REDIRECT_"),
-                eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                eq("-m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(1),
             )
             .times(1)
@@ -371,7 +404,7 @@ mod tests {
         mock.expect_remove_rule()
             .with(
                 str::starts_with("MIRRORD_REDIRECT_"),
-                eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                eq("-m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
             .returning(|_, _| Ok(()));

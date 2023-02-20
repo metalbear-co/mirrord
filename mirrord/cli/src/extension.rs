@@ -30,7 +30,9 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
 
     let config = LayerConfig::from_env()?;
 
-    let mut execution_info = MirrordExecution::start(&config, &progress).await?;
+    // extension needs more timeout since it might need to build
+    // or run tasks before actually launching.
+    let mut execution_info = MirrordExecution::start(&config, &progress, Some(30)).await?;
     // We don't execute so set envs aren't passed, so we need to add config file and target to env.
     execution_info.environment.extend(env);
 
