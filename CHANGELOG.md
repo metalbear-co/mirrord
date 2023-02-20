@@ -9,8 +9,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Fixed
 
-- mirrord now handles it when the local app closes a forwarded stolen tcp connection instead of exiting with an error.
-  Potential fix for [#1063](https://github.com/metalbear-co/mirrord/issues/1063).
+- mirrord now handles it when the local app closes a forwarded stolen tcp connection instead of exiting with an error. Potential fix for [#1063](https://github.com/metalbear-co/mirrord/issues/1063).
+- missing kubeconfig doesn't fail extensions (it failed because it first tried to resolve the default then used custom one)
 
 ### Changed
 
@@ -22,6 +22,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   and when it's closed.
 - JetBrains Plugin: Add debug logs for investigating user issues.
 - JetBrains compatability: set limit from 222 (2022.2.4) since 221 isn't supported by us.
+- Make `kubeconfig` setting effective always by using `-f` in `mirrord ls`.
 - mirrord agent can now run without sniffer, will not be able to mirror but can still steal.
   this is to enable users who have older kernel (4.20>=) to use the steal feature.
 

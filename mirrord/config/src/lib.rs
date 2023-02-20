@@ -18,7 +18,7 @@ pub mod util;
 ///
 /// Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
 /// including if you only made documentation changes.
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use config::{ConfigError, MirrordConfig};
 use mirrord_config_derive::MirrordConfig;
@@ -131,7 +131,7 @@ pub struct LayerConfig {
 impl LayerConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
         if let Ok(path) = std::env::var("MIRRORD_CONFIG_FILE") {
-            LayerFileConfig::from_path(&PathBuf::from(path))?.generate_config()
+            LayerFileConfig::from_path(path)?.generate_config()
         } else {
             LayerFileConfig::default().generate_config()
         }
@@ -139,7 +139,11 @@ impl LayerConfig {
 }
 
 impl LayerFileConfig {
-    pub fn from_path(path: &Path) -> Result<Self, ConfigError> {
+    pub fn from_path<P>(path: P) -> Result<Self, ConfigError>
+    where
+        P: AsRef<Path>,
+    {
+        let path = path.as_ref();
         let file = std::fs::read(path)?;
 
         match path.extension().and_then(|os_val| os_val.to_str()) {

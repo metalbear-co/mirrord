@@ -1,6 +1,7 @@
 use std::{fs::File, path::PathBuf, time::Duration};
 
 use kube::Api;
+use mirrord_config::{config::MirrordConfig, LayerFileConfig};
 use mirrord_kube::{api::kubernetes::create_kube_api, error::KubeApiError};
 use mirrord_operator::{
     client::OperatorApiError,
@@ -64,14 +65,19 @@ async fn operator_setup(
     Ok(())
 }
 
-async fn operator_status() -> Result<()> {
+async fn operator_status(config: Option<String>) -> Result<()> {
     let progress = TaskProgress::new("Operator Status").fail_on_drop(true);
 
-    let status_api: Api<MirrordOperatorCrd> = Api::all(
-        create_kube_api(None)
-            .await
-            .map_err(CliError::KubernetesApiFailed)?,
-    );
+    let kube_api = if let Some(config_path) = config {
+        let config = LayerFileConfig::from_path(config_path)?.generate_config()?;
+        create_kube_api(config.accept_invalid_certificates, config.kubeconfig)
+    } else {
+        create_kube_api(false, None)
+    }
+    .await
+    .map_err(CliError::KubernetesApiFailed)?;
+
+    let status_api: Api<MirrordOperatorCrd> = Api::all(kube_api);
 
     let status_progress = progress.subtask("Fetching Status");
 
@@ -146,6 +152,6 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             namespace,
             license_key,
         } => operator_setup(accept_tos, file, namespace, license_key).await,
-        OperatorCommand::Status => operator_status().await,
+        OperatorCommand::Status { config_file } => operator_status(config_file).await,
     }
 }

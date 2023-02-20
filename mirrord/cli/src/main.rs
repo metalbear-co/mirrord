@@ -11,7 +11,7 @@ use extract::extract_library;
 use k8s_openapi::api::core::v1::Pod;
 use kube::{api::ListParams, Api};
 use mirrord_auth::AuthConfig;
-use mirrord_config::LayerConfig;
+use mirrord_config::{config::MirrordConfig, LayerConfig, LayerFileConfig};
 use mirrord_kube::{
     api::{container::SKIP_NAMES, get_k8s_resource_api, kubernetes::create_kube_api},
     error::KubeApiError,
@@ -120,6 +120,7 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 
     if args.accept_invalid_certificates {
         std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", "true");
+        warn!("Accepting invalid certificates");
     }
 
     if args.ephemeral_container {
@@ -205,11 +206,15 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 
 /// Returns a list of (pod name, [container names]) pairs.
 /// Filtering mesh side cars
-async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<String>>> {
-    let client = create_kube_api(None)
+async fn get_kube_pods(
+    namespace: Option<String>,
+    accept_invalid_certificates: bool,
+    kubeconfig: Option<String>,
+) -> Result<HashMap<String, Vec<String>>> {
+    let client = create_kube_api(accept_invalid_certificates, kubeconfig)
         .await
         .map_err(CliError::KubernetesApiFailed)?;
-    let api: Api<Pod> = get_k8s_resource_api(&client, namespace);
+    let api: Api<Pod> = get_k8s_resource_api(&client, namespace.as_deref());
     let pods = api
         .list(&ListParams::default().labels("app!=mirrord"))
         .await
@@ -247,7 +252,24 @@ async fn get_kube_pods(namespace: Option<&str>) -> Result<HashMap<String, Vec<St
 ///  "pod/py-serv-deployment-5c57fbdc98-pdbn4/container/py-serv",
 /// ]```
 async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
-    let pods = get_kube_pods(args.namespace.as_deref()).await?;
+    let (accept_invalid_certificates, kubeconfig, namespace) =
+        if let Some(config) = &args.config_file {
+            let layer_config = LayerFileConfig::from_path(config)?.generate_config()?;
+            (
+                layer_config.accept_invalid_certificates,
+                layer_config.kubeconfig,
+                layer_config.target.namespace,
+            )
+        } else {
+            (false, None, None)
+        };
+
+    let pods = get_kube_pods(
+        args.namespace.clone().or(namespace),
+        accept_invalid_certificates,
+        kubeconfig,
+    )
+    .await?;
     let mut target_vector = pods
         .iter()
         .flat_map(|(pod, containers)| {

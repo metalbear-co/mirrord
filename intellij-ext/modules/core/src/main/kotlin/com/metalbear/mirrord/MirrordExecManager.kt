@@ -17,9 +17,16 @@ object MirrordExecManager {
 
     private fun chooseTarget(wslDistribution: WSLDistribution?, project: Project): String? {
         MirrordLogger.logger.debug("choose target called")
+        val path = MirrordConfigAPI.getConfigPath(project);
+        val configPath = when(path.exists())
+        {
+            true -> path.toString()
+            false -> null
+        };
+
         val pods =
                 MirrordApi.listPods(
-                        MirrordConfigAPI.getNamespace(project),
+                        configPath,
                         project,
                         wslDistribution
                 )
