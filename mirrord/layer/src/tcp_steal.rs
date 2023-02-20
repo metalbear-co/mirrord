@@ -195,7 +195,9 @@ impl TcpStealHandler {
             }))),
             Some(Err(err)) => {
                 info!("connection id {connection_id:?} read error: {err:?}");
-                LayerTcpSteal::ConnectionUnsubscribe(connection_id)
+                Some(ClientMessage::TcpSteal(
+                    LayerTcpSteal::ConnectionUnsubscribe(connection_id),
+                ))
             }
             None => Some(ClientMessage::TcpSteal(
                 LayerTcpSteal::ConnectionUnsubscribe(connection_id),
