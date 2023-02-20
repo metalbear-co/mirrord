@@ -267,6 +267,10 @@ impl TcpSnifferApi {
             }
             LayerTcp::PortUnsubscribe(port) => self.port_unsubscribe(port).await,
         }
+        .map_err(AgentError::SnifferApiError)
+        // Translate all errors to a single error type
+        // so we can notify the user the sniffer api is unavailable.
+        // and steal might work for them.
     }
 }
 
