@@ -12,6 +12,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Changed `with_span_events` from `FmtSpan::Active` to `FmtSpan::NEW | FmtSpan::CLOSE`.
   Practically this means we will have less logs on enter/exit to span and only when it's first created
   and when it's closed.
+- JetBrains compatability: set limit from 222 (2022.2.4) since 221 isn't supported by us.
 
 ## 3.26.1
 
