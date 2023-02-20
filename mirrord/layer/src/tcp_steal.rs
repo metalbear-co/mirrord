@@ -45,6 +45,7 @@ struct ConnectionTask<HttpVersion> {
     http_version: HttpVersion,
 }
 
+#[tracing::instrument(level = "trace")]
 async fn handle_response(
     request: HttpRequest,
     response: Result<Response<Incoming>, hyper::Error>,

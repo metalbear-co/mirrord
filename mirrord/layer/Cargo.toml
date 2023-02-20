@@ -56,7 +56,7 @@ itertools = "0.10"
 os_info = "3"
 bytemuck = "1"
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
-http-body-util  = { workspace = true }
+http-body-util = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
@@ -65,8 +65,8 @@ null-terminated = "0.3"
 [dev-dependencies]
 k8s-openapi.workspace = true
 base64 = "0.13"
-http-body = "0.4"
-hyper = "0.14"
+http-body = { workspace = true }
+hyper = { workspace = true }
 rstest = "*"
 test-cdylib = "*"
 tower = "0.4"
