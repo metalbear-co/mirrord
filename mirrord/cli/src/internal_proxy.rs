@@ -29,11 +29,10 @@ use tokio::{
 };
 use tracing::{error, log::trace};
 
-use crate::error::{InternalProxyError, Result};
-
-/// Launch timeout until we get first connection.
-/// If layer doesn't connect in this time, we timeout and exit.
-const FIRST_CONNECTION_TIMEOUT: u64 = 5;
+use crate::{
+    config::InternalProxyArgs,
+    error::{InternalProxyError, Result},
+};
 
 /// Print the port for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.
@@ -94,7 +93,7 @@ async fn connection_task(
 
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
-pub(crate) async fn proxy() -> Result<()> {
+pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
     // Let it assign port for us then print it for the user.
     let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
         .await
@@ -108,13 +107,10 @@ pub(crate) async fn proxy() -> Result<()> {
     print_port(&listener)?;
 
     // wait for first connection `FIRST_CONNECTION_TIMEOUT` seconds, or timeout.
-    let (stream, _) = timeout(
-        Duration::from_secs(FIRST_CONNECTION_TIMEOUT),
-        listener.accept(),
-    )
-    .await
-    .map_err(|_| InternalProxyError::FirstConnectionTimeout)?
-    .map_err(InternalProxyError::AcceptError)?;
+    let (stream, _) = timeout(Duration::from_secs(args.timeout), listener.accept())
+        .await
+        .map_err(|_| InternalProxyError::FirstConnectionTimeout)?
+        .map_err(InternalProxyError::AcceptError)?;
 
     let mut active_connections = JoinSet::new();
 
