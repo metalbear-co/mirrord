@@ -27,7 +27,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::{error, trace, warn};
+use tracing::{error, info, trace, warn};
 
 use crate::{
     error::LayerError,
@@ -223,8 +223,10 @@ impl TcpStealHandler {
                 bytes: bytes.to_vec(),
             }))),
             Some(Err(err)) => {
-                error!("connection id {connection_id:?} read error: {err:?}");
-                None
+                info!("connection id {connection_id:?} read error: {err:?}");
+                Some(ClientMessage::TcpSteal(
+                    LayerTcpSteal::ConnectionUnsubscribe(connection_id),
+                ))
             }
             None => Some(self.app_closed_connection(connection_id)),
         }

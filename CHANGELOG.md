@@ -14,6 +14,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 
+- layer: Don't print error when tcp socket faces error as it can be a normal flow.
 - internal proxy - set different timeout for `mirrord exec` and running from extension
   fixing race conditions when running from IntelliJ/VSCode.
 - Changed `with_span_events` from `FmtSpan::Active` to `FmtSpan::NEW | FmtSpan::CLOSE`.
