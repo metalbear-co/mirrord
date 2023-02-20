@@ -1,3 +1,4 @@
+use std::path::Path;
 #[cfg(feature = "incluster")]
 use std::time::Duration;
 
@@ -34,7 +35,7 @@ pub struct KubernetesAPI {
 
 impl KubernetesAPI {
     pub async fn create(config: &LayerConfig) -> Result<Self> {
-        let client = create_kube_api(Some(config.clone())).await?;
+        let client = create_kube_api(config.accept_invalid_certificates, config.kubeconfig).await?;
 
         Ok(KubernetesAPI::new(
             client,
@@ -146,25 +147,19 @@ impl AgentManagment for KubernetesAPI {
     }
 }
 
-pub async fn create_kube_api(config: Option<LayerConfig>) -> Result<Client> {
-    let mut kube_config = Config::infer().await?;
-
-    if let Some(config) = config {
-        if let Some(kube_config_file) = config.kubeconfig {
-            let parsed_kube_config = Kubeconfig::read_from(kube_config_file)?;
-            kube_config =
-                Config::from_custom_kubeconfig(parsed_kube_config, &KubeConfigOptions::default())
-                    .await?;
-        }
-
-        if config.accept_invalid_certificates {
-            kube_config.accept_invalid_certs = true;
-            // Only warn the first time connecting to the agent, not on child processes.
-            if config.connect_agent_name.is_none() {
-                warn!("Accepting invalid certificates");
-            }
-        }
-    }
-
-    Client::try_from(kube_config).map_err(KubeApiError::from)
+pub async fn create_kube_api<P>(
+    accept_invalid_certificates: bool,
+    kubeconfig: Option<P>,
+) -> Result<Client>
+where
+    P: AsRef<Path>,
+{
+    let config = if let Some(kubeconfig) = kubeconfig {
+        let parsed_kube_config = Kubeconfig::read_from(kubeconfig)?;
+        Config::from_custom_kubeconfig(parsed_kube_config, &KubeConfigOptions::default()).await?
+    } else {
+        Config::infer().await?
+    };
+    config.accept_invalid_certs = accept_invalid_certificates;
+    Client::try_from(config).map_err(KubeApiError::from)
 }

@@ -216,7 +216,11 @@ pub(super) enum OperatorCommand {
         #[arg(short, long, default_value = "mirrord")]
         namespace: OperatorNamespace,
     },
-    Status,
+    Status {
+        /// Specify config file to use
+        #[arg(short = 'f')]
+        pub config_file: Option<String>,
+    },
 }
 
 #[derive(ValueEnum, Clone, Debug)]
@@ -239,6 +243,10 @@ pub(super) struct ListTargetArgs {
     /// Specify the namespace to list targets in.
     #[arg(short = 'n', long = "namespace")]
     pub namespace: Option<String>,
+
+    /// Specify config file to use
+    #[arg(short = 'f')]
+    pub config_file: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -257,4 +265,8 @@ pub(super) struct InternalProxyArgs {
     /// If layer doesn't connect in this time, we timeout and exit.
     #[arg(short = 't', default_value_t = 2)]
     pub timeout: u64,
+
+    /// Specify config file to use
+    #[arg(short = 'f')]
+    pub config_file: Option<String>,
 }

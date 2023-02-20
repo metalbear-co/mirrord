@@ -104,11 +104,11 @@ class MirrordAPI {
 
 
 	/// Uses `mirrord ls` to get a list of all targets.
-	async listTargets(targetNamespace: string | null | undefined): Promise<string[]> {
+	async listTargets(configPath: string | null | undefined): Promise<string[]> {
 		const args = ['ls'];
 
-		if (targetNamespace) {
-			args.push('-n', targetNamespace);
+		if (configPath) {
+			args.push('-f', configPath);
 		}
 
 		let [stdout, stderr] = await this.exec(args);
@@ -330,18 +330,16 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		config.env ||= {};
 		let target = null;
 
+		let configPath = await configFilePath();
 		// If target wasn't specified in the config file, let user choose pod from dropdown         
 		if (!await isTargetInFile()) {
-			let targetNamespace = await parseNamespace();
-			let targets = await mirrordApi.listTargets(targetNamespace);
+			let targets = await mirrordApi.listTargets(configPath);
 			let targetName = await vscode.window.showQuickPick(targets, { placeHolder: 'Select a target path to mirror' });
 
 			if (targetName) {
 				target = targetName;	
 			}
 		}
-
-		let configPath = await configFilePath();
 
 		if (config.type === "go") {
 			config.env["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver;compile;go;asm;cgo;link;git";
