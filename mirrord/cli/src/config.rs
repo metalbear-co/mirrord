@@ -219,7 +219,7 @@ pub(super) enum OperatorCommand {
     Status {
         /// Specify config file to use
         #[arg(short = 'f')]
-        pub config_file: Option<String>,
+        config_file: Option<String>,
     },
 }
 

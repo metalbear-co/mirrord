@@ -214,7 +214,7 @@ async fn get_kube_pods(
     let client = create_kube_api(accept_invalid_certificates, kubeconfig)
         .await
         .map_err(CliError::KubernetesApiFailed)?;
-    let api: Api<Pod> = get_k8s_resource_api(&client, namespace);
+    let api: Api<Pod> = get_k8s_resource_api(&client, namespace.as_deref());
     let pods = api
         .list(&ListParams::default().labels("app!=mirrord"))
         .await
@@ -253,7 +253,7 @@ async fn get_kube_pods(
 /// ]```
 async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
     let (accept_invalid_certificates, kubeconfig, namespace) =
-        if let Some(config) = args.config_file {
+        if let Some(config) = &args.config_file {
             let layer_config = LayerFileConfig::from_path(config)?.generate_config()?;
             (
                 layer_config.accept_invalid_certificates,
@@ -265,7 +265,7 @@ async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
         };
 
     let pods = get_kube_pods(
-        args.namespace.as_deref().or(namespace),
+        args.namespace.clone().or(namespace),
         accept_invalid_certificates,
         kubeconfig,
     )

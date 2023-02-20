@@ -49,7 +49,11 @@ impl OperatorApi {
     async fn new(config: &LayerConfig) -> Result<Self> {
         let target_config = config.target.clone();
 
-        let client = create_kube_api(config.accept_invalid_certificates, config.kubeconfig.clone()).await?;
+        let client = create_kube_api(
+            config.accept_invalid_certificates,
+            config.kubeconfig.clone(),
+        )
+        .await?;
 
         let target_api: Api<TargetCrd> =
             get_k8s_resource_api(&client, target_config.namespace.as_deref());
