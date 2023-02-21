@@ -9,6 +9,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## 3.27.1
 
+### Changed
+
 - Update operator version
 
 ## 3.27.0
