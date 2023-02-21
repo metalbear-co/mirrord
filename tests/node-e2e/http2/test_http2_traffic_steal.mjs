@@ -16,6 +16,11 @@ server.on('request', (request, response) => {
     console.log(`> response is done.`);
     server.close();
   });
+
+  request.on('close', () => {
+    console.log(`> request is done.`);
+    server.close();
+  })
 });
 
 server.on('error', (fail) => {
