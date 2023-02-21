@@ -20,6 +20,7 @@ server.on('request', (request, response) => {
   request.on('close', () => {
     console.log(`> request is done.`);
     server.close();
+    process.exit();
   })
 });
 
