@@ -112,7 +112,10 @@ impl State {
                 if self.clients.len() == 1 {
                     // First client after no clients.
                     if self.should_pause {
-                        self.container.as_ref().unwrap().pause().await?;
+                        if let Err(err) = self.container.as_ref().unwrap().pause().await {
+                            warn!("Pausing Error {}", err);
+                        }
+
                         trace!("First client connected - pausing container.")
                     }
                 }
