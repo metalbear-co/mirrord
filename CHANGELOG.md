@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.27.1
+
+- Update operator version
+
 ## 3.27.0
 
 ### Fixed
