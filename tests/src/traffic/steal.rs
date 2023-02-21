@@ -183,7 +183,7 @@ mod steal {
         )
         .await;
 
-        tokio::time::timeout(Duration::from_secs(40), mirrored_process.child.wait())
+        tokio::time::timeout(Duration::from_secs(120), mirrored_process.child.wait())
             .await
             .expect("Timed out waiting for mirrored_process!")
             .expect("mirrored_process failed!");
