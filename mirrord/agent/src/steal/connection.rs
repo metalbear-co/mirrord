@@ -176,7 +176,10 @@ impl TcpConnectionStealer {
             select! {
                 command = self.command_rx.recv() => {
                     if let Some(command) = command {
-                        self.handle_command(command).await?;
+                        self.handle_command(command).await.map_err(| e | {
+                            error!("Failed handling command {e:#?}");
+                            e
+                        })?;
                     } else { break; }
                 },
                 // Accepts a connection that we're going to be stealing traffic from.
