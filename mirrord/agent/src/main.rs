@@ -303,8 +303,8 @@ impl ClientConnectionHandler {
                     if let Some(message) = message {
                         self.respond(DaemonMessage::Tcp(message)).await?;
                     } else {
-                        sniffer_available = false;
-                        warn!("tcp sniffer stopped?");
+                        error!("tcp sniffer stopped?");
+                        break;
                     }
                 },
                 message = self.tcp_stealer_api.recv() => {
