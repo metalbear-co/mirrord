@@ -1,3 +1,5 @@
+use std::time;
+
 use mirrord_protocol::{
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -128,6 +130,12 @@ pub enum AgentError {
         Check agent logs for errors and please report a bug if kernel version >=4.20"#
     )]
     SnifferApiError,
+
+    #[error("Timeout {0} reached before receiving confirmation for unpausing the container.")]
+    UnpauseTimeout(tokio::time::error::Elapsed),
+
+    #[error("Containerd event stream closed before awaited event.")]
+    LostContainerdConnection,
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;

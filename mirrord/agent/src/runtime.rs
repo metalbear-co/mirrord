@@ -2,22 +2,24 @@ use std::{
     fs::File,
     os::unix::io::{IntoRawFd, RawFd},
     path::PathBuf,
+    time::Duration,
 };
 
 use async_trait::async_trait;
 use bollard::{container::InspectContainerOptions, Docker, API_DEFAULT_VERSION};
 use containerd_client::{
     connect,
-    events::TaskPaused,
+    events::TaskResumed,
     services::v1::{
         events_client::EventsClient, tasks_client::TasksClient, Envelope, GetRequest,
         PauseTaskRequest, ResumeTaskRequest, SubscribeRequest,
     },
-    tonic::{transport::Channel, Request},
+    tonic::{transport::Channel, Request, Streaming},
     with_namespace,
 };
 use enum_dispatch::enum_dispatch;
 use nix::sched::setns;
+use tokio::time;
 use tracing::trace;
 
 use crate::error::{AgentError, Result};
@@ -29,6 +31,8 @@ const CONTAINERD_K3S_SOCK_PATH: &str = "/host/run/k3s/containerd/containerd.sock
 /// This is a containerd namespace, not a kubernetes namespace.
 /// All kubernetes-managed containerd containers run in the `k8s.io` containerd namespace.
 const DEFAULT_CONTAINERD_NAMESPACE: &str = "k8s.io";
+
+const UNPAUSE_WAIT_TIMEOUT: u64 = 120;
 
 #[async_trait]
 #[enum_dispatch]
@@ -159,6 +163,20 @@ impl ContainerdContainer {
         };
         Ok(client)
     }
+
+    async fn wait_for_upaused(envelope_stream: Streaming<Envelope>) -> Result<()> {
+        for envelope in envelope_stream {
+            if let Envelope {
+                event: Some(TaskResumed(id)),
+                ..
+            } = envelope && id == container_id
+            {
+                trace!("target container unpaused!");
+                return Ok(())
+            }
+        }
+        Err(AgentError::LostContainerdConnection)
+    }
 }
 
 #[async_trait]
@@ -197,12 +215,11 @@ impl ContainerRuntime for ContainerdContainer {
         let request = ResumeTaskRequest { container_id };
         let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
 
+        // TODO: would client.wait(...) work instead of waiting for the unpaused event?
         let mut events_client = Self::get_events_client().await?;
         let subscribe_request = SubscribeRequest {
-            filters: vec![
-                format!("namespace=={DEFAULT_CONTAINERD_NAMESPACE}"),
-                format!("container_id=={container_id}"), // TODO: is a valid field?
-            ],
+            // TODO: would be nice to also filter by event type and container id.
+            filters: vec![format!("namespace=={DEFAULT_CONTAINERD_NAMESPACE}")],
         };
         let envelope_stream = events_client
             .subscribe(with_namespace!(
@@ -214,15 +231,13 @@ impl ContainerRuntime for ContainerdContainer {
 
         client.resume(request).await?;
 
-        for envelope in envelope_stream {
-            if let Envelope {
-                event: Some(TaskPaused(id)),
-                ..
-            } = envelope && id == container_id
-            {
-                trace!("target container unpaused!")
-            }
-        }
+        time::timeout(
+            Duration::from_secs(UNPAUSE_WAIT_TIMEOUT),
+            ContainerdContainer::wait_for_upaused(envelope_stream),
+        )
+        .await
+        .map_err(|elapsed| AgentError::UnpauseTimeout(elapsed))??;
+
         Ok(())
     }
 }
