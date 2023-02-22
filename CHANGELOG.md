@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- CI: fix error caused by missing dir
+
 ## 3.28.0
 
 ### Changed

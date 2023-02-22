@@ -10,7 +10,7 @@ members = [
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.28.0"
+version = "3.28.1"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
