@@ -181,7 +181,7 @@ mod steal {
             headers.insert("x-filter", "yes".parse().unwrap());
             send_request(
                 get_builder,
-                Some("<h1>Hello World: <b>from local app</b></h1>"),
+                Some("<h1>Hello HTTP/2: <b>from local app</b></h1>"),
                 headers.clone(),
             )
             .await;
@@ -191,7 +191,7 @@ mod steal {
             headers.insert("x-filter", "yes".parse().unwrap());
             send_request(
                 delete_builder,
-                Some("<h1>Hello World: <b>from local app</b></h1>"),
+                Some("<h1>Hello HTTP/2: <b>from local app</b></h1>"),
                 headers.clone(),
             )
             .await;
