@@ -11,6 +11,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Change VSCode extension to package all binaries and select the correct one based on the platform. Fixes [#1101](https://github.com/metalbear-co/mirrord/issues/1101).
 
+### Fixed
+
+- agent: Make sniffer optional to support cases when it's not available and mirroring is not required.
+
 ## 3.27.1
 
 ### Changed
