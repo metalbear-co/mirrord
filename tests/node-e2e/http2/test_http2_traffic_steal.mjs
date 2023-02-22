@@ -10,18 +10,18 @@ server.on('request', (request, response) => {
     'content-type': 'text/html; charset=utf-8',
   });
 
-  response.end('<h1>Hello World: <b>from local app</b></h1>');
+  response.end('<h1>Hello HTTP/2: <b>from local app</b></h1>');
 
   response.on('finish', () => {
-    console.log(`> response is done.`);
-    server.close();
-  });
+    console.log(`> response is done ${JSON.stringify(response.getHeaders())}`);
+    
+    if (request.method == 'DELETE') {
+      console.log('> DELETE request, closing the app');
 
-  request.on('close', () => {
-    console.log(`> request is done.`);
-    server.close();
-    process.exit();
-  })
+      server.close();
+      process.exit();
+    }
+  });
 });
 
 server.on('error', (fail) => {
@@ -39,14 +39,4 @@ server.on('timeout', () => {
   process.exit(-4);
 });
 
-server.on('close', () => {
-  console.log('> server close');
-  process.exit();
-});
-
 server.listen(80);
-
-process.on('SIGTERM', () => {
-  console.log('> shutdown');
-  server.close();
-});

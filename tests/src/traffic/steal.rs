@@ -169,21 +169,33 @@ mod steal {
         mirrored_process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
 
         // Send a GET that should be matched and stolen.
-        let client = reqwest::Client::builder()
-            .http2_prior_knowledge()
-            .build()
-            .unwrap();
-        let req_builder = client.get(&url);
-        let mut headers = HeaderMap::default();
-        headers.insert("x-filter", "yes".parse().unwrap());
-        send_request(
-            req_builder,
-            Some("<h1>Hello World: <b>from local app</b></h1>"),
-            headers.clone(),
-        )
-        .await;
+        // And a DELETE that closes the app.
+        {
+            let client = reqwest::Client::builder()
+                .http2_prior_knowledge()
+                .build()
+                .unwrap();
 
-        drop(client);
+            let get_builder = client.get(&url);
+            let mut headers = HeaderMap::default();
+            headers.insert("x-filter", "yes".parse().unwrap());
+            send_request(
+                get_builder,
+                Some("<h1>Hello World: <b>from local app</b></h1>"),
+                headers.clone(),
+            )
+            .await;
+
+            let delete_builder = client.delete(&url);
+            let mut headers = HeaderMap::default();
+            headers.insert("x-filter", "yes".parse().unwrap());
+            send_request(
+                delete_builder,
+                Some("<h1>Hello World: <b>from local app</b></h1>"),
+                headers.clone(),
+            )
+            .await;
+        }
 
         tokio::time::timeout(Duration::from_secs(120), mirrored_process.child.wait())
             .await
