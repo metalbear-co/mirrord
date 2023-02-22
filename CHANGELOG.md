@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- agent: Make sniffer optional to support cases when it's not available and mirroring is not required.
+
 ## 3.27.1
 
 ### Changed
