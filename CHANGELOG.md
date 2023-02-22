@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.28.0
+
 ### Changed
 
 - Change VSCode extension to package all binaries and select the correct one based on the platform. Fixes [#1101](https://github.com/metalbear-co/mirrord/issues/1101).
