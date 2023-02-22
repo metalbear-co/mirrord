@@ -290,8 +290,9 @@ impl ClientConnectionHandler {
                         break;
                     }
                 },
-                // use to prevent closing when sniffer is not available
-                // while avoiding possible busy loop (infinite iteration of None)
+                // poll the sniffer API only when it's available
+                // exit when it stops (means something bad happened if
+                // it ran and then stopped)
                 message = async {
                     if let Some(ref mut sniffer_api) = self.tcp_sniffer_api {
                         sniffer_api.recv().await
