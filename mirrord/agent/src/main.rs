@@ -17,7 +17,6 @@ use dns::{dns_worker, DnsRequest};
 use error::{AgentError, Result};
 use file::FileManager;
 use futures::{
-    future::OptionFuture,
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
 };
