@@ -79,7 +79,7 @@ where
 }
 
 impl ConnectionTask<V2> {
-    #[tracing::instrument(level = "debug", skip(request_receiver, response_sender))]
+    #[tracing::instrument(level = "trace", skip(request_receiver, response_sender))]
     pub(super) async fn new(
         connect_to: SocketAddr,
         request_receiver: Receiver<HttpRequest>,
@@ -99,7 +99,7 @@ impl ConnectionTask<V2> {
         })
     }
 
-    #[tracing::instrument(level = "debug")]
+    #[tracing::instrument(level = "trace")]
     async fn connect_to_application(connect_to: SocketAddr) -> Result<V2, HttpForwarderError> {
         println!("connect_to_application");
         let http_request_sender = {
@@ -111,13 +111,9 @@ impl ConnectionTask<V2> {
                 .executor(TokioExecutor::default())
                 .handshake(target_stream)
                 .await?;
-            // let (http_request_sender, connection) = http2::handshake(target_stream).await?;
-            println!("{http_request_sender:#?}");
-            println!("{connection:#?}");
 
             // spawn a task to poll the connection.
             tokio::spawn(async move {
-                println!("connecting!");
                 if let Err(fail) = connection.await {
                     error!("Error in http connection with addr {connect_to:?}: {fail:?}");
                 }
@@ -132,7 +128,7 @@ impl ConnectionTask<V2> {
         })
     }
 
-    #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(super) async fn start(self) -> Result<(), HttpForwarderError> {
         let Self {
             mut request_receiver,

@@ -23,6 +23,7 @@ use crate::{
 pub(crate) struct HttpV2;
 
 impl HyperHandler<HttpV2> {
+    #[tracing::instrument(level = "trace")]
     pub(crate) fn new(
         filters: Arc<DashMap<ClientId, Regex>>,
         matched_tx: Sender<HandlerHttpRequest>,
@@ -49,7 +50,7 @@ impl Service<Request<Incoming>> for HyperHandler<HttpV2> {
 
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     fn call(&mut self, request: Request<Incoming>) -> Self::Future {
         self.request_id += 1;
 
@@ -66,6 +67,7 @@ impl Service<Request<Incoming>> for HyperHandler<HttpV2> {
 }
 
 impl HttpV2 {
+    #[tracing::instrument(level = "trace")]
     async fn unmatched_request(
         request: Request<Incoming>,
         original_destination: SocketAddr,
