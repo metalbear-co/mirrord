@@ -8,7 +8,11 @@ use async_trait::async_trait;
 use bollard::{container::InspectContainerOptions, Docker, API_DEFAULT_VERSION};
 use containerd_client::{
     connect,
-    services::v1::{tasks_client::TasksClient, GetRequest, PauseTaskRequest, ResumeTaskRequest},
+    events::TaskPaused,
+    services::v1::{
+        events_client::EventsClient, tasks_client::TasksClient, Envelope, GetRequest,
+        PauseTaskRequest, ResumeTaskRequest, SubscribeRequest,
+    },
     tonic::{transport::Channel, Request},
     with_namespace,
 };
@@ -22,6 +26,8 @@ const CONTAINERD_SOCK_PATH: &str = "/host/run/containerd/containerd.sock";
 const CONTAINERD_ALTERNATIVE_SOCK_PATH: &str = "/host/run/dockershim.sock";
 const CONTAINERD_K3S_SOCK_PATH: &str = "/host/run/k3s/containerd/containerd.sock";
 
+/// This is a containerd namespace, not a kubernetes namespace.
+/// All kubernetes-managed containerd containers run in the `k8s.io` containerd namespace.
 const DEFAULT_CONTAINERD_NAMESPACE: &str = "k8s.io";
 
 #[async_trait]
@@ -142,6 +148,17 @@ impl ContainerdContainer {
         };
         Ok(TasksClient::new(channel))
     }
+
+    async fn get_events_client() -> Result<EventsClient<Channel>> {
+        let client = match EventsClient::connect(CONTAINERD_SOCK_PATH).await {
+            Ok(channel) => channel,
+            Err(_) => match EventsClient::connect(CONTAINERD_ALTERNATIVE_SOCK_PATH).await {
+                Ok(channel) => channel,
+                Err(_) => EventsClient::connect(CONTAINERD_K3S_SOCK_PATH).await?,
+            },
+        };
+        Ok(client)
+    }
 }
 
 #[async_trait]
@@ -169,6 +186,7 @@ impl ContainerRuntime for ContainerdContainer {
         let container_id = self.container_id.to_string();
         let request = PauseTaskRequest { container_id };
         let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
+
         client.pause(request).await?;
         Ok(())
     }
@@ -178,7 +196,33 @@ impl ContainerRuntime for ContainerdContainer {
         let container_id = self.container_id.to_string();
         let request = ResumeTaskRequest { container_id };
         let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
+
+        let mut events_client = Self::get_events_client().await?;
+        let subscribe_request = SubscribeRequest {
+            filters: vec![
+                format!("namespace=={DEFAULT_CONTAINERD_NAMESPACE}"),
+                format!("container_id=={container_id}"), // TODO: is a valid field?
+            ],
+        };
+        let envelope_stream = events_client
+            .subscribe(with_namespace!(
+                subscribe_request,
+                DEFAULT_CONTAINERD_NAMESPACE
+            ))
+            .await?
+            .into_inner();
+
         client.resume(request).await?;
+
+        for envelope in envelope_stream {
+            if let Envelope {
+                event: Some(TaskPaused(id)),
+                ..
+            } = envelope && id == container_id
+            {
+                trace!("target container unpaused!")
+            }
+        }
         Ok(())
     }
 }
