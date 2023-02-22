@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.28.1
+
 ### Fixed
 
 - CI: fix error caused by missing dir
