@@ -164,15 +164,16 @@ impl ContainerdContainer {
         Ok(client)
     }
 
-    async fn wait_for_upaused(envelope_stream: Streaming<Envelope>) -> Result<()> {
+    async fn wait_for_upaused(&self, envelope_stream: Streaming<Envelope>) -> Result<()> {
+        let container_id_str = self.container_id.to_string();
         for envelope in envelope_stream {
             if let Envelope {
-                event: Some(TaskResumed(id)),
+                event: Some(TaskResumed { container_id }),
                 ..
-            } = envelope && id == container_id
+            } = envelope && container_id == container_id_str
             {
                 trace!("target container unpaused!");
-                return Ok(())
+                return Ok(());
             }
         }
         Err(AgentError::LostContainerdConnection)
@@ -233,7 +234,7 @@ impl ContainerRuntime for ContainerdContainer {
 
         time::timeout(
             Duration::from_secs(UNPAUSE_WAIT_TIMEOUT),
-            ContainerdContainer::wait_for_upaused(envelope_stream),
+            self.wait_for_upaused(envelope_stream),
         )
         .await
         .map_err(|elapsed| AgentError::UnpauseTimeout(elapsed))??;

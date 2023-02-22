@@ -1,5 +1,3 @@
-use std::time;
-
 use mirrord_protocol::{
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},

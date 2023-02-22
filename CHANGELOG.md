@@ -14,6 +14,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 
 - agent: Make sniffer optional to support cases when it's not available and mirroring is not required.
+- agent: when resuming ("unpausing") the target container, block on the container unpausing.
 
 ## 3.27.1
 
