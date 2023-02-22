@@ -397,7 +397,7 @@ impl ClientConnectionHandler {
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => {
                 if let Some(sniffer_api) = &mut self.tcp_sniffer_api {
-                    self.tcp_sniffer_api.handle_client_message(message).await?
+                    sniffer_api.handle_client_message(message).await?
                 } else {
                     warn!("received tcp sniffer request while not available");
                     return Err(AgentError::SnifferApiError);
