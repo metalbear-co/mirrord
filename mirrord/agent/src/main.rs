@@ -299,7 +299,7 @@ impl ClientConnectionHandler {
                     } else {
                         unreachable!()
                     }
-                }, if sniffer_api.is_some()=> {
+                }, if self.tcp_sniffer_api.is_some()=> {
                     if let Some(message) = message {
                         self.respond(DaemonMessage::Tcp(message)).await?;
                     } else {
