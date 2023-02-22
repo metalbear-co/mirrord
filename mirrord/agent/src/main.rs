@@ -281,6 +281,7 @@ impl ClientConnectionHandler {
                                 break;
                             }
                             Err(e) => {
+                                error!("Error handling client message: {e:?}");
                                 self.respond(DaemonMessage::Close(format!("{e:?}"))).await?;
                                 break;
                             }
