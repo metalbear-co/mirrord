@@ -1,4 +1,5 @@
 #![feature(stmt_expr_attributes)]
+
 mod env;
 mod file_ops;
 mod http;
@@ -24,13 +25,13 @@ mod utils {
     use futures_util::stream::{StreamExt, TryStreamExt};
     use k8s_openapi::api::{
         apps::v1::Deployment,
-        core::v1::{Pod, Service},
+        core::v1::{Namespace, Pod, Service},
     };
     use kube::{
         api::{DeleteParams, ListParams, PostParams},
         core::WatchEvent,
         runtime::wait::{await_condition, conditions::is_pod_running},
-        Api, Client, Config,
+        Api, Client, Config, Error,
     };
     use rand::{distributions::Alphanumeric, Rng};
     use reqwest::{RequestBuilder, StatusCode};
@@ -410,14 +411,15 @@ mod utils {
 
     impl ResourceGuard {
         /// Creates a resource and spawns a task to delete it when dropped
+        /// Returns Error if already exists.
         /// I'm not sure why I have to add the `static here but this works?
         pub async fn create<K: Debug + Clone + DeserializeOwned + Serialize + 'static>(
             api: &Api<K>,
             name: String,
             data: &K,
             delete_on_fail: bool,
-        ) -> ResourceGuard {
-            api.create(&PostParams::default(), data).await.unwrap();
+        ) -> Result<ResourceGuard, Error> {
+            api.create(&PostParams::default(), data).await?;
             let cancel_token = CancellationToken::new();
             let resource_token = cancel_token.clone();
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
@@ -434,12 +436,12 @@ mod utils {
                     .unwrap();
                 barrier.wait();
             });
-            Self {
+            Ok(Self {
                 guard: Some(resource_token.drop_guard()),
                 barrier: guard_barrier,
                 handle,
                 delete_on_fail,
-            }
+            })
         }
     }
 
@@ -457,12 +459,16 @@ mod utils {
         }
     }
 
+    /// A service deployed to the kubernetes cluster.
+    /// Service is meant as in "Microservice", not as in the Kubernetes resource called Service.
+    /// This includes a Deployment resource, a Service resource and optionally a Namespace.
     pub struct KubeService {
         pub name: String,
         pub namespace: String,
         pub target: String,
         _pod: ResourceGuard,
         _service: ResourceGuard,
+        _namespace: Option<ResourceGuard>,
     }
 
     /// randomize_name: should a random suffix be added to the end of resource names? e.g.
@@ -470,15 +476,16 @@ mod utils {
     /// delete_after_fail: delete resources even if the test fails.
     #[fixture]
     pub async fn service(
-        #[future] kube_client: Client,
         #[default("default")] namespace: &str,
         #[default("NodePort")] service_type: &str,
         #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
         #[default("http-echo")] service_name: &str,
         #[default(true)] randomize_name: bool,
         #[default(false)] delete_after_fail: bool,
+        #[future] kube_client: Client,
     ) -> KubeService {
         let kube_client = kube_client.await;
+        let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
         let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
         let service_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
         let name;
@@ -494,6 +501,30 @@ mod utils {
                 .delete(service_name, &DeleteParams::default())
                 .await;
             name = service_name.to_string();
+        }
+
+        let namespace_resource: Namespace = serde_json::from_value(json!({
+            "apiVersion": "v1",
+            "kind": "Namespace",
+            "metadata": {
+                "name": namespace,
+            },
+        }))
+        .unwrap();
+
+        // Create namespace if does not yet exist. If already exits, it will also not going to be
+        // deleted when the calling test is done.
+        let namespace_guard = ResourceGuard::create(
+            &namespace_api,
+            namespace.to_string(),
+            &namespace_resource,
+            delete_after_fail,
+        )
+        .await
+        .ok();
+
+        if namespace_guard.is_some() {
+            watch_resource_exists(&namespace_api, namespace).await;
         }
 
         let deployment: Deployment = serde_json::from_value(json!({
@@ -555,7 +586,8 @@ mod utils {
             &deployment,
             delete_after_fail,
         )
-        .await;
+        .await
+        .unwrap();
         watch_resource_exists(&deployment_api, &name).await;
 
         let service: Service = serde_json::from_value(json!({
@@ -592,7 +624,8 @@ mod utils {
 
         let service_guard =
             ResourceGuard::create(&service_api, name.to_string(), &service, delete_after_fail)
-                .await;
+                .await
+                .unwrap();
         watch_resource_exists(&service_api, "default").await;
 
         let target = get_pod_instance(&kube_client, &name, namespace)
@@ -609,6 +642,7 @@ mod utils {
             target: format!("pod/{target}/container/{CONTAINER_NAME}"),
             _pod: pod_guard,
             _service: service_guard,
+            _namespace: namespace_guard,
         }
     }
 
@@ -618,13 +652,13 @@ mod utils {
     #[fixture]
     pub async fn udp_logger_service(#[future] kube_client: Client) -> KubeService {
         service(
-            kube_client,
             "default",
             "ClusterIP",
             "ghcr.io/metalbear-co/mirrord-node-udp-logger:latest",
             "udp-logger",
             true,
             false,
+            kube_client,
         )
         .await
     }
@@ -632,13 +666,13 @@ mod utils {
     #[fixture]
     pub async fn http_logger_service(#[future] kube_client: Client) -> KubeService {
         service(
-            kube_client,
             "default",
             "ClusterIP",
             "ghcr.io/metalbear-co/mirrord-http-logger:latest",
             "mirrord-tests-http-logger",
             false, // So that requester can reach logger by name.
             true,
+            kube_client,
         )
         .await
     }
@@ -646,7 +680,6 @@ mod utils {
     #[fixture]
     pub async fn http_log_requester_service(#[future] kube_client: Client) -> KubeService {
         service(
-            kube_client,
             "default",
             "ClusterIP",
             "ghcr.io/metalbear-co/mirrord-http-log-requester:latest",
@@ -655,6 +688,7 @@ mod utils {
             // so that another requester does not send requests while this one is paused.
             false,
             true, // Delete also on fail, cause this service constantly does work.
+            kube_client,
         )
         .await
     }
@@ -664,13 +698,13 @@ mod utils {
     #[fixture]
     pub async fn tcp_echo_service(#[future] kube_client: Client) -> KubeService {
         service(
-            kube_client,
             "default",
             "NodePort",
             "ghcr.io/metalbear-co/mirrord-tcp-echo:latest",
             "tcp-echo",
             true,
             false,
+            kube_client,
         )
         .await
     }
@@ -681,13 +715,13 @@ mod utils {
     #[fixture]
     pub async fn websocket_service(#[future] kube_client: Client) -> KubeService {
         service(
-            kube_client,
             "default",
             "NodePort",
             "ghcr.io/metalbear-co/mirrord-websocket:latest",
             "websocket",
             true,
             false,
+            kube_client,
         )
         .await
     }
@@ -697,13 +731,30 @@ mod utils {
     #[fixture]
     pub async fn hostname_service(#[future] kube_client: Client) -> KubeService {
         service(
-            kube_client,
             "default",
             "NodePort",
             "ghcr.io/metalbear-co/mirrord-pytest:latest",
             "hostname-echo",
             true,
             true,
+            kube_client,
+        )
+        .await
+    }
+
+    #[fixture]
+    pub async fn random_namespace_self_deleting_service(
+        #[future] kube_client: Client,
+    ) -> KubeService {
+        let namespace = format!("random-namespace-{}", random_string());
+        service(
+            &namespace,
+            "NodePort",
+            "ghcr.io/metalbear-co/mirrord-pytest:latest",
+            "pytest-echo",
+            true,
+            true,
+            kube_client,
         )
         .await
     }

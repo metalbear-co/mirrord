@@ -10,6 +10,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 
 - mirrord debug feature (for mirrord developers to debug mirrord): Cause the agent to exit early with an error.
+- mirrord E2E tests: support for custom namespaces.
 
 ### Fixed
 
