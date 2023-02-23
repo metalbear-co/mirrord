@@ -71,13 +71,13 @@ class MirrordAPI {
 			this.cliPath = path.join(debugPath, "mirrord");
 		} else {
 			if(process.platform === "darwin") { // macos binary is universal for all architectures
-				this.cliPath = path.join(context.extensionPath, 'mirrord', 'bin', process.platform, 'mirrord');
+				this.cliPath = path.join(context.extensionPath, 'bin', process.platform, 'mirrord');
 			} else if (process.platform === "linux") {
-				this.cliPath = path.join(context.extensionPath, 'mirrord', 'bin', process.platform, process.arch, 'mirrord');
+				this.cliPath = path.join(context.extensionPath, 'bin', process.platform, process.arch, 'mirrord');
 			} else if (vscode.extensions.getExtension('MetalBear.mirrord')?.extensionKind === vscode.ExtensionKind.Workspace) {
 				throw new Error("Unsupported platform: " + process.platform + " " + process.arch);
 			} else {
-				console.log("Running in WSL.");
+				console.log("Running in Windows.");
 				this.cliPath = '';
 				return;
 			}

@@ -7,6 +7,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.28.3
+
+### Fixed
+
+- VSCode Extension: Fix wrong CLI path
+
 ## 3.28.2
 
 ### Fixed
