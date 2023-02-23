@@ -204,9 +204,9 @@ jobs:
 
       - run: |
           mkdir -p vscode-ext/bin/linux/arm64
-          mkdir -p vscode-ext/bin/linux/x86-64
+          mkdir -p vscode-ext/bin/linux/x64
           mkdir -p vscode-ext/bin/darwin
-      - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord vscode-ext/bin/linux/x86-64/mirrord
+      - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord vscode-ext/bin/linux/x64/mirrord
       - run: cp /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord vscode-ext/bin/linux/arm64/mirrord
       - run: cp /tmp/artifacts/universal-apple-darwin/mirrord vscode-ext/bin/darwin/mirrord
       # Package a patched Delve with our VS Code extension. The patched version bypasses an issue where we can't be injected into platform binaries.
