@@ -78,6 +78,7 @@ class MirrordAPI {
 				throw new Error("Unsupported platform: " + process.platform + " " + process.arch);
 			} else {
 				console.log("Running in WSL.");
+				this.cliPath = '';
 				return;
 			}
 			fs.chmodSync(this.cliPath, 0o755);
