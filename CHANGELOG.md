@@ -7,6 +7,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.28.2
+
+### Fixed
+
+- Fix error in VSCode extension compilation
+
 ## 3.28.1
 
 ### Fixed
