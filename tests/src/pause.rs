@@ -5,13 +5,17 @@ mod pause {
     use std::time::Duration;
 
     use futures::StreamExt;
-    use k8s_openapi::api::core::v1::Pod;
-    use kube::{api::LogParams, Api, Client};
+    use k8s_openapi::api::{batch::v1::Job, core::v1::Pod};
+    use kube::{
+        api::{ListParams, LogParams},
+        runtime::wait::{await_condition, conditions::is_job_completed},
+        Api, Client, ResourceExt,
+    };
     use rstest::*;
 
     use crate::utils::{
-        get_next_log, http_log_requester_service, http_logger_service, kube_client, run_exec,
-        KubeService,
+        get_next_log, get_service_url, http_log_requester_service, http_logger_service,
+        kube_client, random_namespace_self_deleting_service, run_exec, KubeService,
     };
 
     /// http_logger_service is a service that logs strings from the uri of incoming http requests.
@@ -115,5 +119,61 @@ mod pause {
         // Verify that the deployed app resumes after the local app is done.
         let log_from_deployed_after_resume = get_next_log(&mut log_stream).await;
         assert_eq!(log_from_deployed_after_resume, hi_from_deployed_app);
+    }
+
+    /// Verify that when running mirrord with the pause feature, and the agent exits early due to an
+    /// error, that it unpauses the container before exiting.
+    /// Test Plan:
+    /// 1. Run mirrord with pause and agent error.
+    /// 2. Wait for the local child process to exit.
+    /// 3. Wait for the all agent jobs to complete.
+    /// 4. Verify the target pod is unpaused.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(60))]
+    pub async fn unpause_after_error(
+        #[future] random_namespace_self_deleting_service: KubeService,
+        #[future] kube_client: Client,
+    ) {
+        // Using a new random namespace so that we can find the right agent pod.
+        let service = random_namespace_self_deleting_service.await;
+        let kube_client = kube_client.await;
+        let jobs: Api<Job> = Api::namespaced(kube_client.clone(), &service.namespace);
+
+        println!("Running local app with mirrord.");
+        let mut process = run_exec(
+            // not specifying so grep waits on stdin.
+            vec!["grep", "nothing"],
+            &service.target,
+            Some(&service.namespace),
+            None,
+            Some(vec![
+                ("MIRRORD_PAUSE", "true"),
+                ("MIRRORD_AGENT_TEST_ERROR", "true"),
+                ("MIRRORD_AGENT_NAMESPACE", &service.namespace),
+            ]),
+        )
+        .await;
+
+        let res = process.child.wait().await.unwrap();
+        println!("mirrord done running.");
+        // Expecting the local process with mirrord to fail due to the agent disconnecting.
+        assert!(!res.success());
+
+        // Verify the agent pod was deleted before we verify that the target pod is unpaused.
+        let lp = ListParams::default().labels("app=mirrord");
+        let agent_jobs = jobs.clone().list(&lp).await.unwrap();
+        for job in agent_jobs.items {
+            println!("Found agent job. Verifying its completion before moving on.",);
+            await_condition(jobs.clone(), &job.name_any(), is_job_completed())
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        println!("Verified all agents completed.");
+
+        // Now verify the remote pod is unpaused after being paused and exiting early with an error.
+        let url = get_service_url(kube_client.clone(), &service).await;
+        assert!(reqwest::get(url).await.unwrap().status().is_success());
     }
 }
