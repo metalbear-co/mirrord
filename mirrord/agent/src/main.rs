@@ -17,6 +17,7 @@ use dns::{dns_worker, DnsRequest};
 use error::{AgentError, Result};
 use file::FileManager;
 use futures::{
+    executor,
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
 };
@@ -32,7 +33,7 @@ use tokio::{
     time::{timeout, Duration},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, log::warn, trace};
+use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -71,6 +72,23 @@ struct State {
     /// This is an option because it is acceptable not to pass a container runtime and id if not
     /// pausing. When those args are not passed, container is None.
     container: Option<Container>,
+}
+
+/// This is to make sure we don't leave the target container paused if the agent hits an error and
+/// exits early without removing all of its clients.
+impl Drop for State {
+    fn drop(&mut self) {
+        if self.should_pause && !self.no_clients_left() {
+            info!(
+                "Agent exiting without having removed all the clients. Unpausing target container."
+            );
+            if let Err(err) = executor::block_on(self.container.as_ref().unwrap().unpause()) {
+                error!(
+                    "Could not unpause target container while exiting early, got error: {err:?}"
+                );
+            }
+        }
+    }
 }
 
 impl State {
