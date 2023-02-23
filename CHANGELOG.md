@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- mirrord debug feature (for mirrord developers to debug mirrord): Cause the agent to exit early with an error.
+
 ### Fixed
 
 - Unpause the target container before exiting if the agent exits early on an error and the container is paused -

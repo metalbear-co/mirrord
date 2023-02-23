@@ -522,6 +522,10 @@ async fn start_agent() -> Result<()> {
         }
     }
 
+    if args.test_error {
+        return Err(AgentError::TestError);
+    }
+
     loop {
         select! {
             Ok((stream, addr)) = listener.accept() => {
