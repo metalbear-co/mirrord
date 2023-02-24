@@ -20,7 +20,7 @@ use tracing::{error, trace};
 use super::{
     error::HttpTrafficError,
     hyper_handler::{httpv1::HttpV1, httpv2::HttpV2, HyperHandler, RawHyperConnection},
-    DefaultReversibleStream, HttpVersionChecker,
+    DefaultReversibleStream, HttpVersion,
 };
 use crate::{steal::HandlerHttpRequest, util::ClientId};
 
@@ -93,11 +93,11 @@ pub(super) async fn filter_task(
     .await
     {
         Ok(mut reversible_stream) => {
-            match HttpVersionChecker::new(
+            match HttpVersion::new(
                 reversible_stream.get_header(),
                 &H2_PREFACE[..MINIMAL_HEADER_SIZE],
             ) {
-                HttpVersionChecker::V1 => {
+                HttpVersion::V1 => {
                     // Contains the upgraded interceptor connection, if any.
                     let (upgrade_tx, upgrade_rx) = oneshot::channel::<RawHyperConnection>();
 
@@ -149,7 +149,7 @@ pub(super) async fn filter_task(
                             Cannot report the closing of connection {connection_id}.");
                         }).map_err(From::from)
                 }
-                HttpVersionChecker::V2 => {
+                HttpVersion::V2 => {
                     // We have to keep the connection alive to handle a possible upgrade request
                     // manually.
                     http2::Builder::new(TokioExecutor::default())
@@ -173,7 +173,7 @@ pub(super) async fn filter_task(
                             Cannot report the closing of connection {connection_id}.");
                         }).map_err(From::from)
                 }
-                HttpVersionChecker::NotHttp => {
+                HttpVersion::NotHttp => {
                     trace!(
                         "Got a connection with unsupported protocol version, passing it through \
                         to its original destination."

@@ -20,7 +20,7 @@ pub(super) type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
 
 /// Identifies a message as being HTTP or not.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum HttpVersionChecker {
+enum HttpVersion {
     #[default]
     V1,
     V2,
@@ -30,7 +30,7 @@ enum HttpVersionChecker {
     NotHttp,
 }
 
-impl HttpVersionChecker {
+impl HttpVersion {
     /// Checks if `buffer` contains a valid HTTP/1.x request, or if it could be an HTTP/2 request by
     /// comparing it with a slice of [`H2_PREFACE`].
     #[tracing::instrument(level = "trace")]
