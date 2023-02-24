@@ -141,13 +141,7 @@ pub(super) async fn filter_task(
                         copy_bidirectional(&mut client_agent, &mut agent_remote).await?;
                     }
 
-                    connection_close_sender
-                        .send(connection_id)
-                        .await
-                        .inspect_err(|connection_id| {
-                            error!("Main TcpConnectionStealer dropped connection close channel while HTTP filter is still running. \
-                            Cannot report the closing of connection {connection_id}.");
-                        }).map_err(From::from)
+                    close_connection(connection_close_sender, connection_id).await
                 }
                 HttpVersion::V2 => {
                     // We have to keep the connection alive to handle a possible upgrade request
@@ -165,13 +159,7 @@ pub(super) async fn filter_task(
                         )
                         .await?;
 
-                    connection_close_sender
-                        .send(connection_id)
-                        .await
-                        .inspect_err(|connection_id| {
-                            error!("Main TcpConnectionStealer dropped connection close channel while HTTP2 filter is still running. \
-                            Cannot report the closing of connection {connection_id}.");
-                        }).map_err(From::from)
+                    close_connection(connection_close_sender, connection_id).await
                 }
                 HttpVersion::NotHttp => {
                     trace!(
@@ -222,4 +210,21 @@ pub(super) async fn filter_task(
             Err(read_error)
         }
     }
+}
+
+#[tracing::instrument(level = "trace", skip(sender))]
+async fn close_connection(
+    sender: Sender<ConnectionId>,
+    connection_id: ConnectionId,
+) -> Result<(), HttpTrafficError> {
+    sender
+        .send(connection_id)
+        .await
+        .inspect_err(|connection_id| {
+            error!(r"
+                Main TcpConnectionStealer dropped connection close channel while HTTP filter is still running.
+                Cannot report the closing of connection {connection_id}."
+            ); 
+        })
+        .map_err(From::from)
 }
