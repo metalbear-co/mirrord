@@ -53,7 +53,7 @@ impl Service<Request<Incoming>> for HyperHandler<HttpV1> {
 
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    // #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     fn call(&mut self, request: Request<Incoming>) -> Self::Future {
         self.request_id += 1;
 
@@ -105,7 +105,7 @@ impl HttpV1 {
     /// we move it from the original `Request` to a copied `Request`, the channel will never
     /// receive anything due it being in a different `Request` than the one we actually send to
     /// the hyper machine.
-    // #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = "trace")]
     async fn unmatched_request(
         request: Request<Incoming>,
         upgrade_tx: Option<oneshot::Sender<RawHyperConnection>>,
