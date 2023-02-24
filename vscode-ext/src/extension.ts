@@ -70,11 +70,20 @@ class MirrordAPI {
 			const debugPath = path.join(path.dirname(this.context.extensionPath), "target", "debug");
 			this.cliPath = path.join(debugPath, "mirrord");
 		} else {
-			this.cliPath = path.join(context.extensionPath, 'mirrord');
+			if(process.platform === "darwin") { // macos binary is universal for all architectures
+				this.cliPath = path.join(context.extensionPath, 'bin', process.platform, 'mirrord');
+			} else if (process.platform === "linux") {
+				this.cliPath = path.join(context.extensionPath, 'bin', process.platform, process.arch, 'mirrord');
+			} else if (vscode.extensions.getExtension('MetalBear.mirrord')?.extensionKind === vscode.ExtensionKind.Workspace) {
+				throw new Error("Unsupported platform: " + process.platform + " " + process.arch);
+			} else {
+				console.log("Running in Windows.");
+				this.cliPath = '';
+				return;
+			}
 			fs.chmodSync(this.cliPath, 0o755);
 		}
 	}
-
 
 	// Execute the mirrord cli with the given arguments, return stdout, stderr.
 	async exec(args: string[]): Promise<[string, string]> {
@@ -344,8 +353,9 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		if (config.type === "go") {
 			config.env["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver;compile;go;asm;cgo;link;git";
 			// use our custom delve to fix being loaded into debugserver
-			if (os.platform() === "darwin") {
-				config.dlvToolPath = path.join(globalContext.extensionPath, "dlv");
+			
+			if (process.platform === "darwin") {
+				config.dlvToolPath = path.join(globalContext.extensionPath, "bin", "darwin", "dlv-" + process.arch);
 			}
 		}
 

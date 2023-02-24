@@ -128,6 +128,9 @@ pub enum AgentError {
         Check agent logs for errors and please report a bug if kernel version >=4.20"#
     )]
     SnifferApiError,
+
+    #[error("Returning an error to test the agent's error cleanup. Should only ever be used when testing mirrord.")]
+    TestError,
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;

@@ -35,6 +35,15 @@ pub struct Args {
     /// Pause the target container while clients are connected.
     #[arg(short = 'p', long, default_value_t = false)]
     pub pause: bool,
+
+    /// Return an error after accepting the first client connection, in order to test agent error
+    /// cleanup.
+    ///
+    /// ## Internal
+    ///
+    /// This feature is used internally for debugging purposes only!
+    #[arg(long, default_value_t = false, hide = true)]
+    pub test_error: bool,
 }
 
 const DEFAULT_RUNTIME: &str = "containerd";

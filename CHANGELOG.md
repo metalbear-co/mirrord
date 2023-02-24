@@ -7,6 +7,51 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- mirrord debug feature (for mirrord developers to debug mirrord): Cause the agent to exit early with an error.
+- mirrord E2E tests: support for custom namespaces.
+
+### Fixed
+
+- Unpause the target container before exiting if the agent exits early on an error and the container is paused -
+   [#1111](https://github.com/metalbear-co/mirrord/issues/1111).
+
+## 3.28.4
+
+### Fixed
+
+- VSCode Extension: Fix wrong CLI path on Linux
+
+## 3.28.3
+
+### Fixed
+
+- VSCode Extension: Fix wrong CLI path
+
+## 3.28.2
+
+### Fixed
+
+- Fix error in VSCode extension compilation
+
+## 3.28.1
+
+### Fixed
+
+- CI: fix error caused by missing dir
+
+## 3.28.0
+
+### Changed
+
+- Change VSCode extension to package all binaries and select the correct one based on the platform. Fixes [#1101](https://github.com/metalbear-co/mirrord/issues/1101).
+- agent: add log to error when handling a client message fails.
+
+### Fixed
+
+- agent: Make sniffer optional to support cases when it's not available and mirroring is not required.
+
 ## 3.27.1
 
 ### Changed

@@ -17,6 +17,7 @@ use dns::{dns_worker, DnsRequest};
 use error::{AgentError, Result};
 use file::FileManager;
 use futures::{
+    executor,
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
 };
@@ -32,7 +33,7 @@ use tokio::{
     time::{timeout, Duration},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, log::warn, trace};
+use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -71,6 +72,23 @@ struct State {
     /// This is an option because it is acceptable not to pass a container runtime and id if not
     /// pausing. When those args are not passed, container is None.
     container: Option<Container>,
+}
+
+/// This is to make sure we don't leave the target container paused if the agent hits an error and
+/// exits early without removing all of its clients.
+impl Drop for State {
+    fn drop(&mut self) {
+        if self.should_pause && !self.no_clients_left() {
+            info!(
+                "Agent exiting without having removed all the clients. Unpausing target container."
+            );
+            if let Err(err) = executor::block_on(self.container.as_ref().unwrap().unpause()) {
+                error!(
+                    "Could not unpause target container while exiting early, got error: {err:?}"
+                );
+            }
+        }
+    }
 }
 
 impl State {
@@ -206,7 +224,7 @@ struct ClientConnectionHandler {
     file_manager: FileManager,
     stream: Framed<TcpStream, DaemonCodec>,
     pid: Option<u64>,
-    tcp_sniffer_api: TcpSnifferApi,
+    tcp_sniffer_api: Option<TcpSnifferApi>,
     tcp_stealer_api: TcpStealerApi,
     tcp_outgoing_api: TcpOutgoingApi,
     udp_outgoing_api: UdpOutgoingApi,
@@ -234,7 +252,16 @@ impl ClientConnectionHandler {
         let (tcp_sender, tcp_receiver) = mpsc::channel(CHANNEL_SIZE);
 
         let tcp_sniffer_api =
-            TcpSnifferApi::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await?;
+            TcpSnifferApi::new(id, sniffer_command_sender, tcp_receiver, tcp_sender)
+                .await
+                .map_err(|e| {
+                    warn!(
+                        "Failed to create TcpSnifferApi: {}, this could be due to kernel version.",
+                        e
+                    );
+                    e
+                })
+                .ok();
 
         let tcp_stealer_api =
             TcpStealerApi::new(id, stealer_command_sender, mpsc::channel(CHANNEL_SIZE)).await?;
@@ -262,10 +289,6 @@ impl ClientConnectionHandler {
     /// Breaks upon receiver/sender drop.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn start(mut self, cancellation_token: CancellationToken) -> Result<()> {
-        // use to prevent closing when sniffer is not avilable
-        // while avoiding possible busy loop (infinite iteration of None)
-        let mut sniffer_available = true;
-
         loop {
             select! {
                 message = self.stream.next() => {
@@ -276,6 +299,7 @@ impl ClientConnectionHandler {
                                 break;
                             }
                             Err(e) => {
+                                error!("Error handling client message: {e:?}");
                                 self.respond(DaemonMessage::Close(format!("{e:?}"))).await?;
                                 break;
                             }
@@ -285,12 +309,21 @@ impl ClientConnectionHandler {
                         break;
                     }
                 },
-                message = self.tcp_sniffer_api.recv(), if sniffer_available => {
+                // poll the sniffer API only when it's available
+                // exit when it stops (means something bad happened if
+                // it ran and then stopped)
+                message = async {
+                    if let Some(ref mut sniffer_api) = self.tcp_sniffer_api {
+                        sniffer_api.recv().await
+                    } else {
+                        unreachable!()
+                    }
+                }, if self.tcp_sniffer_api.is_some()=> {
                     if let Some(message) = message {
                         self.respond(DaemonMessage::Tcp(message)).await?;
                     } else {
-                        sniffer_available = false;
-                        warn!("tcp sniffer stopped?");
+                        error!("tcp sniffer stopped?");
+                        break;
                     }
                 },
                 message = self.tcp_stealer_api.recv() => {
@@ -382,7 +415,12 @@ impl ClientConnectionHandler {
             }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => {
-                self.tcp_sniffer_api.handle_client_message(message).await?
+                if let Some(sniffer_api) = &mut self.tcp_sniffer_api {
+                    sniffer_api.handle_client_message(message).await?
+                } else {
+                    warn!("received tcp sniffer request while not available");
+                    return Err(AgentError::SnifferApiError);
+                }
             }
             ClientMessage::TcpSteal(message) => {
                 self.tcp_stealer_api.handle_client_message(message).await?
@@ -482,6 +520,10 @@ async fn start_agent() -> Result<()> {
             error!("start -> Failed to accept first connection: timeout");
             return Err(err.into());
         }
+    }
+
+    if args.test_error {
+        return Err(AgentError::TestError);
     }
 
     loop {

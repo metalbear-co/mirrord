@@ -158,6 +158,11 @@ impl ContainerApi for JobContainer {
             agent_command_line.push("--pause".to_owned());
         }
 
+        #[cfg(debug_assertions)]
+        if agent.test_error {
+            agent_command_line.push("--test-error".to_owned());
+        }
+
         let flush_connections = agent.flush_connections.to_string();
 
         let agent_pod: Job = serde_json::from_value(
