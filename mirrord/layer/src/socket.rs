@@ -114,6 +114,7 @@ impl TryFrom<c_int> for SocketKind {
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct UserSocket {
+    id: i32,
     domain: c_int,
     type_: c_int,
     protocol: c_int,

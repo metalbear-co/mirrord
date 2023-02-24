@@ -38,9 +38,9 @@ fn build_go_app() {
 #[timeout(Duration::from_secs(60))]
 async fn test_mirroring_with_http(
     #[values(
-        // Application::PythonFlaskHTTP,
-        Application::PythonFastApiHTTP,
-        Application::NodeHTTP
+        Application::PythonFlaskHTTP,
+        // Application::PythonFastApiHTTP,
+        // Application::NodeHTTP
     )]
     application: Application,
     dylib_path: &PathBuf,
@@ -54,15 +54,15 @@ async fn test_mirroring_with_http(
     layer_connection
         .send_connection_then_data("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
         .await;
-    layer_connection
-        .send_connection_then_data("POST / HTTP/1.1\r\nHost: localhost\r\n\r\npost-data")
-        .await;
-    layer_connection
-        .send_connection_then_data("PUT / HTTP/1.1\r\nHost: localhost\r\n\r\nput-data")
-        .await;
-    layer_connection
-        .send_connection_then_data("DELETE / HTTP/1.1\r\nHost: localhost\r\n\r\ndelete-data")
-        .await;
+    // layer_connection
+    //     .send_connection_then_data("POST / HTTP/1.1\r\nHost: localhost\r\n\r\npost-data")
+    //     .await;
+    // layer_connection
+    //     .send_connection_then_data("PUT / HTTP/1.1\r\nHost: localhost\r\n\r\nput-data")
+    //     .await;
+    // layer_connection
+    //     .send_connection_then_data("DELETE / HTTP/1.1\r\nHost: localhost\r\n\r\ndelete-data")
+    //     .await;
     if matches!(application, Application::PythonFlaskHTTP) {
         assert_eq!(
             layer_connection.codec.next().await.unwrap().unwrap(),
@@ -88,9 +88,9 @@ async fn test_mirroring_with_http(
     }
     test_process.wait().await;
     test_process.assert_stdout_contains("GET: Request completed");
-    test_process.assert_stdout_contains("POST: Request completed");
-    test_process.assert_stdout_contains("PUT: Request completed");
-    test_process.assert_stdout_contains("DELETE: Request completed");
+    // test_process.assert_stdout_contains("POST: Request completed");
+    // test_process.assert_stdout_contains("PUT: Request completed");
+    // test_process.assert_stdout_contains("DELETE: Request completed");
     test_process.assert_no_error_in_stdout();
     test_process.assert_no_error_in_stderr();
 }

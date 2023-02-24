@@ -7,6 +7,7 @@ from os import getpid, kill
 from signal import SIGTERM
 
 from flask import Flask
+from flask import request
 
 log = logging.getLogger("werkzeug")
 log.disabled = True
@@ -47,6 +48,9 @@ def handle_request(method: HttpMethod):
 
 @app.route("/", methods=["GET"])
 def get():
+    server = request.server
+    print(f'{server}: Server value friends')
+    assert server == ("1.1.1.1", 80)
     return handle_request(HttpMethod.GET)
 
 

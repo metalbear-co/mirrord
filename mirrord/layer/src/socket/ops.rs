@@ -94,6 +94,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
     }?;
 
     let new_socket = UserSocket {
+        id: socket_fd,
         domain,
         type_,
         protocol,
@@ -462,28 +463,31 @@ pub(super) fn accept(
     address_len: *mut socklen_t,
     new_fd: RawFd,
 ) -> Detour<RawFd> {
-    let (domain, protocol, type_) = {
+    let (id, domain, protocol, type_) = {
         SOCKETS
             .lock()?
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
                 SocketState::Listening(_) => {
-                    Detour::Success((socket.domain, socket.protocol, socket.type_))
+                    Detour::Success((socket.id, socket.domain, socket.protocol, socket.type_))
                 }
                 _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
     };
 
+    debug!("sockfd {sockfd:#?} | id {id:#?}");
     let (local_address, remote_address) = {
-        CONNECTION_QUEUE
-            .lock()?
-            .get(&sockfd)
+        let mut connection_queue = CONNECTION_QUEUE.lock()?;
+        connection_queue
+            .get(&id)
+            .or_else(|| connection_queue.get(&sockfd))
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .map(|socket| (socket.local_address, socket.remote_address))?
     };
 
     let new_socket = UserSocket {
+        id: new_fd,
         domain,
         protocol,
         type_,
@@ -494,6 +498,8 @@ pub(super) fn accept(
         kind: type_.try_into()?,
     };
     fill_address(address, address_len, remote_address)?;
+
+    debug!("new_socket {new_socket:#?}");
 
     SOCKETS.lock()?.insert(new_fd, Arc::new(new_socket));
 
