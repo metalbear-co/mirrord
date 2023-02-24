@@ -123,7 +123,9 @@ mod pause {
 
     /// Verify that when running mirrord with the pause feature, and the agent exits early due to an
     /// error, that it unpauses the container before exiting.
+    ///
     /// Test Plan:
+    ///
     /// 1. Run mirrord with pause and agent error.
     /// 2. Wait for the local child process to exit.
     /// 3. Wait for the all agent jobs to complete.
