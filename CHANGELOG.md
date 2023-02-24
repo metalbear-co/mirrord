@@ -7,6 +7,16 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- mirrord debug feature (for mirrord developers to debug mirrord): Cause the agent to exit early with an error.
+- mirrord E2E tests: support for custom namespaces.
+
+### Fixed
+
+- Unpause the target container before exiting if the agent exits early on an error and the container is paused -
+   [#1111](https://github.com/metalbear-co/mirrord/issues/1111).
+
 ## 3.28.4
 
 ### Fixed
