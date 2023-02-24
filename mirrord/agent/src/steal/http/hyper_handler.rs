@@ -108,7 +108,8 @@ async fn prepare_response(
     Ok(Response::from_parts(parts, body.into()))
 }
 
-/// Sends a [`MatchedHttpRequest`] through `tx` to be handled by the stealer -> layer.
+/// Sends a [`MatchedHttpRequest`] through `tx` to be handled by the stealer -> layer,
+/// and then waits for the response and returns it once it's there.
 #[tracing::instrument(level = "trace", skip(matched_tx, response_rx))]
 async fn matched_request(
     request: HandlerHttpRequest,
