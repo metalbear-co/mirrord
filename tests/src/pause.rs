@@ -128,7 +128,7 @@ mod pause {
     ///
     /// 1. Run mirrord with pause and agent error.
     /// 2. Wait for the local child process to exit.
-    /// 3. Wait for the all agent jobs to complete.
+    /// 3. Wait for the agent jobs to complete.
     /// 4. Verify the target pod is unpaused.
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
