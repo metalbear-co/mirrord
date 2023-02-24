@@ -38,6 +38,10 @@ pub struct Args {
 
     /// Return an error after accepting the first client connection, in order to test agent error
     /// cleanup.
+    ///
+    /// ## Internal
+    ///
+    /// This feature is used internally for debugging purposes only!
     #[arg(long, default_value_t = false, hide = true)]
     pub test_error: bool,
 }
