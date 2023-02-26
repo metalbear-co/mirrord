@@ -59,8 +59,6 @@ object MirrordExecManager {
         MirrordLogger.logger.debug("target selection")
         var target: String? = null
         if (!MirrordConfigAPI.isTargetSet(project)) {
-            // not sure if that's the best way to do inner function in kotlin, but this works?
-            val targetFunc = { chooseTarget(wslDistribution, project)}
             val application = ApplicationManager.getApplication()
             MirrordLogger.logger.debug("target not selected, showing dialog")
             // In some cases, we're executing from a `ReadAction` context, which means we
@@ -71,7 +69,7 @@ object MirrordExecManager {
             // I have yet come to understand what exactly is going on. fmlv2
             if (application.isDispatchThread) {
                 MirrordLogger.logger.debug("Running from current thread")
-                target = targetFunc()
+                target = chooseTarget(wslDistribution, project)
             }
             else {
                 application.executeOnPooledThread {
