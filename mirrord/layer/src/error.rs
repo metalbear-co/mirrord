@@ -137,9 +137,6 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed to find port `{0}`!")]
     PortNotFound(u16),
 
-    #[error("mirrord-layer: Failed inserting listen, already exists!")]
-    ListenAlreadyExists,
-
     #[error("mirrord-layer: Unmatched pong!")]
     UnmatchedPong,
 
