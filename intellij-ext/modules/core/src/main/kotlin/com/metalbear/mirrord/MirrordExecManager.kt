@@ -9,7 +9,7 @@ import kotlinx.collections.immutable.toImmutableMap
 
 /**
  * Functions to be called when one of our entry points to the program is called - when process is
- * launched, when go entrypoint, etc It will check to see if it already occured for current run and
+ * launched, when go entrypoint, etc. It will check to see if it already occurred for current run and
  * if it did, it will do nothing
  */
 object MirrordExecManager {
@@ -17,12 +17,12 @@ object MirrordExecManager {
 
     private fun chooseTarget(wslDistribution: WSLDistribution?, project: Project): String? {
         MirrordLogger.logger.debug("choose target called")
-        val path = MirrordConfigAPI.getConfigPath(project);
+        val path = MirrordConfigAPI.getConfigPath(project)
         val configPath = when(path.exists())
         {
             true -> path.toString()
             false -> null
-        };
+        }
 
         val pods =
                 MirrordApi.listPods(
@@ -59,27 +59,37 @@ object MirrordExecManager {
         MirrordLogger.logger.debug("target selection")
         var target: String? = null
         if (!MirrordConfigAPI.isTargetSet(project)) {
+            // not sure if that's the best way to do inner function in kotlin, but this works?
+            val targetFunc = { chooseTarget(wslDistribution, project)}
+            val application = ApplicationManager.getApplication()
             MirrordLogger.logger.debug("target not selected, showing dialog")
             // In some cases, we're executing from a `ReadAction` context, which means we
             // can't block and wait for a WriteAction (such as invokeAndWait).
             // Executing it in a thread pool seems to fix, fml.
-            ApplicationManager.getApplication()
-                    .executeOnPooledThread {
-                        MirrordLogger.logger.debug("executing on pooled thread")
-                        ApplicationManager.getApplication().invokeAndWait() {
-                            MirrordLogger.logger.debug("choosing target from invoke")
-                            target = chooseTarget(wslDistribution, project)
-                        }
+            // Update: We found out that if we're on DispatchThread we can just
+            // run our function, and if we don't we get into a deadlock.
+            // I have yet come to understand what exactly is going on. fmlv2
+            if (application.isDispatchThread) {
+                MirrordLogger.logger.debug("Running from current thread")
+                target = targetFunc()
+            }
+            else {
+                application.executeOnPooledThread {
+                    MirrordLogger.logger.debug("executing on pooled thread")
+                    application.invokeAndWait {
+                        MirrordLogger.logger.debug("choosing target from invoke")
+                        target = chooseTarget(wslDistribution, project)
                     }
-                    .get()
-
+                }.get()
+            }
             if (target == null) {
+                MirrordLogger.logger.warn("mirrord loading canceled")
                 MirrordNotifier.progress("mirrord loading canceled.", project)
                 return null
             }
         }
 
-        var env = MirrordApi.exec(target, getConfigPath(project), project, wslDistribution)
+        val env = MirrordApi.exec(target, getConfigPath(project), project, wslDistribution)
 
         env["DEBUGGER_IGNORE_PORTS_PATCH"] = "45000-65535"
         return env.toImmutableMap()

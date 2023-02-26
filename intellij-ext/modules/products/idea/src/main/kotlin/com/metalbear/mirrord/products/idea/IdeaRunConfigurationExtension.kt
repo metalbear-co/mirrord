@@ -6,12 +6,11 @@ import com.intellij.execution.configurations.JavaParameters
 import com.intellij.execution.configurations.RunConfigurationBase
 import com.intellij.execution.configurations.RunnerSettings
 import com.intellij.execution.target.createEnvironmentRequest
-import com.intellij.execution.target.getEffectiveTargetName
-import com.intellij.execution.wsl.WslPath.Companion.getDistributionByWindowsUncPath
 import com.intellij.execution.wsl.target.WslTargetEnvironmentRequest
-import com.intellij.openapi.util.SystemInfo
+import com.intellij.openapi.externalSystem.service.execution.ExternalSystemRunConfiguration
 import com.metalbear.mirrord.MirrordExecManager
 import com.metalbear.mirrord.MirrordLogger
+
 
 class IdeaRunConfigurationExtension: RunConfigurationExtension() {
     override fun isApplicableFor(configuration: RunConfigurationBase<*>): Boolean {
@@ -39,14 +38,23 @@ class IdeaRunConfigurationExtension: RunConfigurationExtension() {
         val currentEnv = HashMap<String, String>()
         currentEnv.putAll(params.env)
 
+        val mirrordEnv = HashMap<String, String>()
         MirrordLogger.logger.debug("calling start")
         MirrordExecManager.start(wsl, project)?.let {
                 env ->
             for (entry in env.entries.iterator()) {
-                currentEnv[entry.key] =  entry.value
+                mirrordEnv[entry.key] =  entry.value
             }
         }
-        params.env = currentEnv
+
+        params.env = currentEnv + mirrordEnv
+
+        // Gradle support (and external system configuration)
+        if (configuration is ExternalSystemRunConfiguration) {
+            val ext = configuration as ExternalSystemRunConfiguration
+            val newEnv = ext.settings.env + mirrordEnv
+            ext.settings.env = newEnv
+        }
         MirrordLogger.logger.debug("setting env and finishing")
     }
     override fun <T : RunConfigurationBase<*>> updateJavaParameters(

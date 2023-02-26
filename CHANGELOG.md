@@ -16,6 +16,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Unpause the target container before exiting if the agent exits early on an error and the container is paused -
    [#1111](https://github.com/metalbear-co/mirrord/issues/1111).
+- intellij-plugin: fix issue where execution hangs when running using Gradle. Fixes [#1120](https://github.com/metalbear-co/mirrord/issues/1120).
+- intellij-plugin: fix issue where mirrord doesn't load into gradle, was found when fixing [#1120].
 
 ## 3.28.4
 
