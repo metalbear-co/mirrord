@@ -7,6 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.29.0
+
 ### Added
 
 - mirrord debug feature (for mirrord developers to debug mirrord): Cause the agent to exit early with an error.
