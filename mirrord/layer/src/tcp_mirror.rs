@@ -19,7 +19,7 @@ use tokio::{
     time::sleep,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     error::{LayerError, Result},
@@ -184,10 +184,13 @@ impl TcpHandler for TcpMirrorHandler {
     async fn handle_listen(&mut self, listen: Listen, tx: &Sender<ClientMessage>) -> Result<()> {
         let port = listen.requested_port;
 
-        self.ports_mut()
-            .insert(listen)
-            .then_some(())
-            .ok_or(LayerError::ListenAlreadyExists)?;
+        if !self.ports_mut().insert(listen) {
+            info!(
+                "Port {} already listening, might be on different address",
+                port
+            );
+            return Ok(());
+        }
 
         tx.send(ClientMessage::Tcp(LayerTcp::PortSubscribe(port)))
             .await
