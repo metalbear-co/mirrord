@@ -259,9 +259,11 @@ impl IPTableFormatter {
                 .find_map(|rule| UID_LOOKUP_REGEX.find(rule).ok().flatten())
                 .map(|m| format!("-o lo {}", m.as_str()));
 
-            Ok(IPTableFormatter::Mesh(
-                filter.unwrap_or_else(|| "-o lo".to_owned()),
-            ))
+            Ok(IPTableFormatter::Mesh(filter.unwrap_or_else(|| {
+                warn!("Couldn't find --uid-owner of meshed chain {mesh_ipt_chain:?} falling back on \"-o lo\" rule");
+
+                "-o lo".to_owned()
+            })))
         } else {
             Ok(IPTableFormatter::Normal)
         }
