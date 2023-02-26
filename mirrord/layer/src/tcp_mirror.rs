@@ -184,7 +184,7 @@ impl TcpHandler for TcpMirrorHandler {
     async fn handle_listen(&mut self, listen: Listen, tx: &Sender<ClientMessage>) -> Result<()> {
         let port = listen.requested_port;
 
-        if self.ports_mut().insert(listen) {
+        if !self.ports_mut().insert(listen) {
             info!(
                 "Port {} already listening, might be on different address",
                 port

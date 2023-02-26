@@ -164,7 +164,7 @@ impl TcpHandler for TcpStealHandler {
     ) -> Result<(), LayerError> {
         let port = listen.requested_port;
 
-        if self.ports_mut().insert(listen) {
+        if !self.ports_mut().insert(listen) {
             info!(
                 "Port {} already listening, might be on different address",
                 port
