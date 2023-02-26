@@ -19,6 +19,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - intellij-plugin: fix issue where execution hangs when running using Gradle. Fixes [#1120](https://github.com/metalbear-co/mirrord/issues/1120).
 - intellij-plugin: fix issue where mirrord doesn't load into gradle, was found when fixing [#1120].
 - mirrord-agent: reintroduce `-o lo` back to iptable rules to prevent issue where outinging messags could be intersepted by mirrord as incoming ones.
+- mirrord-layer: binding same port on different IPs leads to a crash due to `ListenAlreadyExists` error.
+  This is now ignored with a `info` message since we can't know if the IP/Port was already bound
+  or not. Created a follow up issue to complete implementation and error at application's bind.
 
 ## 3.28.4
 
