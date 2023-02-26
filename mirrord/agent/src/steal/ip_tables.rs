@@ -406,7 +406,7 @@ mod tests {
         mock.expect_remove_rule()
             .with(
                 str::starts_with("MIRRORD_REDIRECT_"),
-                eq("-m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                eq("-o lo -m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
             .returning(|_, _| Ok(()));
