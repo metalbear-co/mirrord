@@ -257,7 +257,7 @@ impl IPTableFormatter {
                 .list_rules(mesh_ipt_chain)?
                 .iter()
                 .find_map(|rule| UID_LOOKUP_REGEX.find(rule).ok().flatten())
-                .map(|m| m.as_str().to_owned());
+                .map(|m| format!("-o lo {}", m.as_str()));
 
             Ok(IPTableFormatter::Mesh(
                 filter.unwrap_or_else(|| "-o lo".to_owned()),
