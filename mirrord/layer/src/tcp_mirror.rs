@@ -187,7 +187,12 @@ impl TcpHandler for TcpMirrorHandler {
         self.ports_mut()
             .insert(listen)
             .then_some(())
-            .ok_or(LayerError::ListenAlreadyExists)?;
+            .ok_or_else(|| {
+                info!(
+                    "Port {} already listening, might be on different address",
+                    port
+                )
+            });
 
         tx.send(ClientMessage::Tcp(LayerTcp::PortSubscribe(port)))
             .await

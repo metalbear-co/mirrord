@@ -167,7 +167,12 @@ impl TcpHandler for TcpStealHandler {
         self.ports_mut()
             .insert(listen)
             .then_some(())
-            .ok_or(LayerError::ListenAlreadyExists)?;
+            .ok_or_else(|| {
+                info!(
+                    "Port {} already listening, might be on different address",
+                    port
+                )
+            });
 
         let steal_type = if self.http_ports.contains(&port) && let Some(filter_str) = self.http_filter.take() {
             FilteredHttp(port, Filter::new(filter_str)?)
