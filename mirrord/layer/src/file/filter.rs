@@ -310,7 +310,7 @@ mod tests {
     #[case(FsModeConfig::Local, "/pain/write.a", true, true)]
     #[case(FsModeConfig::Local, "/pain/local/test.a", true, true)]
     #[case(FsModeConfig::Local, "/opt/test.a", true, true)]
-    fn test_include_complex_configuration(
+    fn include_complex_configuration(
         #[case] mode: FsModeConfig,
         #[case] path: &str,
         #[case] write: bool,
@@ -357,7 +357,7 @@ mod tests {
         false,
         false
     )]
-    fn test_remote_read_only_set(
+    fn remote_read_only_set(
         #[case] mode: FsModeConfig,
         #[case] path: &str,
         #[case] write: bool,

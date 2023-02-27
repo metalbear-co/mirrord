@@ -11,17 +11,17 @@ mod env {
     #[cfg(target_os = "linux")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn test_bash_remote_env_vars(
+    pub async fn bash_remote_env_vars(
         #[future] service: KubeService,
         #[values(EnvApp::BashInclude, EnvApp::BashExclude, EnvApp::Bash)] application: EnvApp,
     ) {
-        test_remote_env_vars_works(service, application).await;
+        remote_env_vars_works(service, application).await;
     }
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
-    pub async fn test_remote_env_vars_works(
+    pub async fn remote_env_vars_works(
         #[future] service: KubeService,
         #[values(
             EnvApp::Go18,
