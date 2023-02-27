@@ -118,7 +118,7 @@ mod tests {
     use crate::config::MirrordConfig;
 
     #[rstest]
-    fn test_fs_config_default() {
+    fn fs_config_default() {
         let expect = FsConfig {
             mode: FsModeConfig::Read,
             ..Default::default()

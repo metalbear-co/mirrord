@@ -13,6 +13,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   remote port, for example you can listen on port 9999 locally and it will steal/mirror
   the remote 80 port if `port_mapping: {9999: 80}`. See [#1129](https://github.com/metalbear-co/mirrord/issues/1129)
 
+### Changed
+
+- Removed the prefix "test" from all test names - [#1065](https://github.com/metalbear-co/mirrord/issues/1065).
+
 ## 3.29.0
 
 ### Added

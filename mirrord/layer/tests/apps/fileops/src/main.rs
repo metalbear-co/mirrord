@@ -6,7 +6,7 @@ use std::{fs::OpenOptions, os::unix::prelude::*};
 
 static FILE_PATH: &str = "/tmp/test_file.txt";
 
-fn test_pwrite() {
+fn pwrite() {
     println!(">> test_pwrite");
 
     let file = OpenOptions::new()
@@ -27,7 +27,7 @@ fn test_pwrite() {
 }
 
 // Test that fclose flushes correctly, no need to run remotely for all we care
-fn test_ffunctions() {
+fn ffunctions() {
     println!(">> test_ffunctions");
 
     unsafe {
@@ -44,7 +44,7 @@ fn test_ffunctions() {
 // Rust compiles with newer libc on Linux that uses statx
 #[cfg(target_os = "macos")]
 // Test that lstat works remotely
-fn test_lstat() {
+fn lstat() {
     println!(">> test_lstat");
 
     let metadata = std::fs::symlink_metadata("/tmp/test_file.txt").unwrap();
@@ -57,7 +57,7 @@ fn test_lstat() {
 
 #[cfg(target_os = "macos")]
 // Test that stat works remotely
-fn test_stat() {
+fn stat() {
     println!(">> test_stat");
 
     let metadata = std::fs::metadata("/tmp/test_file.txt").unwrap();
@@ -69,12 +69,12 @@ fn test_stat() {
 }
 
 fn main() {
-    test_pwrite();
-    test_ffunctions();
+    pwrite();
+    ffunctions();
     #[cfg(target_os = "macos")]
     {
-        test_lstat();
-        test_stat();
+        lstat();
+        stat();
     }
     // let close message get called
     std::thread::sleep(std::time::Duration::from_millis(10));
