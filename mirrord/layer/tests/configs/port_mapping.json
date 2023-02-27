@@ -1,0 +1,9 @@
+{
+    "feature": {
+        "network": {
+            "incoming": {
+                "port_mapping": { "9999": 1234}
+            }
+        }
+    }
+}
