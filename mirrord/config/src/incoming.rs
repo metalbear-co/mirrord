@@ -128,6 +128,7 @@ pub struct IncomingAdvancedFileConfig {
     pub http_header_filter: Option<ToggleableConfig<http_filter::HttpHeaderFilterFileConfig>>,
 
     /// Mapping for local ports to remote ports.
+    ///
     /// This is useful when you want to mirror/steal a port to a different port on the remote
     /// machine. For example, your local process listens on port 9333 and the container listens
     /// on port 80. You'd use { 9333: 80 }
