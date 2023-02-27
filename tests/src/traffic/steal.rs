@@ -12,8 +12,9 @@ mod steal {
     use tokio_tungstenite::connect_async;
 
     use crate::utils::{
-        get_service_host_and_port, get_service_url, kube_client, send_request, send_requests,
-        service, tcp_echo_service, websocket_service, Agent, Application, KubeService,
+        get_service_host_and_port, get_service_url, http2_service, kube_client, send_request,
+        send_requests, service, tcp_echo_service, websocket_service, Agent, Application,
+        KubeService,
     };
 
     #[cfg(target_os = "linux")]
@@ -144,12 +145,12 @@ mod steal {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(45))]
     async fn test_filter_with_single_client_and_only_matching_requests_http2(
-        #[future] service: KubeService,
+        #[future] http2_service: KubeService,
         #[future] kube_client: Client,
         #[values(Application::NodeHTTP2)] application: Application,
         #[values(Agent::Job)] agent: Agent,
     ) {
-        let service = service.await;
+        let service = http2_service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut flags = vec!["--steal", "--fs-mode=local"];

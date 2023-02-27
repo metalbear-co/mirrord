@@ -9,7 +9,6 @@ mod traffic;
 
 #[cfg(test)]
 mod utils {
-
     use std::{
         collections::HashMap,
         fmt::Debug,
@@ -721,6 +720,20 @@ mod utils {
             "NodePort",
             "ghcr.io/metalbear-co/mirrord-websocket:latest",
             "websocket",
+            true,
+            false,
+            kube_client,
+        )
+        .await
+    }
+
+    #[fixture]
+    pub async fn http2_service(#[future] kube_client: Client) -> KubeService {
+        service(
+            "default",
+            "NodePort",
+            "ghcr.io/metalbear-co/mirrord-pytest:latest",
+            "http2-echo",
             true,
             false,
             kube_client,
