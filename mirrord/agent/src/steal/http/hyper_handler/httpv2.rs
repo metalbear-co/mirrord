@@ -7,10 +7,7 @@ use fancy_regex::Regex;
 use http_body_util::Full;
 use hyper::{body::Incoming, client, service::Service, Request, Response};
 use mirrord_protocol::{ConnectionId, Port, RequestId};
-use tokio::{
-    net::TcpStream,
-    sync::{mpsc::Sender, oneshot},
-};
+use tokio::{net::TcpStream, sync::mpsc::Sender};
 use tracing::error;
 
 use super::{header_matches, matched_request, prepare_response, HyperHandler};
@@ -123,13 +120,7 @@ impl HttpV2 {
                 request,
             };
 
-            let (response_tx, response_rx) = oneshot::channel();
-            let handler_request = HandlerHttpRequest {
-                request,
-                response_tx,
-            };
-
-            matched_request(handler_request, matched_tx, response_rx).await
+            matched_request(request, matched_tx).await
         } else {
             Self::unmatched_request(request, original_destination).await
         }

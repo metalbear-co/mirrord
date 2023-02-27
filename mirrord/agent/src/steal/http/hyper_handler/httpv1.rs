@@ -180,13 +180,7 @@ impl HttpV1 {
                 request,
             };
 
-            let (response_tx, response_rx) = oneshot::channel();
-            let handler_request = HandlerHttpRequest {
-                request,
-                response_tx,
-            };
-
-            matched_request(handler_request, matched_tx, response_rx).await
+            matched_request(request, matched_tx).await
         } else {
             Self::unmatched_request(request, None, original_destination).await
         }

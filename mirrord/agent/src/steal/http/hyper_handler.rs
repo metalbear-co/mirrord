@@ -14,11 +14,14 @@ use hyper::{
 use mirrord_protocol::{ConnectionId, Port, RequestId};
 use tokio::{
     net::TcpStream,
-    sync::{mpsc::Sender, oneshot::Receiver},
+    sync::{mpsc::Sender, oneshot},
 };
 
 use super::error::HttpTrafficError;
-use crate::{steal::HandlerHttpRequest, util::ClientId};
+use crate::{
+    steal::{HandlerHttpRequest, MatchedHttpRequest},
+    util::ClientId,
+};
 
 pub(super) mod httpv1;
 pub(super) mod httpv2;
@@ -110,12 +113,17 @@ async fn prepare_response(
 
 /// Sends a [`MatchedHttpRequest`] through `tx` to be handled by the stealer -> layer,
 /// and then waits for the response and returns it once it's there.
-#[tracing::instrument(level = "trace", skip(matched_tx, response_rx))]
+#[tracing::instrument(level = "trace", skip(matched_tx))]
 async fn matched_request(
-    request: HandlerHttpRequest,
+    request: MatchedHttpRequest,
     matched_tx: Sender<HandlerHttpRequest>,
-    response_rx: Receiver<Response<Full<Bytes>>>,
 ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
+    let (response_tx, response_rx) = oneshot::channel();
+    let request = HandlerHttpRequest {
+        request,
+        response_tx,
+    };
+
     matched_tx
         .send(request)
         .map_err(HttpTrafficError::from)
