@@ -16,10 +16,14 @@ use crate::{
     util::ClientId,
 };
 
+/// Handles HTTP/2 requests.
+///
+/// See [`HyperHandler`] for more details.
 #[derive(Debug)]
 pub(crate) struct HttpV2;
 
 impl HyperHandler<HttpV2> {
+    /// Creates a new [`HyperHandler`] specifically tuned to handle HTTP/2 requests.
     #[tracing::instrument(level = "trace")]
     pub(crate) fn new(
         filters: Arc<DashMap<ClientId, Regex>>,
@@ -64,6 +68,16 @@ impl Service<Request<Incoming>> for HyperHandler<HttpV2> {
 }
 
 impl HttpV2 {
+    /// Handles the case when no filter matches a header in the request.
+    ///
+    /// # Flow
+    ///
+    /// 1. Creates a [`http2::Connection`](hyper::client::conn::http2::Connection) to the
+    /// `original_destination`;
+    ///
+    /// 2. Sends the [`Request`] to it, and awaits a [`Response`];
+    ///
+    /// 3. Sends the [`HttpResponse`] back on the connected [`TcpStream`];
     #[tracing::instrument(level = "trace")]
     async fn unmatched_request(
         request: Request<Incoming>,
@@ -101,6 +115,11 @@ impl HttpV2 {
         .await
     }
 
+    /// Handles the incoming HTTP/1 [`Request`].
+    ///
+    /// Checks if this [`Request`] headers matches one of the user specified filters.
+    ///
+    /// Helper function due to the fact that [`Service::call`] is not an `async` function.
     #[tracing::instrument(level = "trace")]
     async fn handle_request(
         request: Request<Incoming>,

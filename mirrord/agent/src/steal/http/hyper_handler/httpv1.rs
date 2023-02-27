@@ -20,12 +20,19 @@ use crate::{
     util::ClientId,
 };
 
+/// Handles HTTP/1 requests (including upgrade requests, except HTTP/1 to HTTP/2).
+///
+/// See [`HyperHandler`] for more details.
 #[derive(Debug)]
 pub(crate) struct HttpV1 {
+    /// Upgrade channel with the upgraded interceptor connection.
+    ///
+    /// We use this channel to take control of the upgraded connection back from hyper.
     upgrade_tx: Option<oneshot::Sender<RawHyperConnection>>,
 }
 
 impl HyperHandler<HttpV1> {
+    /// Creates a new [`HyperHandler`] specifically tuned to handle HTTP/1 requests.
     pub(crate) fn new(
         filters: Arc<DashMap<ClientId, Regex>>,
         matched_tx: Sender<HandlerHttpRequest>,
@@ -157,6 +164,12 @@ impl HttpV1 {
         .await
     }
 
+    /// Handles the incoming HTTP/1 [`Request`].
+    ///
+    /// Checks if this [`Request`] contains an upgrade header, and if not, then checks if a header
+    /// matches one of the user specified filters.
+    ///
+    /// Helper function due to the fact that [`Service::call`] is not an `async` function.
     #[allow(clippy::too_many_arguments)]
     #[tracing::instrument(level = "trace")]
     async fn handle_request(
