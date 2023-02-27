@@ -30,7 +30,7 @@ use crate::{steal::HandlerHttpRequest, util::ClientId};
 const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
 
 /// Timeout value for how long we wait for a stream to contain enough bytes to assert which HTTP
-/// version we're dealing with. 
+/// version we're dealing with.
 const DEFAULT_HTTP_VERSION_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
 // TODO(alex): Import this from `hyper-util` when the crate is actually published.
@@ -231,7 +231,7 @@ async fn close_connection(
             error!(r"
                 Main TcpConnectionStealer dropped connection close channel while HTTP filter is still running.
                 Cannot report the closing of connection {connection_id}."
-            ); 
+            );
         })
         .map_err(From::from)
 }
