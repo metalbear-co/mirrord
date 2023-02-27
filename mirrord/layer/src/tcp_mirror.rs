@@ -1,6 +1,6 @@
 use std::{
     borrow::Borrow,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     time::Duration,
 };
@@ -115,6 +115,17 @@ impl Borrow<ConnectionId> for Connection {
 pub struct TcpMirrorHandler {
     ports: HashSet<Listen>,
     connections: HashSet<Connection>,
+    /// LocalPort:RemotePort mapping.
+    port_mapping: HashMap<u16, u16>,
+}
+
+impl TcpMirrorHandler {
+    pub fn new(port_mapping: HashMap<u16, u16>) -> Self {
+        Self {
+            port_mapping,
+            ..Default::default()
+        }
+    }
 }
 
 #[async_trait]
@@ -181,18 +192,29 @@ impl TcpHandler for TcpMirrorHandler {
     }
 
     #[tracing::instrument(level = "trace", skip(self, tx))]
-    async fn handle_listen(&mut self, listen: Listen, tx: &Sender<ClientMessage>) -> Result<()> {
-        let port = listen.requested_port;
+    async fn handle_listen(
+        &mut self,
+        mut listen: Listen,
+        tx: &Sender<ClientMessage>,
+    ) -> Result<()> {
+        let original_port = listen.requested_port;
+        // Check if there's user defined port mapping for this port
+        let request_port = self
+            .port_mapping
+            .get(&original_port)
+            .map(|r| {
+                trace!("mapping port {original_port} to {r}");
+                listen.requested_port = *r;
+                *r
+            })
+            .unwrap_or(original_port);
 
         if !self.ports_mut().insert(listen) {
-            info!(
-                "Port {} already listening, might be on different address",
-                port
-            );
+            info!("Port {request_port} already listening, might be on different address",);
             return Ok(());
         }
 
-        tx.send(ClientMessage::Tcp(LayerTcp::PortSubscribe(port)))
+        tx.send(ClientMessage::Tcp(LayerTcp::PortSubscribe(request_port)))
             .await
             .map_err(From::from)
     }

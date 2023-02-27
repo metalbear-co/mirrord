@@ -56,6 +56,9 @@ pub struct TcpStealHandler {
 
     /// These ports would be filtered with the `http_filter`, if it's Some.
     http_ports: Vec<u16>,
+
+    /// LocalPort:RemotePort mapping.
+    port_mapping: HashMap<u16, u16>,
 }
 
 #[async_trait]
@@ -159,23 +162,30 @@ impl TcpHandler for TcpStealHandler {
     #[tracing::instrument(level = "trace", skip(self, tx))]
     async fn handle_listen(
         &mut self,
-        listen: Listen,
+        mut listen: Listen,
         tx: &Sender<ClientMessage>,
     ) -> Result<(), LayerError> {
-        let port = listen.requested_port;
+        let original_port = listen.requested_port;
+        // Check if there's user defined port mapping for this port
+        let request_port = self
+            .port_mapping
+            .get(&original_port)
+            .map(|r| {
+                trace!("mapping port {original_port} to {r}");
+                listen.requested_port = *r;
+                *r
+            })
+            .unwrap_or(original_port);
 
         if !self.ports_mut().insert(listen) {
-            info!(
-                "Port {} already listening, might be on different address",
-                port
-            );
+            info!("Port {request_port} already listening, might be on different address");
             return Ok(());
         }
 
-        let steal_type = if self.http_ports.contains(&port) && let Some(filter_str) = self.http_filter.take() {
-            FilteredHttp(port, Filter::new(filter_str)?)
+        let steal_type = if self.http_ports.contains(&original_port) && let Some(filter_str) = self.http_filter.take() {
+            FilteredHttp(request_port, Filter::new(filter_str)?)
         } else {
-            All(port)
+            All(request_port)
         };
 
         tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
@@ -191,6 +201,7 @@ impl TcpStealHandler {
         http_filter: Option<String>,
         http_ports: Vec<u16>,
         http_response_sender: Sender<HttpResponse>,
+        port_mapping: HashMap<u16, u16>,
     ) -> Self {
         Self {
             ports: Default::default(),
@@ -200,6 +211,7 @@ impl TcpStealHandler {
             http_response_sender,
             http_filter,
             http_ports,
+            port_mapping,
         }
     }
 
