@@ -21,7 +21,7 @@ mod steal {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    async fn test_steal_http_traffic(
+    async fn steal_http_traffic(
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(
@@ -57,7 +57,7 @@ mod steal {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    async fn test_steal_http_traffic_with_flush_connections(
+    async fn steal_http_traffic_with_flush_connections(
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(
@@ -99,7 +99,7 @@ mod steal {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(45))]
-    async fn test_filter_with_single_client_and_only_matching_requests(
+    async fn filter_with_single_client_and_only_matching_requests(
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(
@@ -211,7 +211,7 @@ mod steal {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(45))]
-    async fn test_filter_with_single_client_and_some_matching_requests(
+    async fn filter_with_single_client_and_some_matching_requests(
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(
@@ -281,7 +281,7 @@ mod steal {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
-    async fn test_complete_passthrough(
+    async fn complete_passthrough(
         #[future] tcp_echo_service: KubeService,
         #[future] kube_client: Client,
         #[values(Agent::Job)] agent: Agent,
@@ -345,7 +345,7 @@ mod steal {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
-    async fn test_websocket_upgrade(
+    async fn websocket_upgrade(
         #[future] websocket_service: KubeService,
         #[future] kube_client: Client,
         #[values(Agent::Job)] agent: Agent,

@@ -17,7 +17,7 @@ use mirrord_sip::sip_patch;
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(20))]
-async fn test_tmp_dir_read_locally(dylib_path: &Path) {
+async fn tmp_dir_read_locally(dylib_path: &Path) {
     let application = Application::BashShebang;
     let executable = application.get_executable().await;
     let executable = sip_patch(&executable).unwrap().unwrap();

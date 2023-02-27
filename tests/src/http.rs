@@ -17,7 +17,7 @@ mod http {
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    async fn test_mirror_http_traffic(
+    async fn mirror_http_traffic(
         #[future]
         #[notrace]
         service: KubeService,
@@ -66,7 +66,7 @@ mod http {
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    async fn test_mirror_http_traffic(
+    async fn mirror_http_traffic(
         #[future]
         #[notrace]
         service: KubeService,

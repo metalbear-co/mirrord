@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- Removed the prefix "test" from all test names - [#1065](https://github.com/metalbear-co/mirrord/issues/1065).
+
 ## 3.29.0
 
 ### Added

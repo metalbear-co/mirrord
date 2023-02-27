@@ -27,7 +27,7 @@ fn get_rw_test_file_env_vars() -> Vec<(&'static str, &'static str)> {
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(20))]
-async fn test_self_open(dylib_path: &PathBuf) {
+async fn self_open(dylib_path: &PathBuf) {
     let application = Application::Go19SelfOpen;
 
     let (mut test_process, mut layer_connection) = application
@@ -46,7 +46,7 @@ async fn test_self_open(dylib_path: &PathBuf) {
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
-async fn test_pwrite(
+async fn pwrite(
     #[values(Application::RustFileOps)] application: Application,
     dylib_path: &PathBuf,
 ) {
@@ -169,7 +169,7 @@ async fn test_pwrite(
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
-async fn test_node_close(
+async fn node_close(
     #[values(Application::NodeFileOps)] application: Application,
     dylib_path: &PathBuf,
 ) {
@@ -230,7 +230,7 @@ async fn test_node_close(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
 #[cfg(target_os = "linux")]
-async fn test_go_stat(
+async fn go_stat(
     #[values(Application::Go19FileOps, Application::Go20FileOps)] application: Application,
     dylib_path: &PathBuf,
 ) {
@@ -290,7 +290,7 @@ async fn test_go_stat(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]
 #[cfg(target_os = "macos")]
-async fn test_go_dir(
+async fn go_dir(
     #[values(Application::Go19Dir, Application::Go20Dir)] application: Application,
     dylib_path: &PathBuf,
 ) {
@@ -413,7 +413,7 @@ async fn test_go_dir(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]
 #[cfg(target_os = "linux")]
-async fn test_go_dir_on_linux(
+async fn go_dir_on_linux(
     #[values(Application::Go19Dir, Application::Go20Dir)] application: Application,
     dylib_path: &PathBuf,
 ) {
@@ -508,7 +508,7 @@ async fn test_go_dir_on_linux(
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]
-async fn test_go_dir_bypass(
+async fn go_dir_bypass(
     #[values(Application::Go19DirBypass, Application::Go20DirBypass)] application: Application,
     dylib_path: &PathBuf,
 ) {
@@ -547,7 +547,7 @@ async fn test_go_dir_bypass(
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]
-async fn test_read_go(
+async fn read_go(
     #[values(Application::Go18Read, Application::Go19Read, Application::Go20Read)]
     application: Application,
     dylib_path: &PathBuf,
@@ -591,7 +591,7 @@ async fn test_read_go(
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]
-async fn test_write_go(
+async fn write_go(
     #[values(Application::Go18Write, Application::Go19Write, Application::Go20Write)]
     application: Application,
     dylib_path: &PathBuf,
@@ -620,7 +620,7 @@ async fn test_write_go(
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]
-async fn test_lseek_go(
+async fn lseek_go(
     #[values(Application::Go18LSeek, Application::Go19LSeek, Application::Go20LSeek)]
     application: Application,
     dylib_path: &PathBuf,
@@ -653,7 +653,7 @@ async fn test_lseek_go(
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(10))]
-async fn test_faccessat_go(
+async fn faccessat_go(
     #[values(
         Application::Go18FAccessAt,
         Application::Go19FAccessAt,
