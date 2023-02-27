@@ -66,20 +66,14 @@ mod tests {
     #[case("test", Some(vec!["foo".to_string()]))]
     #[case("test", None)]
     #[case("test", Some(vec!["foo".to_owned(), "bar".to_owned(), "baz".to_owned()]))]
-    fn test_should_load_true(
-        #[case] given_process: &str,
-        #[case] skip_processes: Option<Vec<String>>,
-    ) {
+    fn should_load_true(#[case] given_process: &str, #[case] skip_processes: Option<Vec<String>>) {
         assert!(should_load(given_process, skip_processes));
     }
 
     #[rstest]
     #[case("test", Some(vec!["test".to_string()]))]
     #[case("test", Some(vec!["test".to_owned(), "foo".to_owned(), "bar".to_owned(), "baz".to_owned()]))]
-    fn test_should_load_false(
-        #[case] given_process: &str,
-        #[case] skip_processes: Option<Vec<String>>,
-    ) {
+    fn should_load_false(#[case] given_process: &str, #[case] skip_processes: Option<Vec<String>>) {
         assert!(!should_load(given_process, skip_processes));
     }
 }
