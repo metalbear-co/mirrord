@@ -257,11 +257,13 @@ impl IPTableFormatter {
                 .list_rules(mesh_ipt_chain)?
                 .iter()
                 .find_map(|rule| UID_LOOKUP_REGEX.find(rule).ok().flatten())
-                .map(|m| m.as_str().to_owned());
+                .map(|m| format!("-o lo {}", m.as_str()));
 
-            Ok(IPTableFormatter::Mesh(
-                filter.unwrap_or_else(|| "-o lo".to_owned()),
-            ))
+            Ok(IPTableFormatter::Mesh(filter.unwrap_or_else(|| {
+                warn!("Couldn't find --uid-owner of meshed chain {mesh_ipt_chain:?} falling back on \"-o lo\" rule");
+
+                "-o lo".to_owned()
+            })))
         } else {
             Ok(IPTableFormatter::Normal)
         }
@@ -390,7 +392,7 @@ mod tests {
         mock.expect_insert_rule()
             .with(
                 str::starts_with("MIRRORD_REDIRECT_"),
-                eq("-m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                eq("-o lo -m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(1),
             )
             .times(1)
@@ -404,7 +406,7 @@ mod tests {
         mock.expect_remove_rule()
             .with(
                 str::starts_with("MIRRORD_REDIRECT_"),
-                eq("-m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                eq("-o lo -m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
             .returning(|_, _| Ok(()));
