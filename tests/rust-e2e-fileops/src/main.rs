@@ -28,7 +28,7 @@ fn create_test_file() {
     assert_eq!(amount, FILE_CONTENTS.len());
 }
 
-fn test_open_read_only() {
+fn open_read_only() {
     println!(">> test_open_read_only");
 
     OpenOptions::new()
@@ -37,7 +37,7 @@ fn test_open_read_only() {
         .expect("Open read-only!");
 }
 
-fn test_open_read_write() {
+fn open_read_write() {
     println!(">> test_open_read_write");
 
     OpenOptions::new()
@@ -47,7 +47,7 @@ fn test_open_read_write() {
         .expect("Open read/write!");
 }
 
-fn test_open_read_contents() {
+fn open_read_contents() {
     println!(">> test_open_read_contents");
 
     let mut file = OpenOptions::new()
@@ -63,7 +63,7 @@ fn test_open_read_contents() {
     assert_eq!(amount, FILE_CONTENTS.len());
 }
 
-fn test_fgets() {
+fn fgets() {
     println!(">> test_fgets");
 
     let file = OpenOptions::new()
@@ -85,7 +85,7 @@ fn test_fgets() {
     };
 }
 
-fn test_pread() {
+fn pread() {
     println!(">> test_pread");
 
     let file = OpenOptions::new()
@@ -107,7 +107,7 @@ fn test_pread() {
     };
 }
 
-fn test_pwrite() {
+fn pwrite() {
     println!(">> test_pwrite");
 
     let file = OpenOptions::new()
@@ -130,10 +130,10 @@ fn test_pwrite() {
 fn main() {
     create_test_file();
 
-    test_open_read_only();
-    test_open_read_write();
-    test_open_read_contents();
-    test_fgets();
-    test_pread();
-    test_pwrite();
+    open_read_only();
+    open_read_write();
+    open_read_contents();
+    fgets();
+    pread();
+    pwrite();
 }

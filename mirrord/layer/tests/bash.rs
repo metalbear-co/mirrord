@@ -25,7 +25,7 @@ use tokio_stream::StreamExt;
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
-async fn test_bash_script(dylib_path: &Path) {
+async fn bash_script(dylib_path: &Path) {
     let application = Application::EnvBashCat;
     let executable = application.get_executable().await; // Own it.
     println!("Using executable: {}", &executable);
