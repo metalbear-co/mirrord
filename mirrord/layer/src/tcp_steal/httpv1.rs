@@ -17,12 +17,20 @@ use tracing::error;
 use super::{handle_response, ConnectionTask};
 use crate::{detour::DetourGuard, tcp_steal::http_forwarding::HttpForwarderError};
 
-pub(super) struct V1 {
-    address: SocketAddr,
+/// Handles HTTP/1 requests.
+///
+/// See [`ConnectionTask`] for usage.
+pub(super) struct HttpV1 {
+    /// Address we're connecting to.
+    destination: SocketAddr,
+
+    /// Sends the request to `destination`, and gets back a response.
     sender: http1::SendRequest<Full<Bytes>>,
 }
 
-impl V1 {
+impl HttpV1 {
+    /// Sends the [`HttpRequest`] through `Self::sender`, converting the response into a
+    /// [`HttpResponse`].
     async fn send_http_request_to_application(
         &mut self,
         request: HttpRequest,
@@ -40,10 +48,12 @@ impl V1 {
 
         // Retry once if the connection was closed.
         if let Err(HttpForwarderError::ConnectionClosedTooSoon(request)) = response {
-            let Self { address, sender } =
-                ConnectionTask::<Self>::connect_to_application(self.address).await?;
+            let Self {
+                destination,
+                sender,
+            } = ConnectionTask::<Self>::connect_to_application(self.destination).await?;
 
-            self.address = address;
+            self.destination = destination;
             self.sender = sender;
 
             Ok(self
@@ -58,7 +68,10 @@ impl V1 {
     }
 }
 
-impl ConnectionTask<V1> {
+impl ConnectionTask<HttpV1> {
+    /// Creates a new [`ConnectionTask`] that handles [`HttpV1`] requests.
+    ///
+    /// Connects to the user's application with `Self::connect_to_application`.
     pub(super) async fn new(
         connect_to: SocketAddr,
         request_receiver: Receiver<HttpRequest>,
@@ -77,7 +90,11 @@ impl ConnectionTask<V1> {
         })
     }
 
-    async fn connect_to_application(connect_to: SocketAddr) -> Result<V1, HttpForwarderError> {
+    /// Creates a client HTTP/1 [`http1::Connection`] to the user's application.
+    ///
+    /// Requests that match the user specified filter will be sent through this connection to the
+    /// user.
+    async fn connect_to_application(connect_to: SocketAddr) -> Result<HttpV1, HttpForwarderError> {
         let target_stream = {
             let _ = DetourGuard::new();
             TcpStream::connect(connect_to).await?
@@ -92,12 +109,14 @@ impl ConnectionTask<V1> {
             }
         });
 
-        Ok(V1 {
-            address: connect_to,
+        Ok(HttpV1 {
+            destination: connect_to,
             sender: http_request_sender,
         })
     }
 
+    /// Starts the communication handling of `matched request -> user application -> response` by
+    /// "listening" on the `request_receiver`.
     pub(super) async fn start(self) -> Result<(), HttpForwarderError> {
         let Self {
             mut request_receiver,

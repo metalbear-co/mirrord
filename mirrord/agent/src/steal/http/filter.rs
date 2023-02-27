@@ -24,7 +24,13 @@ use super::{
 };
 use crate::{steal::HandlerHttpRequest, util::ClientId};
 
+/// Default start of an HTTP/2 request.
+///
+/// Used by [`HttpVersion`] to check if the connection should be treated as HTTP/2.
 const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
+
+/// Timeout value for how long we wait for a stream to contain enough bytes to assert which HTTP
+/// version we're dealing with. 
 const DEFAULT_HTTP_VERSION_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
 // TODO(alex): Import this from `hyper-util` when the crate is actually published.
@@ -212,6 +218,7 @@ pub(super) async fn filter_task(
     }
 }
 
+/// Notifies the [`filter_task`] that the connection with `connection_id` should be closed.
 #[tracing::instrument(level = "trace", skip(sender))]
 async fn close_connection(
     sender: Sender<ConnectionId>,

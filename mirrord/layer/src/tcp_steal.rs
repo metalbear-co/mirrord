@@ -27,7 +27,7 @@ use tracing::{error, info, trace, warn};
 use crate::{
     error::LayerError,
     tcp::{Listen, TcpHandler},
-    tcp_steal::{httpv1::V1, httpv2::V2},
+    tcp_steal::{httpv1::HttpV1, httpv2::HttpV2},
 };
 
 pub(crate) mod http_forwarding;
@@ -324,7 +324,7 @@ impl TcpStealHandler {
             trace!("HTTP client task started.");
             let connection_task_result = match http_version {
                 hyper::Version::HTTP_2 => {
-                    ConnectionTask::<V2>::new(
+                    ConnectionTask::<HttpV2>::new(
                         addr,
                         request_receiver,
                         response_sender,
@@ -338,7 +338,7 @@ impl TcpStealHandler {
                     todo!()
                 }
                 _http_v1 => {
-                    ConnectionTask::<V1>::new(
+                    ConnectionTask::<HttpV1>::new(
                         addr,
                         request_receiver,
                         response_sender,

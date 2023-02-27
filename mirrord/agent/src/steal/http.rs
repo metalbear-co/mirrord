@@ -16,6 +16,7 @@ pub(super) mod filter;
 mod hyper_handler;
 pub(super) mod reversible_stream;
 
+/// Handy alias due to [`ReversibleStream`] being generic, avoiding value mismatches.
 pub(super) type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
 
 /// Identifies a message as being HTTP or not.
