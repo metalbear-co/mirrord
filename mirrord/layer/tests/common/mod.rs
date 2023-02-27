@@ -684,7 +684,7 @@ impl Application {
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
             Application::PythonFastApiHTTP => vec![
-                String::from("--port=80"),
+                String::from("--port=9999"),
                 String::from("--host=0.0.0.0"),
                 String::from("--app-dir=tests/apps/"),
                 String::from("app_fastapi:app"),
@@ -742,8 +742,8 @@ impl Application {
             | Application::Go19FileOps
             | Application::Go20FileOps
             | Application::NodeHTTP
-            | Application::PythonFastApiHTTP
             | Application::PythonFlaskHTTP => 80,
+            Application::PythonFastApiHTTP => 1234,
             Application::PythonDontLoad
             | Application::RustFileOps
             | Application::EnvBashCat
@@ -794,7 +794,15 @@ impl Application {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap().to_string();
         println!("Listening for messages from the layer on {addr}");
-        let env = get_env(dylib_path.to_str().unwrap(), &addr, extra_env_vars);
+        let mut config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        config_path.push("tests/configs/port_mapping.json");
+        let config_path = config_path.to_str();
+        let env = get_env(
+            dylib_path.to_str().unwrap(),
+            &addr,
+            extra_env_vars,
+            config_path,
+        );
         let test_process = self.get_test_process(env).await;
 
         (test_process, listener)
@@ -858,12 +866,16 @@ pub fn get_env<'a>(
     dylib_path_str: &'a str,
     addr: &'a str,
     extra_vars: Vec<(&'a str, &'a str)>,
+    config: Option<&'a str>,
 ) -> HashMap<&'a str, &'a str> {
     let mut env = HashMap::new();
     env.insert("RUST_LOG", "warn,mirrord=trace");
     env.insert("MIRRORD_IMPERSONATED_TARGET", "pod/mock-target"); // Just pass some value.
     env.insert("MIRRORD_CONNECT_TCP", addr);
     env.insert("MIRRORD_REMOTE_DNS", "false");
+    if let Some(config) = config {
+        env.insert("MIRRORD_CONFIG_FILE", config);
+    }
     env.insert("DYLD_INSERT_LIBRARIES", dylib_path_str);
     env.insert("LD_PRELOAD", dylib_path_str);
     for (key, value) in extra_vars {

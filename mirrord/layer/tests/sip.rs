@@ -25,7 +25,7 @@ async fn test_tmp_dir_read_locally(dylib_path: &Path) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();
     println!("Listening for messages from the layer on {addr}");
-    let env = get_env(dylib_path.to_str().unwrap(), &addr, vec![]);
+    let env = get_env(dylib_path.to_str().unwrap(), &addr, vec![], None);
     let mut test_process =
         TestProcess::start_process(executable, application.get_args(), env).await;
 
