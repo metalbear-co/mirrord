@@ -98,7 +98,7 @@ use mirrord_protocol::{
     ClientMessage, DaemonMessage,
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
-use socket::SOCKETS;
+use socket::{SOCKETS, SOCKET_FDS, USER_SOCKETS};
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
 use tcp_steal::TcpStealHandler;
@@ -799,7 +799,12 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         .is_active();
 
     // Remove from sockets, or if not a socket, remove from files if file mode active
-    if SOCKETS.lock().unwrap().remove(&fd).is_none() && file_mode_active {
+    let mut socket_fds = SOCKET_FDS.lock().unwrap();
+    if let Some(socket_id) = socket_fds.remove(&fd) {
+        if socket_fds.values().find(|id| **id == socket_id).is_none() {
+            USER_SOCKETS.lock().unwrap().remove(socket_id);
+        }
+    } else if file_mode_active {
         // SOCKETS lock dropped, not holding it while locking OPEN_FILES.
         OPEN_FILES.lock().unwrap().remove(&fd);
     }

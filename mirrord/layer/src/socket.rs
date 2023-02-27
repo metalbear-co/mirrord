@@ -9,6 +9,7 @@ use std::{
 
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::Port;
+use slotmap::{new_key_type, DefaultKey, SecondaryMap, SlotMap};
 use socket2::SockAddr;
 use tracing::warn;
 use trust_dns_resolver::config::Protocol;
@@ -20,6 +21,16 @@ use crate::{
 
 pub(super) mod hooks;
 pub(crate) mod ops;
+
+new_key_type! {
+     struct UserFd;
+}
+
+pub(crate) static USER_SOCKETS: LazyLock<Mutex<SlotMap<DefaultKey, UserSocket>>> =
+    LazyLock::new(|| Mutex::new(SlotMap::new()));
+
+pub(crate) static SOCKET_FDS: LazyLock<Mutex<HashMap<i32, DefaultKey>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
