@@ -154,18 +154,19 @@ impl ContainerdContainer {
     /// This is useful since we might have more than one
     /// containerd socket to use and we need to find the one
     /// that manages our target container
-    async fn get_client(container_id: String) -> Result<TasksClient<Channel>> {
-        match connect_and_find_container(container_id.clone(), CONTAINERD_SOCK_PATH).await {
+    async fn get_client(&self) -> Result<TasksClient<Channel>> {
+        match connect_and_find_container(self.container_id.clone(), CONTAINERD_SOCK_PATH).await {
             Ok(channel) => Ok(channel),
             Err(_) => match connect_and_find_container(
-                container_id.clone(),
+                self.container_id.clone(),
                 CONTAINERD_ALTERNATIVE_SOCK_PATH,
             )
             .await
             {
                 Ok(channel) => Ok(channel),
                 Err(_) => {
-                    connect_and_find_container(container_id.clone(), CONTAINERD_K3S_SOCK_PATH).await
+                    connect_and_find_container(self.container_id.clone(), CONTAINERD_K3S_SOCK_PATH)
+                        .await
                 }
             },
         }
@@ -175,7 +176,7 @@ impl ContainerdContainer {
 #[async_trait]
 impl ContainerRuntime for ContainerdContainer {
     async fn get_pid(&self) -> Result<u64> {
-        let mut client = Self::get_client(self.container_id.clone()).await?;
+        let mut client = self.get_client().await?;
         let container_id = self.container_id.to_string();
         let request = GetRequest {
             container_id,
@@ -193,7 +194,7 @@ impl ContainerRuntime for ContainerdContainer {
     }
 
     async fn pause(&self) -> Result<()> {
-        let mut client = Self::get_client(self.container_id.clone()).await?;
+        let mut client = self.get_client().await?;
         let container_id = self.container_id.to_string();
         let request = PauseTaskRequest { container_id };
         let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
@@ -202,7 +203,7 @@ impl ContainerRuntime for ContainerdContainer {
     }
 
     async fn unpause(&self) -> Result<()> {
-        let mut client = Self::get_client(self.container_id.clone()).await?;
+        let mut client = self.get_client().await?;
         let container_id = self.container_id.to_string();
         let request = ResumeTaskRequest { container_id };
         let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
