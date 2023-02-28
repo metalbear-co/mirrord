@@ -155,23 +155,20 @@ impl ContainerdContainer {
     /// containerd socket to use and we need to find the one
     /// that manages our target container
     async fn get_client(container_id: String) -> Result<TasksClient<Channel>> {
-        let channel =
-            match connect_and_find_container(container_id.clone(), CONTAINERD_SOCK_PATH).await {
-                Ok(channel) => channel,
-                Err(_) => match connect_and_find_container(
-                    container_id.clone(),
-                    CONTAINERD_ALTERNATIVE_SOCK_PATH,
-                )
-                .await
-                {
-                    Ok(channel) => channel,
-                    Err(_) => {
-                        connect_and_find_container(container_id.clone(), CONTAINERD_K3S_SOCK_PATH)
-                            .await?
-                    }
-                },
-            };
-        Ok(TasksClient::new(channel))
+        match connect_and_find_container(container_id.clone(), CONTAINERD_SOCK_PATH).await {
+            Ok(channel) => Ok(channel),
+            Err(_) => match connect_and_find_container(
+                container_id.clone(),
+                CONTAINERD_ALTERNATIVE_SOCK_PATH,
+            )
+            .await
+            {
+                Ok(channel) => Ok(channel),
+                Err(_) => {
+                    connect_and_find_container(container_id.clone(), CONTAINERD_K3S_SOCK_PATH).await
+                }
+            },
+        }
     }
 }
 
