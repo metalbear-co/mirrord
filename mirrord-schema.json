@@ -446,15 +446,27 @@
           ]
         },
         "port_mapping": {
-          "description": "Mapping for local ports to remote ports.\n\nThis is useful when you want to mirror/steal a port to a different port on the remote machine. For example, your local process listens on port 9333 and the container listens on port 80. You'd use { 9333: 80 }",
+          "description": "Mapping for local ports to remote ports.\n\nThis is useful when you want to mirror/steal a port to a different port on the remote machine. For example, your local process listens on port 9333 and the container listens on port 80. You'd use [[9333, 80]]",
           "type": [
-            "object",
+            "array",
             "null"
           ],
-          "additionalProperties": {
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0.0
+          "items": {
+            "type": "array",
+            "items": [
+              {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0.0
+              },
+              {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0.0
+              }
+            ],
+            "maxItems": 2,
+            "minItems": 2
           }
         }
       }
