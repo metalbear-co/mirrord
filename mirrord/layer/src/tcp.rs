@@ -1,7 +1,7 @@
 /// Tcp Traffic management, common code for stealing & mirroring
 use std::{
     borrow::Borrow,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     net::SocketAddr,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
@@ -14,7 +14,7 @@ use mirrord_protocol::{
     ClientMessage, Port, ResponseError,
 };
 use tokio::{net::TcpStream, sync::mpsc::Sender};
-use tracing::{debug, error};
+use tracing::{debug, error, log::trace};
 
 use crate::{
     detour::DetourGuard,
@@ -73,6 +73,16 @@ impl From<&Listen> for SocketAddr {
 pub(crate) trait TcpHandler {
     fn ports(&self) -> &HashSet<Listen>;
     fn ports_mut(&mut self) -> &mut HashSet<Listen>;
+    fn port_mapping_ref(&self) -> &HashMap<u16, u16>;
+
+    /// Modify `Listen` to match local port to remote port based on mapping
+    /// If no mapping is found, the port is not modified
+    fn apply_port_mapping(&self, listen: &mut Listen) {
+        if let Some(mapped_port) = self.port_mapping_ref().get(&listen.requested_port) {
+            trace!("mapping port {} to {mapped_port}", &listen.requested_port);
+            listen.requested_port = *mapped_port;
+        }
+    }
 
     /// Returns true to let caller know to keep running
     #[tracing::instrument(level = "trace", skip(self))]
@@ -127,7 +137,14 @@ pub(crate) trait TcpHandler {
         &mut self,
         tcp_connection: &NewTcpConnection,
     ) -> Result<TcpStream, LayerError> {
-        let destination_port = tcp_connection.destination_port;
+        let destination_port = self
+            .port_mapping_ref()
+            .get(&tcp_connection.destination_port)
+            .map(|p| {
+                trace!("mapping port {} to {p}", &tcp_connection.destination_port);
+                *p
+            })
+            .unwrap_or(tcp_connection.destination_port);
 
         let listen = self
             .ports()
@@ -138,10 +155,7 @@ pub(crate) trait TcpHandler {
 
         let info = SocketInformation::new(
             SocketAddr::new(tcp_connection.remote_address, tcp_connection.source_port),
-            SocketAddr::new(
-                tcp_connection.local_address,
-                tcp_connection.destination_port,
-            ),
+            SocketAddr::new(tcp_connection.local_address, destination_port),
         );
 
         {

@@ -159,6 +159,10 @@ impl TcpHandler for TcpStealHandler {
         &mut self.ports
     }
 
+    fn port_mapping_ref(&self) -> &HashMap<u16, u16> {
+        &self.port_mapping
+    }
+
     #[tracing::instrument(level = "trace", skip(self, tx))]
     async fn handle_listen(
         &mut self,
@@ -166,16 +170,8 @@ impl TcpHandler for TcpStealHandler {
         tx: &Sender<ClientMessage>,
     ) -> Result<(), LayerError> {
         let original_port = listen.requested_port;
-        // Check if there's user defined port mapping for this port
-        let request_port = self
-            .port_mapping
-            .get(&original_port)
-            .map(|r| {
-                trace!("mapping port {original_port} to {r}");
-                listen.requested_port = *r;
-                *r
-            })
-            .unwrap_or(original_port);
+        self.apply_port_mapping(&mut listen);
+        let request_port = listen.requested_port;
 
         if !self.ports_mut().insert(listen) {
             info!("Port {request_port} already listening, might be on different address");
