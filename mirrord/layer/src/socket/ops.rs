@@ -147,7 +147,7 @@ pub(super) fn bind(
         invalid => Err(Bypass::Domain(invalid)),
     }?;
 
-    trace!("bind -> unbound_address {:#?}", unbound_address);
+    trace!("bind -> unbound_address {:#?}", unbound_address.as_socket());
 
     let bind_result = unsafe { FN_BIND(sockfd, unbound_address.as_ptr(), unbound_address.len()) };
     if bind_result != 0 {
