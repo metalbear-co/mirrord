@@ -54,6 +54,7 @@ os_info = "3"
 bytemuck = "1"
 hyper = { workspace = true, features = ["client"] }
 http-body-util  = { workspace = true }
+bimap.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

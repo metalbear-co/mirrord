@@ -474,18 +474,24 @@ impl Layer {
         let steal = incoming.is_steal();
         let IncomingConfig {
             http_header_filter: HttpHeaderFilterConfig { filter, ports },
+            port_mapping,
             ..
         } = incoming;
         Self {
             tx,
             rx,
             ping: false,
-            tcp_mirror_handler: TcpMirrorHandler::default(),
+            tcp_mirror_handler: TcpMirrorHandler::new(port_mapping.clone()),
             tcp_outgoing_handler: TcpOutgoingHandler::default(),
             udp_outgoing_handler: Default::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
-            tcp_steal_handler: TcpStealHandler::new(filter, ports.into(), http_response_sender),
+            tcp_steal_handler: TcpStealHandler::new(
+                filter,
+                ports.into(),
+                http_response_sender,
+                port_mapping,
+            ),
             http_response_receiver,
             steal,
         }

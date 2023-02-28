@@ -7,6 +7,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- mirrord-layer: Added `port_mapping` under `incoming` configuration to allow mapping local ports to custom
+  remote port, for example you can listen on port 9999 locally and it will steal/mirror
+  the remote 80 port if `port_mapping: {9999: 80}`. See [#1129](https://github.com/metalbear-co/mirrord/issues/1129)
+
 ### Changed
 
 - Removed the prefix "test" from all test names - [#1065](https://github.com/metalbear-co/mirrord/issues/1065).
@@ -25,7 +31,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Unpause the target container before exiting if the agent exits early on an error and the container is paused -
    [#1111](https://github.com/metalbear-co/mirrord/issues/1111).
 - intellij-plugin: fix issue where execution hangs when running using Gradle. Fixes [#1120](https://github.com/metalbear-co/mirrord/issues/1120).
-- intellij-plugin: fix issue where mirrord doesn't load into gradle, was found when fixing [#1120].
+- intellij-plugin: fix issue where mirrord doesn't load into gradle, was found when fixing [#1120](https://github.com/metalbear-co/mirrord/issues/1120).
 - mirrord-agent: reintroduce `-o lo` back to iptable rules to prevent issue where outinging messags could be intersepted by mirrord as incoming ones.
 - mirrord-layer: binding same port on different IPs leads to a crash due to `ListenAlreadyExists` error.
   This is now ignored with a `info` message since we can't know if the IP/Port was already bound
