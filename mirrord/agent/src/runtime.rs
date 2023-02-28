@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use bollard::{container::InspectContainerOptions, Docker, API_DEFAULT_VERSION};
 use containerd_client::{
     connect,
-    services::v1::{tasks_client::TasksClient, GetRequest, PauseTaskRequest, ResumeTaskRequest},
+    services::v1::{tasks_client::TasksClient, GetRequest, PauseTaskRequest, ResumeTaskRequest, containers_client::ContainersClient},
     tonic::{transport::Channel, Request},
     with_namespace,
 };
@@ -24,11 +24,23 @@ const CONTAINERD_K3S_SOCK_PATH: &str = "/host/run/k3s/containerd/containerd.sock
 
 const DEFAULT_CONTAINERD_NAMESPACE: &str = "k8s.io";
 
+struct ContainerInfo {
+    /// External PID of the container
+    pub(crate) pid: u64,
+    /// Environment variables of the container
+    pub(crate) env: HashMap<String, String>,
+}
+
+impl ContainerInfo {
+    pub(crate) fn new(pid: u64, env: HashMap<String, String>) -> Self {
+        ContainerInfo { pid, env }
+    }
+}
 #[async_trait]
 #[enum_dispatch]
 pub(crate) trait ContainerRuntime {
-    /// Get the external pid of the container.
-    async fn get_pid(&self) -> Result<u64>;
+    /// Get information about the container (pid, env).
+    async fn get_info(&self) -> Result<ContainerInfo>;
     /// Pause the whole container (all processes).
     async fn pause(&self) -> Result<()>;
     /// Unpause the whole container (all processes).
@@ -96,7 +108,7 @@ impl DockerContainer {
 
 #[async_trait]
 impl ContainerRuntime for DockerContainer {
-    async fn get_pid(&self) -> Result<u64> {
+    async fn get_info(&self) -> Result<ContainerInfo> {
         let inspect_options = Some(InspectContainerOptions { size: false });
         let inspect_response = self
             .client
@@ -108,7 +120,25 @@ impl ContainerRuntime for DockerContainer {
             .and_then(|state| state.pid)
             .and_then(|pid| if pid > 0 { Some(pid as u64) } else { None })
             .ok_or_else(|| AgentError::NotFound("No pid found!".to_string()))?;
-        Ok(pid)
+
+        let raw_env = inspect_response
+            .config
+            .and_then(|config| config.env)
+            .ok_or_else(|| AgentError::NotFound("No env found!".to_string()))?;
+        let env_vars = raw_env_vars
+            // ["DB=foo.db", "PORT=99", "HOST=", "PATH=/fake"]
+            .map(|key_and_value| key_and_value.splitn(2, '=').collect::<Vec<_>>())
+            // [["DB", "foo.db"], ["PORT", "99"], ["HOST"], ["PATH", "/fake"]]
+            .map(
+                |mut keys_and_values| match (keys_and_values.pop(), keys_and_values.pop()) {
+                    (Some(value), Some(key)) => Some((key.to_string(), value.to_string())),
+                    _ => None,
+                },
+            )
+            // [("DB", "foo.db")]
+            .collect::<HashMap<_, _>>();
+
+        Ok(ContainerInfo::new(pid, env_vars))
     }
 
     async fn pause(&self) -> Result<()> {
@@ -140,13 +170,14 @@ impl ContainerdContainer {
                 Err(_) => connect(CONTAINERD_K3S_SOCK_PATH).await?,
             },
         };
+        ContainersClient::new(channel).
         Ok(TasksClient::new(channel))
     }
 }
 
 #[async_trait]
 impl ContainerRuntime for ContainerdContainer {
-    async fn get_pid(&self) -> Result<u64> {
+    async fn get_info(&self) -> Result<ContainerInfo> {
         let mut client = Self::get_client().await?;
         let container_id = self.container_id.to_string();
         let request = GetRequest {
@@ -154,14 +185,15 @@ impl ContainerRuntime for ContainerdContainer {
             ..Default::default()
         };
         let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
-        let response = client.get(request).await?;
+        let response = client.get(request).await?.into_inner();
         let pid = response
-            .into_inner()
             .process
             .ok_or_else(|| AgentError::NotFound("No pid found!".to_string()))?
             .pid;
 
-        Ok(pid as u64)
+        let env_vars = response.process.unwrap().
+
+        Ok(ContainerInfo::new(pid as u64, env_vars))
     }
 
     async fn pause(&self) -> Result<()> {
