@@ -5,6 +5,7 @@ use std::{
 
 use anyhow::Result;
 use async_trait::async_trait;
+use bimap::BiMap;
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::{
@@ -58,7 +59,7 @@ pub struct TcpStealHandler {
     http_ports: Vec<u16>,
 
     /// LocalPort:RemotePort mapping.
-    port_mapping: HashMap<u16, u16>,
+    port_mapping: BiMap<u16, u16>,
 }
 
 #[async_trait]
@@ -159,7 +160,7 @@ impl TcpHandler for TcpStealHandler {
         &mut self.ports
     }
 
-    fn port_mapping_ref(&self) -> &HashMap<u16, u16> {
+    fn port_mapping_ref(&self) -> &BiMap<u16, u16> {
         &self.port_mapping
     }
 
@@ -197,7 +198,7 @@ impl TcpStealHandler {
         http_filter: Option<String>,
         http_ports: Vec<u16>,
         http_response_sender: Sender<HttpResponse>,
-        port_mapping: HashMap<u16, u16>,
+        port_mapping: BiMap<u16, u16>,
     ) -> Self {
         Self {
             ports: Default::default(),

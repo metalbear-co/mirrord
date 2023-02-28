@@ -1,5 +1,6 @@
-use std::{collections::HashMap, str::FromStr};
+use std::str::FromStr;
 
+use bimap::BiMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use thiserror::Error;
@@ -144,7 +145,7 @@ pub struct IncomingConfig {
 
     pub http_header_filter: http_filter::HttpHeaderFilterConfig,
 
-    pub port_mapping: HashMap<u16, u16>,
+    pub port_mapping: BiMap<u16, u16>,
 }
 
 impl IncomingConfig {

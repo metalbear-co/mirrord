@@ -1,7 +1,7 @@
 /// Tcp Traffic management, common code for stealing & mirroring
 use std::{
     borrow::Borrow,
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     hash::{Hash, Hasher},
     net::SocketAddr,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
@@ -9,6 +9,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use bimap::BiMap;
 use mirrord_protocol::{
     tcp::{DaemonTcp, HttpRequest, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, Port, ResponseError,
@@ -73,12 +74,12 @@ impl From<&Listen> for SocketAddr {
 pub(crate) trait TcpHandler {
     fn ports(&self) -> &HashSet<Listen>;
     fn ports_mut(&mut self) -> &mut HashSet<Listen>;
-    fn port_mapping_ref(&self) -> &HashMap<u16, u16>;
+    fn port_mapping_ref(&self) -> &BiMap<u16, u16>;
 
     /// Modify `Listen` to match local port to remote port based on mapping
     /// If no mapping is found, the port is not modified
     fn apply_port_mapping(&self, listen: &mut Listen) {
-        if let Some(mapped_port) = self.port_mapping_ref().get(&listen.requested_port) {
+        if let Some(mapped_port) = self.port_mapping_ref().get_by_left(&listen.requested_port) {
             trace!("mapping port {} to {mapped_port}", &listen.requested_port);
             listen.requested_port = *mapped_port;
         }
@@ -139,7 +140,7 @@ pub(crate) trait TcpHandler {
     ) -> Result<TcpStream, LayerError> {
         let destination_port = self
             .port_mapping_ref()
-            .get(&tcp_connection.destination_port)
+            .get_by_right(&tcp_connection.destination_port)
             .map(|p| {
                 trace!("mapping port {} to {p}", &tcp_connection.destination_port);
                 *p

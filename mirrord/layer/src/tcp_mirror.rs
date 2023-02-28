@@ -1,11 +1,12 @@
 use std::{
     borrow::Borrow,
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     hash::{Hash, Hasher},
     time::Duration,
 };
 
 use async_trait::async_trait;
+use bimap::BiMap;
 use mirrord_protocol::{
     tcp::{HttpRequest, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, ConnectionId,
@@ -116,11 +117,11 @@ pub struct TcpMirrorHandler {
     ports: HashSet<Listen>,
     connections: HashSet<Connection>,
     /// LocalPort:RemotePort mapping.
-    port_mapping: HashMap<u16, u16>,
+    port_mapping: BiMap<u16, u16>,
 }
 
 impl TcpMirrorHandler {
-    pub fn new(port_mapping: HashMap<u16, u16>) -> Self {
+    pub fn new(port_mapping: BiMap<u16, u16>) -> Self {
         Self {
             port_mapping,
             ..Default::default()
@@ -191,7 +192,7 @@ impl TcpHandler for TcpMirrorHandler {
         &mut self.ports
     }
 
-    fn port_mapping_ref(&self) -> &HashMap<u16, u16> {
+    fn port_mapping_ref(&self) -> &BiMap<u16, u16> {
         &self.port_mapping
     }
 
