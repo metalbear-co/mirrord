@@ -81,7 +81,7 @@ pub(crate) trait TcpHandler {
     fn apply_port_mapping(&self, listen: &mut Listen) {
         if let Some(mapped_port) = self.port_mapping_ref().get_by_left(&listen.requested_port) {
             trace!("mapping port {} to {mapped_port}", &listen.requested_port);
-            (*listen).requested_port = *mapped_port;
+            listen.requested_port = *mapped_port;
         }
     }
 
