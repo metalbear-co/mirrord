@@ -161,24 +161,62 @@ pub(crate) struct ContainerdContainer {
     container_id: String,
 }
 
+/// Connects to the given containerd socket
+/// and returns the client only if the given container
+/// exists.
+async fn connect_and_find_container(
+    container_id: String,
+    sock_path: impl AsRef<std::path::Path>,
+) -> Result<Channel> {
+    let channel = connect(sock_path).await?;
+    let mut client = TasksClient::new(channel.clone());
+    let request = GetRequest {
+        container_id,
+        ..Default::default()
+    };
+    let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
+    client.get(request).await?;
+    Ok(channel)
+}
+
 impl ContainerdContainer {
-    async fn get_client() -> Result<TasksClient<Channel>> {
-        let channel = match connect(CONTAINERD_SOCK_PATH).await {
-            Ok(channel) => channel,
-            Err(_) => match connect(CONTAINERD_ALTERNATIVE_SOCK_PATH).await {
-                Ok(channel) => channel,
-                Err(_) => connect(CONTAINERD_K3S_SOCK_PATH).await?,
+    /// Get the containerd channel for a given container id.
+    /// This is useful since we might have more than one
+    /// containerd socket to use and we need to find the one
+    /// that manages our target container
+    async fn get_channel(&self) -> Result<Channel> {
+        match connect_and_find_container(self.container_id.clone(), CONTAINERD_SOCK_PATH).await {
+            Ok(channel) => Ok(channel),
+            Err(_) => match connect_and_find_container(
+                self.container_id.clone(),
+                CONTAINERD_ALTERNATIVE_SOCK_PATH,
+            )
+            .await
+            {
+                Ok(channel) => Ok(channel),
+                Err(_) => {
+                    connect_and_find_container(self.container_id.clone(), CONTAINERD_K3S_SOCK_PATH)
+                        .await
+                }
             },
-        };
-        ContainersClient::new(channel).
+        }
+    }
+
+    async fn get_task_client(&self) -> Result<TasksClient<Channel>> {
+        let channel = self.get_channel().await?;
         Ok(TasksClient::new(channel))
+    }
+
+    async fn get_container_client(&self) -> Result<ContainerClient<Channel>> {
+        let channel = self.get_channel().await?;
+        Ok(ContainerClient::new(channel))
     }
 }
 
 #[async_trait]
 impl ContainerRuntime for ContainerdContainer {
     async fn get_info(&self) -> Result<ContainerInfo> {
-        let mut client = Self::get_client().await?;
+        let mut client = self.get_task_client().await?;
         let container_id = self.container_id.to_string();
         let request = GetRequest {
             container_id,
@@ -197,7 +235,7 @@ impl ContainerRuntime for ContainerdContainer {
     }
 
     async fn pause(&self) -> Result<()> {
-        let mut client = Self::get_client().await?;
+        let mut client = self.get_task_client().await?;
         let container_id = self.container_id.to_string();
         let request = PauseTaskRequest { container_id };
         let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
@@ -206,7 +244,7 @@ impl ContainerRuntime for ContainerdContainer {
     }
 
     async fn unpause(&self) -> Result<()> {
-        let mut client = Self::get_client().await?;
+        let mut client = self.get_task_client().await?;
         let container_id = self.container_id.to_string();
         let request = ResumeTaskRequest { container_id };
         let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
