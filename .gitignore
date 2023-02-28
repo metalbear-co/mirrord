@@ -63,12 +63,16 @@ mirrord/layer/tests/apps/faccessat_go/18
 mirrord/layer/tests/apps/faccessat_go/19
 mirrord/layer/tests/apps/faccessat_go/20
 
-### VSCode ###
+### VSCode IDE ###
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+
+### VSCode mirrord extension code ###
+# mirrord binary
+vscode-ext/mirrord
 
 ### Intellij ###
 intellij-ext/.gradle
