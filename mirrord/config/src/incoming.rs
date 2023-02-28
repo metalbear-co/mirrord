@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use bimap::BiMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use thiserror::Error;
@@ -81,6 +82,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .transpose()?
                     .unwrap_or_default(),
                 http_header_filter: HttpHeaderFilterFileConfig::default().generate_config()?,
+                ..Default::default()
             },
             IncomingFileConfig::Advanced(advanced) => IncomingConfig {
                 mode: FromEnv::new("MIRRORD_AGENT_TCP_STEAL_TRAFFIC")
@@ -92,6 +94,10 @@ impl MirrordConfig for IncomingFileConfig {
                     .http_header_filter
                     .unwrap_or_default()
                     .generate_config()?,
+                port_mapping: advanced
+                    .port_mapping
+                    .map(|m| m.into_iter().collect())
+                    .unwrap_or_default(),
             },
         };
 
@@ -107,6 +113,7 @@ impl MirrordToggleableConfig for IncomingFileConfig {
         Ok(IncomingConfig {
             mode,
             http_header_filter: HttpHeaderFilterFileConfig::disabled_config()?,
+            ..Default::default()
         })
     }
 }
@@ -123,6 +130,13 @@ pub struct IncomingAdvancedFileConfig {
     ///
     /// See [`HttpHeaderFilterConfig`] for details.
     pub http_header_filter: Option<ToggleableConfig<http_filter::HttpHeaderFilterFileConfig>>,
+
+    /// Mapping for local ports to remote ports.
+    ///
+    /// This is useful when you want to mirror/steal a port to a different port on the remote
+    /// machine. For example, your local process listens on port 9333 and the container listens
+    /// on port 80. You'd use [[9333, 80]]
+    pub port_mapping: Option<Vec<(u16, u16)>>,
 }
 
 #[derive(Default, PartialEq, Eq, Clone, Debug)]
@@ -130,6 +144,8 @@ pub struct IncomingConfig {
     pub mode: IncomingMode,
 
     pub http_header_filter: http_filter::HttpHeaderFilterConfig,
+
+    pub port_mapping: BiMap<u16, u16>,
 }
 
 impl IncomingConfig {

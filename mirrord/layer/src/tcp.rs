@@ -9,12 +9,13 @@ use std::{
 };
 
 use async_trait::async_trait;
+use bimap::BiMap;
 use mirrord_protocol::{
     tcp::{DaemonTcp, HttpRequest, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, Port, ResponseError,
 };
 use tokio::{net::TcpStream, sync::mpsc::Sender};
-use tracing::{debug, error};
+use tracing::{debug, error, log::trace};
 
 use crate::{
     detour::DetourGuard,
@@ -73,6 +74,16 @@ impl From<&Listen> for SocketAddr {
 pub(crate) trait TcpHandler {
     fn ports(&self) -> &HashSet<Listen>;
     fn ports_mut(&mut self) -> &mut HashSet<Listen>;
+    fn port_mapping_ref(&self) -> &BiMap<u16, u16>;
+
+    /// Modify `Listen` to match local port to remote port based on mapping
+    /// If no mapping is found, the port is not modified
+    fn apply_port_mapping(&self, listen: &mut Listen) {
+        if let Some(mapped_port) = self.port_mapping_ref().get_by_left(&listen.requested_port) {
+            trace!("mapping port {} to {mapped_port}", &listen.requested_port);
+            listen.requested_port = *mapped_port;
+        }
+    }
 
     /// Returns true to let caller know to keep running
     #[tracing::instrument(level = "trace", skip(self))]
@@ -127,21 +138,27 @@ pub(crate) trait TcpHandler {
         &mut self,
         tcp_connection: &NewTcpConnection,
     ) -> Result<TcpStream, LayerError> {
-        let destination_port = tcp_connection.destination_port;
+        let remote_destination_port = tcp_connection.destination_port;
+        let local_destination_port = self
+            .port_mapping_ref()
+            .get_by_right(&tcp_connection.destination_port)
+            .map(|p| {
+                trace!("mapping port {} to {p}", &tcp_connection.destination_port);
+                *p
+            })
+            .unwrap_or(tcp_connection.destination_port);
 
         let listen = self
             .ports()
-            .get(&destination_port)
-            .ok_or(LayerError::PortNotFound(destination_port))?;
+            .get(&remote_destination_port)
+            .ok_or(LayerError::PortNotFound(remote_destination_port))?;
 
         let addr: SocketAddr = listen.into();
 
         let info = SocketInformation::new(
             SocketAddr::new(tcp_connection.remote_address, tcp_connection.source_port),
-            SocketAddr::new(
-                tcp_connection.local_address,
-                tcp_connection.destination_port,
-            ),
+            // we want local so app won't know we did the mapping.
+            SocketAddr::new(tcp_connection.local_address, local_destination_port),
         );
 
         {

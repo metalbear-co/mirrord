@@ -267,6 +267,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4a4ddaa51a5bc52a6948f74c06d20aaaddb71924eab79b8c97a8c556e942d6a"
 
 [[package]]
+name = "bimap"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc0455254eb5c6964c4545d8bac815e1a1be4f3afe0ae695ea539c12d728d44b"
+
+[[package]]
 name = "bincode"
 version = "2.0.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2150,6 +2156,7 @@ dependencies = [
 name = "mirrord-config"
 version = "3.29.0"
 dependencies = [
+ "bimap",
  "mirrord-config-derive",
  "rstest 0.15.0",
  "schemars",
@@ -2204,7 +2211,7 @@ dependencies = [
  "mirrord-progress",
  "mirrord-protocol",
  "rand 0.8.5",
- "rstest 0.15.0",
+ "rstest 0.16.0",
  "serde_json",
  "thiserror",
  "tokio",
@@ -2220,6 +2227,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.13.1",
+ "bimap",
  "bytemuck",
  "bytes",
  "chrono",
@@ -2246,7 +2254,7 @@ dependencies = [
  "os_info",
  "rand 0.8.5",
  "regex",
- "rstest 0.15.0",
+ "rstest 0.16.0",
  "serde_json",
  "socket2",
  "streammap-ext",

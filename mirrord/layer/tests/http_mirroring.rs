@@ -52,16 +52,28 @@ async fn mirroring_with_http(
     println!("Application subscribed to port, sending tcp messages.");
 
     layer_connection
-        .send_connection_then_data("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .send_connection_then_data(
+            "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            application.get_app_port(),
+        )
         .await;
     layer_connection
-        .send_connection_then_data("POST / HTTP/1.1\r\nHost: localhost\r\n\r\npost-data")
+        .send_connection_then_data(
+            "POST / HTTP/1.1\r\nHost: localhost\r\n\r\npost-data",
+            application.get_app_port(),
+        )
         .await;
     layer_connection
-        .send_connection_then_data("PUT / HTTP/1.1\r\nHost: localhost\r\n\r\nput-data")
+        .send_connection_then_data(
+            "PUT / HTTP/1.1\r\nHost: localhost\r\n\r\nput-data",
+            application.get_app_port(),
+        )
         .await;
     layer_connection
-        .send_connection_then_data("DELETE / HTTP/1.1\r\nHost: localhost\r\n\r\ndelete-data")
+        .send_connection_then_data(
+            "DELETE / HTTP/1.1\r\nHost: localhost\r\n\r\ndelete-data",
+            application.get_app_port(),
+        )
         .await;
     if matches!(application, Application::PythonFlaskHTTP) {
         assert_eq!(

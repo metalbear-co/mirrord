@@ -6,6 +6,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use bimap::BiMap;
 use mirrord_protocol::{
     tcp::{HttpRequest, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, ConnectionId,
@@ -115,6 +116,17 @@ impl Borrow<ConnectionId> for Connection {
 pub struct TcpMirrorHandler {
     ports: HashSet<Listen>,
     connections: HashSet<Connection>,
+    /// LocalPort:RemotePort mapping.
+    port_mapping: BiMap<u16, u16>,
+}
+
+impl TcpMirrorHandler {
+    pub fn new(port_mapping: BiMap<u16, u16>) -> Self {
+        Self {
+            port_mapping,
+            ..Default::default()
+        }
+    }
 }
 
 #[async_trait]
@@ -180,19 +192,25 @@ impl TcpHandler for TcpMirrorHandler {
         &mut self.ports
     }
 
+    fn port_mapping_ref(&self) -> &BiMap<u16, u16> {
+        &self.port_mapping
+    }
+
     #[tracing::instrument(level = "trace", skip(self, tx))]
-    async fn handle_listen(&mut self, listen: Listen, tx: &Sender<ClientMessage>) -> Result<()> {
-        let port = listen.requested_port;
+    async fn handle_listen(
+        &mut self,
+        mut listen: Listen,
+        tx: &Sender<ClientMessage>,
+    ) -> Result<()> {
+        self.apply_port_mapping(&mut listen);
+        let request_port = listen.requested_port;
 
         if !self.ports_mut().insert(listen) {
-            info!(
-                "Port {} already listening, might be on different address",
-                port
-            );
+            info!("Port {request_port} already listening, might be on different address",);
             return Ok(());
         }
 
-        tx.send(ClientMessage::Tcp(LayerTcp::PortSubscribe(port)))
+        tx.send(ClientMessage::Tcp(LayerTcp::PortSubscribe(request_port)))
             .await
             .map_err(From::from)
     }
