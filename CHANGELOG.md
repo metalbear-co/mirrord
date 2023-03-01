@@ -7,8 +7,21 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix issue when two (or more) containerd sockets exist and we use the wrong one. Fixes [#1133](https://github.com/metalbear-co/mirrord/issues/1133).
+
+### Added
+
+- mirrord-layer: Added `port_mapping` under `incoming` configuration to allow mapping local ports to custom
+  remote port, for example you can listen on port 9999 locally and it will steal/mirror
+  the remote 80 port if `port_mapping: {9999: 80}`. See [#1129](https://github.com/metalbear-co/mirrord/issues/1129)
+
 ### Changed
 
+- Removed the prefix "test" from all test names - [#1065](https://github.com/metalbear-co/mirrord/issues/1065).
+- Created symbolic link from the vscode directory to the `LICENSE` and `CHANGELOG.md` files so that mirrord developers
+  don't need to copy them there before building the app.
 - mirrord-layer: `socket` hook will now block ipv6 requests and will return EAFNOSUPPORT. See [#1121](https://github.com/metalbear-co/mirrord/issues/1121).
 
 ## 3.29.0
@@ -23,7 +36,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Unpause the target container before exiting if the agent exits early on an error and the container is paused -
    [#1111](https://github.com/metalbear-co/mirrord/issues/1111).
 - intellij-plugin: fix issue where execution hangs when running using Gradle. Fixes [#1120](https://github.com/metalbear-co/mirrord/issues/1120).
-- intellij-plugin: fix issue where mirrord doesn't load into gradle, was found when fixing [#1120].
+- intellij-plugin: fix issue where mirrord doesn't load into gradle, was found when fixing [#1120](https://github.com/metalbear-co/mirrord/issues/1120).
 - mirrord-agent: reintroduce `-o lo` back to iptable rules to prevent issue where outinging messags could be intersepted by mirrord as incoming ones.
 - mirrord-layer: binding same port on different IPs leads to a crash due to `ListenAlreadyExists` error.
   This is now ignored with a `info` message since we can't know if the IP/Port was already bound

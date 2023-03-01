@@ -363,6 +363,7 @@ mod tests {
                         IncomingAdvancedFileConfig {
                             mode: Some(IncomingMode::Mirror),
                             http_header_filter: None,
+                            port_mapping: None,
                         },
                     ))),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {
@@ -447,12 +448,12 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_file_exists() {
+    fn schema_file_exists() {
         let _ = File::open(SCHEMA_FILE_PATH).expect("Schema file doesn't exist!");
     }
 
     #[test]
-    fn test_schema_file_is_up_to_date() {
+    fn schema_file_is_up_to_date() {
         let compare_schema = schemars::schema_for!(LayerFileConfig);
         let compare_content =
             serde_json::to_string_pretty(&compare_schema).expect("Failed generating schema!");

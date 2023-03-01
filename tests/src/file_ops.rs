@@ -12,7 +12,7 @@ mod file_ops {
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn test_file_ops(
+    pub async fn file_ops(
         #[future]
         #[notrace]
         service: KubeService,
@@ -48,7 +48,7 @@ mod file_ops {
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn test_file_ops(
+    pub async fn file_ops(
         #[future]
         #[notrace]
         service: KubeService,
@@ -77,7 +77,7 @@ mod file_ops {
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn test_file_ops_ro(
+    pub async fn file_ops_ro(
         #[future]
         #[notrace]
         service: KubeService,
@@ -113,7 +113,7 @@ mod file_ops {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn test_bash_file_exists(#[future] service: KubeService) {
+    pub async fn bash_file_exists(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "exists"];
         let mut process = run_exec(bash_command, &service.target, None, None, None).await;
@@ -130,7 +130,7 @@ mod file_ops {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn test_bash_file_read(#[future] service: KubeService) {
+    pub async fn bash_file_read(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "read"];
         let mut process = run_exec(bash_command, &service.target, None, None, None).await;
@@ -144,7 +144,7 @@ mod file_ops {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn test_bash_file_write(#[future] service: KubeService) {
+    pub async fn bash_file_write(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "write"];
         let args = vec!["--rw"];
@@ -161,7 +161,7 @@ mod file_ops {
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn test_go_dir(
+    pub async fn go_dir(
         #[future]
         #[notrace]
         service: KubeService,

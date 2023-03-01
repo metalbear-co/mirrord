@@ -52,6 +52,7 @@ fancy-regex = { version = "0.10" }
 hyper = { version = "1.0.0-rc.2", features = ["full"] }
 http-body-util = { version = "0.1.0-rc.2" }
 libc = "0.2"
+bimap = "0.6.2"
 
 # latest commits on rustls suppress certificate verification
 # https://github.com/rustls/rustls/pull/1032

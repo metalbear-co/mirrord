@@ -1,0 +1,10 @@
+{
+    "feature": {
+        "network": {
+            "incoming": {
+                "mode": "mirror",
+                "port_mapping": [[9999, 1234]]
+            }
+        }
+    }
+}
