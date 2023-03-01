@@ -76,6 +76,9 @@ pub(crate) enum HookError {
     #[cfg(target_os = "macos")]
     #[error("mirrord-layer: SIP patch failed with error `{0}`!")]
     FailedSipPatch(#[from] SipError),
+
+    #[error("mirrord-layer: IPv6 can't be used with mirrord")]
+    SocketUnsuportedIpv6,
 }
 
 /// Errors internal to mirrord-layer.
@@ -193,6 +196,9 @@ impl From<HookError> for i64 {
             HookError::IO(ref e) if (is_ignored_code(e.raw_os_error())) => {
                 info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
             }
+            HookError::SocketUnsuportedIpv6 => {
+                info!("{}", fail)
+            }
             _ => error!("Error occured in Layer >> {:?}", fail),
         };
 
@@ -231,6 +237,7 @@ impl From<HookError> for i64 {
             HookError::LocalFileCreation(_) => libc::EINVAL,
             #[cfg(target_os = "macos")]
             HookError::FailedSipPatch(_) => libc::EACCES,
+            HookError::SocketUnsuportedIpv6 => libc::EAFNOSUPPORT,
         };
 
         set_errno(errno::Errno(libc_error));

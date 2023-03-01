@@ -8,8 +8,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use errno::{set_errno, Errno};
-use libc::{c_int, sockaddr, socklen_t, EAFNOSUPPORT};
+use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::{dns::LookupRecord, file::OpenOptionsInternal};
 use socket2::SockAddr;
 use tokio::sync::oneshot;
@@ -87,9 +86,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
     }?;
 
     if domain == libc::AF_INET6 {
-        set_errno(Errno(EAFNOSUPPORT));
-
-        return Detour::Error(std::io::Error::last_os_error().into());
+        return Detour::Error(HookError::SocketUnsuportedIpv6);
     }
 
     let socket_result = unsafe { FN_SOCKET(domain, type_, protocol) };
