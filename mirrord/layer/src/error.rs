@@ -191,15 +191,15 @@ impl From<HookError> for i64 {
             | HookError::ResponseError(ResponseError::Remote(_))
             | HookError::ResponseError(ResponseError::RemoteIO(_))
             | HookError::ResponseError(ResponseError::DnsLookup(_)) => {
-                info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
+                info!("libc error (doesn't indicate a problem) >> {fail:#?}")
             }
             HookError::IO(ref e) if (is_ignored_code(e.raw_os_error())) => {
-                info!("libc error (doesn't indicate a problem) >> {:#?}", fail)
+                info!("libc error (doesn't indicate a problem) >> {fail:#?}")
             }
             HookError::SocketUnsuportedIpv6 => {
-                info!("{}", fail)
+                info!("{fail}")
             }
-            _ => error!("Error occured in Layer >> {:?}", fail),
+            _ => error!("Error occured in Layer >> {fail:?}"),
         };
 
         let libc_error = match fail {
