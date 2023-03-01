@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- mirrord-layer: `socket` hook will now block ipv6 requests and will return EAFNOSUPPORT. See [#1121](https://github.com/metalbear-co/mirrord/issues/1121).
+
 ## 3.29.0
 
 ### Added
