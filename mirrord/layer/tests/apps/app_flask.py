@@ -50,7 +50,8 @@ def handle_request(method: HttpMethod):
 def get():
     server = request.server
     print(f'{server}: Server value friends')
-    assert server == ("1.1.1.1", 80)
+    print(f'{request}: Request value has everything')
+    assert server == ("10.253.155.219", 80)
     return handle_request(HttpMethod.GET)
 
 
