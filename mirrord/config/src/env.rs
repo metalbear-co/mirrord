@@ -24,9 +24,6 @@ use crate::{
 /// ```toml
 /// # mirrord-config.toml
 ///
-/// [feature]
-/// env = true
-///
 /// [feature.env]
 /// include = "*"
 /// ```
@@ -39,9 +36,6 @@ use crate::{
 /// ```toml
 /// # mirrord-config.toml
 ///
-/// [feature]
-/// env = true
-///
 /// [feature.env]
 /// include = "PROJECT;DATABASE"
 /// ```
@@ -50,9 +44,6 @@ use crate::{
 ///
 /// ```toml
 /// # mirrord-config.toml
-///
-/// [feature]
-/// env = true
 ///
 /// [feature.env]
 /// exclude = "USER;SECRET"
