@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs::File,
     os::unix::io::{IntoRawFd, RawFd},
     path::PathBuf,
@@ -8,12 +9,16 @@ use async_trait::async_trait;
 use bollard::{container::InspectContainerOptions, Docker, API_DEFAULT_VERSION};
 use containerd_client::{
     connect,
-    services::v1::{tasks_client::TasksClient, GetRequest, PauseTaskRequest, ResumeTaskRequest, containers_client::ContainersClient},
+    services::v1::{
+        containers_client::ContainersClient, tasks_client::TasksClient, GetContainerRequest,
+        GetRequest, PauseTaskRequest, ResumeTaskRequest,
+    },
     tonic::{transport::Channel, Request},
     with_namespace,
 };
 use enum_dispatch::enum_dispatch;
 use nix::sched::setns;
+use oci_spec::runtime::Spec;
 use tracing::trace;
 
 use crate::error::{AgentError, Result};
@@ -24,7 +29,7 @@ const CONTAINERD_K3S_SOCK_PATH: &str = "/host/run/k3s/containerd/containerd.sock
 
 const DEFAULT_CONTAINERD_NAMESPACE: &str = "k8s.io";
 
-struct ContainerInfo {
+pub(crate) struct ContainerInfo {
     /// External PID of the container
     pub(crate) pid: u64,
     /// Environment variables of the container
@@ -125,18 +130,7 @@ impl ContainerRuntime for DockerContainer {
             .config
             .and_then(|config| config.env)
             .ok_or_else(|| AgentError::NotFound("No env found!".to_string()))?;
-        let env_vars = raw_env_vars
-            // ["DB=foo.db", "PORT=99", "HOST=", "PATH=/fake"]
-            .map(|key_and_value| key_and_value.splitn(2, '=').collect::<Vec<_>>())
-            // [["DB", "foo.db"], ["PORT", "99"], ["HOST"], ["PATH", "/fake"]]
-            .map(
-                |mut keys_and_values| match (keys_and_values.pop(), keys_and_values.pop()) {
-                    (Some(value), Some(key)) => Some((key.to_string(), value.to_string())),
-                    _ => None,
-                },
-            )
-            // [("DB", "foo.db")]
-            .collect::<HashMap<_, _>>();
+        let env_vars = parse_raw_env(&raw_env);
 
         Ok(ContainerInfo::new(pid, env_vars))
     }
@@ -179,6 +173,25 @@ async fn connect_and_find_container(
     Ok(channel)
 }
 
+/// Translate ToIter<String> of "K=V" to HashMap.
+fn parse_raw_env<'a, T: IntoIterator<Item = &'a String>>(raw: T) -> HashMap<String, String> {
+    raw.into_iter()
+        .map(|key_and_value| key_and_value.splitn(2, '=').collect::<Vec<_>>())
+        // [["DB", "foo.db"], ["PORT", "99"], ["HOST"], ["PATH", "/fake"]]
+        .filter_map(
+            |mut keys_and_values| match (keys_and_values.pop(), keys_and_values.pop()) {
+                (Some(value), Some(key)) => Some((key.to_string(), value.to_string())),
+                _ => None,
+            },
+        )
+        // [("DB", "foo.db")]
+        .collect::<HashMap<_, _>>()
+}
+
+/// Extract from [`Spec`] struct the environment variables as HashMap<K,V>
+fn extract_env_from_containerd_spec(spec: &Spec) -> Option<HashMap<String, String>> {
+    Some(parse_raw_env(spec.process().as_ref()?.env().as_ref()?))
+}
 impl ContainerdContainer {
     /// Get the containerd channel for a given container id.
     /// This is useful since we might have more than one
@@ -207,9 +220,9 @@ impl ContainerdContainer {
         Ok(TasksClient::new(channel))
     }
 
-    async fn get_container_client(&self) -> Result<ContainerClient<Channel>> {
+    async fn get_container_client(&self) -> Result<ContainersClient<Channel>> {
         let channel = self.get_channel().await?;
-        Ok(ContainerClient::new(channel))
+        Ok(ContainersClient::new(channel))
     }
 }
 
@@ -229,7 +242,21 @@ impl ContainerRuntime for ContainerdContainer {
             .ok_or_else(|| AgentError::NotFound("No pid found!".to_string()))?
             .pid;
 
-        let env_vars = response.process.unwrap().
+        let mut client = self.get_container_client().await?;
+        let request = GetContainerRequest {
+            id: self.container_id.to_string(),
+        };
+        let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
+        let response = client.get(request).await?.into_inner();
+
+        let spec: Spec = response
+            .container
+            .and_then(|c| c.spec)
+            .ok_or_else(|| AgentError::NotFound("Spec wasn't found".to_string()))
+            .map(|s| serde_json::from_slice(&s.value))??;
+
+        let env_vars = extract_env_from_containerd_spec(&spec)
+            .ok_or_else(|| AgentError::NotFound("No env vars found!".to_string()))?;
 
         Ok(ContainerInfo::new(pid as u64, env_vars))
     }

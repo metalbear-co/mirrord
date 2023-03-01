@@ -11,6 +11,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Fix issue when two (or more) containerd sockets exist and we use the wrong one. Fixes [#1133](https://github.com/metalbear-co/mirrord/issues/1133).
 
+
+### Changed
+
+- Use container's runtime env instead of reading it from `/proc/{container_root_pid}/environ` as some processes (such as nginx) wipe it. Fixes [#1135](https://github.com/metalbear-co/mirrord/issues/1135)
+
 ### Added
 
 - mirrord-layer: Added `port_mapping` under `incoming` configuration to allow mapping local ports to custom
