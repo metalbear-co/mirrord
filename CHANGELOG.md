@@ -10,6 +10,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 
 - Fix issue when two (or more) containerd sockets exist and we use the wrong one. Fixes [#1133](https://github.com/metalbear-co/mirrord/issues/1133).
+- Invalid toml in environment variables configuration examples.
 
 ### Changed
 
