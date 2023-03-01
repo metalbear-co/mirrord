@@ -48,6 +48,8 @@ impl EnvFilter {
 
 /// Helper function that loads the process' environment variables, and selects only those that were
 /// requested from `mirrord-layer` (ignores vars specified in `filter_env_vars`).
+///
+/// NOTE: can remove `RemoteResult` when we break protocol compatibility.
 pub(crate) fn select_env_vars(
     full_env: &HashMap<String, String>,
     filter_env_vars: HashSet<String>,

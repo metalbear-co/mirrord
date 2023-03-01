@@ -236,8 +236,10 @@ impl ContainerRuntime for ContainerdContainer {
             ..Default::default()
         };
         let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
-        let response = client.get(request).await?.into_inner();
-        let pid = response
+        let pid = client
+            .get(request)
+            .await?
+            .into_inner()
             .process
             .ok_or_else(|| AgentError::NotFound("No pid found!".to_string()))?
             .pid;
@@ -247,9 +249,11 @@ impl ContainerRuntime for ContainerdContainer {
             id: self.container_id.to_string(),
         };
         let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
-        let response = client.get(request).await?.into_inner();
 
-        let spec: Spec = response
+        let spec: Spec = client
+            .get(request)
+            .await?
+            .into_inner()
             .container
             .and_then(|c| c.spec)
             .ok_or_else(|| AgentError::NotFound("Spec wasn't found".to_string()))
