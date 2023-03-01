@@ -8,7 +8,8 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use libc::{c_int, sockaddr, socklen_t};
+use errno::{set_errno, Errno};
+use libc::{c_int, sockaddr, socklen_t, EAFNOSUPPORT};
 use mirrord_protocol::{dns::LookupRecord, file::OpenOptionsInternal};
 use socket2::SockAddr;
 use tokio::sync::oneshot;
@@ -79,7 +80,13 @@ impl From<ConnectResult> for i32 {
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
     let socket_kind = type_.try_into()?;
 
-    if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) || (domain == libc::AF_UNIX)) {
+    if domain == libc::AF_INET6 {
+        set_errno(Errno(EAFNOSUPPORT));
+
+        return Detour::Error(std::io::Error::last_os_error().into());
+    }
+
+    if !((domain == libc::AF_INET) || (domain == libc::AF_UNIX)) {
         Err(Bypass::Domain(domain))
     } else {
         Ok(())
@@ -135,6 +142,8 @@ pub(super) fn bind(
             })?
     };
 
+    trace!("bind -> socket {socket:#?}");
+
     let unbound_address = match socket.domain {
         libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
             IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -176,6 +185,8 @@ pub(super) fn bind(
     .ok()
     .and_then(|(_, address)| address.as_socket())
     .bypass(Bypass::AddressConversion)?;
+
+    trace!("bind -> bound_address {address:#?}");
 
     Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound(Bound {
         requested_port,
