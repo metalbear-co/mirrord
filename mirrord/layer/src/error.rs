@@ -4,7 +4,9 @@ use errno::set_errno;
 use ignore_codes::*;
 use libc::{c_char, DIR, FILE};
 use mirrord_config::config::ConfigError;
-use mirrord_protocol::{tcp::LayerTcp, ClientMessage, ConnectionId, ResponseError};
+use mirrord_protocol::{
+    tcp::LayerTcp, ClientMessage, ConnectionId, ResponseError, SerializationError,
+};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
 use thiserror::Error;
@@ -12,7 +14,9 @@ use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 use tracing::{error, info};
 
 use super::HookMessage;
-use crate::tcp_steal::http_forwarding::HttpForwarderError;
+use crate::{
+    error::LayerError::UnsupportedSocketType, tcp_steal::http_forwarding::HttpForwarderError,
+};
 
 /// Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
 mod ignore_codes {
@@ -169,6 +173,23 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: local app closed the connection with mirrord.")]
     AppClosedConnection(ClientMessage),
+
+    // `From` implemented below, not with `#[from]` so that when new variants of
+    // `SerializationError` are added, they are mapped into different variants of
+    // `LayerError`.
+    #[error(
+        "mirrord-layer: user application is trying to connect to an address that is not a \
+        supported IP or unix socket address."
+    )]
+    UnsupportedSocketType,
+}
+
+impl From<SerializationError> for LayerError {
+    fn from(err: SerializationError) -> Self {
+        match err {
+            SerializationError::SocketAddress => UnsupportedSocketType,
+        }
+    }
 }
 
 // Cannot have a generic `From<T>` implementation for this error, so explicitly implemented here.
@@ -230,6 +251,7 @@ impl From<HookError> for i64 {
                 // never appears as HookError::ResponseError(PortAlreadyStolen(_)).
                 // this could be changed by waiting for the Subscribed response from agent.
                 ResponseError::PortAlreadyStolen(_port) => libc::EINVAL,
+                ResponseError::NotImplemented => libc::EINVAL,
             },
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,

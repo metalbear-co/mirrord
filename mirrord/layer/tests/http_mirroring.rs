@@ -11,6 +11,7 @@ mod common;
 
 pub use common::*;
 use futures::{SinkExt, StreamExt};
+use mirrord_protocol::outgoing::SocketAddress;
 
 /// For running locally, so that new developers don't have the extra step of building the go app
 /// before running the tests.
@@ -79,7 +80,10 @@ async fn mirroring_with_http(
         assert_eq!(
             layer_connection.codec.next().await.unwrap().unwrap(),
             UdpOutgoing(Connect(LayerConnect {
-                remote_address: std::net::SocketAddr::from(([10, 253, 155, 219], 58162))
+                remote_address: SocketAddress::Ip(std::net::SocketAddr::from((
+                    [10, 253, 155, 219],
+                    58162
+                )))
             }))
         );
         // Refer: https://github.com/pallets/werkzeug/blob/main/src/werkzeug/serving.py#L640

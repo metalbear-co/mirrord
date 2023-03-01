@@ -6,12 +6,15 @@ use std::{
 
 use futures::TryFutureExt;
 use mirrord_protocol::{
-    outgoing::{tcp::*, DaemonConnect, DaemonRead, LayerClose, LayerConnect, LayerWrite},
+    outgoing::{
+        tcp::*, DaemonConnect, DaemonRead, LayerClose, LayerConnect, LayerWrite, SocketAddress,
+    },
     ClientMessage, ConnectionId,
 };
+use socket2::{Domain, Socket, Type};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    net::{TcpStream, UnixStream},
     select,
     sync::mpsc::{channel, Receiver, Sender},
     task,
@@ -64,19 +67,37 @@ impl Default for TcpOutgoingHandler {
 }
 
 impl TcpOutgoingHandler {
-    #[tracing::instrument(level = "trace", skip(layer_tx, mirror_listener, remote_rx))]
+    #[tracing::instrument(level = "trace", skip(layer_tx, layer_socket, remote_rx))]
     async fn interceptor_task(
         layer_tx: Sender<LayerTcpOutgoing>,
         connection_id: ConnectionId,
-        mirror_listener: TcpListener,
+        layer_socket: Socket,
         remote_rx: Receiver<Vec<u8>>,
     ) {
+        let remote_stream = ReceiverStream::new(remote_rx);
+
         // Accepts the user's socket connection, and finally becomes the interceptor socket.
-        let (mut mirror_stream, _) = mirror_listener.accept().await.unwrap();
+        let (mirror_stream, _) = layer_socket.accept().unwrap();
+        // TODO: unwrap
+        mirror_stream.set_nonblocking(true).unwrap();
+        if mirror_stream.local_addr().unwrap().is_unix() {
+            // TODO: unwrap
+            let mirror_stream = UnixStream::from_std(mirror_stream.into()).unwrap();
+            Self::forward_local_remote(layer_tx, connection_id, mirror_stream, remote_stream).await;
+        } else {
+            // TODO: unwrap
+            let mirror_stream = TcpStream::from_std(mirror_stream.into()).unwrap();
+            Self::forward_local_remote(layer_tx, connection_id, mirror_stream, remote_stream).await;
+        }
+    }
 
-        let mut remote_stream = ReceiverStream::new(remote_rx);
-        let mut buffer = vec![0; 1024];
-
+    // TODO: can this whole thing be replaced by tokio's `copy_bidirectional`?
+    async fn forward_local_remote<T: AsyncRead + AsyncWrite + Unpin>(
+        layer_tx: Sender<LayerTcpOutgoing>,
+        connection_id: ConnectionId,
+        mut mirror_stream: T,
+        mut remote_stream: ReceiverStream<Vec<u8>>,
+    ) {
         // Sends a message to close the remote stream in `agent`, when it's
         // being closed in `layer`.
         //
@@ -90,6 +111,8 @@ impl TcpOutgoingHandler {
                 error!("Failed sending close message with {:#?}!", fail);
             }
         };
+
+        let mut buffer = vec![0; 1024];
 
         loop {
             select! {
@@ -175,7 +198,9 @@ impl TcpOutgoingHandler {
 
                 Ok(tx
                     .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(
-                        LayerConnect { remote_address },
+                        LayerConnect {
+                            remote_address: remote_address.try_into()?,
+                        },
                     )))
                     .await?)
             }
@@ -213,30 +238,40 @@ impl TcpOutgoingHandler {
                          }| async move {
                             let _ = DetourGuard::new();
 
-                            // Creates the listener that will wait for the user's socket
-                            // connection.
-                            let mirror_listener = match remote_address {
-                                SocketAddr::V4(_) => {
-                                    TcpListener::bind(SocketAddr::new(
-                                        IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                                        0,
-                                    ))
-                                    .await?
+                            // Socket held by the socket, waiting for the user application to
+                            // connect to it.
+                            let layer_socket = match remote_address {
+                                SocketAddress::Ip(SocketAddr::V4(_)) => {
+                                    let socket = Socket::new(Domain::IPV4, Type::STREAM, None)?;
+                                    socket.bind(
+                                        &(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
+                                            .into()),
+                                    )?;
+                                    socket
                                 }
-                                SocketAddr::V6(_) => {
-                                    TcpListener::bind(SocketAddr::new(
-                                        IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                                        0,
-                                    ))
-                                    .await?
+                                SocketAddress::Ip(SocketAddr::V6(_)) => {
+                                    let socket = Socket::new(Domain::IPV6, Type::STREAM, None)?;
+                                    socket.bind(
+                                        &(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)
+                                            .into()),
+                                    )?;
+                                    socket
+                                }
+                                SocketAddress::Unix(_) => {
+                                    let socket = Socket::new(Domain::UNIX, Type::STREAM, None)?;
+                                    // TODO: this probably does not work. We have to somehow bind
+                                    //       the socket to a free address.
+                                    let addr = SockAddr::unix("")?;
+                                    socket.bind(&addr)?;
+                                    socket
                                 }
                             };
 
-                            Ok((connection_id, mirror_listener, local_address))
+                            Ok((connection_id, layer_socket, local_address.try_into()?))
                         },
                     )
                     .await
-                    .and_then(|(connection_id, listener, local_address)| {
+                    .and_then(|(connection_id, socket, local_address)| {
                         // Incoming remote channel (in the direction of agent -> layer).
                         // When the layer gets data from the agent, it writes it in via the
                         // remote_tx end. the interceptor_task then reads
@@ -247,7 +282,7 @@ impl TcpOutgoingHandler {
                         let (remote_tx, remote_rx) = channel::<Vec<u8>>(1000);
 
                         let _ = DetourGuard::new();
-                        let mirror_address = listener.local_addr()?;
+                        let mirror_address = socket.local_addr()?;
 
                         self.mirrors
                             .insert(connection_id, ConnectionMirror(remote_tx));
@@ -257,7 +292,7 @@ impl TcpOutgoingHandler {
                         task::spawn(TcpOutgoingHandler::interceptor_task(
                             self.layer_tx.clone(),
                             connection_id,
-                            listener,
+                            socket,
                             remote_rx,
                         ));
 

@@ -139,7 +139,7 @@ pub(super) fn bind(
         return Detour::Bypass(Bypass::IgnoreLocalhost(requested_port));
     }
 
-    if is_ignored_port(requested_address) || port_debug_patch(requested_address) {
+    if is_ignored_port(&requested_address) || port_debug_patch(&requested_address) {
         Err(Bypass::Port(requested_address.port()))?;
     }
 
@@ -171,7 +171,7 @@ pub(super) fn bind(
     // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
     // connect to.
     let address = unsafe {
-        SockAddr::init(|storage, len| {
+        SockAddr::try_init(|storage, len| {
             if FN_GETSOCKNAME(sockfd, storage.cast(), len) == -1 {
                 error!("bind -> Failed `getsockname` sockfd {:#?}", sockfd);
 
@@ -253,14 +253,14 @@ const UDP: ConnectType = !TCP;
 #[tracing::instrument(level = "trace")]
 fn connect_outgoing<const TYPE: ConnectType>(
     sockfd: RawFd,
-    remote_address: SocketAddr,
+    remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
 ) -> Detour<ConnectResult> {
     // Prepare this socket to be intercepted.
     let (mirror_tx, mirror_rx) = oneshot::channel();
 
     let connect = Connect {
-        remote_address,
+        remote_address: remote_address.clone(),
         channel_tx: mirror_tx,
     };
 
@@ -281,11 +281,9 @@ fn connect_outgoing<const TYPE: ConnectType>(
         local_address,
     } = mirror_rx.blocking_recv()??;
 
-    let connect_to = SockAddr::from(mirror_address);
-
     // Connect to the interceptor socket that is listening.
     let connect_result: ConnectResult =
-        unsafe { FN_CONNECT(sockfd, connect_to.as_ptr(), connect_to.len()) }.into();
+        unsafe { FN_CONNECT(sockfd, mirror_address.as_ptr(), mirror_address.len()) }.into();
 
     if connect_result.is_failure() {
         error!(
@@ -321,19 +319,22 @@ pub(super) fn connect(
     raw_address: *const sockaddr,
     address_length: socklen_t,
 ) -> Detour<ConnectResult> {
-    let remote_address = SocketAddr::try_from_raw(raw_address, address_length)?;
+    let remote_address = SockAddr::try_from_raw(raw_address, address_length)?;
+    let optional_ip_address = remote_address.as_socket();
 
-    let ignore_localhost = OUTGOING_IGNORE_LOCALHOST
-        .get()
-        .copied()
-        .expect("Should be set during initialization!");
+    if let Some(ip_address) = optional_ip_address.as_ref() {
+        let ignore_localhost = OUTGOING_IGNORE_LOCALHOST
+            .get()
+            .copied()
+            .expect("Should be set during initialization!");
 
-    if ignore_localhost && remote_address.ip().is_loopback() {
-        return Detour::Bypass(Bypass::IgnoreLocalhost(remote_address.port()));
-    }
+        if ignore_localhost && ip_address.ip().is_loopback() {
+            return Detour::Bypass(Bypass::IgnoreLocalhost(ip_address.port()));
+        }
 
-    if is_ignored_port(remote_address) || port_debug_patch(remote_address) {
-        Err(Bypass::Port(remote_address.port()))?
+        if is_ignored_port(ip_address) || port_debug_patch(ip_address) {
+            Err(Bypass::Port(ip_address.port()))?
+        }
     }
 
     let user_socket_info = {
@@ -353,8 +354,7 @@ pub(super) fn connect(
         .copied()
         .expect("Should be set during initialization!");
 
-    let raw_connect = |remote_address| {
-        let rawish_remote_address = SockAddr::from(remote_address);
+    let raw_connect = |rawish_remote_address: SockAddr| {
         let result = unsafe {
             FN_CONNECT(
                 sockfd,
@@ -372,23 +372,26 @@ pub(super) fn connect(
 
     // if it's loopback, check if it's a port we're listening to and if so, just let it connect
     // locally.
-    if remote_address.ip().is_loopback() && let Some(res) =
-        SOCKETS.lock()?.values().find_map(|socket| {
-            if let SocketState::Listening(Bound {
-                requested_address,
-                address,
-            }) = socket.state
-            {
-                if requested_address.port() == remote_address.port()
-                    && socket.protocol == user_socket_info.protocol
+    if let Some(ip_address) = optional_ip_address.as_ref() {
+        if ip_address.ip().is_loopback() && let Some(res) =
+            SOCKETS.lock()?.values().find_map(|socket| {
+                if let SocketState::Listening(Bound {
+                                                  requested_address,
+                                                  address,
+                                              }) = socket.state
                 {
-                    return Some(raw_connect(address));
+                    if requested_address.port() == ip_address.port()
+                        && socket.protocol == user_socket_info.protocol
+                    {
+                        let rawish_remote_address = SockAddr::from(address);
+                        return Some(raw_connect(rawish_remote_address));
+                    }
                 }
-            }
-            None
-        }) {
-        return res;
-    };
+                None
+            }) {
+            return res;
+        }
+    }
 
     match user_socket_info.kind {
         SocketKind::Udp(_) if enabled_udp_outgoing => {
@@ -435,7 +438,9 @@ pub(super) fn getpeername(
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
-                SocketState::Connected(connected) => Detour::Success(connected.remote_address),
+                SocketState::Connected(connected) => {
+                    Detour::Success(connected.remote_address.clone())
+                }
                 _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
     };
@@ -457,9 +462,11 @@ pub(super) fn getsockname(
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
-                SocketState::Connected(connected) => Detour::Success(connected.local_address),
-                SocketState::Bound(bound) => Detour::Success(bound.requested_address),
-                SocketState::Listening(bound) => Detour::Success(bound.requested_address),
+                SocketState::Connected(connected) => {
+                    Detour::Success(connected.local_address.clone())
+                }
+                SocketState::Bound(bound) => Detour::Success(bound.requested_address.into()),
+                SocketState::Listening(bound) => Detour::Success(bound.requested_address.into()),
                 _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
     };
@@ -493,7 +500,7 @@ pub(super) fn accept(
             })?
     };
 
-    let (local_address, remote_address) = {
+    let (local_ip_address, remote_ip_address) = {
         CONNECTION_QUEUE
             .lock()?
             .pop_front(id)
@@ -501,8 +508,11 @@ pub(super) fn accept(
             .map(|socket| (socket.local_address, socket.remote_address))?
     };
 
+    let remote_address = SockAddr::from(remote_ip_address);
+    let local_address = SockAddr::from(local_ip_address);
+
     let state = SocketState::Connected(Connected {
-        remote_address,
+        remote_address: remote_address.clone(),
         local_address,
     });
     let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into()?);

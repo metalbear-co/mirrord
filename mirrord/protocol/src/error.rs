@@ -11,6 +11,12 @@ use trust_dns_resolver::error::{ResolveError, ResolveErrorKind};
 use crate::{tcp::Filter, Port};
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
+pub enum SerializationError {
+    #[error("Could not convert the socket address into a supported owned address type.")]
+    SocketAddress,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
 pub enum ResponseError {
     #[error("Index allocator is full, operation `{0}` failed!")]
     AllocationFailure(String),
@@ -35,6 +41,9 @@ pub enum ResponseError {
 
     #[error("Could not subscribe to port `{0}`, as it is being stolen by another mirrord client.")]
     PortAlreadyStolen(Port),
+
+    #[error("Operation is not yet supported by mirrord.")]
+    NotImplemented,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
