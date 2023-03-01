@@ -27,6 +27,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Removed the prefix "test" from all test names - [#1065](https://github.com/metalbear-co/mirrord/issues/1065).
 - Created symbolic link from the vscode directory to the `LICENSE` and `CHANGELOG.md` files so that mirrord developers
   don't need to copy them there before building the app.
+- mirrord-layer: `socket` hook will now block ipv6 requests and will return EAFNOSUPPORT. See [#1121](https://github.com/metalbear-co/mirrord/issues/1121).
 
 ## 3.29.0
 
