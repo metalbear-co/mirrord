@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- Unnecessary error logs when running a script that uses `env` in its shebang.
+
 ## 3.30.0
 
 ### Added
