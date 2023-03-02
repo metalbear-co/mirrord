@@ -11,7 +11,7 @@ use mirrord_operator::setup::OperatorNamespace;
     version,
     about,
     long_about = r#"
-You encountered an issue? Have a feature request?
+Encountered an issue? Have a feature request?
 Join our Discord server https://discord.gg/pSKEdmNZcK or create a GitHub issue"#
 )]
 pub(super) struct Cli {
