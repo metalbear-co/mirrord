@@ -17,7 +17,7 @@ mod main {
         read::macho::{FatArch, MachHeader},
         Architecture, Endianness, FileKind,
     };
-    use tracing::{error, trace};
+    use tracing::trace;
     use which::which;
 
     use super::*;
@@ -330,16 +330,13 @@ mod main {
                 Ok(None)
             }
             Err(err) => {
-                error!(
+                trace!(
                     "Checking the SIP status of {binary_path} (or of the binary in its shebang, if \
-                    applicable) failed with error {err:?}. Continuing without SIP-sidestepping."
+                    applicable) failed with {err:?}. Continuing without SIP-sidestepping.\
+                    This is not necessarily an error."
                 );
-                // We don't exit here so that execution fails in the same way it normally does when
-                // some file that should exist does not exist (or whatever the problem is), so that
-                // the user gets that feedback and can change whatever is wrong.
-                // Exiting on SIP-check confused users.
-                // (Or if the check failed because of a bug in mirrord, the user can still keep
-                // using it in case the file is not SIP.)
+                // E.g. `env` tries to execute a bunch of non-existing files and fails, and that's
+                // just its valid flow.
                 Ok(None)
             }
         }
