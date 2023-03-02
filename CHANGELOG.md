@@ -7,19 +7,20 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
-### Fixed
-
-- Fix issue when two (or more) containerd sockets exist and we use the wrong one. Fixes [#1133](https://github.com/metalbear-co/mirrord/issues/1133).
-- Invalid toml in environment variables configuration examples.
-
 ### Added
 
 - mirrord-layer: Added `port_mapping` under `incoming` configuration to allow mapping local ports to custom
   remote port, for example you can listen on port 9999 locally and it will steal/mirror
   the remote 80 port if `port_mapping: {9999: 80}`. See [#1129](https://github.com/metalbear-co/mirrord/issues/1129)
 
+### Fixed
+
+- Fix issue when two (or more) containerd sockets exist and we use the wrong one. Fixes [#1133](https://github.com/metalbear-co/mirrord/issues/1133).
+- Invalid toml in environment variables configuration examples.
+
 ### Changed
 
+- Use container's runtime env instead of reading it from `/proc/{container_root_pid}/environ` as some processes (such as nginx) wipe it. Fixes [#1135](https://github.com/metalbear-co/mirrord/issues/1135)
 - Removed the prefix "test" from all test names - [#1065](https://github.com/metalbear-co/mirrord/issues/1065).
 - Created symbolic link from the vscode directory to the `LICENSE` and `CHANGELOG.md` files so that mirrord developers
   don't need to copy them there before building the app.

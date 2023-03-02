@@ -101,6 +101,7 @@ pub enum DaemonMessage {
     LogMessage(LogMessage),
     File(FileResponse),
     Pong,
+    /// NOTE: can remove `RemoteResult` when we break protocol compatibility.
     GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
     GetAddrInfoResponse(GetAddrInfoResponse),
 }

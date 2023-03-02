@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs::File,
     os::unix::io::{IntoRawFd, RawFd},
     path::PathBuf,
@@ -8,12 +9,16 @@ use async_trait::async_trait;
 use bollard::{container::InspectContainerOptions, Docker, API_DEFAULT_VERSION};
 use containerd_client::{
     connect,
-    services::v1::{tasks_client::TasksClient, GetRequest, PauseTaskRequest, ResumeTaskRequest},
+    services::v1::{
+        containers_client::ContainersClient, tasks_client::TasksClient, GetContainerRequest,
+        GetRequest, PauseTaskRequest, ResumeTaskRequest,
+    },
     tonic::{transport::Channel, Request},
     with_namespace,
 };
 use enum_dispatch::enum_dispatch;
 use nix::sched::setns;
+use oci_spec::runtime::Spec;
 use tracing::trace;
 
 use crate::error::{AgentError, Result};
@@ -24,11 +29,23 @@ const CONTAINERD_K3S_SOCK_PATH: &str = "/host/run/k3s/containerd/containerd.sock
 
 const DEFAULT_CONTAINERD_NAMESPACE: &str = "k8s.io";
 
+pub(crate) struct ContainerInfo {
+    /// External PID of the container
+    pub(crate) pid: u64,
+    /// Environment variables of the container
+    pub(crate) env: HashMap<String, String>,
+}
+
+impl ContainerInfo {
+    pub(crate) fn new(pid: u64, env: HashMap<String, String>) -> Self {
+        ContainerInfo { pid, env }
+    }
+}
 #[async_trait]
 #[enum_dispatch]
 pub(crate) trait ContainerRuntime {
-    /// Get the external pid of the container.
-    async fn get_pid(&self) -> Result<u64>;
+    /// Get information about the container (pid, env).
+    async fn get_info(&self) -> Result<ContainerInfo>;
     /// Pause the whole container (all processes).
     async fn pause(&self) -> Result<()>;
     /// Unpause the whole container (all processes).
@@ -96,7 +113,7 @@ impl DockerContainer {
 
 #[async_trait]
 impl ContainerRuntime for DockerContainer {
-    async fn get_pid(&self) -> Result<u64> {
+    async fn get_info(&self) -> Result<ContainerInfo> {
         let inspect_options = Some(InspectContainerOptions { size: false });
         let inspect_response = self
             .client
@@ -108,7 +125,14 @@ impl ContainerRuntime for DockerContainer {
             .and_then(|state| state.pid)
             .and_then(|pid| if pid > 0 { Some(pid as u64) } else { None })
             .ok_or_else(|| AgentError::NotFound("No pid found!".to_string()))?;
-        Ok(pid)
+
+        let raw_env = inspect_response
+            .config
+            .and_then(|config| config.env)
+            .ok_or_else(|| AgentError::NotFound("No env found!".to_string()))?;
+        let env_vars = parse_raw_env(&raw_env);
+
+        Ok(ContainerInfo::new(pid, env_vars))
     }
 
     async fn pause(&self) -> Result<()> {
@@ -137,24 +161,43 @@ pub(crate) struct ContainerdContainer {
 async fn connect_and_find_container(
     container_id: String,
     sock_path: impl AsRef<std::path::Path>,
-) -> Result<TasksClient<Channel>> {
+) -> Result<Channel> {
     let channel = connect(sock_path).await?;
-    let mut client = TasksClient::new(channel);
+    let mut client = TasksClient::new(channel.clone());
     let request = GetRequest {
         container_id,
         ..Default::default()
     };
     let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
     client.get(request).await?;
-    Ok(client)
+    Ok(channel)
 }
 
+/// Translate ToIter<String> of "K=V" to HashMap.
+fn parse_raw_env<'a, T: IntoIterator<Item = &'a String>>(raw: T) -> HashMap<String, String> {
+    raw.into_iter()
+        .map(|key_and_value| key_and_value.splitn(2, '=').collect::<Vec<_>>())
+        // [["DB", "foo.db"], ["PORT", "99"], ["HOST"], ["PATH", "/fake"]]
+        .filter_map(
+            |mut keys_and_values| match (keys_and_values.pop(), keys_and_values.pop()) {
+                (Some(value), Some(key)) => Some((key.to_string(), value.to_string())),
+                _ => None,
+            },
+        )
+        // [("DB", "foo.db")]
+        .collect::<HashMap<_, _>>()
+}
+
+/// Extract from [`Spec`] struct the environment variables as HashMap<K,V>
+fn extract_env_from_containerd_spec(spec: &Spec) -> Option<HashMap<String, String>> {
+    Some(parse_raw_env(spec.process().as_ref()?.env().as_ref()?))
+}
 impl ContainerdContainer {
-    /// Get the containerd client for a given container id.
+    /// Get the containerd channel for a given container id.
     /// This is useful since we might have more than one
     /// containerd socket to use and we need to find the one
     /// that manages our target container
-    async fn get_client(&self) -> Result<TasksClient<Channel>> {
+    async fn get_channel(&self) -> Result<Channel> {
         match connect_and_find_container(self.container_id.clone(), CONTAINERD_SOCK_PATH).await {
             Ok(channel) => Ok(channel),
             Err(_) => match connect_and_find_container(
@@ -171,30 +214,59 @@ impl ContainerdContainer {
             },
         }
     }
+
+    async fn get_task_client(&self) -> Result<TasksClient<Channel>> {
+        let channel = self.get_channel().await?;
+        Ok(TasksClient::new(channel))
+    }
+
+    async fn get_container_client(&self) -> Result<ContainersClient<Channel>> {
+        let channel = self.get_channel().await?;
+        Ok(ContainersClient::new(channel))
+    }
 }
 
 #[async_trait]
 impl ContainerRuntime for ContainerdContainer {
-    async fn get_pid(&self) -> Result<u64> {
-        let mut client = self.get_client().await?;
+    async fn get_info(&self) -> Result<ContainerInfo> {
+        let mut client = self.get_task_client().await?;
         let container_id = self.container_id.to_string();
         let request = GetRequest {
             container_id,
             ..Default::default()
         };
         let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
-        let response = client.get(request).await?;
-        let pid = response
+        let pid = client
+            .get(request)
+            .await?
             .into_inner()
             .process
             .ok_or_else(|| AgentError::NotFound("No pid found!".to_string()))?
             .pid;
 
-        Ok(pid as u64)
+        let mut client = self.get_container_client().await?;
+        let request = GetContainerRequest {
+            id: self.container_id.to_string(),
+        };
+        let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
+
+        let spec: Spec = client
+            .get(request)
+            .await?
+            .into_inner()
+            .container
+            .and_then(|c| c.spec)
+            .ok_or_else(|| AgentError::NotFound("Spec wasn't found".to_string()))
+            .map(|s| serde_json::from_slice(&s.value))??;
+
+        let env_vars = extract_env_from_containerd_spec(&spec)
+            .ok_or_else(|| AgentError::NotFound("No env vars found!".to_string()))?;
+
+        Ok(ContainerInfo::new(pid as u64, env_vars))
     }
 
     async fn pause(&self) -> Result<()> {
-        let mut client = self.get_client().await?;
+        let mut client = self.get_task_client().await?;
         let container_id = self.container_id.to_string();
         let request = PauseTaskRequest { container_id };
         let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
@@ -203,7 +275,7 @@ impl ContainerRuntime for ContainerdContainer {
     }
 
     async fn unpause(&self) -> Result<()> {
-        let mut client = self.get_client().await?;
+        let mut client = self.get_task_client().await?;
         let container_id = self.container_id.to_string();
         let request = ResumeTaskRequest { container_id };
         let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);

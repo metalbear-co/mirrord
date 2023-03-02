@@ -1,10 +1,6 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-};
+use std::collections::{HashMap, HashSet};
 
 use mirrord_protocol::RemoteResult;
-use tokio::io::AsyncReadExt;
 use tracing::trace;
 use wildmatch::WildMatch;
 
@@ -53,42 +49,24 @@ impl EnvFilter {
 /// Helper function that loads the process' environment variables, and selects only those that were
 /// requested from `mirrord-layer` (ignores vars specified in `filter_env_vars`).
 ///
-/// Returns an error if none of the requested environment variables were found.
-pub async fn select_env_vars(
-    environ_path: PathBuf,
+/// NOTE: can remove `RemoteResult` when we break protocol compatibility.
+pub(crate) fn select_env_vars(
+    full_env: &HashMap<String, String>,
     filter_env_vars: HashSet<String>,
     select_env_vars: HashSet<String>,
 ) -> RemoteResult<HashMap<String, String>> {
     trace!(
-        "select_env_vars -> environ_path {:#?} filter_env_vars {:#?} select_env_vars {:#?}",
-        environ_path,
+        "select_env_vars -> filter_env_vars {:#?} select_env_vars {:#?}",
         filter_env_vars,
         select_env_vars
     );
 
-    let mut environ_file = tokio::fs::File::open(environ_path).await?;
-
-    let mut raw_env_vars = String::with_capacity(8192);
-
-    // TODO: nginx doesn't play nice when we do this, it only returns a string that goes like
-    // "nginx -g daemon off;".
-    let _read_amount = environ_file.read_to_string(&mut raw_env_vars).await?;
-
     let env_filter = EnvFilter::new(select_env_vars, filter_env_vars);
 
-    let env_vars = raw_env_vars
-        // "DB=foo.db\0PORT=99\0HOST=\0PATH=/fake\0"
-        .split_terminator(char::from(0))
-        // ["DB=foo.db", "PORT=99", "HOST=", "PATH=/fake"]
-        .map(|key_and_value| key_and_value.splitn(2, '=').collect::<Vec<_>>())
-        // [["DB", "foo.db"], ["PORT", "99"], ["HOST"], ["PATH", "/fake"]]
-        .filter_map(
-            |mut keys_and_values| match (keys_and_values.pop(), keys_and_values.pop()) {
-                (Some(value), Some(key)) => Some((key.to_string(), value.to_string())),
-                _ => None,
-            },
-        )
+    let env_vars = full_env
+        .iter()
         .filter(|(key, _)| env_filter.matches(key))
+        .map(|(a, b)| (a.clone(), b.clone()))
         // [("DB", "foo.db")]
         .collect::<HashMap<_, _>>();
 
