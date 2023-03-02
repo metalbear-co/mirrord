@@ -97,13 +97,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
         Ok(socket_result)
     }?;
 
-    let new_socket = UserSocket {
-        domain,
-        type_,
-        protocol,
-        state: SocketState::default(),
-        kind: socket_kind,
-    };
+    let new_socket = UserSocket::new(domain, type_, protocol, Default::default(), socket_kind);
 
     SOCKETS.lock()?.insert(socket_fd, Arc::new(new_socket));
 
@@ -487,16 +481,12 @@ pub(super) fn accept(
             .map(|socket| (socket.local_address, socket.remote_address))?
     };
 
-    let new_socket = UserSocket {
-        domain,
-        protocol,
-        type_,
-        state: SocketState::Connected(Connected {
-            remote_address,
-            local_address,
-        }),
-        kind: type_.try_into()?,
-    };
+    let state = SocketState::Connected(Connected {
+        remote_address,
+        local_address,
+    });
+    let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into()?);
+
     fill_address(address, address_len, remote_address)?;
 
     SOCKETS.lock()?.insert(new_fd, Arc::new(new_socket));

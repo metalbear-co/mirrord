@@ -4,7 +4,7 @@ use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{atomic::AtomicU64, Arc, LazyLock, Mutex},
 };
 
 use libc::{c_int, sockaddr, socklen_t};
@@ -21,11 +21,22 @@ use crate::{
 pub(super) mod hooks;
 pub(crate) mod ops;
 
+pub(crate) static SOCKET_ALLOCATOR: AtomicU64 = AtomicU64::new(0);
+
 pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
     LazyLock::new(|| Mutex::new(ConnectionQueue::default()));
+
+#[derive(Debug, PartialOrd, PartialEq, Ord, Eq, Clone, Copy, Hash)]
+pub(crate) struct SocketId(u64);
+
+impl SocketId {
+    pub(crate) fn new() -> Self {
+        Self(SOCKET_ALLOCATOR.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
+    }
+}
 
 /// Struct sent over the socket once created to pass metadata to the hook
 #[derive(Debug)]
@@ -39,18 +50,19 @@ pub struct SocketInformation {
 /// poll_agent loop inserts connection data into this queue, and accept reads it.
 #[derive(Debug, Default)]
 pub struct ConnectionQueue {
-    connections: HashMap<RawFd, VecDeque<SocketInformation>>,
+    connections: HashMap<SocketId, VecDeque<SocketInformation>>,
 }
 
 impl ConnectionQueue {
-    pub fn add(&mut self, fd: &RawFd, info: SocketInformation) {
-        self.connections.entry(*fd).or_default().push_back(info);
+    pub fn add(&mut self, id: SocketId, info: SocketInformation) {
+        self.connections.entry(id).or_default().push_back(info);
     }
-    pub fn get(&mut self, fd: &RawFd) -> Option<SocketInformation> {
-        let mut queue = self.connections.remove(fd)?;
+
+    pub fn get(&mut self, id: SocketId) -> Option<SocketInformation> {
+        let mut queue = self.connections.remove(&id)?;
         if let Some(info) = queue.pop_front() {
             if !queue.is_empty() {
-                self.connections.insert(*fd, queue);
+                self.connections.insert(id, queue);
             }
             Some(info)
         } else {
@@ -114,11 +126,31 @@ impl TryFrom<c_int> for SocketKind {
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct UserSocket {
+    pub(crate) id: SocketId,
     domain: c_int,
     type_: c_int,
     protocol: c_int,
     pub state: SocketState,
     pub(crate) kind: SocketKind,
+}
+
+impl UserSocket {
+    pub(crate) fn new(
+        domain: c_int,
+        type_: c_int,
+        protocol: c_int,
+        state: SocketState,
+        kind: SocketKind,
+    ) -> Self {
+        Self {
+            id: SocketId::new(),
+            domain,
+            type_,
+            protocol,
+            state,
+            kind,
+        }
+    }
 }
 
 #[inline]
