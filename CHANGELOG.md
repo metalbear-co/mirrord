@@ -7,11 +7,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## 3.30.0
+
 ### Added
 
 - mirrord-layer: Added `port_mapping` under `incoming` configuration to allow mapping local ports to custom
   remote port, for example you can listen on port 9999 locally and it will steal/mirror
-  the remote 80 port if `port_mapping: {9999: 80}`. See [#1129](https://github.com/metalbear-co/mirrord/issues/1129)
+  the remote 80 port if `port_mapping: [[9999, 80]]`. See [#1129](https://github.com/metalbear-co/mirrord/issues/1129)
 
 ### Fixed
 
