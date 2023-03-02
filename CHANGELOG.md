@@ -12,6 +12,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Unnecessary error logs when running a script that uses `env` in its shebang.
 - VSCode extension: running Python script with debugger fails because it tries to connect to the debugger port remotely.
 
+### Changed
+
+- improved mirrord cli help message.
+
 ## 3.30.0
 
 ### Added
