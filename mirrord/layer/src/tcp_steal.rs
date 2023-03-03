@@ -4,10 +4,8 @@ use std::{
 };
 
 use async_trait::async_trait;
-use futures::TryFutureExt;
 use bimap::BiMap;
-use bytes::Bytes;
-use http_body_util::Full;
+use futures::TryFutureExt;
 use hyper::{body::Incoming, Response, StatusCode};
 use mirrord_protocol::{
     tcp::{
