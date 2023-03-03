@@ -21,19 +21,49 @@ use crate::{
 pub(super) mod hooks;
 pub(crate) mod ops;
 
-pub(crate) static SOCKET_ALLOCATOR: AtomicU64 = AtomicU64::new(0);
+/// Holds the latest `u64` to be used as a new [`SocketId`].
+///
+/// ## Warning
+///
+/// **DO NOT USE THIS DIRECTLY**
+///
+/// [`SocketId`] _allocations_ are handled in `SocketId::default`, if you change this value directly
+/// bad things can happen (you've been warned).
+static SOCKET_ALLOCATOR: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Holds the connections that are waiting to be fully realized.
+///
+/// The connections here are added by
+/// [`TcpHandler::create_local_stream`](crate::tcp::TcpHandler::create_local_stream) and are dealt
+/// with by [`ops::accept`].
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
     LazyLock::new(|| Mutex::new(ConnectionQueue::default()));
 
+/// Better way of identifying a socket than just relying on its `fd`.
+///
+/// ## Details
+///
+/// Due to how we handle [`ops::dup`], if we were to rely solely on `fd`s to identify a socket, then
+/// we can miss changes that should happen on the _original_ `fd` (but were triggered on the
+/// _dupped_ `fd`).
+///
+/// This is mostly to help the [`ConnectionQueue`] tracking the correct socket for [`ops::accept`].
+///
+/// ## Warning
+///
+/// **DO NOT CONSTRUCT**
+///
+/// You should avoid constructing this type directly, and instead use `SocketId::default`, as there
+/// is a bit of logic to be done at creation.
 #[derive(Debug, PartialOrd, PartialEq, Ord, Eq, Clone, Copy, Hash)]
 pub(crate) struct SocketId(u64);
 
-impl SocketId {
-    pub(crate) fn new() -> Self {
+impl Default for SocketId {
+    /// Increments [`SOCKET_ALLOCATOR`] and uses the latest value as an id for `Self`.
+    fn default() -> Self {
         Self(SOCKET_ALLOCATOR.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
     }
 }
@@ -54,11 +84,19 @@ pub struct ConnectionQueue {
 }
 
 impl ConnectionQueue {
-    pub fn add(&mut self, id: SocketId, info: SocketInformation) {
+    /// Adds a connection.
+    ///
+    /// See [`TcpHandler::create_local_stream`](crate::tcp::TcpHandler::create_local_stream).
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn add(&mut self, id: SocketId, info: SocketInformation) {
         self.connections.entry(id).or_default().push_back(info);
     }
 
-    pub fn get(&mut self, id: SocketId) -> Option<SocketInformation> {
+    /// Gets a connection.
+    ///
+    /// See [`ops::accept].
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn get(&mut self, id: SocketId) -> Option<SocketInformation> {
         let mut queue = self.connections.remove(&id)?;
         if let Some(info) = queue.pop_front() {
             if !queue.is_empty() {
@@ -72,6 +110,7 @@ impl ConnectionQueue {
 }
 
 impl SocketInformation {
+    #[tracing::instrument(level = "trace")]
     pub fn new(remote_address: SocketAddr, local_address: SocketAddr) -> Self {
         Self {
             remote_address,
@@ -125,7 +164,7 @@ impl TryFrom<c_int> for SocketKind {
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct UserSocket {
+pub(crate) struct UserSocket {
     pub(crate) id: SocketId,
     domain: c_int,
     type_: c_int,
@@ -143,7 +182,7 @@ impl UserSocket {
         kind: SocketKind,
     ) -> Self {
         Self {
-            id: SocketId::new(),
+            id: Default::default(),
             domain,
             type_,
             protocol,

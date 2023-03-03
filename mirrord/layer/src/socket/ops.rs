@@ -212,7 +212,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
                 mirror_port: address.port(),
                 requested_port,
                 ipv6: address.is_ipv6(),
-                fd: sockfd,
+                id: socket.id,
             })))?;
 
             Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(Bound {
@@ -451,8 +451,9 @@ pub(super) fn getsockname(
 }
 
 /// When the fd is "ours", we accept and recv the first bytes that contain metadata on the
-/// connection to be set in our lock This enables us to have a safe way to get "remote" information
-/// (remote ip, port, etc).
+/// connection to be set in our lock.
+///
+/// This enables us to have a safe way to get "remote" information (remote ip, port, etc).
 #[tracing::instrument(level = "trace", skip(address, address_len))]
 pub(super) fn accept(
     sockfd: RawFd,
@@ -460,14 +461,14 @@ pub(super) fn accept(
     address_len: *mut socklen_t,
     new_fd: RawFd,
 ) -> Detour<RawFd> {
-    let (domain, protocol, type_) = {
+    let (id, domain, protocol, type_) = {
         SOCKETS
             .lock()?
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
                 SocketState::Listening(_) => {
-                    Detour::Success((socket.domain, socket.protocol, socket.type_))
+                    Detour::Success((socket.id, socket.domain, socket.protocol, socket.type_))
                 }
                 _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
@@ -476,7 +477,7 @@ pub(super) fn accept(
     let (local_address, remote_address) = {
         CONNECTION_QUEUE
             .lock()?
-            .get(&sockfd)
+            .get(id)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .map(|socket| (socket.local_address, socket.remote_address))?
     };
