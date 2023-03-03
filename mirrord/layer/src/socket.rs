@@ -26,11 +26,18 @@ pub(crate) mod ops;
 pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// Holds the connections that are waiting to be fully realized.
+/// Holds the connections that have yet to be [`accept`](ops::accept)ed.
+///
+/// ## Details
 ///
 /// The connections here are added by
-/// [`TcpHandler::create_local_stream`](crate::tcp::TcpHandler::create_local_stream) and are dealt
-/// with by [`ops::accept`].
+/// [`TcpHandler::create_local_stream`](crate::tcp::TcpHandler::create_local_stream) when the agent
+/// sends us a [`NewTcpConnection`](mirrord_protocol::tcp::NewTcpConnection).
+///
+/// And they become part of the [`UserSocket`]'s [`SocketState`] when [`ops::accept`] is called.
+///
+/// Finally, we remove a [`ConnectionQueue`] when the socket's `fd` is closed in
+/// [`close_layer_fd`](crate::close_layer_fd).
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
     LazyLock::new(|| Mutex::new(ConnectionQueue::default()));
 
