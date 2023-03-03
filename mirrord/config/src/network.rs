@@ -75,15 +75,15 @@ mod tests {
         #[values(
             (
                 None,
-                IncomingConfig { mode: IncomingMode::Mirror, http_header_filter: Default::default(), }
+                IncomingConfig { mode: IncomingMode::Mirror, ..Default::default() }
             ),
             (
                 Some("false"),
-                IncomingConfig { mode: IncomingMode::Mirror, http_header_filter: Default::default(), }
+                IncomingConfig { mode: IncomingMode::Mirror, ..Default::default() }
             ),
             (
                 Some("true"),
-                IncomingConfig { mode: IncomingMode::Steal, http_header_filter: Default::default(), }
+                IncomingConfig { mode: IncomingMode::Steal, ..Default::default() }
             ),
         )]
         incoming: (Option<&str>, IncomingConfig),

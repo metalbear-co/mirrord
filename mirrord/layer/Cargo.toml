@@ -53,7 +53,8 @@ itertools = "0.10"
 os_info = "3"
 bytemuck = "1"
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
-http-body-util = { workspace = true }
+http-body-util  = { workspace = true }
+bimap.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

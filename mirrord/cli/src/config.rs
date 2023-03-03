@@ -6,7 +6,14 @@ use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use mirrord_operator::setup::OperatorNamespace;
 
 #[derive(Parser)]
-#[command(author, version, about, long_about = None)]
+#[command(
+    author,
+    version,
+    about,
+    long_about = r#"
+Encountered an issue? Have a feature request?
+Join our Discord server https://discord.gg/pSKEdmNZcK or create a GitHub issue"#
+)]
 pub(super) struct Cli {
     #[command(subcommand)]
     pub(super) commands: Commands,

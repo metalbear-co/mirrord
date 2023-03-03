@@ -6,9 +6,8 @@
 #![feature(type_alias_impl_trait)]
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     net::{Ipv4Addr, SocketAddrV4},
-    path::PathBuf,
 };
 
 use actix_codec::Framed;
@@ -23,6 +22,7 @@ use futures::{
 };
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest};
 use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
+use runtime::ContainerInfo;
 use sniffer::{SnifferCommand, TcpConnectionSniffer, TcpSnifferApi};
 use steal::api::TcpStealerApi;
 use tokio::{
@@ -108,12 +108,12 @@ impl State {
         })
     }
 
-    /// Get the external pid of the target container, if container info available.
-    pub async fn get_container_pid(&self) -> Result<Option<u64>> {
+    /// Get the external pid + env of the target container, if container info available.
+    pub async fn get_container_info(&self) -> Result<Option<ContainerInfo>> {
         if self.container.is_some() {
             let container = self.container.as_ref().unwrap();
-            let pid = container.get_pid().await?;
-            Ok(Some(pid))
+            let info = container.get_info().await?;
+            Ok(Some(info))
         } else {
             Ok(None)
         }
@@ -149,6 +149,7 @@ impl State {
         dns_sender: Sender<DnsRequest>,
         ephemeral_container: bool,
         pid: Option<u64>,
+        env: HashMap<String, String>,
     ) -> Result<Option<JoinHandle<u32>>> {
         match self.new_client().await {
             Ok(client_id) => {
@@ -161,6 +162,7 @@ impl State {
                         sniffer_command_tx,
                         stealer_command_tx,
                         dns_sender,
+                        env,
                     )
                     .and_then(|client| client.start(cancellation_token))
                     .await
@@ -223,15 +225,16 @@ struct ClientConnectionHandler {
     /// Handles mirrord's file operations, see [`FileManager`].
     file_manager: FileManager,
     stream: Framed<TcpStream, DaemonCodec>,
-    pid: Option<u64>,
     tcp_sniffer_api: Option<TcpSnifferApi>,
     tcp_stealer_api: TcpStealerApi,
     tcp_outgoing_api: TcpOutgoingApi,
     udp_outgoing_api: UdpOutgoingApi,
     dns_sender: Sender<DnsRequest>,
+    env: HashMap<String, String>,
 }
 
 impl ClientConnectionHandler {
+    #[allow(clippy::too_many_arguments)]
     /// Initializes [`ClientConnectionHandler`].
     pub async fn new(
         id: ClientId,
@@ -241,6 +244,7 @@ impl ClientConnectionHandler {
         sniffer_command_sender: Sender<SnifferCommand>,
         stealer_command_sender: Sender<StealerCommand>,
         dns_sender: Sender<DnsRequest>,
+        env: HashMap<String, String>,
     ) -> Result<Self> {
         let file_manager = match pid {
             Some(_) => FileManager::new(pid),
@@ -273,12 +277,12 @@ impl ClientConnectionHandler {
             id,
             file_manager,
             stream,
-            pid,
             tcp_sniffer_api,
             tcp_stealer_api,
             tcp_outgoing_api,
             udp_outgoing_api,
             dns_sender,
+            env,
         };
 
         Ok(client_handler)
@@ -388,14 +392,8 @@ impl ClientConnectionHandler {
                     self.id, env_vars_filter, env_vars_select
                 );
 
-                let pid = self
-                    .pid
-                    .map(|i| i.to_string())
-                    .unwrap_or_else(|| "self".to_string());
-                let environ_path = PathBuf::from("/proc").join(pid).join("environ");
-
                 let env_vars_result =
-                    env::select_env_vars(environ_path, env_vars_filter, env_vars_select).await;
+                    env::select_env_vars(&self.env, env_vars_filter, env_vars_select);
 
                 self.respond(DaemonMessage::GetEnvVarsResponse(env_vars_result))
                     .await?
@@ -446,7 +444,11 @@ async fn start_agent() -> Result<()> {
     .await?;
 
     let mut state = State::new(&args).await?;
-    let pid = state.get_container_pid().await?;
+    let (pid, env) = match state.get_container_info().await? {
+        Some(ContainerInfo { pid, env }) => (Some(pid), env),
+        None => (None, HashMap::new()),
+    };
+
     let cancellation_token = CancellationToken::new();
     // Cancel all other tasks on exit
     let cancel_guard = cancellation_token.clone().drop_guard();
@@ -506,6 +508,7 @@ async fn start_agent() -> Result<()> {
                     dns_sender.clone(),
                     args.ephemeral_container,
                     pid,
+                    env.clone(),
                 )
                 .await?
             {
@@ -537,7 +540,8 @@ async fn start_agent() -> Result<()> {
                     cancellation_token.clone(),
                     dns_sender.clone(),
                     args.ephemeral_container,
-                    pid
+                    pid,
+                    env.clone()
                 ).await? {clients.push(client) };
             },
             client = clients.next() => {
@@ -593,7 +597,7 @@ async fn start_iptable_guard() -> Result<()> {
 
     let args = parse_args();
     let state = State::new(&args).await?;
-    let pid = state.get_container_pid().await?;
+    let pid = state.get_container_info().await?.map(|c| c.pid);
 
     let chain_name = SafeIpTables::<iptables::IPTables>::get_chain_name();
 

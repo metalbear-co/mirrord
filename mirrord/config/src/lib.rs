@@ -363,6 +363,7 @@ mod tests {
                         IncomingAdvancedFileConfig {
                             mode: Some(IncomingMode::Mirror),
                             http_header_filter: None,
+                            port_mapping: None,
                         },
                     ))),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {

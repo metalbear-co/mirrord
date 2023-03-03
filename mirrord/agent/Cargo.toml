@@ -51,6 +51,7 @@ httparse = "1"
 fancy-regex = { workspace = true }
 dashmap = { version = "5" }
 pin-project = "1"
+oci-spec = "0.6.0"
 
 [dev-dependencies]
 mockall = "0.11"

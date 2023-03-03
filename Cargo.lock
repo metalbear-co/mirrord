@@ -262,6 +262,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4a4ddaa51a5bc52a6948f74c06d20aaaddb71924eab79b8c97a8c556e942d6a"
 
 [[package]]
+name = "bimap"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc0455254eb5c6964c4545d8bac815e1a1be4f3afe0ae695ea539c12d728d44b"
+
+[[package]]
 name = "bincode"
 version = "2.0.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -851,6 +857,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive_builder"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d67778784b508018359cbc8696edb3db78160bab2c2a28ba7f56ef6932997f8"
+dependencies = [
+ "derive_builder_macro",
+]
+
+[[package]]
+name = "derive_builder_core"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c11bdc11a0c47bc7d37d582b5285da6849c96681023680b906673c5707af7b0f"
+dependencies = [
+ "darling 0.14.3",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "derive_builder_macro"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ebcda35c7a396850a55ffeac740804b40ffec779b98fffbb1738f4033f0ee79e"
+dependencies = [
+ "derive_builder_core",
+ "syn",
+]
+
+[[package]]
 name = "difflib"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1018,7 +1055,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.29.0"
+version = "3.30.0"
 dependencies = [
  "libc",
 ]
@@ -1235,6 +1272,18 @@ dependencies = [
  "cfg-if",
  "libc",
  "wasi 0.11.0+wasi-snapshot-preview1",
+]
+
+[[package]]
+name = "getset"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e45727250e75cc04ff2846a66397da8ef2b3db8e40e0cef4df67950a07621eb9"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -2027,7 +2076,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.29.0"
+version = "3.30.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -2064,7 +2113,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.29.0"
+version = "3.30.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -2086,6 +2135,7 @@ dependencies = [
  "mockall",
  "nix 0.24.3",
  "num-traits",
+ "oci-spec",
  "pin-project",
  "pnet",
  "rand 0.8.5",
@@ -2108,7 +2158,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.29.0"
+version = "3.30.0"
 dependencies = [
  "lazy_static",
  "rand 0.8.5",
@@ -2121,8 +2171,9 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.29.0"
+version = "3.30.0"
 dependencies = [
+ "bimap",
  "mirrord-config-derive",
  "rstest 0.15.0",
  "schemars",
@@ -2136,7 +2187,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.29.0"
+version = "3.30.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -2146,7 +2197,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.29.0"
+version = "3.30.0"
 dependencies = [
  "axum",
  "futures",
@@ -2163,7 +2214,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.29.0"
+version = "3.30.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -2187,12 +2238,13 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.29.0"
+version = "3.30.0"
 dependencies = [
  "actix-codec",
  "anyhow",
  "async-trait",
  "base64 0.13.1",
+ "bimap",
  "bytemuck",
  "bytes",
  "chrono",
@@ -2237,7 +2289,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.29.0"
+version = "3.30.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2246,7 +2298,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.29.0"
+version = "3.30.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -2274,7 +2326,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.29.0"
+version = "3.30.0"
 dependencies = [
  "atty",
  "serde",
@@ -2284,7 +2336,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "3.29.0"
+version = "3.30.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -2302,7 +2354,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.29.0"
+version = "3.30.0"
 dependencies = [
  "memchr",
  "object 0.29.0",
@@ -2638,6 +2690,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea86265d3d3dcb6a27fc51bd29a4bf387fae9d2986b823079d4986af253eb439"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "oci-spec"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "214b837f7dde5026f2028ead5ae720073277c19f82ff85623b142c39d4b843e7"
+dependencies = [
+ "derive_builder",
+ "getset",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -3331,7 +3396,7 @@ dependencies = [
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.29.0"
+version = "3.30.0"
 dependencies = [
  "libc",
 ]

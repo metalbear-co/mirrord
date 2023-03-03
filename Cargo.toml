@@ -10,7 +10,7 @@ members = [
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.29.0"
+version = "3.30.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -55,6 +55,7 @@ hyper = { git = "https://github.com/meowjesty/hyper", branch = "issue/922/http2"
 http-body = { git = "https://github.com/meowjesty/http-body", branch = "issue/922/http2" }
 http-body-util = { git = "https://github.com/meowjesty/http-body", branch = "issue/922/http2" }
 libc = "0.2"
+bimap = "0.6.2"
 
 # latest commits on rustls suppress certificate verification
 # https://github.com/rustls/rustls/pull/1032

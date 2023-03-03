@@ -5,6 +5,9 @@ use std::{
 
 use async_trait::async_trait;
 use futures::TryFutureExt;
+use bimap::BiMap;
+use bytes::Bytes;
+use http_body_util::Full;
 use hyper::{body::Incoming, Response, StatusCode};
 use mirrord_protocol::{
     tcp::{
@@ -116,6 +119,9 @@ pub struct TcpStealHandler {
 
     /// These ports would be filtered with the `http_filter`, if it's Some.
     http_ports: Vec<u16>,
+
+    /// LocalPort:RemotePort mapping.
+    port_mapping: BiMap<u16, u16>,
 }
 
 #[async_trait]
@@ -216,26 +222,29 @@ impl TcpHandler for TcpStealHandler {
         &mut self.ports
     }
 
+    fn port_mapping_ref(&self) -> &BiMap<u16, u16> {
+        &self.port_mapping
+    }
+
     #[tracing::instrument(level = "trace", skip(self, tx))]
     async fn handle_listen(
         &mut self,
-        listen: Listen,
+        mut listen: Listen,
         tx: &Sender<ClientMessage>,
     ) -> Result<(), LayerError> {
-        let port = listen.requested_port;
+        let original_port = listen.requested_port;
+        self.apply_port_mapping(&mut listen);
+        let request_port = listen.requested_port;
 
         if !self.ports_mut().insert(listen) {
-            info!(
-                "Port {} already listening, might be on different address",
-                port
-            );
+            info!("Port {request_port} already listening, might be on different address");
             return Ok(());
         }
 
-        let steal_type = if self.http_ports.contains(&port) && let Some(filter_str) = self.http_filter.take() {
-            FilteredHttp(port, Filter::new(filter_str)?)
+        let steal_type = if self.http_ports.contains(&original_port) && let Some(filter_str) = self.http_filter.take() {
+            FilteredHttp(request_port, Filter::new(filter_str)?)
         } else {
-            All(port)
+            All(request_port)
         };
 
         tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
@@ -251,6 +260,7 @@ impl TcpStealHandler {
         http_filter: Option<String>,
         http_ports: Vec<u16>,
         http_response_sender: Sender<HttpResponse>,
+        port_mapping: BiMap<u16, u16>,
     ) -> Self {
         Self {
             ports: Default::default(),
@@ -260,6 +270,7 @@ impl TcpStealHandler {
             http_response_sender,
             http_filter,
             http_ports,
+            port_mapping,
         }
     }
 

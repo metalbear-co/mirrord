@@ -358,6 +358,10 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 				config.dlvToolPath = path.join(globalContext.extensionPath, "bin", "darwin", "dlv-" + process.arch);
 			}
 		}
+		
+		// add range of ports that vs code uses for debugging (mostly Python)
+		// todo: find better way to resolve the exact ports.
+		config.env["DEBUGGER_IGNORE_PORTS_PATCH"] = "45000-65535";
 
 		let env = await mirrordApi.binaryExecute(target, configPath);
 		config.env = Object.assign({}, config.env, env);

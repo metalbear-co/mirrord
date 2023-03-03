@@ -256,7 +256,7 @@
       }
     },
     "EnvFileConfig": {
-      "description": "Allows the user to set or override a local process' environment variables with the ones from a remote pod.\n\nWhich environment variables to load from the remote pod are controlled by setting either `include` or `exclude`.\n\nSee the environment variables [reference](https://mirrord.dev/docs/reference/env/) for more details.\n\n## Examples\n\n- Include every environment variable from the remote pod (default):\n\n```toml # mirrord-config.toml\n\n[feature] env = true\n\n[feature.env] include = \"*\" ```\n\nSome environment variables are excluded by default (`PATH` for example), including these requires specifying them with `include`, see `mirrord-agent::env::EnvFilter`.\n\n- Include the remote pod's environment variables \"PROJECT\", \"DATABASE\":\n\n```toml # mirrord-config.toml\n\n[feature] env = true\n\n[feature.env] include = \"PROJECT;DATABASE\" ```\n\n- Exclude the remote pod's environment variables \"USER\", \"SECRET\", and include everything else:\n\n```toml # mirrord-config.toml\n\n[feature] env = true\n\n[feature.env] exclude = \"USER;SECRET\" ```",
+      "description": "Allows the user to set or override a local process' environment variables with the ones from a remote pod.\n\nWhich environment variables to load from the remote pod are controlled by setting either `include` or `exclude`.\n\nSee the environment variables [reference](https://mirrord.dev/docs/reference/env/) for more details.\n\n## Examples\n\n- Include every environment variable from the remote pod (default):\n\n```toml # mirrord-config.toml\n\n[feature.env] include = \"*\" ```\n\nSome environment variables are excluded by default (`PATH` for example), including these requires specifying them with `include`, see `mirrord-agent::env::EnvFilter`.\n\n- Include the remote pod's environment variables \"PROJECT\", \"DATABASE\":\n\n```toml # mirrord-config.toml\n\n[feature.env] include = \"PROJECT;DATABASE\" ```\n\n- Exclude the remote pod's environment variables \"USER\", \"SECRET\", and include everything else:\n\n```toml # mirrord-config.toml\n\n[feature.env] exclude = \"USER;SECRET\" ```",
       "type": "object",
       "properties": {
         "exclude": {
@@ -444,6 +444,30 @@
               "type": "null"
             }
           ]
+        },
+        "port_mapping": {
+          "description": "Mapping for local ports to remote ports.\n\nThis is useful when you want to mirror/steal a port to a different port on the remote machine. For example, your local process listens on port 9333 and the container listens on port 80. You'd use [[9333, 80]]",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "array",
+            "items": [
+              {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0.0
+              },
+              {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0.0
+              }
+            ],
+            "maxItems": 2,
+            "minItems": 2
+          }
         }
       }
     },
