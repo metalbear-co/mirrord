@@ -29,7 +29,7 @@ pub(crate) mod ops;
 ///
 /// [`SocketId`] _allocations_ are handled in `SocketId::default`, if you change this value directly
 /// bad things can happen (you've been warned).
-static SOCKET_ALLOCATOR: AtomicU64 = AtomicU64::new(0);
+static SOCKET_ID_ALLOCATOR: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -62,9 +62,9 @@ pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
 pub(crate) struct SocketId(u64);
 
 impl Default for SocketId {
-    /// Increments [`SOCKET_ALLOCATOR`] and uses the latest value as an id for `Self`.
+    /// Increments [`SOCKET_ID_ALLOCATOR`] and uses the latest value as an id for `Self`.
     fn default() -> Self {
-        Self(SOCKET_ALLOCATOR.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+        Self(SOCKET_ID_ALLOCATOR.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
     }
 }
 
