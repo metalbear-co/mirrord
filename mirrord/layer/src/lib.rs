@@ -115,6 +115,7 @@ use crate::{
     common::HookMessage,
     file::{filter::FILE_FILTER, FileHandler},
     load::LoadType,
+    socket::CONNECTION_QUEUE,
 };
 
 mod common;
@@ -804,9 +805,10 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         .expect("Should be set during initialization!")
         .is_active();
 
-    // Remove from sockets, or if not a socket, remove from files if file mode active
-    if SOCKETS.lock().unwrap().remove(&fd).is_none() && file_mode_active {
-        // SOCKETS lock dropped, not holding it while locking OPEN_FILES.
+    // Remove from sockets, also removing the `ConnectionQueue` associated with the socket.
+    if let Some(socket) = SOCKETS.lock().unwrap().remove(&fd) {
+        CONNECTION_QUEUE.lock().unwrap().remove(socket.id);
+    } else if file_mode_active {
         OPEN_FILES.lock().unwrap().remove(&fd);
     }
 }

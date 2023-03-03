@@ -58,20 +58,20 @@ impl ConnectionQueue {
         self.connections.entry(id).or_default().push_back(info);
     }
 
-    /// Gets a connection.
+    /// Pops the next connection to be handled from `Self`.
     ///
     /// See [`ops::accept].
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) fn get(&mut self, id: SocketId) -> Option<SocketInformation> {
-        let mut queue = self.connections.remove(&id)?;
-        if let Some(info) = queue.pop_front() {
-            if !queue.is_empty() {
-                self.connections.insert(id, queue);
-            }
-            Some(info)
-        } else {
-            None
-        }
+    pub(crate) fn pop_front(&mut self, id: SocketId) -> Option<SocketInformation> {
+        self.connections.get_mut(&id)?.pop_front()
+    }
+
+    /// Removes the [`ConnectionQueue`] associated with the [`UserSocket`].
+    ///
+    /// See [`crate::close_layer_fd].
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn remove(&mut self, id: SocketId) -> Option<VecDeque<SocketInformation>> {
+        self.connections.remove(&id)
     }
 }
 
