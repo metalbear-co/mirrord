@@ -19,7 +19,7 @@ use tracing::{debug, error, log::trace};
 use crate::{
     detour::DetourGuard,
     error::LayerError,
-    socket::{SocketId, SocketInformation, CONNECTION_QUEUE},
+    socket::{id::SocketId, SocketInformation, CONNECTION_QUEUE},
     LayerError::{PortAlreadyStolen, UnexpectedResponseError},
 };
 

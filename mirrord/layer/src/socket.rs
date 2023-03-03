@@ -4,7 +4,7 @@ use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
-    sync::{atomic::AtomicU64, Arc, LazyLock, Mutex},
+    sync::{Arc, LazyLock, Mutex},
 };
 
 use libc::{c_int, sockaddr, socklen_t};
@@ -13,23 +13,15 @@ use socket2::SockAddr;
 use tracing::warn;
 use trust_dns_resolver::config::Protocol;
 
+use self::id::SocketId;
 use crate::{
     detour::{Bypass, Detour, OptionExt},
     error::{HookError, HookResult},
 };
 
 pub(super) mod hooks;
+pub(crate) mod id;
 pub(crate) mod ops;
-
-/// Holds the latest `u64` to be used as a new [`SocketId`].
-///
-/// ## Warning
-///
-/// **DO NOT USE THIS DIRECTLY**
-///
-/// [`SocketId`] _allocations_ are handled in `SocketId::default`, if you change this value directly
-/// bad things can happen (you've been warned).
-static SOCKET_ID_ALLOCATOR: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -41,32 +33,6 @@ pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> =
 /// with by [`ops::accept`].
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
     LazyLock::new(|| Mutex::new(ConnectionQueue::default()));
-
-/// Better way of identifying a socket than just relying on its `fd`.
-///
-/// ## Details
-///
-/// Due to how we handle [`ops::dup`], if we were to rely solely on `fd`s to identify a socket, then
-/// we can miss changes that should happen on the _original_ `fd` (but were triggered on the
-/// _dupped_ `fd`).
-///
-/// This is mostly to help the [`ConnectionQueue`] tracking the correct socket for [`ops::accept`].
-///
-/// ## Warning
-///
-/// **DO NOT CONSTRUCT**
-///
-/// You should avoid constructing this type directly, and instead use `SocketId::default`, as there
-/// is a bit of logic to be done at creation.
-#[derive(Debug, PartialOrd, PartialEq, Ord, Eq, Clone, Copy, Hash)]
-pub(crate) struct SocketId(u64);
-
-impl Default for SocketId {
-    /// Increments [`SOCKET_ID_ALLOCATOR`] and uses the latest value as an id for `Self`.
-    fn default() -> Self {
-        Self(SOCKET_ID_ALLOCATOR.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-    }
-}
 
 /// Struct sent over the socket once created to pass metadata to the hook
 #[derive(Debug)]
