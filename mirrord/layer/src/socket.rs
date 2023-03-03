@@ -64,7 +64,7 @@ pub(crate) struct SocketId(u64);
 impl Default for SocketId {
     /// Increments [`SOCKET_ALLOCATOR`] and uses the latest value as an id for `Self`.
     fn default() -> Self {
-        Self(SOCKET_ALLOCATOR.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
+        Self(SOCKET_ALLOCATOR.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
     }
 }
 
