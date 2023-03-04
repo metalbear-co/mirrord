@@ -15,6 +15,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Changed
 
 - improved mirrord cli help message.
+- mirrord-config: Change `flush_connections` default to `true`, related to
+  [#1029](https://github.com/metalbear-co/mirrord/issues/1029).
 
 ## 3.30.0
 
