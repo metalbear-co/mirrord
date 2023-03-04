@@ -36,7 +36,7 @@ pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> =
 ///
 /// And they become part of the [`UserSocket`]'s [`SocketState`] when [`ops::accept`] is called.
 ///
-/// Finally, we remove a [`ConnectionQueue`] when the socket's `fd` is closed in
+/// Finally, we remove a socket's queue when the socket's `fd` is closed in
 /// [`close_layer_fd`](crate::close_layer_fd).
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
     LazyLock::new(|| Mutex::new(ConnectionQueue::default()));
