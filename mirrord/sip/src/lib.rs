@@ -213,10 +213,7 @@ mod main {
 
         // Patch binary if it is in the list of binaries to patch.
         // See `ends_with` docs for understanding better when it returns true.
-        if patch_binaries
-            .iter()
-            .any(|x| complete_path.ends_with(x))
-        {
+        if patch_binaries.iter().any(|x| complete_path.ends_with(x)) {
             return Ok(SipStatus::SomeSIP(complete_path, None));
         }
 
