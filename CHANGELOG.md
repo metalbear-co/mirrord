@@ -7,6 +7,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- `sip_binaries` to config file to allow specifying SIP-protected binaries that needs to be patched
+  when mirrord doesn't detect those. See [#1152](https://github.com/metalbear-co/mirrord/issues/1152).
+
 ### Fixed
 
 - Unnecessary error logs when running a script that uses `env` in its shebang.

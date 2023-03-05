@@ -270,10 +270,17 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
 
     nix_devbox_patch(&mut config);
 
+    #[cfg(target_os = "macos")]
+    let patch_binaries = config
+        .sip_binaries
+        .clone()
+        .map(|x| x.to_vec())
+        .unwrap_or_default();
+
     match load::load_type(given_process, config) {
         LoadType::Full(config) => layer_start(*config),
         #[cfg(target_os = "macos")]
-        LoadType::SIPOnly => sip_only_layer_start(),
+        LoadType::SIPOnly => sip_only_layer_start(patch_binaries),
         LoadType::Skip => {}
     }
 
@@ -382,7 +389,15 @@ fn layer_start(config: LayerConfig) {
 
     FILE_FILTER.get_or_init(|| FileFilter::new(config.feature.fs.clone()));
 
-    enable_hooks(file_mode.is_active(), config.feature.network.dns);
+    enable_hooks(
+        file_mode.is_active(),
+        config.feature.network.dns,
+        config
+            .sip_binaries
+            .clone()
+            .map(|x| x.to_vec())
+            .unwrap_or_default(),
+    );
 
     RUNTIME.block_on(start_layer_thread(tx, rx, receiver, config));
 }
@@ -390,10 +405,10 @@ fn layer_start(config: LayerConfig) {
 /// We need to hook execve syscall to allow mirrord-layer to be loaded with sip patch when loading
 /// mirrord-layer on a process where specified to skip with MIRRORD_SKIP_PROCESSES
 #[cfg(target_os = "macos")]
-fn sip_only_layer_start() {
+fn sip_only_layer_start(patch_binaries: Vec<String>) {
     let mut hook_manager = HookManager::default();
 
-    unsafe { exec::enable_execve_hook(&mut hook_manager) };
+    unsafe { exec::enable_execve_hook(&mut hook_manager, patch_binaries) };
 }
 
 /// Acts as an API to the various features of mirrord-layer, holding the actual feature handler
@@ -749,7 +764,7 @@ async fn start_layer_thread(
 ///   `true`, see [`NetworkConfig`], and
 ///   [`hooks::enable_socket_hooks`](socket::hooks::enable_socket_hooks).
 #[tracing::instrument(level = "trace")]
-fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
+fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries: Vec<String>) {
     let mut hook_manager = HookManager::default();
 
     unsafe {
@@ -776,7 +791,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool) {
 
     #[cfg(target_os = "macos")]
     unsafe {
-        exec::enable_execve_hook(&mut hook_manager)
+        exec::enable_execve_hook(&mut hook_manager, patch_binaries)
     };
 
     if enabled_file_ops {
