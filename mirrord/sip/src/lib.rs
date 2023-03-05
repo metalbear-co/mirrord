@@ -363,7 +363,7 @@ mod main {
         #[test]
         fn is_sip_true() {
             assert!(matches!(
-                get_sip_status("/bin/ls"),
+                get_sip_status("/bin/ls", &vec![]),
                 Ok(SipStatus::SomeSIP(_, _))
             ));
         }
@@ -375,14 +375,15 @@ mod main {
             f.write(&data).unwrap();
             f.flush().unwrap();
             assert!(matches!(
-                get_sip_status(f.path().to_str().unwrap()).unwrap(),
+                get_sip_status(f.path().to_str().unwrap(), &vec![]).unwrap(),
                 SipStatus::NoSIP
             ));
         }
 
         #[test]
         fn is_sip_notfound() {
-            let err = get_sip_status("/donald/duck/was/a/duck/not/a/quack/a/duck").unwrap_err();
+            let err =
+                get_sip_status("/donald/duck/was/a/duck/not/a/quack/a/duck", &vec![]).unwrap_err();
             assert!(err.to_string().contains("executable file not found"));
         }
 
@@ -391,7 +392,10 @@ mod main {
             let path = "/bin/ls";
             let output = "/tmp/ls_mirrord_test";
             patch_binary(path, output).unwrap();
-            assert!(matches!(get_sip_status(output).unwrap(), SipStatus::NoSIP));
+            assert!(matches!(
+                get_sip_status(output, &vec![]).unwrap(),
+                SipStatus::NoSIP
+            ));
             // Check DYLD_* features work on it:
             let output = std::process::Command::new(output)
                 .env("DYLD_PRINT_LIBRARIES", "1")
