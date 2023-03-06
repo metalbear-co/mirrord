@@ -25,7 +25,8 @@ use crate::{
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
     port_debug_patch,
     tcp::{Listen, TcpIncoming},
-    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, OUTGOING_IGNORE_LOCALHOST,
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_LOCALHOST,
+    OUTGOING_IGNORE_LOCALHOST,
 };
 
 /// Hostname initialized from the agent with [`gethostname`].
@@ -121,7 +122,7 @@ pub(super) fn bind(
     let requested_address = SocketAddr::try_from_raw(raw_address, address_length)?;
     let requested_port = requested_address.port();
 
-    let ignore_localhost = OUTGOING_IGNORE_LOCALHOST
+    let ignore_localhost = INCOMING_IGNORE_LOCALHOST
         .get()
         .copied()
         .expect("Should be set during initialization!");

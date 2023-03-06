@@ -214,7 +214,7 @@ pub(crate) static OUTGOING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
 ///
 /// ## Usage
 ///
-/// When true, localhost connections will stay local (won't go to the remote pod localhost)
+/// When true, localhost connections will stay local - wont mirror or steal.
 pub(crate) static INCOMING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
 
 /// Check if we're running in NixOS or Devbox.
