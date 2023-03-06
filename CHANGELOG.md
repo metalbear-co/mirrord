@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- Possible bug when bound address is bypassed and socket stays in `SOCKETS` map.
+
 ## 3.31.0
 
 ### Added
