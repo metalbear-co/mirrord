@@ -157,8 +157,17 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 
     let sub_progress = progress.subtask("preparing to launch process");
 
+    let config = LayerConfig::from_env()?;
+
     #[cfg(target_os = "macos")]
-    let (_did_sip_patch, binary) = match sip_patch(&args.binary)? {
+    let (_did_sip_patch, binary) = match sip_patch(
+        &args.binary,
+        &config
+            .sip_binaries
+            .clone()
+            .map(|x| x.to_vec())
+            .unwrap_or_default(),
+    )? {
         None => (false, args.binary.clone()),
         Some(sip_result) => (true, sip_result),
     };
@@ -166,7 +175,6 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     #[cfg(not(target_os = "macos"))]
     let binary = args.binary.clone();
 
-    let config = LayerConfig::from_env()?;
     if config.agent.pause {
         if config.agent.ephemeral {
             error!("Pausing is not yet supported together with an ephemeral agent container.");

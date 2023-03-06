@@ -14,6 +14,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - config: `ignore_localhost` to `incoming` config for ignoring localhost bound sockets, meaning it will not steal/mirror those.
 - combination of `ignore_localhost` in `incoming` and `outgoing` can be useful when you run complex processes that does
   IPC over localhost.
+- `sip_binaries` to config file to allow specifying SIP-protected binaries that needs to be patched
+  when mirrord doesn't detect those. See [#1152](https://github.com/metalbear-co/mirrord/issues/1152).
 
 ### Fixed
 

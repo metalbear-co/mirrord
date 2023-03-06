@@ -5,6 +5,7 @@ use std::{
     ffi::{c_void, CStr, CString},
     marker::PhantomData,
     ptr,
+    sync::OnceLock,
 };
 
 use libc::{c_char, c_int, pid_t};
@@ -30,7 +31,15 @@ use crate::{
 /// patching).
 const MAX_ARGC: usize = 256;
 
-pub(crate) unsafe fn enable_execve_hook(hook_manager: &mut HookManager) {
+pub(crate) static PATCH_BINARIES: OnceLock<Vec<String>> = OnceLock::new();
+
+pub(crate) unsafe fn enable_execve_hook(
+    hook_manager: &mut HookManager,
+    patch_binaries: Vec<String>,
+) {
+    PATCH_BINARIES
+        .set(patch_binaries)
+        .expect("couldn't set patch_binaries");
     replace!(hook_manager, "execve", execve_detour, FnExecve, FN_EXECVE);
     replace!(
         hook_manager,
@@ -44,7 +53,8 @@ pub(crate) unsafe fn enable_execve_hook(hook_manager: &mut HookManager) {
 /// Check if the file that is to be executed has SIP and patch it if it does.
 #[tracing::instrument(level = "trace")]
 pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
-    match sip_patch(path) {
+    let patch_binaries = PATCH_BINARIES.get().expect("patch binaries not set");
+    match sip_patch(path, patch_binaries) {
         Ok(None) => Bypass(NoSipDetected(path.to_string())),
         Ok(Some(new_path)) => Success(new_path),
         Err(SipError::FileNotFound(non_existing_bin)) => {
