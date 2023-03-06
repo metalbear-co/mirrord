@@ -25,6 +25,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - VSCode extension: running Python script with debugger fails because it tries to connect to the debugger port remotely.
 - Big file leading to timeout: we found out that `bincode` doesn't do so well with large chunked messages
   so we limited remote read size to 1 megabyte, and read operation supports getting partial data until EOF.
+- mirrord-operator: fix silent fail when parsing websocket messages fails.
 
 ### Changed
 
