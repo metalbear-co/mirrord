@@ -1,7 +1,6 @@
 use std::str::FromStr;
 
 use bimap::BiMap;
-use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use thiserror::Error;
