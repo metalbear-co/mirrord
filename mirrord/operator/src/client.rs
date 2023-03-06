@@ -33,7 +33,7 @@ pub enum OperatorApiError {
     #[error("invalid message: {0:?}")]
     InvalidMessage(Message),
     #[error("Receiver<DaemonMessage> was dropped")]
-    DaemonReciverDropped,
+    DaemonReceiverDropped,
 }
 
 type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
@@ -168,7 +168,7 @@ where
                 self.daemon_tx
                     .send(daemon_message)
                     .await
-                    .map_err(|_| OperatorApiError::DaemonReciverDropped)?;
+                    .map_err(|_| OperatorApiError::DaemonReceiverDropped)?;
             }
             message => return Err(OperatorApiError::InvalidMessage(message)),
         }
