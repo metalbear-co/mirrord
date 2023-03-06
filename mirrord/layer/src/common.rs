@@ -95,13 +95,13 @@ pub(crate) enum HookMessage {
 /// These conversions happen in the unsafe `hook` functions, and we pass the converted value inside
 /// a [`Detour`] to defer the handling of `null` pointers (and other _invalid-ish_ values) when the
 /// `ops` version of the function returns an `Error` or [`Bypass`].
-pub(crate) trait FromPtr<P> {
+pub(crate) trait TryFromPtr<P> {
     /// Converts pointer `P` to `Self`.
-    fn from_ptr(value: P) -> Self;
+    fn try_from_ptr(value: P) -> Self;
 }
 
-impl FromPtr<*const c_char> for Detour<&str> {
-    fn from_ptr(value: *const c_char) -> Self {
+impl TryFromPtr<*const c_char> for Detour<&str> {
+    fn try_from_ptr(value: *const c_char) -> Self {
         let converted = (!value.is_null())
             .then(|| unsafe { CStr::from_ptr(value) })
             .map(CStr::to_str)?
@@ -114,20 +114,20 @@ impl FromPtr<*const c_char> for Detour<&str> {
     }
 }
 
-impl FromPtr<*const c_char> for Detour<String> {
-    fn from_ptr(value: *const c_char) -> Self {
-        Detour::<&str>::from_ptr(value).map(String::from)
+impl TryFromPtr<*const c_char> for Detour<String> {
+    fn try_from_ptr(value: *const c_char) -> Self {
+        Detour::<&str>::try_from_ptr(value).map(String::from)
     }
 }
 
-impl FromPtr<*const c_char> for Detour<PathBuf> {
-    fn from_ptr(value: *const c_char) -> Self {
-        Detour::<String>::from_ptr(value).map(PathBuf::from)
+impl TryFromPtr<*const c_char> for Detour<PathBuf> {
+    fn try_from_ptr(value: *const c_char) -> Self {
+        Detour::<String>::try_from_ptr(value).map(PathBuf::from)
     }
 }
 
-impl FromPtr<*const c_char> for Detour<OpenOptionsInternal> {
-    fn from_ptr(value: *const c_char) -> Self {
-        Detour::<String>::from_ptr(value).map(OpenOptionsInternal::from_mode)
+impl TryFromPtr<*const c_char> for Detour<OpenOptionsInternal> {
+    fn try_from_ptr(value: *const c_char) -> Self {
+        Detour::<String>::try_from_ptr(value).map(OpenOptionsInternal::from_mode)
     }
 }

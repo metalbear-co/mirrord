@@ -36,7 +36,7 @@ use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
 use crate::error::HookError::ResponseError;
 use crate::{
     close_layer_fd,
-    common::FromPtr,
+    common::TryFromPtr,
     detour::{Detour, DetourGuard},
     error::HookError,
     file::ops::{access, lseek, open, read, write},
@@ -48,7 +48,7 @@ use crate::{
 /// We ignore mode in case we don't bypass the call.
 #[tracing::instrument(level = "trace")]
 unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, mode: c_int) -> RawFd {
-    let rawish_path = FromPtr::from_ptr(raw_path);
+    let rawish_path = TryFromPtr::try_from_ptr(raw_path);
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
     trace!(
@@ -86,8 +86,8 @@ pub(super) unsafe extern "C" fn fopen_detour(
     raw_path: *const c_char,
     raw_mode: *const c_char,
 ) -> *mut FILE {
-    let path = FromPtr::from_ptr(raw_path);
-    let mode = FromPtr::from_ptr(raw_mode);
+    let path = TryFromPtr::try_from_ptr(raw_path);
+    let mode = TryFromPtr::try_from_ptr(raw_mode);
 
     fopen(path, mode).unwrap_or_bypass_with(|_| FN_FOPEN(raw_path, raw_mode))
 }
@@ -183,7 +183,7 @@ pub(crate) unsafe extern "C" fn openat_detour(
     raw_path: *const c_char,
     open_flags: c_int,
 ) -> RawFd {
-    let path = FromPtr::from_ptr(raw_path);
+    let path = TryFromPtr::try_from_ptr(raw_path);
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
     openat(fd, path, open_options).unwrap_or_bypass_with(|_| FN_OPENAT(fd, raw_path, open_flags))
@@ -442,7 +442,7 @@ pub(crate) unsafe extern "C" fn write_detour(
 
 /// Implementation of access_detour, used in access_detour and faccessat_detour
 unsafe fn access_logic(raw_path: *const c_char, mode: c_int) -> c_int {
-    let path = FromPtr::from_ptr(raw_path);
+    let path = TryFromPtr::try_from_ptr(raw_path);
 
     access(path, mode as u8).unwrap_or_bypass_with(|_| FN_ACCESS(raw_path, mode))
 }
@@ -557,7 +557,7 @@ unsafe extern "C" fn fill_stat(out_stat: *mut stat, metadata: &MetadataInternal)
 /// Hook for `libc::lstat`.
 #[hook_guard_fn]
 unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
-    let path = FromPtr::from_ptr(raw_path);
+    let path = TryFromPtr::try_from_ptr(raw_path);
 
     xstat(Some(path), None, false)
         .map(|res| {
@@ -583,7 +583,7 @@ pub(crate) unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> 
 /// Hook for `libc::stat`.
 #[hook_guard_fn]
 unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
-    let path = FromPtr::from_ptr(raw_path);
+    let path = TryFromPtr::try_from_ptr(raw_path);
 
     xstat(Some(path), None, true)
         .map(|res| {
@@ -605,7 +605,7 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
         return FN___XSTAT(ver, raw_path, out_stat);
     }
 
-    let path = FromPtr::from_ptr(raw_path);
+    let path = TryFromPtr::try_from_ptr(raw_path);
 
     xstat(Some(path), None, true)
         .map(|res| {
@@ -623,7 +623,7 @@ pub(crate) unsafe fn fstatat_logic(
     out_stat: *mut stat,
     flag: c_int,
 ) -> Detour<i32> {
-    let path = FromPtr::from_ptr(raw_path);
+    let path = TryFromPtr::try_from_ptr(raw_path);
     let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
 
     xstat(Some(path), Some(fd), follow_symlink).map(|res| {
