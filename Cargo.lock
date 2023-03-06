@@ -2350,6 +2350,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-tungstenite",
+ "tracing",
 ]
 
 [[package]]
