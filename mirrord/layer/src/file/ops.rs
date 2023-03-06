@@ -17,7 +17,6 @@ use crate::{
     HookMessage,
 };
 
-
 /// 1 Megabyte. Large read requests can lead to timeouts.
 const MAX_READ_SIZE: u64 = 1024 * 1024;
 
