@@ -8,8 +8,8 @@ use thiserror::Error;
 
 use crate::{
     config::{
-        from_env::FromEnv, source::MirrordConfigSource, ConfigError, FromMirrordConfig,
-        MirrordConfig, Result,
+        from_env::FromEnv, source::MirrordConfigSource, unstable::Unstable, ConfigError,
+        FromMirrordConfig, MirrordConfig, Result,
     },
     util::{MirrordToggleableConfig, ToggleableConfig},
 };
@@ -99,7 +99,12 @@ impl MirrordConfig for IncomingFileConfig {
                     .port_mapping
                     .map(|m| m.into_iter().collect())
                     .unwrap_or_default(),
-                ignore_localhost: advanced.ignore_localhost.unwrap_or_default(),
+                ignore_localhost: advanced
+                    .ignore_localhost
+                    .layer(|layer| Unstable::new("IncomingFileConfig", "ignore_localhost", layer))
+                    .source_value()
+                    .transpose()?
+                    .unwrap_or_default(),
             },
         };
 
@@ -120,7 +125,7 @@ impl MirrordToggleableConfig for IncomingFileConfig {
     }
 }
 
-#[derive(MirrordConfig, Deserialize, Clone, Debug, JsonSchema)]
+#[derive(Deserialize, Clone, Debug, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct IncomingAdvancedFileConfig {
     /// Allows selecting between mirrorring or stealing traffic.
@@ -141,7 +146,6 @@ pub struct IncomingAdvancedFileConfig {
     pub port_mapping: Option<Vec<(u16, u16)>>,
 
     /// Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702
-    #[config(unstable, default = false)]
     pub ignore_localhost: Option<bool>,
 }
 
