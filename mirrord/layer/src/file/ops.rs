@@ -17,6 +17,10 @@ use crate::{
     HookMessage,
 };
 
+
+/// 1 Megabyte. Large read requests can lead to timeouts.
+const MAX_READ_SIZE: u64 = 1024 * 1024;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RemoteFile {
     pub fd: u64,
@@ -364,6 +368,9 @@ pub(crate) fn read(local_fd: RawFd, read_amount: u64) -> Detour<ReadFileResponse
 fn remote_read(remote_fd: u64, read_amount: u64) -> Detour<ReadFileResponse> {
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
+    // Limit read size because if we read too much it can lead to a timeout
+    // Seems also that bincode doesn't do well with large buffers
+    let read_amount = std::cmp::min(read_amount, MAX_READ_SIZE);
     let reading_file = Read {
         remote_fd,
         buffer_size: read_amount,
