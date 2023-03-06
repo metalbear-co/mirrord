@@ -189,19 +189,33 @@ pub(crate) static HOOK_SENDER: OnceLock<Sender<HookMessage>> = OnceLock::new();
 /// 2. [`go_hooks`] file operations.
 pub(crate) static FILE_MODE: OnceLock<FsConfig> = OnceLock::new();
 
-/// Tells us if the user enabled the Tcp outgoing feature in [`NetworkConfig`].
+/// Tells us if the user enabled the Tcp outgoing feature in [`OutgoingConfig`].
 ///
 /// ## Usage
 ///
 /// Used to change the behavior of the `socket::ops::connect` hook operation.
 pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
-/// Tells us if the user enabled the Udp outgoing feature in [`NetworkConfig`].
+/// Tells us if the user enabled the Udp outgoing feature in [`OutgoingConfig`].
 ///
 /// ## Usage
 ///
 /// Used to change the behavior of the `socket::ops::connect` hook operation.
 pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
+
+/// Tells us if the user enabled wants to ignore localhots connections in [`OutgoingConfig`].
+///
+/// ## Usage
+///
+/// When true, localhost connections will stay local (won't go to the remote pod localhost)
+pub(crate) static OUTGOING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
+
+/// Tells us if the user enabled wants to ignore listening on localhost in [`IncomingConfig`].
+///
+/// ## Usage
+///
+/// When true, localhost connections will stay local - wont mirror or steal.
+pub(crate) static INCOMING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
 
 /// Check if we're running in NixOS or Devbox.
 ///
@@ -386,6 +400,14 @@ fn layer_start(config: LayerConfig) {
     ENABLED_UDP_OUTGOING
         .set(config.feature.network.outgoing.udp)
         .expect("Setting ENABLED_UDP_OUTGOING singleton");
+
+    OUTGOING_IGNORE_LOCALHOST
+        .set(config.feature.network.outgoing.ignore_localhost)
+        .expect("Setting OUTGOING_IGNORE_LOCALHOST singleton");
+
+    INCOMING_IGNORE_LOCALHOST
+        .set(config.feature.network.incoming.ignore_localhost)
+        .expect("Setting INCOMING_IGNORE_LOCALHOST singleton");
 
     FILE_FILTER.get_or_init(|| FileFilter::new(config.feature.fs.clone()));
 
