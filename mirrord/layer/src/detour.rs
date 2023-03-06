@@ -288,6 +288,7 @@ impl<S> Detour<S> {
         }
     }
 
+    /// Return the contained `Success` value or `S::default()`.
     pub(crate) fn unwrap_or_default(self) -> S
     where
         S: Default,

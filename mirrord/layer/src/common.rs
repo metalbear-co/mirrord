@@ -85,7 +85,18 @@ pub(crate) enum HookMessage {
     GetAddrinfo(GetAddrInfo),
 }
 
+/// Converts raw pointer values `P` to some other type.
+///
+/// ## Usage
+///
+/// Mainly used to convert from raw C strings (`*const c_char`) into a Rust type wrapped in
+/// [`Detour`].
+///
+/// These conversions happen in the unsafe `hook` functions, and we pass the converted value inside
+/// a [`Detour`] to defer the handling of `null` pointers (and other _invalid-ish_ values) when the
+/// `ops` version of the function returns an `Error` or [`Bypass`].
 pub(crate) trait FromPtr<P> {
+    /// Converts pointer `P` to `Self`.
     fn from_ptr(value: P) -> Self;
 }
 
