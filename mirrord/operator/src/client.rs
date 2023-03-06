@@ -168,9 +168,9 @@ where
                 self.daemon_tx
                     .send(daemon_message)
                     .await
-                    .map_err(|_| OperatorApiError::DaemonReceiverDropped)?;
+                    .map_err(|_| OperatorApiError::DaemonReceiverDropped)
             }
-            message => return Err(OperatorApiError::InvalidMessage(message)),
+            message => Err(OperatorApiError::InvalidMessage(message)),
         }
     }
 
