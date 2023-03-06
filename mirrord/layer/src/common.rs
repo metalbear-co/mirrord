@@ -100,7 +100,7 @@ pub(crate) trait FromPtr<P> {
     fn from_ptr(value: P) -> Self;
 }
 
-impl FromPtr<*const c_char> for Detour<String> {
+impl FromPtr<*const c_char> for Detour<&str> {
     fn from_ptr(value: *const c_char) -> Self {
         let converted = (!value.is_null())
             .then(|| unsafe { CStr::from_ptr(value) })
@@ -108,10 +108,15 @@ impl FromPtr<*const c_char> for Detour<String> {
             .map_err(|fail| {
                 warn!("Failed converting `value` from `CStr` with {:#?}", fail);
                 Bypass::CStrConversion
-            })
-            .map(String::from)?;
+            })?;
 
         Detour::Success(converted)
+    }
+}
+
+impl FromPtr<*const c_char> for Detour<String> {
+    fn from_ptr(value: *const c_char) -> Self {
+        Detour::<&str>::from_ptr(value).map(String::from)
     }
 }
 
