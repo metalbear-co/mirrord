@@ -137,7 +137,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
             // that we don't just keep going indefinitely if a bad argv was passed.
             return Bypass(TooManyArgs);
         }
-        let arg_str = Detour::<&str>::from_ptr(arg)?;
+        let arg_str = Detour::<&str>::from_ptr(*arg)?;
         trace!("exec arg: {arg_str}");
 
         c_string_vec.0.push(
