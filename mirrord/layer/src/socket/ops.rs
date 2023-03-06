@@ -25,7 +25,7 @@ use crate::{
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
     port_debug_patch,
     tcp::{Listen, TcpIncoming},
-    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, OUTGOING_IGNORE_LOCALHOST,
 };
 
 /// Hostname initialized from the agent with [`gethostname`].
@@ -318,6 +318,15 @@ pub(super) fn connect(
     address_length: socklen_t,
 ) -> Detour<ConnectResult> {
     let remote_address = SocketAddr::try_from_raw(raw_address, address_length)?;
+
+    let ignore_localhost = OUTGOING_IGNORE_LOCALHOST
+        .get()
+        .copied()
+        .expect("Should be set during initialization!");
+
+    if ignore_localhost && remote_address.ip().is_loopback() {
+        return Detour::Bypass(Bypass::IgnoreLocalhost(remote_address.port()));
+    }
 
     if is_ignored_port(remote_address) || port_debug_patch(remote_address) {
         Err(Bypass::Port(remote_address.port()))?

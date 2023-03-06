@@ -7,6 +7,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added
+
+- config: `ignore_localhost` to `outgoing` config for ignoring localhost connections, meaning it will connect to local
+  instead of remote localhost.
+
 ### Fixed
 
 - Unnecessary error logs when running a script that uses `env` in its shebang.
