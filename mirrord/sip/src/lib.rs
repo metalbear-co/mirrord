@@ -190,7 +190,11 @@ mod main {
 
     /// Determine status recursively, keep seen_paths, and return an error if there is a cyclical
     /// reference.
-    fn get_sip_status_rec(path: &str, seen_paths: &mut HashSet<PathBuf>) -> Result<SipStatus> {
+    fn get_sip_status_rec(
+        path: &str,
+        seen_paths: &mut HashSet<PathBuf>,
+        patch_binaries: &Vec<String>,
+    ) -> Result<SipStatus> {
         // If which fails, try using the given path as is.
         let complete_path = which(path).unwrap_or_else(|_| PathBuf::from(&path));
         if !complete_path.exists() {
@@ -206,13 +210,20 @@ mod main {
             return Err(CyclicShebangs(canonical_path.to_string_lossy().to_string()));
         }
         seen_paths.insert(canonical_path);
+
+        // Patch binary if it is in the list of binaries to patch.
+        // See `ends_with` docs for understanding better when it returns true.
+        if patch_binaries.iter().any(|x| complete_path.ends_with(x)) {
+            return Ok(SipStatus::SomeSIP(complete_path, None));
+        }
+
         let metadata = std::fs::metadata(&complete_path)?;
         if (metadata.st_flags() & SF_RESTRICTED) > 0 {
             return Ok(SipStatus::SomeSIP(complete_path, None));
         }
         if let Some(shebang) = read_shebang_from_file(&complete_path)? {
             // Start from index 2 of shebang to get only the path.
-            return match get_sip_status_rec(&shebang[2..], seen_paths)? {
+            return match get_sip_status_rec(&shebang[2..], seen_paths, patch_binaries)? {
                 // The file at the end of the shebang chain is not protected.
                 SipStatus::NoSIP => Ok(SipStatus::NoSIP),
                 some_sip => Ok(SipStatus::SomeSIP(complete_path, Some(Box::new(some_sip)))),
@@ -225,9 +236,9 @@ mod main {
     /// suggest)
     /// If file is a script with shebang, the SipStatus is derived from the the SipStatus of the
     /// file the shebang points to.
-    fn get_sip_status(path: &str) -> Result<SipStatus> {
+    fn get_sip_status(path: &str, patch_binaries: &Vec<String>) -> Result<SipStatus> {
         let mut seen_paths = HashSet::new();
-        get_sip_status_rec(path, &mut seen_paths)
+        get_sip_status_rec(path, &mut seen_paths, patch_binaries)
     }
 
     /// Only call this function on a file that is SomeSIP.
@@ -318,8 +329,8 @@ mod main {
     /// If it is, create a non-protected version of the file and return `Ok(Some(patched_path)`.
     /// If it is not, `Ok(None)`.
     /// Propagate errors.
-    pub fn sip_patch(binary_path: &str) -> Result<Option<String>> {
-        match get_sip_status(binary_path) {
+    pub fn sip_patch(binary_path: &str, patch_binaries: &Vec<String>) -> Result<Option<String>> {
+        match get_sip_status(binary_path, patch_binaries) {
             Ok(SipStatus::SomeSIP(path, shebang_target)) => {
                 let tmp_dir = temp_dir().join(MIRRORD_PATCH_DIR);
                 trace!("Using temp dir: {:?} for sip patches", &tmp_dir);
@@ -352,7 +363,7 @@ mod main {
         #[test]
         fn is_sip_true() {
             assert!(matches!(
-                get_sip_status("/bin/ls"),
+                get_sip_status("/bin/ls", &vec![]),
                 Ok(SipStatus::SomeSIP(_, _))
             ));
         }
@@ -364,14 +375,15 @@ mod main {
             f.write(&data).unwrap();
             f.flush().unwrap();
             assert!(matches!(
-                get_sip_status(f.path().to_str().unwrap()).unwrap(),
+                get_sip_status(f.path().to_str().unwrap(), &vec![]).unwrap(),
                 SipStatus::NoSIP
             ));
         }
 
         #[test]
         fn is_sip_notfound() {
-            let err = get_sip_status("/donald/duck/was/a/duck/not/a/quack/a/duck").unwrap_err();
+            let err =
+                get_sip_status("/donald/duck/was/a/duck/not/a/quack/a/duck", &vec![]).unwrap_err();
             assert!(err.to_string().contains("executable file not found"));
         }
 
@@ -380,7 +392,10 @@ mod main {
             let path = "/bin/ls";
             let output = "/tmp/ls_mirrord_test";
             patch_binary(path, output).unwrap();
-            assert!(matches!(get_sip_status(output).unwrap(), SipStatus::NoSIP));
+            assert!(matches!(
+                get_sip_status(output, &vec![]).unwrap(),
+                SipStatus::NoSIP
+            ));
             // Check DYLD_* features work on it:
             let output = std::process::Command::new(output)
                 .env("DYLD_PRINT_LIBRARIES", "1")
@@ -421,7 +436,9 @@ mod main {
             let script_contents = "#!/usr/bin/env bash\nexit\n";
             script.write(script_contents.as_ref()).unwrap();
             script.flush().unwrap();
-            let changed_script_path = sip_patch(script.path().to_str().unwrap()).unwrap().unwrap();
+            let changed_script_path = sip_patch(script.path().to_str().unwrap(), &Vec::new())
+                .unwrap()
+                .unwrap();
             let new_shebang = read_shebang_from_file(changed_script_path)
                 .unwrap()
                 .unwrap();
@@ -451,8 +468,8 @@ mod main {
             std::fs::set_permissions(path, permissions).unwrap();
 
             let path_str = path.to_str().unwrap();
-            let _ = sip_patch(path_str).unwrap().unwrap();
-            let _ = sip_patch(path_str).unwrap().unwrap();
+            let _ = sip_patch(path_str, &Vec::new()).unwrap().unwrap();
+            let _ = sip_patch(path_str, &Vec::new()).unwrap().unwrap();
         }
 
         /// Run `sip_patch` on a file that has a shebang that points to itself and verify that we
@@ -463,7 +480,7 @@ mod main {
             let contents = "#!".to_string() + script.path().to_str().unwrap();
             script.write(contents.as_bytes()).unwrap();
             script.flush().unwrap();
-            let res = sip_patch(script.path().to_str().unwrap());
+            let res = sip_patch(script.path().to_str().unwrap(), &Vec::new());
             assert!(matches!(res, Ok(None)));
         }
     }
