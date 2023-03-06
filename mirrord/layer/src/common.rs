@@ -1,13 +1,16 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::collections::VecDeque;
+use std::{collections::VecDeque, ffi::CStr, path::PathBuf};
 
-use mirrord_protocol::RemoteResult;
+use libc::c_char;
+use mirrord_protocol::{file::OpenOptionsInternal, RemoteResult};
 use tokio::sync::oneshot;
+use tracing::warn;
 
 use crate::{
+    detour::{Bypass, Detour},
     dns::GetAddrInfo,
     error::{HookError, HookResult},
-    file::FileOperation,
+    file::{FileOperation, OpenOptionsInternalExt},
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing},
     tcp::TcpIncoming,
     HOOK_SENDER,
@@ -80,4 +83,35 @@ pub(crate) enum HookMessage {
 
     /// Message originating from `getaddrinfo`, see [`GetAddrInfo`].
     GetAddrinfo(GetAddrInfo),
+}
+
+pub(crate) trait FromPtr<P> {
+    fn from_ptr(value: P) -> Self;
+}
+
+impl FromPtr<*const c_char> for Detour<String> {
+    fn from_ptr(value: *const c_char) -> Self {
+        let converted = (!value.is_null())
+            .then(|| unsafe { CStr::from_ptr(value) })
+            .map(CStr::to_str)?
+            .map_err(|fail| {
+                warn!("Failed converting `value` from `CStr` with {:#?}", fail);
+                Bypass::CStrConversion
+            })
+            .map(String::from)?;
+
+        Detour::Success(converted)
+    }
+}
+
+impl FromPtr<*const c_char> for Detour<PathBuf> {
+    fn from_ptr(value: *const c_char) -> Self {
+        Detour::<String>::from_ptr(value).map(PathBuf::from)
+    }
+}
+
+impl FromPtr<*const c_char> for Detour<OpenOptionsInternal> {
+    fn from_ptr(value: *const c_char) -> Self {
+        Detour::<String>::from_ptr(value).map(OpenOptionsInternal::from_mode)
+    }
 }

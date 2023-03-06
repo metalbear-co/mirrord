@@ -46,11 +46,6 @@ type LocalFd = RawFd;
 type RemoteFd = u64;
 type DirStreamFd = usize;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DirStream {
-    direntry: Box<DirEntryInternal>,
-}
-
 /// `OPEN_FILES` is used to track open files and their corrospending remote file descriptor.
 /// We use Arc so we can support dup more nicely, this means that if user
 /// Opens file `A`, receives fd 1, then dups, receives 2 - both stay open, until both are closed.
