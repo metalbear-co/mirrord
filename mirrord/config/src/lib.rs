@@ -371,11 +371,13 @@ mod tests {
                             mode: Some(IncomingMode::Mirror),
                             http_header_filter: None,
                             port_mapping: None,
+                            ignore_localhost: None,
                         },
                     ))),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {
                         tcp: Some(true),
                         udp: Some(false),
+                        ..Default::default()
                     })),
                 })),
                 capture_error_trace: None,

@@ -25,7 +25,8 @@ use crate::{
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
     port_debug_patch,
     tcp::{Listen, TcpIncoming},
-    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_LOCALHOST,
+    OUTGOING_IGNORE_LOCALHOST,
 };
 
 /// Hostname initialized from the agent with [`gethostname`].
@@ -120,6 +121,15 @@ pub(super) fn bind(
 ) -> Detour<i32> {
     let requested_address = SocketAddr::try_from_raw(raw_address, address_length)?;
     let requested_port = requested_address.port();
+
+    let ignore_localhost = INCOMING_IGNORE_LOCALHOST
+        .get()
+        .copied()
+        .expect("Should be set during initialization!");
+
+    if ignore_localhost && requested_address.ip().is_loopback() {
+        return Detour::Bypass(Bypass::IgnoreLocalhost(requested_port));
+    }
 
     if is_ignored_port(requested_address) || port_debug_patch(requested_address) {
         Err(Bypass::Port(requested_address.port()))?;
@@ -318,6 +328,15 @@ pub(super) fn connect(
     address_length: socklen_t,
 ) -> Detour<ConnectResult> {
     let remote_address = SocketAddr::try_from_raw(raw_address, address_length)?;
+
+    let ignore_localhost = OUTGOING_IGNORE_LOCALHOST
+        .get()
+        .copied()
+        .expect("Should be set during initialization!");
+
+    if ignore_localhost && remote_address.ip().is_loopback() {
+        return Detour::Bypass(Bypass::IgnoreLocalhost(remote_address.port()));
+    }
 
     if is_ignored_port(remote_address) || port_debug_patch(remote_address) {
         Err(Bypass::Port(remote_address.port()))?
