@@ -9,6 +9,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 
+- config: `ignore_localhost` to `outgoing` config for ignoring localhost connections, meaning it will connect to local
+  instead of remote localhost.
+- config: `ignore_localhost` to `incoming` config for ignoring localhost bound sockets, meaning it will not steal/mirror those.
+- combination of `ignore_localhost` in `incoming` and `outgoing` can be useful when you run complex processes that does
+  IPC over localhost.
 - `sip_binaries` to config file to allow specifying SIP-protected binaries that needs to be patched
   when mirrord doesn't detect those. See [#1152](https://github.com/metalbear-co/mirrord/issues/1152).
 
@@ -16,6 +21,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Unnecessary error logs when running a script that uses `env` in its shebang.
 - VSCode extension: running Python script with debugger fails because it tries to connect to the debugger port remotely.
+- Big file leading to timeout: we found out that `bincode` doesn't do so well with large chunked messages
+  so we limited remote read size to 1 megabyte, and read operation supports getting partial data until EOF.
 - mirrord-operator: fix silent fail when parsing websocket messages fails.
 
 ### Changed

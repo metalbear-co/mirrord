@@ -15,6 +15,10 @@ pub struct OutgoingConfig {
 
     #[config(env = "MIRRORD_UDP_OUTGOING", default = true)]
     pub udp: bool,
+
+    /// Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702
+    #[config(unstable, default = false)]
+    pub ignore_localhost: bool,
 }
 
 impl MirrordToggleableConfig for OutgoingFileConfig {
@@ -27,6 +31,7 @@ impl MirrordToggleableConfig for OutgoingFileConfig {
             udp: FromEnv::new("MIRRORD_UDP_OUTGOING")
                 .source_value()
                 .unwrap_or(Ok(false))?,
+            ..Default::default()
         })
     }
 }
