@@ -99,7 +99,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .port_mapping
                     .map(|m| m.into_iter().collect())
                     .unwrap_or_default(),
-                ignore_localhost: advanced.ignore_localhost,
+                ignore_localhost: advanced.ignore_localhost.unwrap_or_default(),
             },
         };
 
@@ -142,7 +142,7 @@ pub struct IncomingAdvancedFileConfig {
 
     /// Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702
     #[config(unstable, default = false)]
-    pub ignore_localhost: bool,
+    pub ignore_localhost: Option<bool>,
 }
 
 #[derive(Default, PartialEq, Eq, Clone, Debug)]
