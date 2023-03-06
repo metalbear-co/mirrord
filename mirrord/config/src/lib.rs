@@ -364,6 +364,7 @@ mod tests {
                             mode: Some(IncomingMode::Mirror),
                             http_header_filter: None,
                             port_mapping: None,
+                            ignore_localhost: false,
                         },
                     ))),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {

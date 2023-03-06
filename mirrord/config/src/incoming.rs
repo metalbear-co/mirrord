@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use bimap::BiMap;
+use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use thiserror::Error;
@@ -98,6 +99,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .port_mapping
                     .map(|m| m.into_iter().collect())
                     .unwrap_or_default(),
+                ignore_localhost: advanced.ignore_localhost,
             },
         };
 
@@ -118,7 +120,7 @@ impl MirrordToggleableConfig for IncomingFileConfig {
     }
 }
 
-#[derive(Deserialize, Clone, Debug, JsonSchema)]
+#[derive(MirrordConfig, Deserialize, Clone, Debug, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct IncomingAdvancedFileConfig {
     /// Allows selecting between mirrorring or stealing traffic.
@@ -137,6 +139,10 @@ pub struct IncomingAdvancedFileConfig {
     /// machine. For example, your local process listens on port 9333 and the container listens
     /// on port 80. You'd use [[9333, 80]]
     pub port_mapping: Option<Vec<(u16, u16)>>,
+
+    /// Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702
+    #[config(unstable, default = false)]
+    pub ignore_localhost: bool,
 }
 
 #[derive(Default, PartialEq, Eq, Clone, Debug)]
@@ -146,6 +152,8 @@ pub struct IncomingConfig {
     pub http_header_filter: http_filter::HttpHeaderFilterConfig,
 
     pub port_mapping: BiMap<u16, u16>,
+
+    pub ignore_localhost: bool,
 }
 
 impl IncomingConfig {

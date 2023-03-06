@@ -121,6 +121,15 @@ pub(super) fn bind(
     let requested_address = SocketAddr::try_from_raw(raw_address, address_length)?;
     let requested_port = requested_address.port();
 
+    let ignore_localhost = OUTGOING_IGNORE_LOCALHOST
+        .get()
+        .copied()
+        .expect("Should be set during initialization!");
+
+    if ignore_localhost && requested_address.ip().is_loopback() {
+        return Detour::Bypass(Bypass::IgnoreLocalhost(requested_port));
+    }
+
     if is_ignored_port(requested_address) || port_debug_patch(requested_address) {
         Err(Bypass::Port(requested_address.port()))?;
     }

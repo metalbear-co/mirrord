@@ -11,6 +11,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - config: `ignore_localhost` to `outgoing` config for ignoring localhost connections, meaning it will connect to local
   instead of remote localhost.
+- config: `ignore_localhost` to `incoming` config for ignoring localhost bound sockets, meaning it will not steal/mirror those.
+- combination of `ignore_localhost` in `incoming` and `outgoing` can be useful when you run complex processes that does
+  IPC over localhost.
 
 ### Fixed
 

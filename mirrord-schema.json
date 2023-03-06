@@ -422,6 +422,9 @@
     },
     "IncomingAdvancedFileConfig": {
       "type": "object",
+      "required": [
+        "ignore_localhost"
+      ],
       "properties": {
         "http_header_filter": {
           "description": "Sets up the HTTP traffic filter (currently, only for [`IncomingMode::Steal`]).\n\nSee [`HttpHeaderFilterConfig`] for details.",
@@ -433,6 +436,10 @@
               "type": "null"
             }
           ]
+        },
+        "ignore_localhost": {
+          "description": "Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702",
+          "type": "boolean"
         },
         "mode": {
           "description": "Allows selecting between mirrorring or stealing traffic.\n\nSee [`IncomingMode`] for details.",
