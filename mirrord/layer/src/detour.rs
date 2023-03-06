@@ -176,6 +176,9 @@ pub(crate) enum Bypass {
     /// `intercept_tmp_dir`
     #[cfg(target_os = "macos")]
     TooManyArgs,
+
+    /// Socket is connecting to localhots and we're asked to ignore it.
+    IgnoreLocalhost(u16),
 }
 
 /// [`ControlFlow`](std::ops::ControlFlow)-like enum to be used by hooks.

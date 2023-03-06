@@ -126,6 +126,13 @@ pub struct LayerConfig {
     /// in-cluster config.
     #[config(env = "MIRRORD_KUBECONFIG")]
     pub kubeconfig: Option<String>,
+
+    /// Binaries to patch (macOS SIP).
+    /// Use this when mirrord isn't loaded to protected binaries
+    /// that weren't automatically patched.
+    /// Runs `endswith` on the binary path (so `bash` would apply to any binary
+    /// ending with `bash` while `/usr/bin/bash` would apply only for that binary).
+    pub sip_binaries: Option<VecOrSingle<String>>,
 }
 
 impl LayerConfig {
@@ -364,17 +371,20 @@ mod tests {
                             mode: Some(IncomingMode::Mirror),
                             http_header_filter: None,
                             port_mapping: None,
+                            ignore_localhost: None,
                         },
                     ))),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {
                         tcp: Some(true),
                         udp: Some(false),
+                        ..Default::default()
                     })),
                 })),
                 capture_error_trace: None,
             }),
             connect_tcp: None,
             operator: None,
+            sip_binaries: None,
         };
 
         assert_eq!(config, expect);

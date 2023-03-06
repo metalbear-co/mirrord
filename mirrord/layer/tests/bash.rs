@@ -34,7 +34,7 @@ async fn bash_script(dylib_path: &Path) {
     println!("Listening for messages from the layer on {addr}");
     let env = get_env(dylib_path.to_str().unwrap(), &addr, vec![], None);
     #[cfg(target_os = "macos")]
-    let executable = sip_patch(&executable).unwrap().unwrap();
+    let executable = sip_patch(&executable, &Vec::new()).unwrap().unwrap();
     let test_process = TestProcess::start_process(executable, application.get_args(), env).await;
 
     // Accept the connection from the layer in the env binary and verify initial messages.
