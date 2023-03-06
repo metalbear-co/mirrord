@@ -369,6 +369,7 @@ mod tests {
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {
                         tcp: Some(true),
                         udp: Some(false),
+                        ..Default::default()
                     })),
                 })),
                 capture_error_trace: None,

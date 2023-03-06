@@ -547,6 +547,13 @@
     "OutgoingFileConfig": {
       "type": "object",
       "properties": {
+        "ignore_localhost": {
+          "description": "Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "tcp": {
           "type": [
             "boolean",
