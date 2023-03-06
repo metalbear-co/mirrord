@@ -172,8 +172,6 @@ where
             }
             message => return Err(OperatorApiError::InvalidMessage(message)),
         }
-
-        todo!()
     }
 
     async fn start(mut self) -> Result<()> {
