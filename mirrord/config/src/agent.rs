@@ -80,7 +80,7 @@ pub struct AgentConfig {
     /// Temporary fix for issue [#1029](https://github.com/metalbear-co/mirrord/issues/1029).
     #[config(
         env = "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS",
-        default = false,
+        default = true,
         unstable
     )]
     pub flush_connections: bool,

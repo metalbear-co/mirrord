@@ -8,8 +8,9 @@ use mirrord_kube::{
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use thiserror::Error;
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
+use tracing::error;
 
 use crate::crd::TargetCrd;
 
@@ -22,7 +23,17 @@ pub enum OperatorApiError {
     #[error(transparent)]
     HttpError(#[from] http::Error),
     #[error(transparent)]
+    WsError(#[from] TungsteniteError),
+    #[error(transparent)]
     KubeApiError(#[from] KubeApiError),
+    #[error(transparent)]
+    DecodeError(#[from] bincode::error::DecodeError),
+    #[error(transparent)]
+    EncodeError(#[from] bincode::error::EncodeError),
+    #[error("invalid message: {0:?}")]
+    InvalidMessage(Message),
+    #[error("Receiver<DaemonMessage> was dropped")]
+    DaemonReceiverDropped,
 }
 
 type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
@@ -98,13 +109,17 @@ impl OperatorApi {
             .await
             .map_err(KubeApiError::from)?;
 
-        wrap_connection(connection)
+        Ok(ConnectionWrapper::wrap(connection))
     }
 }
 
-fn wrap_connection<T>(
-    mut connection: T,
-) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)>
+pub struct ConnectionWrapper<T> {
+    connection: T,
+    client_rx: Receiver<ClientMessage>,
+    daemon_tx: Sender<DaemonMessage>,
+}
+
+impl<T> ConnectionWrapper<T>
 where
     for<'stream> T: StreamExt<Item = Result<Message, TungsteniteError>>
         + SinkExt<Message, Error = TungsteniteError>
@@ -112,45 +127,73 @@ where
         + Unpin
         + 'stream,
 {
-    let (client_tx, mut client_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
-    let (daemon_tx, daemon_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
+    fn wrap(connection: T) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
+        let (client_tx, client_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
+        let (daemon_tx, daemon_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
 
-    tokio::spawn(async move {
+        let connection_wrapper = ConnectionWrapper {
+            connection,
+            client_rx,
+            daemon_tx,
+        };
+
+        tokio::spawn(async move {
+            if let Err(err) = connection_wrapper.start().await {
+                error!("{err:?}")
+            }
+        });
+
+        (client_tx, daemon_rx)
+    }
+
+    async fn handle_client_message(&mut self, client_message: ClientMessage) -> Result<()> {
+        let payload = bincode::encode_to_vec(client_message, bincode::config::standard())?;
+
+        self.connection.send(payload.into()).await?;
+
+        Ok(())
+    }
+
+    async fn handle_daemon_message(
+        &mut self,
+        daemon_message: Result<Message, TungsteniteError>,
+    ) -> Result<()> {
+        match daemon_message? {
+            Message::Binary(payload) => {
+                let (daemon_message, _) = bincode::decode_from_slice::<DaemonMessage, _>(
+                    &payload,
+                    bincode::config::standard(),
+                )?;
+
+                self.daemon_tx
+                    .send(daemon_message)
+                    .await
+                    .map_err(|_| OperatorApiError::DaemonReceiverDropped)
+            }
+            message => Err(OperatorApiError::InvalidMessage(message)),
+        }
+    }
+
+    async fn start(mut self) -> Result<()> {
         loop {
             tokio::select! {
-                client_message = client_rx.recv() => {
-                    if let Some(client_message) = client_message {
-                        if let Ok(payload) = bincode::encode_to_vec(client_message, bincode::config::standard()) {
-                            if let Err(err) = connection.send(payload.into()).await {
-                                eprintln!("{err:?}");
-
-                                break;
-                            }
-                        } else {
-                            break;
-                        }
-                    } else {
-                        break;
+                client_message = self.client_rx.recv() => {
+                    match client_message {
+                        Some(client_message) => self.handle_client_message(client_message).await?,
+                        None => break,
                     }
                 }
-                daemon_message = connection.next() => {
-                    if let Some(Ok(Message::Binary(payload))) = daemon_message {
-                        if let Ok((daemon_message, _)) = bincode::decode_from_slice::<DaemonMessage, _>(&payload, bincode::config::standard()) {
-                            if let Err(err) = daemon_tx.send(daemon_message).await {
-                                eprintln!("{err:?}");
-
-                                break;
-                            }
-                        } else {
-                            break;
-                        }
+                daemon_message = self.connection.next() => {
+                    match daemon_message {
+                        Some(daemon_message) => self.handle_daemon_message(daemon_message).await?,
+                        None => break,
                     }
                 }
             }
         }
 
-        let _ = connection.send(Message::Close(None)).await;
-    });
+        let _ = self.connection.send(Message::Close(None)).await;
 
-    Ok((client_tx, daemon_rx))
+        Ok(())
+    }
 }

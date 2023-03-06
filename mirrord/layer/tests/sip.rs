@@ -20,7 +20,7 @@ use mirrord_sip::sip_patch;
 async fn tmp_dir_read_locally(dylib_path: &Path) {
     let application = Application::BashShebang;
     let executable = application.get_executable().await;
-    let executable = sip_patch(&executable).unwrap().unwrap();
+    let executable = sip_patch(&executable, &Vec::new()).unwrap().unwrap();
     println!("Using executable: {}", &executable);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();
