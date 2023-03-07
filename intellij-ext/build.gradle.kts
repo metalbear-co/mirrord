@@ -106,7 +106,8 @@ tasks {
 
     changelog {
         version.set(properties("pluginVersion"))
-        groups.set(emptyList())
+        groups.set(listOf("Added", "Changed", "Deprecated", "Removed", "Fixed", "Security", "Internal"))
+
     }
 
     patchPluginXml {
