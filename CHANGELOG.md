@@ -7,6 +7,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed
+
+- mirrord-layer: Added `SocketId` to `UserSocket` as a better way of identifying sockets,
+  part of [#1054](https://github.com/metalbear-co/mirrord/issues/1054).
+
 ## 3.31.0
 
 ### Added
