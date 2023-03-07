@@ -5,12 +5,7 @@ use core::ffi::{c_size_t, c_ssize_t};
 ///
 /// NOTICE: If a file operation fails, it might be because it depends on some `libc` function
 /// that is not being hooked (`strace` the program to check).
-use std::{
-    ffi::{CStr, CString},
-    os::unix::io::RawFd,
-    ptr, slice,
-    time::Duration,
-};
+use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
 
 #[cfg(target_os = "linux")]
 use errno::{set_errno, Errno};
@@ -35,13 +30,12 @@ use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
 #[cfg(target_os = "linux")]
 use crate::error::HookError::ResponseError;
 use crate::{
-    close_layer_fd,
     common::TryFromPtr,
     detour::{Detour, DetourGuard},
     error::HookError,
     file::ops::{access, lseek, open, read, write},
     hooks::HookManager,
-    replace, FN_CLOSE,
+    replace,
 };
 
 /// Implementation of open_detour, used in open_detour and openat_detour
@@ -98,7 +92,7 @@ pub(super) unsafe extern "C" fn fopen_detour(
 /// mirrord-layer.
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char) -> *mut FILE {
-    let rawish_mode = (!raw_mode.is_null()).then(|| CStr::from_ptr(raw_mode));
+    let rawish_mode = TryFromPtr::try_from_ptr(raw_mode);
 
     fdopen(fd, rawish_mode).unwrap_or_bypass_with(|_| FN_FDOPEN(fd, raw_mode))
 }
@@ -487,21 +481,17 @@ pub(crate) unsafe extern "C" fn ferror_detour(file_stream: *mut FILE) -> c_int {
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fclose_detour(file_stream: *mut FILE) -> c_int {
-    let (res, fd) = match open_file_stream_fd(file_stream) {
-        Some(local_fd) => (FN_CLOSE(local_fd), local_fd),
-        None => (FN_FCLOSE(file_stream), fileno_logic(file_stream)),
-    };
-
-    close_layer_fd(fd);
-    res
+    let local_fd = *(file_stream as *const _);
+    fclose(local_fd).unwrap_or_bypass_with(|_| FN_FCLOSE(file_stream))
 }
 
-/// Hook for `libc::fileno`.
+/// Hook for [`libc::fileno`].
 ///
-/// Converts a `*mut FILE` stream into an fd.
+/// Converts a `*mut FILE` stream into an fd, see [`fileno`] for more details.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fileno_detour(file_stream: *mut FILE) -> c_int {
-    fileno_logic(file_stream)
+    let local_fd = *(file_stream as *const _);
+    fileno(local_fd).unwrap_or_bypass_with(|_| FN_FILENO(file_stream))
 }
 
 /// Implementation of fileno_detour, used in fileno_detour and fread_detour

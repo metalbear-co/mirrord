@@ -1,4 +1,3 @@
-use core::ffi::CStr;
 use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 use libc::{c_int, c_uint, AT_FDCWD, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
@@ -22,7 +21,7 @@ const MAX_READ_SIZE: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RemoteFile {
-    pub fd: u64,
+    pub(crate) fd: u64,
 }
 
 impl RemoteFile {
@@ -164,7 +163,7 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
 /// Calls [`open`] and returns a [`FILE`] pointer based on the **local** `fd`.
 #[tracing::instrument(level = "trace")]
 pub(crate) fn fopen(path: Detour<PathBuf>, mode: Detour<OpenOptionsInternal>) -> Detour<*mut FILE> {
-    let open_options = mode.unwrap_or_default();
+    let open_options = mode?;
 
     let local_file_fd = open(path, open_options)?;
     let result = OPEN_FILES
@@ -178,21 +177,8 @@ pub(crate) fn fopen(path: Detour<PathBuf>, mode: Detour<OpenOptionsInternal>) ->
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE> {
-    let _open_options: OpenOptionsInternal = rawish_mode
-        .map(CStr::to_str)
-        .transpose()
-        .map_err(|fail| {
-            warn!(
-                "Failed converting `rawish_mode` from `CStr` with {:#?}",
-                fail
-            );
-
-            Bypass::CStrConversion
-        })?
-        .map(String::from)
-        .map(OpenOptionsInternalExt::from_mode)
-        .unwrap_or_default();
+pub(crate) fn fdopen(fd: RawFd, rawish_mode: Detour<OpenOptionsInternal>) -> Detour<*mut FILE> {
+    let _open_options = rawish_mode?;
 
     trace!("fdopen -> open_options {_open_options:#?}");
 
@@ -241,6 +227,44 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
     OPEN_FILES.lock()?.remove(&fd);
 
     Detour::Success(local_dir_fd as usize)
+}
+
+/// Returns the `local_fd` back if this fd is being managed by us.
+///
+/// ## Details
+///
+/// Due to the way we handle opening file streams (see [`fopen`]), it is safe-ish to convert the
+/// `*mut FILE` to a simple `RawFd`, and check if it's still in our [`OPEN_FILES`].
+///
+/// ## Safety
+///
+/// The assumption may break if the file stream pointer conversion to [`RawFd`] ends up being equal
+/// to some fd that is being managed by us, for example:
+///
+/// 1. The user calls [`libc::fopen`] for a locally handled path;
+/// 2. The call succeeds, and returns a `*mut FILE` _A_, which can be dereferenced to a value of
+///    `3`;
+/// 3. We're holding a previously opened file with `fd == 3`;
+/// 4. User calls [`libc::fileno`] with the acquired file stream _A_;
+/// 5. We convert the file stream _A_ to `3`, breaking our invariant.
+///
+/// We're assuming that most pointers won't have such small values, and that the user won't reach a
+/// big enough list of fds to get close to normal pointer address' values.
+#[tracing::instrument(level = "trace")]
+pub(crate) fn fileno(local_fd: RawFd) -> Detour<RawFd> {
+    Detour::Success(
+        OPEN_FILES
+            .lock()?
+            .contains_key(&local_fd)
+            .then(|| local_fd)?,
+    )
+}
+
+#[tracing::instrument(level = "trace")]
+pub(crate) fn fclose(local_fd: RawFd) -> Detour<i32> {
+    Detour::Success(OPEN_FILES.lock()?.remove(&local_fd).map(|_| 0)?)
+    // TODO(alex) [mid] 2023-03-07: Call `fflush` if this was being used as output (always safe to
+    // call it? if so, then just always do it).
 }
 
 // fetches the current entry in the directory stream created by `fdopendir`
