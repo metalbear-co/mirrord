@@ -37,3 +37,8 @@ showcontent = true
 directory = "fixed"
 name = "Fixed"
 showcontent = true
+
+[[tool.towncrier.type]]
+directory = "internal"
+name = "Internal"
+showcontent = true
