@@ -121,14 +121,6 @@ pub(super) fn bind(
         .copied()
         .expect("Should be set during initialization!");
 
-    if ignore_localhost && requested_address.ip().is_loopback() {
-        return Detour::Bypass(Bypass::IgnoreLocalhost(requested_port));
-    }
-
-    if is_ignored_port(requested_address) || port_debug_patch(requested_address) {
-        Err(Bypass::Port(requested_address.port()))?;
-    }
-
     let mut socket = {
         SOCKETS
             .lock()?
@@ -142,6 +134,14 @@ pub(super) fn bind(
                 }
             })?
     };
+
+    if ignore_localhost && requested_address.ip().is_loopback() {
+        return Detour::Bypass(Bypass::IgnoreLocalhost(requested_port));
+    }
+
+    if is_ignored_port(requested_address) || port_debug_patch(requested_address) {
+        Err(Bypass::Port(requested_address.port()))?;
+    }
 
     let unbound_address = match socket.domain {
         libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(

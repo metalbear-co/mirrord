@@ -7,6 +7,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed
+
+- Possible bug when bound address is bypassed and socket stays in `SOCKETS` map.
+
 ### Changed
 
 - mirrord-layer: Added `SocketId` to `UserSocket` as a better way of identifying sockets,
