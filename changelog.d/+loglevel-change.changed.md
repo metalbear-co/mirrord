@@ -1,0 +1,1 @@
+Change socket error on reading from outgoing sockets to be info instead of error
