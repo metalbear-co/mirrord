@@ -103,7 +103,7 @@ impl TcpOutgoingHandler {
                             continue;
                         },
                         Err(fail) => {
-                            error!("Failed reading mirror_stream with {:#?}", fail);
+                            info!("Failed reading mirror_stream with {:#?}", fail);
                             close_remote_stream(layer_tx.clone()).await;
 
                             break;
