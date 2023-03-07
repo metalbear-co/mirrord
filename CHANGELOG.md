@@ -1,13 +1,16 @@
 # Change Log
 
-All notable changes to this project will be documented in this file.
+All notable changes to the mirrord's cli, agent, protocol, extensions will be documented in this file.
+Previous versions had CHANGELOG per component, we decided to combine all repositories to a mono-repo with one CHANGELOG.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the changes for the upcoming release can be found in <https://github.com/metalbear-co/mirrord/tree/main/changelog.d/>.
+## [Unreleased]
 
-<!-- towncrier release notes start -->
+### Changed
 
+- mirrord-layer: Added `SocketId` to `UserSocket` as a better way of identifying sockets,
+  part of [#1054](https://github.com/metalbear-co/mirrord/issues/1054).
 
 ## 3.31.0
 

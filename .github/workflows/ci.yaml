@@ -14,6 +14,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  towncrier_check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: install towncrier
+        run: pip install towncrier
+      - name: verify newsfragment exist
+        run: towncrier check
+
   changed_files:
     runs-on: ubuntu-latest
     # don't run CI on drafts
@@ -608,6 +616,7 @@ jobs:
     if: always()
     needs:
       [
+        towncrier_check,
         changed_files,
         build_mirrord,
         test_agent_image,
@@ -631,19 +640,19 @@ jobs:
         # then skipping is considered success by branch protection rules
         env:
           CI_SUCCESS: ${{ (needs.changed_files.result == 'success') &&
-                      (needs.build_mirrord.result == 'success' || needs.build_mirrord.result == 'skipped') &&
-                      (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
-                      (needs.integration_tests_macos.result == 'success' || needs.integration_tests_macos.result == 'skipped') &&
-                      (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped') &&
-                      (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
-                      (needs.test_mirrord_layer_cli.result == 'success' || needs.test_mirrord_layer_cli.result == 'skipped') &&
-                      (needs.test_agent.result == 'success' || needs.test_agent.result == 'skipped') &&
-                      (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
-                      (needs.lint_macos.result == 'success' || needs.lint_macos.result == 'skipped') &&
-                      (needs.test_mirrord_config.result == 'success' || needs.test_mirrord_config.result == 'skipped') &&
-                      (needs.test_mirrord_protocol.result == 'success' || needs.test_mirrord_protocol.result == 'skipped') &&
-                      (needs.test_mirrord_sip.result == 'success' || needs.test_mirrord_sip.result == 'skipped') &&
-                      (needs.build_intellij_plugin.result == 'success' || needs.build_intellij_plugin.result == 'skipped') &&
-                      (needs.lint_markdown.result == 'success' || needs.lint_markdown.result == 'skipped') }}
+            (needs.towncrier_check.result == 'success') &&
+            (needs.build_mirrord.result == 'success' || needs.build_mirrord.result == 'skipped') &&
+            (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
+            (needs.integration_tests_macos.result == 'success' || needs.integration_tests_macos.result == 'skipped') &&
+            (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped') &&
+            (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
+            (needs.test_mirrord_layer_cli.result == 'success' || needs.test_mirrord_layer_cli.result == 'skipped') &&
+            (needs.test_agent.result == 'success' || needs.test_agent.result == 'skipped') &&
+            (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
+            (needs.lint_macos.result == 'success' || needs.lint_macos.result == 'skipped') &&
+            (needs.test_mirrord_config.result == 'success' || needs.test_mirrord_config.result == 'skipped') &&
+            (needs.test_mirrord_protocol.result == 'success' || needs.test_mirrord_protocol.result == 'skipped') &&
+            (needs.test_mirrord_sip.result == 'success' || needs.test_mirrord_sip.result == 'skipped') &&
+            (needs.build_intellij_plugin.result == 'success' || needs.build_intellij_plugin.result == 'skipped') &&
+            (needs.lint_markdown.result == 'success' || needs.lint_markdown.result == 'skipped') }}
         run: echo $CI_SUCCESS && if [ "$CI_SUCCESS" == "true" ]; then echo "SUCCESS" && exit 0; else echo "Failure" && exit 1; fi
-
