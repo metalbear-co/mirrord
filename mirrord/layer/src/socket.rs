@@ -13,17 +13,31 @@ use socket2::SockAddr;
 use tracing::warn;
 use trust_dns_resolver::config::Protocol;
 
+use self::id::SocketId;
 use crate::{
     detour::{Bypass, Detour, OptionExt},
     error::{HookError, HookResult},
 };
 
 pub(super) mod hooks;
+pub(crate) mod id;
 pub(crate) mod ops;
 
 pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Holds the connections that have yet to be [`accept`](ops::accept)ed.
+///
+/// ## Details
+///
+/// The connections here are added by
+/// [`TcpHandler::create_local_stream`](crate::tcp::TcpHandler::create_local_stream) when the agent
+/// sends us a [`NewTcpConnection`](mirrord_protocol::tcp::NewTcpConnection).
+///
+/// And they become part of the [`UserSocket`]'s [`SocketState`] when [`ops::accept`] is called.
+///
+/// Finally, we remove a socket's queue when the socket's `fd` is closed in
+/// [`close_layer_fd`](crate::close_layer_fd).
 pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
     LazyLock::new(|| Mutex::new(ConnectionQueue::default()));
 
@@ -39,27 +53,37 @@ pub struct SocketInformation {
 /// poll_agent loop inserts connection data into this queue, and accept reads it.
 #[derive(Debug, Default)]
 pub struct ConnectionQueue {
-    connections: HashMap<RawFd, VecDeque<SocketInformation>>,
+    connections: HashMap<SocketId, VecDeque<SocketInformation>>,
 }
 
 impl ConnectionQueue {
-    pub fn add(&mut self, fd: &RawFd, info: SocketInformation) {
-        self.connections.entry(*fd).or_default().push_back(info);
+    /// Adds a connection.
+    ///
+    /// See [`TcpHandler::create_local_stream`](crate::tcp::TcpHandler::create_local_stream).
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn add(&mut self, id: SocketId, info: SocketInformation) {
+        self.connections.entry(id).or_default().push_back(info);
     }
-    pub fn get(&mut self, fd: &RawFd) -> Option<SocketInformation> {
-        let mut queue = self.connections.remove(fd)?;
-        if let Some(info) = queue.pop_front() {
-            if !queue.is_empty() {
-                self.connections.insert(*fd, queue);
-            }
-            Some(info)
-        } else {
-            None
-        }
+
+    /// Pops the next connection to be handled from `Self`.
+    ///
+    /// See [`ops::accept].
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn pop_front(&mut self, id: SocketId) -> Option<SocketInformation> {
+        self.connections.get_mut(&id)?.pop_front()
+    }
+
+    /// Removes the [`ConnectionQueue`] associated with the [`UserSocket`].
+    ///
+    /// See [`crate::close_layer_fd].
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn remove(&mut self, id: SocketId) -> Option<VecDeque<SocketInformation>> {
+        self.connections.remove(&id)
     }
 }
 
 impl SocketInformation {
+    #[tracing::instrument(level = "trace")]
     pub fn new(remote_address: SocketAddr, local_address: SocketAddr) -> Self {
         Self {
             remote_address,
@@ -113,12 +137,32 @@ impl TryFrom<c_int> for SocketKind {
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct UserSocket {
+pub(crate) struct UserSocket {
+    pub(crate) id: SocketId,
     domain: c_int,
     type_: c_int,
     protocol: c_int,
     pub state: SocketState,
     pub(crate) kind: SocketKind,
+}
+
+impl UserSocket {
+    pub(crate) fn new(
+        domain: c_int,
+        type_: c_int,
+        protocol: c_int,
+        state: SocketState,
+        kind: SocketKind,
+    ) -> Self {
+        Self {
+            id: Default::default(),
+            domain,
+            type_,
+            protocol,
+            state,
+            kind,
+        }
+    }
 }
 
 #[inline]
