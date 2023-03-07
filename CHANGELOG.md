@@ -8,23 +8,6 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
-## [3.32.0](https://github.com/metalbear-co/mirrord/tree/3.32.0) - 2023-03-07
-
-
-### Changed
-
-- mirrord-layer: Added `SocketId` to `UserSocket` as a better way of
-  identifying sockets, part of #1054.
-  [#1054](https://github.com/metalbear-co/mirrord/issues/1054)
-- CHANGELOG - changed to use towncrier
-
-
-### Fixed
-
-- Possible bug when bound address is bypassed and socket stays in `SOCKETS`
-  map.
-
-
 ## 3.31.0
 
 ### Added
