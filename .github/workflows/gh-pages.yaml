@@ -29,7 +29,7 @@ jobs:
       RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
     steps:
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: nightly
       - uses: Swatinem/rust-cache@v2

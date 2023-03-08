@@ -78,7 +78,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
@@ -95,7 +95,7 @@ jobs:
       RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
     steps:
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --document-private-items
 
@@ -105,7 +105,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
@@ -123,7 +123,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v2
@@ -141,7 +141,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v2
@@ -159,7 +159,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v2
@@ -174,7 +174,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
       - uses: Swatinem/rust-cache@v2
       - run: |
@@ -186,7 +186,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
@@ -239,7 +239,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v2
@@ -255,7 +255,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
@@ -277,7 +277,7 @@ jobs:
       MIRRORD_TEST_USE_EXISTING_LIB: /home/runner/work/mirrord/mirrord/target/debug/libmirrord_layer.so
     steps:
       - uses: actions/checkout@v3 # Checkout the mirrord repo.
-      - uses: dtolnay/rust-toolchain@stable # Install rust.
+      - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install rust.
         with:
           target: x86_64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
@@ -389,7 +389,7 @@ jobs:
       MIRRORD_TEST_USE_EXISTING_LIB: ../../target/debug/libmirrord_layer.dylib
     steps:
       - uses: actions/checkout@v3 # Checkout the mirrord repo.
-      - uses: dtolnay/rust-toolchain@stable # Install Rust.
+      - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install Rust.
         with:
           target: x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
@@ -455,7 +455,7 @@ jobs:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
