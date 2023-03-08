@@ -172,7 +172,7 @@ jobs:
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
           tags: |
-            ghcr.io/metalbear-co/mirrord-staging: ${{ github.sha }}
+            ghcr.io/metalbear-co/mirrord-staging:${{ github.sha }}
 
       - name: Build and push (final/release)
         if: github.event_name != 'workflow_dispatch'
