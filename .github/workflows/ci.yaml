@@ -103,10 +103,14 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
+      # the setup rust toolchain action ignores the input if file exists.. so remove it
+      - if: ${{matrix.target == 'aarch64-apple-darwin'}}
+        run: rm rust-toolchain.toml
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
+          toolchain: nightly-2023-01-31
       # only mirrord, mirrord-sip contain macOS specific, so run clippy on that.
       - run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -D warnings
       - run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -D warnings
