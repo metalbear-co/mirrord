@@ -8,3 +8,4 @@ compile/test speed improvements
     saves a lot of time on fetching (takes around 60s when using libgit2)
 4. switch to use `actions-rust-lang/setup-rust-toolchain@v1` instead of `actions-rs/toolchain@v1` 
     since it's deprecated and doesn't support `rust-toolchain.toml`
+5. remove s`Swatinem/rust-cache@v2` since it's included in `actions-rust-lang/setup-rust-toolchain@v1`

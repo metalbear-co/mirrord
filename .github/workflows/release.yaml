@@ -15,9 +15,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: aarch64-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: aarch64-unknown-linux-gnu-ubuntu-latest
       - uses: taiki-e/install-action@v2
         with:
           tool: cross
@@ -42,9 +39,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: x86_64-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: x86_64-unknown-linux-gnu-ubuntu-latest
       - uses: taiki-e/install-action@v2
         with:
           tool: cross
@@ -64,7 +58,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: aarch64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
       - name: Import Code-Signing Certificates
         uses: Apple-Actions/import-codesign-certs@v1
         with:

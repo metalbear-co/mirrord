@@ -32,7 +32,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: nightly
-      - uses: Swatinem/rust-cache@v2
       - run: cargo doc --document-private-items
       - name: Deploy rust docs 🚀🦀
         uses: JamesIves/github-pages-deploy-action@v4

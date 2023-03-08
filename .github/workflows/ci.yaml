@@ -81,7 +81,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
       # Needed for agent
       - run: cargo fmt --all -- --check
       - run: cargo clippy -- -D warnings
@@ -96,7 +95,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - uses: Swatinem/rust-cache@v2
       - run: cargo doc --document-private-items
 
   lint_macos:
@@ -109,7 +107,6 @@ jobs:
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
       # only mirrord, mirrord-sip contain macOS specific, so run clippy on that.
       - run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -D warnings
       - run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -D warnings
@@ -126,9 +123,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{matrix.os}}
       - run: |
           cargo test -p mirrord-protocol
 
@@ -144,9 +138,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{matrix.os}}
       - run: |
           cargo test -p mirrord-config
 
@@ -162,9 +153,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{matrix.os}}
       - run: |
           cargo test -p mirrord-kube --all-features
 
@@ -175,7 +163,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - uses: Swatinem/rust-cache@v2
       - run: |
           cargo test -p mirrord-sip
 
@@ -188,7 +175,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
-      - uses: Swatinem/rust-cache@v2
       - run: |
           sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
           sudo chown runner -R /home/runner
@@ -241,9 +227,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{matrix.os}}-${{matrix.target}}
       # For now, just verify it compiles.
       - run: cargo build -p mirrord-layer -p mirrord --target=${{matrix.target}}
 
@@ -257,9 +240,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ubuntu-latest
       - run: cargo build --manifest-path=./Cargo.toml
       - name: upload layer
         uses: actions/upload-artifact@v3
@@ -279,9 +259,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install rust.
         with:
           target: x86_64-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
-        with:
-          cache-on-failure: true
       - uses: actions/setup-node@v3 # For http mirroring test.
         with:
           node-version: 14
@@ -391,9 +368,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install Rust.
         with:
           target: x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
-        with:
-          cache-on-failure: true
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
           go-version: "1.18"
@@ -457,10 +431,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ubuntu-latest
-          cache-on-failure: true
       - uses: actions/setup-node@v3
         with:
           node-version: 14
