@@ -62,7 +62,7 @@ jobs:
           toolchain: nightly-2023-01-31
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          target: aarch64-apple-darwin, aarch64-apple-darwin
+          target: aarch64-apple-darwin,aarch64-apple-darwin
       - name: Import Code-Signing Certificates
         uses: Apple-Actions/import-codesign-certs@v1
         with:
