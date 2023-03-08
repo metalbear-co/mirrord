@@ -20,8 +20,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: aarch64-unknown-linux-gnu-ubuntu-latest
-      - name: setup cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cross
       # building layer and cli together leads to weird situation where embedded layer is x64, so split.
       - name: build mirrord-layer
         run: cross +nightly build --release -p mirrord-layer --target=aarch64-unknown-linux-gnu
@@ -48,8 +49,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: x86_64-unknown-linux-gnu-ubuntu-latest
-      - name: setup cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cross
       - name: build mirrord-layer and cli
         run: cross +nightly build --release -p mirrord -p mirrord-layer --target=x86_64-unknown-linux-gnu
       - uses: actions/upload-artifact@v3
@@ -138,7 +140,6 @@ jobs:
           if-no-files-found: error
 
   release_docker_image:
-    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -161,7 +162,20 @@ jobs:
         run: |
           echo "version=$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"')" >> $GITHUB_OUTPUT
         id: version
-      - name: Build and push
+
+      - name: Build and push (test)
+        if: github.event_name == 'workflow_dispatch'
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: mirrord/agent/Dockerfile
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          tags: |
+            ghcr.io/metalbear-co/mirrord-staging:${{ github.sha }}
+
+      - name: Build and push (final/release)
+        if: github.event_name != 'workflow_dispatch'
         uses: docker/build-push-action@v3
         with:
           context: .
@@ -222,7 +236,6 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: cd vscode-ext && vsce publish ${{ steps.version.outputs.version }}
 
-      
       - uses: actions/upload-artifact@v3
         with:
           name: vscode-ext

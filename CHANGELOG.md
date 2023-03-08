@@ -1,11 +1,47 @@
 # Change Log
 
-All notable changes to the mirrord's cli, agent, protocol, extensions will be documented in this file.
-Previous versions had CHANGELOG per component, we decided to combine all repositories to a mono-repo with one CHANGELOG.
+All notable changes to this project will be documented in this file.
 
-Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the changes for the upcoming release can be found in <https://github.com/metalbear-co/mirrord/tree/main/changelog.d/>.
+
+<!-- towncrier release notes start -->
+
+## [3.32.0](https://github.com/metalbear-co/mirrord/tree/3.32.0) - 2023-03-08
+
+
+### Changed
+
+- mirrord-layer: changed result of `getsockname` to return requested socket on
+  `bind` instead of the detoured socket address
+  [#1047](https://github.com/metalbear-co/mirrord/issues/1047)
+- mirrord-layer: Added `SocketId` to `UserSocket` as a better way of
+  identifying sockets, part of #1054.
+  [#1054](https://github.com/metalbear-co/mirrord/issues/1054)
+- CHANGELOG - changed to use towncrier
+- Change socket error on reading from outgoing sockets and mirror to be info
+  instead of error
+
+
+### Fixed
+
+- Possible bug when bound address is bypassed and socket stays in `SOCKETS`
+  map.
+
+
+### Internal
+
+- Change release.yaml so pushing final tags will occur only on real releases
+  while manual releases will push into `ghcr.io/metalbear-co/mirrord-staging:
+  ${{ github.sha }}`
+  so we can leverage github CI for testing images.
+- Don't build builder image as part of the build, use a prebuilt image -
+  improve cd time
+  Use `taiki-e/install-action` instead of `cargo install` (compiles from
+  source) for installing `cross`.
+- Fix broken aarch build
+
 
 ## 3.31.0
 

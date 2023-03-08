@@ -99,13 +99,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
         Ok(socket_result)
     }?;
 
-    let new_socket = UserSocket {
-        domain,
-        type_,
-        protocol,
-        state: SocketState::default(),
-        kind: socket_kind,
-    };
+    let new_socket = UserSocket::new(domain, type_, protocol, Default::default(), socket_kind);
 
     SOCKETS.lock()?.insert(socket_fd, Arc::new(new_socket));
 
@@ -128,14 +122,6 @@ pub(super) fn bind(
         .copied()
         .expect("Should be set during initialization!");
 
-    if ignore_localhost && requested_address.ip().is_loopback() {
-        return Detour::Bypass(Bypass::IgnoreLocalhost(requested_port));
-    }
-
-    if is_ignored_port(requested_address) || port_debug_patch(requested_address) {
-        Err(Bypass::Port(requested_address.port()))?;
-    }
-
     let mut socket = {
         SOCKETS
             .lock()?
@@ -149,6 +135,14 @@ pub(super) fn bind(
                 }
             })?
     };
+
+    if ignore_localhost && requested_address.ip().is_loopback() {
+        return Detour::Bypass(Bypass::IgnoreLocalhost(requested_port));
+    }
+
+    if is_ignored_port(requested_address) || port_debug_patch(requested_address) {
+        Err(Bypass::Port(requested_address.port()))?;
+    }
 
     let unbound_address = match socket.domain {
         libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
@@ -193,7 +187,7 @@ pub(super) fn bind(
     .bypass(Bypass::AddressConversion)?;
 
     Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound(Bound {
-        requested_port,
+        requested_address,
         address,
     });
 
@@ -215,7 +209,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
 
     match socket.state {
         SocketState::Bound(Bound {
-            requested_port,
+            requested_address,
             address,
         }) => {
             let listen_result = unsafe { FN_LISTEN(sockfd, backlog) };
@@ -227,13 +221,13 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
 
             blocking_send_hook_message(HookMessage::Tcp(TcpIncoming::Listen(Listen {
                 mirror_port: address.port(),
-                requested_port,
+                requested_port: requested_address.port(),
                 ipv6: address.is_ipv6(),
-                fd: sockfd,
+                id: socket.id,
             })))?;
 
             Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(Bound {
-                requested_port,
+                requested_address,
                 address,
             });
 
@@ -382,11 +376,11 @@ pub(super) fn connect(
     if remote_address.ip().is_loopback() && let Some(res) =
         SOCKETS.lock()?.values().find_map(|socket| {
             if let SocketState::Listening(Bound {
-                requested_port,
+                requested_address,
                 address,
             }) = socket.state
             {
-                if requested_port == remote_address.port()
+                if requested_address.port() == remote_address.port()
                     && socket.protocol == user_socket_info.protocol
                 {
                     return Some(raw_connect(address));
@@ -465,8 +459,8 @@ pub(super) fn getsockname(
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
                 SocketState::Connected(connected) => Detour::Success(connected.local_address),
-                SocketState::Bound(bound) => Detour::Success(bound.address),
-                SocketState::Listening(bound) => Detour::Success(bound.address),
+                SocketState::Bound(bound) => Detour::Success(bound.requested_address),
+                SocketState::Listening(bound) => Detour::Success(bound.requested_address),
                 _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
     };
@@ -477,8 +471,9 @@ pub(super) fn getsockname(
 }
 
 /// When the fd is "ours", we accept and recv the first bytes that contain metadata on the
-/// connection to be set in our lock This enables us to have a safe way to get "remote" information
-/// (remote ip, port, etc).
+/// connection to be set in our lock.
+///
+/// This enables us to have a safe way to get "remote" information (remote ip, port, etc).
 #[tracing::instrument(level = "trace", skip(address, address_len))]
 pub(super) fn accept(
     sockfd: RawFd,
@@ -486,14 +481,14 @@ pub(super) fn accept(
     address_len: *mut socklen_t,
     new_fd: RawFd,
 ) -> Detour<RawFd> {
-    let (domain, protocol, type_) = {
+    let (id, domain, protocol, type_) = {
         SOCKETS
             .lock()?
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
                 SocketState::Listening(_) => {
-                    Detour::Success((socket.domain, socket.protocol, socket.type_))
+                    Detour::Success((socket.id, socket.domain, socket.protocol, socket.type_))
                 }
                 _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
@@ -502,21 +497,17 @@ pub(super) fn accept(
     let (local_address, remote_address) = {
         CONNECTION_QUEUE
             .lock()?
-            .get(&sockfd)
+            .pop_front(id)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .map(|socket| (socket.local_address, socket.remote_address))?
     };
 
-    let new_socket = UserSocket {
-        domain,
-        protocol,
-        type_,
-        state: SocketState::Connected(Connected {
-            remote_address,
-            local_address,
-        }),
-        kind: type_.try_into()?,
-    };
+    let state = SocketState::Connected(Connected {
+        remote_address,
+        local_address,
+    });
+    let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into()?);
+
     fill_address(address, address_len, remote_address)?;
 
     SOCKETS.lock()?.insert(new_fd, Arc::new(new_socket));

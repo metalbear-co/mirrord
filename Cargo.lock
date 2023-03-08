@@ -83,9 +83,9 @@ checksum = "224afbd727c3d6e4b90103ece64b8d1b67fbb1973b1046c2281eed3f3803f800"
 
 [[package]]
 name = "asn1-rs"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf6690c370453db30743b373a60ba498fc0d6d83b11f4abfd87a84a075db5dd4"
+checksum = "7f6fd5ddaf0351dff5b8da21b2fb4ff8e08ddd02857f0bf69c47639106c0fff0"
 dependencies = [
  "asn1-rs-derive",
  "asn1-rs-impl",
@@ -669,9 +669,9 @@ dependencies = [
 
 [[package]]
 name = "csv"
-version = "1.2.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af91f40b7355f82b0a891f50e70399475945bb0b0da4f1700ce60761c9d3e359"
+checksum = "0b015497079b9a9d69c02ad25de6c0a6edef051ea6360a327d0bd05802ef64ad"
 dependencies = [
  "csv-core",
  "itoa",
@@ -833,9 +833,9 @@ checksum = "23d8666cb01533c39dde32bcbab8e227b4ed6679b2c925eba05feabea39508fb"
 
 [[package]]
 name = "der-parser"
-version = "8.1.0"
+version = "8.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42d4bc9b0db0a0df9ae64634ac5bdefb7afcb534e182275ca0beadbe486701c1"
+checksum = "dbd676fbbab537128ef0278adb5576cf363cff6aa22a7b24effe97347cfab61e"
 dependencies = [
  "asn1-rs",
  "displaydoc",
@@ -1055,7 +1055,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.31.0"
+version = "3.32.0"
 dependencies = [
  "libc",
 ]
@@ -1619,9 +1619,9 @@ dependencies = [
 
 [[package]]
 name = "io-lifetimes"
-version = "1.0.5"
+version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1abeb7a0dd0f8181267ff8adc397075586500b81b28a73e8a0208b00fc170fb3"
+checksum = "cfa919a82ea574332e2de6e74b4c36e74d41982b335080fa59d4ef31be20fdf3"
 dependencies = [
  "libc",
  "windows-sys 0.45.0",
@@ -2079,7 +2079,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.31.0"
+version = "3.32.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -2116,7 +2116,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.31.0"
+version = "3.32.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -2161,7 +2161,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.31.0"
+version = "3.32.0"
 dependencies = [
  "lazy_static",
  "rand 0.8.5",
@@ -2174,7 +2174,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.31.0"
+version = "3.32.0"
 dependencies = [
  "bimap",
  "mirrord-config-derive",
@@ -2190,7 +2190,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.31.0"
+version = "3.32.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -2200,7 +2200,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.31.0"
+version = "3.32.0"
 dependencies = [
  "axum",
  "futures",
@@ -2217,7 +2217,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.31.0"
+version = "3.32.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -2241,7 +2241,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.31.0"
+version = "3.32.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -2293,7 +2293,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.31.0"
+version = "3.32.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2302,7 +2302,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.31.0"
+version = "3.32.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -2331,7 +2331,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.31.0"
+version = "3.32.0"
 dependencies = [
  "atty",
  "serde",
@@ -2341,7 +2341,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "3.31.0"
+version = "3.32.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -2359,7 +2359,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.31.0"
+version = "3.32.0"
 dependencies = [
  "memchr",
  "object 0.29.0",
@@ -3392,7 +3392,7 @@ dependencies = [
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.31.0"
+version = "3.32.0"
 dependencies = [
  "libc",
 ]
@@ -3615,9 +3615,9 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "serde"
-version = "1.0.152"
+version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb7d1f0d3021d347a83e556fc4683dea2ea09d87bccdf88ff5c12545d89d5efb"
+checksum = "8cdd151213925e7f1ab45a9bbfb129316bd00799784b174b7cc7bcd16961c49e"
 dependencies = [
  "serde_derive",
 ]
@@ -3634,9 +3634,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.152"
+version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af487d118eecd09402d70a5d72551860e788df87b464af30e5ea6a38c75c541e"
+checksum = "4fc80d722935453bcafdc2c9a73cd6fac4dc1938f0346035d84bf99fa9e33217"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4507,9 +4507,9 @@ checksum = "497961ef93d974e23eb6f433eb5fe1b7930b659f06d12dec6fc44a8f554c0bba"
 
 [[package]]
 name = "unicode-bidi"
-version = "0.3.10"
+version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d54675592c1dbefd78cbd98db9bacd89886e1ca50692a0692baefffdeb92dd58"
+checksum = "524b68aca1d05e03fdf03fcdce2c6c94b6daf6d16861ddaa7e4f2b6638a9052c"
 
 [[package]]
 name = "unicode-ident"
@@ -4917,9 +4917,9 @@ checksum = "447660ad36a13288b1db4d4248e857b510e8c3a225c822ba4fb748c0aafecffd"
 
 [[package]]
 name = "winnow"
-version = "0.3.4"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c95fb4ff192527911dd18eb138ac30908e7165b8944e528b6af93aa4c842d345"
+checksum = "ee7b2c67f962bf5042bfd8b6a916178df33a26eec343ae064cb8e069f638fa6f"
 dependencies = [
  "memchr",
 ]
