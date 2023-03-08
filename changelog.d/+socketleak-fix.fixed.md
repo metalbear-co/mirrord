@@ -1,1 +1,0 @@
-Possible bug when bound address is bypassed and socket stays in `SOCKETS` map.
