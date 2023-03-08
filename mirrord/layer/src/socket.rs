@@ -8,7 +8,6 @@ use std::{
 };
 
 use libc::{c_int, sockaddr, socklen_t};
-use mirrord_protocol::Port;
 use socket2::SockAddr;
 use tracing::warn;
 use trust_dns_resolver::config::Protocol;
@@ -102,7 +101,7 @@ pub struct Connected {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Bound {
-    requested_port: Port,
+    requested_address: SocketAddr,
     address: SocketAddr,
 }
 

@@ -186,7 +186,7 @@ pub(super) fn bind(
     .bypass(Bypass::AddressConversion)?;
 
     Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound(Bound {
-        requested_port,
+        requested_address,
         address,
     });
 
@@ -208,7 +208,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
 
     match socket.state {
         SocketState::Bound(Bound {
-            requested_port,
+            requested_address,
             address,
         }) => {
             let listen_result = unsafe { FN_LISTEN(sockfd, backlog) };
@@ -220,13 +220,13 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
 
             blocking_send_hook_message(HookMessage::Tcp(TcpIncoming::Listen(Listen {
                 mirror_port: address.port(),
-                requested_port,
+                requested_port: requested_address.port(),
                 ipv6: address.is_ipv6(),
                 id: socket.id,
             })))?;
 
             Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(Bound {
-                requested_port,
+                requested_address,
                 address,
             });
 
@@ -375,11 +375,11 @@ pub(super) fn connect(
     if remote_address.ip().is_loopback() && let Some(res) =
         SOCKETS.lock()?.values().find_map(|socket| {
             if let SocketState::Listening(Bound {
-                requested_port,
+                requested_address,
                 address,
             }) = socket.state
             {
-                if requested_port == remote_address.port()
+                if requested_address.port() == remote_address.port()
                     && socket.protocol == user_socket_info.protocol
                 {
                     return Some(raw_connect(address));
@@ -458,8 +458,8 @@ pub(super) fn getsockname(
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
                 SocketState::Connected(connected) => Detour::Success(connected.local_address),
-                SocketState::Bound(bound) => Detour::Success(bound.address),
-                SocketState::Listening(bound) => Detour::Success(bound.address),
+                SocketState::Bound(bound) => Detour::Success(bound.requested_address),
+                SocketState::Listening(bound) => Detour::Success(bound.requested_address),
                 _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
     };
