@@ -81,7 +81,6 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       # Needed for agent
@@ -100,7 +99,6 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --document-private-items
 
@@ -113,7 +111,6 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
           components: rustfmt, clippy
           target: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
@@ -133,7 +130,6 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
           target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v2
         with:
@@ -153,7 +149,6 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
           target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v2
         with:
@@ -173,7 +168,6 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
           target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v2
         with:
@@ -190,7 +184,6 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
       - uses: Swatinem/rust-cache@v2
       - run: |
           cargo test -p mirrord-sip
@@ -204,7 +197,6 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: |
@@ -259,7 +251,6 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
           target: ${{matrix.target}}
       - uses: Swatinem/rust-cache@v2
         with:
@@ -277,7 +268,6 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
@@ -301,7 +291,6 @@ jobs:
       - uses: actions-rs/toolchain@v1 # Install rust.
         with:
           profile: minimal
-          toolchain: nightly
           target: x86_64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
         with:
@@ -415,7 +404,6 @@ jobs:
       - uses: actions-rs/toolchain@v1 # Install Rust.
         with:
           profile: minimal
-          toolchain: nightly
           target: x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
         with:
@@ -480,7 +468,6 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
