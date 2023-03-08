@@ -5,3 +5,4 @@ compile/test speed improvements
 2. change `rust-toolchain.toml` so it won't auto install unneeded targets always
 3. remove `toolchain: nightly` parameter from `actions-rs/toolchain@v1` since it's
     not needed because we have `rust-toolchain.toml`
+    saves a lot of time on fetching (takes around 60s when using libgit2)
