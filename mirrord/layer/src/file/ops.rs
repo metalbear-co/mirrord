@@ -1,4 +1,4 @@
-use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
+use std::{ffi::CString, io::SeekFrom, num::NonZeroI64, os::unix::io::RawFd, path::PathBuf};
 
 use libc::{c_int, c_uint, AT_FDCWD, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::file::{
@@ -22,11 +22,15 @@ const MAX_READ_SIZE: u64 = 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RemoteFile {
     pub(crate) fd: u64,
+    pub(crate) error: Option<NonZeroI64>,
 }
 
 impl RemoteFile {
     pub(crate) fn new(fd: u64) -> Self {
-        Self { fd }
+        Self {
+            fd,
+            error: Default::default(),
+        }
     }
 }
 
@@ -65,9 +69,10 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<u64> {
         OPEN_FILES
             .lock()?
             .get(&local_fd)
-            .map(|remote_file| remote_file.fd)
             // Bypass if we're not managing the relative part.
-            .ok_or(Bypass::LocalFdNotFound(local_fd))?,
+            .ok_or(Bypass::LocalFdNotFound(local_fd))
+            .map(|remote_file| remote_file.read())??
+            .fd,
     )
 }
 
@@ -152,10 +157,10 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
     let fake_local_file_name = CString::new(remote_fd.to_string())?;
     let local_file_fd = unsafe { create_local_fake_file(fake_local_file_name, remote_fd) }?;
 
-    OPEN_FILES
-        .lock()
-        .unwrap()
-        .insert(local_file_fd, Arc::new(RemoteFile::new(remote_fd)));
+    OPEN_FILES.lock().unwrap().insert(
+        local_file_fd,
+        Arc::new(RwLock::new(RemoteFile::new(remote_fd))),
+    );
 
     Detour::Success(local_file_fd)
 }
@@ -200,11 +205,7 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
     // usize == ptr size
     // we don't return a pointer to an address that contains DIR
 
-    let remote_file_fd = OPEN_FILES
-        .lock()?
-        .get(&fd)
-        .ok_or(Bypass::LocalFdNotFound(fd))?
-        .fd;
+    let remote_file_fd = get_remote_fd(fd)?;
 
     let (dir_channel_tx, dir_channel_rx) = oneshot::channel();
 
@@ -258,6 +259,23 @@ pub(crate) fn fileno(local_fd: RawFd) -> Detour<RawFd> {
             .contains_key(&local_fd)
             .then(|| local_fd)?,
     )
+}
+
+#[tracing::instrument(level = "trace")]
+pub(crate) fn ferror(local_fd: RawFd) -> Detour<i32> {
+    let remote_file = OPEN_FILES.lock()?.get(&local_fd)?;
+
+    // TODO(alex) [high] 2023-03-07: Need to get the error for this particular file, not for the
+    // general os_error.
+    //
+    // Probably need to happen on the agent?
+    //
+    // Actually, every operation on file stream should update the `RemoteFile` with some
+    // `last_error` for some operation that failed.
+    std::io::Error::last_os_error()
+        .raw_os_error()
+        .unwrap_or_default();
+    todo!()
 }
 
 #[tracing::instrument(level = "trace")]
@@ -334,9 +352,10 @@ pub(crate) fn openat(
         let fake_local_file_name = CString::new(remote_fd.to_string())?;
         let local_file_fd = unsafe { create_local_fake_file(fake_local_file_name, remote_fd) }?;
 
-        OPEN_FILES
-            .lock()?
-            .insert(local_file_fd, Arc::new(RemoteFile::new(remote_fd)));
+        OPEN_FILES.lock()?.insert(
+            local_file_fd,
+            Arc::new(RwLock::new(RemoteFile::new(remote_fd))),
+        );
 
         Detour::Success(local_file_fd)
     }

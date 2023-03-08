@@ -309,6 +309,14 @@ impl<S> Detour<S> {
             _ => default,
         }
     }
+
+    pub(crate) fn inspect_err<F: FnOnce(&HookError)>(self, op: F) -> Self {
+        if let Detour::Error(ref fail) = self {
+            op(fail)
+        }
+
+        self
+    }
 }
 
 impl<S> Detour<S>

@@ -5,7 +5,7 @@ use core::ffi::{c_size_t, c_ssize_t};
 ///
 /// NOTICE: If a file operation fails, it might be because it depends on some `libc` function
 /// that is not being hooked (`strace` the program to check).
-use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
+use std::{ffi::CString, num::NonZeroI64, os::unix::io::RawFd, ptr, slice, time::Duration};
 
 #[cfg(target_os = "linux")]
 use errno::{set_errno, Errno};
@@ -289,10 +289,10 @@ pub(crate) unsafe extern "C" fn fread_detour(
     file_stream: *mut FILE,
 ) -> size_t {
     // Extract the fd from stream and check if it's managed by us, or should be bypassed.
-    let fd = fileno_logic(file_stream);
+    let local_fd = *(file_stream as *const _);
     let read_amount = (element_size * number_of_elements) as u64;
 
-    read(fd, read_amount)
+    read(local_fd, read_amount)
         .map(|read_file| {
             let ReadFileResponse { bytes, read_amount } = read_file;
 
@@ -307,6 +307,12 @@ pub(crate) unsafe extern "C" fn fread_detour(
             // TODO: The function fread() does not distinguish between end-of-file and error,
             // and callers must use feof(3) and ferror(3) to determine which occurred.
             read_amount as usize
+        })
+        .inspect_err(|fail| {
+            let mut open_files = OPEN_FILES.lock().unwrap();
+            let remote_file = open_files.get_mut(&local_fd).unwrap();
+
+            remote_file.write().unwrap().error = NonZeroI64::new(fail.code());
         })
         .unwrap_or_bypass_with(|_| {
             FN_FREAD(out_buffer, element_size, number_of_elements, file_stream)
@@ -465,18 +471,8 @@ pub(crate) unsafe extern "C" fn faccessat_detour(
 /// Used to distinguish between an error or `EOF` (especially relevant for `fgets`).
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn ferror_detour(file_stream: *mut FILE) -> c_int {
-    // Extract the fd from stream and check if it's managed by us, or should be bypassed.
-    let fd = fileno_logic(file_stream);
-
-    // We're only interested in files that are handled by `mirrord-agent`.
-    let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).map(|file| file.fd);
-    if remote_fd.is_some() {
-        std::io::Error::last_os_error()
-            .raw_os_error()
-            .unwrap_or_default()
-    } else {
-        FN_FERROR(file_stream)
-    }
+    let local_fd = *(file_stream as *const _);
+    ferror(local_fd).unwrap_or_bypass_with(|_| FN_FERROR(file_stream))
 }
 
 #[hook_guard_fn]

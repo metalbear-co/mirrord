@@ -81,6 +81,50 @@ pub(crate) enum HookError {
     SocketUnsuportedIpv6,
 }
 
+impl HookError {
+    pub(crate) fn code(&self) -> i64 {
+        let libc_code = match self {
+            HookError::SendErrorHookMessage(_) => libc::EBADMSG,
+            HookError::RecvError(_) => libc::EBADMSG,
+            HookError::Null(_) => libc::EINVAL,
+            HookError::TryFromInt(_) => libc::EINVAL,
+            HookError::EmptyHookSender => libc::EINVAL,
+            HookError::IO(io_fail) => io_fail.raw_os_error().unwrap_or(libc::EIO),
+            HookError::LockError => libc::EINVAL,
+            HookError::ResponseError(response_fail) => match response_fail {
+                ResponseError::AllocationFailure(_) => libc::ENOMEM,
+                ResponseError::NotFound(_) => libc::ENOENT,
+                ResponseError::NotDirectory(_) => libc::ENOTDIR,
+                ResponseError::NotFile(_) => libc::EISDIR,
+                ResponseError::RemoteIO(io_fail) => io_fail.raw_os_error.unwrap_or(libc::EIO),
+                ResponseError::Remote(remote) => match remote {
+                    // So far only encountered when trying to make requests from golang.
+                    mirrord_protocol::RemoteError::ConnectTimedOut(_) => libc::ENETUNREACH,
+                    _ => libc::EINVAL,
+                },
+                ResponseError::DnsLookup(dns_fail) => match dns_fail.kind {
+                    mirrord_protocol::ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
+                    _ => libc::EAI_FAIL,
+                },
+                // for listen, EINVAL means "socket is already connected."
+                // Will not happen, because this ResponseError is not return from any hook, so it
+                // never appears as HookError::ResponseError(PortAlreadyStolen(_)).
+                // this could be changed by waiting for the Subscribed response from agent.
+                ResponseError::PortAlreadyStolen(_port) => libc::EINVAL,
+            },
+            HookError::DNSNoName => libc::EFAULT,
+            HookError::Utf8(_) => libc::EINVAL,
+            HookError::NullPointer => libc::EINVAL,
+            HookError::LocalFileCreation(_) => libc::EINVAL,
+            #[cfg(target_os = "macos")]
+            HookError::FailedSipPatch(_) => libc::EACCES,
+            HookError::SocketUnsuportedIpv6 => libc::EAFNOSUPPORT,
+        };
+
+        libc_code as i64
+    }
+}
+
 /// Errors internal to mirrord-layer.
 ///
 /// You'll encounter these when the layer is performing some of its internal operations (mostly when
@@ -178,6 +222,13 @@ impl<'a, T> From<std::sync::PoisonError<std::sync::MutexGuard<'a, T>>> for HookE
     }
 }
 
+// Cannot have a generic `From<T>` implementation for this error, so explicitly implemented here.
+impl<'a, T> From<std::sync::PoisonError<std::sync::RwLockReadGuard<'a, T>>> for HookError {
+    fn from(_: std::sync::PoisonError<std::sync::RwLockReadGuard<T>>) -> Self {
+        HookError::LockError
+    }
+}
+
 pub(crate) type Result<T, E = LayerError> = std::result::Result<T, E>;
 pub(crate) type HookResult<T, E = HookError> = std::result::Result<T, E>;
 
@@ -202,45 +253,7 @@ impl From<HookError> for i64 {
             _ => error!("Error occured in Layer >> {fail:?}"),
         };
 
-        let libc_error = match fail {
-            HookError::SendErrorHookMessage(_) => libc::EBADMSG,
-            HookError::RecvError(_) => libc::EBADMSG,
-            HookError::Null(_) => libc::EINVAL,
-            HookError::TryFromInt(_) => libc::EINVAL,
-            HookError::EmptyHookSender => libc::EINVAL,
-            HookError::IO(io_fail) => io_fail.raw_os_error().unwrap_or(libc::EIO),
-            HookError::LockError => libc::EINVAL,
-            HookError::ResponseError(response_fail) => match response_fail {
-                ResponseError::AllocationFailure(_) => libc::ENOMEM,
-                ResponseError::NotFound(_) => libc::ENOENT,
-                ResponseError::NotDirectory(_) => libc::ENOTDIR,
-                ResponseError::NotFile(_) => libc::EISDIR,
-                ResponseError::RemoteIO(io_fail) => io_fail.raw_os_error.unwrap_or(libc::EIO),
-                ResponseError::Remote(remote) => match remote {
-                    // So far only encountered when trying to make requests from golang.
-                    mirrord_protocol::RemoteError::ConnectTimedOut(_) => libc::ENETUNREACH,
-                    _ => libc::EINVAL,
-                },
-                ResponseError::DnsLookup(dns_fail) => match dns_fail.kind {
-                    mirrord_protocol::ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
-                    _ => libc::EAI_FAIL,
-                },
-                // for listen, EINVAL means "socket is already connected."
-                // Will not happen, because this ResponseError is not return from any hook, so it
-                // never appears as HookError::ResponseError(PortAlreadyStolen(_)).
-                // this could be changed by waiting for the Subscribed response from agent.
-                ResponseError::PortAlreadyStolen(_port) => libc::EINVAL,
-            },
-            HookError::DNSNoName => libc::EFAULT,
-            HookError::Utf8(_) => libc::EINVAL,
-            HookError::NullPointer => libc::EINVAL,
-            HookError::LocalFileCreation(_) => libc::EINVAL,
-            #[cfg(target_os = "macos")]
-            HookError::FailedSipPatch(_) => libc::EACCES,
-            HookError::SocketUnsuportedIpv6 => libc::EAFNOSUPPORT,
-        };
-
-        set_errno(errno::Errno(libc_error));
+        set_errno(errno::Errno(fail.code() as i32));
 
         -1
     }
