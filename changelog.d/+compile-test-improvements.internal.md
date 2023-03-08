@@ -6,3 +6,5 @@ compile/test speed improvements
 3. remove `toolchain: nightly` parameter from `actions-rs/toolchain@v1` since it's
     not needed because we have `rust-toolchain.toml`
     saves a lot of time on fetching (takes around 60s when using libgit2)
+4. switch to use `dtolnay/rust-toolchain@stable` instead of `actions-rs/toolchain@v1` 
+    since it's deprecated and doesn't support `rust-toolchain.toml`

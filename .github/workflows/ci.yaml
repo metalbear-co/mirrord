@@ -78,7 +78,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
           profile: minimal
           components: rustfmt, clippy
@@ -96,7 +96,7 @@ jobs:
       RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
           profile: minimal
       - uses: Swatinem/rust-cache@v2
@@ -108,7 +108,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
           profile: minimal
           components: rustfmt, clippy
@@ -127,7 +127,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
           profile: minimal
           target: ${{matrix.target}}
@@ -146,7 +146,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
           profile: minimal
           target: ${{matrix.target}}
@@ -165,7 +165,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
           profile: minimal
           target: ${{matrix.target}}
@@ -181,7 +181,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
           profile: minimal
       - uses: Swatinem/rust-cache@v2
@@ -194,7 +194,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
           profile: minimal
           components: rustfmt
@@ -248,7 +248,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
           profile: minimal
           target: ${{matrix.target}}
@@ -265,7 +265,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
           profile: minimal
           components: rustfmt
@@ -288,7 +288,7 @@ jobs:
       MIRRORD_TEST_USE_EXISTING_LIB: /home/runner/work/mirrord/mirrord/target/debug/libmirrord_layer.so
     steps:
       - uses: actions/checkout@v3 # Checkout the mirrord repo.
-      - uses: actions-rs/toolchain@v1 # Install rust.
+      - uses: dtolnay/rust-toolchain@stable # Install rust.
         with:
           profile: minimal
           target: x86_64-unknown-linux-gnu
@@ -401,7 +401,7 @@ jobs:
       MIRRORD_TEST_USE_EXISTING_LIB: ../../target/debug/libmirrord_layer.dylib
     steps:
       - uses: actions/checkout@v3 # Checkout the mirrord repo.
-      - uses: actions-rs/toolchain@v1 # Install Rust.
+      - uses: dtolnay/rust-toolchain@stable # Install Rust.
         with:
           profile: minimal
           target: x86_64-apple-darwin
@@ -468,7 +468,7 @@ jobs:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
           profile: minimal
           components: rustfmt
