@@ -563,7 +563,6 @@ jobs:
           name: test
           path: /tmp
       - name: start minikube
-        if: matrix.container-runtime == 'containerd'
         uses: medyagh/setup-minikube@master
         with:
           container-runtime: ${{matrix.container-runtime}}
