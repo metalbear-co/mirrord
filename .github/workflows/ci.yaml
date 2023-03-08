@@ -224,9 +224,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
+      # the setup rust toolchain action ignores the input if file exists.. so remove it
+      - if: ${{matrix.target == 'aarch64-apple-darwin'}}
+        run: rm rust-toolchain.toml
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{matrix.target}}
+          toolchain: nightly-2023-01-31
       # For now, just verify it compiles.
       - run: cargo build -p mirrord-layer -p mirrord --target=${{matrix.target}}
 
