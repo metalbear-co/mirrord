@@ -257,7 +257,7 @@ pub(crate) fn fileno(local_fd: RawFd) -> Detour<RawFd> {
         OPEN_FILES
             .lock()?
             .contains_key(&local_fd)
-            .then(|| local_fd)?,
+            .then_some(local_fd)?,
     )
 }
 
