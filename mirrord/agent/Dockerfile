@@ -9,8 +9,8 @@ COPY tests /app/tests
 COPY .cargo /app/.cargo
 
 RUN ./mirrord/agent/platform.sh
-
-RUN cargo +nightly zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release
+RUN echo $PATH
+RUN cargo +nightly-2023-01-31 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release
 RUN cp /app/target/$(cat /.platform)/release/mirrord-agent /mirrord-agent
 
 FROM ghcr.io/metalbear-co/ci-agent-runtime:latest
