@@ -18,11 +18,11 @@ jobs:
           tool: cross
       # building layer and cli together leads to weird situation where embedded layer is x64, so split.
       - name: build mirrord-layer
-        run: cross build --release -p mirrord-layer --target=aarch64-unknown-linux-gnu
+        run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord-layer --target=aarch64-unknown-linux-gnu
       - name: build mirrord cli
         env:
           MIRRORD_LAYER_FILE: ../../../target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
-        run: cross build --release -p mirrord --target=aarch64-unknown-linux-gnu
+        run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord --target=aarch64-unknown-linux-gnu
       - uses: actions/upload-artifact@v3
         with:
           name: aarch64-unknown-linux-gnu
@@ -71,7 +71,7 @@ jobs:
           brew tap mitchellh/gon
           brew install mitchellh/gon/gon
       - name: build mirrord-layer x86-64
-        run: cargo build --release -p mirrord-layer --target=x86_64-apple-darwin
+        run: cargo +nightly build --release -p mirrord-layer --target=x86_64-apple-darwin
       - name: build mirrord-layer macOS arm/arm64e
         # Editing the arm64 binary, since arm64e can be loaded into both arm64 & arm64e
         # >> target/debug/libmirrord_layer.dylib: Mach-O 64-bit dynamically linked shared library arm64
@@ -80,7 +80,7 @@ jobs:
         # >> magic bits: 0000000 facf feed 000c 0100 0002 0000 0006 0000
         # >> target/debug/libmirrord_layer.dylib: Mach-O 64-bit dynamically linked shared library arm64e
         run: |
-          cargo build --release -p mirrord-layer --target=aarch64-apple-darwin
+          cargo +nightly build --release -p mirrord-layer --target=aarch64-apple-darwin
           cp target/aarch64-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/libmirrord_layer_arm64e.dylib
           printf '\x02' | dd of=target/aarch64-apple-darwin/release/libmirrord_layer_arm64e.dylib bs=1 seek=8 count=1 conv=notrunc
       - name: Sign layer binaries
@@ -100,11 +100,11 @@ jobs:
       - name: build macOS arm cli with universal dylib
         env:
           MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
-        run: cargo build --release -p mirrord --target=aarch64-apple-darwin
+        run: cargo +nightly build --release -p mirrord --target=aarch64-apple-darwin
       - name: build macOS x86-64 cli with universal dylib
         env:
           MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
-        run: cargo build --release -p mirrord --target=x86_64-apple-darwin
+        run: cargo +nightly build --release -p mirrord --target=x86_64-apple-darwin
       - name: Sign cli binaries
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
