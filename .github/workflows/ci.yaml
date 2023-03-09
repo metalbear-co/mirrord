@@ -178,10 +178,11 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
-      - run: |
-          sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
-          sudo chown runner -R /home/runner
-          sudo chmod u+rwx -R /home/runner
+      - name: add raw net cap to test
+        run: |
+          setcap cap_net_raw,cap_net_admin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo
+      - name: test
+        run: cargo test -p mirrord-agent
 
   test_agent_image:
     runs-on: ubuntu-latest
