@@ -1,7 +1,4 @@
 name: Release
-# cross doesn't pick up the toolchain so we have to 
-env:
-  TOOLCHAIN: +nightly-2023-01-31
 on:
   push:
     tags:
@@ -21,11 +18,11 @@ jobs:
           tool: cross
       # building layer and cli together leads to weird situation where embedded layer is x64, so split.
       - name: build mirrord-layer
-        run: cross $TOOLCHAIN build --release -p mirrord-layer --target=aarch64-unknown-linux-gnu
+        run: cross build --release -p mirrord-layer --target=aarch64-unknown-linux-gnu
       - name: build mirrord cli
         env:
           MIRRORD_LAYER_FILE: ../../../target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
-        run: cross $TOOLCHAIN build --release -p mirrord --target=aarch64-unknown-linux-gnu
+        run: cross build --release -p mirrord --target=aarch64-unknown-linux-gnu
       - uses: actions/upload-artifact@v3
         with:
           name: aarch64-unknown-linux-gnu
@@ -42,7 +39,7 @@ jobs:
         with:
           tool: cross
       - name: build mirrord-layer and cli
-        run: cross $TOOLCHAIN build --release -p mirrord -p mirrord-layer --target=x86_64-unknown-linux-gnu
+        run: cross build --release -p mirrord -p mirrord-layer --target=x86_64-unknown-linux-gnu
       - uses: actions/upload-artifact@v3
         with:
           name: x86_64-unknown-linux-gnu
