@@ -25,7 +25,7 @@ jobs:
           tool: cross
       # building layer and cli together leads to weird situation where embedded layer is x64, so split.
       - name: build mirrord-layer
-        run: cargo +$TOOLCHAIN build --release -p mirrord-layer --target=aarch64-unknown-linux-gnu
+        run: cross +$TOOLCHAIN build --release -p mirrord-layer --target=aarch64-unknown-linux-gnu
       - name: build mirrord cli
         env:
           MIRRORD_LAYER_FILE: ../../../target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
