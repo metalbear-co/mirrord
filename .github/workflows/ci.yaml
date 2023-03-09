@@ -178,7 +178,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: add raw net cap to test
         run: |
-          setcap cap_net_raw,cap_net_admin /home/runner/.rustup/toolchains/nightly-2023-01-31-x86_64-unknown-linux-gnu/bin/cargo
+          setcap cap_net_raw,cap_net_admin=eip /home/runner/.rustup/toolchains/nightly-2023-01-31-x86_64-unknown-linux-gnu/bin/cargo
       - name: test
         run: cargo test -p mirrord-agent
 
