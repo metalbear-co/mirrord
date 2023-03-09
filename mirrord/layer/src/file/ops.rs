@@ -71,8 +71,7 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<u64> {
             .get(&local_fd)
             // Bypass if we're not managing the relative part.
             .ok_or(Bypass::LocalFdNotFound(local_fd))
-            .map(|remote_file| remote_file.read())??
-            .fd,
+            .map(|remote_file| remote_file.fd)?,
     )
 }
 
@@ -157,10 +156,10 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
     let fake_local_file_name = CString::new(remote_fd.to_string())?;
     let local_file_fd = unsafe { create_local_fake_file(fake_local_file_name, remote_fd) }?;
 
-    OPEN_FILES.lock().unwrap().insert(
-        local_file_fd,
-        Arc::new(RwLock::new(RemoteFile::new(remote_fd))),
-    );
+    OPEN_FILES
+        .lock()
+        .unwrap()
+        .insert(local_file_fd, Arc::new(RemoteFile::new(remote_fd)));
 
     Detour::Success(local_file_fd)
 }
@@ -352,10 +351,9 @@ pub(crate) fn openat(
         let fake_local_file_name = CString::new(remote_fd.to_string())?;
         let local_file_fd = unsafe { create_local_fake_file(fake_local_file_name, remote_fd) }?;
 
-        OPEN_FILES.lock()?.insert(
-            local_file_fd,
-            Arc::new(RwLock::new(RemoteFile::new(remote_fd))),
-        );
+        OPEN_FILES
+            .lock()?
+            .insert(local_file_fd, Arc::new(RemoteFile::new(remote_fd)));
 
         Detour::Success(local_file_fd)
     }
