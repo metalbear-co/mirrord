@@ -176,8 +176,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          components: rustfmt
       - name: add raw net cap to test
         run: |
           setcap cap_net_raw,cap_net_admin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo
