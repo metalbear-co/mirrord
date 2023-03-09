@@ -115,32 +115,22 @@ jobs:
       - run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -D warnings
 
   test_mirrord_protocol:
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          target: ${{matrix.target}}
       - run: |
           cargo test -p mirrord-protocol
 
   test_mirrord_config:
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          target: ${{matrix.target}}
       - run: |
           cargo test -p mirrord-config
 

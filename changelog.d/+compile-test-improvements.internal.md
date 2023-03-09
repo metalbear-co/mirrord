@@ -9,3 +9,4 @@ compile/test speed improvements
 4. switch to use `actions-rust-lang/setup-rust-toolchain@v1` instead of `actions-rs/toolchain@v1` 
     since it's deprecated and doesn't support `rust-toolchain.toml`
 5. remove s`Swatinem/rust-cache@v2` since it's included in `actions-rust-lang/setup-rust-toolchain@v1`
+6. use latest version of `Apple-Actions/import-codesign-certs` to remove warnings

@@ -60,7 +60,7 @@ jobs:
         with:
           target: aarch64-apple-darwin,aarch64-apple-darwin
       - name: Import Code-Signing Certificates
-        uses: Apple-Actions/import-codesign-certs@v1
+        uses: Apple-Actions/import-codesign-certs@8f3fb608891dd2244cdab3d69cd68c0d37a7fe93
         with:
           # The certificates in a PKCS12 file encoded as a base64 string
           p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
