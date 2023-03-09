@@ -145,17 +145,12 @@ jobs:
           cargo test -p mirrord-config
 
   test_mirrord_kube:
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          target: ${{matrix.target}}
       - run: |
           cargo test -p mirrord-kube --all-features
 
