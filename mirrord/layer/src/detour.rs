@@ -289,6 +289,7 @@ impl<S> Detour<S> {
     }
 
     /// Return the contained `Success` value or `S::default()`.
+    #[cfg(target_os = "macos")]
     pub(crate) fn unwrap_or_default(self) -> S
     where
         S: Default,
@@ -303,6 +304,7 @@ impl<S> Detour<S> {
     ///
     /// To be used in hooks that are deemed non-essential, and the run should continue even if they
     /// fail.
+    #[cfg(target_os = "macos")]
     pub(crate) fn unwrap_or(self, default: S) -> S {
         match self {
             Detour::Success(s) => s,

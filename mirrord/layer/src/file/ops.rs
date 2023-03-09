@@ -262,7 +262,7 @@ pub(crate) fn fileno(local_fd: RawFd) -> Detour<RawFd> {
 
 #[tracing::instrument(level = "trace")]
 pub(crate) fn ferror(local_fd: RawFd) -> Detour<i32> {
-    let remote_file = OPEN_FILES.lock()?.get(&local_fd)?;
+    let _remote_file = OPEN_FILES.lock()?.get(&local_fd)?;
 
     // TODO(alex) [high] 2023-03-07: Need to get the error for this particular file, not for the
     // general os_error.

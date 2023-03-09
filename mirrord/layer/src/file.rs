@@ -13,7 +13,7 @@ use std::{
     io::SeekFrom,
     os::unix::io::RawFd,
     path::PathBuf,
-    sync::{Arc, LazyLock, Mutex, RwLock},
+    sync::{Arc, LazyLock, Mutex},
 };
 
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
