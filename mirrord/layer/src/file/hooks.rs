@@ -312,9 +312,9 @@ pub(crate) unsafe extern "C" fn fread_detour(
         })
         .inspect_err(|fail| {
             let mut open_files = OPEN_FILES.lock().unwrap();
-            let mut remote_file = open_files.get_mut(&local_fd).unwrap();
+            let remote_file = open_files.get_mut(&local_fd).unwrap();
 
-            Arc::get_mut(&mut remote_file).unwrap().error = NonZeroI64::new(fail.code());
+            Arc::get_mut(remote_file).unwrap().error = NonZeroI64::new(fail.code());
         })
         .unwrap_or_bypass_with(|_| {
             FN_FREAD(out_buffer, element_size, number_of_elements, file_stream)
