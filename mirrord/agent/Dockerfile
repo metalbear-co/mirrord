@@ -10,6 +10,8 @@ COPY .cargo /app/.cargo
 
 RUN ./mirrord/agent/platform.sh
 RUN echo $PATH
+# this takes around 1 minute since libgit2 is slow https://github.com/rust-lang/cargo/issues/9167
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 RUN cargo +nightly-2023-01-31 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release
 RUN cp /app/target/$(cat /.platform)/release/mirrord-agent /mirrord-agent
 
