@@ -8,7 +8,6 @@ use socket_stream::SocketStream;
 use streammap_ext::StreamMap;
 use tokio::{
     io::{split, AsyncWriteExt, ReadHalf, WriteHalf},
-    net::{TcpStream, UnixStream},
     select,
     sync::mpsc::{self, Receiver, Sender},
     time::timeout,
@@ -57,20 +56,16 @@ async fn layer_recv(
             // invalid `IP:port` combination, and hangs until the go socket times out.
             let daemon_connect = timeout(
                 Duration::from_millis(3000),
-                SocketStream::from(if remote_address.is_ip() {
-                    TcpStream::connect(remote_address.clone().into())
-                } else {
-                    UnixStream::connect(remote_address.clone().into())
-                }),
+                SocketStream::connect(remote_address.clone()),
             )
             .await
             .map_err(|elapsed| {
                 warn!("interceptor_task -> Elapsed connect error {:#?}", elapsed);
                 ResponseError::Remote(RemoteError::ConnectTimedOut(remote_address.clone()))
             })
-            .map_err(From::from)?
+            .map_err(From::from)
             .and_then(|remote_stream| {
-                // TODO: this can't work.
+                let remote_stream = remote_stream?;
                 let agent_address = remote_stream.local_addr()?;
                 let connection_id = allocator
                     .next_index()

@@ -32,6 +32,38 @@ pub enum UnixAddr {
     Abstract(Vec<u8>),
 }
 
+impl TryFrom<UnixAddr> for SockAddr {
+    type Error = io::Error;
+
+    fn try_from(addr: UnixAddr) -> Result<Self, Self::Error> {
+        match addr {
+            Pathname(path) => SockAddr::unix(path),
+            // TODO
+            Abstract(bytes) => SockAddr::unix(String::from_utf8(bytes).map_err(|_| {
+                io::Error::new(
+                    ErrorKind::Other,
+                    "Not supporting unprintable abstract addresses.",
+                )
+            })?),
+        }
+    }
+}
+
+impl TryFrom<SocketAddress> for SocketAddr {
+    type Error = io::Error;
+
+    fn try_from(addr: SocketAddress) -> Result<Self, Self::Error> {
+        if let SocketAddress::Ip(socket_addr) = addr {
+            Ok(socket_addr)
+        } else {
+            Err(io::Error::new(
+                ErrorKind::Other,
+                "Not supporting unprintable abstract addresses.",
+            ))
+        }
+    }
+}
+
 impl SocketAddress {
     pub fn is_ip(&self) -> bool {
         matches!(self, Self::Ip(_))
@@ -66,15 +98,7 @@ impl TryFrom<SocketAddress> for SockAddr {
     fn try_from(addr: SocketAddress) -> Result<Self, Self::Error> {
         match addr {
             SocketAddress::Ip(socket_addr) => Ok(socket_addr.into()),
-            SocketAddress::Unix(Pathname(path)) => SockAddr::unix(path),
-            SocketAddress::Unix(Abstract(bytes)) => {
-                SockAddr::unix(String::from_utf8(bytes).map_err(|_| {
-                    io::Error::new(
-                        ErrorKind::Other,
-                        "Not supporting unprintable abstract addresses.",
-                    )
-                })?)
-            }
+            SocketAddress::Unix(unix_addr) => unix_addr.try_into(),
         }
     }
 }
