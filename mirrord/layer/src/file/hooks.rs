@@ -529,21 +529,6 @@ pub(crate) unsafe extern "C" fn fileno_detour(file_stream: *mut FILE) -> c_int {
     fileno(local_fd).unwrap_or_bypass_with(|_| FN_FILENO(file_stream))
 }
 
-/// Implementation of fileno_detour, used in fileno_detour and fread_detour
-unsafe fn fileno_logic(file_stream: *mut FILE) -> c_int {
-    open_file_stream_fd(file_stream).unwrap_or_else(|| FN_FILENO(file_stream))
-}
-
-unsafe fn open_file_stream_fd(file_stream: *mut FILE) -> Option<RawFd> {
-    let local_fd = *(file_stream as *const _);
-
-    OPEN_FILES
-        .lock()
-        .unwrap()
-        .contains_key(&local_fd)
-        .then_some(local_fd)
-}
-
 /// Tries to convert input to type O, if it fails it returns the max value of O.
 /// For example, if you put u32::MAX into a u8, it will return u8::MAX.
 fn best_effort_cast<I: Bounded, O: TryFrom<I> + Bounded>(input: I) -> O {
