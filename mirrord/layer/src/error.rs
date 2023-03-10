@@ -229,6 +229,13 @@ impl<'a, T> From<std::sync::PoisonError<std::sync::RwLockReadGuard<'a, T>>> for 
     }
 }
 
+// Cannot have a generic `From<T>` implementation for this error, so explicitly implemented here.
+impl<'a, T> From<std::sync::PoisonError<std::sync::RwLockWriteGuard<'a, T>>> for HookError {
+    fn from(_: std::sync::PoisonError<std::sync::RwLockWriteGuard<T>>) -> Self {
+        HookError::LockError
+    }
+}
+
 pub(crate) type Result<T, E = LayerError> = std::result::Result<T, E>;
 pub(crate) type HookResult<T, E = HookError> = std::result::Result<T, E>;
 

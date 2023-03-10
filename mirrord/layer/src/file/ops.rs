@@ -2,8 +2,8 @@
 // - fclose [p] (partial, missing `fflush`);
 // - fdopen [] (missing remote file constraint check);
 // - fileno [x];
-// - clearerr [] (not hooked);
-// - feof [] (not hooked);
+// - clearerr [x] (not hooked);
+// - feof [x] (not hooked);
 // - ferror [x] (use error from remote_file);
 // - fread [x] (add error / eof to remote_file);
 // - fgets [x] (add error / eof to remote_file);
@@ -288,6 +288,18 @@ pub(crate) fn feof(local_fd: RawFd) -> Detour<i32> {
     let remote_file = open_files.get(&local_fd)?.read()?;
 
     Detour::Success(remote_file.is_eof.into())
+}
+
+/// Clears the `is_eof` and `error` values from this [`RemoteFile`]
+#[tracing::instrument(level = "trace")]
+pub(crate) fn clearerr(local_fd: RawFd) -> Detour<()> {
+    let open_files = OPEN_FILES.lock()?;
+    let mut remote_file = open_files.get(&local_fd)?.write()?;
+
+    remote_file.error = None;
+    remote_file.is_eof = false;
+
+    Detour::Success(())
 }
 
 #[tracing::instrument(level = "trace")]

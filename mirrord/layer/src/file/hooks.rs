@@ -495,11 +495,23 @@ pub(crate) unsafe extern "C" fn ferror_detour(file_stream: *mut FILE) -> c_int {
 
 /// Returns `EOF` state for this `file_stream`.
 ///
-/// See [`feof`]
+/// See [`feof`].
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn feof_detour(file_stream: *mut FILE) -> c_int {
     let local_fd = *(file_stream as *const _);
     feof(local_fd).unwrap_or_bypass_with(|_| FN_FEOF(file_stream))
+}
+
+/// Clears `EOF` and error state for this `file_stream`.
+///
+/// See [`clearerr`].
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn clearerr_detour(file_stream: *mut FILE) {
+    let local_fd = *(file_stream as *const _);
+    clearerr(local_fd).map(|()| 0).unwrap_or_bypass_with(|_| {
+        FN_CLEARERR(file_stream);
+        0
+    });
 }
 
 #[hook_guard_fn]
@@ -723,6 +735,13 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "pread", pread_detour, FnPread, FN_PREAD);
     replace!(hook_manager, "ferror", ferror_detour, FnFerror, FN_FERROR);
     replace!(hook_manager, "feof", feof_detour, FnFeof, FN_FEOF);
+    replace!(
+        hook_manager,
+        "clearerr",
+        clearerr_detour,
+        FnClearerr,
+        FN_CLEARERR
+    );
     replace!(hook_manager, "fclose", fclose_detour, FnFclose, FN_FCLOSE);
     replace!(hook_manager, "fileno", fileno_detour, FnFileno, FN_FILENO);
     replace!(hook_manager, "lseek", lseek_detour, FnLseek, FN_LSEEK);
