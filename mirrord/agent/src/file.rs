@@ -309,6 +309,7 @@ impl FileManager {
                         file.read(&mut buffer).map(|read_amount| ReadFileResponse {
                             bytes: buffer,
                             read_amount: read_amount as u64,
+                            is_eof: 0 == read_amount,
                         })?;
 
                     Ok(read_amount)
@@ -320,7 +321,7 @@ impl FileManager {
 
     /// Remote implementation of `fgets`.
     ///
-    /// Uses `BufReader::read_line` to read a line (including `"\n"`) from a file with `fd`. The
+    /// Uses `BufReader::read_until` to read a line (including `"\n"`) from a file with `fd`. The
     /// file cursor position has to be moved manually due to this.
     ///
     /// `fgets` is only supposed to read `buffer_size`, so we limit moving the file's position based
@@ -337,25 +338,30 @@ impl FileManager {
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
                     let original_position = file.stream_position()?;
+
                     // limit bytes read using take
                     let mut reader = BufReader::new(std::io::Read::by_ref(file)).take(buffer_size);
                     let mut buffer = Vec::<u8>::with_capacity(buffer_size as usize);
-                    Ok(reader
-                        .read_until(b'\n', &mut buffer)
-                        .and_then(|read_amount| {
-                            // Revert file to original position + bytes read (in case the
-                            // bufreader advanced too much)
-                            file.seek(SeekFrom::Start(original_position + read_amount as u64))?;
+                    let read_amount = reader.read_until(b'\n', &mut buffer)?;
 
-                            // We handle the extra bytes in the `fgets` hook, so here we can
-                            // just return the full buffer.
-                            let response = ReadFileResponse {
-                                bytes: buffer,
-                                read_amount: read_amount as u64,
-                            };
+                    // Has to be performed BEFORE the `seek` that puts this file in its proper
+                    // position.
+                    let end_of_file = file.seek(SeekFrom::End(0))?;
 
-                            Ok(response)
-                        })?)
+                    // Revert file to original position + bytes read (in case the
+                    // bufreader advanced too much)
+                    let new_position =
+                        file.seek(SeekFrom::Start(original_position + read_amount as u64))?;
+
+                    // We handle the extra bytes in the `fgets` hook, so here we can
+                    // just return the full buffer.
+                    let response = ReadFileResponse {
+                        bytes: buffer,
+                        read_amount: read_amount as u64,
+                        is_eof: end_of_file == new_position,
+                    };
+
+                    Ok(response)
                 } else {
                     Err(ResponseError::NotFile(fd))
                 }
@@ -382,6 +388,7 @@ impl FileManager {
                         ReadFileResponse {
                             bytes: buffer,
                             read_amount: read_amount as u64,
+                            is_eof: 0 == read_amount,
                         }
                     })?;
 

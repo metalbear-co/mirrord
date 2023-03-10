@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    io::{self},
+    io,
 };
 
 use actix_codec::{Decoder, Encoder};

@@ -5,9 +5,7 @@ use core::ffi::{c_size_t, c_ssize_t};
 ///
 /// NOTICE: If a file operation fails, it might be because it depends on some `libc` function
 /// that is not being hooked (`strace` the program to check).
-use std::{
-    ffi::CString, num::NonZeroI64, os::unix::io::RawFd, ptr, slice, sync::Arc, time::Duration,
-};
+use std::{ffi::CString, num::NonZeroI64, os::unix::io::RawFd, ptr, slice, time::Duration};
 
 #[cfg(target_os = "linux")]
 use errno::{set_errno, Errno};
@@ -95,7 +93,6 @@ pub(super) unsafe extern "C" fn fopen_detour(
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char) -> *mut FILE {
     let rawish_mode = TryFromPtr::try_from_ptr(raw_mode);
-
     fdopen(fd, rawish_mode).unwrap_or_bypass_with(|_| FN_FDOPEN(fd, raw_mode))
 }
 
@@ -262,7 +259,9 @@ pub(crate) unsafe extern "C" fn read_detour(
 ) -> ssize_t {
     read(fd, count as u64)
         .map(|read_file| {
-            let ReadFileResponse { bytes, read_amount } = read_file;
+            let ReadFileResponse {
+                bytes, read_amount, ..
+            } = read_file;
 
             // There is no distinction between reading 0 bytes or if we hit EOF, but we only copy to
             // buffer if we have something to copy.
@@ -296,7 +295,19 @@ pub(crate) unsafe extern "C" fn fread_detour(
 
     read(local_fd, read_amount)
         .map(|read_file| {
-            let ReadFileResponse { bytes, read_amount } = read_file;
+            let ReadFileResponse {
+                bytes,
+                read_amount,
+                is_eof,
+            } = read_file;
+
+            // `fread` does not distinguish between end-of-file and error, callers must use
+            // `feof(3)` and `ferror(3)` to determine which occurred.
+            if is_eof {
+                let mut open_files = OPEN_FILES.lock().unwrap();
+                let mut remote_file = open_files.get_mut(&local_fd).unwrap().write().unwrap();
+                remote_file.is_eof = true;
+            }
 
             // There is no distinction between reading 0 bytes or if we hit EOF, but we only copy to
             // buffer if we have something to copy.
@@ -306,15 +317,12 @@ pub(crate) unsafe extern "C" fn fread_detour(
                 ptr::copy(read_ptr, out_buffer, read_amount as usize);
             }
 
-            // TODO: The function fread() does not distinguish between end-of-file and error,
-            // and callers must use feof(3) and ferror(3) to determine which occurred.
             read_amount as usize
         })
         .inspect_err(|fail| {
             let mut open_files = OPEN_FILES.lock().unwrap();
             let remote_file = open_files.get_mut(&local_fd).unwrap();
-
-            Arc::get_mut(remote_file).unwrap().error = NonZeroI64::new(fail.code());
+            remote_file.write().unwrap().error = NonZeroI64::new(fail.code());
         })
         .unwrap_or_bypass_with(|_| {
             FN_FREAD(out_buffer, element_size, number_of_elements, file_stream)
@@ -330,16 +338,28 @@ pub(crate) unsafe extern "C" fn fgets_detour(
     file_stream: *mut FILE,
 ) -> *mut c_char {
     // Extract the fd from stream and check if it's managed by us, or should be bypassed.
-    let fd = fileno_logic(file_stream);
+    let local_fd = *(file_stream as *const _);
 
     // `fgets` reads 1 LESS character than specified by `capacity`, so instead of having
     // branching code to check if this is an `fgets` call elsewhere, we just subtract 1 from
     // `capacity` here.
     let buffer_size = capacity - 1;
 
-    fgets(fd, buffer_size as usize)
+    fgets(local_fd, buffer_size as usize)
         .map(|read_file| {
-            let ReadFileResponse { bytes, read_amount } = read_file;
+            let ReadFileResponse {
+                bytes,
+                read_amount,
+                is_eof,
+            } = read_file;
+
+            // `fgets` does not distinguish between end-of-file and error, callers must use
+            // `feof(3)` and `ferror(3)` to determine which occurred.
+            if is_eof {
+                let mut open_files = OPEN_FILES.lock().unwrap();
+                let mut remote_file = open_files.get_mut(&local_fd).unwrap().write().unwrap();
+                remote_file.is_eof = true;
+            }
 
             // There is no distinction between reading 0 bytes or if we hit EOF, but we only
             // copy to buffer if we have something to copy.
@@ -359,6 +379,11 @@ pub(crate) unsafe extern "C" fn fgets_detour(
                 ptr::null_mut()
             }
         })
+        .inspect_err(|fail| {
+            let mut open_files = OPEN_FILES.lock().unwrap();
+            let remote_file = open_files.get_mut(&local_fd).unwrap();
+            remote_file.write().unwrap().error = NonZeroI64::new(fail.code());
+        })
         .unwrap_or_bypass_with(|_| FN_FGETS(out_buffer, capacity, file_stream))
 }
 
@@ -371,7 +396,9 @@ pub(crate) unsafe extern "C" fn pread_detour(
 ) -> ssize_t {
     pread(fd, amount_to_read as u64, offset as u64)
         .map(|read_file| {
-            let ReadFileResponse { bytes, read_amount } = read_file;
+            let ReadFileResponse {
+                bytes, read_amount, ..
+            } = read_file;
             let fixed_read = (amount_to_read as u64).min(read_amount);
 
             // There is no distinction between reading 0 bytes or if we hit EOF, but we only
@@ -475,6 +502,15 @@ pub(crate) unsafe extern "C" fn faccessat_detour(
 pub(crate) unsafe extern "C" fn ferror_detour(file_stream: *mut FILE) -> c_int {
     let local_fd = *(file_stream as *const _);
     ferror(local_fd).unwrap_or_bypass_with(|_| FN_FERROR(file_stream))
+}
+
+/// Returns `EOF` state for this `file_stream`.
+///
+/// See [`feof`]
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn feof_detour(file_stream: *mut FILE) -> c_int {
+    let local_fd = *(file_stream as *const _);
+    feof(local_fd).unwrap_or_bypass_with(|_| FN_FEOF(file_stream))
 }
 
 #[hook_guard_fn]
@@ -704,6 +740,7 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "fgets", fgets_detour, FnFgets, FN_FGETS);
     replace!(hook_manager, "pread", pread_detour, FnPread, FN_PREAD);
     replace!(hook_manager, "ferror", ferror_detour, FnFerror, FN_FERROR);
+    replace!(hook_manager, "feof", feof_detour, FnFeof, FN_FEOF);
     replace!(hook_manager, "fclose", fclose_detour, FnFclose, FN_FCLOSE);
     replace!(hook_manager, "fileno", fileno_detour, FnFileno, FN_FILENO);
     replace!(hook_manager, "lseek", lseek_detour, FnLseek, FN_LSEEK);
