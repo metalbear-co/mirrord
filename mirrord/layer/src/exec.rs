@@ -15,7 +15,7 @@ use null_terminated::Nul;
 use tracing::{trace, warn};
 
 use crate::{
-    common::TryFromPtr,
+    common::CheckedInto,
     detour::{
         Bypass::{ExecOnNonExistingFile, NoSipDetected, TooManyArgs},
         Detour,
@@ -137,7 +137,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
             // that we don't just keep going indefinitely if a bad argv was passed.
             return Bypass(TooManyArgs);
         }
-        let arg_str = <&str as TryFromPtr<*const c_char>>::try_from_ptr(*arg)?;
+        let arg_str = (*arg).checked_into()?;
         trace!("exec arg: {arg_str}");
 
         c_string_vec.0.push(
@@ -174,7 +174,7 @@ unsafe fn patch_sip_for_new_process(
         .unwrap_or_default();
     trace!("Executable {} called execve/posix_spawn", calling_exe);
 
-    let path_str = <&str as TryFromPtr<*const c_char>>::try_from_ptr(path)?;
+    let path_str = path.checked_into()?;
 
     let path_c_string = patch_if_sip(path_str)
         .and_then(|new_path| Success(CString::new(new_path)?))

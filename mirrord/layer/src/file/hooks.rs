@@ -30,7 +30,7 @@ use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
 #[cfg(target_os = "linux")]
 use crate::error::HookError::ResponseError;
 use crate::{
-    common::TryFromPtr,
+    common::CheckedInto,
     detour::{Detour, DetourGuard},
     error::HookError,
     file::ops::{access, lseek, open, read, write},
@@ -42,16 +42,10 @@ use crate::{
 /// We ignore mode in case we don't bypass the call.
 #[tracing::instrument(level = "trace")]
 unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, mode: c_int) -> RawFd {
-    let rawish_path = TryFromPtr::try_from_ptr(raw_path);
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
-    trace!(
-        "rawish_path {:#?} | open_options {:#?}",
-        rawish_path,
-        open_options
-    );
-
-    open(rawish_path, open_options).unwrap_or_bypass_with(|_| FN_OPEN(raw_path, open_flags, mode))
+    open(raw_path.checked_into(), open_options)
+        .unwrap_or_bypass_with(|_| FN_OPEN(raw_path, open_flags, mode))
 }
 
 /// Hook for `libc::open`.
@@ -80,10 +74,8 @@ pub(super) unsafe extern "C" fn fopen_detour(
     raw_path: *const c_char,
     raw_mode: *const c_char,
 ) -> *mut FILE {
-    let path = TryFromPtr::try_from_ptr(raw_path);
-    let mode = TryFromPtr::try_from_ptr(raw_mode);
-
-    fopen(path, mode).unwrap_or_bypass_with(|_| FN_FOPEN(raw_path, raw_mode))
+    fopen(raw_path.checked_into(), raw_mode.checked_into())
+        .unwrap_or_bypass_with(|_| FN_FOPEN(raw_path, raw_mode))
 }
 
 /// Hook for `libc::fdopen`.
@@ -92,8 +84,7 @@ pub(super) unsafe extern "C" fn fopen_detour(
 /// mirrord-layer.
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char) -> *mut FILE {
-    let rawish_mode = TryFromPtr::try_from_ptr(raw_mode);
-    fdopen(fd, rawish_mode).unwrap_or_bypass_with(|_| FN_FDOPEN(fd, raw_mode))
+    fdopen(fd, raw_mode.checked_into()).unwrap_or_bypass_with(|_| FN_FDOPEN(fd, raw_mode))
 }
 
 #[hook_guard_fn]
@@ -176,10 +167,10 @@ pub(crate) unsafe extern "C" fn openat_detour(
     raw_path: *const c_char,
     open_flags: c_int,
 ) -> RawFd {
-    let path = TryFromPtr::try_from_ptr(raw_path);
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
-    openat(fd, path, open_options).unwrap_or_bypass_with(|_| FN_OPENAT(fd, raw_path, open_flags))
+    openat(fd, raw_path.checked_into(), open_options)
+        .unwrap_or_bypass_with(|_| FN_OPENAT(fd, raw_path, open_flags))
 }
 
 /// Hook for getdents64, for Go's `os.ReadDir` on Linux.
@@ -471,9 +462,7 @@ pub(crate) unsafe extern "C" fn write_detour(
 
 /// Implementation of access_detour, used in access_detour and faccessat_detour
 unsafe fn access_logic(raw_path: *const c_char, mode: c_int) -> c_int {
-    let path = TryFromPtr::try_from_ptr(raw_path);
-
-    access(path, mode as u8).unwrap_or_bypass_with(|_| FN_ACCESS(raw_path, mode))
+    access(raw_path.checked_into(), mode as u8).unwrap_or_bypass_with(|_| FN_ACCESS(raw_path, mode))
 }
 
 /// Hook for `libc::access`.
@@ -581,9 +570,7 @@ unsafe extern "C" fn fill_stat(out_stat: *mut stat, metadata: &MetadataInternal)
 /// Hook for `libc::lstat`.
 #[hook_guard_fn]
 unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
-    let path = TryFromPtr::try_from_ptr(raw_path);
-
-    xstat(Some(path), None, false)
+    xstat(Some(raw_path.checked_into()), None, false)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
@@ -607,9 +594,7 @@ pub(crate) unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> 
 /// Hook for `libc::stat`.
 #[hook_guard_fn]
 unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
-    let path = TryFromPtr::try_from_ptr(raw_path);
-
-    xstat(Some(path), None, true)
+    xstat(Some(raw_path.checked_into()), None, true)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
@@ -629,9 +614,7 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
         return FN___XSTAT(ver, raw_path, out_stat);
     }
 
-    let path = TryFromPtr::try_from_ptr(raw_path);
-
-    xstat(Some(path), None, true)
+    xstat(Some(raw_path.checked_into()), None, true)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
@@ -647,10 +630,9 @@ pub(crate) unsafe fn fstatat_logic(
     out_stat: *mut stat,
     flag: c_int,
 ) -> Detour<i32> {
-    let path = TryFromPtr::try_from_ptr(raw_path);
     let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
 
-    xstat(Some(path), Some(fd), follow_symlink).map(|res| {
+    xstat(Some(raw_path.checked_into()), Some(fd), follow_symlink).map(|res| {
         let res = res.metadata;
         fill_stat(out_stat, &res);
         0
