@@ -8,7 +8,7 @@ use thiserror::Error;
 use tracing::warn;
 use trust_dns_resolver::error::{ResolveError, ResolveErrorKind};
 
-use crate::{tcp::Filter, Port};
+use crate::{outgoing::SocketAddress, tcp::Filter, Port};
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
 pub enum SerializationError {
@@ -59,8 +59,8 @@ pub enum RemoteError {
 
     /// Especially relevant for the outgoing traffic feature, when `golang` attempts to connect
     /// on both IPv6 and IPv4.
-    #[error("Connect call to `SocketAddr` `{0}` timed out!")]
-    ConnectTimedOut(SocketAddr),
+    #[error("Connect call to `SocketAddress` `{0}` timed out!")]
+    ConnectTimedOut(SocketAddress),
 
     #[error(r#"Got bad regex "{0}" for http filter subscriptions. Regex error: `{1}`."#)]
     BadHttpFilterRegex(Filter, String),

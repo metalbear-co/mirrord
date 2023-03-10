@@ -1,5 +1,11 @@
 use core::fmt;
-use std::{io, io::ErrorKind, net::SocketAddr, path::PathBuf};
+use std::{
+    fmt::{Display, Formatter},
+    io,
+    io::ErrorKind,
+    net::SocketAddr,
+    path::PathBuf,
+};
 
 use bincode::{Decode, Encode};
 use socket2::SockAddr;
@@ -24,6 +30,16 @@ pub enum SocketAddress {
 pub enum UnixAddr {
     Pathname(PathBuf),
     Abstract(Vec<u8>),
+}
+
+impl SocketAddress {
+    pub fn is_ip(&self) -> bool {
+        matches!(self, Self::Ip(_))
+    }
+
+    pub fn is_unix(&self) -> bool {
+        matches!(self, Self::Unix(_))
+    }
 }
 
 impl TryFrom<SockAddr> for SocketAddress {
@@ -60,6 +76,18 @@ impl TryFrom<SocketAddress> for SockAddr {
                 })?)
             }
         }
+    }
+}
+
+/// For error messages, e.g. [`RemoteError::ConnectTimeOut`].
+impl Display for SocketAddress {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let addr = match self {
+            SocketAddress::Ip(ip_address) => ip_address.to_string(),
+            SocketAddress::Unix(Pathname(path)) => path.to_string_lossy().to_string(),
+            SocketAddress::Unix(Abstract(name)) => String::from_utf8_lossy(name).to_string(),
+        };
+        write!(f, "{}", addr)
     }
 }
 
