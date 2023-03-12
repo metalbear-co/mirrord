@@ -13,7 +13,7 @@ use crate::{sniffer::SnifferCommand, steal::StealerCommand};
 
 #[derive(Debug, Error)]
 pub enum AgentError {
-    #[error("Agent failed with `{0}`")]
+    #[error("Agent failed with `{0:?}`")]
     IO(#[from] std::io::Error),
 
     #[error("SnifferCommand sender failed with `{0}`")]
