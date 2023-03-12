@@ -1,0 +1,1 @@
+print logs of stealer/sniffer start failure
