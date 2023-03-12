@@ -24,7 +24,7 @@ static UID_LOOKUP_REGEX: LazyLock<Regex> =
 static SKIP_PORTS_LOOKUP_REGEX: LazyLock<[Regex; 2]> = LazyLock::new(|| {
     [
         Regex::new(r"-p tcp -m multiport --dports ([\d:,]+)").unwrap(),
-        Regex::new(r" -p tcp -m tcp --dport ([\d:,]+)").unwrap(),
+        Regex::new(r"-p tcp -m tcp --dport ([\d:,]+)").unwrap(),
     ]
 });
 
@@ -242,7 +242,7 @@ impl IPTableFormatter {
                         .captures(rule)
                         .ok()
                         .flatten()
-                        .and_then(|capture| capture.get(0))
+                        .and_then(|capture| capture.get(1))
                 })
                 .map(|m| m.as_str().to_string())
                 .collect();
@@ -356,7 +356,7 @@ impl IpTableChain {
             .chain(self.skiped_ports.iter().map(|port| {
                 (
                     self.name.as_str(),
-                    format!("-p tcp -m multiport ! --dports {port} -j RETURN"),
+                    format!("! -p tcp -m multiport --dports {port} -j RETURN"),
                 )
             }))
             .collect()
