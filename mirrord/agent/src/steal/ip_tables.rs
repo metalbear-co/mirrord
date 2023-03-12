@@ -251,7 +251,7 @@ impl IPTableFormatter {
         }
     }
 
-    fn chains<IPT: IPTables>(&self, ipt: &IPT) -> Result<Vec<IpTableChain>> {
+    pub(crate) fn chains<IPT: IPTables>(&self, ipt: &IPT) -> Result<Vec<IpTableChain>> {
         match self {
             IPTableFormatter::Normal => Ok(vec![IpTableChain::prerouting(None)]),
             IPTableFormatter::Mesh(mesh_output_chain) => {
@@ -376,7 +376,7 @@ impl IpTableChain {
         }
     }
 
-    fn remove<IPT: IPTables>(&self, ipt: &IPT) -> Result<()> {
+    pub(crate) fn remove<IPT: IPTables>(&self, ipt: &IPT) -> Result<()> {
         ipt.remove_rule(self.entrypoint_name, &self.entrypoint_rule)?;
 
         ipt.remove_chain(&self.name)

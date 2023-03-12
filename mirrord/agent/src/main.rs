@@ -581,7 +581,13 @@ async fn clear_iptable_chain() -> Result<()> {
     let ipt = iptables::new(false).unwrap();
     let formatter = IPTableFormatter::detect(&ipt)?;
 
-    formatter.chains().for_each(|chain| chain.remove());
+    formatter
+        .chains(&ipt)?
+        .into_iter()
+        .map(|chain| chain.remove(&ipt))
+        .collect::<Result<()>>()?;
+
+    Ok(())
 }
 
 #[cfg(not(target_os = "linux"))]
