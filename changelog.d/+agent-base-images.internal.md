@@ -1,1 +1,0 @@
-use base images for agent to reduce build time
