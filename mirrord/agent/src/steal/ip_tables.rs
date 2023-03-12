@@ -21,8 +21,12 @@ pub(crate) static MIRRORD_IPTABLE_OUTPUT_ENV: &str = "MIRRORD_IPTABLE_OUTPUT_NAM
 static UID_LOOKUP_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"-m owner --uid-owner \d+").unwrap());
 
-static SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"-p tcp -m multiport --dports ([\d:,]+)").unwrap());
+static SKIP_PORTS_LOOKUP_REGEX: LazyLock<[Regex; 2]> = LazyLock::new(|| {
+    [
+        Regex::new(r"-p tcp -m multiport --dports ([\d:,]+)").unwrap(),
+        Regex::new(r" -p tcp -m tcp --dport ([\d:,]+)").unwrap(),
+    ]
+});
 
 const IPTABLES_TABLE_NAME: &str = "nat";
 
@@ -106,11 +110,9 @@ where
         let chains = formatter.chains(&ipt)?;
 
         for chain in &chains {
-            let (entrypoint, entrypoint_rule) = chain.entrypoint();
-
             ipt.create_chain(&chain.name)?;
 
-            if entrypoint == "OUTPUT" && let Some(bypass) = formatter.bypass_own_packets_rule() {
+            if chain.entrypoint_name == "OUTPUT" && let Some(bypass) = formatter.bypass_own_packets_rule() {
                 ipt.insert_rule(
                     &chain.name,
                     &bypass,
@@ -118,7 +120,9 @@ where
                 )?;
             }
 
-            ipt.add_rule(entrypoint, entrypoint_rule)?;
+            for (entrypoint, entrypoint_rule) in chain.entrypoint() {
+                ipt.add_rule(entrypoint, &entrypoint_rule)?;
+            }
         }
 
         Ok(Self {
@@ -204,32 +208,48 @@ where
 #[derive(Debug)]
 pub(crate) enum IPTableFormatter {
     Normal,
-    Mesh(String, String),
+    Mesh(String, Vec<String>),
 }
 
 impl IPTableFormatter {
     const MESH_ENTRYPOINTS: [&'static str; 2] = ["-j PROXY_INIT_OUTPUT", "-j ISTIO_OUTPUT"];
-    const MESH_INPUT_NAMES: [&'static str; 2] = ["PROXY_INIT_REDIRECT", "ISTIO_INPUT"];
+    const MESH_INPUT_NAMES: [&'static str; 2] = ["PROXY_INIT_REDIRECT", "ISTIO_INBOUND"];
     const MESH_OUTPUT_NAMES: [&'static str; 2] = ["PROXY_INIT_OUTPUT", "ISTIO_OUTPUT"];
 
     #[tracing::instrument(level = "trace", skip_all)]
     pub(crate) fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Self> {
         let output = ipt.list_rules("OUTPUT")?;
 
-        if let Some((mesh_input_chain, mesh_output_chain)) = output.iter().find_map(|rule| {
-            IPTableFormatter::MESH_ENTRYPOINTS
+        if let Some((mesh_input_chain, mesh_output_chain, skip_ports_regex)) =
+            output.iter().find_map(|rule| {
+                IPTableFormatter::MESH_ENTRYPOINTS
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, mesh_output)| {
+                        rule.contains(mesh_output).then_some((
+                            IPTableFormatter::MESH_INPUT_NAMES[index],
+                            IPTableFormatter::MESH_OUTPUT_NAMES[index],
+                            &SKIP_PORTS_LOOKUP_REGEX[index],
+                        ))
+                    })
+            })
+        {
+            let skip_ports = ipt
+                .list_rules(mesh_input_chain)?
                 .iter()
-                .enumerate()
-                .find_map(|(index, mesh_output)| {
-                    rule.contains(mesh_output).then_some((
-                        IPTableFormatter::MESH_INPUT_NAMES[index],
-                        IPTableFormatter::MESH_OUTPUT_NAMES[index],
-                    ))
+                .filter_map(|rule| {
+                    skip_ports_regex
+                        .captures(rule)
+                        .ok()
+                        .flatten()
+                        .and_then(|capture| capture.get(0))
                 })
-        }) {
+                .map(|m| m.as_str().to_string())
+                .collect();
+
             Ok(IPTableFormatter::Mesh(
-                mesh_input_chain.to_string(),
                 mesh_output_chain.to_string(),
+                skip_ports,
             ))
         } else {
             Ok(IPTableFormatter::Normal)
@@ -238,15 +258,9 @@ impl IPTableFormatter {
 
     pub(crate) fn chains<IPT: IPTables>(&self, ipt: &IPT) -> Result<Vec<IpTableChain>> {
         match self {
-            IPTableFormatter::Normal => Ok(vec![IpTableChain::prerouting(None)]),
-            IPTableFormatter::Mesh(mesh_input_chain, mesh_output_chain) => {
-                let skip_ports = ipt
-                    .list_rules(mesh_input_chain)?
-                    .iter()
-                    .find_map(|rule| SKIP_PORTS_LOOKUP_REGEX.find(rule).ok().flatten())
-                    .map(|m| m.as_str().to_string());
-
-                let prerouting = IpTableChain::prerouting(skip_ports);
+            IPTableFormatter::Normal => Ok(vec![IpTableChain::prerouting(vec![])]),
+            IPTableFormatter::Mesh(mesh_output_chain, skip_ports) => {
+                let prerouting = IpTableChain::prerouting(skip_ports.clone());
 
                 // We extract --uid-owner value from the mesh's rules to get messages only from them
                 // and not other processes sendning messages from localhost like healthprobe for
@@ -287,41 +301,35 @@ impl IPTableFormatter {
 
 #[derive(Debug)]
 pub struct IpTableChain {
-    name: String,
     entrypoint_name: &'static str,
-    entrypoint_rule: String,
+    name: String,
     redirect_filter: Option<String>,
     rule_index: AtomicI32,
+    skiped_ports: Vec<String>,
 }
 
 impl IpTableChain {
-    fn prerouting(entrypoint_rule: Option<String>) -> Self {
+    fn prerouting(skiped_ports: Vec<String>) -> Self {
         let chain_name = Self::prerouting_name();
-
-        let entrypoint_rule = entrypoint_rule
-            .map(|rule| format!("{rule} -j {chain_name}"))
-            .unwrap_or_else(|| format!("-j {chain_name}"));
 
         IpTableChain {
             entrypoint_name: "PREROUTING",
             name: chain_name,
-            entrypoint_rule,
             redirect_filter: None,
             rule_index: AtomicI32::from(1),
+            skiped_ports,
         }
     }
 
     fn output(redirect_filter: Option<String>) -> Self {
         let chain_name = Self::output_name();
 
-        let entrypoint_rule = format!("-j {chain_name}");
-
         IpTableChain {
             entrypoint_name: "OUTPUT",
             name: chain_name,
-            entrypoint_rule,
             redirect_filter,
             rule_index: AtomicI32::from(1),
+            skiped_ports: vec![],
         }
     }
 
@@ -343,8 +351,15 @@ impl IpTableChain {
         })
     }
 
-    fn entrypoint(&self) -> (&str, &str) {
-        (self.entrypoint_name, &self.entrypoint_rule)
+    fn entrypoint(&self) -> Vec<(&str, String)> {
+        std::iter::once((self.entrypoint_name, format!("-j {}", self.name)))
+            .chain(self.skiped_ports.iter().map(|port| {
+                (
+                    self.name.as_str(),
+                    format!("-p tcp -m multiport ! --dports {port}"),
+                )
+            }))
+            .collect()
     }
 
     fn redirect(&self, redirected_port: Port, target_port: Port) -> String {
@@ -358,7 +373,7 @@ impl IpTableChain {
     }
 
     pub(crate) fn remove<IPT: IPTables>(&self, ipt: &IPT) -> Result<()> {
-        ipt.remove_rule(self.entrypoint_name, &self.entrypoint_rule)?;
+        ipt.remove_rule(self.entrypoint_name, &format!("-j {}", self.name))?;
 
         ipt.remove_chain(&self.name)
     }
