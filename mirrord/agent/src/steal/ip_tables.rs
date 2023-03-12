@@ -445,7 +445,7 @@ mod tests {
             .returning(|_| {
                 Ok(vec![
                     "-N PROXY_INIT_REDIRECT".to_owned(),
-                    "-A PROXY_INIT_REDIRECT -p tcp --match multiport --dports <ports> -j RETURN"
+                    "-A PROXY_INIT_REDIRECT -p tcp --match multiport --dports 22 -j RETURN"
                         .to_owned(),
                     "-A PROXY_INIT_REDIRECT -p tcp -j REDIRECT --to-port 4143".to_owned(),
                 ])
@@ -469,7 +469,10 @@ mod tests {
             .returning(|_| Ok(()));
 
         mock.expect_add_rule()
-            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
+            .with(
+                eq("PREROUTING"),
+                str::starts_with("-p tcp --match multiport --dports 22 -j MIRRORD_INPUT_"),
+            )
             .times(1)
             .returning(|_, _| Ok(()));
 
@@ -481,7 +484,7 @@ mod tests {
         mock.expect_insert_rule()
             .with(
                 str::starts_with("MIRRORD_OUTPUT_"),
-                str::starts_with("-m owner --gid-owner "),
+                str::starts_with("-m owner --gid-owner"),
                 eq(1),
             )
             .times(1)
