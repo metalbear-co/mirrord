@@ -393,16 +393,6 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        mock.expect_remove_chain()
-            .with(str::starts_with("MIRRORD_INPUT_"))
-            .times(1)
-            .returning(|_| Ok(()));
-
-        mock.expect_add_rule()
-            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
-            .times(1)
-            .returning(|_, _| Ok(()));
-
         mock.expect_insert_rule()
             .with(
                 str::starts_with("MIRRORD_INPUT_"),
@@ -412,7 +402,7 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
-        mock.expect_remove_rule()
+        mock.expect_add_rule()
             .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
             .times(1)
             .returning(|_, _| Ok(()));
@@ -424,6 +414,16 @@ mod tests {
             )
             .times(1)
             .returning(|_, _| Ok(()));
+
+        mock.expect_remove_rule()
+            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_remove_chain()
+            .with(str::starts_with("MIRRORD_INPUT_"))
+            .times(1)
+            .returning(|_| Ok(()));
 
         let ipt = SafeIpTables::new(mock, false).expect("Create Failed");
 
@@ -468,25 +468,24 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        mock.expect_remove_chain()
-            .with(str::starts_with("MIRRORD_INPUT_"))
+        mock.expect_add_rule()
+            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
             .times(1)
-            .returning(|_| Ok(()));
+            .returning(|_, _| Ok(()));
 
         mock.expect_create_chain()
             .with(str::starts_with("MIRRORD_OUTPUT_"))
             .times(1)
             .returning(|_| Ok(()));
 
-        mock.expect_remove_chain()
-            .with(str::starts_with("MIRRORD_OUTPUT_"))
+        mock.expect_insert_rule()
+            .with(
+                str::starts_with("MIRRORD_OUTPUT_"),
+                str::starts_with("-m owner --gid-owner "),
+                eq(1),
+            )
             .times(1)
-            .returning(|_| Ok(()));
-
-        mock.expect_add_rule()
-            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
-            .times(1)
-            .returning(|_, _| Ok(()));
+            .returning(|_, _, _| Ok(()));
 
         mock.expect_add_rule()
             .with(eq("OUTPUT"), str::starts_with("-j MIRRORD_OUTPUT_"))
@@ -506,16 +505,6 @@ mod tests {
             .returning(|_, _, _| Ok(()));
 
         mock.expect_remove_rule()
-            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
-            .times(1)
-            .returning(|_, _| Ok(()));
-
-        mock.expect_remove_rule()
-            .with(eq("OUTPUT"), str::starts_with("-j MIRRORD_OUTPUT_"))
-            .times(1)
-            .returning(|_, _| Ok(()));
-
-        mock.expect_remove_rule()
             .with(
                 str::starts_with("MIRRORD_OUTPUT_"),
                 eq(
@@ -525,6 +514,26 @@ mod tests {
             )
             .times(1)
             .returning(|_, _| Ok(()));
+
+        mock.expect_remove_rule()
+            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_remove_chain()
+            .with(str::starts_with("MIRRORD_INPUT_"))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        mock.expect_remove_rule()
+            .with(eq("OUTPUT"), str::starts_with("-j MIRRORD_OUTPUT_"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_remove_chain()
+            .with(str::starts_with("MIRRORD_OUTPUT_"))
+            .times(1)
+            .returning(|_| Ok(()));
 
         let ipt = SafeIpTables::new(mock, false).expect("Create Failed");
 
