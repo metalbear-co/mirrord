@@ -21,7 +21,10 @@ use nix::sched::setns;
 use oci_spec::runtime::Spec;
 use tracing::trace;
 
-use crate::error::{AgentError, Result};
+use crate::{
+    env::parse_raw_env,
+    error::{AgentError, Result},
+};
 
 const CONTAINERD_SOCK_PATH: &str = "/host/run/containerd/containerd.sock";
 const CONTAINERD_ALTERNATIVE_SOCK_PATH: &str = "/host/run/dockershim.sock";
@@ -171,21 +174,6 @@ async fn connect_and_find_container(
     let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
     client.get(request).await?;
     Ok(channel)
-}
-
-/// Translate ToIter<String> of "K=V" to HashMap.
-fn parse_raw_env<'a, T: IntoIterator<Item = &'a String>>(raw: T) -> HashMap<String, String> {
-    raw.into_iter()
-        .map(|key_and_value| key_and_value.splitn(2, '=').collect::<Vec<_>>())
-        // [["DB", "foo.db"], ["PORT", "99"], ["HOST"], ["PATH", "/fake"]]
-        .filter_map(
-            |mut keys_and_values| match (keys_and_values.pop(), keys_and_values.pop()) {
-                (Some(value), Some(key)) => Some((key.to_string(), value.to_string())),
-                _ => None,
-            },
-        )
-        // [("DB", "foo.db")]
-        .collect::<HashMap<_, _>>()
 }
 
 /// Extract from [`Spec`] struct the environment variables as HashMap<K,V>
