@@ -594,8 +594,7 @@ async fn clear_iptable_chain() -> Result<()> {
     formatter
         .chains(&ipt)?
         .into_iter()
-        .map(|chain| chain.remove(&ipt))
-        .collect::<Result<()>>()?;
+        .try_for_each(|chain| chain.remove(&ipt))?;
 
     Ok(())
 }
@@ -626,9 +625,9 @@ async fn start_iptable_guard() -> Result<()> {
 
     std::env::set_var(
         MIRRORD_IPTABLE_PREROUTING_ENV,
-        &IpTableChain::prerouting_name(),
+        IpTableChain::prerouting_name(),
     );
-    std::env::set_var(MIRRORD_IPTABLE_OUTPUT_ENV, &IpTableChain::output_name());
+    std::env::set_var(MIRRORD_IPTABLE_OUTPUT_ENV, IpTableChain::output_name());
 
     let result = spawn_child_agent();
 
