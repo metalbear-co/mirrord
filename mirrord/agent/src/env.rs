@@ -52,11 +52,11 @@ impl EnvFilter {
 }
 
 /// Translate ToIter<AsRef<str>> of "K=V" to HashMap.
-pub(crate) fn parse_raw_env<'a, S: AsRef<str>, T: IntoIterator<Item = S>>(
+pub(crate) fn parse_raw_env<'a, S: AsRef<str> + 'a + ?Sized, T: IntoIterator<Item = &'a S>>(
     raw: T,
 ) -> HashMap<String, String> {
     raw.into_iter()
-        .map(|key_and_value| key_and_value.as_ref().splitn(2, '=').collect::<Vec<&str>>())
+        .map(|key_and_value| key_and_value.as_ref().splitn(2, '=').collect::<Vec<_>>())
         // [["DB", "foo.db"], ["PORT", "99"], ["HOST"], ["PATH", "/fake"]]
         .filter_map(
             |mut keys_and_values| match (keys_and_values.pop(), keys_and_values.pop()) {
@@ -85,7 +85,7 @@ pub(crate) async fn get_proc_environ(path: PathBuf) -> Result<HashMap<String, St
 ///
 /// NOTE: can remove `RemoteResult` when we break protocol compatibility.
 #[tracing::instrument(level = "trace", skip(full_env))]
-pub(crate) async fn select_env_vars(
+pub(crate) fn select_env_vars(
     full_env: &HashMap<String, String>,
     filter_env_vars: HashSet<String>,
     select_env_vars: HashSet<String>,

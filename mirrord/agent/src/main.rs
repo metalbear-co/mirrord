@@ -394,7 +394,7 @@ impl ClientConnectionHandler {
                 );
 
                 let env_vars_result =
-                    env::select_env_vars(&self.env, env_vars_filter, env_vars_select).await;
+                    env::select_env_vars(&self.env, env_vars_filter, env_vars_select);
 
                 self.respond(DaemonMessage::GetEnvVarsResponse(env_vars_result))
                     .await?

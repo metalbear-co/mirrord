@@ -3196,7 +3196,6 @@ dependencies = [
  "nix 0.25.1",
  "socket2",
  "tokio",
- "tracing",
 ]
 
 [[package]]
