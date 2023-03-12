@@ -356,7 +356,7 @@ impl IpTableChain {
             .chain(self.skiped_ports.iter().map(|port| {
                 (
                     self.name.as_str(),
-                    format!("-p tcp -m multiport ! --dports {port}"),
+                    format!("-p tcp -m multiport ! --dports {port} -j RETURN"),
                 )
             }))
             .collect()
