@@ -107,7 +107,7 @@ where
     pub(super) fn new(ipt: IPT, flush_connections: bool) -> Result<Self> {
         let formatter = IPTableFormatter::detect(&ipt)?;
 
-        let chains = formatter.chains(&ipt)?;
+        let chains = formatter.chains(&ipt);
 
         for chain in &chains {
             ipt.create_chain(&chain.name)?;
@@ -208,7 +208,10 @@ where
 #[derive(Debug)]
 pub(crate) enum IPTableFormatter {
     Normal,
-    Mesh(String, Vec<String>),
+    Mesh {
+        own_packet_filter: Option<String>,
+        skiped_ports: Vec<String>,
+    },
 }
 
 impl IPTableFormatter {
@@ -220,25 +223,31 @@ impl IPTableFormatter {
     pub(crate) fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Self> {
         let output = ipt.list_rules("OUTPUT")?;
 
-        if let Some((mesh_input_chain, mesh_output_chain, skip_ports_regex)) =
-            output.iter().find_map(|rule| {
-                IPTableFormatter::MESH_ENTRYPOINTS
+        if let Some(mesh_index) = output.iter().find_map(|rule| {
+            IPTableFormatter::MESH_ENTRYPOINTS
+                .iter()
+                .enumerate()
+                .find_map(|(index, mesh_output)| rule.contains(mesh_output).then_some(index))
+        }) {
+            // We extract --uid-owner value from the mesh's rules to get messages only from them
+            // and not other processes sendning messages from localhost like healthprobe for
+            // grpc. This to more closely match behavior with non meshed
+            // services
+            let own_packet_filter = ipt
+                    .list_rules(Self::MESH_OUTPUT_NAMES[mesh_index])?
                     .iter()
-                    .enumerate()
-                    .find_map(|(index, mesh_output)| {
-                        rule.contains(mesh_output).then_some((
-                            IPTableFormatter::MESH_INPUT_NAMES[index],
-                            IPTableFormatter::MESH_OUTPUT_NAMES[index],
-                            &SKIP_PORTS_LOOKUP_REGEX[index],
-                        ))
-                    })
-            })
-        {
-            let skip_ports = ipt
-                .list_rules(mesh_input_chain)?
+                    .find_map(|rule| UID_LOOKUP_REGEX.find(rule).ok().flatten())
+                    .map(|m| format!("-o lo {}", m.as_str())).or_else(|| {
+                        warn!("Couldn't find --uid-owner of meshed chain {:?} falling back on \"-o lo\" rule", Self::MESH_OUTPUT_NAMES[mesh_index]);
+
+                        Some("-o lo".to_owned())
+                    });
+
+            let skiped_ports = ipt
+                .list_rules(IPTableFormatter::MESH_INPUT_NAMES[mesh_index])?
                 .iter()
                 .filter_map(|rule| {
-                    skip_ports_regex
+                    SKIP_PORTS_LOOKUP_REGEX[mesh_index]
                         .captures(rule)
                         .ok()
                         .flatten()
@@ -247,39 +256,25 @@ impl IPTableFormatter {
                 .map(|m| m.as_str().to_string())
                 .collect();
 
-            Ok(IPTableFormatter::Mesh(
-                mesh_output_chain.to_string(),
-                skip_ports,
-            ))
+            Ok(IPTableFormatter::Mesh {
+                own_packet_filter,
+                skiped_ports,
+            })
         } else {
             Ok(IPTableFormatter::Normal)
         }
     }
 
-    pub(crate) fn chains<IPT: IPTables>(&self, ipt: &IPT) -> Result<Vec<IpTableChain>> {
+    pub(crate) fn chains<IPT: IPTables>(&self, ipt: &IPT) -> Vec<IpTableChain> {
         match self {
-            IPTableFormatter::Normal => Ok(vec![IpTableChain::prerouting(vec![])]),
-            IPTableFormatter::Mesh(mesh_output_chain, skip_ports) => {
-                let prerouting = IpTableChain::prerouting(skip_ports.clone());
-
-                // We extract --uid-owner value from the mesh's rules to get messages only from them
-                // and not other processes sendning messages from localhost like healthprobe for
-                // grpc. This to more closely match behavior with non meshed
-                // services
-                let filter = ipt
-                    .list_rules(mesh_output_chain)?
-                    .iter()
-                    .find_map(|rule| UID_LOOKUP_REGEX.find(rule).ok().flatten())
-                    .map(|m| format!("-o lo {}", m.as_str())).or_else(|| {
-                        warn!("Couldn't find --uid-owner of meshed chain {mesh_output_chain:?} falling back on \"-o lo\" rule");
-
-                        Some("-o lo".to_owned())
-                    });
-
-                let output = IpTableChain::output(filter);
-
-                Ok(vec![prerouting, output])
-            }
+            IPTableFormatter::Normal => vec![IpTableChain::prerouting(vec![])],
+            IPTableFormatter::Mesh {
+                own_packet_filter,
+                skiped_ports,
+            } => vec![
+                IpTableChain::prerouting(skiped_ports.clone()),
+                IpTableChain::output(own_packet_filter.clone()),
+            ],
         }
     }
 
@@ -291,7 +286,7 @@ impl IPTableFormatter {
     fn bypass_own_packets_rule(&self) -> Option<String> {
         match self {
             IPTableFormatter::Normal => None,
-            IPTableFormatter::Mesh(_, _) => {
+            IPTableFormatter::Mesh { .. } => {
                 let gid = getgid();
                 Some(format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))
             }
