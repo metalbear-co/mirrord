@@ -104,6 +104,8 @@ where
         let chains = formatter.chains(&ipt)?;
 
         for chain in &chains {
+            warn!("{chain:?}");
+
             ipt.create_chain(&chain.name)?;
 
             if let Some(bypass) = formatter.bypass_own_packets_rule() {
@@ -111,6 +113,11 @@ where
             }
 
             let (entrypoint, entrypoint_rule) = chain.entrypoint();
+
+            warn!(
+                "{entrypoint} {entrypoint_rule} ---- {:#?}",
+                ipt.list_rules(entrypoint)?
+            );
 
             warn!(
                 "{entrypoint} {entrypoint_rule} ---- {:#?}",
@@ -310,12 +317,7 @@ pub struct IpTableChain {
 
 impl IpTableChain {
     fn prerouting(entrypoint_rule: Option<String>) -> Self {
-        let chain_name = std::env::var(MIRRORD_IPTABLE_PREROUTING_ENV).unwrap_or_else(|_| {
-            format!(
-                "MIRRORD_INPUT_{}",
-                Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
-            )
-        });
+        let chain_name = Self::prerouting_name();
 
         let entrypoint_rule = entrypoint_rule
             .map(|rule| format!("{rule} -j {chain_name}"))
@@ -330,12 +332,7 @@ impl IpTableChain {
     }
 
     fn output(redirect_filter: Option<String>) -> Self {
-        let chain_name = std::env::var(MIRRORD_IPTABLE_OUTPUT_ENV).unwrap_or_else(|_| {
-            format!(
-                "MIRRORD_OUTPUT_{}",
-                Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
-            )
-        });
+        let chain_name = Self::output_name();
 
         let entrypoint_rule = format!("-j {chain_name}");
 
@@ -345,6 +342,24 @@ impl IpTableChain {
             entrypoint_rule,
             redirect_filter,
         }
+    }
+
+    pub(crate) fn prerouting_name() -> String {
+        std::env::var(MIRRORD_IPTABLE_PREROUTING_ENV).unwrap_or_else(|_| {
+            format!(
+                "MIRRORD_INPUT_{}",
+                Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
+            )
+        })
+    }
+
+    pub(crate) fn output_name() -> String {
+        std::env::var(MIRRORD_IPTABLE_OUTPUT_ENV).unwrap_or_else(|_| {
+            format!(
+                "MIRRORD_OUTPUT_{}",
+                Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
+            )
+        })
     }
 
     fn entrypoint(&self) -> (&str, &str) {
@@ -439,34 +454,31 @@ mod tests {
             .returning(|_| {
                 Ok(vec![
                     "-N PROXY_INIT_OUTPUT".to_owned(),
-                    "-A PROXY_INIT_OUTPUT -m owner --uid-owner 2102 -m comment --comment
-    \"proxy-init/ignore-proxy-user-id/1676542558\" -j RETURN"
+                    "-A PROXY_INIT_OUTPUT -m owner --uid-owner 2102 -m comment --comment \"proxy-init/ignore-proxy-user-id/1676542558\" -j RETURN"
                         .to_owned(),
-                    "-A
-    PROXY_INIT_OUTPUT -o lo -m comment --comment \"proxy-init/ignore-loopback/1676542558\" -j
-    RETURN"
+                    "-A PROXY_INIT_OUTPUT -o lo -m comment --comment \"proxy-init/ignore-loopback/1676542558\" -js RETURN"
                         .to_owned(),
                 ])
             });
 
         mock.expect_create_chain()
-            .with(str::starts_with("MIRRORD_REDIRECT_"))
+            .with(str::starts_with("MIRRORD_INPUT_"))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_remove_chain()
-            .with(str::starts_with("MIRRORD_REDIRECT_"))
+            .with(str::starts_with("MIRRORD_INPUT_"))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_add_rule()
-            .with(eq("OUTPUT"), str::starts_with("-j MIRRORD_REDIRECT_"))
+            .with(eq("OUTPUT"), str::starts_with("-j MIRRORD_INPUT_"))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                str::starts_with("MIRRORD_REDIRECT_"),
+                str::starts_with("MIRRORD_INPUT_"),
                 eq(
                     "-o lo -m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT
     --to-ports 420",
