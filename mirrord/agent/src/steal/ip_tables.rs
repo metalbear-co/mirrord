@@ -7,7 +7,9 @@ use rand::distributions::{Alphanumeric, DistString};
 use tokio::process::Command;
 use tracing::warn;
 
-use crate::error::{AgentError, Result};
+#[cfg(target_os = "linux")]
+use crate::error::AgentError;
+use crate::error::Result;
 
 pub(crate) static MIRRORD_IPTABLE_PREROUTING_ENV: &str = "MIRRORD_IPTABLE_PREROUTING_NAME";
 pub(crate) static MIRRORD_IPTABLE_OUTPUT_ENV: &str = "MIRRORD_IPTABLE_OUTPUT_NAME";
@@ -32,6 +34,7 @@ pub(crate) trait IPTables {
     fn remove_rule(&self, chain: &str, rule: &str) -> Result<()>;
 }
 
+#[cfg(target_os = "linux")]
 impl IPTables for iptables::IPTables {
     fn create_chain(&self, name: &str) -> Result<()> {
         self.new_chain(IPTABLES_TABLE_NAME, name)
@@ -92,18 +95,23 @@ where
     pub(super) fn new(ipt: IPT, flush_connections: bool) -> Result<Self> {
         let formatter = IPTableFormatter::detect(&ipt)?;
 
-        let chains = formatter.chains(&ipt);
+        let chains = formatter.chains(&ipt)?;
 
         for chain in &chains {
             ipt.create_chain(&chain.name)?;
 
             if let Some(bypass) = formatter.bypass_own_packets_rule() {
-                ipt.add_rule(&chain.name, &bypass);
+                ipt.insert_rule(&chain.name, &bypass, formatter.rule_start_index())?;
             }
 
             let (entrypoint, entrypoint_rule) = chain.entrypoint();
 
-            ipt.add_rule(entrypoint, entrypoint_rule)?
+            warn!(
+                "{entrypoint} {entrypoint_rule} ---- {:#?}",
+                ipt.list_rules(&chain.name)?
+            );
+
+            ipt.add_rule(entrypoint, entrypoint_rule)?;
         }
 
         Ok(Self {
@@ -120,9 +128,19 @@ where
     #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         for chain in &self.chains {
-            let (chain_name, rule) = chain.redirect_rule(redirected_port, target_port);
+            self.inner.insert_rule(
+                &chain.name,
+                &chain.redirect(redirected_port, target_port),
+                self.formatter.rule_start_index(),
+            )?;
 
-            self.inner.add_rule(chain_name, &rule)?;
+            let (entrypoint, entrypoint_rule) = chain.entrypoint();
+
+            warn!(
+                "{:?} ---- {:#?}",
+                chain.entrypoint(),
+                self.inner.list_rules(&chain.name)?
+            );
         }
 
         Ok(())
@@ -135,9 +153,8 @@ where
     #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         for chain in &self.chains {
-            let (chain_name, rule) = chain.redirect_rule(redirected_port, target_port);
-
-            self.inner.remove_rule(chain_name, &rule)?;
+            self.inner
+                .remove_rule(&chain.name, &chain.redirect(redirected_port, target_port))?;
         }
 
         Ok(())
@@ -217,17 +234,15 @@ impl IPTableFormatter {
                         .then_some(IPTableFormatter::MESH_NAMES[index])
                 })
         }) {
-            warn!("skip_ports {skip_ports:?}");
-
-            Ok(IPTableFormatter::Mesh(mesh_output_chain))
+            Ok(IPTableFormatter::Mesh(mesh_output_chain.to_string()))
         } else {
             Ok(IPTableFormatter::Normal)
         }
     }
 
-    fn chains<IPT: IPTables>(&self, ipt: &IPT) -> Vec<IpTableChain> {
+    fn chains<IPT: IPTables>(&self, ipt: &IPT) -> Result<Vec<IpTableChain>> {
         match self {
-            IPTableFormatter::Normal => vec![IpTableChain::prerouting(None)],
+            IPTableFormatter::Normal => Ok(vec![IpTableChain::prerouting(None)]),
             IPTableFormatter::Mesh(mesh_output_chain) => {
                 let skip_ports = ipt
                     .list_rules("PROXY_INIT_REDIRECT")?
@@ -246,14 +261,14 @@ impl IPTableFormatter {
                     .iter()
                     .find_map(|rule| UID_LOOKUP_REGEX.find(rule).ok().flatten())
                     .map(|m| format!("-o lo {}", m.as_str())).or_else(|| {
-                        warn!("Couldn't find --uid-owner of meshed chain {mesh_ipt_chain:?} falling back on \"-o lo\" rule");
+                        warn!("Couldn't find --uid-owner of meshed chain {mesh_output_chain:?} falling back on \"-o lo\" rule");
 
                         Some("-o lo".to_owned())
                     });
 
                 let output = IpTableChain::output(filter);
 
-                vec![prerouting, output]
+                Ok(vec![prerouting, output])
             }
         }
     }
@@ -272,6 +287,13 @@ impl IPTableFormatter {
             }
         }
     }
+
+    fn rule_start_index(&self) -> i32 {
+        match self {
+            IPTableFormatter::Normal => 1,
+            IPTableFormatter::Mesh(_) => 2,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -286,7 +308,7 @@ impl IpTableChain {
     fn prerouting(entrypoint_rule: Option<String>) -> Self {
         let chain_name = std::env::var(MIRRORD_IPTABLE_PREROUTING_ENV).unwrap_or_else(|_| {
             format!(
-                "MIRRORD_PREROUTING_REDIRECT_{}",
+                "MIRRORD_PREROUTING_{}",
                 Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
             )
         });
@@ -297,7 +319,7 @@ impl IpTableChain {
 
         IpTableChain {
             entrypoint_name: "PREROUTING",
-            chain_name,
+            name: chain_name,
             entrypoint_rule,
             redirect_filter: None,
         }
@@ -306,15 +328,17 @@ impl IpTableChain {
     fn output(redirect_filter: Option<String>) -> Self {
         let chain_name = std::env::var(MIRRORD_IPTABLE_OUTPUT_ENV).unwrap_or_else(|_| {
             format!(
-                "MIRRORD_OUTPUT_REDIRECT_{}",
+                "MIRRORD_OUTPUT_{}",
                 Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
             )
         });
 
-        RuleSet {
+        let entrypoint_rule = format!("-j {chain_name}");
+
+        IpTableChain {
             entrypoint_name: "OUTPUT",
-            chain_name,
-            entrypoint_rule: format!("-j {chain_name}"),
+            name: chain_name,
+            entrypoint_rule,
             redirect_filter,
         }
     }
@@ -323,22 +347,20 @@ impl IpTableChain {
         (self.entrypoint_name, &self.entrypoint_rule)
     }
 
-    fn redirect(&self, redirected_port: Port, target_port: Port) -> (&str, String) {
+    fn redirect(&self, redirected_port: Port, target_port: Port) -> String {
         let redirect_rule =
             format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
 
-        let redirect_rule = match &self.redirect_filter {
+        match &self.redirect_filter {
             Some(filter) => format!("{filter} {redirect_rule}"),
             None => redirect_rule,
-        };
-
-        (&self.chain_name, redirect_rule)
+        }
     }
 
     fn remove<IPT: IPTables>(&self, ipt: &IPT) -> Result<()> {
         ipt.remove_rule(self.entrypoint_name, &self.entrypoint_rule)?;
 
-        ipt.remove_chain(self.chain_name)
+        ipt.remove_chain(&self.name)
     }
 }
 
