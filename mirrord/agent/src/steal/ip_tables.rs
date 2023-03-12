@@ -441,6 +441,17 @@ mod tests {
             .returning(|_| Ok(vec!["-j PROXY_INIT_OUTPUT".to_owned()]));
 
         mock.expect_list_rules()
+            .with(eq("PROXY_INIT_REDIRECT"))
+            .returning(|_| {
+                Ok(vec![
+                    "-N PROXY_INIT_REDIRECT".to_owned(),
+                    "-A PROXY_INIT_REDIRECT -p tcp --match multiport --dports <ports> -j RETURN"
+                        .to_owned(),
+                    "-A PROXY_INIT_REDIRECT -p tcp -j REDIRECT --to-port 4143".to_owned(),
+                ])
+            });
+
+        mock.expect_list_rules()
             .with(eq("PROXY_INIT_OUTPUT"))
             .returning(|_| {
                 Ok(vec![
@@ -462,14 +473,29 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
+        mock.expect_create_chain()
+            .with(str::starts_with("MIRRORD_OUTPUT_"))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        mock.expect_remove_chain()
+            .with(str::starts_with("MIRRORD_OUTPUT_"))
+            .times(1)
+            .returning(|_| Ok(()));
+
         mock.expect_add_rule()
-            .with(eq("OUTPUT"), str::starts_with("-j MIRRORD_INPUT_"))
+            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_add_rule()
+            .with(eq("OUTPUT"), str::starts_with("-j MIRRORD_OUTPUT_"))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                str::starts_with("MIRRORD_INPUT_"),
+                str::starts_with("MIRRORD_OUTPUT_"),
                 eq(
                     "-o lo -m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT
     --to-ports 420",
@@ -480,13 +506,18 @@ mod tests {
             .returning(|_, _, _| Ok(()));
 
         mock.expect_remove_rule()
-            .with(eq("OUTPUT"), str::starts_with("-j MIRRORD_REDIRECT_"))
+            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_remove_rule()
+            .with(eq("OUTPUT"), str::starts_with("-j MIRRORD_OUTPUT_"))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
             .with(
-                str::starts_with("MIRRORD_REDIRECT_"),
+                str::starts_with("MIRRORD_OUTPUT_"),
                 eq(
                     "-o lo -m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT
     --to-ports 420",
