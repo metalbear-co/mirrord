@@ -1,4 +1,7 @@
-use std::sync::LazyLock;
+use std::sync::{
+    atomic::{AtomicI32, Ordering},
+    LazyLock,
+};
 
 use fancy_regex::Regex;
 use mirrord_protocol::Port;
@@ -85,7 +88,6 @@ impl IPTables for iptables::IPTables {
 pub(crate) struct SafeIpTables<IPT: IPTables> {
     inner: IPT,
     chains: Vec<IpTableChain>,
-    formatter: IPTableFormatter,
     flush_connections: bool,
 }
 
@@ -104,25 +106,17 @@ where
         let chains = formatter.chains(&ipt)?;
 
         for chain in &chains {
-            warn!("{chain:?}");
+            let (entrypoint, entrypoint_rule) = chain.entrypoint();
 
             ipt.create_chain(&chain.name)?;
 
-            if let Some(bypass) = formatter.bypass_own_packets_rule() {
-                ipt.insert_rule(&chain.name, &bypass, 1)?;
+            if entrypoint == "OUTPUT" && let Some(bypass) = formatter.bypass_own_packets_rule() {
+                ipt.insert_rule(
+                    &chain.name,
+                    &bypass,
+                    chain.rule_index.fetch_add(1, Ordering::Relaxed),
+                )?;
             }
-
-            let (entrypoint, entrypoint_rule) = chain.entrypoint();
-
-            warn!(
-                "{entrypoint} {entrypoint_rule} ---- {:#?}",
-                ipt.list_rules(entrypoint)?
-            );
-
-            warn!(
-                "{entrypoint} {entrypoint_rule} ---- {:#?}",
-                ipt.list_rules(&chain.name)?
-            );
 
             ipt.add_rule(entrypoint, entrypoint_rule)?;
         }
@@ -130,7 +124,6 @@ where
         Ok(Self {
             inner: ipt,
             chains,
-            formatter,
             flush_connections,
         })
     }
@@ -144,14 +137,8 @@ where
             self.inner.insert_rule(
                 &chain.name,
                 &chain.redirect(redirected_port, target_port),
-                self.formatter.rule_start_index(),
+                chain.rule_index.fetch_add(1, Ordering::Relaxed),
             )?;
-
-            warn!(
-                "{:?} ---- {:#?}",
-                chain.entrypoint(),
-                self.inner.list_rules(&chain.name)?
-            );
         }
 
         Ok(())
@@ -166,6 +153,8 @@ where
         for chain in &self.chains {
             self.inner
                 .remove_rule(&chain.name, &chain.redirect(redirected_port, target_port))?;
+
+            chain.rule_index.fetch_sub(1, Ordering::Relaxed);
         }
 
         Ok(())
@@ -298,13 +287,6 @@ impl IPTableFormatter {
             }
         }
     }
-
-    fn rule_start_index(&self) -> i32 {
-        match self {
-            IPTableFormatter::Normal => 1,
-            IPTableFormatter::Mesh(_) => 2,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -313,6 +295,7 @@ pub struct IpTableChain {
     entrypoint_name: &'static str,
     entrypoint_rule: String,
     redirect_filter: Option<String>,
+    rule_index: AtomicI32,
 }
 
 impl IpTableChain {
@@ -328,6 +311,7 @@ impl IpTableChain {
             name: chain_name,
             entrypoint_rule,
             redirect_filter: None,
+            rule_index: AtomicI32::from(1),
         }
     }
 
@@ -341,6 +325,7 @@ impl IpTableChain {
             name: chain_name,
             entrypoint_rule,
             redirect_filter,
+            rule_index: AtomicI32::from(1),
         }
     }
 
