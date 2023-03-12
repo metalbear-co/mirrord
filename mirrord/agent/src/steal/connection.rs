@@ -490,7 +490,7 @@ impl TcpConnectionStealer {
         if port_unsubscribed {
             // No remaining subscribers on this port.
             self.iptables()?
-                .remove_stealer_iptables_rules(port, self.stealer.local_addr()?.port())?;
+                .remove_redirect(port, self.stealer.local_addr()?.port())?;
 
             self.port_subscriptions.remove(&port);
             if self.port_subscriptions.is_empty() {

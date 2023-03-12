@@ -188,16 +188,6 @@ where
 
         Ok(())
     }
-
-    /// Removes port redirection, and bypass gid packets from iptables.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) fn remove_stealer_iptables_rules(
-        &self,
-        redirected_port: Port,
-        target_port: Port,
-    ) -> Result<()> {
-        self.remove_redirect(redirected_port, target_port)
-    }
 }
 
 impl<IPT> Drop for SafeIpTables<IPT>
