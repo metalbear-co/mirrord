@@ -140,8 +140,6 @@ where
                 self.formatter.rule_start_index(),
             )?;
 
-            let (entrypoint, entrypoint_rule) = chain.entrypoint();
-
             warn!(
                 "{:?} ---- {:#?}",
                 chain.entrypoint(),
@@ -314,7 +312,7 @@ impl IpTableChain {
     fn prerouting(entrypoint_rule: Option<String>) -> Self {
         let chain_name = std::env::var(MIRRORD_IPTABLE_PREROUTING_ENV).unwrap_or_else(|_| {
             format!(
-                "MIRRORD_PREROUTING_{}",
+                "MIRRORD_INPUT_{}",
                 Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
             )
         });
@@ -385,23 +383,23 @@ mod tests {
             .returning(|_| Ok(vec![]));
 
         mock.expect_create_chain()
-            .with(str::starts_with("MIRRORD_REDIRECT_"))
+            .with(str::starts_with("MIRRORD_INPUT_"))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_remove_chain()
-            .with(str::starts_with("MIRRORD_REDIRECT_"))
+            .with(str::starts_with("MIRRORD_INPUT_"))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_add_rule()
-            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_REDIRECT_"))
+            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                str::starts_with("MIRRORD_REDIRECT_"),
+                str::starts_with("MIRRORD_INPUT_"),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(1),
             )
@@ -409,13 +407,13 @@ mod tests {
             .returning(|_, _, _| Ok(()));
 
         mock.expect_remove_rule()
-            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_REDIRECT_"))
+            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
             .with(
-                str::starts_with("MIRRORD_REDIRECT_"),
+                str::starts_with("MIRRORD_INPUT_"),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
