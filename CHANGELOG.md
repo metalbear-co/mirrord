@@ -8,6 +8,45 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.32.1](https://github.com/metalbear-co/mirrord/tree/3.32.1) - 2023-03-12
+
+
+### Fixed
+
+- fix mirroring not handling big requests - increase buffer size (in rawsocket
+  dependency).
+  also trace logs to not log the data.
+  [#1178](https://github.com/metalbear-co/mirrord/issues/1178)
+- fix environment regression by mixing the two approaches together.
+  priority is proc > oci (via container api)
+  [#1180](https://github.com/metalbear-co/mirrord/issues/1180)
+
+
+### Internal
+
+- compile/test speed improvements
+
+  1. add CARGO_NET_GIT_FETCH_WITH_CLI=true to agent's Dockerfile since we found
+  out it
+      saves a lot of time on fetching (around takes 60s when using libgit2)
+  2. change `rust-toolchain.toml` so it won't auto install unneeded targets
+  always
+  3. remove `toolchain: nightly` parameter from `actions-rs/toolchain@v1` since
+  it's
+      not needed because we have `rust-toolchain.toml`
+      saves a lot of time on fetching (takes around 60s when using libgit2)
+  4. switch to use `actions-rust-lang/setup-rust-toolchain@v1` instead of
+  `actions-rs/toolchain@v1`
+      since it's deprecated and doesn't support `rust-toolchain.toml`
+  5. remove s`Swatinem/rust-cache@v2` since it's included in
+  `actions-rust-lang/setup-rust-toolchain@v1`
+  6. use latest version of `Apple-Actions/import-codesign-certs` to remove
+  warnings
+- print logs of stealer/sniffer start failure
+- run docker/containerd runtime at the same time to make e2e faster
+- use base images for agent to reduce build time
+
+
 ## [3.32.0](https://github.com/metalbear-co/mirrord/tree/3.32.0) - 2023-03-08
 
 

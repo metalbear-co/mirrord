@@ -1,1 +1,0 @@
-run docker/containerd runtime at the same time to make e2e faster
