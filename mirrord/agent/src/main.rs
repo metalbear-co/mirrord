@@ -452,8 +452,7 @@ async fn start_agent() -> Result<()> {
 
     let environ_path = PathBuf::from("/proc")
         .join(
-            (&pid)
-                .map(|i| i.to_string())
+            pid.map(|i| i.to_string())
                 .unwrap_or_else(|| "self".to_string()),
         )
         .join("environ");
