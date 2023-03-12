@@ -467,11 +467,12 @@ async fn start_agent() -> Result<()> {
 
     let sniffer_cancellation_token = cancellation_token.clone();
     let sniffer_task = run_thread_in_namespace(
-        TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface).map_ok(
+        TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface).and_then(
             |sniffer| async move {
                 if let Err(err) = sniffer.start(sniffer_cancellation_token).await {
                     error!("Sniffer failed: {err}");
                 }
+                Ok(())
             },
         ),
         "Sniffer".to_string(),
@@ -481,10 +482,11 @@ async fn start_agent() -> Result<()> {
 
     let stealer_cancellation_token = cancellation_token.clone();
     let stealer_task = run_thread_in_namespace(
-        TcpConnectionStealer::new(stealer_command_rx).map_ok(|stealer| async move {
+        TcpConnectionStealer::new(stealer_command_rx).and_then(|stealer| async move {
             if let Err(err) = stealer.start(stealer_cancellation_token).await {
                 error!("Stealer failed: {err}");
             }
+            Ok(())
         }),
         "Stealer".to_string(),
         pid,
