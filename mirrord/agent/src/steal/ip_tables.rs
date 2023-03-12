@@ -36,6 +36,7 @@ pub(crate) trait IPTables {
 
 #[cfg(target_os = "linux")]
 impl IPTables for iptables::IPTables {
+    #[tracing::instrument(level = "trace", skip(self))]
     fn create_chain(&self, name: &str) -> Result<()> {
         self.new_chain(IPTABLES_TABLE_NAME, name)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
@@ -45,6 +46,7 @@ impl IPTables for iptables::IPTables {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     fn remove_chain(&self, name: &str) -> Result<()> {
         self.flush_chain(IPTABLES_TABLE_NAME, name)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
@@ -54,21 +56,25 @@ impl IPTables for iptables::IPTables {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     fn add_rule(&self, chain: &str, rule: &str) -> Result<()> {
         self.append(IPTABLES_TABLE_NAME, chain, rule)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> Result<()> {
         self.insert(IPTABLES_TABLE_NAME, chain, rule, index)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     fn list_rules(&self, chain: &str) -> Result<Vec<String>> {
         self.list(IPTABLES_TABLE_NAME, chain)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     fn remove_rule(&self, chain: &str, rule: &str) -> Result<()> {
         self.delete(IPTABLES_TABLE_NAME, chain, rule)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))
@@ -101,7 +107,7 @@ where
             ipt.create_chain(&chain.name)?;
 
             if let Some(bypass) = formatter.bypass_own_packets_rule() {
-                ipt.insert_rule(&chain.name, &bypass, formatter.rule_start_index())?;
+                ipt.insert_rule(&chain.name, &bypass, 1)?;
             }
 
             let (entrypoint, entrypoint_rule) = chain.entrypoint();
