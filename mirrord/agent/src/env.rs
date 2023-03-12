@@ -1,8 +1,13 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
 
 use mirrord_protocol::RemoteResult;
-use tracing::trace;
+use tokio::io::AsyncReadExt;
 use wildmatch::WildMatch;
+
+use crate::error::Result;
 
 struct EnvFilter {
     include: Vec<WildMatch>,
@@ -46,23 +51,46 @@ impl EnvFilter {
     }
 }
 
+/// Translate ToIter<AsRef<str>> of "K=V" to HashMap.
+pub(crate) fn parse_raw_env<'a, S: AsRef<str>, T: IntoIterator<Item = S>>(
+    raw: T,
+) -> HashMap<String, String> {
+    raw.into_iter()
+        .map(|key_and_value| key_and_value.as_ref().splitn(2, '=').collect::<Vec<&str>>())
+        // [["DB", "foo.db"], ["PORT", "99"], ["HOST"], ["PATH", "/fake"]]
+        .filter_map(
+            |mut keys_and_values| match (keys_and_values.pop(), keys_and_values.pop()) {
+                (Some(value), Some(key)) => Some((key.to_string(), value.to_string())),
+                _ => None,
+            },
+        )
+        // [("DB", "foo.db")]
+        .collect::<HashMap<_, _>>()
+}
+
+pub(crate) async fn get_proc_environ(path: PathBuf) -> Result<HashMap<String, String>> {
+    let mut environ_file = tokio::fs::File::open(path).await?;
+
+    let mut raw_env_vars = String::with_capacity(8192);
+
+    // TODO: nginx doesn't play nice when we do this, it only returns a string that goes like
+    // "nginx -g daemon off;".
+    let _read_amount = environ_file.read_to_string(&mut raw_env_vars).await?;
+
+    Ok(parse_raw_env(raw_env_vars.split_terminator(char::from(0))))
+}
+
 /// Helper function that loads the process' environment variables, and selects only those that were
 /// requested from `mirrord-layer` (ignores vars specified in `filter_env_vars`).
 ///
 /// NOTE: can remove `RemoteResult` when we break protocol compatibility.
-pub(crate) fn select_env_vars(
+#[tracing::instrument(level = "trace", skip(full_env))]
+pub(crate) async fn select_env_vars(
     full_env: &HashMap<String, String>,
     filter_env_vars: HashSet<String>,
     select_env_vars: HashSet<String>,
 ) -> RemoteResult<HashMap<String, String>> {
-    trace!(
-        "select_env_vars -> filter_env_vars {:#?} select_env_vars {:#?}",
-        filter_env_vars,
-        select_env_vars
-    );
-
     let env_filter = EnvFilter::new(select_env_vars, filter_env_vars);
-
     let env_vars = full_env
         .iter()
         .filter(|(key, _)| env_filter.matches(key))
