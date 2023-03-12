@@ -214,27 +214,33 @@ where
 #[derive(Debug)]
 pub(crate) enum IPTableFormatter {
     Normal,
-    Mesh(String),
+    Mesh(String, String),
 }
 
 impl IPTableFormatter {
-    const MESH_OUTPUTS: [&'static str; 2] = ["-j PROXY_INIT_OUTPUT", "-j ISTIO_OUTPUT"];
-    const MESH_NAMES: [&'static str; 2] = ["PROXY_INIT_OUTPUT", "ISTIO_OUTPUT"];
+    const MESH_ENTRYPOINTS: [&'static str; 2] = ["-j PROXY_INIT_OUTPUT", "-j ISTIO_OUTPUT"];
+    const MESH_INPUT_NAMES: [&'static str; 2] = ["PROXY_INIT_REDIRECT", "ISTIO_INPUT"];
+    const MESH_OUTPUT_NAMES: [&'static str; 2] = ["PROXY_INIT_OUTPUT", "ISTIO_OUTPUT"];
 
     #[tracing::instrument(level = "trace", skip_all)]
     pub(crate) fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Self> {
         let output = ipt.list_rules("OUTPUT")?;
 
-        if let Some(mesh_output_chain) = output.iter().find_map(|rule| {
-            IPTableFormatter::MESH_OUTPUTS
+        if let Some((mesh_input_chain, mesh_output_chain)) = output.iter().find_map(|rule| {
+            IPTableFormatter::MESH_ENTRYPOINTS
                 .iter()
                 .enumerate()
                 .find_map(|(index, mesh_output)| {
-                    rule.contains(mesh_output)
-                        .then_some(IPTableFormatter::MESH_NAMES[index])
+                    rule.contains(mesh_output).then_some((
+                        IPTableFormatter::MESH_INPUT_NAMES[index],
+                        IPTableFormatter::MESH_OUTPUT_NAMES[index],
+                    ))
                 })
         }) {
-            Ok(IPTableFormatter::Mesh(mesh_output_chain.to_string()))
+            Ok(IPTableFormatter::Mesh(
+                mesh_input_chain.to_string(),
+                mesh_output_chain.to_string(),
+            ))
         } else {
             Ok(IPTableFormatter::Normal)
         }
@@ -243,9 +249,9 @@ impl IPTableFormatter {
     pub(crate) fn chains<IPT: IPTables>(&self, ipt: &IPT) -> Result<Vec<IpTableChain>> {
         match self {
             IPTableFormatter::Normal => Ok(vec![IpTableChain::prerouting(None)]),
-            IPTableFormatter::Mesh(mesh_output_chain) => {
+            IPTableFormatter::Mesh(mesh_input_chain, mesh_output_chain) => {
                 let skip_ports = ipt
-                    .list_rules("PROXY_INIT_REDIRECT")?
+                    .list_rules(mesh_input_chain)?
                     .iter()
                     .find_map(|rule| SKIP_PORTS_LOOKUP_REGEX.find(rule).ok().flatten())
                     .map(|m| m.as_str().to_string());
@@ -281,7 +287,7 @@ impl IPTableFormatter {
     fn bypass_own_packets_rule(&self) -> Option<String> {
         match self {
             IPTableFormatter::Normal => None,
-            IPTableFormatter::Mesh(_) => {
+            IPTableFormatter::Mesh(_, _) => {
                 let gid = getgid();
                 Some(format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))
             }
