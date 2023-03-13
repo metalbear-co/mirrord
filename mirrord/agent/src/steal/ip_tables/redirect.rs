@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::{ops::Deref, sync::LazyLock};
 
 use mirrord_protocol::Port;
 use rand::distributions::{Alphanumeric, DistString};
@@ -64,6 +64,13 @@ where
         self.managed.remove_rule(&redirect_rule)?;
 
         Ok(())
+    }
+}
+
+impl<'ipt, IPT> Deref for PreroutingRedirect<'ipt, IPT> {
+    type Target = IPTableChain<'ipt, IPT>;
+    fn deref(&self) -> &Self::Target {
+        &self.managed
     }
 }
 

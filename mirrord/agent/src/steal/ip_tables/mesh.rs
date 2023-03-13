@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::{ops::Deref, sync::LazyLock};
 
 use fancy_regex::Regex;
 use mirrord_protocol::Port;
@@ -104,6 +104,12 @@ where
         self.managed.remove_rule(&redirect_rule)?;
 
         Ok(())
+    }
+}
+impl<'ipt, IPT> Deref for MeshRedirect<'ipt, IPT> {
+    type Target = IPTableChain<'ipt, IPT>;
+    fn deref(&self) -> &Self::Target {
+        &self.managed
     }
 }
 
