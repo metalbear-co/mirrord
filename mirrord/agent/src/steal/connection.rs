@@ -334,7 +334,7 @@ impl TcpConnectionStealer {
                 // Should not happen.
                 debug_assert!(false);
                 error!("Internal error: subscriptions of closed client still present.");
-                self.close_client(client_id)
+                self.close_client(client_id).await
             }
         }
     }
@@ -463,7 +463,7 @@ impl TcpConnectionStealer {
 
         if first_subscriber && let Ok(port) = steal_port {
             self.iptables()?
-                .add_stealer_iptables_rules(port, self.stealer.local_addr()?.port()).await?;
+                .add_redirect(port, self.stealer.local_addr()?.port()).await?;
         }
 
         self.send_message_to_single_client(&client_id, DaemonTcp::SubscribeResult(steal_port))
@@ -475,7 +475,11 @@ impl TcpConnectionStealer {
     /// Removes `port` from [`TcpConnectionStealer::iptables`] rules, and unsubscribes the layer
     /// with `client_id`.
     #[tracing::instrument(level = "trace", skip(self))]
-    fn port_unsubscribe(&mut self, client_id: ClientId, port: Port) -> Result<(), AgentError> {
+    async fn port_unsubscribe(
+        &mut self,
+        client_id: ClientId,
+        port: Port,
+    ) -> Result<(), AgentError> {
         let port_unsubscribed = match self.port_subscriptions.get_mut(&port) {
             Some(HttpFiltered(manager)) => {
                 manager.remove_client(&client_id);
@@ -490,7 +494,8 @@ impl TcpConnectionStealer {
         if port_unsubscribed {
             // No remaining subscribers on this port.
             self.iptables()?
-                .remove_redirect(port, self.stealer.local_addr()?.port())?;
+                .remove_redirect(port, self.stealer.local_addr()?.port())
+                .await?;
 
             self.port_subscriptions.remove(&port);
             if self.port_subscriptions.is_empty() {
@@ -516,10 +521,10 @@ impl TcpConnectionStealer {
     /// their redirection rules from [`TcpConnectionStealer::iptables`] and all their open
     /// connections.
     #[tracing::instrument(level = "trace", skip(self))]
-    fn close_client(&mut self, client_id: ClientId) -> Result<(), AgentError> {
+    async fn close_client(&mut self, client_id: ClientId) -> Result<(), AgentError> {
         let ports = self.get_client_ports(client_id);
         for port in ports.iter() {
-            self.port_unsubscribe(client_id, *port)?
+            self.port_unsubscribe(client_id, *port).await?
         }
 
         // Close and remove all remaining connections of the closed client.

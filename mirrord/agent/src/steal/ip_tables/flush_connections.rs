@@ -3,10 +3,7 @@ use mirrord_protocol::Port;
 use tokio::process::Command;
 use tracing::warn;
 
-use crate::{
-    error::Result,
-    steal::ip_tables::redirect::{AsyncRedirect, Redirect},
-};
+use crate::{error::Result, steal::ip_tables::redirect::AsyncRedirect};
 
 #[derive(Debug)]
 pub struct FlushConnections<T> {
@@ -15,9 +12,9 @@ pub struct FlushConnections<T> {
 
 impl<T> FlushConnections<T>
 where
-    T: Redirect,
+    T: AsyncRedirect,
 {
-    fn new(inner: T) -> Self {
+    pub fn new(inner: T) -> Self {
         FlushConnections { inner }
     }
 }
@@ -27,7 +24,9 @@ impl<T> AsyncRedirect for FlushConnections<T>
 where
     T: AsyncRedirect + Send + Sync,
 {
-    const ENTRYPOINT: &'static str = T::ENTRYPOINT;
+    fn get_entrypoint(&self) -> &str {
+        self.inner.get_entrypoint()
+    }
 
     async fn async_add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.inner

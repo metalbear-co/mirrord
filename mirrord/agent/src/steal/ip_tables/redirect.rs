@@ -30,7 +30,7 @@ pub trait Redirect {
 
 #[async_trait]
 pub trait AsyncRedirect {
-    const ENTRYPOINT: &'static str;
+    fn get_entrypoint(&self) -> &str;
 
     /// Create port redirection
     async fn async_add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()>;
@@ -43,7 +43,9 @@ impl<T> AsyncRedirect for T
 where
     T: Redirect + Send + Sync,
 {
-    const ENTRYPOINT: &'static str = T::ENTRYPOINT;
+    fn get_entrypoint(&self) -> &str {
+        T::ENTRYPOINT
+    }
 
     async fn async_add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.add_redirect(redirected_port, target_port)
