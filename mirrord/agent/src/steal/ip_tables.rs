@@ -478,7 +478,7 @@ mod tests {
         mock.expect_insert_rule()
             .with(
                 str::starts_with("MIRRORD_INPUT_"),
-                eq("-p tcp -m multiport ! --dports 22 -j RETURN"),
+                eq("-m multiport -p tcp ! --dports 22 -j RETURN"),
                 eq(1),
             )
             .times(1)
