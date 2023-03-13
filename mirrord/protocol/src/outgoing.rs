@@ -79,7 +79,7 @@ impl TryFrom<SockAddr> for SocketAddress {
 
     fn try_from(addr: SockAddr) -> Result<Self, Self::Error> {
         addr.as_socket()
-            .map(|ip_addr| SocketAddress::Ip(ip_addr))
+            .map(SocketAddress::Ip)
             .or_else(|| {
                 addr.as_pathname()
                     .map(|path| SocketAddress::Unix(Pathname(path.to_owned())))
@@ -111,7 +111,7 @@ impl Display for SocketAddress {
             SocketAddress::Unix(Pathname(path)) => path.to_string_lossy().to_string(),
             SocketAddress::Unix(Abstract(name)) => String::from_utf8_lossy(name).to_string(),
         };
-        write!(f, "{}", addr)
+        write!(f, "{addr}")
     }
 }
 
