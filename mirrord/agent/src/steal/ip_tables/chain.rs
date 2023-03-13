@@ -2,9 +2,9 @@ use std::sync::atomic::{AtomicI32, Ordering};
 
 use crate::{error::Result, steal::ip_tables::IPTables};
 
+#[derive(Debug)]
 pub struct IPTableChain<'ipt, IPT> {
     inner: &'ipt IPT,
-    table: &'ipt str,
     chain: &'ipt str,
     chain_size: AtomicI32,
 }
@@ -13,16 +13,17 @@ impl<'ipt, IPT> IPTableChain<'ipt, IPT>
 where
     IPT: IPTables,
 {
-    pub fn new(inner: &'ipt IPT, table: &'ipt str, chain: &'ipt str) -> Self {
+    pub fn create(inner: &'ipt IPT, chain: &'ipt str) -> Result<Self> {
+        inner.create_chain(chain)?;
+
         // Start with 1 because the chain will allways have atleast `-A <chain name>` as a rule
         let chain_size = AtomicI32::from(1);
 
-        IPTableChain {
+        Ok(IPTableChain {
             inner,
-            table,
             chain,
             chain_size,
-        }
+        })
     }
 
     pub fn add_rule(&self, rule: &str) -> Result<i32> {

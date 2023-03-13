@@ -33,10 +33,10 @@ impl<'ipt, IPT> PreroutingRedirect<'ipt, IPT>
 where
     IPT: IPTables,
 {
-    pub fn create(ipt: &'ipt IPT) -> Self {
-        let managed = IPTableChain::new(ipt, "nat", &IPTABLE_PREROUTING);
+    pub fn create(ipt: &'ipt IPT) -> Result<Self> {
+        let managed = IPTableChain::create(ipt, &IPTABLE_PREROUTING)?;
 
-        PreroutingRedirect { managed }
+        Ok(PreroutingRedirect { managed })
     }
 }
 
@@ -74,6 +74,11 @@ mod tests {
     fn add_redirect() {
         let mut mock = MockIPTables::new();
 
+        mock.expect_create_chain()
+            .with(eq(IPTABLE_PREROUTING.as_str()))
+            .times(1)
+            .returning(|_| Ok(()));
+
         mock.expect_insert_rule()
             .with(
                 eq(IPTABLE_PREROUTING.as_str()),
@@ -83,8 +88,63 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
-        let prerouting = PreroutingRedirect::create(&mock);
+        let prerouting = PreroutingRedirect::create(&mock).expect("Unable to create");
 
         assert!(prerouting.add_redirect(69, 420).is_ok());
+    }
+
+    #[test]
+    fn add_redirect_twice() {
+        let mut mock = MockIPTables::new();
+
+        mock.expect_create_chain()
+            .with(eq(IPTABLE_PREROUTING.as_str()))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        mock.expect_insert_rule()
+            .with(
+                eq(IPTABLE_PREROUTING.as_str()),
+                eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                eq(1),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        mock.expect_insert_rule()
+            .with(
+                eq(IPTABLE_PREROUTING.as_str()),
+                eq("-m tcp -p tcp --dport 169 -j REDIRECT --to-ports 1420"),
+                eq(2),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        let prerouting = PreroutingRedirect::create(&mock).expect("Unable to create");
+
+        assert!(prerouting.add_redirect(69, 420).is_ok());
+        assert!(prerouting.add_redirect(169, 1420).is_ok());
+    }
+
+    #[test]
+    fn remove_redirect() {
+        let mut mock = MockIPTables::new();
+
+        mock.expect_create_chain()
+            .with(eq(IPTABLE_PREROUTING.as_str()))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        mock.expect_remove_rule()
+            .with(
+                eq(IPTABLE_PREROUTING.as_str()),
+                eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+            )
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let prerouting = PreroutingRedirect::create(&mock).expect("Unable to create");
+
+        assert!(prerouting.remove_redirect(69, 420).is_ok());
     }
 }
