@@ -218,7 +218,7 @@ pub(crate) enum IPTableFormatter {
     Normal,
     Mesh {
         own_packet_filter: Option<String>,
-        skiped_ports: Vec<String>,
+        skipped_ports: Vec<String>,
     },
 }
 
@@ -251,7 +251,7 @@ impl IPTableFormatter {
                         Some("-o lo".to_owned())
                     });
 
-            let skiped_ports = ipt
+            let skipped_ports = ipt
                 .list_rules(IPTableFormatter::MESH_INPUT_NAMES[mesh_index])?
                 .iter()
                 .filter_map(|rule| {
@@ -266,7 +266,7 @@ impl IPTableFormatter {
 
             Ok(IPTableFormatter::Mesh {
                 own_packet_filter,
-                skiped_ports,
+                skipped_ports,
             })
         } else {
             Ok(IPTableFormatter::Normal)
@@ -278,9 +278,9 @@ impl IPTableFormatter {
             IPTableFormatter::Normal => vec![IpTableChain::prerouting(vec![])],
             IPTableFormatter::Mesh {
                 own_packet_filter,
-                skiped_ports,
+                skipped_ports,
             } => vec![
-                IpTableChain::prerouting(skiped_ports.clone()),
+                IpTableChain::prerouting(skipped_ports.clone()),
                 IpTableChain::output(own_packet_filter.clone()),
             ],
         }
@@ -308,11 +308,11 @@ pub struct IpTableChain {
     name: String,
     redirect_filter: Option<String>,
     rule_index: AtomicI32,
-    skiped_ports: Vec<String>,
+    skipped_ports: Vec<String>,
 }
 
 impl IpTableChain {
-    fn prerouting(skiped_ports: Vec<String>) -> Self {
+    fn prerouting(skipped_ports: Vec<String>) -> Self {
         let chain_name = Self::prerouting_name();
 
         IpTableChain {
@@ -320,7 +320,7 @@ impl IpTableChain {
             name: chain_name,
             redirect_filter: None,
             rule_index: AtomicI32::from(1),
-            skiped_ports,
+            skipped_ports,
         }
     }
 
@@ -332,7 +332,7 @@ impl IpTableChain {
             name: chain_name,
             redirect_filter,
             rule_index: AtomicI32::from(1),
-            skiped_ports: vec![],
+            skipped_ports: vec![],
         }
     }
 
@@ -356,7 +356,7 @@ impl IpTableChain {
 
     fn entrypoint(&self) -> Vec<(&str, String)> {
         std::iter::once((self.entrypoint_name, format!("-j {}", self.name)))
-            .chain(self.skiped_ports.iter().map(|port| {
+            .chain(self.skipped_ports.iter().map(|port| {
                 (
                     self.name.as_str(),
                     format!("! -p tcp -m multiport --dports {port} -j RETURN"),
