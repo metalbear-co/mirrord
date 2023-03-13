@@ -212,9 +212,9 @@ pub(crate) fn fdopen(fd: RawFd, mode: Detour<OpenOptionsInternal>) -> Detour<*mu
 
     // Only open if the file we hold has compatible permissions with what's being requested.
     if remote_file.read()?.open_options <= open_options {
-        Detour::Error(HookError::OpenOptionsDoesntMatch)
-    } else {
         Detour::Success(local_fd as *const _ as *mut _)
+    } else {
+        Detour::Error(HookError::OpenOptionsDoesntMatch)
     }
 }
 
