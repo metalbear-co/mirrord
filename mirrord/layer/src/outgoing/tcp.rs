@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    env::temp_dir,
     future::Future,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
@@ -11,8 +12,10 @@ use mirrord_protocol::{
     },
     ClientMessage, ConnectionId,
 };
+use rand::{distributions::Alphanumeric, Rng};
 use socket2::{Domain, Socket, Type};
 use tokio::{
+    fs::create_dir_all,
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpStream, UnixStream},
     select,
@@ -24,6 +27,9 @@ use tracing::{error, info, trace, warn};
 
 use super::*;
 use crate::{common::ResponseDeque, detour::DetourGuard, error::LayerError};
+
+/// For unix socket addresses, relative to the temp dir (`/tmp/mirrord-bin/...`).
+pub const MIRRORD_UNIX_STREAMS: &str = "mirrord-unix-sockets";
 
 /// Hook messages handled by `TcpOutgoingHandler`.
 ///
@@ -52,8 +58,6 @@ pub(crate) struct TcpOutgoingHandler {
     layer_tx: Sender<LayerTcpOutgoing>,
     layer_rx: Receiver<LayerTcpOutgoing>,
 }
-
-impl Default for TcpOutgoingHandler {
     fn default() -> Self {
         let (layer_tx, layer_rx) = channel(1000);
 
@@ -259,9 +263,20 @@ impl TcpOutgoingHandler {
                                 }
                                 SocketAddress::Unix(_) => {
                                     let socket = Socket::new(Domain::UNIX, Type::STREAM, None)?;
-                                    // TODO: this probably does not work. We have to somehow bind
-                                    //       the socket to a free address.
-                                    let addr = SockAddr::unix("")?;
+                                    let tmp_dir = temp_dir().join(MIRRORD_UNIX_STREAMS);
+                                    if !tmp_dir.exists() {
+                                        create_dir_all(&tmp_dir).await?;
+                                    }
+                                    let random_string: String = rand::thread_rng()
+                                        .sample_iter(&Alphanumeric)
+                                        .take(16)
+                                        .map(char::from)
+                                        .collect();
+                                    let pathname = tmp_dir.join(random_string);
+
+                                    let addr = SockAddr::unix(&pathname)?;
+                                    // TODO: should we retry with a different random string if the
+                                    //       bind fails?
                                     socket.bind(&addr)?;
                                     socket
                                 }
