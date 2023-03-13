@@ -607,7 +607,7 @@ async fn clear_iptable_chain() -> Result<()> {
     let formatter = IPTableFormatter::detect(&ipt)?;
 
     formatter
-        .chains(&ipt)
+        .chains()
         .into_iter()
         .try_for_each(|chain| chain.remove(&ipt))?;
 

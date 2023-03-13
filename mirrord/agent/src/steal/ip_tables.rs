@@ -107,7 +107,7 @@ where
     pub(super) fn new(ipt: IPT, flush_connections: bool) -> Result<Self> {
         let formatter = IPTableFormatter::detect(&ipt)?;
 
-        let chains = formatter.chains(&ipt);
+        let chains = formatter.chains();
 
         for chain in &chains {
             ipt.create_chain(&chain.name)?;
@@ -121,7 +121,15 @@ where
             }
 
             for (entrypoint, entrypoint_rule) in chain.entrypoint() {
-                ipt.add_rule(entrypoint, &entrypoint_rule)?;
+                if entrypoint == chain.name {
+                    ipt.insert_rule(
+                        entrypoint,
+                        &entrypoint_rule,
+                        chain.rule_index.fetch_add(1, Ordering::Relaxed),
+                    )?;
+                } else {
+                    ipt.add_rule(entrypoint, &entrypoint_rule)?;
+                }
             }
         }
 
@@ -265,7 +273,7 @@ impl IPTableFormatter {
         }
     }
 
-    pub(crate) fn chains<IPT: IPTables>(&self, ipt: &IPT) -> Vec<IpTableChain> {
+    pub(crate) fn chains(&self) -> Vec<IpTableChain> {
         match self {
             IPTableFormatter::Normal => vec![IpTableChain::prerouting(vec![])],
             IPTableFormatter::Mesh {
@@ -445,8 +453,7 @@ mod tests {
             .returning(|_| {
                 Ok(vec![
                     "-N PROXY_INIT_REDIRECT".to_owned(),
-                    "-A PROXY_INIT_REDIRECT -p tcp --match multiport --dports 22 -j RETURN"
-                        .to_owned(),
+                    "-A PROXY_INIT_REDIRECT -p tcp -m multiport --dports 22 -j RETURN".to_owned(),
                     "-A PROXY_INIT_REDIRECT -p tcp -j REDIRECT --to-port 4143".to_owned(),
                 ])
             });
@@ -468,11 +475,17 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        mock.expect_add_rule()
+        mock.expect_insert_rule()
             .with(
-                eq("PREROUTING"),
-                str::starts_with("-p tcp --match multiport --dports 22 -j MIRRORD_INPUT_"),
+                str::starts_with("MIRRORD_INPUT_"),
+                eq("! -p tcp -m multiport --dports 22 -j RETURN"),
+                eq(1),
             )
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        mock.expect_add_rule()
+            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
             .times(1)
             .returning(|_, _| Ok(()));
 
@@ -497,22 +510,37 @@ mod tests {
 
         mock.expect_insert_rule()
             .with(
+                str::starts_with("MIRRORD_INPUT_"),
+                eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                eq(2),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        mock.expect_insert_rule()
+            .with(
                 str::starts_with("MIRRORD_OUTPUT_"),
                 eq(
-                    "-o lo -m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT
-    --to-ports 420",
+                    "-o lo -m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420",
                 ),
-                eq(1),
+                eq(2),
             )
             .times(1)
             .returning(|_, _, _| Ok(()));
 
         mock.expect_remove_rule()
             .with(
+                str::starts_with("MIRRORD_INPUT_"),
+                eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+            )
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_remove_rule()
+            .with(
                 str::starts_with("MIRRORD_OUTPUT_"),
                 eq(
-                    "-o lo -m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT
-    --to-ports 420",
+                    "-o lo -m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420",
                 ),
             )
             .times(1)
