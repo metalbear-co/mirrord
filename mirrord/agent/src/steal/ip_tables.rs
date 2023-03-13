@@ -14,6 +14,9 @@ use tracing::warn;
 use crate::error::AgentError;
 use crate::error::Result;
 
+mod chain;
+mod redirect;
+
 pub(crate) static MIRRORD_IPTABLE_PREROUTING_ENV: &str = "MIRRORD_IPTABLE_PREROUTING_NAME";
 pub(crate) static MIRRORD_IPTABLE_OUTPUT_ENV: &str = "MIRRORD_IPTABLE_OUTPUT_NAME";
 
@@ -31,7 +34,7 @@ static SKIP_PORTS_LOOKUP_REGEX: LazyLock<[Regex; 2]> = LazyLock::new(|| {
 const IPTABLES_TABLE_NAME: &str = "nat";
 
 #[cfg_attr(test, mockall::automock)]
-pub(crate) trait IPTables {
+pub trait IPTables {
     fn create_chain(&self, name: &str) -> Result<()>;
     fn remove_chain(&self, name: &str) -> Result<()>;
 
