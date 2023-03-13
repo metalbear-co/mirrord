@@ -19,6 +19,12 @@ use crate::{
 static UID_LOOKUP_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"-m owner --uid-owner \d+").unwrap());
 
+static LINKERD_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"-p tcp -m multiport --dports ([\d:,]+)").unwrap());
+
+static ISTIO_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"-p tcp -m tcp --dport ([\d:,]+)").unwrap());
+
 pub static IPTABLE_MESH_ENV: &str = "MIRRORD_IPTABLE_MESH_NAME";
 pub static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_MESH_ENV).unwrap_or_else(|_| {
@@ -41,6 +47,13 @@ where
 {
     pub fn create(ipt: &'ipt IPT) -> Result<Self> {
         let preroute = PreroutingRedirect::create(ipt)?;
+
+        for port in
+            Self::get_skip_ports(ipt, "PROXY_INIT_REDIRECT", &LINKERD_SKIP_PORTS_LOOKUP_REGEX)?
+        {
+            preroute.add_rule(&format!("-m multiport -p tcp ! --dports {port} -j RETURN"))?;
+        }
+
         let managed = IPTableChain::create(ipt, &IPTABLE_MESH)?;
 
         let gid = getgid();
@@ -70,6 +83,27 @@ where
             });
 
         Ok(own_packet_filter)
+    }
+
+    fn get_skip_ports(
+        ipt: &'ipt IPT,
+        chain_name: &str,
+        lookup_regex: &Regex,
+    ) -> Result<Vec<String>> {
+        let skipped_ports = ipt
+            .list_rules(chain_name)?
+            .iter()
+            .filter_map(|rule| {
+                lookup_regex
+                    .captures(rule)
+                    .ok()
+                    .flatten()
+                    .and_then(|capture| capture.get(1))
+            })
+            .map(|m| m.as_str().to_string())
+            .collect();
+
+        Ok(skipped_ports)
     }
 }
 

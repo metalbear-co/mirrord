@@ -15,6 +15,7 @@ use crate::error::AgentError;
 use crate::error::Result;
 
 mod chain;
+mod flush_connections;
 mod mesh;
 mod redirect;
 

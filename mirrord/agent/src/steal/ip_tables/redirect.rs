@@ -1,5 +1,6 @@
 use std::{ops::Deref, sync::LazyLock};
 
+use async_trait::async_trait;
 use mirrord_protocol::Port;
 use rand::distributions::{Alphanumeric, DistString};
 
@@ -25,6 +26,32 @@ pub trait Redirect {
     fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()>;
     /// Remove port redirection
     fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()>;
+}
+
+#[async_trait]
+pub trait AsyncRedirect {
+    const ENTRYPOINT: &'static str;
+
+    /// Create port redirection
+    async fn async_add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()>;
+    /// Remove port redirection
+    async fn async_remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()>;
+}
+
+#[async_trait]
+impl<T> AsyncRedirect for T
+where
+    T: Redirect + Send + Sync,
+{
+    const ENTRYPOINT: &'static str = T::ENTRYPOINT;
+
+    async fn async_add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+        self.add_redirect(redirected_port, target_port)
+    }
+
+    async fn async_remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+        self.remove_redirect(redirected_port, target_port)
+    }
 }
 
 pub struct PreroutingRedirect<'ipt, IPT> {
