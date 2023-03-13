@@ -16,7 +16,7 @@ use mirrord_protocol::file::{
     XstatResponse,
 };
 use tokio::sync::oneshot;
-use tracing::{error, trace};
+use tracing::{error, info, trace};
 
 use super::{filter::FILE_FILTER, *};
 use crate::{
@@ -180,7 +180,7 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
 }
 
 /// Calls [`open`] and returns a [`FILE`] pointer based on the **local** `fd`.
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "debug")]
 pub(crate) fn fopen(path: Detour<PathBuf>, mode: Detour<OpenOptionsInternal>) -> Detour<*mut FILE> {
     let open_options = mode?;
 
@@ -199,7 +199,7 @@ pub(crate) fn fopen(path: Detour<PathBuf>, mode: Detour<OpenOptionsInternal>) ->
 /// (which is just a pointer to the `local_fd` we're holding).
 ///
 /// The `mode` has to be compatible with the [`OpenOptionsInternal`] of the file with `fd`.
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "debug")]
 pub(crate) fn fdopen(fd: RawFd, mode: Detour<OpenOptionsInternal>) -> Detour<*mut FILE> {
     let open_options = mode?;
 
@@ -280,7 +280,7 @@ pub(crate) fn fileno(local_fd: RawFd) -> Detour<RawFd> {
     )
 }
 
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "debug")]
 pub(crate) fn ferror(local_fd: RawFd) -> Detour<i32> {
     let open_files = OPEN_FILES.lock()?;
     let remote_file = open_files.get(&local_fd)?.read()?;
@@ -289,7 +289,7 @@ pub(crate) fn ferror(local_fd: RawFd) -> Detour<i32> {
 }
 
 /// Returns `1` if `is_eof` is set, and `0` if it's not.
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "debug")]
 pub(crate) fn feof(local_fd: RawFd) -> Detour<i32> {
     let open_files = OPEN_FILES.lock()?;
     let remote_file = open_files.get(&local_fd)?.read()?;
@@ -309,7 +309,7 @@ pub(crate) fn clearerr(local_fd: RawFd) -> Detour<()> {
     Detour::Success(())
 }
 
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "debug")]
 pub(crate) fn fclose(local_fd: RawFd) -> Detour<i32> {
     Detour::Success(OPEN_FILES.lock()?.remove(&local_fd).map(|_| 0)?)
     // TODO(alex) [mid] 2023-03-07: Call `fflush` if this was being used as output (always safe to
@@ -396,13 +396,10 @@ pub(crate) fn openat(
 ///
 /// **Bypassed** when trying to load system files, and files from the current working directory, see
 /// `open`.
-pub(crate) fn read(local_fd: RawFd, read_amount: u64) -> Detour<ReadFileResponse> {
-    get_remote_fd(local_fd).and_then(|remote_fd| remote_read(remote_fd, read_amount))
-}
-
-/// Blocking request and wait on already found remote_fd
 #[tracing::instrument(level = "trace")]
-fn remote_read(remote_fd: u64, read_amount: u64) -> Detour<ReadFileResponse> {
+pub(crate) fn read(local_fd: RawFd, read_amount: u64) -> Detour<ReadFileResponse> {
+    let remote_fd = get_remote_fd(local_fd)?;
+
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     // Limit read size because if we read too much it can lead to a timeout
@@ -417,7 +414,13 @@ fn remote_read(remote_fd: u64, read_amount: u64) -> Detour<ReadFileResponse> {
 
     blocking_send_file_message(FileOperation::Read(reading_file))?;
 
-    Detour::Success(file_channel_rx.blocking_recv()??)
+    let read = file_channel_rx.blocking_recv()??;
+
+    let d = String::from_utf8_lossy(&read.bytes[..read.read_amount as usize]);
+    info!("reading {:#?} | file {:#?}", read, local_fd);
+    info!("reading got {:#?}", d);
+
+    Detour::Success(read)
 }
 
 #[tracing::instrument(level = "trace")]
@@ -436,7 +439,13 @@ pub(crate) fn fgets(local_fd: RawFd, buffer_size: usize) -> Detour<ReadFileRespo
 
     blocking_send_file_message(FileOperation::ReadLine(reading_file))?;
 
-    Detour::Success(file_channel_rx.blocking_recv()??)
+    let read = file_channel_rx.blocking_recv()??;
+
+    let d = String::from_utf8_lossy(&read.bytes[..read.read_amount as usize]);
+    info!("fgetsing {:#?} | file {:#?}", read, local_fd);
+    info!("fgetsing got {:#?}", d);
+
+    Detour::Success(read)
 }
 
 #[tracing::instrument(level = "trace")]
