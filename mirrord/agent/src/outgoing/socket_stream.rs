@@ -58,7 +58,7 @@ impl SocketStream {
                 // Tokio's UnixStream does not support connecting to an abstract address so we first
                 // create an std UnixStream, then we convert it to a tokio UnixStream.
                 Self::from(UnixStream::from_std(StdUnixStream::connect_addr(
-                    &<StdUnixSocketAddr as SocketAddrExt>::from_abstract_name(&bytes)?,
+                    &<StdUnixSocketAddr as SocketAddrExt>::from_abstract_name(bytes)?,
                 )?)?)
             }
         })
