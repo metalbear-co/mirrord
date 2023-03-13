@@ -8,6 +8,7 @@ use std::{
 };
 
 use libc::{c_int, sockaddr, socklen_t};
+use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
 use tracing::warn;
 use trust_dns_resolver::config::Protocol;
@@ -94,9 +95,9 @@ impl SocketInformation {
 #[derive(Debug)]
 pub struct Connected {
     /// Remote address we're connected to
-    remote_address: SockAddr,
+    remote_address: SocketAddress,
     /// Local address (pod-wise)
-    local_address: SockAddr,
+    local_address: SocketAddress,
 }
 
 #[derive(Debug, Clone, Copy)]

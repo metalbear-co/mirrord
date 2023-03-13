@@ -14,9 +14,7 @@ use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 use tracing::{error, info};
 
 use super::HookMessage;
-use crate::{
-    error::LayerError::UnsupportedSocketType, tcp_steal::http_forwarding::HttpForwarderError,
-};
+use crate::tcp_steal::http_forwarding::HttpForwarderError;
 
 /// Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
 mod ignore_codes {
@@ -83,6 +81,15 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: IPv6 can't be used with mirrord")]
     SocketUnsuportedIpv6,
+
+    // `From` implemented below, not with `#[from]` so that when new variants of
+    // `SerializationError` are added, they are mapped into different variants of
+    // `LayerError`.
+    #[error(
+        "mirrord-layer: user application is trying to connect to an address that is not a \
+        supported IP or unix socket address."
+    )]
+    UnsupportedSocketType,
 }
 
 /// Errors internal to mirrord-layer.
@@ -187,7 +194,15 @@ pub(crate) enum LayerError {
 impl From<SerializationError> for LayerError {
     fn from(err: SerializationError) -> Self {
         match err {
-            SerializationError::SocketAddress => UnsupportedSocketType,
+            SerializationError::SocketAddress => LayerError::UnsupportedSocketType,
+        }
+    }
+}
+
+impl From<SerializationError> for HookError {
+    fn from(err: SerializationError) -> Self {
+        match err {
+            SerializationError::SocketAddress => HookError::UnsupportedSocketType,
         }
     }
 }
@@ -260,6 +275,7 @@ impl From<HookError> for i64 {
             #[cfg(target_os = "macos")]
             HookError::FailedSipPatch(_) => libc::EACCES,
             HookError::SocketUnsuportedIpv6 => libc::EAFNOSUPPORT,
+            HookError::UnsupportedSocketType => libc::EAFNOSUPPORT,
         };
 
         set_errno(errno::Errno(libc_error));

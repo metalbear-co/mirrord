@@ -294,8 +294,8 @@ fn connect_outgoing<const TYPE: ConnectType>(
     }
 
     let connected = Connected {
-        remote_address,
-        local_address,
+        remote_address: remote_address.try_into()?,
+        local_address: local_address.try_into()?,
     };
 
     Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
@@ -447,7 +447,7 @@ pub(super) fn getpeername(
 
     debug!("getpeername -> remote_address {:#?}", remote_address);
 
-    fill_address(address, address_len, remote_address)
+    fill_address(address, address_len, remote_address.try_into()?)
 }
 /// Resolve the fake local address to the real local address.
 #[tracing::instrument(level = "trace", skip(address, address_len))]
@@ -473,7 +473,7 @@ pub(super) fn getsockname(
 
     debug!("getsockname -> local_address {:#?}", local_address);
 
-    fill_address(address, address_len, local_address)
+    fill_address(address, address_len, local_address.try_into()?)
 }
 
 /// When the fd is "ours", we accept and recv the first bytes that contain metadata on the
@@ -508,8 +508,8 @@ pub(super) fn accept(
             .map(|socket| (socket.local_address, socket.remote_address))?
     };
 
-    let remote_address = SockAddr::from(remote_ip_address);
-    let local_address = SockAddr::from(local_ip_address);
+    let remote_address = SocketAddress::Ip(remote_ip_address);
+    let local_address = SocketAddress::Ip(local_ip_address);
 
     let state = SocketState::Connected(Connected {
         remote_address: remote_address.clone(),
@@ -517,7 +517,7 @@ pub(super) fn accept(
     });
     let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into()?);
 
-    fill_address(address, address_len, remote_address)?;
+    fill_address(address, address_len, remote_address.try_into()?)?;
 
     SOCKETS.lock()?.insert(new_fd, Arc::new(new_socket));
 

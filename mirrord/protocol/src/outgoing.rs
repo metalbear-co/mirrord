@@ -25,11 +25,17 @@ pub enum SocketAddress {
     Unix(UnixAddr),
 }
 
-/// A unix socket address type that owns all of its data (does not contain references/slices).
+/// A unix socket address type with rust member types (not libc stuff).
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum UnixAddr {
     Pathname(PathBuf),
     Abstract(Vec<u8>),
+}
+
+impl From<SocketAddr> for SocketAddress {
+    fn from(addr: SocketAddr) -> Self {
+        SocketAddress::Ip(addr)
+    }
 }
 
 impl TryFrom<UnixAddr> for SockAddr {
