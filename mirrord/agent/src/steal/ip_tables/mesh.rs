@@ -1,8 +1,10 @@
 use std::sync::LazyLock;
 
+use fancy_regex::Regex;
 use mirrord_protocol::Port;
 use nix::unistd::getgid;
 use rand::distributions::{Alphanumeric, DistString};
+use tracing::warn;
 
 use crate::{
     error::Result,
@@ -12,6 +14,10 @@ use crate::{
         IPTables,
     },
 };
+
+/// [`Regex`] used to select the `owner` rule from the list of `iptables` rules.
+static UID_LOOKUP_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"-m owner --uid-owner \d+").unwrap());
 
 pub static IPTABLE_MESH_ENV: &str = "MIRRORD_IPTABLE_MESH_NAME";
 pub static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
@@ -26,6 +32,7 @@ pub static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
 pub struct MeshRedirect<'ipt, IPT> {
     preroute: PreroutingRedirect<'ipt, IPT>,
     managed: IPTableChain<'ipt, IPT>,
+    own_packet_filter: String,
 }
 
 impl<'ipt, IPT> MeshRedirect<'ipt, IPT>
@@ -37,9 +44,32 @@ where
         let managed = IPTableChain::create(ipt, &IPTABLE_MESH)?;
 
         let gid = getgid();
-        managed.add_rule(&format!("-m owner --gid-owner {gid} -p tcp -j RETURN"));
+        managed.add_rule(&format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))?;
 
-        Ok(MeshRedirect { preroute, managed })
+        let own_packet_filter = Self::get_own_packet_filter(ipt, "PROXY_INIT_OUTPUT")?;
+
+        Ok(MeshRedirect {
+            preroute,
+            managed,
+            own_packet_filter,
+        })
+    }
+
+    fn get_own_packet_filter(ipt: &'ipt IPT, chain_name: &str) -> Result<String> {
+        let own_packet_filter = ipt
+            .list_rules(chain_name)?
+            .iter()
+            .find_map(|rule| UID_LOOKUP_REGEX.find(rule).ok().flatten())
+            .map(|m| format!("-o lo {}", m.as_str()))
+            .unwrap_or_else(|| {
+                warn!(
+                    "Couldn't find --uid-owner of meshed chain {chain_name:?} falling back on \"-o lo\" rule",
+                );
+
+                "-o lo".to_owned()
+            });
+
+        Ok(own_packet_filter)
     }
 }
 
@@ -50,12 +80,26 @@ where
     fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.preroute.add_redirect(redirected_port, target_port)?;
 
+        let redirect_rule = format!(
+            "{} -m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}",
+            self.own_packet_filter
+        );
+
+        self.managed.add_rule(&redirect_rule)?;
+
         Ok(())
     }
 
     fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.preroute
             .remove_redirect(redirected_port, target_port)?;
+
+        let redirect_rule = format!(
+            "{} -m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}",
+            self.own_packet_filter
+        );
+
+        self.managed.remove_rule(&redirect_rule)?;
 
         Ok(())
     }
