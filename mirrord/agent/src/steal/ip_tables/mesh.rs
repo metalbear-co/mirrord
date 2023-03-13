@@ -45,12 +45,10 @@ impl<'ipt, IPT> MeshRedirect<'ipt, IPT>
 where
     IPT: IPTables,
 {
-    pub fn create(ipt: &'ipt IPT) -> Result<Self> {
+    pub fn create(ipt: &'ipt IPT, vendor: MeshVendor) -> Result<Self> {
         let preroute = PreroutingRedirect::create(ipt)?;
 
-        for port in
-            Self::get_skip_ports(ipt, "PROXY_INIT_REDIRECT", &LINKERD_SKIP_PORTS_LOOKUP_REGEX)?
-        {
+        for port in Self::get_skip_ports(ipt, &vendor)? {
             preroute.add_rule(&format!("-m multiport -p tcp ! --dports {port} -j RETURN"))?;
         }
 
@@ -59,7 +57,7 @@ where
         let gid = getgid();
         managed.add_rule(&format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))?;
 
-        let own_packet_filter = Self::get_own_packet_filter(ipt, "PROXY_INIT_OUTPUT")?;
+        let own_packet_filter = Self::get_own_packet_filter(ipt, &vendor)?;
 
         Ok(MeshRedirect {
             preroute,
@@ -68,7 +66,9 @@ where
         })
     }
 
-    fn get_own_packet_filter(ipt: &'ipt IPT, chain_name: &str) -> Result<String> {
+    fn get_own_packet_filter(ipt: &'ipt IPT, vendor: &MeshVendor) -> Result<String> {
+        let chain_name = vendor.output_chain();
+
         let own_packet_filter = ipt
             .list_rules(chain_name)?
             .iter()
@@ -85,13 +85,11 @@ where
         Ok(own_packet_filter)
     }
 
-    fn get_skip_ports(
-        ipt: &'ipt IPT,
-        chain_name: &str,
-        lookup_regex: &Regex,
-    ) -> Result<Vec<String>> {
+    fn get_skip_ports(ipt: &'ipt IPT, vendor: &MeshVendor) -> Result<Vec<String>> {
+        let lookup_regex = vendor.skip_ports_regex();
+
         let skipped_ports = ipt
-            .list_rules(chain_name)?
+            .list_rules(vendor.input_chain())?
             .iter()
             .filter_map(|rule| {
                 lookup_regex
@@ -144,6 +142,48 @@ impl<'ipt, IPT> Deref for MeshRedirect<'ipt, IPT> {
     type Target = IPTableChain<'ipt, IPT>;
     fn deref(&self) -> &Self::Target {
         &self.managed
+    }
+}
+
+pub enum MeshVendor {
+    Linkerd,
+    Istio,
+}
+
+impl MeshVendor {
+    pub fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Option<Self>> {
+        let output = ipt.list_rules("OUTPUT")?;
+
+        Ok(output.iter().find_map(|rule| {
+            if rule.contains("-j PROXY_INIT_OUTPUT") {
+                Some(MeshVendor::Linkerd)
+            } else if rule.contains("-j ISTIO_OUTPUT") {
+                Some(MeshVendor::Istio)
+            } else {
+                None
+            }
+        }))
+    }
+
+    fn input_chain(&self) -> &str {
+        match self {
+            MeshVendor::Linkerd => "PROXY_INIT_REDIRECT",
+            MeshVendor::Istio => "ISTIO_INBOUND",
+        }
+    }
+
+    fn output_chain(&self) -> &str {
+        match self {
+            MeshVendor::Linkerd => "PROXY_INIT_OUTPUT",
+            MeshVendor::Istio => "ISTIO_OUTPUT",
+        }
+    }
+
+    fn skip_ports_regex(&self) -> &Regex {
+        match self {
+            MeshVendor::Linkerd => &LINKERD_SKIP_PORTS_LOOKUP_REGEX,
+            MeshVendor::Istio => &ISTIO_SKIP_PORTS_LOOKUP_REGEX,
+        }
     }
 }
 
@@ -216,7 +256,8 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
-        let prerouting = MeshRedirect::create(&mock).expect("Unable to create");
+        let prerouting =
+            MeshRedirect::create(&mock, MeshVendor::Linkerd).expect("Unable to create");
 
         assert!(prerouting.add_redirect(69, 420).is_ok());
     }
