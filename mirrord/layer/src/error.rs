@@ -79,6 +79,9 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: IPv6 can't be used with mirrord")]
     SocketUnsuportedIpv6,
+
+    #[error("mirrord-layer: Tried calling some `open`-like function with `OpenOptions` that do not match what was expected!")]
+    OpenOptionsDoesntMatch,
 }
 
 impl HookError {

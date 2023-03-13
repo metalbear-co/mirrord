@@ -1,6 +1,6 @@
 // TODO(alex) [high] 2023-03-10: Tasks
 // - fclose [p] (partial, missing `fflush`);
-// - fdopen [] (missing remote file constraint check);
+// - fdopen [x] (missing remote file constraint check);
 // - fileno [x];
 // - clearerr [x] (not hooked);
 // - feof [x] (not hooked);
@@ -34,12 +34,14 @@ pub(crate) struct RemoteFile {
     pub(crate) fd: u64,
     pub(crate) error: Option<NonZeroI64>,
     pub(crate) is_eof: bool,
+    pub(crate) open_options: OpenOptionsInternal,
 }
 
 impl RemoteFile {
-    pub(crate) fn new(fd: u64) -> Self {
+    pub(crate) fn new(fd: u64, open_options: OpenOptionsInternal) -> Self {
         Self {
             fd,
+            open_options,
             error: Default::default(),
             is_eof: Default::default(),
         }
@@ -171,7 +173,7 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
 
     OPEN_FILES.lock().unwrap().insert(
         local_file_fd,
-        Arc::new(RwLock::new(RemoteFile::new(remote_fd))),
+        Arc::new(RwLock::new(RemoteFile::new(remote_fd, open_options))),
     );
 
     Detour::Success(local_file_fd)
@@ -193,22 +195,27 @@ pub(crate) fn fopen(path: Detour<PathBuf>, mode: Detour<OpenOptionsInternal>) ->
     Detour::Success(result)
 }
 
+/// Opens a file with `fd` that is being held in [`OPEN_FILES`], returning a _non-null_ file stream
+/// (which is just a pointer to the `local_fd` we're holding).
+///
+/// The `mode` has to be compatible with the [`OpenOptionsInternal`] of the file with `fd`.
 #[tracing::instrument(level = "trace")]
-pub(crate) fn fdopen(fd: RawFd, rawish_mode: Detour<OpenOptionsInternal>) -> Detour<*mut FILE> {
-    let _open_options = rawish_mode?;
+pub(crate) fn fdopen(fd: RawFd, mode: Detour<OpenOptionsInternal>) -> Detour<*mut FILE> {
+    let open_options = mode?;
 
-    trace!("fdopen -> open_options {_open_options:#?}");
+    trace!("fdopen -> open_options {open_options:#?}");
 
-    // TODO: Check that the constraint: remote file must have the same mode stuff that is passed
-    // here.
-    let result = OPEN_FILES
-        .lock()?
+    let open_files = OPEN_FILES.lock()?;
+    let (local_fd, remote_file) = open_files
         .get_key_value(&fd)
-        .ok_or(Bypass::LocalFdNotFound(fd))
-        .inspect(|(local_fd, remote_fd)| trace!("fdopen -> {local_fd:#?} {remote_fd:#?}"))
-        .map(|(local_fd, _)| local_fd as *const _ as *mut _)?;
+        .ok_or(Bypass::LocalFdNotFound(fd))?;
 
-    Detour::Success(result)
+    // Only open if the file we hold has compatible permissions with what's being requested.
+    if remote_file.read()?.open_options <= open_options {
+        Detour::Error(HookError::OpenOptionsDoesntMatch)
+    } else {
+        Detour::Success(local_fd as *const _ as *mut _)
+    }
 }
 
 /// creates a directory stream for the `remote_fd` in the agent
@@ -378,7 +385,7 @@ pub(crate) fn openat(
 
         OPEN_FILES.lock()?.insert(
             local_file_fd,
-            Arc::new(RwLock::new(RemoteFile::new(remote_fd))),
+            Arc::new(RwLock::new(RemoteFile::new(remote_fd, open_options))),
         );
 
         Detour::Success(local_file_fd)

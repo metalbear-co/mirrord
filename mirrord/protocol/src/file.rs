@@ -144,7 +144,7 @@ pub struct OpenFileResponse {
 // specific thing).
 //
 // TODO: Should probably live in a separate place (same reasoning as `AddrInfoHint`).
-#[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq, Default)]
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq, Default, PartialOrd, Ord)]
 pub struct OpenOptionsInternal {
     pub read: bool,
     pub write: bool,
