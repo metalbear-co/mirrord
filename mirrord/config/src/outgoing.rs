@@ -27,7 +27,7 @@ pub struct OutgoingConfig {
     /// remotely. When your application connects to a path that is configured to be connected
     /// remotely, mirrord will connect it to that path on the remote target.
     ///
-    /// When disabled, all unix socket connections will be preformed locally on your system.
+    /// When disabled, all unix socket connections will be performed locally on your system.
     ///
     /// See [`UnixTcpConfig`].
     #[config(nested, toggleable)]

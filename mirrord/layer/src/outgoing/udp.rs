@@ -269,7 +269,7 @@ impl UdpOutgoingHandler {
                                     // This should never happen. If we're here - the agent reported
                                     // a UDP connection to a remote unix socket. The layer does not
                                     // request such a thing, so either there was a bug earlier in
-                                    // the layer, the agent is rouge, or this code is outdated.
+                                    // the layer, the agent is rogue, or this code is outdated.
                                     error!("Datagrams over unix sockets are not supported.");
                                     Err(NotImplemented)?
                                 }
