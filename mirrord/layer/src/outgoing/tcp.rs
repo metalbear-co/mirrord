@@ -276,7 +276,7 @@ impl TcpOutgoingHandler {
                                         .collect();
                                     let pathname = tmp_dir.join(random_string);
 
-                                    let addr = SockAddr::unix(&pathname)?;
+                                    let addr = SockAddr::unix(pathname)?;
                                     // TODO: should we retry with a different random string if the
                                     //       bind fails?
                                     socket.bind(&addr)?;
