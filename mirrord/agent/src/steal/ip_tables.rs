@@ -359,7 +359,7 @@ impl IpTableChain {
             .chain(self.skipped_ports.iter().map(|port| {
                 (
                     self.name.as_str(),
-                    format!("! -p tcp -m multiport --dports {port} -j RETURN"),
+                    format!("-m multiport -p tcp ! --dports {port} -j RETURN"),
                 )
             }))
             .collect()
