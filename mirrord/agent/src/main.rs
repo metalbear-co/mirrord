@@ -8,6 +8,7 @@
 use std::{
     collections::{HashMap, HashSet},
     net::{Ipv4Addr, SocketAddrV4},
+    path::PathBuf,
 };
 
 use actix_codec::Framed;
@@ -444,10 +445,24 @@ async fn start_agent() -> Result<()> {
     .await?;
 
     let mut state = State::new(&args).await?;
-    let (pid, env) = match state.get_container_info().await? {
+    let (pid, mut env) = match state.get_container_info().await? {
         Some(ContainerInfo { pid, env }) => (Some(pid), env),
         None => (None, HashMap::new()),
     };
+
+    let environ_path = PathBuf::from("/proc")
+        .join(
+            pid.map(|i| i.to_string())
+                .unwrap_or_else(|| "self".to_string()),
+        )
+        .join("environ");
+
+    match env::get_proc_environ(environ_path).await {
+        Ok(environ) => env.extend(environ.into_iter()),
+        Err(err) => {
+            error!("Failed to get process environment variables: {err:?}");
+        }
+    }
 
     let cancellation_token = CancellationToken::new();
     // Cancel all other tasks on exit
@@ -467,8 +482,14 @@ async fn start_agent() -> Result<()> {
 
     let sniffer_cancellation_token = cancellation_token.clone();
     let sniffer_task = run_thread_in_namespace(
-        TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface)
-            .and_then(|sniffer| sniffer.start(sniffer_cancellation_token)),
+        TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface).and_then(
+            |sniffer| async move {
+                if let Err(err) = sniffer.start(sniffer_cancellation_token).await {
+                    error!("Sniffer failed: {err}");
+                }
+                Ok(())
+            },
+        ),
         "Sniffer".to_string(),
         pid,
         "net",
@@ -476,8 +497,12 @@ async fn start_agent() -> Result<()> {
 
     let stealer_cancellation_token = cancellation_token.clone();
     let stealer_task = run_thread_in_namespace(
-        TcpConnectionStealer::new(stealer_command_rx)
-            .and_then(|stealer| stealer.start(stealer_cancellation_token)),
+        TcpConnectionStealer::new(stealer_command_rx).and_then(|stealer| async move {
+            if let Err(err) = stealer.start(stealer_cancellation_token).await {
+                error!("Stealer failed: {err}");
+            }
+            Ok(())
+        }),
         "Stealer".to_string(),
         pid,
         "net",

@@ -122,6 +122,7 @@ impl HookError {
             #[cfg(target_os = "macos")]
             HookError::FailedSipPatch(_) => libc::EACCES,
             HookError::SocketUnsuportedIpv6 => libc::EAFNOSUPPORT,
+            HookError::OpenOptionsDoesntMatch => libc::EPERM,
         };
 
         libc_code as i64
