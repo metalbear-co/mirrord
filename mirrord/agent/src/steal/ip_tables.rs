@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use fancy_regex::Regex;
 use mirrord_protocol::Port;
@@ -18,9 +18,6 @@ mod chain;
 mod flush_connections;
 mod mesh;
 mod redirect;
-
-pub(crate) static MIRRORD_IPTABLE_PREROUTING_ENV: &str = "MIRRORD_IPTABLE_PREROUTING_NAME";
-pub(crate) static MIRRORD_IPTABLE_OUTPUT_ENV: &str = "MIRRORD_IPTABLE_OUTPUT_NAME";
 
 /// [`Regex`] used to select the `owner` rule from the list of `iptables` rules.
 static UID_LOOKUP_REGEX: LazyLock<Regex> =
@@ -96,7 +93,7 @@ impl IPTables for iptables::IPTables {
 /// Wrapper struct for IPTables so it flushes on drop.
 pub(crate) struct SafeIpTables<IPT: IPTables> {
     inner: IPT,
-    redirect: Box<dyn AsyncRedirect>,
+    redirect: Arc<dyn AsyncRedirect>,
 }
 
 /// Wrapper for using iptables. This creates a a new chain on creation and deletes it on drop.
@@ -113,17 +110,17 @@ where
             let meshed = MeshRedirect::create(&ipt, vendor)?;
 
             if flush_connections {
-                Box::new(FlushConnections::new(meshed)) as Box<dyn AsyncRedirect>
+                Arc::new(FlushConnections::new(meshed)) as Arc<dyn AsyncRedirect>
             } else {
-                Box::new(meshed) as Box<dyn AsyncRedirect>
+                Arc::new(meshed) as Arc<dyn AsyncRedirect>
             }
         } else {
             let prerouting = PreroutingRedirect::create(&ipt)?;
 
             if flush_connections {
-                Box::new(FlushConnections::new(prerouting)) as Box<dyn AsyncRedirect>
+                Arc::new(FlushConnections::new(prerouting)) as Arc<dyn AsyncRedirect>
             } else {
-                Box::new(prerouting) as Box<dyn AsyncRedirect>
+                Arc::new(prerouting) as Arc<dyn AsyncRedirect>
             }
         };
 

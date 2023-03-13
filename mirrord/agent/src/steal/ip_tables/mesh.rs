@@ -29,7 +29,7 @@ pub static IPTABLE_MESH_ENV: &str = "MIRRORD_IPTABLE_MESH_NAME";
 pub static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_MESH_ENV).unwrap_or_else(|_| {
         format!(
-            "MIRRORD_MESH_{}",
+            "MIRRORD_OUTPUT_{}",
             Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
         )
     })

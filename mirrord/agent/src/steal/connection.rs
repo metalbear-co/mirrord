@@ -656,8 +656,8 @@ impl TcpConnectionStealer {
             Command::PortSubscribe(port_steal) => {
                 self.port_subscribe(client_id, port_steal).await?
             }
-            Command::PortUnsubscribe(port) => self.port_unsubscribe(client_id, port)?,
-            Command::ClientClose => self.close_client(client_id)?,
+            Command::PortUnsubscribe(port) => self.port_unsubscribe(client_id, port).await?,
+            Command::ClientClose => self.close_client(client_id).await?,
             Command::ResponseData(tcp_data) => self.forward_data(tcp_data).await?,
             Command::HttpResponse(response) => self.http_response(response).await,
         }
