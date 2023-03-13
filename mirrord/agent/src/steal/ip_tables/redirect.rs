@@ -76,7 +76,7 @@ mod tests {
 
         mock.expect_insert_rule()
             .with(
-                eq(*IPTABLE_PREROUTING),
+                eq(IPTABLE_PREROUTING.as_str()),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(1),
             )
