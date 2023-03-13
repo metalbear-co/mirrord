@@ -58,6 +58,8 @@ pub(crate) struct TcpOutgoingHandler {
     layer_tx: Sender<LayerTcpOutgoing>,
     layer_rx: Receiver<LayerTcpOutgoing>,
 }
+
+impl Default for TcpOutgoingHandler {
     fn default() -> Self {
         let (layer_tx, layer_rx) = channel(1000);
 
