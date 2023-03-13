@@ -83,7 +83,10 @@ impl TcpOutgoingHandler {
         let remote_stream = ReceiverStream::new(remote_rx);
 
         // Accepts the user's socket connection, and finally becomes the interceptor socket.
-        let (mirror_stream, _) = layer_socket.accept().unwrap();
+        let (mirror_stream, _) = layer_socket
+            .accept()
+            .inspect_err(|err| error!("{err}"))
+            .unwrap();
         // TODO: unwrap
         mirror_stream.set_nonblocking(true).unwrap();
         if mirror_stream.local_addr().unwrap().is_unix() {
@@ -283,6 +286,8 @@ impl TcpOutgoingHandler {
                                     socket
                                 }
                             };
+                            // TODO: make backlog not a literal.
+                            layer_socket.listen(16)?;
 
                             Ok((connection_id, layer_socket, local_address.try_into()?))
                         },
