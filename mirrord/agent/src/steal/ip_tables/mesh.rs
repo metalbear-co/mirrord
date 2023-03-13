@@ -77,6 +77,8 @@ impl<IPT> Redirect for MeshRedirect<'_, IPT>
 where
     IPT: IPTables,
 {
+    const ENTRYPOINT: &'static str = "OUTPUT";
+
     fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.preroute.add_redirect(redirected_port, target_port)?;
 

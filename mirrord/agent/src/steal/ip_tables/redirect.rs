@@ -19,6 +19,8 @@ pub static IPTABLE_PREROUTING: LazyLock<String> = LazyLock::new(|| {
 });
 
 pub trait Redirect {
+    const ENTRYPOINT: &'static str;
+
     /// Create port redirection
     fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()>;
     /// Remove port redirection
@@ -44,6 +46,8 @@ impl<IPT> Redirect for PreroutingRedirect<'_, IPT>
 where
     IPT: IPTables,
 {
+    const ENTRYPOINT: &'static str = "PREROUTING";
+
     fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         let redirect_rule =
             format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
