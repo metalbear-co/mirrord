@@ -247,7 +247,7 @@ impl TcpOutgoingHandler {
                          }| async move {
                             let _ = DetourGuard::new();
 
-                            // Socket held by the socket, waiting for the user application to
+                            // Socket held by the layer, waiting for the user application to
                             // connect to it.
                             let layer_socket = match remote_address {
                                 SocketAddress::Ip(SocketAddr::V4(_)) => {
