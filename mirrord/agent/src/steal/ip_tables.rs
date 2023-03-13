@@ -15,6 +15,7 @@ use crate::error::AgentError;
 use crate::error::Result;
 
 mod chain;
+mod mesh;
 mod redirect;
 
 pub(crate) static MIRRORD_IPTABLE_PREROUTING_ENV: &str = "MIRRORD_IPTABLE_PREROUTING_NAME";

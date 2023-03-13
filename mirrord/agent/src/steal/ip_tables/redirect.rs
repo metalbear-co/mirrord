@@ -8,8 +8,8 @@ use crate::{
     steal::ip_tables::{chain::IPTableChain, IPTables},
 };
 
-static IPTABLE_PREROUTING_ENV: &str = "MIRRORD_IPTABLE_PREROUTING_NAME";
-static IPTABLE_PREROUTING: LazyLock<String> = LazyLock::new(|| {
+pub static IPTABLE_PREROUTING_ENV: &str = "MIRRORD_IPTABLE_PREROUTING_NAME";
+pub static IPTABLE_PREROUTING: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_PREROUTING_ENV).unwrap_or_else(|_| {
         format!(
             "MIRRORD_INPUT_{}",
