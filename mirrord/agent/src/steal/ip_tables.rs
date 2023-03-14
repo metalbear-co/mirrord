@@ -139,7 +139,7 @@ where
         Ok(Self { redirect })
     }
 
-    pub(super) async fn load(ipt: IPT, flush_connections: bool) -> Result<Self> {
+    pub(crate) async fn load(ipt: IPT, flush_connections: bool) -> Result<Self> {
         let redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
             Redirects::Mesh(MeshRedirect::load(Arc::new(ipt), vendor)?)
         } else {

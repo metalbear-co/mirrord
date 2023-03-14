@@ -604,12 +604,9 @@ async fn start_agent() -> Result<()> {
 
 #[cfg(target_os = "linux")]
 async fn clear_iptable_chain() -> Result<()> {
-    let ipt = Arc::new(iptables::new(false).unwrap());
+    let ipt = iptables::new(false).unwrap();
 
-    SafeIpTables::load(ipt.clone(), false)
-        .await?
-        .cleanup()
-        .await?;
+    SafeIpTables::load(ipt, false).await?.cleanup().await?;
 
     Ok(())
 }
