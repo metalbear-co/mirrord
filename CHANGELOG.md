@@ -8,6 +8,18 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.32.2](https://github.com/metalbear-co/mirrord/tree/3.32.2) - 2023-03-14
+
+
+### Fixed
+
+- fix microk8s support by adding possible containerd socket path
+  [#1186](https://github.com/metalbear-co/mirrord/issues/1186)
+- fix gethostname null termination missing
+  [#1189](https://github.com/metalbear-co/mirrord/issues/1189)
+- Update webbrowser dependency to fix security issue.
+
+
 ## [3.32.1](https://github.com/metalbear-co/mirrord/tree/3.32.1) - 2023-03-12
 
 
