@@ -584,11 +584,11 @@
             "null"
           ]
         },
-        "unix_tcp": {
-          "description": "Control which paths for unix sockets (host-local interprocess communication) are connected remotely. When your application connects to a path that is configured to be connected remotely, mirrord will connect it to that path on the remote target.\n\nWhen disabled, all unix socket connections will be performed locally on your system.\n\nSee [`UnixTcpConfig`].",
+        "unix_streams": {
+          "description": "Connect to these unix streams remotely (and to all other paths locally).",
           "anyOf": [
             {
-              "$ref": "#/definitions/ToggleableConfig_for_UnixTcpFileConfig"
+              "$ref": "#/definitions/VecOrSingle_for_String"
             },
             {
               "type": "null"
@@ -742,34 +742,6 @@
           "$ref": "#/definitions/OutgoingFileConfig"
         }
       ]
-    },
-    "ToggleableConfig_for_UnixTcpFileConfig": {
-      "anyOf": [
-        {
-          "type": "boolean"
-        },
-        {
-          "$ref": "#/definitions/UnixTcpFileConfig"
-        }
-      ]
-    },
-    "UnixTcpFileConfig": {
-      "description": "Specify which paths of tcp unix sockets should be connected to on the remote target and which should be connected to locally. Paths can be specified as regular expressions according to [this syntax](https://docs.rs/regex/1.7.1/regex/index.html#syntax).\n\nIf you only want to specify a single path (or regular expression), you don't need to put it inside an array, you can pass the string directly.\n\nYou can either specify the remote paths (allow list) or the local paths (block list), not both. If you specify the remote paths, only the specified paths will be connected to remotely, and all other paths will be connected to on your local system. If you specify the local paths, all paths will be connected to remotely, except for the specified paths.\n\n## Examples\n\n### Connect to all paths remotely by including them all with a regular expression\n\n```toml # mirrord-config.toml\n\n[feature.network.outgoing.unix_tcp] remote = \".*\" ```\n\n### Connect to all paths remotely by passing an empty local list\n\n```toml # mirrord-config.toml\n\n[feature.network.outgoing.unix_tcp] local = [] # Don't do anything locally - connect to all unix addresses remotely. ```\n\n### Connect to all paths locally by completely disabling the unix_tcp option\n\n```toml # mirrord-config.toml\n\n[feature.network.outgoing] unix_tcp = false ```\n\n### Connect to all paths remotely except for paths in /tmp/local-socket and paths that end with \"-local\"\n\n```toml # mirrord-config.toml\n\n[feature.network.outgoing.unix_tcp] local = [ \"^/tmp/local-socket/.*\", \"-local$\", ] ```",
-      "type": "object",
-      "properties": {
-        "remote_list": {
-          "description": "Connect to these paths remotely (and to all other paths locally).\n\nValue is a list separated by \";\".",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/VecOrSingle_for_String"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "additionalProperties": false
     },
     "VecOrSingle_for_String": {
       "anyOf": [
