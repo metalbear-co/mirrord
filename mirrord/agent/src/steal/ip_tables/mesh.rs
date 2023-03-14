@@ -215,6 +215,15 @@ mod tests {
             .returning(|_| Ok(vec!["-j PROXY_INIT_OUTPUT".to_owned()]));
 
         mock.expect_list_rules()
+            .with(eq("PROXY_INIT_REDIRECT"))
+            .returning(|_| {
+                Ok(vec![
+                    "-N PROXY_INIT_REDIRECT".to_owned(),
+                    "-A PROXY_INIT_REDIRECT -p tcp -j REDIRECT --to-port 4143".to_owned(),
+                ])
+            });
+
+        mock.expect_list_rules()
             .with(eq("PROXY_INIT_OUTPUT"))
             .returning(|_| {
                 Ok(vec![
@@ -273,6 +282,11 @@ mod tests {
 
         mock.expect_remove_chain()
             .with(eq(IPTABLE_PREROUTING.as_str()))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        mock.expect_remove_chain()
+            .with(eq(IPTABLE_MESH.as_str()))
             .times(1)
             .returning(|_| Ok(()));
 
