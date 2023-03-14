@@ -381,7 +381,7 @@ pub(super) fn connect(
         }
 
         if is_ignored_port(ip_address) || port_debug_patch(ip_address) {
-            Err(Bypass::Port(ip_address.port()))?
+            return Detour::Bypass(Bypass::Port(ip_address.port()));
         }
     } else if remote_address.is_unix() {
         let address = remote_address
