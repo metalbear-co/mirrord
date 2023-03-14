@@ -208,6 +208,8 @@ mod tests {
         assert!(ipt.add_redirect(69, 420).await.is_ok());
 
         assert!(ipt.remove_redirect(69, 420).await.is_ok());
+
+        assert!(ipt.cleanup().await.is_ok());
     }
 
     #[tokio::test]
@@ -341,5 +343,7 @@ mod tests {
         assert!(ipt.add_redirect(69, 420).await.is_ok());
 
         assert!(ipt.remove_redirect(69, 420).await.is_ok());
+
+        assert!(ipt.cleanup().await.is_ok());
     }
 }

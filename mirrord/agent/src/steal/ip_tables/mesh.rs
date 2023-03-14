@@ -271,6 +271,11 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
+        mock.expect_remove_chain()
+            .with(eq(IPTABLE_PREROUTING.as_str()))
+            .times(1)
+            .returning(|_| Ok(()));
+
         let prerouting =
             MeshRedirect::create(Arc::new(mock), MeshVendor::Linkerd).expect("Unable to create");
 

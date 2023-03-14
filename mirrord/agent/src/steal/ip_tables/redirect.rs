@@ -165,6 +165,11 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
+        mock.expect_remove_chain()
+            .with(eq(IPTABLE_PREROUTING.as_str()))
+            .times(1)
+            .returning(|_| Ok(()));
+
         let prerouting = PreroutingRedirect::create(Arc::new(mock)).expect("Unable to create");
 
         assert!(prerouting.add_redirect(69, 420).is_ok());
@@ -197,6 +202,11 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
+        mock.expect_remove_chain()
+            .with(eq(IPTABLE_PREROUTING.as_str()))
+            .times(1)
+            .returning(|_| Ok(()));
+
         let prerouting = PreroutingRedirect::create(Arc::new(mock)).expect("Unable to create");
 
         assert!(prerouting.add_redirect(69, 420).is_ok());
@@ -219,6 +229,11 @@ mod tests {
             )
             .times(1)
             .returning(|_, _| Ok(()));
+
+        mock.expect_remove_chain()
+            .with(eq(IPTABLE_PREROUTING.as_str()))
+            .times(1)
+            .returning(|_| Ok(()));
 
         let prerouting = PreroutingRedirect::create(Arc::new(mock)).expect("Unable to create");
 
