@@ -129,6 +129,13 @@ pub enum AgentError {
     )]
     SnifferApiError,
 
+    #[error(
+        r#"Couldn't find containerd socket to use, please open a bug report
+           providing information on how you installed k8s and if you know where
+           the containerd socket is"#
+    )]
+    ContainerdSocketNotFound,
+
     #[error("Returning an error to test the agent's error cleanup. Should only ever be used when testing mirrord.")]
     TestError,
 }
