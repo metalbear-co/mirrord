@@ -28,6 +28,8 @@ pub trait Redirect {
 
     fn mount_entrypoint(&self) -> Result<()>;
 
+    fn unmount_entrypoint(&self) -> Result<()>;
+
     /// Create port redirection
     fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()>;
     /// Remove port redirection
@@ -38,6 +40,8 @@ pub trait Redirect {
 #[enum_dispatch]
 pub trait AsyncRedirect {
     async fn async_mount_entrypoint(&self) -> Result<()>;
+
+    async fn async_unmount_entrypoint(&self) -> Result<()>;
 
     /// Create port redirection
     async fn async_add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()>;
@@ -54,6 +58,10 @@ where
         self.mount_entrypoint()
     }
 
+    async fn async_unmount_entrypoint(&self) -> Result<()> {
+        self.unmount_entrypoint()
+    }
+
     async fn async_add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.add_redirect(redirected_port, target_port)
     }
@@ -63,7 +71,7 @@ where
     }
 }
 
-pub struct PreroutingRedirect<IPT> {
+pub struct PreroutingRedirect<IPT: IPTables> {
     managed: IPTableChain<IPT>,
 }
 
@@ -93,6 +101,15 @@ where
         Ok(())
     }
 
+    fn unmount_entrypoint(&self) -> Result<()> {
+        self.managed.inner().remove_rule(
+            Self::ENTRYPOINT,
+            &format!("-j {}", self.managed.chain_name()),
+        )?;
+
+        Ok(())
+    }
+
     fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         let redirect_rule =
             format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
@@ -112,7 +129,10 @@ where
     }
 }
 
-impl<IPT> Deref for PreroutingRedirect<IPT> {
+impl<IPT> Deref for PreroutingRedirect<IPT>
+where
+    IPT: IPTables,
+{
     type Target = IPTableChain<IPT>;
 
     fn deref(&self) -> &Self::Target {

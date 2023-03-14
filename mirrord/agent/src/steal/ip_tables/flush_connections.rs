@@ -28,6 +28,10 @@ where
         self.inner.async_mount_entrypoint().await
     }
 
+    async fn async_unmount_entrypoint(&self) -> Result<()> {
+        self.inner.async_unmount_entrypoint().await
+    }
+
     async fn async_add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.inner
             .async_add_redirect(redirected_port, target_port)

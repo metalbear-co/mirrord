@@ -3,13 +3,10 @@ use std::sync::{
     Arc,
 };
 
-use crate::{
-    error::{AgentError, Result},
-    steal::ip_tables::IPTables,
-};
+use crate::{error::Result, steal::ip_tables::IPTables};
 
 #[derive(Debug)]
-pub struct IPTableChain<IPT> {
+pub struct IPTableChain<IPT: IPTables> {
     inner: Arc<IPT>,
     chain: String,
     chain_size: AtomicI32,
@@ -31,24 +28,6 @@ where
             chain_size,
         })
     }
-
-    // pub fn load(inner: Arc<IPT>, chain: String) -> Result<Self> {
-    //     let rules = inner.list_rules(&chain)?.len();
-
-    //     if rules == 0 {
-    //         return Err(AgentError::IPTablesError(format!(
-    //             "Unable to load chain {chain} because no rules exist"
-    //         )));
-    //     }
-
-    //     let chain_size = AtomicI32::from((rules - 1) as i32);
-
-    //     Ok(IPTableChain {
-    //         inner,
-    //         chain,
-    //         chain_size,
-    //     })
-    // }
 
     pub fn chain_name(&self) -> &str {
         &self.chain
@@ -78,5 +57,14 @@ where
         self.chain_size.fetch_sub(1, Ordering::Relaxed);
 
         Ok(())
+    }
+}
+
+impl<IPT> Drop for IPTableChain<IPT>
+where
+    IPT: IPTables,
+{
+    fn drop(&mut self) {
+        let _ = self.inner.remove_chain(&self.chain);
     }
 }

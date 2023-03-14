@@ -221,6 +221,8 @@ impl TcpConnectionStealer {
             }
         }
 
+        self.iptables()?.cleanup().await?;
+
         Ok(())
     }
 
@@ -663,6 +665,3 @@ impl TcpConnectionStealer {
         Ok(())
     }
 }
-
-// unsafe impl Send for TcpConnectionStealer {}
-// unsafe impl Sync for TcpConnectionStealer {}

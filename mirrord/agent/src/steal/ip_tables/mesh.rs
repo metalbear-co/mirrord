@@ -35,7 +35,7 @@ pub static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
     })
 });
 
-pub struct MeshRedirect<IPT> {
+pub struct MeshRedirect<IPT: IPTables> {
     preroute: PreroutingRedirect<IPT>,
     managed: IPTableChain<IPT>,
     own_packet_filter: String,
@@ -114,6 +114,17 @@ where
         self.preroute.mount_entrypoint()?;
 
         self.managed.inner().add_rule(
+            Self::ENTRYPOINT,
+            &format!("-j {}", self.managed.chain_name()),
+        )?;
+
+        Ok(())
+    }
+
+    fn unmount_entrypoint(&self) -> Result<()> {
+        self.preroute.unmount_entrypoint()?;
+
+        self.managed.inner().remove_rule(
             Self::ENTRYPOINT,
             &format!("-j {}", self.managed.chain_name()),
         )?;

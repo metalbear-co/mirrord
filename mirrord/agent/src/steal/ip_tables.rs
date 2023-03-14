@@ -1,7 +1,6 @@
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use enum_dispatch::enum_dispatch;
-use fancy_regex::Regex;
 use mirrord_protocol::Port;
 
 #[cfg(target_os = "linux")]
@@ -19,17 +18,6 @@ mod chain;
 mod flush_connections;
 mod mesh;
 mod redirect;
-
-/// [`Regex`] used to select the `owner` rule from the list of `iptables` rules.
-static UID_LOOKUP_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"-m owner --uid-owner \d+").unwrap());
-
-static SKIP_PORTS_LOOKUP_REGEX: LazyLock<[Regex; 2]> = LazyLock::new(|| {
-    [
-        Regex::new(r"-p tcp -m multiport --dports ([\d:,]+)").unwrap(),
-        Regex::new(r"-p tcp -m tcp --dport ([\d:,]+)").unwrap(),
-    ]
-});
 
 const IPTABLES_TABLE_NAME: &str = "nat";
 
@@ -139,7 +127,9 @@ where
         redirected_port: Port,
         target_port: Port,
     ) -> Result<()> {
-        Ok(())
+        self.redirect
+            .async_add_redirect(redirected_port, target_port)
+            .await
     }
 
     /// Removes the redirect rule from iptables.
@@ -152,15 +142,14 @@ where
         redirected_port: Port,
         target_port: Port,
     ) -> Result<()> {
-        Ok(())
+        self.redirect
+            .async_remove_redirect(redirected_port, target_port)
+            .await
     }
-}
 
-impl<IPT> Drop for SafeIpTables<IPT>
-where
-    IPT: IPTables + Send + Sync,
-{
-    fn drop(&mut self) {}
+    pub(super) async fn cleanup(&self) -> Result<()> {
+        self.redirect.async_unmount_entrypoint().await
+    }
 }
 
 #[cfg(test)]
