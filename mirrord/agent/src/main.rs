@@ -40,7 +40,11 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use crate::{
     cli::Args,
     runtime::{get_container, Container, ContainerRuntime},
-    steal::{connection::TcpConnectionStealer, StealerCommand},
+    steal::{
+        connection::TcpConnectionStealer,
+        ip_tables::{IPTABLE_MESH, IPTABLE_MESH_ENV, IPTABLE_PREROUTING, IPTABLE_PREROUTING_ENV},
+        StealerCommand,
+    },
     util::{run_thread_in_namespace, ClientId, IndexAllocator},
 };
 
@@ -596,13 +600,12 @@ async fn start_agent() -> Result<()> {
 
 #[cfg(target_os = "linux")]
 async fn clear_iptable_chain() -> Result<()> {
-    let ipt = iptables::new(false).unwrap();
-    // let formatter = IPTableFormatter::detect(&ipt)?;
+    let ipt = Arc::new(iptables::new(false).unwrap());
 
-    // formatter
-    //     .chains()
-    //     .into_iter()
-    //     .try_for_each(|chain| chain.remove(&ipt))?;
+    SafeIpTables::load(ipt.clone(), false)
+        .await?
+        .cleanup()
+        .await?;
 
     Ok(())
 }
@@ -631,11 +634,8 @@ async fn start_iptable_guard() -> Result<()> {
     let state = State::new(&args).await?;
     let pid = state.get_container_info().await?.map(|c| c.pid);
 
-    // std::env::set_var(
-    //     MIRRORD_IPTABLE_PREROUTING_ENV,
-    //     IpTableChain::prerouting_name(),
-    // );
-    // std::env::set_var(MIRRORD_IPTABLE_OUTPUT_ENV, IpTableChain::output_name());
+    std::env::set_var(IPTABLE_PREROUTING_ENV, IPTABLE_PREROUTING.as_str());
+    std::env::set_var(IPTABLE_MESH_ENV, IPTABLE_MESH.as_str());
 
     let result = spawn_child_agent();
 
@@ -665,15 +665,13 @@ async fn main() -> Result<()> {
 
     debug!("main -> Initializing mirrord-agent.");
 
-    // let agent_result = if std::env::var(MIRRORD_IPTABLE_PREROUTING_ENV).is_ok()
-    //     && std::env::var(MIRRORD_IPTABLE_OUTPUT_ENV).is_ok()
-    // {
-    //     start_agent().await
-    // } else {
-    //     start_iptable_guard().await
-    // };
-
-    let agent_result = start_agent().await;
+    let agent_result = if std::env::var(IPTABLE_PREROUTING_ENV).is_ok()
+        && std::env::var(IPTABLE_MESH_ENV).is_ok()
+    {
+        start_agent().await
+    } else {
+        start_iptable_guard().await
+    };
 
     match agent_result {
         Ok(_) => {

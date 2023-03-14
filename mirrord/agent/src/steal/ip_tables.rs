@@ -1,7 +1,8 @@
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use enum_dispatch::enum_dispatch;
 use mirrord_protocol::Port;
+use rand::distributions::{Alphanumeric, DistString};
 
 #[cfg(target_os = "linux")]
 use crate::error::AgentError;
@@ -14,10 +15,30 @@ use crate::{
     },
 };
 
-mod chain;
-mod flush_connections;
-mod mesh;
-mod redirect;
+pub(crate) mod chain;
+pub(crate) mod flush_connections;
+pub(crate) mod mesh;
+pub(crate) mod redirect;
+
+pub static IPTABLE_PREROUTING_ENV: &str = "MIRRORD_IPTABLE_PREROUTING_NAME";
+pub static IPTABLE_PREROUTING: LazyLock<String> = LazyLock::new(|| {
+    std::env::var(IPTABLE_PREROUTING_ENV).unwrap_or_else(|_| {
+        format!(
+            "MIRRORD_INPUT_{}",
+            Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
+        )
+    })
+});
+
+pub static IPTABLE_MESH_ENV: &str = "MIRRORD_IPTABLE_MESH_NAME";
+pub static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
+    std::env::var(IPTABLE_MESH_ENV).unwrap_or_else(|_| {
+        format!(
+            "MIRRORD_OUTPUT_{}",
+            Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
+        )
+    })
+});
 
 const IPTABLES_TABLE_NAME: &str = "nat";
 
@@ -100,7 +121,7 @@ impl<IPT> SafeIpTables<IPT>
 where
     IPT: IPTables + Send + Sync,
 {
-    pub(super) async fn new(ipt: IPT, flush_connections: bool) -> Result<Self> {
+    pub(super) async fn create(ipt: IPT, flush_connections: bool) -> Result<Self> {
         let redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
             Redirects::Mesh(MeshRedirect::create(Arc::new(ipt), vendor)?)
         } else {
@@ -114,6 +135,22 @@ where
         };
 
         redirect.async_mount_entrypoint().await?;
+
+        Ok(Self { redirect })
+    }
+
+    pub(super) async fn load(ipt: IPT, flush_connections: bool) -> Result<Self> {
+        let redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
+            Redirects::Mesh(MeshRedirect::load(Arc::new(ipt), vendor)?)
+        } else {
+            Redirects::Standard(PreroutingRedirect::load(Arc::new(ipt))?)
+        };
+
+        let redirect = if flush_connections {
+            Redirects::FlushConnections(FlushConnections::new(Box::new(redirect)))
+        } else {
+            redirect
+        };
 
         Ok(Self { redirect })
     }
@@ -203,7 +240,9 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::new(mock, false).await.expect("Create Failed");
+        let ipt = SafeIpTables::create(mock, false)
+            .await
+            .expect("Create Failed");
 
         assert!(ipt.add_redirect(69, 420).await.is_ok());
 
@@ -338,7 +377,9 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::new(mock, false).await.expect("Create Failed");
+        let ipt = SafeIpTables::create(mock, false)
+            .await
+            .expect("Create Failed");
 
         assert!(ipt.add_redirect(69, 420).await.is_ok());
 

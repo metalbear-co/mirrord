@@ -3,7 +3,6 @@ use std::sync::{Arc, LazyLock};
 use fancy_regex::Regex;
 use mirrord_protocol::Port;
 use nix::unistd::getgid;
-use rand::distributions::{Alphanumeric, DistString};
 use tracing::warn;
 
 use crate::{
@@ -11,7 +10,7 @@ use crate::{
     steal::ip_tables::{
         chain::IPTableChain,
         redirect::{PreroutingRedirect, Redirect},
-        IPTables,
+        IPTables, IPTABLE_MESH,
     },
 };
 
@@ -24,16 +23,6 @@ static LINKERD_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
 
 static ISTIO_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"-p tcp -m tcp --dport ([\d:,]+)").unwrap());
-
-pub static IPTABLE_MESH_ENV: &str = "MIRRORD_IPTABLE_MESH_NAME";
-pub static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
-    std::env::var(IPTABLE_MESH_ENV).unwrap_or_else(|_| {
-        format!(
-            "MIRRORD_OUTPUT_{}",
-            Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
-        )
-    })
-});
 
 pub struct MeshRedirect<IPT: IPTables> {
     preroute: PreroutingRedirect<IPT>,
@@ -57,6 +46,18 @@ where
 
         let gid = getgid();
         managed.add_rule(&format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))?;
+
+        Ok(MeshRedirect {
+            preroute,
+            managed,
+            own_packet_filter,
+        })
+    }
+
+    pub fn load(ipt: Arc<IPT>, vendor: MeshVendor) -> Result<Self> {
+        let own_packet_filter = Self::get_own_packet_filter(&ipt, &vendor)?;
+        let preroute = PreroutingRedirect::load(ipt.clone())?;
+        let managed = IPTableChain::load(ipt, IPTABLE_MESH.to_string())?;
 
         Ok(MeshRedirect {
             preroute,
@@ -207,7 +208,7 @@ mod tests {
     use mockall::predicate::*;
 
     use super::*;
-    use crate::steal::ip_tables::{redirect::IPTABLE_PREROUTING, MockIPTables};
+    use crate::steal::ip_tables::{MockIPTables, IPTABLE_PREROUTING};
 
     fn create_mesh_list_values(mock: &mut MockIPTables) {
         mock.expect_list_rules()

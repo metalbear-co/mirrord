@@ -1,27 +1,13 @@
-use std::{
-    ops::Deref,
-    sync::{Arc, LazyLock},
-};
+use std::{ops::Deref, sync::Arc};
 
 use async_trait::async_trait;
 use enum_dispatch::enum_dispatch;
 use mirrord_protocol::Port;
-use rand::distributions::{Alphanumeric, DistString};
 
 use crate::{
     error::Result,
-    steal::ip_tables::{chain::IPTableChain, IPTables},
+    steal::ip_tables::{chain::IPTableChain, IPTables, IPTABLE_PREROUTING},
 };
-
-pub static IPTABLE_PREROUTING_ENV: &str = "MIRRORD_IPTABLE_PREROUTING_NAME";
-pub static IPTABLE_PREROUTING: LazyLock<String> = LazyLock::new(|| {
-    std::env::var(IPTABLE_PREROUTING_ENV).unwrap_or_else(|_| {
-        format!(
-            "MIRRORD_INPUT_{}",
-            Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
-        )
-    })
-});
 
 pub trait Redirect {
     const ENTRYPOINT: &'static str;
@@ -81,6 +67,12 @@ where
 {
     pub fn create(ipt: Arc<IPT>) -> Result<Self> {
         let managed = IPTableChain::create(ipt, IPTABLE_PREROUTING.to_string())?;
+
+        Ok(PreroutingRedirect { managed })
+    }
+
+    pub fn load(ipt: Arc<IPT>) -> Result<Self> {
+        let managed = IPTableChain::load(ipt, IPTABLE_PREROUTING.to_string())?;
 
         Ok(PreroutingRedirect { managed })
     }

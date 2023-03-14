@@ -403,7 +403,7 @@ impl TcpConnectionStealer {
             .unwrap_or_default();
         let iptables = iptables::new(false).unwrap();
 
-        self.iptables = Some(SafeIpTables::new(iptables, flush_connections).await?);
+        self.iptables = Some(SafeIpTables::create(iptables, flush_connections).await?);
         Ok(())
     }
 
