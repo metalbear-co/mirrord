@@ -1,4 +1,7 @@
-use std::{ops::Deref, sync::LazyLock};
+use std::{
+    ops::Deref,
+    sync::{Arc, LazyLock},
+};
 
 use fancy_regex::Regex;
 use mirrord_protocol::Port;
@@ -35,29 +38,28 @@ pub static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
     })
 });
 
-pub struct MeshRedirect<'ipt, IPT> {
-    preroute: PreroutingRedirect<'ipt, IPT>,
-    managed: IPTableChain<'ipt, IPT>,
+pub struct MeshRedirect<IPT> {
+    preroute: PreroutingRedirect<IPT>,
+    managed: IPTableChain<IPT>,
     own_packet_filter: String,
 }
 
-impl<'ipt, IPT> MeshRedirect<'ipt, IPT>
+impl<IPT> MeshRedirect<IPT>
 where
     IPT: IPTables,
 {
-    pub fn create(ipt: &'ipt IPT, vendor: MeshVendor) -> Result<Self> {
-        let preroute = PreroutingRedirect::create(ipt)?;
+    pub fn create(ipt: Arc<IPT>, vendor: MeshVendor) -> Result<Self> {
+        let preroute = PreroutingRedirect::create(ipt.clone())?;
+        let own_packet_filter = Self::get_own_packet_filter(&ipt, &vendor)?;
 
-        for port in Self::get_skip_ports(ipt, &vendor)? {
+        for port in Self::get_skip_ports(&ipt, &vendor)? {
             preroute.add_rule(&format!("-m multiport -p tcp ! --dports {port} -j RETURN"))?;
         }
 
-        let managed = IPTableChain::create(ipt, &IPTABLE_MESH)?;
+        let managed = IPTableChain::create(ipt, IPTABLE_MESH.to_string())?;
 
         let gid = getgid();
         managed.add_rule(&format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))?;
-
-        let own_packet_filter = Self::get_own_packet_filter(ipt, &vendor)?;
 
         Ok(MeshRedirect {
             preroute,
@@ -66,7 +68,7 @@ where
         })
     }
 
-    fn get_own_packet_filter(ipt: &'ipt IPT, vendor: &MeshVendor) -> Result<String> {
+    fn get_own_packet_filter(ipt: &IPT, vendor: &MeshVendor) -> Result<String> {
         let chain_name = vendor.output_chain();
 
         let own_packet_filter = ipt
@@ -85,7 +87,7 @@ where
         Ok(own_packet_filter)
     }
 
-    fn get_skip_ports(ipt: &'ipt IPT, vendor: &MeshVendor) -> Result<Vec<String>> {
+    fn get_skip_ports(ipt: &IPT, vendor: &MeshVendor) -> Result<Vec<String>> {
         let lookup_regex = vendor.skip_ports_regex();
 
         let skipped_ports = ipt
@@ -105,7 +107,7 @@ where
     }
 }
 
-impl<IPT> Redirect for MeshRedirect<'_, IPT>
+impl<IPT> Redirect for MeshRedirect<IPT>
 where
     IPT: IPTables,
 {
@@ -139,8 +141,9 @@ where
     }
 }
 
-impl<'ipt, IPT> Deref for MeshRedirect<'ipt, IPT> {
-    type Target = IPTableChain<'ipt, IPT>;
+impl<IPT> Deref for MeshRedirect<IPT> {
+    type Target = IPTableChain<IPT>;
+
     fn deref(&self) -> &Self::Target {
         &self.managed
     }
@@ -258,7 +261,7 @@ mod tests {
             .returning(|_, _, _| Ok(()));
 
         let prerouting =
-            MeshRedirect::create(&mock, MeshVendor::Linkerd).expect("Unable to create");
+            MeshRedirect::create(Arc::new(mock), MeshVendor::Linkerd).expect("Unable to create");
 
         assert!(prerouting.add_redirect(69, 420).is_ok());
     }

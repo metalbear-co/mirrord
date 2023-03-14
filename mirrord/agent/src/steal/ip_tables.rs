@@ -1,4 +1,7 @@
-use std::{ops::Deref, sync::LazyLock};
+use std::{
+    ops::Deref,
+    sync::{Arc, LazyLock},
+};
 
 use enum_dispatch::enum_dispatch;
 use fancy_regex::Regex;
@@ -93,17 +96,17 @@ impl IPTables for iptables::IPTables {
 }
 
 #[enum_dispatch(AsyncRedirect)]
-pub enum Redirects<'ipt, IPT: IPTables + Sync> {
-    Standard(PreroutingRedirect<'ipt, IPT>),
-    Mesh(MeshRedirect<'ipt, IPT>),
-    FlushConnections(FlushConnections<Redirects<'ipt, IPT>>),
+pub enum Redirects<IPT: IPTables + Send + Sync> {
+    Standard(PreroutingRedirect<IPT>),
+    Mesh(MeshRedirect<IPT>),
+    FlushConnections(FlushConnections<Redirects<IPT>>),
 }
 
-impl<'ipt, IPT> Deref for Redirects<'ipt, IPT>
+impl<IPT> Deref for Redirects<IPT>
 where
-    IPT: IPTables + Sync,
+    IPT: IPTables + Send + Sync,
 {
-    type Target = IPTableChain<'ipt, IPT>;
+    type Target = IPTableChain<IPT>;
 
     fn deref(&self) -> &Self::Target {
         match self {
@@ -115,9 +118,8 @@ where
 }
 
 /// Wrapper struct for IPTables so it flushes on drop.
-pub(crate) struct SafeIpTables<IPT: IPTables + Sync + 'static> {
-    inner: IPT,
-    redirect: Redirects<'static, IPT>,
+pub(crate) struct SafeIpTables<IPT: IPTables + Send + Sync> {
+    redirect: Redirects<IPT>,
 }
 
 /// Wrapper for using iptables. This creates a a new chain on creation and deletes it on drop.
@@ -127,13 +129,13 @@ pub(crate) struct SafeIpTables<IPT: IPTables + Sync + 'static> {
 /// -> ORIGINAL_CHAIN
 impl<IPT> SafeIpTables<IPT>
 where
-    IPT: IPTables + Sync,
+    IPT: IPTables + Send + Sync,
 {
     pub(super) fn new(ipt: IPT, flush_connections: bool) -> Result<Self> {
         let redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
-            Redirects::Mesh(MeshRedirect::create(&ipt, vendor)?)
+            Redirects::Mesh(MeshRedirect::create(Arc::new(ipt), vendor)?)
         } else {
-            Redirects::Standard(PreroutingRedirect::create(&ipt)?)
+            Redirects::Standard(PreroutingRedirect::create(Arc::new(ipt))?)
         };
 
         let redirect = if flush_connections {
@@ -142,15 +144,7 @@ where
             redirect
         };
 
-        ipt.add_rule(
-            redirect.get_entrypoint(),
-            &format!("-j {}", redirect.get_chain_name()),
-        );
-
-        Ok(Self {
-            inner: ipt,
-            redirect,
-        })
+        Ok(Self { redirect })
     }
 
     /// Adds the redirect rule to iptables.
@@ -181,14 +175,9 @@ where
 
 impl<IPT> Drop for SafeIpTables<IPT>
 where
-    IPT: IPTables + Sync,
+    IPT: IPTables + Send + Sync,
 {
-    fn drop(&mut self) {
-        self.inner.remove_rule(
-            self.redirect.get_entrypoint(),
-            &format!("-j {}", self.redirect.get_chain_name()),
-        );
-    }
+    fn drop(&mut self) {}
 }
 
 #[cfg(test)]

@@ -1,23 +1,47 @@
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::{
+    atomic::{AtomicI32, Ordering},
+    Arc,
+};
 
-use crate::{error::Result, steal::ip_tables::IPTables};
+use crate::{
+    error::{AgentError, Result},
+    steal::ip_tables::IPTables,
+};
 
 #[derive(Debug)]
-pub struct IPTableChain<'ipt, IPT> {
-    inner: &'ipt IPT,
-    chain: &'ipt str,
+pub struct IPTableChain<IPT> {
+    inner: Arc<IPT>,
+    chain: String,
     chain_size: AtomicI32,
 }
 
-impl<'ipt, IPT> IPTableChain<'ipt, IPT>
+impl<IPT> IPTableChain<IPT>
 where
     IPT: IPTables,
 {
-    pub fn create(inner: &'ipt IPT, chain: &'ipt str) -> Result<Self> {
-        inner.create_chain(chain)?;
+    pub fn create(inner: Arc<IPT>, chain: String) -> Result<Self> {
+        inner.create_chain(&chain)?;
 
         // Start with 1 because the chain will allways have atleast `-A <chain name>` as a rule
         let chain_size = AtomicI32::from(1);
+
+        Ok(IPTableChain {
+            inner,
+            chain,
+            chain_size,
+        })
+    }
+
+    pub fn load(inner: Arc<IPT>, chain: String) -> Result<Self> {
+        let rules = inner.list_rules(&chain)?.len();
+
+        if rules == 0 {
+            return Err(AgentError::IPTablesError(format!(
+                "Unable to load chain {chain} because no rules exist"
+            )));
+        }
+
+        let chain_size = AtomicI32::from((rules - 1) as i32);
 
         Ok(IPTableChain {
             inner,

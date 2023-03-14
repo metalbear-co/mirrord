@@ -1,4 +1,7 @@
-use std::{ops::Deref, sync::LazyLock};
+use std::{
+    ops::Deref,
+    sync::{Arc, LazyLock},
+};
 
 use async_trait::async_trait;
 use enum_dispatch::enum_dispatch;
@@ -58,22 +61,22 @@ where
     }
 }
 
-pub struct PreroutingRedirect<'ipt, IPT> {
-    managed: IPTableChain<'ipt, IPT>,
+pub struct PreroutingRedirect<IPT> {
+    managed: IPTableChain<IPT>,
 }
 
-impl<'ipt, IPT> PreroutingRedirect<'ipt, IPT>
+impl<IPT> PreroutingRedirect<IPT>
 where
     IPT: IPTables,
 {
-    pub fn create(ipt: &'ipt IPT) -> Result<Self> {
-        let managed = IPTableChain::create(ipt, &IPTABLE_PREROUTING)?;
+    pub fn create(ipt: Arc<IPT>) -> Result<Self> {
+        let managed = IPTableChain::create(ipt, IPTABLE_PREROUTING.to_string())?;
 
         Ok(PreroutingRedirect { managed })
     }
 }
 
-impl<IPT> Redirect for PreroutingRedirect<'_, IPT>
+impl<IPT> Redirect for PreroutingRedirect<IPT>
 where
     IPT: IPTables,
 {
@@ -98,8 +101,9 @@ where
     }
 }
 
-impl<'ipt, IPT> Deref for PreroutingRedirect<'ipt, IPT> {
-    type Target = IPTableChain<'ipt, IPT>;
+impl<IPT> Deref for PreroutingRedirect<IPT> {
+    type Target = IPTableChain<IPT>;
+
     fn deref(&self) -> &Self::Target {
         &self.managed
     }
@@ -130,7 +134,7 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
-        let prerouting = PreroutingRedirect::create(&mock).expect("Unable to create");
+        let prerouting = PreroutingRedirect::create(Arc::new(mock)).expect("Unable to create");
 
         assert!(prerouting.add_redirect(69, 420).is_ok());
     }
@@ -162,7 +166,7 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
-        let prerouting = PreroutingRedirect::create(&mock).expect("Unable to create");
+        let prerouting = PreroutingRedirect::create(Arc::new(mock)).expect("Unable to create");
 
         assert!(prerouting.add_redirect(69, 420).is_ok());
         assert!(prerouting.add_redirect(169, 1420).is_ok());
@@ -185,7 +189,7 @@ mod tests {
             .times(1)
             .returning(|_, _| Ok(()));
 
-        let prerouting = PreroutingRedirect::create(&mock).expect("Unable to create");
+        let prerouting = PreroutingRedirect::create(Arc::new(mock)).expect("Unable to create");
 
         assert!(prerouting.remove_redirect(69, 420).is_ok());
     }
