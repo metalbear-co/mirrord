@@ -665,3 +665,6 @@ impl TcpConnectionStealer {
         Ok(())
     }
 }
+
+// unsafe impl Send for TcpConnectionStealer {}
+// unsafe impl Sync for TcpConnectionStealer {}

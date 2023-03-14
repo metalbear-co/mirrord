@@ -7,15 +7,19 @@ use crate::{error::Result, steal::ip_tables::redirect::AsyncRedirect};
 
 #[derive(Debug)]
 pub struct FlushConnections<T> {
-    inner: T,
+    inner: Box<T>,
 }
 
 impl<T> FlushConnections<T>
 where
     T: AsyncRedirect,
 {
-    pub fn new(inner: T) -> Self {
+    pub fn new(inner: Box<T>) -> Self {
         FlushConnections { inner }
+    }
+
+    pub fn inner(&self) -> &T {
+        &self.inner
     }
 }
 

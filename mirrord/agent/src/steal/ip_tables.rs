@@ -1,5 +1,6 @@
-use std::sync::{Arc, LazyLock};
+use std::{ops::Deref, sync::LazyLock};
 
+use enum_dispatch::enum_dispatch;
 use fancy_regex::Regex;
 use mirrord_protocol::Port;
 
@@ -8,6 +9,7 @@ use crate::error::AgentError;
 use crate::{
     error::Result,
     steal::ip_tables::{
+        chain::IPTableChain,
         flush_connections::FlushConnections,
         mesh::{MeshRedirect, MeshVendor},
         redirect::{AsyncRedirect, PreroutingRedirect},
@@ -90,10 +92,32 @@ impl IPTables for iptables::IPTables {
     }
 }
 
+#[enum_dispatch(AsyncRedirect)]
+pub enum Redirects<'ipt, IPT: IPTables + Sync> {
+    Standard(PreroutingRedirect<'ipt, IPT>),
+    Mesh(MeshRedirect<'ipt, IPT>),
+    FlushConnections(FlushConnections<Redirects<'ipt, IPT>>),
+}
+
+impl<'ipt, IPT> Deref for Redirects<'ipt, IPT>
+where
+    IPT: IPTables + Sync,
+{
+    type Target = IPTableChain<'ipt, IPT>;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Redirects::Standard(prerouting) => prerouting.deref(),
+            Redirects::Mesh(mesh) => mesh.deref(),
+            Redirects::FlushConnections(flushed) => flushed.inner().deref(),
+        }
+    }
+}
+
 /// Wrapper struct for IPTables so it flushes on drop.
-pub(crate) struct SafeIpTables<IPT: IPTables> {
+pub(crate) struct SafeIpTables<IPT: IPTables + Sync + 'static> {
     inner: IPT,
-    redirect: Arc<dyn AsyncRedirect>,
+    redirect: Redirects<'static, IPT>,
 }
 
 /// Wrapper for using iptables. This creates a a new chain on creation and deletes it on drop.
@@ -103,26 +127,25 @@ pub(crate) struct SafeIpTables<IPT: IPTables> {
 /// -> ORIGINAL_CHAIN
 impl<IPT> SafeIpTables<IPT>
 where
-    IPT: IPTables + Send + Sync,
+    IPT: IPTables + Sync,
 {
     pub(super) fn new(ipt: IPT, flush_connections: bool) -> Result<Self> {
         let redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
-            let meshed = MeshRedirect::create(&ipt, vendor)?;
-
-            if flush_connections {
-                Arc::new(FlushConnections::new(meshed)) as Arc<dyn AsyncRedirect>
-            } else {
-                Arc::new(meshed) as Arc<dyn AsyncRedirect>
-            }
+            Redirects::Mesh(MeshRedirect::create(&ipt, vendor)?)
         } else {
-            let prerouting = PreroutingRedirect::create(&ipt)?;
-
-            if flush_connections {
-                Arc::new(FlushConnections::new(prerouting)) as Arc<dyn AsyncRedirect>
-            } else {
-                Arc::new(prerouting) as Arc<dyn AsyncRedirect>
-            }
+            Redirects::Standard(PreroutingRedirect::create(&ipt)?)
         };
+
+        let redirect = if flush_connections {
+            Redirects::FlushConnections(FlushConnections::new(Box::new(redirect)))
+        } else {
+            redirect
+        };
+
+        ipt.add_rule(
+            redirect.get_entrypoint(),
+            &format!("-j {}", redirect.get_chain_name()),
+        );
 
         Ok(Self {
             inner: ipt,
@@ -158,9 +181,14 @@ where
 
 impl<IPT> Drop for SafeIpTables<IPT>
 where
-    IPT: IPTables,
+    IPT: IPTables + Sync,
 {
-    fn drop(&mut self) {}
+    fn drop(&mut self) {
+        self.inner.remove_rule(
+            self.redirect.get_entrypoint(),
+            &format!("-j {}", self.redirect.get_chain_name()),
+        );
+    }
 }
 
 #[cfg(test)]

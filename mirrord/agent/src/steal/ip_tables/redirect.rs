@@ -1,6 +1,7 @@
 use std::{ops::Deref, sync::LazyLock};
 
 use async_trait::async_trait;
+use enum_dispatch::enum_dispatch;
 use mirrord_protocol::Port;
 use rand::distributions::{Alphanumeric, DistString};
 
@@ -29,6 +30,7 @@ pub trait Redirect {
 }
 
 #[async_trait]
+#[enum_dispatch]
 pub trait AsyncRedirect {
     fn get_entrypoint(&self) -> &str;
 
@@ -41,7 +43,7 @@ pub trait AsyncRedirect {
 #[async_trait]
 impl<T> AsyncRedirect for T
 where
-    T: Redirect + Send + Sync,
+    T: Redirect + Sync,
 {
     fn get_entrypoint(&self) -> &str {
         T::ENTRYPOINT

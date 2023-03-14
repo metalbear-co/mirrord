@@ -597,12 +597,12 @@ async fn start_agent() -> Result<()> {
 #[cfg(target_os = "linux")]
 async fn clear_iptable_chain() -> Result<()> {
     let ipt = iptables::new(false).unwrap();
-    let formatter = IPTableFormatter::detect(&ipt)?;
+    // let formatter = IPTableFormatter::detect(&ipt)?;
 
-    formatter
-        .chains()
-        .into_iter()
-        .try_for_each(|chain| chain.remove(&ipt))?;
+    // formatter
+    //     .chains()
+    //     .into_iter()
+    //     .try_for_each(|chain| chain.remove(&ipt))?;
 
     Ok(())
 }

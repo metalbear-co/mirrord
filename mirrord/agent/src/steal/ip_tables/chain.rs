@@ -26,6 +26,10 @@ where
         })
     }
 
+    pub fn get_chain_name(&self) -> &str {
+        &self.chain
+    }
+
     pub fn add_rule(&self, rule: &str) -> Result<i32> {
         self.inner
             .insert_rule(
