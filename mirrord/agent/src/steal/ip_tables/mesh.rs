@@ -242,8 +242,8 @@ mod tests {
             });
     }
 
-    #[test]
-    fn add_redirect() {
+    #[tokio::test]
+    async fn add_redirect() {
         let gid = getgid();
         let mut mock = MockIPTables::new();
 
@@ -299,6 +299,6 @@ mod tests {
         let prerouting =
             MeshRedirect::create(Arc::new(mock), MeshVendor::Linkerd).expect("Unable to create");
 
-        assert!(prerouting.add_redirect(69, 420).is_ok());
+        assert!(prerouting.add_redirect(69, 420).await.is_ok());
     }
 }
