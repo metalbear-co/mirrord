@@ -29,7 +29,7 @@ use super::*;
 use crate::{common::ResponseDeque, detour::DetourGuard, error::LayerError};
 
 /// For unix socket addresses, relative to the temp dir (`/tmp/mirrord-bin/...`).
-pub const MIRRORD_UNIX_STREAMS: &str = "mirrord-unix-sockets";
+pub const UNIX_STREAMS_DIRNAME: &str = "mirrord-unix-sockets";
 
 /// Hook messages handled by `TcpOutgoingHandler`.
 ///
@@ -268,7 +268,7 @@ impl TcpOutgoingHandler {
                                 }
                                 SocketAddress::Unix(_) => {
                                     let socket = Socket::new(Domain::UNIX, Type::STREAM, None)?;
-                                    let tmp_dir = temp_dir().join(MIRRORD_UNIX_STREAMS);
+                                    let tmp_dir = temp_dir().join(UNIX_STREAMS_DIRNAME);
                                     if !tmp_dir.exists() {
                                         create_dir_all(&tmp_dir).await?;
                                     }
