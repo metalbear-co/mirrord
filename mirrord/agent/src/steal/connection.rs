@@ -551,7 +551,8 @@ impl TcpConnectionStealer {
                     "Failed to send message to client {} with {:#?}!",
                     client_id, fail
                 );
-                let _ = self.close_client(*client_id);
+
+                let _ = self.close_client(*client_id).await;
                 fail
             })?;
         }
