@@ -26,7 +26,7 @@ use crate::{
     port_debug_patch,
     tcp::{Listen, TcpIncoming},
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_LOCALHOST,
-    OUTGOING_IGNORE_LOCALHOST,
+    OUTGOING_IGNORE_LOCALHOST, REMOTE_UNIX_STREAMS,
 };
 
 /// Hostname initialized from the agent with [`gethostname`].
@@ -322,20 +322,9 @@ pub(super) fn connect(
     let remote_address = SockAddr::try_from_raw(raw_address, address_length)?;
     let optional_ip_address = remote_address.as_socket();
 
-    if let Some(ip_address) = optional_ip_address.as_ref() {
-        let ignore_localhost = OUTGOING_IGNORE_LOCALHOST
-            .get()
-            .copied()
-            .expect("Should be set during initialization!");
-
-        if ignore_localhost && ip_address.ip().is_loopback() {
-            return Detour::Bypass(Bypass::IgnoreLocalhost(ip_address.port()));
-        }
-
-        if is_ignored_port(ip_address) || port_debug_patch(ip_address) {
-            Err(Bypass::Port(ip_address.port()))?
-        }
-    }
+    let unix_streams = REMOTE_UNIX_STREAMS
+        .get()
+        .expect("Should be set during initialization!");
 
     let user_socket_info = {
         SOCKETS
@@ -343,6 +332,76 @@ pub(super) fn connect(
             .remove(&sockfd)
             .ok_or(Bypass::LocalFdNotFound(sockfd))?
     };
+
+    if let Some(ip_address) = optional_ip_address.as_ref() {
+        let ignore_localhost = OUTGOING_IGNORE_LOCALHOST
+            .get()
+            .copied()
+            .expect("Should be set during initialization!");
+
+        if ip_address.ip().is_loopback() {
+            if ignore_localhost {
+                return Detour::Bypass(Bypass::IgnoreLocalhost(ip_address.port()));
+            }
+            if let Some(res) =
+                // Iterate through sockets, if any of them has the requested port that the
+                // application is now trying to connect to - then don't forward this connection
+                // to the agent, and instead of connecting to the requested address, connect to
+                // the actual address where the application is locally listening.
+                SOCKETS.lock()?.values().find_map(|socket| {
+                    if let SocketState::Listening(Bound {
+                        requested_address,
+                        address,
+                    }) = socket.state
+                    {
+                        if requested_address.port() == ip_address.port()
+                            && socket.protocol == user_socket_info.protocol
+                        {
+                            let rawish_remote_address = SockAddr::from(address);
+                            let result = unsafe {
+                                FN_CONNECT(
+                                    sockfd,
+                                    rawish_remote_address.as_ptr(),
+                                    rawish_remote_address.len(),
+                                )
+                            };
+
+                            return Some(if result != 0 {
+                                Detour::Error(io::Error::last_os_error().into())
+                            } else {
+                                Detour::Success(result.into())
+                            });
+                        }
+                    }
+                    None
+                })
+            {
+                return res;
+            }
+        }
+
+        if is_ignored_port(ip_address) || port_debug_patch(ip_address) {
+            Err(Bypass::Port(ip_address.port()))?
+        }
+    } else if remote_address.is_unix() {
+        let address = remote_address
+            .as_pathname()
+            .map(|path| path.to_string_lossy())
+            .or(remote_address
+                .as_abstract_namespace()
+                .map(String::from_utf8_lossy))
+            .map(String::from);
+        if !address.as_ref().is_some_and(|address_name| {
+            unix_streams
+                .as_ref()
+                .is_some_and(|regex_set| regex_set.is_match(address_name))
+        }) {
+            return Detour::Bypass(Bypass::UnixSocket(address));
+        }
+    } else {
+        // We do not hijack connections of this address type - Bypass!
+        return Detour::Bypass(Bypass::Domain(remote_address.domain().into()));
+    }
 
     let enabled_tcp_outgoing = ENABLED_TCP_OUTGOING
         .get()
@@ -354,51 +413,18 @@ pub(super) fn connect(
         .copied()
         .expect("Should be set during initialization!");
 
-    let raw_connect = |rawish_remote_address: SockAddr| {
-        let result = unsafe {
-            FN_CONNECT(
-                sockfd,
-                rawish_remote_address.as_ptr(),
-                rawish_remote_address.len(),
-            )
-        };
-
-        if result != 0 {
-            Detour::Error(Err(io::Error::last_os_error())?)?
-        } else {
-            Detour::Success(result.into())
-        }
-    };
-
-    // if it's loopback, check if it's a port we're listening to and if so, just let it connect
-    // locally.
-    if let Some(ip_address) = optional_ip_address.as_ref() {
-        if ip_address.ip().is_loopback() && let Some(res) =
-            SOCKETS.lock()?.values().find_map(|socket| {
-                if let SocketState::Listening(Bound {
-                                                  requested_address,
-                                                  address,
-                                              }) = socket.state
-                {
-                    if requested_address.port() == ip_address.port()
-                        && socket.protocol == user_socket_info.protocol
-                    {
-                        let rawish_remote_address = SockAddr::from(address);
-                        return Some(raw_connect(rawish_remote_address));
-                    }
-                }
-                None
-            }) {
-            return res;
-        }
-    }
-
     match user_socket_info.kind {
         SocketKind::Udp(_) if enabled_udp_outgoing => {
             connect_outgoing::<UDP>(sockfd, remote_address, user_socket_info)
         }
         SocketKind::Tcp(_) => match user_socket_info.state {
-            SocketState::Initialized if enabled_tcp_outgoing => {
+            SocketState::Initialized
+                if (optional_ip_address.is_some() && enabled_tcp_outgoing)
+                    || (remote_address.is_unix()
+                        && unix_streams
+                            .as_ref()
+                            .is_some_and(|streams| !streams.is_empty())) =>
+            {
                 connect_outgoing::<TCP>(sockfd, remote_address, user_socket_info)
             }
             SocketState::Bound(Bound { address, .. }) => {
@@ -409,18 +435,18 @@ pub(super) fn connect(
 
                 if bind_result != 0 {
                     error!(
-                    "connect -> Failed to bind socket result {:?}, address: {:?}, sockfd: {:?}!",
-                    bind_result, address, sockfd
-                );
+                        "connect -> Failed to bind socket result {:?}, address: {:?}, sockfd: {:?}!",
+                        bind_result, address, sockfd
+                    );
 
                     Err(io::Error::last_os_error())?
                 } else {
-                    raw_connect(remote_address)
+                    Detour::Bypass(Bypass::MirrorConnect)
                 }
             }
-            _ => raw_connect(remote_address),
+            _ => Detour::Bypass(Bypass::DisabledOutgoing),
         },
-        _ => raw_connect(remote_address),
+        _ => Detour::Bypass(Bypass::DisabledOutgoing),
     }
 }
 

@@ -3,11 +3,8 @@ use schemars::JsonSchema;
 
 use crate::{
     config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
-    outgoing::unix::{UnixTcpConfig, UnixTcpFileConfig},
-    util::MirrordToggleableConfig,
+    util::{MirrordToggleableConfig, VecOrSingle},
 };
-
-pub mod unix;
 
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
 #[config(map_to = "OutgoingFileConfig", derive = "JsonSchema")]
@@ -23,15 +20,9 @@ pub struct OutgoingConfig {
     #[config(unstable, default = false)]
     pub ignore_localhost: bool,
 
-    /// Control which paths for unix sockets (host-local interprocess communication) are connected
-    /// remotely. When your application connects to a path that is configured to be connected
-    /// remotely, mirrord will connect it to that path on the remote target.
-    ///
-    /// When disabled, all unix socket connections will be performed locally on your system.
-    ///
-    /// See [`UnixTcpConfig`].
-    #[config(nested, toggleable)]
-    pub unix_tcp: UnixTcpConfig,
+    /// Connect to these unix streams remotely (and to all other paths locally).
+    #[config(env = "MIRRORD_OUTGOING_REMOTE_UNIX_STREAMS")]
+    pub unix_streams: Option<VecOrSingle<String>>,
 }
 
 impl MirrordToggleableConfig for OutgoingFileConfig {
@@ -43,7 +34,9 @@ impl MirrordToggleableConfig for OutgoingFileConfig {
             udp: FromEnv::new("MIRRORD_UDP_OUTGOING")
                 .source_value()
                 .unwrap_or(Ok(false))?,
-            unix_tcp: UnixTcpFileConfig::disabled_config()?,
+            unix_streams: FromEnv::new("MIRRORD_OUTGOING_REMOTE_UNIX_STREAMS")
+                .source_value()
+                .transpose()?,
             ..Default::default()
         })
     }
