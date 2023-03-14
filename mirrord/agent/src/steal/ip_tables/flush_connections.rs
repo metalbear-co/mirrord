@@ -17,10 +17,6 @@ where
     pub fn new(inner: Box<T>) -> Self {
         FlushConnections { inner }
     }
-
-    pub fn inner(&self) -> &T {
-        &self.inner
-    }
 }
 
 #[async_trait]

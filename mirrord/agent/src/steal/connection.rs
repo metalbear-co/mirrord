@@ -399,9 +399,9 @@ impl TcpConnectionStealer {
             .ok()
             .and_then(|var| var.parse::<bool>().ok())
             .unwrap_or_default();
+        let iptables = iptables::new(false).unwrap();
 
-        self.iptables =
-            Some(SafeIpTables::new(iptables::new(false).unwrap(), flush_connections).await?);
+        self.iptables = Some(SafeIpTables::new(iptables, flush_connections).await?);
         Ok(())
     }
 
