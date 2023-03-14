@@ -9,7 +9,6 @@ use std::{
     collections::{HashMap, HashSet},
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
-    sync::Arc,
 };
 
 use actix_codec::Framed;
