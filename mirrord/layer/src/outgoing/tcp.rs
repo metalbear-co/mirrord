@@ -205,11 +205,11 @@ impl TcpOutgoingHandler {
                 // suggests using a `HashMap`).
                 self.connect_queue.push_back(channel_tx);
 
+                let remote_address = remote_address.try_into()?;
+                trace!("TCP Outgoing connection to {remote_address}.");
                 Ok(tx
                     .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(
-                        LayerConnect {
-                            remote_address: remote_address.try_into()?,
-                        },
+                        LayerConnect { remote_address },
                     )))
                     .await?)
             }
