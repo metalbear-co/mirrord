@@ -3,12 +3,12 @@ use std::{
     fmt::{Display, Formatter},
     io,
     io::ErrorKind,
-    net::SocketAddr,
+    net::SocketAddr as StdIpSocketAddr,
     path::PathBuf,
 };
 
 use bincode::{Decode, Encode};
-use socket2::SockAddr;
+use socket2::SockAddr as OsSockAddr;
 
 use crate::{
     outgoing::UnixAddr::{Abstract, Pathname},
@@ -21,7 +21,7 @@ pub mod udp;
 /// A serializable socket address type that can represent IP addresses or addresses of unix sockets.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum SocketAddress {
-    Ip(SocketAddr),
+    Ip(StdIpSocketAddr),
     Unix(UnixAddr),
 }
 
@@ -32,20 +32,20 @@ pub enum UnixAddr {
     Abstract(Vec<u8>),
 }
 
-impl From<SocketAddr> for SocketAddress {
-    fn from(addr: SocketAddr) -> Self {
+impl From<StdIpSocketAddr> for SocketAddress {
+    fn from(addr: StdIpSocketAddr) -> Self {
         SocketAddress::Ip(addr)
     }
 }
 
-impl TryFrom<UnixAddr> for SockAddr {
+impl TryFrom<UnixAddr> for OsSockAddr {
     type Error = io::Error;
 
     fn try_from(addr: UnixAddr) -> Result<Self, Self::Error> {
         match addr {
-            Pathname(path) => SockAddr::unix(path),
+            Pathname(path) => OsSockAddr::unix(path),
             // TODO
-            Abstract(bytes) => SockAddr::unix(String::from_utf8(bytes).map_err(|_| {
+            Abstract(bytes) => OsSockAddr::unix(String::from_utf8(bytes).map_err(|_| {
                 io::Error::new(
                     ErrorKind::Other,
                     "Not supporting unprintable abstract addresses.",
@@ -55,17 +55,14 @@ impl TryFrom<UnixAddr> for SockAddr {
     }
 }
 
-impl TryFrom<SocketAddress> for SocketAddr {
+impl TryFrom<SocketAddress> for StdIpSocketAddr {
     type Error = io::Error;
 
     fn try_from(addr: SocketAddress) -> Result<Self, Self::Error> {
         if let SocketAddress::Ip(socket_addr) = addr {
             Ok(socket_addr)
         } else {
-            Err(io::Error::new(
-                ErrorKind::Other,
-                "Not supporting unprintable abstract addresses.",
-            ))
+            Err(io::Error::new(ErrorKind::Other, "Not an IP address"))
         }
     }
 }
@@ -80,10 +77,10 @@ impl SocketAddress {
     }
 }
 
-impl TryFrom<SockAddr> for SocketAddress {
+impl TryFrom<OsSockAddr> for SocketAddress {
     type Error = SerializationError;
 
-    fn try_from(addr: SockAddr) -> Result<Self, Self::Error> {
+    fn try_from(addr: OsSockAddr) -> Result<Self, Self::Error> {
         addr.as_socket()
             .map(SocketAddress::Ip)
             .or_else(|| {
@@ -98,7 +95,7 @@ impl TryFrom<SockAddr> for SocketAddress {
     }
 }
 
-impl TryFrom<SocketAddress> for SockAddr {
+impl TryFrom<SocketAddress> for OsSockAddr {
     type Error = io::Error;
 
     fn try_from(addr: SocketAddress) -> Result<Self, Self::Error> {
