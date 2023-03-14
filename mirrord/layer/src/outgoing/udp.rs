@@ -164,7 +164,7 @@ impl UdpOutgoingHandler {
                                 )
                                 .await
                             {
-                                error!("Failed writing to mirror_stream with {:#?}!", fail);
+                                trace!("Failed writing to mirror_stream with {:#?}!", fail);
                                 break;
                             }
                         },
