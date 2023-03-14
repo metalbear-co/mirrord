@@ -3,7 +3,7 @@ use mirrord_protocol::Port;
 use tokio::process::Command;
 use tracing::warn;
 
-use crate::{error::Result, steal::ip_tables::redirect::AsyncRedirect};
+use crate::{error::Result, steal::ip_tables::redirect::Redirect};
 
 #[derive(Debug)]
 pub struct FlushConnections<T> {
@@ -12,7 +12,7 @@ pub struct FlushConnections<T> {
 
 impl<T> FlushConnections<T>
 where
-    T: AsyncRedirect,
+    T: Redirect,
 {
     pub fn new(inner: Box<T>) -> Self {
         FlushConnections { inner }
@@ -20,21 +20,21 @@ where
 }
 
 #[async_trait]
-impl<T> AsyncRedirect for FlushConnections<T>
+impl<T> Redirect for FlushConnections<T>
 where
-    T: AsyncRedirect + Send + Sync,
+    T: Redirect + Send + Sync,
 {
-    async fn async_mount_entrypoint(&self) -> Result<()> {
-        self.inner.async_mount_entrypoint().await
+    async fn mount_entrypoint(&self) -> Result<()> {
+        self.inner.mount_entrypoint().await
     }
 
-    async fn async_unmount_entrypoint(&self) -> Result<()> {
-        self.inner.async_unmount_entrypoint().await
+    async fn unmount_entrypoint(&self) -> Result<()> {
+        self.inner.unmount_entrypoint().await
     }
 
-    async fn async_add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+    async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.inner
-            .async_add_redirect(redirected_port, target_port)
+            .add_redirect(redirected_port, target_port)
             .await?;
 
         let conntrack = Command::new("conntrack")
@@ -55,9 +55,9 @@ where
         Ok(())
     }
 
-    async fn async_remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+    async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.inner
-            .async_add_redirect(redirected_port, target_port)
+            .remove_redirect(redirected_port, target_port)
             .await?;
 
         Ok(())

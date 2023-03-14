@@ -9,52 +9,17 @@ use crate::{
     steal::ip_tables::{chain::IPTableChain, IPTables, IPTABLE_PREROUTING},
 };
 
-pub trait Redirect {
-    const ENTRYPOINT: &'static str;
-
-    fn mount_entrypoint(&self) -> Result<()>;
-
-    fn unmount_entrypoint(&self) -> Result<()>;
-
-    /// Create port redirection
-    fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()>;
-    /// Remove port redirection
-    fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()>;
-}
-
 #[async_trait]
 #[enum_dispatch]
-pub trait AsyncRedirect {
-    async fn async_mount_entrypoint(&self) -> Result<()>;
+pub trait Redirect {
+    async fn mount_entrypoint(&self) -> Result<()>;
 
-    async fn async_unmount_entrypoint(&self) -> Result<()>;
+    async fn unmount_entrypoint(&self) -> Result<()>;
 
     /// Create port redirection
-    async fn async_add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()>;
+    async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()>;
     /// Remove port redirection
-    async fn async_remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()>;
-}
-
-#[async_trait]
-impl<T> AsyncRedirect for T
-where
-    T: Redirect + Sync,
-{
-    async fn async_mount_entrypoint(&self) -> Result<()> {
-        self.mount_entrypoint()
-    }
-
-    async fn async_unmount_entrypoint(&self) -> Result<()> {
-        self.unmount_entrypoint()
-    }
-
-    async fn async_add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.add_redirect(redirected_port, target_port)
-    }
-
-    async fn async_remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.remove_redirect(redirected_port, target_port)
-    }
+    async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()>;
 }
 
 pub struct PreroutingRedirect<IPT: IPTables> {
@@ -65,6 +30,8 @@ impl<IPT> PreroutingRedirect<IPT>
 where
     IPT: IPTables,
 {
+    const ENTRYPOINT: &'static str = "PREROUTING";
+
     pub fn create(ipt: Arc<IPT>) -> Result<Self> {
         let managed = IPTableChain::create(ipt, IPTABLE_PREROUTING.to_string())?;
 
@@ -78,13 +45,12 @@ where
     }
 }
 
+#[async_trait]
 impl<IPT> Redirect for PreroutingRedirect<IPT>
 where
-    IPT: IPTables,
+    IPT: IPTables + Send + Sync,
 {
-    const ENTRYPOINT: &'static str = "PREROUTING";
-
-    fn mount_entrypoint(&self) -> Result<()> {
+    async fn mount_entrypoint(&self) -> Result<()> {
         self.managed.inner().add_rule(
             Self::ENTRYPOINT,
             &format!("-j {}", self.managed.chain_name()),
@@ -93,7 +59,7 @@ where
         Ok(())
     }
 
-    fn unmount_entrypoint(&self) -> Result<()> {
+    async fn unmount_entrypoint(&self) -> Result<()> {
         self.managed.inner().remove_rule(
             Self::ENTRYPOINT,
             &format!("-j {}", self.managed.chain_name()),
@@ -102,7 +68,7 @@ where
         Ok(())
     }
 
-    fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+    async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         let redirect_rule =
             format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
 
@@ -111,7 +77,7 @@ where
         Ok(())
     }
 
-    fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+    async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         let redirect_rule =
             format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
 
@@ -139,8 +105,8 @@ mod tests {
     use super::*;
     use crate::steal::ip_tables::MockIPTables;
 
-    #[test]
-    fn add_redirect() {
+    #[tokio::test]
+    async fn add_redirect() {
         let mut mock = MockIPTables::new();
 
         mock.expect_create_chain()
@@ -164,11 +130,11 @@ mod tests {
 
         let prerouting = PreroutingRedirect::create(Arc::new(mock)).expect("Unable to create");
 
-        assert!(prerouting.add_redirect(69, 420).is_ok());
+        assert!(prerouting.add_redirect(69, 420).await.is_ok());
     }
 
-    #[test]
-    fn add_redirect_twice() {
+    #[tokio::test]
+    async fn add_redirect_twice() {
         let mut mock = MockIPTables::new();
 
         mock.expect_create_chain()
@@ -201,12 +167,12 @@ mod tests {
 
         let prerouting = PreroutingRedirect::create(Arc::new(mock)).expect("Unable to create");
 
-        assert!(prerouting.add_redirect(69, 420).is_ok());
-        assert!(prerouting.add_redirect(169, 1420).is_ok());
+        assert!(prerouting.add_redirect(69, 420).await.is_ok());
+        assert!(prerouting.add_redirect(169, 1420).await.is_ok());
     }
 
-    #[test]
-    fn remove_redirect() {
+    #[tokio::test]
+    async fn remove_redirect() {
         let mut mock = MockIPTables::new();
 
         mock.expect_create_chain()
@@ -229,6 +195,6 @@ mod tests {
 
         let prerouting = PreroutingRedirect::create(Arc::new(mock)).expect("Unable to create");
 
-        assert!(prerouting.remove_redirect(69, 420).is_ok());
+        assert!(prerouting.remove_redirect(69, 420).await.is_ok());
     }
 }

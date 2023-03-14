@@ -11,7 +11,7 @@ use crate::{
     steal::ip_tables::{
         flush_connections::FlushConnections,
         mesh::{MeshRedirect, MeshVendor},
-        redirect::{AsyncRedirect, PreroutingRedirect},
+        redirect::{PreroutingRedirect, Redirect},
     },
 };
 
@@ -100,7 +100,7 @@ impl IPTables for iptables::IPTables {
     }
 }
 
-#[enum_dispatch(AsyncRedirect)]
+#[enum_dispatch(Redirect)]
 pub enum Redirects<IPT: IPTables + Send + Sync> {
     Standard(PreroutingRedirect<IPT>),
     Mesh(MeshRedirect<IPT>),
@@ -134,7 +134,7 @@ where
             redirect
         };
 
-        redirect.async_mount_entrypoint().await?;
+        redirect.mount_entrypoint().await?;
 
         Ok(Self { redirect })
     }
@@ -165,7 +165,7 @@ where
         target_port: Port,
     ) -> Result<()> {
         self.redirect
-            .async_add_redirect(redirected_port, target_port)
+            .add_redirect(redirected_port, target_port)
             .await
     }
 
@@ -180,12 +180,12 @@ where
         target_port: Port,
     ) -> Result<()> {
         self.redirect
-            .async_remove_redirect(redirected_port, target_port)
+            .remove_redirect(redirected_port, target_port)
             .await
     }
 
     pub(crate) async fn cleanup(&self) -> Result<()> {
-        self.redirect.async_unmount_entrypoint().await
+        self.redirect.unmount_entrypoint().await
     }
 }
 

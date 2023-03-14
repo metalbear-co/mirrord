@@ -1,5 +1,6 @@
 use std::sync::{Arc, LazyLock};
 
+use async_trait::async_trait;
 use fancy_regex::Regex;
 use mirrord_protocol::Port;
 use nix::unistd::getgid;
@@ -34,6 +35,8 @@ impl<IPT> MeshRedirect<IPT>
 where
     IPT: IPTables,
 {
+    const ENTRYPOINT: &'static str = "OUTPUT";
+
     pub fn create(ipt: Arc<IPT>, vendor: MeshVendor) -> Result<Self> {
         let preroute = PreroutingRedirect::create(ipt.clone())?;
         let own_packet_filter = Self::get_own_packet_filter(&ipt, &vendor)?;
@@ -105,14 +108,13 @@ where
     }
 }
 
+#[async_trait]
 impl<IPT> Redirect for MeshRedirect<IPT>
 where
-    IPT: IPTables,
+    IPT: IPTables + Send + Sync,
 {
-    const ENTRYPOINT: &'static str = "OUTPUT";
-
-    fn mount_entrypoint(&self) -> Result<()> {
-        self.preroute.mount_entrypoint()?;
+    async fn mount_entrypoint(&self) -> Result<()> {
+        self.preroute.mount_entrypoint().await?;
 
         self.managed.inner().add_rule(
             Self::ENTRYPOINT,
@@ -122,8 +124,8 @@ where
         Ok(())
     }
 
-    fn unmount_entrypoint(&self) -> Result<()> {
-        self.preroute.unmount_entrypoint()?;
+    async fn unmount_entrypoint(&self) -> Result<()> {
+        self.preroute.unmount_entrypoint().await?;
 
         self.managed.inner().remove_rule(
             Self::ENTRYPOINT,
@@ -133,8 +135,10 @@ where
         Ok(())
     }
 
-    fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.preroute.add_redirect(redirected_port, target_port)?;
+    async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+        self.preroute
+            .add_redirect(redirected_port, target_port)
+            .await?;
 
         let redirect_rule = format!(
             "{} -m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}",
@@ -146,9 +150,10 @@ where
         Ok(())
     }
 
-    fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+    async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.preroute
-            .remove_redirect(redirected_port, target_port)?;
+            .remove_redirect(redirected_port, target_port)
+            .await?;
 
         let redirect_rule = format!(
             "{} -m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}",
