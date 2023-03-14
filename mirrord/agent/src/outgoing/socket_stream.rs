@@ -9,14 +9,20 @@ use std::{
     task::{Context, Poll},
 };
 
-use mirrord_protocol::outgoing::{
-    SocketAddress,
-    UnixAddr::{Abstract, Pathname},
+use mirrord_protocol::{
+    outgoing::{
+        SocketAddress,
+        UnixAddr::{Abstract, Pathname, Unnamed},
+    },
+    RemoteError, RemoteResult, ResponseError,
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     net::{TcpStream, UnixStream},
 };
+use tracing::trace;
+
+use crate::file::{get_root_path_from_optional_pid, resolve_path};
 
 pub enum SocketStream {
     Ip(TcpStream),
@@ -40,28 +46,45 @@ impl SocketStream {
         Ok(match self {
             SocketStream::Ip(tcp_stream) => SocketAddress::Ip(tcp_stream.local_addr()?),
             SocketStream::Unix(unix_stream) => {
-                // TODO: unwrap!
-                // TODO: If tokio's UnixStream's SocketAddress does not support abstract addresses
-                //      should we support only pathname? Or should we not use tokio?
-                SocketAddress::Unix(Pathname(
-                    unix_stream.local_addr()?.as_pathname().unwrap().to_owned(),
-                ))
+                // TODO: remove.
+                trace!("{unix_stream:?}");
+                let local_address = unix_stream.local_addr()?;
+                trace!("{local_address:?}");
+                SocketAddress::Unix(if local_address.is_unnamed() {
+                    Unnamed
+                } else {
+                    // TODO: remove this unwrap, handle abstract addresses.
+                    Pathname(local_address.as_pathname().unwrap().to_owned())
+                })
             }
         })
     }
 
-    pub async fn connect(addr: SocketAddress) -> io::Result<Self> {
-        Ok(match addr {
-            SocketAddress::Ip(addr) => Self::from(TcpStream::connect(addr).await?),
-            SocketAddress::Unix(Pathname(path)) => Self::from(UnixStream::connect(&path).await?),
+    pub async fn connect(addr: SocketAddress, pid: Option<u64>) -> RemoteResult<Self> {
+        match addr {
+            SocketAddress::Ip(addr) => Ok(Self::from(TcpStream::connect(addr).await?)),
+            SocketAddress::Unix(Pathname(path)) => {
+                // In order to connect to a unix socket on the target pod, instead of connecting to
+                // /the/target/path we connect to /proc/<PID>/root/the/target/path.
+                let root_path = get_root_path_from_optional_pid(pid);
+                let final_path = resolve_path(path, root_path)?;
+
+                Ok(Self::from(UnixStream::connect(&final_path).await?))
+            }
             SocketAddress::Unix(Abstract(bytes)) => {
                 // Tokio's UnixStream does not support connecting to an abstract address so we first
                 // create an std UnixStream, then we convert it to a tokio UnixStream.
-                Self::from(UnixStream::from_std(StdUnixStream::connect_addr(
-                    &<StdUnixSocketAddr as SocketAddrExt>::from_abstract_name(bytes)?,
-                )?)?)
+                Ok(Self::from(UnixStream::from_std(
+                    StdUnixStream::connect_addr(
+                        &<StdUnixSocketAddr as SocketAddrExt>::from_abstract_name(bytes)?,
+                    )?,
+                )?))
             }
-        })
+            SocketAddress::Unix(Unnamed) => {
+                // Cannot connect to unnamed socket by address.
+                Err(ResponseError::Remote(RemoteError::InvalidAddress(addr)))
+            }
+        }
     }
 }
 

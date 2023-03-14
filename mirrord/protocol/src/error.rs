@@ -1,7 +1,4 @@
-use std::{
-    io,
-    net::{AddrParseError, SocketAddr},
-};
+use std::{io, net::AddrParseError};
 
 use bincode::{Decode, Encode};
 use thiserror::Error;
@@ -55,7 +52,7 @@ pub enum RemoteError {
     AddressParsing(String),
 
     #[error("Failed operation to `SocketAddr` with `{0}`!")]
-    InvalidAddress(SocketAddr),
+    InvalidAddress(SocketAddress),
 
     /// Especially relevant for the outgoing traffic feature, when `golang` attempts to connect
     /// on both IPv6 and IPv4.

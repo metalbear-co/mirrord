@@ -47,6 +47,7 @@ async fn layer_recv(
     writers: &mut HashMap<ConnectionId, WriteHalf<SocketStream>>,
     readers: &mut StreamMap<ConnectionId, ReaderStream<ReadHalf<SocketStream>>>,
     daemon_tx: Sender<DaemonTcpOutgoing>,
+    pid: Option<u64>,
 ) -> Result<()> {
     match layer_message {
         // [user] -> [layer] -> [agent] -> [remote host]
@@ -56,7 +57,7 @@ async fn layer_recv(
             // invalid `IP:port` combination, and hangs until the go socket times out.
             let daemon_connect = timeout(
                 Duration::from_millis(3000),
-                SocketStream::connect(remote_address.clone()),
+                SocketStream::connect(remote_address.clone(), pid),
             )
             .await
             .map_err(|elapsed| {
@@ -128,7 +129,7 @@ impl TcpOutgoingApi {
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
         let task = run_thread_in_namespace(
-            Self::interceptor_task(layer_rx, daemon_tx),
+            Self::interceptor_task(layer_rx, daemon_tx, pid),
             "TcpOutgoing".to_string(),
             pid,
             "net",
@@ -146,6 +147,7 @@ impl TcpOutgoingApi {
     async fn interceptor_task(
         mut layer_rx: Receiver<Layer>,
         daemon_tx: Sender<Daemon>,
+        pid: Option<u64>,
     ) -> Result<()> {
         let mut allocator: IndexAllocator<ConnectionId> = IndexAllocator::new();
 
@@ -161,7 +163,7 @@ impl TcpOutgoingApi {
 
                 // [layer] -> [agent]
                 Some(layer_message) = layer_rx.recv() => {
-                    layer_recv(layer_message, &mut allocator, &mut writers, &mut readers, daemon_tx.clone()).await?
+                    layer_recv(layer_message, &mut allocator, &mut writers, &mut readers, daemon_tx.clone(), pid).await?
                 }
 
                 // [remote] -> [agent] -> [layer] -> [user]

@@ -11,7 +11,7 @@ use bincode::{Decode, Encode};
 use socket2::SockAddr as OsSockAddr;
 
 use crate::{
-    outgoing::UnixAddr::{Abstract, Pathname},
+    outgoing::UnixAddr::{Abstract, Pathname, Unnamed},
     ConnectionId, SerializationError,
 };
 
@@ -30,6 +30,7 @@ pub enum SocketAddress {
 pub enum UnixAddr {
     Pathname(PathBuf),
     Abstract(Vec<u8>),
+    Unnamed,
 }
 
 impl From<StdIpSocketAddr> for SocketAddress {
@@ -51,6 +52,7 @@ impl TryFrom<UnixAddr> for OsSockAddr {
                     "Not supporting unprintable abstract addresses.",
                 )
             })?),
+            UnixAddr::Unnamed => OsSockAddr::unix(""),
         }
     }
 }
@@ -91,6 +93,7 @@ impl TryFrom<OsSockAddr> for SocketAddress {
                 addr.as_abstract_namespace()
                     .map(|slice| SocketAddress::Unix(Abstract(slice.to_vec())))
             })
+            .or_else(|| addr.is_unnamed().then_some(SocketAddress::Unix(Unnamed)))
             .ok_or(SerializationError::SocketAddress)
     }
 }
@@ -113,6 +116,7 @@ impl Display for SocketAddress {
             SocketAddress::Ip(ip_address) => ip_address.to_string(),
             SocketAddress::Unix(Pathname(path)) => path.to_string_lossy().to_string(),
             SocketAddress::Unix(Abstract(name)) => String::from_utf8_lossy(name).to_string(),
+            SocketAddress::Unix(Unnamed) => "<UNNAMED-UNIX-ADDRESS>".to_string(),
         };
         write!(f, "{addr}")
     }
