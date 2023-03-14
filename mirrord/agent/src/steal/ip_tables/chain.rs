@@ -32,26 +32,30 @@ where
         })
     }
 
-    pub fn load(inner: Arc<IPT>, chain: String) -> Result<Self> {
-        let rules = inner.list_rules(&chain)?.len();
+    // pub fn load(inner: Arc<IPT>, chain: String) -> Result<Self> {
+    //     let rules = inner.list_rules(&chain)?.len();
 
-        if rules == 0 {
-            return Err(AgentError::IPTablesError(format!(
-                "Unable to load chain {chain} because no rules exist"
-            )));
-        }
+    //     if rules == 0 {
+    //         return Err(AgentError::IPTablesError(format!(
+    //             "Unable to load chain {chain} because no rules exist"
+    //         )));
+    //     }
 
-        let chain_size = AtomicI32::from((rules - 1) as i32);
+    //     let chain_size = AtomicI32::from((rules - 1) as i32);
 
-        Ok(IPTableChain {
-            inner,
-            chain,
-            chain_size,
-        })
+    //     Ok(IPTableChain {
+    //         inner,
+    //         chain,
+    //         chain_size,
+    //     })
+    // }
+
+    pub fn chain_name(&self) -> &str {
+        &self.chain
     }
 
-    pub fn get_chain_name(&self) -> &str {
-        &self.chain
+    pub fn inner(&self) -> &IPT {
+        &self.inner
     }
 
     pub fn add_rule(&self, rule: &str) -> Result<i32> {

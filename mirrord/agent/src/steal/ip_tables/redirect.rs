@@ -26,6 +26,8 @@ pub static IPTABLE_PREROUTING: LazyLock<String> = LazyLock::new(|| {
 pub trait Redirect {
     const ENTRYPOINT: &'static str;
 
+    fn mount_entrypoint(&self) -> Result<()>;
+
     /// Create port redirection
     fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()>;
     /// Remove port redirection
@@ -35,7 +37,7 @@ pub trait Redirect {
 #[async_trait]
 #[enum_dispatch]
 pub trait AsyncRedirect {
-    fn get_entrypoint(&self) -> &str;
+    async fn async_mount_entrypoint(&self) -> Result<()>;
 
     /// Create port redirection
     async fn async_add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()>;
@@ -48,8 +50,8 @@ impl<T> AsyncRedirect for T
 where
     T: Redirect + Sync,
 {
-    fn get_entrypoint(&self) -> &str {
-        T::ENTRYPOINT
+    async fn async_mount_entrypoint(&self) -> Result<()> {
+        self.mount_entrypoint()
     }
 
     async fn async_add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
@@ -81,6 +83,15 @@ where
     IPT: IPTables,
 {
     const ENTRYPOINT: &'static str = "PREROUTING";
+
+    fn mount_entrypoint(&self) -> Result<()> {
+        self.managed.inner().add_rule(
+            Self::ENTRYPOINT,
+            &format!("-j {}", self.managed.chain_name()),
+        )?;
+
+        Ok(())
+    }
 
     fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         let redirect_rule =

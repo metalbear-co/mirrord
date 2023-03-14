@@ -28,8 +28,8 @@ impl<T> AsyncRedirect for FlushConnections<T>
 where
     T: AsyncRedirect + Send + Sync,
 {
-    fn get_entrypoint(&self) -> &str {
-        self.inner.get_entrypoint()
+    async fn async_mount_entrypoint(&self) -> Result<()> {
+        self.inner.async_mount_entrypoint().await
     }
 
     async fn async_add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {

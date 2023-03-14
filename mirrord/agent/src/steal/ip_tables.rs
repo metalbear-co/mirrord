@@ -1,7 +1,4 @@
-use std::{
-    ops::Deref,
-    sync::{Arc, LazyLock},
-};
+use std::sync::{Arc, LazyLock};
 
 use enum_dispatch::enum_dispatch;
 use fancy_regex::Regex;
@@ -12,7 +9,6 @@ use crate::error::AgentError;
 use crate::{
     error::Result,
     steal::ip_tables::{
-        chain::IPTableChain,
         flush_connections::FlushConnections,
         mesh::{MeshRedirect, MeshVendor},
         redirect::{AsyncRedirect, PreroutingRedirect},
@@ -102,21 +98,6 @@ pub enum Redirects<IPT: IPTables + Send + Sync> {
     FlushConnections(FlushConnections<Redirects<IPT>>),
 }
 
-impl<IPT> Deref for Redirects<IPT>
-where
-    IPT: IPTables + Send + Sync,
-{
-    type Target = IPTableChain<IPT>;
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            Redirects::Standard(prerouting) => prerouting.deref(),
-            Redirects::Mesh(mesh) => mesh.deref(),
-            Redirects::FlushConnections(flushed) => flushed.inner().deref(),
-        }
-    }
-}
-
 /// Wrapper struct for IPTables so it flushes on drop.
 pub(crate) struct SafeIpTables<IPT: IPTables + Send + Sync> {
     redirect: Redirects<IPT>,
@@ -131,7 +112,7 @@ impl<IPT> SafeIpTables<IPT>
 where
     IPT: IPTables + Send + Sync,
 {
-    pub(super) fn new(ipt: IPT, flush_connections: bool) -> Result<Self> {
+    pub(super) async fn new(ipt: IPT, flush_connections: bool) -> Result<Self> {
         let redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
             Redirects::Mesh(MeshRedirect::create(Arc::new(ipt), vendor)?)
         } else {
@@ -143,6 +124,8 @@ where
         } else {
             redirect
         };
+
+        redirect.async_mount_entrypoint().await?;
 
         Ok(Self { redirect })
     }
@@ -231,7 +214,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::new(mock, false).expect("Create Failed");
+        let ipt = SafeIpTables::new(mock, false).await.expect("Create Failed");
 
         assert!(ipt.add_redirect(69, 420).await.is_ok());
 
@@ -364,7 +347,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::new(mock, false).expect("Create Failed");
+        let ipt = SafeIpTables::new(mock, false).await.expect("Create Failed");
 
         assert!(ipt.add_redirect(69, 420).await.is_ok());
 

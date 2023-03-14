@@ -394,16 +394,14 @@ impl TcpConnectionStealer {
     }
 
     /// Initialize iptables member, which creates an iptables chain for our rules.
-    fn init_iptables(&mut self) -> Result<()> {
+    async fn init_iptables(&mut self) -> Result<()> {
         let flush_connections = std::env::var("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS")
             .ok()
             .and_then(|var| var.parse::<bool>().ok())
             .unwrap_or_default();
 
-        self.iptables = Some(SafeIpTables::new(
-            iptables::new(false).unwrap(),
-            flush_connections,
-        )?);
+        self.iptables =
+            Some(SafeIpTables::new(iptables::new(false).unwrap(), flush_connections).await?);
         Ok(())
     }
 
@@ -415,7 +413,7 @@ impl TcpConnectionStealer {
     async fn port_subscribe(&mut self, client_id: ClientId, port_steal: StealType) -> Result<()> {
         if self.iptables.is_none() {
             // TODO: make the initialization internal to SafeIpTables.
-            self.init_iptables()?;
+            self.init_iptables().await?;
         }
         let mut first_subscriber = false;
 

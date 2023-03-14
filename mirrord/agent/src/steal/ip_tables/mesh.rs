@@ -1,7 +1,4 @@
-use std::{
-    ops::Deref,
-    sync::{Arc, LazyLock},
-};
+use std::sync::{Arc, LazyLock};
 
 use fancy_regex::Regex;
 use mirrord_protocol::Port;
@@ -113,6 +110,17 @@ where
 {
     const ENTRYPOINT: &'static str = "OUTPUT";
 
+    fn mount_entrypoint(&self) -> Result<()> {
+        self.preroute.mount_entrypoint()?;
+
+        self.managed.inner().add_rule(
+            Self::ENTRYPOINT,
+            &format!("-j {}", self.managed.chain_name()),
+        )?;
+
+        Ok(())
+    }
+
     fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.preroute.add_redirect(redirected_port, target_port)?;
 
@@ -138,14 +146,6 @@ where
         self.managed.remove_rule(&redirect_rule)?;
 
         Ok(())
-    }
-}
-
-impl<IPT> Deref for MeshRedirect<IPT> {
-    type Target = IPTableChain<IPT>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.managed
     }
 }
 
