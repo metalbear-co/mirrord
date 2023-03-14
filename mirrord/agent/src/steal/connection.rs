@@ -546,15 +546,16 @@ impl TcpConnectionStealer {
         message: DaemonTcp,
     ) -> Result<(), AgentError> {
         if let Some(sender) = self.clients.get(client_id) {
-            sender.send(message).await.map_err(|fail| {
+            if let Err(fail) = sender.send(message).await {
                 warn!(
                     "Failed to send message to client {} with {:#?}!",
                     client_id, fail
                 );
 
                 let _ = self.close_client(*client_id).await;
-                fail
-            })?;
+
+                return Err(fail.into());
+            }
         }
 
         Ok(())
