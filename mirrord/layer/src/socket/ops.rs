@@ -526,16 +526,18 @@ pub(super) fn accept(
             })?
     };
 
-    let (local_ip_address, remote_ip_address) = {
+    let (local_address, remote_address) = {
         CONNECTION_QUEUE
             .lock()?
             .pop_front(id)
             .bypass(Bypass::LocalFdNotFound(sockfd))
-            .map(|socket| (socket.local_address, socket.remote_address))?
+            .map(|socket| {
+                (
+                    SocketAddress::Ip(socket.local_address),
+                    SocketAddress::Ip(socket.remote_address),
+                )
+            })?
     };
-
-    let remote_address = SocketAddress::Ip(remote_ip_address);
-    let local_address = SocketAddress::Ip(local_ip_address);
 
     let state = SocketState::Connected(Connected {
         remote_address: remote_address.clone(),
