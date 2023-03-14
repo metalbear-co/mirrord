@@ -585,7 +585,7 @@
           ]
         },
         "unix_tcp": {
-          "description": "Control which paths for unix sockets (host-local interprocess communication) are connected remotely. When your application connects to a path that is configured to be connected remotely, mirrord will connect it to that path on the remote target.\n\nWhen disabled, all unix socket connections will be preformed locally on your system.\n\nSee [`UnixTcpConfig`].",
+          "description": "Control which paths for unix sockets (host-local interprocess communication) are connected remotely. When your application connects to a path that is configured to be connected remotely, mirrord will connect it to that path on the remote target.\n\nWhen disabled, all unix socket connections will be performed locally on your system.\n\nSee [`UnixTcpConfig`].",
           "anyOf": [
             {
               "$ref": "#/definitions/ToggleableConfig_for_UnixTcpFileConfig"
