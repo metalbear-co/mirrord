@@ -9,6 +9,7 @@ use std::{
     collections::{HashMap, HashSet},
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
+    sync::Arc,
 };
 
 use actix_codec::Framed;
@@ -42,7 +43,10 @@ use crate::{
     runtime::{get_container, Container, ContainerRuntime},
     steal::{
         connection::TcpConnectionStealer,
-        ip_tables::{IPTABLE_MESH, IPTABLE_MESH_ENV, IPTABLE_PREROUTING, IPTABLE_PREROUTING_ENV},
+        ip_tables::{
+            SafeIpTables, IPTABLE_MESH, IPTABLE_MESH_ENV, IPTABLE_PREROUTING,
+            IPTABLE_PREROUTING_ENV,
+        },
         StealerCommand,
     },
     util::{run_thread_in_namespace, ClientId, IndexAllocator},
