@@ -184,7 +184,7 @@ where
             .await
     }
 
-    pub(super) async fn cleanup(&self) -> Result<()> {
+    pub(crate) async fn cleanup(&self) -> Result<()> {
         self.redirect.async_unmount_entrypoint().await
     }
 }
