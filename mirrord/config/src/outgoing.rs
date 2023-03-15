@@ -21,7 +21,7 @@ pub struct OutgoingConfig {
     pub ignore_localhost: bool,
 
     /// Connect to these unix streams remotely (and to all other paths locally).
-    #[config(env = "MIRRORD_OUTGOING_REMOTE_UNIX_STREAMS")]
+    #[config(unstable, env = "MIRRORD_OUTGOING_REMOTE_UNIX_STREAMS")]
     pub unix_streams: Option<VecOrSingle<String>>,
 }
 
