@@ -3362,6 +3362,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-unix-socket-client"
+version = "3.32.2"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"

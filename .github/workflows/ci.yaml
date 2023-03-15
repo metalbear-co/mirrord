@@ -488,6 +488,9 @@ jobs:
       - run: |
           cd tests/rust-e2e-fileops
           cargo build
+      - run: |
+          cd tests/rust-unix-socket-client
+          cargo build
       - name: download image
         uses: actions/download-artifact@v2
         with:
