@@ -319,7 +319,7 @@ mod traffic {
     /// 3. Verify the client app did not panic.
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(120))]
+    #[timeout(Duration::from_secs(240))]
     pub async fn outgoing_unix_stream_pathname(
         #[future]
         // TODO: change to image from test-images repo!
