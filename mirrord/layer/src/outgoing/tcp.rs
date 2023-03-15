@@ -304,8 +304,9 @@ impl TcpOutgoingHandler {
                                     socket
                                 }
                             };
-                            // TODO: make backlog not a literal.
-                            layer_socket.listen(16)?;
+                            // We are only accepting one connection on this socket, so setting
+                            // backlog to 1.
+                            layer_socket.listen(1)?;
 
                             Ok((connection_id, layer_socket, local_address.try_into()?))
                         },
