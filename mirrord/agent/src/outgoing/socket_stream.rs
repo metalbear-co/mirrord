@@ -49,23 +49,8 @@ impl SocketStream {
                 SocketAddress::Unix(if local_address.is_unnamed() {
                     Unnamed
                 } else {
-                    if let Some(path) = local_address.as_pathname() {
-                        Pathname(path.to_owned())
-                    } else {
-                        // TODO: we would need an `as_abstract_name` in
-                        // [`tokio::net::unix::SocketAddr`].
-                        Abstract(
-                            unix_stream
-                                .clone()
-                                .into_std()
-                                .unwrap()
-                                .local_addr()
-                                .unwrap()
-                                .as_abstract_name()
-                                .unwrap()
-                                .to_vec(),
-                        )
-                    }
+                    // Unwrap: we probably don't connect from a local abstract address.
+                    Pathname(local_address.as_pathname().unwrap().to_owned())
                 })
             }
         })
