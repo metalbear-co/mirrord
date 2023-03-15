@@ -73,6 +73,13 @@ impl Default for TcpOutgoingHandler {
 }
 
 impl TcpOutgoingHandler {
+    /// # Arguments
+    ///
+    /// * `layer_tx` - A channel for sending data from the local app to the main task (to be
+    ///   forwarded to the agent).
+    /// * `layer_socket` - A bound and listening socket that the user application will connect to
+    ///   (instead of to its actual remote target).
+    /// * `remote_rx` - A channel for reading incoming data that was forwarded from the remote peer.
     #[tracing::instrument(level = "trace", skip(layer_tx, layer_socket, remote_rx))]
     async fn interceptor_task(
         layer_tx: Sender<LayerTcpOutgoing>,
@@ -87,16 +94,27 @@ impl TcpOutgoingHandler {
             .accept()
             .inspect_err(|err| error!("{err}"))
             .unwrap();
-        // TODO: unwrap
-        mirror_stream.set_nonblocking(true).unwrap();
-        if mirror_stream.local_addr().unwrap().is_unix() {
-            // TODO: unwrap
-            let mirror_stream = UnixStream::from_std(mirror_stream.into()).unwrap();
+
+        mirror_stream
+            .set_nonblocking(true)
+            .inspect_err(|err| error!("Error {err:?} when trying to set stream to nonblocking."))
+            .unwrap();
+
+        // We unwrap local_addr, because the socket must be bound at this point, so local_addr must
+        // succeed.
+        let local_addr = mirror_stream.local_addr().unwrap();
+        if local_addr.is_unix() {
+            let mirror_stream = UnixStream::from_std(mirror_stream.into())
+                .map_err(|err| error!("Invalid unix stream socket address: {err:?}"))
+                .unwrap();
+            Self::forward_local_remote(layer_tx, connection_id, mirror_stream, remote_stream).await;
+        } else if local_addr.is_ipv6() || local_addr.is_ipv4() {
+            let mirror_stream = TcpStream::from_std(mirror_stream.into())
+                .map_err(|err| error!("Invalid IP socket address: {err:?}"))
+                .unwrap();
             Self::forward_local_remote(layer_tx, connection_id, mirror_stream, remote_stream).await;
         } else {
-            // TODO: unwrap
-            let mirror_stream = TcpStream::from_std(mirror_stream.into()).unwrap();
-            Self::forward_local_remote(layer_tx, connection_id, mirror_stream, remote_stream).await;
+            error!("Unsupported socket address family, not intercepting.")
         }
     }
 
