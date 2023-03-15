@@ -20,7 +20,6 @@ use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     net::{TcpStream, UnixStream},
 };
-use tracing::trace;
 
 use crate::file::{get_root_path_from_optional_pid, resolve_path};
 
@@ -46,15 +45,27 @@ impl SocketStream {
         Ok(match self {
             SocketStream::Ip(tcp_stream) => SocketAddress::Ip(tcp_stream.local_addr()?),
             SocketStream::Unix(unix_stream) => {
-                // TODO: remove.
-                trace!("{unix_stream:?}");
                 let local_address = unix_stream.local_addr()?;
-                trace!("{local_address:?}");
                 SocketAddress::Unix(if local_address.is_unnamed() {
                     Unnamed
                 } else {
-                    // TODO: remove this unwrap, handle abstract addresses.
-                    Pathname(local_address.as_pathname().unwrap().to_owned())
+                    if let Some(path) = local_address.as_pathname() {
+                        Pathname(path.to_owned())
+                    } else {
+                        // TODO: we would need an `as_abstract_name` in
+                        // [`tokio::net::unix::SocketAddr`].
+                        Abstract(
+                            unix_stream
+                                .clone()
+                                .into_std()
+                                .unwrap()
+                                .local_addr()
+                                .unwrap()
+                                .as_abstract_name()
+                                .unwrap()
+                                .to_vec(),
+                        )
+                    }
                 })
             }
         })
