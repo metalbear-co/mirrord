@@ -21,6 +21,16 @@ pub struct OutgoingConfig {
     pub ignore_localhost: bool,
 
     /// Connect to these unix streams remotely (and to all other paths locally).
+    ///
+    /// You can either specify a single value or an array of values.
+    /// Each value is interpreted as a regular expression
+    /// ([Supported Syntax](https://docs.rs/regex/1.7.1/regex/index.html#syntax)).
+    ///
+    /// When your application connects to a unix socket, the target address will be converted to a
+    /// string (non-utf8 bytes are replaced by a placeholder character) and matched against the set
+    /// of regexes specified here. If there is a match, mirrord will connect your application with
+    /// the target unix socket address on the target pod. Otherwise, it will leave the connection
+    /// to happen locally on your machine.
     #[config(unstable, env = "MIRRORD_OUTGOING_REMOTE_UNIX_STREAMS")]
     pub unix_streams: Option<VecOrSingle<String>>,
 }
