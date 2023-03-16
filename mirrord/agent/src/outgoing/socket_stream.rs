@@ -23,6 +23,8 @@ use tokio::{
 
 use crate::file::{get_root_path_from_optional_pid, resolve_path};
 
+/// An enum that can mostly be used like tokio's [`TcpStream`] and [`UnixStream`], but can hold
+/// either of them.
 pub enum SocketStream {
     Ip(TcpStream),
     Unix(UnixStream),
@@ -41,6 +43,7 @@ impl From<UnixStream> for SocketStream {
 }
 
 impl SocketStream {
+    /// Get the local address on this socket.
     pub fn local_addr(&self) -> io::Result<SocketAddress> {
         Ok(match self {
             SocketStream::Ip(tcp_stream) => SocketAddress::Ip(tcp_stream.local_addr()?),
@@ -56,6 +59,7 @@ impl SocketStream {
         })
     }
 
+    /// Connect to a given [`SocketAddress`], whether IP or unix.
     pub async fn connect(addr: SocketAddress, pid: Option<u64>) -> RemoteResult<Self> {
         match addr {
             SocketAddress::Ip(addr) => Ok(Self::from(TcpStream::connect(addr).await?)),
