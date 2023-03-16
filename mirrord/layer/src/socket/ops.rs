@@ -13,7 +13,7 @@ use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::{dns::LookupRecord, file::OpenOptionsInternal};
 use socket2::SockAddr;
 use tokio::sync::oneshot;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace};
 
 use super::{hooks::*, *};
 use crate::{
@@ -652,6 +652,7 @@ pub(super) fn getaddrinfo(
 }
 
 /// Retrieves the `hostname` from the agent's `/etc/hostname` to be used by [`gethostname`]
+#[tracing::instrument(level = "debug")]
 fn remote_hostname_string() -> Detour<CString> {
     let hostname_path = PathBuf::from(r"/etc/hostname");
 
@@ -663,22 +664,63 @@ fn remote_hostname_string() -> Detour<CString> {
         },
     )?;
 
-    let hostname_file = file::ops::read(hostname_fd, 256)?;
+    let hostname_file = file::ops::read(Detour::Success(hostname_fd), 256)?;
+
+    debug!("HOSTNAME STRING read {hostname_file:#?}");
 
     close_layer_fd(hostname_fd);
+
+    OPEN_FILES
+        .lock()
+        .unwrap()
+        .iter()
+        .for_each(|(k, v)| info!("HOSTNAME AFTER CLOSE HAS {k:#?} {v:#?}"));
 
     CString::new(
         hostname_file
             .bytes
             .into_iter()
-            .take(hostname_file.read_amount as usize - 1)
+            // Take until new-line.
+            .take_while(|byte| *byte != b'\n')
+            // .take(hostname_file.read_amount as usize - 1)
             .collect::<Vec<_>>(),
     )
+    .inspect(|hostname| debug!("HOSTNAME we have the string {hostname:#?}"))
     .map(Detour::Success)?
 }
 
 /// Resolve hostname from remote host with caching for the result
 #[tracing::instrument(level = "trace")]
 pub(super) fn gethostname() -> Detour<&'static CString> {
+    OPEN_FILES
+        .lock()
+        .unwrap()
+        .iter()
+        .for_each(|(k, v)| info!("GETHOSTNAME FILES ARE {k:#?} {v:#?}"));
+
+    let wrong_file = OPEN_FILES.lock().unwrap().remove(&32780);
+    if let Some(wrong_file) = wrong_file {
+        info!("GETHOSTNAME WE SHOULD HAVE FIXED {wrong_file:#?}");
+        OPEN_FILES.lock().unwrap().insert(12, wrong_file);
+
+        OPEN_FILES
+            .lock()
+            .unwrap()
+            .iter()
+            .for_each(|(k, v)| info!("GETHOSTNAME WE HAVE CHANGED THE FILES {k:#?} {v:#?}"));
+    }
+
+    let right_file = OPEN_FILES.lock().unwrap().remove(&12);
+    if let Some(right_file) = right_file {
+        info!("GETHOSTNAME WE SHOULD HAVE FIXED AGAIN? {right_file:#?}");
+        OPEN_FILES.lock().unwrap().insert(12, right_file);
+
+        OPEN_FILES
+            .lock()
+            .unwrap()
+            .iter()
+            .for_each(|(k, v)| info!("GETHOSTNAME WE HAVE CHANGED THE FILES AGAIN? {k:#?} {v:#?}"));
+    }
+
     HOSTNAME.get_or_detour_init(remote_hostname_string)
 }

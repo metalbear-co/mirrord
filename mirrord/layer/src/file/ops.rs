@@ -16,7 +16,7 @@ use mirrord_protocol::file::{
     XstatResponse,
 };
 use tokio::sync::oneshot;
-use tracing::{error, info, trace};
+use tracing::{debug, error, info, trace};
 
 use super::{filter::FILE_FILTER, *};
 use crate::{
@@ -35,15 +35,17 @@ pub(crate) struct RemoteFile {
     pub(crate) error: Option<NonZeroI64>,
     pub(crate) is_eof: bool,
     pub(crate) open_options: OpenOptionsInternal,
+    pub(crate) path: Option<PathBuf>,
 }
 
 impl RemoteFile {
-    pub(crate) fn new(fd: u64, open_options: OpenOptionsInternal) -> Self {
+    pub(crate) fn new(fd: u64, open_options: OpenOptionsInternal, path: Option<PathBuf>) -> Self {
         Self {
             fd,
             open_options,
             error: Default::default(),
             is_eof: Default::default(),
+            path,
         }
     }
 }
@@ -156,7 +158,7 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let requesting_file = Open {
-        path,
+        path: path.clone(),
         open_options,
         file_channel_tx,
     };
@@ -173,24 +175,69 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
 
     OPEN_FILES.lock().unwrap().insert(
         local_file_fd,
-        Arc::new(RwLock::new(RemoteFile::new(remote_fd, open_options))),
+        Arc::new(RwLock::new(RemoteFile::new(
+            remote_fd,
+            open_options,
+            Some(path),
+        ))),
     );
 
     Detour::Success(local_file_fd)
 }
 
+// TODO(alex) [high] 2023-03-14: Few things can go wrong here:
+// 1. If we try to `fopen` a file that is being ignored;
+// 2. or we don't have enought permissions;
+// 3. or the file doesn't exist;
+//   - Segfaults.
+//
+// But this doesn't crash on `fopen` itself, it does a bit later? Must test with `fopen` `fclose`
+// pair and expand with more `f` stream functions later.
+//
+// Tested cases:
+//
+// 1. File exists: write + read_write [/tmp]: fopen -> fseek -> fclose (works);
+// 2. File exists: write + read_write [/tmp]: fopen -> stat -> fseek -> fclose (works);
+// 3. File exists: write + read_write [/tmp]: fopen -> fileno -> stat -> fseek -> fclose (works);
+// 4. File exists: read + read_only [/tmp]: fopen -> fclose (works);
+// 5. File exists: read + read_only [/tmp]: fopen -> fseek -> fclose (works);
+// 6. File exists: read + read_only [/tmp]: fopen -> stat -> fseek -> fclose (works);
+// 7. File exists: read + read_only [/tmp]: fopen -> fileno -> stat -> fseek -> fclose (works);
+// 8. File NOT exists: read: fopen -> fclose (breaks);
+//
+// Gotta test 8 better, with the proper file that python was trying to open, to see if this is the
+// case of non-existance.
+//
+// ADD(alex) [high] 2023-03-15: Making `/etc/resolv.conf` and `/etc/hosts` read locally doesn't
+// segfault, but mirror mode doesn't seem to work (curl doesn't mirror anything).
+//
+// Why are these 2 files problematic?
+// - Maybe it's some mixing of `/etc` `IGNORE_FILES`?
+// - Do they work in simpler examples?
+//
+//   1. Tested with `read_only` for both `/etc` files, and they work;
+//
 /// Calls [`open`] and returns a [`FILE`] pointer based on the **local** `fd`.
 #[tracing::instrument(level = "debug")]
 pub(crate) fn fopen(path: Detour<PathBuf>, mode: Detour<OpenOptionsInternal>) -> Detour<*mut FILE> {
     let open_options = mode?;
+    let path = path?;
 
-    let local_file_fd = open(path, open_options)?;
+    let local_file_fd = open(Detour::Success(path.clone()), open_options)?;
+
+    let debug_fds: Vec<RawFd> = OPEN_FILES.lock().unwrap().keys().copied().collect();
+    info!("fopen has fds {debug_fds:#?}");
+
     let result = OPEN_FILES
-        .lock()?
+        .lock()
+        .inspect_err(|_| warn!("fopen failed locking OPEN_FILES!"))?
         .get_key_value(&local_file_fd)
+        .inspect(|(k, v)| info!("fopen has key {k:#?} and file {v:#?}"))
         .ok_or(Bypass::LocalFdNotFound(local_file_fd))
         // Convert the fd into a `*FILE`, this is be ok as long as `OPEN_FILES` holds the fd.
         .map(|(local_fd, _)| local_fd as *const _ as *mut _)?;
+
+    info!("fopen result is {result:#?} for path {path:#?}");
 
     Detour::Success(result)
 }
@@ -271,7 +318,14 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
 /// We're assuming that most pointers won't have such small values, and that the user won't reach a
 /// big enough list of fds to get close to normal pointer address' values.
 #[tracing::instrument(level = "trace")]
-pub(crate) fn fileno(local_fd: RawFd) -> Detour<RawFd> {
+pub(crate) fn fileno(local_fd: Detour<RawFd>) -> Detour<RawFd> {
+    let local_fd = local_fd?;
+
+    OPEN_FILES
+        .lock()?
+        .iter()
+        .for_each(|(k, v)| debug!("FILENO CONTAINS k {k:#?} v {v:#?}"));
+
     Detour::Success(
         OPEN_FILES
             .lock()?
@@ -281,27 +335,27 @@ pub(crate) fn fileno(local_fd: RawFd) -> Detour<RawFd> {
 }
 
 #[tracing::instrument(level = "debug")]
-pub(crate) fn ferror(local_fd: RawFd) -> Detour<i32> {
+pub(crate) fn ferror(local_fd: Detour<RawFd>) -> Detour<i32> {
     let open_files = OPEN_FILES.lock()?;
-    let remote_file = open_files.get(&local_fd)?.read()?;
+    let remote_file = open_files.get(&local_fd?)?.read()?;
 
     Detour::Success(remote_file.error.map(NonZeroI64::get).unwrap_or_default() as i32)
 }
 
 /// Returns `1` if `is_eof` is set, and `0` if it's not.
 #[tracing::instrument(level = "debug")]
-pub(crate) fn feof(local_fd: RawFd) -> Detour<i32> {
+pub(crate) fn feof(local_fd: Detour<RawFd>) -> Detour<i32> {
     let open_files = OPEN_FILES.lock()?;
-    let remote_file = open_files.get(&local_fd)?.read()?;
+    let remote_file = open_files.get(&local_fd?)?.read()?;
 
     Detour::Success(remote_file.is_eof.into())
 }
 
 /// Clears the `is_eof` and `error` values from this [`RemoteFile`]
 #[tracing::instrument(level = "trace")]
-pub(crate) fn clearerr(local_fd: RawFd) -> Detour<()> {
+pub(crate) fn clearerr(local_fd: Detour<RawFd>) -> Detour<()> {
     let open_files = OPEN_FILES.lock()?;
-    let mut remote_file = open_files.get(&local_fd)?.write()?;
+    let mut remote_file = open_files.get(&local_fd?)?.write()?;
 
     remote_file.error = None;
     remote_file.is_eof = false;
@@ -310,8 +364,12 @@ pub(crate) fn clearerr(local_fd: RawFd) -> Detour<()> {
 }
 
 #[tracing::instrument(level = "debug")]
-pub(crate) fn fclose(local_fd: RawFd) -> Detour<i32> {
-    Detour::Success(OPEN_FILES.lock()?.remove(&local_fd).map(|_| 0)?)
+pub(crate) fn fclose(local_fd: Detour<RawFd>) -> Detour<i32> {
+    let removed = OPEN_FILES.lock()?.remove(&local_fd?);
+    info!("fclose removed {:#?}", removed);
+
+    let _r = removed?;
+    Detour::Success(0)
     // TODO(alex) [mid] 2023-03-07: Call `fflush` if this was being used as output (always safe to
     // call it? if so, then just always do it).
 }
@@ -372,7 +430,7 @@ pub(crate) fn openat(
 
         let requesting_file = OpenRelative {
             relative_fd: remote_fd,
-            path,
+            path: path.clone(),
             open_options,
             file_channel_tx,
         };
@@ -385,7 +443,11 @@ pub(crate) fn openat(
 
         OPEN_FILES.lock()?.insert(
             local_file_fd,
-            Arc::new(RwLock::new(RemoteFile::new(remote_fd, open_options))),
+            Arc::new(RwLock::new(RemoteFile::new(
+                remote_fd,
+                open_options,
+                Some(path),
+            ))),
         );
 
         Detour::Success(local_file_fd)
@@ -397,7 +459,8 @@ pub(crate) fn openat(
 /// **Bypassed** when trying to load system files, and files from the current working directory, see
 /// `open`.
 #[tracing::instrument(level = "trace")]
-pub(crate) fn read(local_fd: RawFd, read_amount: u64) -> Detour<ReadFileResponse> {
+pub(crate) fn read(local_fd: Detour<RawFd>, read_amount: u64) -> Detour<ReadFileResponse> {
+    let local_fd = local_fd?;
     let remote_fd = get_remote_fd(local_fd)?;
 
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
@@ -424,7 +487,8 @@ pub(crate) fn read(local_fd: RawFd, read_amount: u64) -> Detour<ReadFileResponse
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn fgets(local_fd: RawFd, buffer_size: usize) -> Detour<ReadFileResponse> {
+pub(crate) fn fgets(local_fd: Detour<RawFd>, buffer_size: usize) -> Detour<ReadFileResponse> {
+    let local_fd = local_fd?;
     // We're only interested in files that are paired with mirrord-agent.
     let remote_fd = get_remote_fd(local_fd)?;
 
@@ -485,7 +549,8 @@ pub(crate) fn pwrite(local_fd: RawFd, buffer: &[u8], offset: u64) -> Detour<Writ
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn lseek(local_fd: RawFd, offset: i64, whence: i32) -> Detour<u64> {
+pub(crate) fn lseek(local_fd: Detour<RawFd>, offset: i64, whence: i32) -> Detour<u64> {
+    let local_fd = local_fd?;
     let remote_fd = get_remote_fd(local_fd)?;
 
     let seek_from = match whence {
@@ -512,6 +577,11 @@ pub(crate) fn lseek(local_fd: RawFd, offset: i64, whence: i32) -> Detour<u64> {
     blocking_send_file_message(FileOperation::Seek(seeking_file))?;
 
     let SeekFileResponse { result_offset } = file_channel_rx.blocking_recv()??;
+
+    let mut open_files = OPEN_FILES.lock()?;
+    let mut file = open_files.get_mut(&local_fd)?.write()?;
+    file.is_eof = false;
+
     Detour::Success(result_offset)
 }
 
@@ -564,7 +634,7 @@ pub(crate) fn access(path: Detour<PathBuf>, mode: u8) -> Detour<c_int> {
 /// that.
 /// rawish_path is Option<Option<&CStr>> because we need to differentiate between null pointer
 /// and non existing argument (For error handling)
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "debug")]
 pub(crate) fn xstat(
     path: Option<Detour<PathBuf>>,
     fd: Option<RawFd>,
@@ -574,6 +644,8 @@ pub(crate) fn xstat(
     let (path, fd) = match (path, fd) {
         // fstatat
         (Some(path), Some(fd)) => {
+            debug!("path and fd are {path:#?} {fd:#?}");
+
             let path = path?;
             let fd = {
                 if fd == AT_FDCWD {
@@ -588,16 +660,21 @@ pub(crate) fn xstat(
                     Some(get_remote_fd(fd)?)
                 }
             };
+
+            debug!("path and remote_fd are {path:#?} {fd:#?}");
             (Some(path), fd)
         }
         // lstat/stat
         (Some(path), None) => {
+            debug!("path and none fd are {path:#?}");
             let path = path?;
             if path.is_relative() {
                 // Calls with non absolute paths are sent to libc::open.
                 return Detour::Bypass(Bypass::RelativePath(path));
             }
             should_ignore!(path, false);
+
+            debug!("path and none fd are {path:#?}");
             (Some(path), None)
         }
         // fstat
@@ -605,6 +682,8 @@ pub(crate) fn xstat(
         // can't happen
         (None, None) => return Detour::Error(HookError::NullPointer),
     };
+
+    debug!("what was returned in xstat match was path {path:#?}, and fd {fd:#?}");
 
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
@@ -617,7 +696,10 @@ pub(crate) fn xstat(
 
     blocking_send_file_message(FileOperation::Xstat(lstat))?;
 
-    Detour::Success(file_channel_rx.blocking_recv()??)
+    let xstat_result = file_channel_rx.blocking_recv();
+    debug!("xstat result is {xstat_result:#?}");
+
+    Detour::Success(xstat_result??)
 }
 
 #[cfg(target_os = "linux")]

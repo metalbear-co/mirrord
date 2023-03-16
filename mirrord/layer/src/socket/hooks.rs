@@ -9,6 +9,7 @@ use std::{
 use errno::{set_errno, Errno};
 use libc::{c_char, c_int, sockaddr, socklen_t, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
+use tracing::{error, info};
 
 use super::ops::*;
 use crate::{detour::DetourGuard, error::HookError, hooks::HookManager, replace};
@@ -75,7 +76,7 @@ pub(crate) unsafe extern "C" fn getsockname_detour(
 
 /// Hook for `libc::gethostname`.
 ///
-/// Reads remote hostname bytes into `raw_name`, will rais EINVAL errno and return -1 if hostname
+/// Reads remote hostname bytes into `raw_name`, will raise EINVAL errno and return -1 if hostname
 /// read more than `name_length`
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn gethostname_detour(
@@ -84,15 +85,17 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
 ) -> c_int {
     gethostname()
         .map(|host| {
-            let host_len = host.as_bytes().len();
+            let host_len = host.as_bytes_with_nul().len();
 
             raw_name.copy_from_nonoverlapping(host.as_ptr(), cmp::min(name_length, host_len));
 
             if host_len > name_length {
+                error!("Error in gethostname!");
                 set_errno(Errno(EINVAL));
 
                 -1
             } else {
+                info!("Success in gethostname!");
                 0
             }
         })

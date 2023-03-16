@@ -9,7 +9,10 @@ use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
-use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf, sync::OnceLock};
+use std::{
+    cell::RefCell, marker::Destruct, ops::Deref, os::unix::prelude::*, path::PathBuf,
+    sync::OnceLock,
+};
 
 use crate::error::HookError;
 
@@ -288,6 +291,13 @@ impl<S> Detour<S> {
         }
     }
 
+    pub(crate) fn unwrap(self) -> S {
+        match self {
+            Detour::Success(s) => s,
+            _ => panic!("Unwrapped invalid value!"),
+        }
+    }
+
     /// Return the contained `Success` value or a provided default if `Bypass` or `Error`.
     ///
     /// To be used in hooks that are deemed non-essential, and the run should continue even if they
@@ -308,6 +318,19 @@ impl<S> Detour<S> {
         self
     }
 }
+
+// impl<S> Clone for Detour<S>
+// where
+//     S: ~const Clone + ~const Destruct,
+// {
+//     fn clone(&self) -> Self {
+//         match self {
+//             Detour::Success(s) => Detour::Success(s.clone()),
+//             Detour::Bypass(b) => Detour::Bypass(b.clone()),
+//             Detour::Error(e) => Detour::Error(e.clone()),
+//         }
+//     }
+// }
 
 impl<S> Detour<S>
 where
