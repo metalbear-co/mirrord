@@ -107,22 +107,40 @@ impl TcpOutgoingHandler {
             let mirror_stream = UnixStream::from_std(mirror_stream.into())
                 .map_err(|err| error!("Invalid unix stream socket address: {err:?}"))
                 .unwrap();
-            Self::forward_local_remote(layer_tx, connection_id, mirror_stream, remote_stream).await;
+            Self::forward_bidirectionally(layer_tx, connection_id, mirror_stream, remote_stream)
+                .await;
         } else if local_addr.is_ipv6() || local_addr.is_ipv4() {
             let mirror_stream = TcpStream::from_std(mirror_stream.into())
                 .map_err(|err| error!("Invalid IP socket address: {err:?}"))
                 .unwrap();
-            Self::forward_local_remote(layer_tx, connection_id, mirror_stream, remote_stream).await;
+            Self::forward_bidirectionally(layer_tx, connection_id, mirror_stream, remote_stream)
+                .await;
         } else {
             error!("Unsupported socket address family, not intercepting.")
         }
     }
 
-    // TODO: can this whole thing be replaced by tokio's `copy_bidirectional`?
-    async fn forward_local_remote<T: AsyncRead + AsyncWrite + Unpin>(
+    /// Forward in both directions data between the user application and the main layer task (that
+    /// forwards it to the agent, that sends it to the remote target).
+    ///
+    /// ```
+    ///      layer_tx ◄──────
+    ///                     layer_to_user_stream ◄───────► user app
+    /// remote_stream ───────►
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `layer_tx` - A channel for sending data from the local app to the main layer task (to be
+    ///   forwarded to the agent).
+    /// * `layer_to_user_stream` - An outgoing stream (could be UNIX, TCP/IP, or anything that's
+    ///   async read and write) between the user app and the layer.
+    /// * `remote_stream` - A [`ReceiverStream`] to read the response data forwarded from the agent
+    ///   (to be forwarded to `layer_to_user_stream`).
+    async fn forward_bidirectionally<T: AsyncRead + AsyncWrite + Unpin>(
         layer_tx: Sender<LayerTcpOutgoing>,
         connection_id: ConnectionId,
-        mut mirror_stream: T,
+        mut layer_to_user_stream: T,
         mut remote_stream: ReceiverStream<Vec<u8>>,
     ) {
         // Sends a message to close the remote stream in `agent`, when it's
@@ -147,7 +165,7 @@ impl TcpOutgoingHandler {
 
                 // Reads data that the user is sending from their socket to mirrord's interceptor
                 // socket.
-                read = mirror_stream.read(&mut buffer) => {
+                read = layer_to_user_stream.read(&mut buffer) => {
                     match read {
                         Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
                             continue;
@@ -184,7 +202,7 @@ impl TcpOutgoingHandler {
                             // Writes the data sent by `agent` (that came from the actual remote
                             // stream) to our interceptor socket. When the user tries to read the
                             // remote data, this'll be what they receive.
-                            if let Err(fail) = mirror_stream.write_all(&bytes).await {
+                            if let Err(fail) = layer_to_user_stream.write_all(&bytes).await {
                                 trace!("Failed writing to mirror_stream with {:#?}!", fail);
                                 break;
                             }
