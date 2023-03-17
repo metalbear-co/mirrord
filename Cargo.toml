@@ -7,6 +7,7 @@ members = [
     "tests",
     "tests/rust-e2e-fileops",
     "tests/rust-unix-socket-client",
+    "tests/rust-bypassed-unix-socket",
 ]
 
 # latest commits on rustls suppress certificate verification

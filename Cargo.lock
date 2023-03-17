@@ -3355,6 +3355,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-bypassed-unix-socket"
+version = "3.32.2"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "rust-e2e-fileops"
 version = "3.32.3"
 dependencies = [

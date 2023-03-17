@@ -345,4 +345,26 @@ mod traffic {
         // and get the same data back. So if it exits with success everything worked.
         assert!(res.success());
     }
+
+    /// Verify that mirrord does not interfere with ignored unix sockets and connecting to a unix
+    /// socket that is NOT configured to happen remotely works fine locally (testing the Bypass
+    /// case of connections to unix sockets).
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    pub async fn outgoing_bypassed_unix_stream_pathname(#[future] service: KubeService) {
+        let service = service.await;
+        let app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../target/debug/rust-bypassed-unix-socket")
+            .to_string_lossy()
+            .to_string();
+        let executable = vec![app_path.as_str()];
+
+        let mut process = run_exec(executable, &service.target, None, None, None).await;
+        let res = process.child.wait().await.unwrap();
+
+        // The test application panics if it does not successfully connect to the socket, send data,
+        // and get the same data back. So if it exits with success everything worked.
+        assert!(res.success());
+    }
 }
