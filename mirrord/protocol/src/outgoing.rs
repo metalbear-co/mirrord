@@ -45,7 +45,7 @@ impl TryFrom<UnixAddr> for OsSockAddr {
     fn try_from(addr: UnixAddr) -> Result<Self, Self::Error> {
         match addr {
             Pathname(path) => OsSockAddr::unix(path),
-            // TODO
+            // We could use a `socket2::SockAddr::from_abstract_name` but it does not have it yet.
             Abstract(bytes) => OsSockAddr::unix(String::from_utf8(bytes).map_err(|_| {
                 io::Error::new(
                     ErrorKind::Other,
