@@ -75,22 +75,20 @@ pub(super) unsafe extern "C" fn open_detour(
 pub(super) unsafe extern "C" fn fopen_detour(
     raw_path: *const c_char,
     raw_mode: *const c_char,
-) -> *mut FILE {
+) -> usize {
+    debug!("FOPEN DETOUR CALLED");
     let result = fopen(raw_path.checked_into(), raw_mode.checked_into())
         .unwrap_or_bypass_with(|_| FN_FOPEN(raw_path, raw_mode));
 
-    debug!("FOPEN DETOUR is null ? {:#?}", result.is_null());
     debug!("FOPEN DETOUR ENDED!");
 
-    if !result.is_null() {
-        debug!("FOPEN DETOUR has proper pointer {:#?}", result);
+    debug!("FOPEN DETOUR has proper pointer {:#?}", result);
 
-        OPEN_FILES
-            .lock()
-            .unwrap()
-            .iter()
-            .for_each(|(k, v)| info!("FOPEN OPEN_FILES has key {k:#?} value {v:#?}"));
-    }
+    OPEN_FILES
+        .lock()
+        .unwrap()
+        .iter()
+        .for_each(|(k, v)| info!("FOPEN OPEN_FILES has key {k:#?} value {v:#?}"));
 
     result
 }
@@ -100,7 +98,7 @@ pub(super) unsafe extern "C" fn fopen_detour(
 /// Converts a `RawFd` into `*mut FILE` only for files that are already being managed by
 /// mirrord-layer.
 #[hook_guard_fn]
-pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char) -> *mut FILE {
+pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char) -> usize {
     fdopen(fd, raw_mode.checked_into()).unwrap_or_bypass_with(|_| FN_FDOPEN(fd, raw_mode))
 }
 
@@ -673,11 +671,7 @@ pub(crate) unsafe extern "C" fn vfprintf_detour(
     debug!("VFPRINTF DETOUR");
 
     if !file_stream.is_null() {
-        debug!(
-            "VFPRINTF DETOUR with file_stream {:#?} fd {:#?}",
-            file_stream,
-            *(file_stream as *const RawFd)
-        );
+        debug!("VFPRINTF DETOUR with file_stream {:#?}", file_stream);
     }
 
     FN_VFPRINTF(file_stream, format, args)
@@ -940,6 +934,7 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     // {
     //     replace!(hook_manager, "statx", statx_detour, FnStatx, FN_STATX);
     // }
+
     #[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
     {
         replace!(

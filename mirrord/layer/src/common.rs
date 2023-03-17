@@ -1,5 +1,5 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{collections::VecDeque, ffi::CStr, os::fd::RawFd, path::PathBuf};
+use std::{collections::VecDeque, ffi::CStr, os::fd::RawFd, path::PathBuf, ptr::NonNull};
 
 use libc::c_char;
 use mirrord_protocol::{file::OpenOptionsInternal, RemoteResult};
@@ -135,8 +135,11 @@ impl CheckedInto<OpenOptionsInternal> for *const c_char {
 impl CheckedInto<RawFd> for *mut libc::FILE {
     fn checked_into(self) -> Detour<RawFd> {
         let converted = (!self.is_null())
-            .then(|| unsafe { *(self as *const _) })
-            .ok_or(Bypass::NullNode)?;
+            .then(|| self as isize)
+            .and_then(|this| usize::try_from(this).ok())
+            .and_then(|this| RawFd::try_from(this).ok())
+            .ok_or(Bypass::FdNotOurs)
+            .inspect_err(|_| warn!("WE ARE BYPASSING THIS STREAM!"))?;
 
         Detour::Success(converted)
     }

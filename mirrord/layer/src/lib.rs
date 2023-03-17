@@ -847,8 +847,12 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         CONNECTION_QUEUE.lock().unwrap().remove(socket.id);
     } else if file_mode_active {
         // might not be enabled if `local`
-        let removed = OPEN_FILES.lock().unwrap().remove(&fd);
-        info!("CLOSED FILE {removed:#?}");
+        let _removed = OPEN_FILES
+            .lock()
+            .unwrap()
+            .remove(&fd)
+            .inspect(|file| info!("CLOSED FILE {file:#?}"))
+            .map(|_| unsafe { FN_CLOSE(fd) });
     }
 }
 

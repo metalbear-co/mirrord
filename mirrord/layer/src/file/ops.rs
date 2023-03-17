@@ -219,7 +219,7 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
 //
 /// Calls [`open`] and returns a [`FILE`] pointer based on the **local** `fd`.
 #[tracing::instrument(level = "debug")]
-pub(crate) fn fopen(path: Detour<PathBuf>, mode: Detour<OpenOptionsInternal>) -> Detour<*mut FILE> {
+pub(crate) fn fopen(path: Detour<PathBuf>, mode: Detour<OpenOptionsInternal>) -> Detour<usize> {
     let open_options = mode?;
     let path = path?;
 
@@ -228,18 +228,13 @@ pub(crate) fn fopen(path: Detour<PathBuf>, mode: Detour<OpenOptionsInternal>) ->
     let debug_fds: Vec<RawFd> = OPEN_FILES.lock().unwrap().keys().copied().collect();
     info!("fopen has fds {debug_fds:#?}");
 
-    let result = OPEN_FILES
+    OPEN_FILES
         .lock()
-        .inspect_err(|_| warn!("fopen failed locking OPEN_FILES!"))?
-        .get_key_value(&local_file_fd)
-        .inspect(|(k, v)| info!("fopen has key {k:#?} and file {v:#?}"))
-        .ok_or(Bypass::LocalFdNotFound(local_file_fd))
-        // Convert the fd into a `*FILE`, this is be ok as long as `OPEN_FILES` holds the fd.
-        .map(|(local_fd, _)| local_fd as *const _ as *mut _)?;
+        .unwrap()
+        .iter()
+        .for_each(|(k, v)| info!("FILES AFTER INSERTION {k:#?} {v:#?}"));
 
-    info!("fopen result is {result:#?} for path {path:#?}");
-
-    Detour::Success(result)
+    Detour::Success(usize::try_from(local_file_fd)?)
 }
 
 /// Opens a file with `fd` that is being held in [`OPEN_FILES`], returning a _non-null_ file stream
@@ -247,7 +242,7 @@ pub(crate) fn fopen(path: Detour<PathBuf>, mode: Detour<OpenOptionsInternal>) ->
 ///
 /// The `mode` has to be compatible with the [`OpenOptionsInternal`] of the file with `fd`.
 #[tracing::instrument(level = "debug")]
-pub(crate) fn fdopen(fd: RawFd, mode: Detour<OpenOptionsInternal>) -> Detour<*mut FILE> {
+pub(crate) fn fdopen(fd: RawFd, mode: Detour<OpenOptionsInternal>) -> Detour<usize> {
     let open_options = mode?;
 
     trace!("fdopen -> open_options {open_options:#?}");
@@ -259,7 +254,7 @@ pub(crate) fn fdopen(fd: RawFd, mode: Detour<OpenOptionsInternal>) -> Detour<*mu
 
     // Only open if the file we hold has compatible permissions with what's being requested.
     if open_options <= remote_file.read()?.open_options {
-        Detour::Success(local_fd as *const _ as *mut _)
+        Detour::Success(usize::try_from(*local_fd)?)
     } else {
         Detour::Error(HookError::OpenOptionsDoesntMatch)
     }
