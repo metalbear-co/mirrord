@@ -277,13 +277,13 @@ fn connect_outgoing<const TYPE: ConnectType>(
 
     blocking_send_hook_message(hook_message)?;
     let RemoteConnection {
-        mirror_address,
-        local_address,
+        layer_address,
+        user_app_address,
     } = mirror_rx.blocking_recv()??;
 
     // Connect to the interceptor socket that is listening.
     let connect_result: ConnectResult =
-        unsafe { FN_CONNECT(sockfd, mirror_address.as_ptr(), mirror_address.len()) }.into();
+        unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into();
 
     if connect_result.is_failure() {
         error!(
@@ -295,7 +295,7 @@ fn connect_outgoing<const TYPE: ConnectType>(
 
     let connected = Connected {
         remote_address: remote_address.try_into()?,
-        local_address: local_address.try_into()?,
+        local_address: user_app_address.try_into()?,
     };
 
     Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);

@@ -280,11 +280,11 @@ impl UdpOutgoingHandler {
                         },
                     )
                     .await
-                    .and_then(|(connection_id, socket, local_address)| {
+                    .and_then(|(connection_id, socket, user_app_address)| {
                         let (remote_tx, remote_rx) = channel::<Vec<u8>>(1000);
 
                         let _ = DetourGuard::new();
-                        let mirror_address = socket.local_addr()?;
+                        let layer_address = socket.local_addr()?;
 
                         // user and interceptor sockets are connected to each other, so now we spawn
                         // a new task to pair their reads/writes.
@@ -299,8 +299,8 @@ impl UdpOutgoingHandler {
                             .insert(connection_id, ConnectionMirror(remote_tx));
 
                         Ok(RemoteConnection {
-                            local_address: local_address.try_into()?,
-                            mirror_address: mirror_address.into(),
+                            user_app_address: user_app_address.try_into()?,
+                            layer_address: layer_address.into(),
                         })
                     });
 

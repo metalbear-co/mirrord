@@ -14,13 +14,13 @@ pub(crate) mod udp;
 
 /// Wrapper type for the (layer) socket address that intercepts the user's socket messages.
 ///
-/// (user-app) local_address <--> mirrord_address (layer) <--> agent <--> remote-peer
+/// (user-app) user_app_address <--> layer_address (layer) <--> agent <--> remote-peer
 #[derive(Debug)]
 pub(crate) struct RemoteConnection {
     /// The socket that is held by mirrord.
-    pub(crate) mirror_address: SockAddr,
+    pub(crate) layer_address: SockAddr,
     /// The socket that is held by the user application.
-    pub(crate) local_address: SockAddr,
+    pub(crate) user_app_address: SockAddr,
 }
 
 #[derive(Debug)]

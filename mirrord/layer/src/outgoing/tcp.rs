@@ -330,7 +330,7 @@ impl TcpOutgoingHandler {
                         },
                     )
                     .await
-                    .and_then(|(connection_id, socket, local_address)| {
+                    .and_then(|(connection_id, socket, user_app_address)| {
                         // Incoming remote channel (in the direction of agent -> layer).
                         // When the layer gets data from the agent, it writes it in via the
                         // remote_tx end. the interceptor_task then reads
@@ -341,7 +341,7 @@ impl TcpOutgoingHandler {
                         let (remote_tx, remote_rx) = channel::<Vec<u8>>(1000);
 
                         let _ = DetourGuard::new();
-                        let mirror_address = socket.local_addr()?;
+                        let layer_address = socket.local_addr()?;
 
                         self.mirrors
                             .insert(connection_id, ConnectionMirror(remote_tx));
@@ -356,8 +356,8 @@ impl TcpOutgoingHandler {
                         ));
 
                         Ok(RemoteConnection {
-                            local_address,
-                            mirror_address,
+                            user_app_address,
+                            layer_address,
                         })
                     });
 
