@@ -49,7 +49,7 @@ impl TryFrom<UnixAddr> for OsSockAddr {
             Abstract(bytes) => OsSockAddr::unix(String::from_utf8(bytes).map_err(|_| {
                 io::Error::new(
                     ErrorKind::Other,
-                    "Not supporting unprintable abstract addresses.",
+                    "Unprintable abstract addresses not supported.",
                 )
             })?),
             UnixAddr::Unnamed => OsSockAddr::unix(""),
