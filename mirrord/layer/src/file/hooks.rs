@@ -490,6 +490,69 @@ pub(crate) unsafe extern "C" fn fseeko_detour(
 }
 
 #[hook_guard_fn]
+pub(crate) unsafe extern "C" fn flock_detour(fd: RawFd, operation: c_int) -> c_int {
+    debug!("FLOCK DETOUR");
+    debug!("FLOCK {fd:#?}");
+
+    FN_FLOCK(fd, operation)
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn flockfile_detour(file_stream: *mut FILE) {
+    debug!("FLOCKFILE DETOUR");
+    let local_fd = file_stream.checked_into();
+    debug!("FLOCKFILE {local_fd:#?}");
+
+    if let Detour::Success(fd) = local_fd {
+        ()
+    } else {
+        FN_FLOCKFILE(file_stream)
+    }
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn ftrylockfile_detour(file_stream: *mut FILE) -> c_int {
+    debug!("FTRYLOCKFILE DETOUR");
+    let local_fd = file_stream.checked_into();
+    debug!("FTRYLOCKFILE {local_fd:#?}");
+
+    if let Detour::Success(fd) = local_fd {
+        0
+    } else {
+        FN_FTRYLOCKFILE(file_stream)
+    }
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn funlockfile_detour(file_stream: *mut FILE) {
+    debug!("FUNLOCKFILE DETOUR");
+    let local_fd = file_stream.checked_into();
+    debug!("FUNLOCKFILE {local_fd:#?}");
+
+    if let Detour::Success(fd) = local_fd {
+        ()
+    } else {
+        FN_FUNLOCKFILE(file_stream)
+    }
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn __fsetlocking_detour(
+    file_stream: *mut FILE,
+    type_: c_int,
+) -> c_int {
+    debug!("FSETLOCKING DETOUR");
+    let local_fd = file_stream.checked_into();
+    debug!("FSETLOCKING {local_fd:#?}");
+
+    if let Detour::Success(fd) = local_fd {
+        0
+    } else {
+        FN___FSETLOCKING(file_stream, type_)
+    }
+}
+
+#[hook_guard_fn]
 pub(crate) unsafe extern "C" fn ftell_detour(file_stream: *mut FILE) -> c_int {
     debug!("FTELL DETOUR");
     let local_fd = file_stream.checked_into();
@@ -886,6 +949,37 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "lseek", lseek_detour, FnLseek, FN_LSEEK);
     replace!(hook_manager, "fseek", fseek_detour, FnFseek, FN_FSEEK);
     replace!(hook_manager, "fseeko", fseeko_detour, FnFseeko, FN_FSEEKO);
+
+    replace!(hook_manager, "flock", flock_detour, FnFlock, FN_FLOCK);
+    replace!(
+        hook_manager,
+        "flockfile",
+        flockfile_detour,
+        FnFlockfile,
+        FN_FLOCKFILE
+    );
+    replace!(
+        hook_manager,
+        "ftrylockfile",
+        ftrylockfile_detour,
+        FnFtrylockfile,
+        FN_FTRYLOCKFILE
+    );
+    replace!(
+        hook_manager,
+        "funlockfile",
+        funlockfile_detour,
+        FnFunlockfile,
+        FN_FUNLOCKFILE
+    );
+    replace!(
+        hook_manager,
+        "__fsetlocking",
+        __fsetlocking_detour,
+        Fn__fsetlocking,
+        FN___FSETLOCKING
+    );
+
     replace!(hook_manager, "ftell", ftell_detour, FnFtell, FN_FTELL);
     replace!(hook_manager, "ftello", ftello_detour, FnFtello, FN_FTELLO);
     replace!(hook_manager, "rewind", rewind_detour, FnRewind, FN_REWIND);
