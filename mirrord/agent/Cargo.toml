@@ -35,13 +35,11 @@ bollard = "0.13"
 tokio-util.workspace = true
 rand.workspace = true
 streammap-ext.workspace = true
-iptables = "0.5"
 libc.workspace = true
 faccess = "0.2"
 bytes = "1.2"
 regex = "1"
 socket2 = "0.4"
-rawsocket = {git = "https://github.com/metalbear-co/rawsocket.git"}
 wildmatch = "2"
 enum_dispatch = "0.3.8"
 async-trait.workspace = true
@@ -52,6 +50,10 @@ fancy-regex = { workspace = true }
 dashmap = { version = "5" }
 pin-project = "1"
 oci-spec = "0.6.0"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+iptables = "0.5"
+rawsocket = {git = "https://github.com/metalbear-co/rawsocket.git"}
 
 [dev-dependencies]
 mockall = "0.11"
