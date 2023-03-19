@@ -1,22 +1,47 @@
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
-use fancy_regex::Regex;
+use enum_dispatch::enum_dispatch;
 use mirrord_protocol::Port;
-use nix::unistd::getgid;
 use rand::distributions::{Alphanumeric, DistString};
-use tokio::process::Command;
-use tracing::warn;
 
-use crate::error::{AgentError, Result};
+use crate::{
+    error::{AgentError, Result},
+    steal::ip_tables::{
+        flush_connections::FlushConnections,
+        mesh::{MeshRedirect, MeshVendor},
+        redirect::{PreroutingRedirect, Redirect},
+    },
+};
 
-pub(crate) static MIRRORD_IPTABLE_CHAIN_ENV: &str = "MIRRORD_IPTABLE_CHAIN_NAME";
+pub(crate) mod chain;
+pub(crate) mod flush_connections;
+pub(crate) mod mesh;
+pub(crate) mod redirect;
 
-/// [`Regex`] used to select the `owner` rule from the list of `iptables` rules.
-static UID_LOOKUP_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"-m owner --uid-owner \d+").unwrap());
+pub static IPTABLE_PREROUTING_ENV: &str = "MIRRORD_IPTABLE_PREROUTING_NAME";
+pub static IPTABLE_PREROUTING: LazyLock<String> = LazyLock::new(|| {
+    std::env::var(IPTABLE_PREROUTING_ENV).unwrap_or_else(|_| {
+        format!(
+            "MIRRORD_INPUT_{}",
+            Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
+        )
+    })
+});
+
+pub static IPTABLE_MESH_ENV: &str = "MIRRORD_IPTABLE_MESH_NAME";
+pub static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
+    std::env::var(IPTABLE_MESH_ENV).unwrap_or_else(|_| {
+        format!(
+            "MIRRORD_OUTPUT_{}",
+            Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
+        )
+    })
+});
+
+const IPTABLES_TABLE_NAME: &str = "nat";
 
 #[cfg_attr(test, mockall::automock)]
-pub(crate) trait IPTables {
+pub trait IPTables {
     fn create_chain(&self, name: &str) -> Result<()>;
     fn remove_chain(&self, name: &str) -> Result<()>;
 
@@ -27,6 +52,7 @@ pub(crate) trait IPTables {
 }
 
 impl IPTables for iptables::IPTables {
+    #[tracing::instrument(level = "trace", skip(self))]
     fn create_chain(&self, name: &str) -> Result<()> {
         self.new_chain(IPTABLES_TABLE_NAME, name)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
@@ -36,6 +62,7 @@ impl IPTables for iptables::IPTables {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     fn remove_chain(&self, name: &str) -> Result<()> {
         self.flush_chain(IPTABLES_TABLE_NAME, name)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
@@ -45,36 +72,43 @@ impl IPTables for iptables::IPTables {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     fn add_rule(&self, chain: &str, rule: &str) -> Result<()> {
         self.append(IPTABLES_TABLE_NAME, chain, rule)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> Result<()> {
         self.insert(IPTABLES_TABLE_NAME, chain, rule, index)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     fn list_rules(&self, chain: &str) -> Result<Vec<String>> {
         self.list(IPTABLES_TABLE_NAME, chain)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     fn remove_rule(&self, chain: &str, rule: &str) -> Result<()> {
         self.delete(IPTABLES_TABLE_NAME, chain, rule)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
 }
 
-/// Wrapper struct for IPTables so it flushes on drop.
-pub(crate) struct SafeIpTables<IPT: IPTables> {
-    inner: IPT,
-    chain_name: String,
-    formatter: IPTableFormatter,
-    flush_connections: bool,
+#[enum_dispatch(Redirect)]
+pub enum Redirects<IPT: IPTables + Send + Sync> {
+    Standard(PreroutingRedirect<IPT>),
+    Mesh(MeshRedirect<IPT>),
+    FlushConnections(FlushConnections<Redirects<IPT>>),
 }
 
-const IPTABLES_TABLE_NAME: &str = "nat";
+/// Wrapper struct for IPTables so it flushes on drop.
+pub(crate) struct SafeIpTables<IPT: IPTables + Send + Sync> {
+    redirect: Redirects<IPT>,
+}
+
 /// Wrapper for using iptables. This creates a a new chain on creation and deletes it on drop.
 /// The way it works is that it adds a chain, then adds a rule to the chain that returns to the
 /// original chain (fallback) and adds a rule in the "PREROUTING" table that jumps to the new chain.
@@ -82,62 +116,50 @@ const IPTABLES_TABLE_NAME: &str = "nat";
 /// -> ORIGINAL_CHAIN
 impl<IPT> SafeIpTables<IPT>
 where
-    IPT: IPTables,
+    IPT: IPTables + Send + Sync,
 {
-    pub(super) fn new(ipt: IPT, flush_connections: bool) -> Result<Self> {
-        let formatter = IPTableFormatter::detect(&ipt)?;
+    pub(super) async fn create(ipt: IPT, flush_connections: bool) -> Result<Self> {
+        let mut redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
+            Redirects::Mesh(MeshRedirect::create(Arc::new(ipt), vendor)?)
+        } else {
+            Redirects::Standard(PreroutingRedirect::create(Arc::new(ipt))?)
+        };
 
-        let chain_name = Self::get_chain_name();
+        if flush_connections {
+            redirect = Redirects::FlushConnections(FlushConnections::new(Box::new(redirect)))
+        }
 
-        ipt.create_chain(&chain_name)?;
+        redirect.mount_entrypoint().await?;
 
-        ipt.add_rule(formatter.entrypoint(), &format!("-j {}", &chain_name))?;
-
-        Ok(Self {
-            inner: ipt,
-            chain_name,
-            formatter,
-            flush_connections,
-        })
+        Ok(Self { redirect })
     }
 
-    pub(crate) fn get_chain_name() -> String {
-        std::env::var(MIRRORD_IPTABLE_CHAIN_ENV).unwrap_or_else(|_| {
-            format!(
-                "MIRRORD_REDIRECT_{}",
-                Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
-            )
-        })
-    }
+    pub(crate) async fn load(ipt: IPT, flush_connections: bool) -> Result<Self> {
+        let mut redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
+            Redirects::Mesh(MeshRedirect::load(Arc::new(ipt), vendor)?)
+        } else {
+            Redirects::Standard(PreroutingRedirect::load(Arc::new(ipt))?)
+        };
 
-    pub(crate) fn remove_chain(
-        ipt: &IPT,
-        formatter: &IPTableFormatter,
-        chain_name: &str,
-    ) -> Result<()> {
-        ipt.remove_rule(formatter.entrypoint(), &format!("-j {chain_name}"))?;
+        if flush_connections {
+            redirect = Redirects::FlushConnections(FlushConnections::new(Box::new(redirect)))
+        }
 
-        ipt.remove_chain(chain_name)?;
-
-        Ok(())
-    }
-
-    /// Helper function that lists all the iptables' rules belonging to [`Self::chain_name`].
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) fn list_rules(&self) -> Result<Vec<String>> {
-        self.inner.list_rules(&self.chain_name)
+        Ok(Self { redirect })
     }
 
     /// Adds the redirect rule to iptables.
     ///
     /// Used to redirect packets when mirrord incoming feature is set to `steal`.
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.inner.insert_rule(
-            &self.chain_name,
-            &self.formatter.redirect_rule(redirected_port, target_port),
-            1,
-        )
+    pub(super) async fn add_redirect(
+        &self,
+        redirected_port: Port,
+        target_port: Port,
+    ) -> Result<()> {
+        self.redirect
+            .add_redirect(redirected_port, target_port)
+            .await
     }
 
     /// Removes the redirect rule from iptables.
@@ -145,158 +167,18 @@ where
     /// Stops redirecting packets when mirrord incoming feature is set to `steal`, and there are no
     /// more subscribers on `target_port`.
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.inner.remove_rule(
-            &self.chain_name,
-            &self.formatter.redirect_rule(redirected_port, target_port),
-        )
-    }
-
-    /// Adds a `RETURN` rule based on `gid` to iptables.
-    ///
-    /// When the mirrord incoming feature is set to `steal`, and we're using a filter (instead of
-    /// stealing every packet), we need this rule to avoid stealing our own packets, that were sent
-    /// to their original destinations.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) fn add_bypass_own_packets(&self) -> Result<()> {
-        if let Some(rule) = self.formatter.bypass_own_packets_rule() {
-            self.inner.insert_rule(&self.chain_name, &rule, 1)
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Removes the `RETURN` bypass rule from iptables.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) fn remove_bypass_own_packets(&self) -> Result<()> {
-        if let Some(rule) = self.formatter.bypass_own_packets_rule() {
-            self.inner.remove_rule(&self.chain_name, &rule)
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Adds port redirection, and bypass gid packets from iptables.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) async fn add_stealer_iptables_rules(
+    pub(super) async fn remove_redirect(
         &self,
         redirected_port: Port,
         target_port: Port,
     ) -> Result<()> {
-        self.add_redirect(redirected_port, target_port)
-            .and_then(|_| self.add_bypass_own_packets())?;
-
-        if self.flush_connections {
-            let conntrack = Command::new("conntrack")
-                .args([
-                    "--delete",
-                    "--proto",
-                    "tcp",
-                    "--orig-port-dst",
-                    &target_port.to_string(),
-                ])
-                .output()
-                .await?;
-
-            if !conntrack.status.success() && conntrack.status.code() != Some(256) {
-                warn!("`conntrack` output is {conntrack:#?}");
-            }
-        }
-
-        Ok(())
+        self.redirect
+            .remove_redirect(redirected_port, target_port)
+            .await
     }
 
-    /// Removes port redirection, and bypass gid packets from iptables.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) fn remove_stealer_iptables_rules(
-        &self,
-        redirected_port: Port,
-        target_port: Port,
-    ) -> Result<()> {
-        self.remove_redirect(redirected_port, target_port)
-            .and_then(|_| self.remove_bypass_own_packets())
-    }
-}
-
-impl<IPT> Drop for SafeIpTables<IPT>
-where
-    IPT: IPTables,
-{
-    fn drop(&mut self) {
-        Self::remove_chain(&self.inner, &self.formatter, &self.chain_name).unwrap();
-    }
-}
-
-#[derive(Debug)]
-pub(crate) enum IPTableFormatter {
-    Normal,
-    Mesh(String),
-}
-
-impl IPTableFormatter {
-    const MESH_OUTPUTS: [&'static str; 2] = ["-j PROXY_INIT_OUTPUT", "-j ISTIO_OUTPUT"];
-    const MESH_NAMES: [&'static str; 2] = ["PROXY_INIT_OUTPUT", "ISTIO_OUTPUT"];
-
-    #[tracing::instrument(level = "trace", skip_all)]
-    pub(crate) fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Self> {
-        let output = ipt.list_rules("OUTPUT")?;
-
-        if let Some(mesh_ipt_chain) = output.iter().find_map(|rule| {
-            IPTableFormatter::MESH_OUTPUTS
-                .iter()
-                .enumerate()
-                .find_map(|(index, mesh_output)| {
-                    rule.contains(mesh_output)
-                        .then_some(IPTableFormatter::MESH_NAMES[index])
-                })
-        }) {
-            // We extract --uid-owner value from the mesh's rules to get messages only from them
-            // and not other processes sendning messages from localhost like healthprobe for grpc.
-            // This to more closely match behavior with non meshed services
-            let filter = ipt
-                .list_rules(mesh_ipt_chain)?
-                .iter()
-                .find_map(|rule| UID_LOOKUP_REGEX.find(rule).ok().flatten())
-                .map(|m| format!("-o lo {}", m.as_str()));
-
-            Ok(IPTableFormatter::Mesh(filter.unwrap_or_else(|| {
-                warn!("Couldn't find --uid-owner of meshed chain {mesh_ipt_chain:?} falling back on \"-o lo\" rule");
-
-                "-o lo".to_owned()
-            })))
-        } else {
-            Ok(IPTableFormatter::Normal)
-        }
-    }
-
-    fn entrypoint(&self) -> &str {
-        match self {
-            IPTableFormatter::Normal => "PREROUTING",
-            IPTableFormatter::Mesh(_) => "OUTPUT",
-        }
-    }
-
-    #[tracing::instrument(level = "trace", ret)]
-    fn redirect_rule(&self, redirected_port: Port, target_port: Port) -> String {
-        let redirect_rule =
-            format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
-
-        match self {
-            IPTableFormatter::Normal => redirect_rule,
-            IPTableFormatter::Mesh(filter) => {
-                format!("{filter} {redirect_rule}")
-            }
-        }
-    }
-
-    fn bypass_own_packets_rule(&self) -> Option<String> {
-        match self {
-            IPTableFormatter::Normal => None,
-            IPTableFormatter::Mesh(_) => {
-                let gid = getgid();
-                Some(format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))
-            }
-        }
+    pub(crate) async fn cleanup(&self) -> Result<()> {
+        self.redirect.unmount_entrypoint().await
     }
 }
 
@@ -306,8 +188,8 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn default() {
+    #[tokio::test]
+    async fn default() {
         let mut mock = MockIPTables::new();
 
         mock.expect_list_rules()
@@ -315,51 +197,55 @@ mod tests {
             .returning(|_| Ok(vec![]));
 
         mock.expect_create_chain()
-            .with(str::starts_with("MIRRORD_REDIRECT_"))
+            .with(str::starts_with("MIRRORD_INPUT_"))
             .times(1)
             .returning(|_| Ok(()));
-
-        mock.expect_remove_chain()
-            .with(str::starts_with("MIRRORD_REDIRECT_"))
-            .times(1)
-            .returning(|_| Ok(()));
-
-        mock.expect_add_rule()
-            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_REDIRECT_"))
-            .times(1)
-            .returning(|_, _| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                str::starts_with("MIRRORD_REDIRECT_"),
+                str::starts_with("MIRRORD_INPUT_"),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(1),
             )
             .times(1)
             .returning(|_, _, _| Ok(()));
 
-        mock.expect_remove_rule()
-            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_REDIRECT_"))
+        mock.expect_add_rule()
+            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
             .with(
-                str::starts_with("MIRRORD_REDIRECT_"),
+                str::starts_with("MIRRORD_INPUT_"),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
             .returning(|_, _| Ok(()));
 
-        let ipt = SafeIpTables::new(mock, false).expect("Create Failed");
+        mock.expect_remove_rule()
+            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
+            .times(1)
+            .returning(|_, _| Ok(()));
 
-        assert!(ipt.add_redirect(69, 420).is_ok());
+        mock.expect_remove_chain()
+            .with(str::starts_with("MIRRORD_INPUT_"))
+            .times(1)
+            .returning(|_| Ok(()));
 
-        assert!(ipt.remove_redirect(69, 420).is_ok());
+        let ipt = SafeIpTables::create(mock, false)
+            .await
+            .expect("Create Failed");
+
+        assert!(ipt.add_redirect(69, 420).await.is_ok());
+
+        assert!(ipt.remove_redirect(69, 420).await.is_ok());
+
+        assert!(ipt.cleanup().await.is_ok());
     }
 
-    #[test]
-    fn linkerd() {
+    #[tokio::test]
+    async fn linkerd() {
         let mut mock = MockIPTables::new();
 
         mock.expect_list_rules()
@@ -367,54 +253,131 @@ mod tests {
             .returning(|_| Ok(vec!["-j PROXY_INIT_OUTPUT".to_owned()]));
 
         mock.expect_list_rules()
+            .with(eq("PROXY_INIT_REDIRECT"))
+            .returning(|_| {
+                Ok(vec![
+                    "-N PROXY_INIT_REDIRECT".to_owned(),
+                    "-A PROXY_INIT_REDIRECT -p tcp -m multiport --dports 22 -j RETURN".to_owned(),
+                    "-A PROXY_INIT_REDIRECT -p tcp -j REDIRECT --to-port 4143".to_owned(),
+                ])
+            });
+
+        mock.expect_list_rules()
             .with(eq("PROXY_INIT_OUTPUT"))
-            .returning(|_| Ok(vec![
-                "-N PROXY_INIT_OUTPUT".to_owned(),
-                "-A PROXY_INIT_OUTPUT -m owner --uid-owner 2102 -m comment --comment \"proxy-init/ignore-proxy-user-id/1676542558\" -j RETURN".to_owned(),
-                "-A PROXY_INIT_OUTPUT -o lo -m comment --comment \"proxy-init/ignore-loopback/1676542558\" -j RETURN".to_owned(),
-            ]));
+            .returning(|_| {
+                Ok(vec![
+                    "-N PROXY_INIT_OUTPUT".to_owned(),
+                    "-A PROXY_INIT_OUTPUT -m owner --uid-owner 2102 -m comment --comment \"proxy-init/ignore-proxy-user-id/1676542558\" -j RETURN"
+                        .to_owned(),
+                    "-A PROXY_INIT_OUTPUT -o lo -m comment --comment \"proxy-init/ignore-loopback/1676542558\" -js RETURN"
+                        .to_owned(),
+                ])
+            });
 
         mock.expect_create_chain()
-            .with(str::starts_with("MIRRORD_REDIRECT_"))
+            .with(str::starts_with("MIRRORD_INPUT_"))
             .times(1)
             .returning(|_| Ok(()));
-
-        mock.expect_remove_chain()
-            .with(str::starts_with("MIRRORD_REDIRECT_"))
-            .times(1)
-            .returning(|_| Ok(()));
-
-        mock.expect_add_rule()
-            .with(eq("OUTPUT"), str::starts_with("-j MIRRORD_REDIRECT_"))
-            .times(1)
-            .returning(|_, _| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                str::starts_with("MIRRORD_REDIRECT_"),
-                eq("-o lo -m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                str::starts_with("MIRRORD_INPUT_"),
+                eq("-m multiport -p tcp ! --dports 22 -j RETURN"),
                 eq(1),
             )
             .times(1)
             .returning(|_, _, _| Ok(()));
 
+        mock.expect_add_rule()
+            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_create_chain()
+            .with(str::starts_with("MIRRORD_OUTPUT_"))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        mock.expect_insert_rule()
+            .with(
+                str::starts_with("MIRRORD_OUTPUT_"),
+                str::starts_with("-m owner --gid-owner"),
+                eq(1),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        mock.expect_add_rule()
+            .with(eq("OUTPUT"), str::starts_with("-j MIRRORD_OUTPUT_"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_insert_rule()
+            .with(
+                str::starts_with("MIRRORD_INPUT_"),
+                eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                eq(2),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        mock.expect_insert_rule()
+            .with(
+                str::starts_with("MIRRORD_OUTPUT_"),
+                eq(
+                    "-o lo -m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420",
+                ),
+                eq(2),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
         mock.expect_remove_rule()
-            .with(eq("OUTPUT"), str::starts_with("-j MIRRORD_REDIRECT_"))
+            .with(
+                str::starts_with("MIRRORD_INPUT_"),
+                eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+            )
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
             .with(
-                str::starts_with("MIRRORD_REDIRECT_"),
-                eq("-o lo -m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                str::starts_with("MIRRORD_OUTPUT_"),
+                eq(
+                    "-o lo -m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420",
+                ),
             )
             .times(1)
             .returning(|_, _| Ok(()));
 
-        let ipt = SafeIpTables::new(mock, false).expect("Create Failed");
+        mock.expect_remove_rule()
+            .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
+            .times(1)
+            .returning(|_, _| Ok(()));
 
-        assert!(ipt.add_redirect(69, 420).is_ok());
+        mock.expect_remove_chain()
+            .with(str::starts_with("MIRRORD_INPUT_"))
+            .times(1)
+            .returning(|_| Ok(()));
 
-        assert!(ipt.remove_redirect(69, 420).is_ok());
+        mock.expect_remove_rule()
+            .with(eq("OUTPUT"), str::starts_with("-j MIRRORD_OUTPUT_"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_remove_chain()
+            .with(str::starts_with("MIRRORD_OUTPUT_"))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let ipt = SafeIpTables::create(mock, false)
+            .await
+            .expect("Create Failed");
+
+        assert!(ipt.add_redirect(69, 420).await.is_ok());
+
+        assert!(ipt.remove_redirect(69, 420).await.is_ok());
+
+        assert!(ipt.cleanup().await.is_ok());
     }
 }

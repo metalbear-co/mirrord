@@ -221,6 +221,8 @@ impl TcpConnectionStealer {
             }
         }
 
+        self.iptables()?.cleanup().await?;
+
         Ok(())
     }
 
@@ -334,7 +336,7 @@ impl TcpConnectionStealer {
                 // Should not happen.
                 debug_assert!(false);
                 error!("Internal error: subscriptions of closed client still present.");
-                self.close_client(client_id)
+                self.close_client(client_id).await
             }
         }
     }
@@ -394,16 +396,14 @@ impl TcpConnectionStealer {
     }
 
     /// Initialize iptables member, which creates an iptables chain for our rules.
-    fn init_iptables(&mut self) -> Result<()> {
+    async fn init_iptables(&mut self) -> Result<()> {
         let flush_connections = std::env::var("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS")
             .ok()
             .and_then(|var| var.parse::<bool>().ok())
             .unwrap_or_default();
+        let iptables = iptables::new(false).unwrap();
 
-        self.iptables = Some(SafeIpTables::new(
-            iptables::new(false).unwrap(),
-            flush_connections,
-        )?);
+        self.iptables = Some(SafeIpTables::create(iptables, flush_connections).await?);
         Ok(())
     }
 
@@ -415,7 +415,7 @@ impl TcpConnectionStealer {
     async fn port_subscribe(&mut self, client_id: ClientId, port_steal: StealType) -> Result<()> {
         if self.iptables.is_none() {
             // TODO: make the initialization internal to SafeIpTables.
-            self.init_iptables()?;
+            self.init_iptables().await?;
         }
         let mut first_subscriber = false;
 
@@ -463,7 +463,7 @@ impl TcpConnectionStealer {
 
         if first_subscriber && let Ok(port) = steal_port {
             self.iptables()?
-                .add_stealer_iptables_rules(port, self.stealer.local_addr()?.port()).await?;
+                .add_redirect(port, self.stealer.local_addr()?.port()).await?;
         }
 
         self.send_message_to_single_client(&client_id, DaemonTcp::SubscribeResult(steal_port))
@@ -475,7 +475,11 @@ impl TcpConnectionStealer {
     /// Removes `port` from [`TcpConnectionStealer::iptables`] rules, and unsubscribes the layer
     /// with `client_id`.
     #[tracing::instrument(level = "trace", skip(self))]
-    fn port_unsubscribe(&mut self, client_id: ClientId, port: Port) -> Result<(), AgentError> {
+    async fn port_unsubscribe(
+        &mut self,
+        client_id: ClientId,
+        port: Port,
+    ) -> Result<(), AgentError> {
         let port_unsubscribed = match self.port_subscriptions.get_mut(&port) {
             Some(HttpFiltered(manager)) => {
                 manager.remove_client(&client_id);
@@ -490,7 +494,8 @@ impl TcpConnectionStealer {
         if port_unsubscribed {
             // No remaining subscribers on this port.
             self.iptables()?
-                .remove_stealer_iptables_rules(port, self.stealer.local_addr()?.port())?;
+                .remove_redirect(port, self.stealer.local_addr()?.port())
+                .await?;
 
             self.port_subscriptions.remove(&port);
             if self.port_subscriptions.is_empty() {
@@ -516,10 +521,10 @@ impl TcpConnectionStealer {
     /// their redirection rules from [`TcpConnectionStealer::iptables`] and all their open
     /// connections.
     #[tracing::instrument(level = "trace", skip(self))]
-    fn close_client(&mut self, client_id: ClientId) -> Result<(), AgentError> {
+    async fn close_client(&mut self, client_id: ClientId) -> Result<(), AgentError> {
         let ports = self.get_client_ports(client_id);
         for port in ports.iter() {
-            self.port_unsubscribe(client_id, *port)?
+            self.port_unsubscribe(client_id, *port).await?
         }
 
         // Close and remove all remaining connections of the closed client.
@@ -541,14 +546,16 @@ impl TcpConnectionStealer {
         message: DaemonTcp,
     ) -> Result<(), AgentError> {
         if let Some(sender) = self.clients.get(client_id) {
-            sender.send(message).await.map_err(|fail| {
+            if let Err(fail) = sender.send(message).await {
                 warn!(
                     "Failed to send message to client {} with {:#?}!",
                     client_id, fail
                 );
-                let _ = self.close_client(*client_id);
-                fail
-            })?;
+
+                let _ = self.close_client(*client_id).await;
+
+                return Err(fail.into());
+            }
         }
 
         Ok(())
@@ -651,8 +658,8 @@ impl TcpConnectionStealer {
             Command::PortSubscribe(port_steal) => {
                 self.port_subscribe(client_id, port_steal).await?
             }
-            Command::PortUnsubscribe(port) => self.port_unsubscribe(client_id, port)?,
-            Command::ClientClose => self.close_client(client_id)?,
+            Command::PortUnsubscribe(port) => self.port_unsubscribe(client_id, port).await?,
+            Command::ClientClose => self.close_client(client_id).await?,
             Command::ResponseData(tcp_data) => self.forward_data(tcp_data).await?,
             Command::HttpResponse(response) => self.http_response(response).await,
         }
