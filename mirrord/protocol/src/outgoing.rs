@@ -69,16 +69,6 @@ impl TryFrom<SocketAddress> for StdIpSocketAddr {
     }
 }
 
-impl SocketAddress {
-    pub fn is_ip(&self) -> bool {
-        matches!(self, Self::Ip(_))
-    }
-
-    pub fn is_unix(&self) -> bool {
-        matches!(self, Self::Unix(_))
-    }
-}
-
 impl TryFrom<OsSockAddr> for SocketAddress {
     type Error = SerializationError;
 
