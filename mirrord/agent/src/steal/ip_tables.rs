@@ -122,17 +122,15 @@ where
     IPT: IPTables + Send + Sync,
 {
     pub(super) async fn create(ipt: IPT, flush_connections: bool) -> Result<Self> {
-        let redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
+        let mut redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
             Redirects::Mesh(MeshRedirect::create(Arc::new(ipt), vendor)?)
         } else {
             Redirects::Standard(PreroutingRedirect::create(Arc::new(ipt))?)
         };
 
-        let redirect = if flush_connections {
-            Redirects::FlushConnections(FlushConnections::new(Box::new(redirect)))
-        } else {
-            redirect
-        };
+        if flush_connections {
+            redirect = Redirects::FlushConnections(FlushConnections::new(Box::new(redirect)))
+        }
 
         redirect.mount_entrypoint().await?;
 
@@ -140,17 +138,15 @@ where
     }
 
     pub(crate) async fn load(ipt: IPT, flush_connections: bool) -> Result<Self> {
-        let redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
+        let mut redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
             Redirects::Mesh(MeshRedirect::load(Arc::new(ipt), vendor)?)
         } else {
             Redirects::Standard(PreroutingRedirect::load(Arc::new(ipt))?)
         };
 
-        let redirect = if flush_connections {
-            Redirects::FlushConnections(FlushConnections::new(Box::new(redirect)))
-        } else {
-            redirect
-        };
+        if flush_connections {
+            redirect = Redirects::FlushConnections(FlushConnections::new(Box::new(redirect)))
+        }
 
         Ok(Self { redirect })
     }
