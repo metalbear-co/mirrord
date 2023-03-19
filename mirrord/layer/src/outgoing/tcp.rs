@@ -135,7 +135,7 @@ impl TcpOutgoingHandler {
                             // stream) to our interceptor socket. When the user tries to read the
                             // remote data, this'll be what they receive.
                             if let Err(fail) = mirror_stream.write_all(&bytes).await {
-                                error!("Failed writing to mirror_stream with {:#?}!", fail);
+                                trace!("Failed writing to mirror_stream with {:#?}!", fail);
                                 break;
                             }
                         },
