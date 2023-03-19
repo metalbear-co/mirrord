@@ -316,8 +316,8 @@ impl TcpOutgoingHandler {
                                     let pathname = tmp_dir.join(random_string);
 
                                     let addr = SockAddr::unix(pathname)?;
-                                    // TODO: should we retry with a different random string if the
-                                    //       bind fails?
+                                    // Could theoretically fail if we generated the same random
+                                    // string for two connections, but that's rather unlikely.
                                     socket.bind(&addr)?;
                                     socket
                                 }
