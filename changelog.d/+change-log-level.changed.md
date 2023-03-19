@@ -1,1 +1,0 @@
-change outgoing connection drop to be trace instead of error since it's not an error
