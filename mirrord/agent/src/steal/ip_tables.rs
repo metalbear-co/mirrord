@@ -4,10 +4,8 @@ use enum_dispatch::enum_dispatch;
 use mirrord_protocol::Port;
 use rand::distributions::{Alphanumeric, DistString};
 
-#[cfg(target_os = "linux")]
-use crate::error::AgentError;
 use crate::{
-    error::Result,
+    error::{AgentError, Result},
     steal::ip_tables::{
         flush_connections::FlushConnections,
         mesh::{MeshRedirect, MeshVendor},
@@ -53,7 +51,6 @@ pub trait IPTables {
     fn remove_rule(&self, chain: &str, rule: &str) -> Result<()>;
 }
 
-#[cfg(target_os = "linux")]
 impl IPTables for iptables::IPTables {
     #[tracing::instrument(level = "trace", skip(self))]
     fn create_chain(&self, name: &str) -> Result<()> {

@@ -589,6 +589,7 @@ async fn start_agent() -> Result<()> {
 
     trace!("Agent shutting down.");
     drop(cancel_guard);
+
     if let Err(err) = sniffer_task.join().map_err(|_| AgentError::JoinTask)? {
         error!("start_agent -> sniffer task failed with error: {}", err);
     }
@@ -601,17 +602,11 @@ async fn start_agent() -> Result<()> {
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
 async fn clear_iptable_chain() -> Result<()> {
     let ipt = iptables::new(false).unwrap();
 
     SafeIpTables::load(ipt, false).await?.cleanup().await?;
 
-    Ok(())
-}
-
-#[cfg(not(target_os = "linux"))]
-async fn clear_iptable_chain() -> Result<()> {
     Ok(())
 }
 
