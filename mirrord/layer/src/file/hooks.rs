@@ -490,6 +490,13 @@ pub(crate) unsafe extern "C" fn fseeko_detour(
 }
 
 #[hook_guard_fn]
+pub(crate) unsafe extern "C" fn __resolv_conf_load_detour(pre_init: *mut c_void) -> *mut c_void {
+    debug!("__RESOLV_CONF_LOAD DETOUR");
+
+    FN___RESOLV_CONF_LOAD(pre_init)
+}
+
+#[hook_guard_fn]
 pub(crate) unsafe extern "C" fn flock_detour(fd: RawFd, operation: c_int) -> c_int {
     debug!("FLOCK DETOUR");
     debug!("FLOCK {fd:#?}");
@@ -950,6 +957,13 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "fseek", fseek_detour, FnFseek, FN_FSEEK);
     replace!(hook_manager, "fseeko", fseeko_detour, FnFseeko, FN_FSEEKO);
 
+    replace!(
+        hook_manager,
+        "__resolv_conf_load",
+        __resolv_conf_load_detour,
+        Fn__resolv_conf_load,
+        FN___RESOLV_CONF_LOAD
+    );
     replace!(hook_manager, "flock", flock_detour, FnFlock, FN_FLOCK);
     replace!(
         hook_manager,
