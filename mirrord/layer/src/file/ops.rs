@@ -87,8 +87,7 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<u64> {
             .get(&local_fd)
             // Bypass if we're not managing the relative part.
             .ok_or(Bypass::LocalFdNotFound(local_fd))
-            .map(|remote_file| remote_file.read())??
-            .fd,
+            .map(|remote_file| remote_file.fd)?,
     )
 }
 
@@ -175,11 +174,7 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
 
     OPEN_FILES.lock().unwrap().insert(
         local_file_fd,
-        Arc::new(RwLock::new(RemoteFile::new(
-            remote_fd,
-            open_options,
-            Some(path),
-        ))),
+        Arc::new(RemoteFile::new(remote_fd, open_options, Some(path))),
     );
 
     Detour::Success(local_file_fd)
@@ -253,7 +248,7 @@ pub(crate) fn fdopen(fd: RawFd, mode: Detour<OpenOptionsInternal>) -> Detour<usi
         .ok_or(Bypass::LocalFdNotFound(fd))?;
 
     // Only open if the file we hold has compatible permissions with what's being requested.
-    if open_options <= remote_file.read()?.open_options {
+    if open_options <= remote_file.open_options {
         Detour::Success(usize::try_from(*local_fd)?)
     } else {
         Detour::Error(HookError::OpenOptionsDoesntMatch)
@@ -329,46 +324,6 @@ pub(crate) fn fileno(local_fd: Detour<RawFd>) -> Detour<RawFd> {
     )
 }
 
-#[tracing::instrument(level = "debug")]
-pub(crate) fn ferror(local_fd: Detour<RawFd>) -> Detour<i32> {
-    let open_files = OPEN_FILES.lock()?;
-    let remote_file = open_files.get(&local_fd?)?.read()?;
-
-    Detour::Success(remote_file.error.map(NonZeroI64::get).unwrap_or_default() as i32)
-}
-
-/// Returns `1` if `is_eof` is set, and `0` if it's not.
-#[tracing::instrument(level = "debug")]
-pub(crate) fn feof(local_fd: Detour<RawFd>) -> Detour<i32> {
-    let open_files = OPEN_FILES.lock()?;
-    let remote_file = open_files.get(&local_fd?)?.read()?;
-
-    Detour::Success(remote_file.is_eof.into())
-}
-
-/// Clears the `is_eof` and `error` values from this [`RemoteFile`]
-#[tracing::instrument(level = "trace")]
-pub(crate) fn clearerr(local_fd: Detour<RawFd>) -> Detour<()> {
-    let open_files = OPEN_FILES.lock()?;
-    let mut remote_file = open_files.get(&local_fd?)?.write()?;
-
-    remote_file.error = None;
-    remote_file.is_eof = false;
-
-    Detour::Success(())
-}
-
-#[tracing::instrument(level = "debug")]
-pub(crate) fn fclose(local_fd: Detour<RawFd>) -> Detour<i32> {
-    let removed = OPEN_FILES.lock()?.remove(&local_fd?);
-    info!("fclose removed {:#?}", removed);
-
-    let _r = removed?;
-    Detour::Success(0)
-    // TODO(alex) [mid] 2023-03-07: Call `fflush` if this was being used as output (always safe to
-    // call it? if so, then just always do it).
-}
-
 // fetches the current entry in the directory stream created by `fdopendir`
 #[tracing::instrument(level = "trace")]
 pub(crate) fn readdir_r(dir_stream: usize) -> Detour<Option<DirEntryInternal>> {
@@ -438,11 +393,7 @@ pub(crate) fn openat(
 
         OPEN_FILES.lock()?.insert(
             local_file_fd,
-            Arc::new(RwLock::new(RemoteFile::new(
-                remote_fd,
-                open_options,
-                Some(path),
-            ))),
+            Arc::new(RemoteFile::new(remote_fd, open_options, Some(path))),
         );
 
         Detour::Success(local_file_fd)
@@ -546,10 +497,6 @@ pub(crate) fn lseek(local_fd: Detour<RawFd>, offset: i64, whence: i32) -> Detour
     blocking_send_file_message(FileOperation::Seek(seeking_file))?;
 
     let SeekFileResponse { result_offset } = file_channel_rx.blocking_recv()??;
-
-    let mut open_files = OPEN_FILES.lock()?;
-    let mut file = open_files.get_mut(&local_fd)?.write()?;
-    file.is_eof = false;
 
     Detour::Success(result_offset)
 }
