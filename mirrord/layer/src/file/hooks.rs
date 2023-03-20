@@ -5,13 +5,12 @@ use core::ffi::{c_size_t, c_ssize_t};
 ///
 /// NOTICE: If a file operation fails, it might be because it depends on some `libc` function
 /// that is not being hooked (`strace` the program to check).
-use std::{ffi::CString, num::NonZeroI64, os::unix::io::RawFd, ptr, slice, time::Duration};
+use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
 
 #[cfg(target_os = "linux")]
 use errno::{set_errno, Errno};
 use libc::{
     self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, DIR,
-    FILE,
 };
 #[cfg(target_os = "linux")]
 use libc::{EBADF, EINVAL, ENOENT, ENOTDIR};
@@ -26,7 +25,7 @@ use tracing::{debug, trace};
 #[cfg(target_os = "linux")]
 use tracing::{error, info, warn};
 
-use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
+use super::{ops::*, OpenOptionsInternalExt};
 #[cfg(target_os = "linux")]
 use crate::error::HookError::ResponseError;
 use crate::{
@@ -70,9 +69,38 @@ pub(super) unsafe extern "C" fn open_detour(
 ///
 /// Converts a `RawFd` into `*mut FILE` only for files that are already being managed by
 /// mirrord-layer.
+///
+/// ## Details
+///
+/// We actually convert this to a pointer address (`usize`), and not to an actual pointer to
+/// [`FILE`].
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char) -> usize {
     fdopen(fd, raw_mode.checked_into()).unwrap_or_bypass_with(|_| FN_FDOPEN(fd, raw_mode))
+}
+
+/// Hook for macos internal call of `libc::fopen`.
+///
+/// **Bypassed** by `raw_path`s that match `IGNORE_FILES` regex.
+///
+/// ## Details
+///
+/// In linux, `fopen` just calls `open`, so we don't need to hook it (same for other `f` operations
+/// that act on file streams [`libc::FILE`]), but macos actually calls `open$NOCANCEL`.
+#[cfg(target_os = "macos")]
+#[hook_fn]
+pub(super) unsafe extern "C" fn open_nocancel_detour(
+    raw_path: *const c_char,
+    open_flags: c_int,
+    mut args: ...
+) -> RawFd {
+    let mode: c_int = args.arg();
+    let guard = DetourGuard::new();
+    if guard.is_none() {
+        FN_OPEN_NOCANCEL(raw_path, open_flags, mode)
+    } else {
+        open_logic(raw_path, open_flags, mode)
+    }
 }
 
 #[hook_guard_fn]
@@ -257,59 +285,6 @@ pub(crate) unsafe extern "C" fn read_detour(
         .unwrap_or_bypass_with(|_| FN_READ(fd, out_buffer, count))
 }
 
-/// Hook for `libc::fread`.
-///
-/// Reads `element_size * number_of_elements` bytes into `out_buffer`, only for `*mut FILE`s that
-/// are being managed by mirrord-layer.
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fread_detour(
-    out_buffer: *mut c_void,
-    element_size: size_t,
-    number_of_elements: size_t,
-    file_stream: *mut FILE,
-) -> size_t {
-    debug!("FREAD DETOUR");
-    // Extract the fd from stream and check if it's managed by us, or should be bypassed.
-    let local_fd = file_stream.checked_into();
-    let read_amount = (element_size * number_of_elements) as u64;
-
-    let to_read = file_stream.checked_into();
-    let to_read_3 = file_stream.checked_into();
-    read(to_read, read_amount)
-        .map(|read_file| {
-            let ReadFileResponse {
-                bytes,
-                read_amount,
-                is_eof,
-            } = read_file;
-
-            // `fread` does not distinguish between end-of-file and error, callers must use
-            // `feof(3)` and `ferror(3)` to determine which occurred.
-            if is_eof {
-                let mut open_files = OPEN_FILES.lock().unwrap();
-                let mut remote_file = open_files
-                    .get_mut(&to_read_3.unwrap())
-                    .unwrap()
-                    .write()
-                    .unwrap();
-                remote_file.is_eof = true;
-            }
-
-            // There is no distinction between reading 0 bytes or if we hit EOF, but we only copy to
-            // buffer if we have something to copy.
-            if read_amount > 0 {
-                let read_ptr = bytes.as_ptr();
-                let out_buffer = out_buffer.cast();
-                ptr::copy(read_ptr, out_buffer, read_amount as usize);
-            }
-
-            read_amount as usize
-        })
-        .unwrap_or_bypass_with(|_| {
-            FN_FREAD(out_buffer, element_size, number_of_elements, file_stream)
-        })
-}
-
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn pread_detour(
     fd: RawFd,
@@ -368,64 +343,6 @@ pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c
         .unwrap_or_bypass_with(|_| FN_LSEEK(fd, offset, whence))
 }
 
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fseek_detour(
-    file_stream: *mut FILE,
-    offset: c_int,
-    whence: c_int,
-) -> c_int {
-    debug!("FSEEK DETOUR");
-    lseek(file_stream.checked_into(), offset as off_t, whence)
-        .map(|offset| i64::try_from(offset).unwrap())
-        .unwrap_or_bypass_with(|_| FN_FSEEK(file_stream, offset, whence).into()) as c_int
-}
-
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fseeko_detour(
-    file_stream: *mut FILE,
-    offset: off_t,
-    whence: c_int,
-) -> c_int {
-    debug!("FSEEKO DETOUR");
-    lseek(file_stream.checked_into(), offset as off_t, whence)
-        .map(|offset| i64::try_from(offset).unwrap())
-        .unwrap_or_bypass_with(|_| FN_FSEEKO(file_stream, offset, whence).into()) as c_int
-}
-
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn flock_detour(fd: RawFd, operation: c_int) -> c_int {
-    debug!("FLOCK DETOUR");
-    debug!("FLOCK {fd:#?}");
-
-    FN_FLOCK(fd, operation)
-}
-
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn flockfile_detour(file_stream: *mut FILE) {
-    debug!("FLOCKFILE DETOUR");
-    let local_fd = file_stream.checked_into();
-    debug!("FLOCKFILE {local_fd:#?}");
-
-    if let Detour::Success(fd) = local_fd {
-        ()
-    } else {
-        FN_FLOCKFILE(file_stream)
-    }
-}
-
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn ftrylockfile_detour(file_stream: *mut FILE) -> c_int {
-    debug!("FTRYLOCKFILE DETOUR");
-    let local_fd = file_stream.checked_into();
-    debug!("FTRYLOCKFILE {local_fd:#?}");
-
-    if let Detour::Success(fd) = local_fd {
-        0
-    } else {
-        FN_FTRYLOCKFILE(file_stream)
-    }
-}
-
 /// Implementation of write_detour, used in  write_detour
 pub(crate) unsafe extern "C" fn write_logic(
     fd: RawFd,
@@ -476,91 +393,6 @@ pub(crate) unsafe extern "C" fn faccessat_detour(
     } else {
         FN_FACCESSAT(dirfd, pathname, mode, flags)
     }
-}
-
-/// Used to distinguish between an error or `EOF` (especially relevant for `fgets`).
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn ferror_detour(file_stream: *mut FILE) -> c_int {
-    debug!("FERROR DETOUR");
-    ferror(file_stream.checked_into()).unwrap_or_bypass_with(|_| FN_FERROR(file_stream))
-}
-
-/// Returns `EOF` state for this `file_stream`.
-///
-/// See [`feof`].
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn feof_detour(file_stream: *mut FILE) -> c_int {
-    debug!("FEOF DETOUR");
-    feof(file_stream.checked_into()).unwrap_or_bypass_with(|_| FN_FEOF(file_stream))
-}
-
-/// Clears `EOF` and error state for this `file_stream`.
-///
-/// See [`clearerr`].
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn clearerr_detour(file_stream: *mut FILE) {
-    debug!("CLEARERR DETOUR");
-    clearerr(file_stream.checked_into())
-        .map(|()| 0)
-        .unwrap_or_bypass_with(|_| {
-            FN_CLEARERR(file_stream);
-            0
-        });
-}
-
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fclose_detour(file_stream: *mut FILE) -> c_int {
-    debug!("FCLOSE DETOUR");
-    let r = fclose(file_stream.checked_into()).unwrap_or_bypass_with(|_| FN_FCLOSE(file_stream));
-    info!("fclose result {r:#?}");
-    r
-}
-
-/// Hook for [`libc::fileno`].
-///
-/// Converts a `*mut FILE` stream into an fd, see [`fileno`] for more details.
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fileno_detour(file_stream: *mut FILE) -> c_int {
-    debug!("FILENO DETOUR");
-    let fd = fileno(file_stream.checked_into()).unwrap_or_bypass_with(|_| FN_FILENO(file_stream));
-
-    debug!("FILENO DETOUR fd {:#?}", fd);
-
-    fd
-}
-
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fprintf_detour(
-    file_stream: *mut FILE,
-    format: *const c_char,
-    args: ...
-) -> c_int {
-    debug!("FPRINTF DETOUR");
-
-    if !file_stream.is_null() {
-        debug!(
-            "FPRINTF DETOUR with file_stream {:#?} fd {:#?}",
-            file_stream,
-            *(file_stream as *const RawFd)
-        );
-    }
-
-    FN_FPRINTF(file_stream, format, args)
-}
-
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn vfprintf_detour(
-    file_stream: *mut FILE,
-    format: *const c_char,
-    args: ...
-) -> c_int {
-    debug!("VFPRINTF DETOUR");
-
-    if !file_stream.is_null() {
-        debug!("VFPRINTF DETOUR with file_stream {:#?}", file_stream);
-    }
-
-    FN_VFPRINTF(file_stream, format, args)
 }
 
 /// Tries to convert input to type O, if it fails it returns the max value of O.
@@ -741,17 +573,8 @@ unsafe extern "C" fn fstatat_detour(
 
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
-    // replace!(
-    //     hook_manager,
-    //     "__fsetlocking",
-    //     __fsetlocking_detour,
-    //     Fn__fsetlocking,
-    //     FN___FSETLOCKING
-    // );
-
     replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
     replace!(hook_manager, "openat", openat_detour, FnOpenat, FN_OPENAT);
-    // replace!(hook_manager, "fopen", fopen_detour, FnFopen, FN_FOPEN);
     replace!(hook_manager, "fdopen", fdopen_detour, FnFdopen, FN_FDOPEN);
 
     replace!(hook_manager, "read", read_detour, FnRead, FN_READ);
@@ -763,79 +586,7 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         FnClosedir,
         FN_CLOSEDIR
     );
-    // replace!(hook_manager, "fread", fread_detour, FnFread, FN_FREAD);
-    // replace!(hook_manager, "fgets", fgets_detour, FnFgets, FN_FGETS);
     replace!(hook_manager, "pread", pread_detour, FnPread, FN_PREAD);
-    // replace!(hook_manager, "ferror", ferror_detour, FnFerror, FN_FERROR);
-    // replace!(hook_manager, "feof", feof_detour, FnFeof, FN_FEOF);
-    // replace!(
-    //     hook_manager,
-    //     "clearerr",
-    //     clearerr_detour,
-    //     FnClearerr,
-    //     FN_CLEARERR
-    // );
-    // replace!(hook_manager, "fclose", fclose_detour, FnFclose, FN_FCLOSE);
-    // replace!(hook_manager, "fileno", fileno_detour, FnFileno, FN_FILENO);
-    // replace!(hook_manager, "lseek", lseek_detour, FnLseek, FN_LSEEK);
-    // replace!(hook_manager, "fseek", fseek_detour, FnFseek, FN_FSEEK);
-    // replace!(hook_manager, "fseeko", fseeko_detour, FnFseeko, FN_FSEEKO);
-
-    replace!(hook_manager, "flock", flock_detour, FnFlock, FN_FLOCK);
-    // replace!(
-    //     hook_manager,
-    //     "flockfile",
-    //     flockfile_detour,
-    //     FnFlockfile,
-    //     FN_FLOCKFILE
-    // );
-    // replace!(
-    //     hook_manager,
-    //     "ftrylockfile",
-    //     ftrylockfile_detour,
-    //     FnFtrylockfile,
-    //     FN_FTRYLOCKFILE
-    // );
-    // replace!(
-    //     hook_manager,
-    //     "funlockfile",
-    //     funlockfile_detour,
-    //     FnFunlockfile,
-    //     FN_FUNLOCKFILE
-    // );
-
-    // replace!(hook_manager, "ftell", ftell_detour, FnFtell, FN_FTELL);
-    // replace!(hook_manager, "ftello", ftello_detour, FnFtello, FN_FTELLO);
-    // replace!(hook_manager, "rewind", rewind_detour, FnRewind, FN_REWIND);
-    // replace!(
-    //     hook_manager,
-    //     "fgetpos",
-    //     fgetpos_detour,
-    //     FnFgetpos,
-    //     FN_FGETPOS
-    // );
-    // replace!(
-    //     hook_manager,
-    //     "fsetpos",
-    //     fsetpos_detour,
-    //     FnFsetpos,
-    //     FN_FSETPOS
-    // );
-    // replace!(
-    //     hook_manager,
-    //     "fprintf",
-    //     fprintf_detour,
-    //     FnFprintf,
-    //     FN_FPRINTF
-    // );
-    // replace!(
-    //     hook_manager,
-    //     "vfprintf",
-    //     vfprintf_detour,
-    //     FnVfprintf,
-    //     FN_VFPRINTF
-    // );
-
     replace!(hook_manager, "write", write_detour, FnWrite, FN_WRITE);
     replace!(hook_manager, "pwrite", pwrite_detour, FnPwrite, FN_PWRITE);
     replace!(hook_manager, "access", access_detour, FnAccess, FN_ACCESS);
@@ -887,6 +638,16 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FN_READDIR_R
         );
     }
+
+    #[cfg(target_os = "macos")]
+    replace!(
+        hook_manager,
+        "open$NOCANCEL",
+        open_nocancel_detour,
+        FnOpen_nocancel,
+        FN_OPEN_NOCANCEL
+    );
+
     // on non aarch64 (Intel) we need to hook also $INODE64 variants
     #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
     {

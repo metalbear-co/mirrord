@@ -74,26 +74,15 @@ pub(crate) unsafe extern "C" fn getsockname_detour(
         .unwrap_or_bypass_with(|_| FN_GETSOCKNAME(sockfd, address, address_len))
 }
 
-#[hook_fn]
-pub(crate) unsafe extern "C" fn res_vinit_1_detour(
-    file_stream: *mut FILE,
-    parser: *mut c_void,
-) -> bool {
-    info!("RES_VINIT_1_DETOUR");
-
-    FN_RES_VINIT_1(file_stream, parser)
-}
-
 /// Hook for `libc::gethostname`.
 ///
 /// Reads remote hostname bytes into `raw_name`, will raise EINVAL errno and return -1 if hostname
 /// read more than `name_length`
-#[hook_fn]
+#[hook_guard_fn]
 pub(crate) unsafe extern "C" fn gethostname_detour(
     raw_name: *mut c_char,
     name_length: usize,
 ) -> c_int {
-    // FN_GETHOSTNAME(raw_name, name_length)
     gethostname()
         .map(|host| {
             let host_len = host.as_bytes_with_nul().len();
