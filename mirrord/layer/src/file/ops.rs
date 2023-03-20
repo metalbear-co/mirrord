@@ -286,44 +286,6 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
     Detour::Success(local_dir_fd as usize)
 }
 
-/// Returns the `local_fd` back if this fd is being managed by us.
-///
-/// ## Details
-///
-/// Due to the way we handle opening file streams (see [`fopen`]), it is safe-ish to convert the
-/// `*mut FILE` to a simple `RawFd`, and check if it's still in our [`OPEN_FILES`].
-///
-/// ## Safety
-///
-/// The assumption may break if the file stream pointer conversion to [`RawFd`] ends up being equal
-/// to some fd that is being managed by us, for example:
-///
-/// 1. The user calls [`libc::fopen`] for a locally handled path;
-/// 2. The call succeeds, and returns a `*mut FILE` _A_, which can be dereferenced to a value of
-///    `3`;
-/// 3. We're holding a previously opened file with `fd == 3`;
-/// 4. User calls [`libc::fileno`] with the acquired file stream _A_;
-/// 5. We convert the file stream _A_ to `3`, breaking our invariant.
-///
-/// We're assuming that most pointers won't have such small values, and that the user won't reach a
-/// big enough list of fds to get close to normal pointer address' values.
-#[tracing::instrument(level = "trace")]
-pub(crate) fn fileno(local_fd: Detour<RawFd>) -> Detour<RawFd> {
-    let local_fd = local_fd?;
-
-    OPEN_FILES
-        .lock()?
-        .iter()
-        .for_each(|(k, v)| debug!("FILENO CONTAINS k {k:#?} v {v:#?}"));
-
-    Detour::Success(
-        OPEN_FILES
-            .lock()?
-            .contains_key(&local_fd)
-            .then_some(local_fd)?,
-    )
-}
-
 // fetches the current entry in the directory stream created by `fdopendir`
 #[tracing::instrument(level = "trace")]
 pub(crate) fn readdir_r(dir_stream: usize) -> Detour<Option<DirEntryInternal>> {
@@ -468,8 +430,7 @@ pub(crate) fn pwrite(local_fd: RawFd, buffer: &[u8], offset: u64) -> Detour<Writ
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn lseek(local_fd: Detour<RawFd>, offset: i64, whence: i32) -> Detour<u64> {
-    let local_fd = local_fd?;
+pub(crate) fn lseek(local_fd: RawFd, offset: i64, whence: i32) -> Detour<u64> {
     let remote_fd = get_remote_fd(local_fd)?;
 
     let seek_from = match whence {

@@ -336,9 +336,7 @@ pub(crate) unsafe extern "C" fn pwrite_detour(
 /// **Bypassed** by `fd`s that are not managed by us (not found in `OPEN_FILES`).
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c_int) -> off_t {
-    debug!("lseek_detour for fd {fd:#?}");
-
-    lseek(Detour::Success(fd), offset, whence)
+    lseek(fd, offset, whence)
         .map(|offset| i64::try_from(offset).unwrap())
         .unwrap_or_bypass_with(|_| FN_LSEEK(fd, offset, whence))
 }
