@@ -1,7 +1,7 @@
 use std::{ptr::null_mut, sync::LazyLock};
 
 use frida_gum::{interceptor::Interceptor, Gum, Module, NativePointer};
-use tracing::trace;
+use tracing::{debug, trace};
 
 use crate::{LayerError, Result};
 
@@ -23,13 +23,16 @@ fn get_modules() -> Vec<String> {
 }
 
 /// Wrapper function that maps it to our error for convinence.
+#[tracing::instrument(level = "info")]
 fn get_export_by_name(module: Option<&str>, symbol: &str) -> Result<NativePointer> {
     Module::find_export_by_name(module, symbol)
+        .inspect(|ptr| debug!("Found export by name {:#?}", ptr.0))
         .ok_or_else(|| LayerError::NoExportName(symbol.to_string()))
 }
 
 impl<'a> HookManager<'a> {
     /// Hook the first function exported from a lib that is in modules and is hooked succesfully
+    #[tracing::instrument(level = "info", skip(self))]
     fn hook_any_lib_export(
         &mut self,
         symbol: &str,
@@ -41,7 +44,10 @@ impl<'a> HookManager<'a> {
                 continue;
             }
             if let Ok(function) = get_export_by_name(Some(module), symbol) {
-                trace!("found {symbol:?} in {module:?}, hooking");
+                trace!(
+                    "found {symbol:?} in {module:?}, hooking function {:#?}",
+                    function.0
+                );
                 match self.interceptor.replace(
                     function,
                     NativePointer(detour),
@@ -60,6 +66,7 @@ impl<'a> HookManager<'a> {
     /// Hook an exported symbol, suitable for most libc use cases.
     /// If it fails to hook the first one found, it will try to hook each matching export
     /// until it succeeds.
+    #[tracing::instrument(level = "info", skip(self))]
     pub(crate) fn hook_export_or_any(
         &mut self,
         symbol: &str,
@@ -77,6 +84,7 @@ impl<'a> HookManager<'a> {
     #[cfg(target_os = "linux")]
     /// Hook a symbol that isn't exported.
     /// It is valuable when hooking internal stuff. (Go)
+    #[tracing::instrument(level = "info", skip(self))]
     fn hook_symbol(
         &mut self,
         module: &str,

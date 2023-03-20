@@ -490,13 +490,6 @@ pub(crate) unsafe extern "C" fn fseeko_detour(
 }
 
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn __resolv_conf_load_detour(pre_init: *mut c_void) -> *mut c_void {
-    debug!("__RESOLV_CONF_LOAD DETOUR");
-
-    FN___RESOLV_CONF_LOAD(pre_init)
-}
-
-#[hook_guard_fn]
 pub(crate) unsafe extern "C" fn flock_detour(fd: RawFd, operation: c_int) -> c_int {
     debug!("FLOCK DETOUR");
     debug!("FLOCK {fd:#?}");
@@ -543,7 +536,7 @@ pub(crate) unsafe extern "C" fn funlockfile_detour(file_stream: *mut FILE) {
     }
 }
 
-#[hook_guard_fn]
+#[hook_fn]
 pub(crate) unsafe extern "C" fn __fsetlocking_detour(
     file_stream: *mut FILE,
     type_: c_int,
@@ -925,9 +918,17 @@ unsafe extern "C" fn fstatat_detour(
 
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
+    // replace!(
+    //     hook_manager,
+    //     "__fsetlocking",
+    //     __fsetlocking_detour,
+    //     Fn__fsetlocking,
+    //     FN___FSETLOCKING
+    // );
+
     replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
     replace!(hook_manager, "openat", openat_detour, FnOpenat, FN_OPENAT);
-    replace!(hook_manager, "fopen", fopen_detour, FnFopen, FN_FOPEN);
+    // replace!(hook_manager, "fopen", fopen_detour, FnFopen, FN_FOPEN);
     replace!(hook_manager, "fdopen", fdopen_detour, FnFdopen, FN_FDOPEN);
 
     replace!(hook_manager, "read", read_detour, FnRead, FN_READ);
@@ -939,92 +940,78 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         FnClosedir,
         FN_CLOSEDIR
     );
-    replace!(hook_manager, "fread", fread_detour, FnFread, FN_FREAD);
-    replace!(hook_manager, "fgets", fgets_detour, FnFgets, FN_FGETS);
+    // replace!(hook_manager, "fread", fread_detour, FnFread, FN_FREAD);
+    // replace!(hook_manager, "fgets", fgets_detour, FnFgets, FN_FGETS);
     replace!(hook_manager, "pread", pread_detour, FnPread, FN_PREAD);
-    replace!(hook_manager, "ferror", ferror_detour, FnFerror, FN_FERROR);
-    replace!(hook_manager, "feof", feof_detour, FnFeof, FN_FEOF);
-    replace!(
-        hook_manager,
-        "clearerr",
-        clearerr_detour,
-        FnClearerr,
-        FN_CLEARERR
-    );
-    replace!(hook_manager, "fclose", fclose_detour, FnFclose, FN_FCLOSE);
-    replace!(hook_manager, "fileno", fileno_detour, FnFileno, FN_FILENO);
-    replace!(hook_manager, "lseek", lseek_detour, FnLseek, FN_LSEEK);
-    replace!(hook_manager, "fseek", fseek_detour, FnFseek, FN_FSEEK);
-    replace!(hook_manager, "fseeko", fseeko_detour, FnFseeko, FN_FSEEKO);
+    // replace!(hook_manager, "ferror", ferror_detour, FnFerror, FN_FERROR);
+    // replace!(hook_manager, "feof", feof_detour, FnFeof, FN_FEOF);
+    // replace!(
+    //     hook_manager,
+    //     "clearerr",
+    //     clearerr_detour,
+    //     FnClearerr,
+    //     FN_CLEARERR
+    // );
+    // replace!(hook_manager, "fclose", fclose_detour, FnFclose, FN_FCLOSE);
+    // replace!(hook_manager, "fileno", fileno_detour, FnFileno, FN_FILENO);
+    // replace!(hook_manager, "lseek", lseek_detour, FnLseek, FN_LSEEK);
+    // replace!(hook_manager, "fseek", fseek_detour, FnFseek, FN_FSEEK);
+    // replace!(hook_manager, "fseeko", fseeko_detour, FnFseeko, FN_FSEEKO);
 
-    replace!(
-        hook_manager,
-        "__resolv_conf_load",
-        __resolv_conf_load_detour,
-        Fn__resolv_conf_load,
-        FN___RESOLV_CONF_LOAD
-    );
     replace!(hook_manager, "flock", flock_detour, FnFlock, FN_FLOCK);
-    replace!(
-        hook_manager,
-        "flockfile",
-        flockfile_detour,
-        FnFlockfile,
-        FN_FLOCKFILE
-    );
-    replace!(
-        hook_manager,
-        "ftrylockfile",
-        ftrylockfile_detour,
-        FnFtrylockfile,
-        FN_FTRYLOCKFILE
-    );
-    replace!(
-        hook_manager,
-        "funlockfile",
-        funlockfile_detour,
-        FnFunlockfile,
-        FN_FUNLOCKFILE
-    );
-    replace!(
-        hook_manager,
-        "__fsetlocking",
-        __fsetlocking_detour,
-        Fn__fsetlocking,
-        FN___FSETLOCKING
-    );
+    // replace!(
+    //     hook_manager,
+    //     "flockfile",
+    //     flockfile_detour,
+    //     FnFlockfile,
+    //     FN_FLOCKFILE
+    // );
+    // replace!(
+    //     hook_manager,
+    //     "ftrylockfile",
+    //     ftrylockfile_detour,
+    //     FnFtrylockfile,
+    //     FN_FTRYLOCKFILE
+    // );
+    // replace!(
+    //     hook_manager,
+    //     "funlockfile",
+    //     funlockfile_detour,
+    //     FnFunlockfile,
+    //     FN_FUNLOCKFILE
+    // );
 
-    replace!(hook_manager, "ftell", ftell_detour, FnFtell, FN_FTELL);
-    replace!(hook_manager, "ftello", ftello_detour, FnFtello, FN_FTELLO);
-    replace!(hook_manager, "rewind", rewind_detour, FnRewind, FN_REWIND);
-    replace!(
-        hook_manager,
-        "fgetpos",
-        fgetpos_detour,
-        FnFgetpos,
-        FN_FGETPOS
-    );
-    replace!(
-        hook_manager,
-        "fsetpos",
-        fsetpos_detour,
-        FnFsetpos,
-        FN_FSETPOS
-    );
-    replace!(
-        hook_manager,
-        "fprintf",
-        fprintf_detour,
-        FnFprintf,
-        FN_FPRINTF
-    );
-    replace!(
-        hook_manager,
-        "vfprintf",
-        vfprintf_detour,
-        FnVfprintf,
-        FN_VFPRINTF
-    );
+    // replace!(hook_manager, "ftell", ftell_detour, FnFtell, FN_FTELL);
+    // replace!(hook_manager, "ftello", ftello_detour, FnFtello, FN_FTELLO);
+    // replace!(hook_manager, "rewind", rewind_detour, FnRewind, FN_REWIND);
+    // replace!(
+    //     hook_manager,
+    //     "fgetpos",
+    //     fgetpos_detour,
+    //     FnFgetpos,
+    //     FN_FGETPOS
+    // );
+    // replace!(
+    //     hook_manager,
+    //     "fsetpos",
+    //     fsetpos_detour,
+    //     FnFsetpos,
+    //     FN_FSETPOS
+    // );
+    // replace!(
+    //     hook_manager,
+    //     "fprintf",
+    //     fprintf_detour,
+    //     FnFprintf,
+    //     FN_FPRINTF
+    // );
+    // replace!(
+    //     hook_manager,
+    //     "vfprintf",
+    //     vfprintf_detour,
+    //     FnVfprintf,
+    //     FN_VFPRINTF
+    // );
 
     replace!(hook_manager, "write", write_detour, FnWrite, FN_WRITE);
     replace!(hook_manager, "pwrite", pwrite_detour, FnPwrite, FN_PWRITE);

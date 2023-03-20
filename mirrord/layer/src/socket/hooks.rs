@@ -7,7 +7,7 @@ use std::{
 };
 
 use errno::{set_errno, Errno};
-use libc::{c_char, c_int, sockaddr, socklen_t, EINVAL};
+use libc::{c_char, c_int, c_void, sockaddr, socklen_t, EINVAL, FILE};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use tracing::{error, info};
 
@@ -74,18 +74,31 @@ pub(crate) unsafe extern "C" fn getsockname_detour(
         .unwrap_or_bypass_with(|_| FN_GETSOCKNAME(sockfd, address, address_len))
 }
 
+#[hook_fn]
+pub(crate) unsafe extern "C" fn res_vinit_1_detour(
+    file_stream: *mut FILE,
+    parser: *mut c_void,
+) -> bool {
+    info!("RES_VINIT_1_DETOUR");
+
+    FN_RES_VINIT_1(file_stream, parser)
+}
+
 /// Hook for `libc::gethostname`.
 ///
 /// Reads remote hostname bytes into `raw_name`, will raise EINVAL errno and return -1 if hostname
 /// read more than `name_length`
-#[hook_guard_fn]
+#[hook_fn]
 pub(crate) unsafe extern "C" fn gethostname_detour(
     raw_name: *mut c_char,
     name_length: usize,
 ) -> c_int {
+    // FN_GETHOSTNAME(raw_name, name_length)
     gethostname()
         .map(|host| {
+            info!("HOSTNAME host {host:#?}");
             let host_len = host.as_bytes_with_nul().len();
+            info!("HOSTNAME host_len {host_len:#?}");
 
             raw_name.copy_from_nonoverlapping(host.as_ptr(), cmp::min(name_length, host_len));
 
@@ -295,6 +308,14 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
 }
 
 pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled_remote_dns: bool) {
+    // replace!(
+    //     hook_manager,
+    //     "res_vinit_1",
+    //     res_vinit_1_detour,
+    //     FnRes_vinit_1,
+    //     FN_RES_VINIT_1
+    // );
+
     replace!(hook_manager, "socket", socket_detour, FnSocket, FN_SOCKET);
 
     replace!(hook_manager, "bind", bind_detour, FnBind, FN_BIND);
