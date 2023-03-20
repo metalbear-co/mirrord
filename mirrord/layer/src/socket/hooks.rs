@@ -7,7 +7,7 @@ use std::{
 };
 
 use errno::{set_errno, Errno};
-use libc::{c_char, c_int, c_void, sockaddr, socklen_t, EINVAL, FILE};
+use libc::{c_char, c_int, sockaddr, socklen_t, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use tracing::{error, info};
 

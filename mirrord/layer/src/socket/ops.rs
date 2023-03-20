@@ -13,7 +13,7 @@ use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::{dns::LookupRecord, file::OpenOptionsInternal};
 use socket2::SockAddr;
 use tokio::sync::oneshot;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, trace};
 
 use super::{hooks::*, *};
 use crate::{
@@ -665,8 +665,7 @@ fn remote_hostname_string() -> Detour<CString> {
     )?;
 
     let hostname_file = file::ops::read(Detour::Success(hostname_fd), 256)?;
-    debug!("HOSTNAME STRING read {hostname_file:#?}");
-    // close_layer_fd(hostname_fd);
+    close_layer_fd(hostname_fd);
 
     CString::new(
         hostname_file
@@ -674,10 +673,8 @@ fn remote_hostname_string() -> Detour<CString> {
             .into_iter()
             // Take until new-line.
             .take_while(|byte| *byte != b'\n')
-            // .take(hostname_file.read_amount as usize - 1)
             .collect::<Vec<_>>(),
     )
-    .inspect(|hostname| debug!("HOSTNAME we have the string {hostname:#?}"))
     .map(Detour::Success)?
 }
 

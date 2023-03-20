@@ -291,13 +291,6 @@ impl<S> Detour<S> {
         }
     }
 
-    pub(crate) fn unwrap(self) -> S {
-        match self {
-            Detour::Success(s) => s,
-            _ => panic!("Unwrapped invalid value!"),
-        }
-    }
-
     /// Return the contained `Success` value or a provided default if `Bypass` or `Error`.
     ///
     /// To be used in hooks that are deemed non-essential, and the run should continue even if they
