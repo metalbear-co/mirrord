@@ -63,7 +63,7 @@ object MirrordApi {
             it.patchCommandLine(commandLine, project, wslOptions)
         }
 
-        MirrordLogger.logger.debug("creating command line and executing {}".format(commandLine.toString()))
+        MirrordLogger.logger.debug("creating command line and executing %s".format(commandLine.toString()))
         val process = commandLine.toProcessBuilder()
             .redirectOutput(ProcessBuilder.Redirect.PIPE)
             .redirectError(ProcessBuilder.Redirect.PIPE)
@@ -75,7 +75,7 @@ object MirrordApi {
         MirrordLogger.logger.debug("process wait finished, reading output")
         val data = process.inputStream.bufferedReader().readText();
         val gson = Gson();
-        MirrordLogger.logger.debug("parsing {}".format(data))
+        MirrordLogger.logger.debug("parsing %s".format(data))
         return gson.fromJson(data, Array<String>::class.java).asList()
 
     }
