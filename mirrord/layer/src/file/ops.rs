@@ -10,7 +10,7 @@
 // - fseek [] (not hooked);
 use std::{ffi::CString, io::SeekFrom, num::NonZeroI64, os::unix::io::RawFd, path::PathBuf};
 
-use libc::{c_int, c_uint, AT_FDCWD, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
+use libc::{c_int, c_uint, AT_FDCWD, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::file::{
     OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse, WriteFileResponse,
     XstatResponse,
@@ -477,32 +477,6 @@ pub(crate) fn read(local_fd: Detour<RawFd>, read_amount: u64) -> Detour<ReadFile
     let d = String::from_utf8_lossy(&read.bytes[..read.read_amount as usize]);
     info!("reading {:#?} | file {:#?}", read, local_fd);
     info!("reading got {:#?}", d);
-
-    Detour::Success(read)
-}
-
-#[tracing::instrument(level = "trace")]
-pub(crate) fn fgets(local_fd: Detour<RawFd>, buffer_size: usize) -> Detour<ReadFileResponse> {
-    let local_fd = local_fd?;
-    // We're only interested in files that are paired with mirrord-agent.
-    let remote_fd = get_remote_fd(local_fd)?;
-
-    let (file_channel_tx, file_channel_rx) = oneshot::channel();
-
-    let reading_file = Read {
-        remote_fd,
-        buffer_size: buffer_size as u64,
-        start_from: 0,
-        file_channel_tx,
-    };
-
-    blocking_send_file_message(FileOperation::ReadLine(reading_file))?;
-
-    let read = file_channel_rx.blocking_recv()??;
-
-    let d = String::from_utf8_lossy(&read.bytes[..read.read_amount as usize]);
-    info!("fgetsing {:#?} | file {:#?}", read, local_fd);
-    info!("fgetsing got {:#?}", d);
 
     Detour::Success(read)
 }

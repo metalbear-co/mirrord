@@ -1,5 +1,5 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{collections::VecDeque, ffi::CStr, os::fd::RawFd, path::PathBuf, ptr::NonNull};
+use std::{collections::VecDeque, ffi::CStr, os::fd::RawFd, path::PathBuf};
 
 use libc::c_char;
 use mirrord_protocol::{file::OpenOptionsInternal, RemoteResult};

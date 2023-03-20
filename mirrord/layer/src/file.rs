@@ -248,7 +248,6 @@ impl FileHandler {
             OpenRelative(open_relative) => self.handle_hook_open_relative(open_relative, tx).await,
 
             Read(read) => self.handle_hook_read(read, tx).await,
-            ReadLine(read) => self.handle_hook_read_line(read, tx).await,
             ReadLimited(read) => self.handle_hook_read_limited(read, tx).await,
             Seek(seek) => self.handle_hook_seek(seek, tx).await,
             Write(write) => self.handle_hook_write(write, tx).await,
@@ -685,7 +684,6 @@ pub enum FileOperation {
     Open(Open),
     OpenRelative(OpenRelative),
     Read(Read<ReadFileResponse>),
-    ReadLine(Read<ReadFileResponse>),
     ReadLimited(Read<ReadFileResponse>),
     Write(Write<WriteFileResponse>),
     WriteLimited(Write<WriteFileResponse>),

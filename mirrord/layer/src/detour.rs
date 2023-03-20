@@ -9,10 +9,7 @@ use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
-use std::{
-    cell::RefCell, marker::Destruct, ops::Deref, os::unix::prelude::*, path::PathBuf,
-    sync::OnceLock,
-};
+use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf, sync::OnceLock};
 
 use crate::error::HookError;
 
@@ -311,14 +308,6 @@ impl<S> Detour<S> {
             Detour::Success(s) => s,
             _ => default,
         }
-    }
-
-    pub(crate) fn inspect_err<F: FnOnce(&HookError)>(self, op: F) -> Self {
-        if let Detour::Error(ref fail) = self {
-            op(fail)
-        }
-
-        self
     }
 }
 

@@ -5,9 +5,7 @@ use core::ffi::{c_size_t, c_ssize_t};
 ///
 /// NOTICE: If a file operation fails, it might be because it depends on some `libc` function
 /// that is not being hooked (`strace` the program to check).
-use std::{
-    ffi::CString, num::NonZeroI64, os::unix::io::RawFd, path::PathBuf, ptr, slice, time::Duration,
-};
+use std::{ffi::CString, num::NonZeroI64, os::unix::io::RawFd, ptr, slice, time::Duration};
 
 #[cfg(target_os = "linux")]
 use errno::{set_errno, Errno};
@@ -66,31 +64,6 @@ pub(super) unsafe extern "C" fn open_detour(
     } else {
         open_logic(raw_path, open_flags, mode)
     }
-}
-
-/// Hook for `libc::fopen`.
-///
-/// **Bypassed** by `raw_path`s that match `IGNORE_FILES` regex.
-#[hook_guard_fn]
-pub(super) unsafe extern "C" fn fopen_detour(
-    raw_path: *const c_char,
-    raw_mode: *const c_char,
-) -> usize {
-    debug!("FOPEN DETOUR CALLED");
-    let result = fopen(raw_path.checked_into(), raw_mode.checked_into())
-        .unwrap_or_bypass_with(|_| FN_FOPEN(raw_path, raw_mode));
-
-    debug!("FOPEN DETOUR ENDED!");
-
-    debug!("FOPEN DETOUR has proper pointer {:#?}", result);
-
-    OPEN_FILES
-        .lock()
-        .unwrap()
-        .iter()
-        .for_each(|(k, v)| info!("FOPEN OPEN_FILES has key {k:#?} value {v:#?}"));
-
-    result
 }
 
 /// Hook for `libc::fdopen`.
@@ -332,79 +305,9 @@ pub(crate) unsafe extern "C" fn fread_detour(
 
             read_amount as usize
         })
-        .inspect_err(|fail| {
-            let mut open_files = OPEN_FILES.lock().unwrap();
-            let remote_file = open_files.get_mut(&local_fd.unwrap()).unwrap();
-            remote_file.write().unwrap().error = NonZeroI64::new(fail.code());
-        })
         .unwrap_or_bypass_with(|_| {
             FN_FREAD(out_buffer, element_size, number_of_elements, file_stream)
         })
-}
-
-/// Reads at most `capacity - 1` characters. Reading stops on `'\n'`, `EOF` or on error. On success,
-/// it appends `'\0'` to the end of the string (thus the limit on `capacity`).
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fgets_detour(
-    out_buffer: *mut c_char,
-    capacity: c_int,
-    file_stream: *mut FILE,
-) -> *mut c_char {
-    debug!("FGETS DETOUR");
-    // Extract the fd from stream and check if it's managed by us, or should be bypassed.
-    let local_fd = file_stream.checked_into();
-
-    // `fgets` reads 1 LESS character than specified by `capacity`, so instead of having
-    // branching code to check if this is an `fgets` call elsewhere, we just subtract 1 from
-    // `capacity` here.
-    let buffer_size = capacity - 1;
-
-    let to_read = file_stream.checked_into();
-    let to_read_3 = file_stream.checked_into();
-    fgets(to_read, buffer_size as usize)
-        .map(|read_file| {
-            let ReadFileResponse {
-                bytes,
-                read_amount,
-                is_eof,
-            } = read_file;
-
-            // `fgets` does not distinguish between end-of-file and error, callers must use
-            // `feof(3)` and `ferror(3)` to determine which occurred.
-            if is_eof {
-                let mut open_files = OPEN_FILES.lock().unwrap();
-                let mut remote_file = open_files
-                    .get_mut(&to_read_3.unwrap())
-                    .unwrap()
-                    .write()
-                    .unwrap();
-                remote_file.is_eof = true;
-            }
-
-            // There is no distinction between reading 0 bytes or if we hit EOF, but we only
-            // copy to buffer if we have something to copy.
-            //
-            // Callers can check for EOF by using `ferror`.
-            if read_amount > 0 {
-                let bytes_slice = &bytes[0..buffer_size.min(read_amount as i32) as usize];
-                let eof = vec![0; 1];
-
-                // Append '\0' to comply with `fgets`.
-                let read = [bytes_slice, &eof].concat();
-
-                ptr::copy(read.as_ptr().cast(), out_buffer, read.len());
-
-                out_buffer
-            } else {
-                ptr::null_mut()
-            }
-        })
-        .inspect_err(|fail| {
-            let mut open_files = OPEN_FILES.lock().unwrap();
-            let remote_file = open_files.get_mut(&local_fd.unwrap()).unwrap();
-            remote_file.write().unwrap().error = NonZeroI64::new(fail.code());
-        })
-        .unwrap_or_bypass_with(|_| FN_FGETS(out_buffer, capacity, file_stream))
 }
 
 #[hook_guard_fn]
@@ -521,86 +424,6 @@ pub(crate) unsafe extern "C" fn ftrylockfile_detour(file_stream: *mut FILE) -> c
     } else {
         FN_FTRYLOCKFILE(file_stream)
     }
-}
-
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn funlockfile_detour(file_stream: *mut FILE) {
-    debug!("FUNLOCKFILE DETOUR");
-    let local_fd = file_stream.checked_into();
-    debug!("FUNLOCKFILE {local_fd:#?}");
-
-    if let Detour::Success(fd) = local_fd {
-        ()
-    } else {
-        FN_FUNLOCKFILE(file_stream)
-    }
-}
-
-#[hook_fn]
-pub(crate) unsafe extern "C" fn __fsetlocking_detour(
-    file_stream: *mut FILE,
-    type_: c_int,
-) -> c_int {
-    debug!("FSETLOCKING DETOUR");
-    let local_fd = file_stream.checked_into();
-    debug!("FSETLOCKING {local_fd:#?}");
-
-    if let Detour::Success(fd) = local_fd {
-        0
-    } else {
-        FN___FSETLOCKING(file_stream, type_)
-    }
-}
-
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn ftell_detour(file_stream: *mut FILE) -> c_int {
-    debug!("FTELL DETOUR");
-    let local_fd = file_stream.checked_into();
-    debug!("ftell_detour {local_fd:#?}");
-
-    FN_FTELL(file_stream)
-}
-
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn ftello_detour(file_stream: *mut FILE) -> off_t {
-    debug!("FTELLO DETOUR");
-    let local_fd = file_stream.checked_into();
-    debug!("ftello_detour {local_fd:#?}");
-
-    FN_FTELLO(file_stream)
-}
-
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn rewind_detour(file_stream: *mut FILE) {
-    debug!("REWIND DETOUR");
-    let local_fd = file_stream.checked_into();
-    debug!("rewind_detour {local_fd:#?}");
-
-    FN_REWIND(file_stream)
-}
-
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fgetpos_detour(
-    file_stream: *mut FILE,
-    raw_position: *mut libc::fpos_t,
-) -> c_int {
-    debug!("FGETPOS DETOUR");
-    let local_fd = file_stream.checked_into();
-    debug!("fgetpos_detour {local_fd:#?}");
-
-    FN_FGETPOS(file_stream, raw_position)
-}
-
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fsetpos_detour(
-    file_stream: *mut FILE,
-    raw_position: *const libc::fpos_t,
-) -> c_int {
-    debug!("FSETPOS DETOUR");
-    let local_fd = file_stream.checked_into();
-    debug!("fsetpos_detour {local_fd:#?}");
-
-    FN_FSETPOS(file_stream, raw_position)
 }
 
 /// Implementation of write_detour, used in  write_detour
