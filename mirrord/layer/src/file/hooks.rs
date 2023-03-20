@@ -87,7 +87,6 @@ pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char
 ///
 /// In linux, `fopen` just calls `open`, so we don't need to hook it (same for other `f` operations
 /// that act on file streams [`libc::FILE`]), but macos actually calls `open$NOCANCEL`.
-#[cfg(target_os = "macos")]
 #[hook_fn]
 pub(super) unsafe extern "C" fn open_nocancel_detour(
     raw_path: *const c_char,
@@ -568,6 +567,13 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
     replace!(hook_manager, "openat", openat_detour, FnOpenat, FN_OPENAT);
     replace!(hook_manager, "fdopen", fdopen_detour, FnFdopen, FN_FDOPEN);
+    replace!(
+        hook_manager,
+        "open$NOCANCEL",
+        open_nocancel_detour,
+        FnOpen_nocancel,
+        FN_OPEN_NOCANCEL
+    );
 
     replace!(hook_manager, "read", read_detour, FnRead, FN_READ);
 
@@ -630,15 +636,6 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FN_READDIR_R
         );
     }
-
-    #[cfg(target_os = "macos")]
-    replace!(
-        hook_manager,
-        "open$NOCANCEL",
-        open_nocancel_detour,
-        FnOpen_nocancel,
-        FN_OPEN_NOCANCEL
-    );
 
     // on non aarch64 (Intel) we need to hook also $INODE64 variants
     #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
