@@ -1,14 +1,4 @@
-// TODO(alex) [high] 2023-03-10: Tasks
-// - fclose [p] (partial, missing `fflush`);
-// - fdopen [x] (missing remote file constraint check);
-// - fileno [x];
-// - clearerr [x] (not hooked);
-// - feof [x] (not hooked);
-// - ferror [x] (use error from remote_file);
-// - fread [x] (add error / eof to remote_file);
-// - fgets [x] (add error / eof to remote_file);
-// - fseek [] (not hooked);
-use std::{ffi::CString, io::SeekFrom, num::NonZeroI64, os::unix::io::RawFd, path::PathBuf};
+use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 use libc::{c_int, c_uint, AT_FDCWD, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::file::{
@@ -32,8 +22,6 @@ const MAX_READ_SIZE: u64 = 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RemoteFile {
     pub(crate) fd: u64,
-    pub(crate) error: Option<NonZeroI64>,
-    pub(crate) is_eof: bool,
     pub(crate) open_options: OpenOptionsInternal,
     pub(crate) path: Option<PathBuf>,
 }
@@ -43,8 +31,6 @@ impl RemoteFile {
         Self {
             fd,
             open_options,
-            error: Default::default(),
-            is_eof: Default::default(),
             path,
         }
     }
@@ -85,9 +71,9 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<u64> {
         OPEN_FILES
             .lock()?
             .get(&local_fd)
+            .map(|remote_file| remote_file.fd)
             // Bypass if we're not managing the relative part.
-            .ok_or(Bypass::LocalFdNotFound(local_fd))
-            .map(|remote_file| remote_file.fd)?,
+            .ok_or(Bypass::LocalFdNotFound(local_fd))?,
     )
 }
 
@@ -180,67 +166,13 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
     Detour::Success(local_file_fd)
 }
 
-// TODO(alex) [high] 2023-03-14: Few things can go wrong here:
-// 1. If we try to `fopen` a file that is being ignored;
-// 2. or we don't have enought permissions;
-// 3. or the file doesn't exist;
-//   - Segfaults.
-//
-// But this doesn't crash on `fopen` itself, it does a bit later? Must test with `fopen` `fclose`
-// pair and expand with more `f` stream functions later.
-//
-// Tested cases:
-//
-// 1. File exists: write + read_write [/tmp]: fopen -> fseek -> fclose (works);
-// 2. File exists: write + read_write [/tmp]: fopen -> stat -> fseek -> fclose (works);
-// 3. File exists: write + read_write [/tmp]: fopen -> fileno -> stat -> fseek -> fclose (works);
-// 4. File exists: read + read_only [/tmp]: fopen -> fclose (works);
-// 5. File exists: read + read_only [/tmp]: fopen -> fseek -> fclose (works);
-// 6. File exists: read + read_only [/tmp]: fopen -> stat -> fseek -> fclose (works);
-// 7. File exists: read + read_only [/tmp]: fopen -> fileno -> stat -> fseek -> fclose (works);
-// 8. File NOT exists: read: fopen -> fclose (breaks);
-//
-// Gotta test 8 better, with the proper file that python was trying to open, to see if this is the
-// case of non-existance.
-//
-// ADD(alex) [high] 2023-03-15: Making `/etc/resolv.conf` and `/etc/hosts` read locally doesn't
-// segfault, but mirror mode doesn't seem to work (curl doesn't mirror anything).
-//
-// Why are these 2 files problematic?
-// - Maybe it's some mixing of `/etc` `IGNORE_FILES`?
-// - Do they work in simpler examples?
-//
-//   1. Tested with `read_only` for both `/etc` files, and they work;
-//
-/// Calls [`open`] and returns a [`FILE`] pointer based on the **local** `fd`.
-#[tracing::instrument(level = "debug")]
-pub(crate) fn fopen(path: Detour<PathBuf>, mode: Detour<OpenOptionsInternal>) -> Detour<usize> {
-    let open_options = mode?;
-    let path = path?;
-
-    let local_file_fd = open(Detour::Success(path.clone()), open_options)?;
-
-    let debug_fds: Vec<RawFd> = OPEN_FILES.lock().unwrap().keys().copied().collect();
-    info!("fopen has fds {debug_fds:#?}");
-
-    OPEN_FILES
-        .lock()
-        .unwrap()
-        .iter()
-        .for_each(|(k, v)| info!("FILES AFTER INSERTION {k:#?} {v:#?}"));
-
-    Detour::Success(usize::try_from(local_file_fd)?)
-}
-
 /// Opens a file with `fd` that is being held in [`OPEN_FILES`], returning a _non-null_ file stream
 /// (which is just a pointer to the `local_fd` we're holding).
 ///
 /// The `mode` has to be compatible with the [`OpenOptionsInternal`] of the file with `fd`.
-#[tracing::instrument(level = "debug")]
+#[tracing::instrument(level = "trace")]
 pub(crate) fn fdopen(fd: RawFd, mode: Detour<OpenOptionsInternal>) -> Detour<usize> {
     let open_options = mode?;
-
-    trace!("fdopen -> open_options {open_options:#?}");
 
     let open_files = OPEN_FILES.lock()?;
     let (local_fd, remote_file) = open_files

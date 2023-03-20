@@ -21,7 +21,7 @@ use mirrord_protocol::file::{
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
 use num_traits::Bounded;
-use tracing::{debug, trace};
+use tracing::trace;
 #[cfg(target_os = "linux")]
 use tracing::{error, info, warn};
 
@@ -431,7 +431,6 @@ unsafe extern "C" fn fill_stat(out_stat: *mut stat, metadata: &MetadataInternal)
 /// Hook for `libc::lstat`.
 #[hook_guard_fn]
 unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
-    debug!("lstat_detour calling xstat");
     xstat(Some(raw_path.checked_into()), None, false)
         .map(|res| {
             let res = res.metadata;
@@ -444,7 +443,6 @@ unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) 
 /// Hook for `libc::fstat`.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> c_int {
-    debug!("stat_detour calling xstat");
     xstat(None, Some(fd), true)
         .map(|res| {
             let res = res.metadata;
@@ -457,7 +455,6 @@ pub(crate) unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> 
 /// Hook for `libc::stat`.
 #[hook_guard_fn]
 unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
-    debug!("stat_detour calling xstat");
     xstat(Some(raw_path.checked_into()), None, true)
         .map(|res| {
             let res = res.metadata;
@@ -474,13 +471,10 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
     raw_path: *const c_char,
     out_stat: *mut stat,
 ) -> c_int {
-    debug!("xstat_detour ver {ver:#?}");
-
     if ver != 1 {
         return FN___XSTAT(ver, raw_path, out_stat);
     }
 
-    debug!("xstat_detour calling xstat");
     xstat(Some(raw_path.checked_into()), None, true)
         .map(|res| {
             let res = res.metadata;
