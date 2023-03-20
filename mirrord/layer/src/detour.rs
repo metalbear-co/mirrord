@@ -301,19 +301,6 @@ impl<S> Detour<S> {
     }
 }
 
-// impl<S> Clone for Detour<S>
-// where
-//     S: ~const Clone + ~const Destruct,
-// {
-//     fn clone(&self) -> Self {
-//         match self {
-//             Detour::Success(s) => Detour::Success(s.clone()),
-//             Detour::Bypass(b) => Detour::Bypass(b.clone()),
-//             Detour::Error(e) => Detour::Error(e.clone()),
-//         }
-//     }
-// }
-
 impl<S> Detour<S>
 where
     S: From<HookError>,
