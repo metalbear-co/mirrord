@@ -652,7 +652,7 @@ pub(super) fn getaddrinfo(
 }
 
 /// Retrieves the `hostname` from the agent's `/etc/hostname` to be used by [`gethostname`]
-#[tracing::instrument(level = "info")]
+#[tracing::instrument(level = "trace")]
 fn remote_hostname_string() -> Detour<CString> {
     let hostname_path = PathBuf::from(r"/etc/hostname");
 
@@ -679,7 +679,7 @@ fn remote_hostname_string() -> Detour<CString> {
 }
 
 /// Resolve hostname from remote host with caching for the result
-#[tracing::instrument(level = "info")]
+#[tracing::instrument(level = "trace")]
 pub(super) fn gethostname() -> Detour<&'static CString> {
     HOSTNAME.get_or_detour_init(remote_hostname_string)
 }

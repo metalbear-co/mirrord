@@ -836,7 +836,6 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
 ///
 /// Removes the `fd` key from either [`SOCKETS`] or [`OPEN_FILES`].
 pub(crate) fn close_layer_fd(fd: c_int) {
-    trace!("Closing fd {}", fd);
     let file_mode_active = FILE_MODE
         .get()
         .expect("Should be set during initialization!")
@@ -846,13 +845,11 @@ pub(crate) fn close_layer_fd(fd: c_int) {
     if let Some(socket) = SOCKETS.lock().unwrap().remove(&fd) {
         CONNECTION_QUEUE.lock().unwrap().remove(socket.id);
     } else if file_mode_active {
-        info!("Removing the file!");
         // might not be enabled if `local`
         let _removed = OPEN_FILES
             .lock()
             .unwrap()
             .remove(&fd)
-            .inspect(|file| info!("CLOSED FILE {file:#?}"))
             .map(|_| unsafe { FN_CLOSE(fd) });
     }
 }

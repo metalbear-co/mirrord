@@ -89,7 +89,6 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
             raw_name.copy_from_nonoverlapping(host.as_ptr(), cmp::min(name_length, host_len));
 
             if host_len > name_length {
-                error!("Error in gethostname!");
                 set_errno(Errno(EINVAL));
 
                 -1
@@ -294,16 +293,7 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
 }
 
 pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled_remote_dns: bool) {
-    // replace!(
-    //     hook_manager,
-    //     "res_vinit_1",
-    //     res_vinit_1_detour,
-    //     FnRes_vinit_1,
-    //     FN_RES_VINIT_1
-    // );
-
     replace!(hook_manager, "socket", socket_detour, FnSocket, FN_SOCKET);
-
     replace!(hook_manager, "bind", bind_detour, FnBind, FN_BIND);
     replace!(hook_manager, "listen", listen_detour, FnListen, FN_LISTEN);
 
