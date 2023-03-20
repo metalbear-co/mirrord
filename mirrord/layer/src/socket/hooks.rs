@@ -96,10 +96,7 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
     // FN_GETHOSTNAME(raw_name, name_length)
     gethostname()
         .map(|host| {
-            info!("HOSTNAME host {host:#?}");
             let host_len = host.as_bytes_with_nul().len();
-            info!("HOSTNAME host_len {host_len:#?}");
-
             raw_name.copy_from_nonoverlapping(host.as_ptr(), cmp::min(name_length, host_len));
 
             if host_len > name_length {

@@ -8,6 +8,34 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.32.3](https://github.com/metalbear-co/mirrord/tree/3.32.3) - 2023-03-19
+
+
+### Changed
+
+- change outgoing connection drop to be trace instead of error since it's not
+  an error
+
+
+### Fixed
+
+- Support stealing on meshed services with ports specified in
+  --skip-inbound-ports on linkerd and itsio equivalent.
+  [#1041](https://github.com/metalbear-co/mirrord/issues/1041)
+
+
+## [3.32.2](https://github.com/metalbear-co/mirrord/tree/3.32.2) - 2023-03-14
+
+
+### Fixed
+
+- fix microk8s support by adding possible containerd socket path
+  [#1186](https://github.com/metalbear-co/mirrord/issues/1186)
+- fix gethostname null termination missing
+  [#1189](https://github.com/metalbear-co/mirrord/issues/1189)
+- Update webbrowser dependency to fix security issue.
+
+
 ## [3.32.1](https://github.com/metalbear-co/mirrord/tree/3.32.1) - 2023-03-12
 
 

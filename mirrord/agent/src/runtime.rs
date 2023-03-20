@@ -26,9 +26,18 @@ use crate::{
     error::{AgentError, Result},
 };
 
-const CONTAINERD_SOCK_PATH: &str = "/host/run/containerd/containerd.sock";
+const CONTAINERD_DEFAULT_SOCK_PATH: &str = "/host/run/containerd/containerd.sock";
 const CONTAINERD_ALTERNATIVE_SOCK_PATH: &str = "/host/run/dockershim.sock";
 const CONTAINERD_K3S_SOCK_PATH: &str = "/host/run/k3s/containerd/containerd.sock";
+const CONTAINERD_MICROK8S_SOCK_PATH: &str = "/host/var/snap/microk8s/common/run/containerd.sock";
+
+/// Possible containerd socket paths, evaluated from left to right.
+const CONTAINERD_SOCK_PATHS: [&str; 4] = [
+    CONTAINERD_DEFAULT_SOCK_PATH,
+    CONTAINERD_ALTERNATIVE_SOCK_PATH,
+    CONTAINERD_K3S_SOCK_PATH,
+    CONTAINERD_MICROK8S_SOCK_PATH,
+];
 
 const DEFAULT_CONTAINERD_NAMESPACE: &str = "k8s.io";
 
@@ -186,21 +195,14 @@ impl ContainerdContainer {
     /// containerd socket to use and we need to find the one
     /// that manages our target container
     async fn get_channel(&self) -> Result<Channel> {
-        match connect_and_find_container(self.container_id.clone(), CONTAINERD_SOCK_PATH).await {
-            Ok(channel) => Ok(channel),
-            Err(_) => match connect_and_find_container(
-                self.container_id.clone(),
-                CONTAINERD_ALTERNATIVE_SOCK_PATH,
-            )
-            .await
+        for sock_path in CONTAINERD_SOCK_PATHS {
+            if let Ok(channel) =
+                connect_and_find_container(self.container_id.clone(), sock_path).await
             {
-                Ok(channel) => Ok(channel),
-                Err(_) => {
-                    connect_and_find_container(self.container_id.clone(), CONTAINERD_K3S_SOCK_PATH)
-                        .await
-                }
-            },
+                return Ok(channel);
+            }
         }
+        Err(AgentError::ContainerdSocketNotFound)
     }
 
     async fn get_task_client(&self) -> Result<TasksClient<Channel>> {

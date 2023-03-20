@@ -27,6 +27,11 @@ class IdeaRunConfigurationExtension: RunConfigurationExtension() {
 
 
     private fun < T: RunConfigurationBase<*>> patchEnv (configuration: T, params: JavaParameters) {
+        MirrordLogger.logger.debug("Check if relevant")
+        if (configuration.name.startsWith("Build ")) {
+            MirrordLogger.logger.info("Configuration name %s ignored".format(configuration.name))
+            return
+        }
         MirrordLogger.logger.debug("wsl check")
         val wsl = when (val request = createEnvironmentRequest(configuration, configuration.project)) {
             is WslTargetEnvironmentRequest -> request.configuration.distribution!!
