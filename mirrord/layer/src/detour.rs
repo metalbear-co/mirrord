@@ -292,6 +292,9 @@ impl<S> Detour<S> {
     ///
     /// To be used in hooks that are deemed non-essential, and the run should continue even if they
     /// fail.
+    ///
+    /// Currently defined only on macos because it is only used in macos-only code.
+    /// Remove the cfg attribute to enable using in other code.
     #[cfg(target_os = "macos")]
     pub(crate) fn unwrap_or(self, default: S) -> S {
         match self {

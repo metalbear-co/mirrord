@@ -264,7 +264,7 @@ pub(crate) unsafe extern "C" fn read_detour(
     out_buffer: *mut c_void,
     count: size_t,
 ) -> ssize_t {
-    read(Detour::Success(fd), count as u64)
+    read(fd, count as u64)
         .map(|read_file| {
             let ReadFileResponse {
                 bytes, read_amount, ..

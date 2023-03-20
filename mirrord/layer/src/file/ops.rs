@@ -405,8 +405,7 @@ pub(crate) fn openat(
 /// **Bypassed** when trying to load system files, and files from the current working directory, see
 /// `open`.
 #[tracing::instrument(level = "trace")]
-pub(crate) fn read(local_fd: Detour<RawFd>, read_amount: u64) -> Detour<ReadFileResponse> {
-    let local_fd = local_fd?;
+pub(crate) fn read(local_fd: RawFd, read_amount: u64) -> Detour<ReadFileResponse> {
     let remote_fd = get_remote_fd(local_fd)?;
 
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
