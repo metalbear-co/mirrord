@@ -179,9 +179,6 @@ pub(crate) enum Bypass {
 
     /// Socket is connecting to localhots and we're asked to ignore it.
     IgnoreLocalhost(u16),
-
-    /// Called a detour with an `fd` that doesn't belong to us.
-    FdNotOurs,
 }
 
 /// [`ControlFlow`](std::ops::ControlFlow)-like enum to be used by hooks.
