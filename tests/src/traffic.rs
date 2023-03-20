@@ -319,11 +319,15 @@ mod traffic {
     /// 3. Verify the client app did not panic.
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(240))]
+    #[timeout(Duration::from_secs(60))]
     pub async fn outgoing_unix_stream_pathname(
         #[future]
-        // TODO: change to image from test-images repo!
-        #[with("default", "ClusterIP", "t4lz/unix-socket-server:latest", "unix-echo")]
+        #[with(
+            "default",
+            "ClusterIP",
+            "ghcr.io/metalbear-co/mirrord-unix-socket-server:latest",
+            "unix-echo"
+        )]
         service: KubeService,
     ) {
         let service = service.await;
