@@ -38,7 +38,7 @@ mod utils {
     use rstest::*;
     use serde::{de::DeserializeOwned, Serialize};
     use serde_json::json;
-    use tempfile::{tempdir, TempDir};
+    use tempfile::TempDir;
     use tokio::{
         io::{AsyncReadExt, BufReader},
         process::{Child, Command},
