@@ -88,7 +88,7 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
     let mode: c_int = args.arg();
     let guard = DetourGuard::new();
     if guard.is_none() {
-        FN_OPEN(raw_path, open_flags, mode)
+        FN_OPEN_NOCANCEL(raw_path, open_flags, mode)
     } else {
         open_logic(raw_path, open_flags, mode)
             .unwrap_or_bypass_with(|_| FN_OPEN_NOCANCEL(raw_path, open_flags, mode))
