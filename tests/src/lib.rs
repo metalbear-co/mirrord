@@ -38,7 +38,7 @@ mod utils {
     use rstest::*;
     use serde::{de::DeserializeOwned, Serialize};
     use serde_json::json;
-    use tempdir::TempDir;
+    use tempfile::{tempdir, TempDir};
     use tokio::{
         io::{AsyncReadExt, BufReader},
         process::{Child, Command},
@@ -323,7 +323,7 @@ mod utils {
             None => env!("CARGO_BIN_FILE_MIRRORD"),
             Some(binary_path) => binary_path,
         };
-        let temp_dir = tempdir::TempDir::new("test").unwrap();
+        let temp_dir = TempDir::new_in("test").unwrap();
         let mut mirrord_args = vec!["exec", "--target", target, "-c"];
         if let Some(namespace) = namespace {
             mirrord_args.extend(["--target-namespace", namespace].into_iter());
@@ -373,7 +373,7 @@ mod utils {
             None => env!("CARGO_BIN_FILE_MIRRORD"),
             Some(binary_path) => binary_path,
         };
-        let temp_dir = tempdir::TempDir::new("test").unwrap();
+        let temp_dir = TempDir::new_in("test").unwrap();
         let mut mirrord_args = vec!["ls"];
         if let Some(args) = args {
             mirrord_args.extend(args);
