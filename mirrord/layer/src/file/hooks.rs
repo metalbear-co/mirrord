@@ -39,11 +39,10 @@ use crate::{
 /// Implementation of open_detour, used in open_detour and openat_detour
 /// We ignore mode in case we don't bypass the call.
 #[tracing::instrument(level = "trace")]
-unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, mode: c_int) -> RawFd {
+unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, mode: c_int) -> Detour<RawFd> {
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
     open(raw_path.checked_into(), open_options)
-        .unwrap_or_bypass_with(|_| FN_OPEN(raw_path, open_flags, mode))
 }
 
 /// Hook for `libc::open`.
@@ -61,6 +60,7 @@ pub(super) unsafe extern "C" fn open_detour(
         FN_OPEN(raw_path, open_flags, mode)
     } else {
         open_logic(raw_path, open_flags, mode)
+            .unwrap_or_bypass_with(|_| FN_OPEN(raw_path, open_flags, mode))
     }
 }
 
@@ -84,6 +84,7 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
         FN_OPEN_NOCANCEL(raw_path, open_flags, mode)
     } else {
         open_logic(raw_path, open_flags, mode)
+            .unwrap_or_bypass_with(|_| FN_OPEN_NOCANCEL(raw_path, open_flags, mode))
     }
 }
 
