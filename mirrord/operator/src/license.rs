@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "license-fetch")]
 static LICENSE_SERVER: &str = "https://license.metalbear.co/v1/check";
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Debug, Hash, Deserialize, JsonSchema, Serialize)]
 pub struct License {
     pub organization: String,
     pub name: String,
