@@ -166,27 +166,6 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
     Detour::Success(local_file_fd)
 }
 
-/// Opens a file with `fd` that is being held in [`OPEN_FILES`], returning a _non-null_ file stream
-/// (which is just a pointer to the `local_fd` we're holding).
-///
-/// The `mode` has to be compatible with the [`OpenOptionsInternal`] of the file with `fd`.
-#[tracing::instrument(level = "trace")]
-pub(crate) fn fdopen(fd: RawFd, mode: Detour<OpenOptionsInternal>) -> Detour<usize> {
-    let open_options = mode?;
-
-    let open_files = OPEN_FILES.lock()?;
-    let (local_fd, remote_file) = open_files
-        .get_key_value(&fd)
-        .ok_or(Bypass::LocalFdNotFound(fd))?;
-
-    // Only open if the file we hold has compatible permissions with what's being requested.
-    if open_options <= remote_file.open_options {
-        Detour::Success(usize::try_from(*local_fd)?)
-    } else {
-        Detour::Error(HookError::OpenOptionsDoesntMatch)
-    }
-}
-
 /// creates a directory stream for the `remote_fd` in the agent
 #[tracing::instrument(level = "trace")]
 pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {

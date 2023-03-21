@@ -64,20 +64,6 @@ pub(super) unsafe extern "C" fn open_detour(
     }
 }
 
-/// Hook for `libc::fdopen`.
-///
-/// Converts a `RawFd` into `*mut FILE` only for files that are already being managed by
-/// mirrord-layer.
-///
-/// ## Details
-///
-/// We actually convert this to a pointer address (`usize`), and not to an actual pointer to
-/// [`FILE`].
-#[hook_guard_fn]
-pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char) -> usize {
-    fdopen(fd, raw_mode.checked_into()).unwrap_or_bypass_with(|_| FN_FDOPEN(fd, raw_mode))
-}
-
 /// Hook for macos internal call of `libc::fopen`.
 ///
 /// **Bypassed** by `raw_path`s that match `IGNORE_FILES` regex.
@@ -565,7 +551,6 @@ unsafe extern "C" fn fstatat_detour(
 pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
     replace!(hook_manager, "openat", openat_detour, FnOpenat, FN_OPENAT);
-    replace!(hook_manager, "fdopen", fdopen_detour, FnFdopen, FN_FDOPEN);
     replace!(
         hook_manager,
         "open$NOCANCEL",

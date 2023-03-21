@@ -79,9 +79,6 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: IPv6 can't be used with mirrord")]
     SocketUnsuportedIpv6,
-
-    #[error("mirrord-layer: Tried calling some `open`-like function with `OpenOptions` that do not match what was expected!")]
-    OpenOptionsDoesntMatch,
 }
 
 impl HookError {
@@ -122,7 +119,6 @@ impl HookError {
             #[cfg(target_os = "macos")]
             HookError::FailedSipPatch(_) => libc::EACCES,
             HookError::SocketUnsuportedIpv6 => libc::EAFNOSUPPORT,
-            HookError::OpenOptionsDoesntMatch => libc::EPERM,
         };
 
         libc_code as i64
