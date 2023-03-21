@@ -15,8 +15,8 @@ use crate::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, FdOpenDirRequest,
         OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest,
         ReadDirRequest, ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
-        ReadLineFileRequest, SeekFileRequest, SeekFileResponse, WriteFileRequest,
-        WriteFileResponse, WriteLimitedFileRequest, XstatRequest, XstatResponse,
+        SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+        WriteLimitedFileRequest, XstatRequest, XstatResponse,
     },
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -42,7 +42,6 @@ pub enum FileRequest {
     Open(OpenFileRequest),
     OpenRelative(OpenRelativeFileRequest),
     Read(ReadFileRequest),
-    ReadLine(ReadLineFileRequest),
     ReadLimited(ReadLimitedFileRequest),
     Seek(SeekFileRequest),
     Write(WriteFileRequest),
@@ -78,7 +77,6 @@ pub type RemoteResult<T> = Result<T, ResponseError>;
 pub enum FileResponse {
     Open(RemoteResult<OpenFileResponse>),
     Read(RemoteResult<ReadFileResponse>),
-    ReadLine(RemoteResult<ReadFileResponse>),
     ReadLimited(RemoteResult<ReadFileResponse>),
     Write(RemoteResult<WriteFileResponse>),
     WriteLimited(RemoteResult<WriteFileResponse>),

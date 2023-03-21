@@ -24,9 +24,8 @@ use mirrord_protocol::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, DirEntryInternal,
         FdOpenDirRequest, OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
         OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
-        ReadFileResponse, ReadLimitedFileRequest, ReadLineFileRequest, SeekFileRequest,
-        SeekFileResponse, WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest,
-        XstatRequest, XstatResponse,
+        ReadFileResponse, ReadLimitedFileRequest, SeekFileRequest, SeekFileResponse,
+        WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest, XstatRequest, XstatResponse,
     },
     ClientMessage, FileRequest, FileResponse, RemoteResult,
 };
@@ -115,7 +114,6 @@ pub struct FileHandler {
     /// idea: Replace all VecDeque with HashMap, the assumption order will remain is dangerous :O
     open_queue: ResponseDeque<OpenFileResponse>,
     read_queue: ResponseDeque<ReadFileResponse>,
-    read_line_queue: ResponseDeque<ReadFileResponse>,
     read_limited_queue: ResponseDeque<ReadFileResponse>,
     seek_queue: ResponseDeque<SeekFileResponse>,
     write_queue: ResponseDeque<WriteFileResponse>,
@@ -157,20 +155,6 @@ impl FileHandler {
                     .inspect_err(|fail| trace!("DaemonMessage::ReadFileResponse {:#?}", fail));
 
                 pop_send(&mut self.read_queue, read)
-            }
-            ReadLine(read) => {
-                // The debug message is too big if we just log it directly.
-                let _ = read
-                    .as_ref()
-                    .inspect(|success| trace!("DaemonMessage::ReadLineFileResponse {:#?}", success))
-                    .inspect_err(|fail| trace!("DaemonMessage::ReadLineFileResponse {:#?}", fail));
-
-                pop_send(&mut self.read_line_queue, read).inspect_err(|fail| {
-                    error!(
-                        "handle_daemon_message -> Failed `pop_send` with {:#?}",
-                        fail,
-                    )
-                })
             }
             ReadLimited(read) => {
                 // The debug message is too big if we just log it directly.
@@ -337,30 +321,6 @@ impl FileHandler {
         };
 
         let request = ClientMessage::FileRequest(FileRequest::Read(read_file_request));
-        tx.send(request).await.map_err(From::from)
-    }
-
-    #[tracing::instrument(level = "trace", skip(self, tx))]
-    async fn handle_hook_read_line(
-        &mut self,
-        read_line: Read<ReadFileResponse>,
-        tx: &Sender<ClientMessage>,
-    ) -> Result<()> {
-        let Read {
-            remote_fd,
-            buffer_size,
-            file_channel_tx,
-            ..
-        } = read_line;
-
-        self.read_line_queue.push_back(file_channel_tx);
-
-        let read_file_request = ReadLineFileRequest {
-            remote_fd,
-            buffer_size,
-        };
-
-        let request = ClientMessage::FileRequest(FileRequest::ReadLine(read_file_request));
         tx.send(request).await.map_err(From::from)
     }
 
