@@ -93,7 +93,6 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
 
                 -1
             } else {
-                info!("Success in gethostname!");
                 0
             }
         })
