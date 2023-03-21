@@ -8,7 +8,6 @@ mod env {
     use crate::utils::{run_exec, service, EnvApp, KubeService};
 
     #[rstest]
-    #[cfg(target_os = "linux")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn bash_remote_env_vars(

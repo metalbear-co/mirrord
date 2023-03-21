@@ -4,7 +4,9 @@ use errno::set_errno;
 use ignore_codes::*;
 use libc::{c_char, DIR, FILE};
 use mirrord_config::config::ConfigError;
-use mirrord_protocol::{tcp::LayerTcp, ClientMessage, ConnectionId, ResponseError};
+use mirrord_protocol::{
+    tcp::LayerTcp, ClientMessage, ConnectionId, ResponseError, SerializationError,
+};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
 use thiserror::Error;
@@ -79,6 +81,15 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: IPv6 can't be used with mirrord")]
     SocketUnsuportedIpv6,
+
+    // `From` implemented below, not with `#[from]` so that when new variants of
+    // `SerializationError` are added, they are mapped into different variants of
+    // `LayerError`.
+    #[error(
+        "mirrord-layer: user application is trying to connect to an address that is not a \
+        supported IP or unix socket address."
+    )]
+    UnsupportedSocketType,
 }
 
 /// Errors internal to mirrord-layer.
@@ -169,6 +180,31 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: local app closed the connection with mirrord.")]
     AppClosedConnection(ClientMessage),
+
+    // `From` implemented below, not with `#[from]` so that when new variants of
+    // `SerializationError` are added, they are mapped into different variants of
+    // `LayerError`.
+    #[error(
+        "mirrord-layer: user application is trying to connect to an address that is not a \
+        supported IP or unix socket address."
+    )]
+    UnsupportedSocketType,
+}
+
+impl From<SerializationError> for LayerError {
+    fn from(err: SerializationError) -> Self {
+        match err {
+            SerializationError::SocketAddress => LayerError::UnsupportedSocketType,
+        }
+    }
+}
+
+impl From<SerializationError> for HookError {
+    fn from(err: SerializationError) -> Self {
+        match err {
+            SerializationError::SocketAddress => HookError::UnsupportedSocketType,
+        }
+    }
 }
 
 // Cannot have a generic `From<T>` implementation for this error, so explicitly implemented here.
@@ -230,6 +266,7 @@ impl From<HookError> for i64 {
                 // never appears as HookError::ResponseError(PortAlreadyStolen(_)).
                 // this could be changed by waiting for the Subscribed response from agent.
                 ResponseError::PortAlreadyStolen(_port) => libc::EINVAL,
+                ResponseError::NotImplemented => libc::EINVAL,
             },
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,
@@ -238,6 +275,7 @@ impl From<HookError> for i64 {
             #[cfg(target_os = "macos")]
             HookError::FailedSipPatch(_) => libc::EACCES,
             HookError::SocketUnsuportedIpv6 => libc::EAFNOSUPPORT,
+            HookError::UnsupportedSocketType => libc::EAFNOSUPPORT,
         };
 
         set_errno(errno::Errno(libc_error));

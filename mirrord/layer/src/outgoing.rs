@@ -1,13 +1,11 @@
 use core::fmt;
-use std::{
-    net::SocketAddr,
-    ops::{Deref, DerefMut},
-};
+use std::ops::{Deref, DerefMut};
 
 use mirrord_protocol::{
     outgoing::{DaemonConnect, DaemonRead, LayerClose, LayerConnect, LayerWrite},
     ConnectionId,
 };
+use socket2::SockAddr;
 
 use crate::common::ResponseChannel;
 
@@ -15,15 +13,19 @@ pub(crate) mod tcp;
 pub(crate) mod udp;
 
 /// Wrapper type for the (layer) socket address that intercepts the user's socket messages.
+///
+/// (user-app) user_app_address <--> layer_address (layer) <--> agent <--> remote-peer
 #[derive(Debug)]
 pub(crate) struct RemoteConnection {
-    pub(crate) mirror_address: SocketAddr,
-    pub(crate) local_address: SocketAddr,
+    /// The socket that is held by mirrord.
+    pub(crate) layer_address: SockAddr,
+    /// The socket that is held by the user application.
+    pub(crate) user_app_address: SockAddr,
 }
 
 #[derive(Debug)]
 pub(crate) struct Connect {
-    pub(crate) remote_address: SocketAddr,
+    pub(crate) remote_address: SockAddr,
     pub(crate) channel_tx: ResponseChannel<RemoteConnection>,
 }
 

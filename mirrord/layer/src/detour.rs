@@ -121,6 +121,9 @@ pub(crate) enum Bypass {
     /// Either an invalid socket domain, or one that we don't handle.
     Domain(i32),
 
+    /// Unix socket to address that was not configured to be connected remotely.
+    UnixSocket(Option<String>),
+
     /// We could not find this [`RawFd`] in neither [`OPEN_FILES`](crate::file::OPEN_FILES), nor
     /// [`SOCKETS`](crate::socket::SOCKETS).
     LocalFdNotFound(RawFd),
@@ -179,6 +182,12 @@ pub(crate) enum Bypass {
 
     /// Socket is connecting to localhots and we're asked to ignore it.
     IgnoreLocalhost(u16),
+
+    /// Hooked connect from a bound mirror socket.
+    MirrorConnect,
+
+    /// Hooked a `connect` to a target that is disabled in the configuration.
+    DisabledOutgoing,
 }
 
 /// [`ControlFlow`](std::ops::ControlFlow)-like enum to be used by hooks.
