@@ -8,6 +8,7 @@ use std::{
 };
 
 use libc::{c_int, sockaddr, socklen_t};
+use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
 use tracing::warn;
 use trust_dns_resolver::config::Protocol;
@@ -94,9 +95,9 @@ impl SocketInformation {
 #[derive(Debug)]
 pub struct Connected {
     /// Remote address we're connected to
-    remote_address: SocketAddr,
+    remote_address: SocketAddress,
     /// Local address (pod-wise)
-    local_address: SocketAddr,
+    local_address: SocketAddress,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -165,7 +166,7 @@ impl UserSocket {
 }
 
 #[inline]
-fn is_ignored_port(addr: SocketAddr) -> bool {
+fn is_ignored_port(addr: &SocketAddr) -> bool {
     let (ip, port) = (addr.ip(), addr.port());
     let ignored_ip = ip == IpAddr::V4(Ipv4Addr::LOCALHOST) || ip == IpAddr::V6(Ipv6Addr::LOCALHOST);
     port == 0 || ignored_ip && (port > 50000 && port < 60000)
@@ -176,24 +177,22 @@ fn is_ignored_port(addr: SocketAddr) -> bool {
 fn fill_address(
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-    new_address: SocketAddr,
+    new_address: SockAddr,
 ) -> Detour<i32> {
     let result = if address.is_null() {
         Ok(0)
     } else if address_len.is_null() {
         Err(HookError::NullPointer)
     } else {
-        let os_address = SockAddr::from(new_address);
-
         unsafe {
-            let len = std::cmp::min(*address_len as usize, os_address.len() as usize);
+            let len = std::cmp::min(*address_len as usize, new_address.len() as usize);
 
             std::ptr::copy_nonoverlapping(
-                os_address.as_ptr() as *const u8,
+                new_address.as_ptr() as *const u8,
                 address as *mut u8,
                 len,
             );
-            *address_len = os_address.len();
+            *address_len = new_address.len();
         }
 
         Ok(0)
@@ -230,13 +229,15 @@ impl ProtocolExt for Protocol {
 }
 
 pub(crate) trait SocketAddrExt {
-    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<SocketAddr>;
+    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<Self>
+    where
+        Self: Sized;
 }
 
-impl SocketAddrExt for SocketAddr {
-    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<SocketAddr> {
+impl SocketAddrExt for SockAddr {
+    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<SockAddr> {
         unsafe {
-            SockAddr::init(|storage, len| {
+            SockAddr::try_init(|storage, len| {
                 storage.copy_from_nonoverlapping(raw_address.cast(), 1);
                 len.copy_from_nonoverlapping(&address_length, 1);
 
@@ -244,7 +245,14 @@ impl SocketAddrExt for SocketAddr {
             })
         }
         .ok()
-        .and_then(|((), address)| address.as_socket())
+        .map(|((), address)| address)
         .bypass(Bypass::AddressConversion)
+    }
+}
+
+impl SocketAddrExt for SocketAddr {
+    fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<SocketAddr> {
+        SockAddr::try_from_raw(raw_address, address_length)
+            .and_then(|address| address.as_socket().bypass(Bypass::AddressConversion))
     }
 }

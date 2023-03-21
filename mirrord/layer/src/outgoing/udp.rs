@@ -7,8 +7,12 @@ use std::{
 
 use futures::TryFutureExt;
 use mirrord_protocol::{
-    outgoing::udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
+    outgoing::{
+        udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
+        SocketAddress,
+    },
     ClientMessage, ConnectionId,
+    ResponseError::NotImplemented,
 };
 use tokio::{
     net::UdpSocket,
@@ -216,7 +220,9 @@ impl UdpOutgoingHandler {
 
                 Ok(tx
                     .send(ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(
-                        LayerConnect { remote_address },
+                        LayerConnect {
+                            remote_address: remote_address.try_into()?,
+                        },
                     )))
                     .await?)
             }
@@ -253,14 +259,20 @@ impl UdpOutgoingHandler {
                             let _ = DetourGuard::new();
 
                             let mirror_socket = match remote_address {
-                                SocketAddr::V4(_) => UdpSocket::bind(SocketAddr::new(
-                                    IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                                    0,
-                                )),
-                                SocketAddr::V6(_) => UdpSocket::bind(SocketAddr::new(
-                                    IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                                    0,
-                                )),
+                                SocketAddress::Ip(SocketAddr::V4(_)) => UdpSocket::bind(
+                                    SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
+                                ),
+                                SocketAddress::Ip(SocketAddr::V6(_)) => UdpSocket::bind(
+                                    SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
+                                ),
+                                SocketAddress::Unix(_) => {
+                                    // This should never happen. If we're here - the agent reported
+                                    // a UDP connection to a remote unix socket. The layer does not
+                                    // request such a thing, so either there was a bug earlier in
+                                    // the layer, the agent is rogue, or this code is outdated.
+                                    error!("Datagrams over unix sockets are not supported.");
+                                    Err(NotImplemented)?
+                                }
                             }
                             .await?;
 
@@ -268,11 +280,11 @@ impl UdpOutgoingHandler {
                         },
                     )
                     .await
-                    .and_then(|(connection_id, socket, local_address)| {
+                    .and_then(|(connection_id, socket, user_app_address)| {
                         let (remote_tx, remote_rx) = channel::<Vec<u8>>(1000);
 
                         let _ = DetourGuard::new();
-                        let mirror_address = socket.local_addr()?;
+                        let layer_address = socket.local_addr()?;
 
                         // user and interceptor sockets are connected to each other, so now we spawn
                         // a new task to pair their reads/writes.
@@ -287,8 +299,8 @@ impl UdpOutgoingHandler {
                             .insert(connection_id, ConnectionMirror(remote_tx));
 
                         Ok(RemoteConnection {
-                            local_address,
-                            mirror_address,
+                            user_app_address: user_app_address.try_into()?,
+                            layer_address: layer_address.into(),
                         })
                     });
 

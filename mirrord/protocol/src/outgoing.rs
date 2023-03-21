@@ -1,17 +1,121 @@
 use core::fmt;
-use std::net::SocketAddr;
+use std::{
+    fmt::{Display, Formatter},
+    io,
+    io::ErrorKind,
+    net::SocketAddr as StdIpSocketAddr,
+    path::PathBuf,
+};
 
 use bincode::{Decode, Encode};
+use socket2::SockAddr as OsSockAddr;
 
-use crate::ConnectionId;
+use crate::{
+    outgoing::UnixAddr::{Abstract, Pathname, Unnamed},
+    ConnectionId, SerializationError,
+};
 
 pub mod tcp;
 pub mod udp;
 
+/// A serializable socket address type that can represent IP addresses or addresses of unix sockets.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum SocketAddress {
+    Ip(StdIpSocketAddr),
+    Unix(UnixAddr),
+}
+
+/// A unix socket address type with rust member types (not libc stuff).
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum UnixAddr {
+    Pathname(PathBuf),
+    Abstract(Vec<u8>),
+    Unnamed,
+}
+
+impl From<StdIpSocketAddr> for SocketAddress {
+    fn from(addr: StdIpSocketAddr) -> Self {
+        SocketAddress::Ip(addr)
+    }
+}
+
+impl TryFrom<UnixAddr> for OsSockAddr {
+    type Error = io::Error;
+
+    fn try_from(addr: UnixAddr) -> Result<Self, Self::Error> {
+        match addr {
+            Pathname(path) => OsSockAddr::unix(path),
+            // We could use a `socket2::SockAddr::from_abstract_name` but it does not have it yet.
+            Abstract(bytes) => OsSockAddr::unix(String::from_utf8(bytes).map_err(|_| {
+                io::Error::new(
+                    ErrorKind::Other,
+                    "Unprintable abstract addresses not supported.",
+                )
+            })?),
+            UnixAddr::Unnamed => OsSockAddr::unix(""),
+        }
+    }
+}
+
+impl TryFrom<SocketAddress> for StdIpSocketAddr {
+    type Error = io::Error;
+
+    fn try_from(addr: SocketAddress) -> Result<Self, Self::Error> {
+        if let SocketAddress::Ip(socket_addr) = addr {
+            Ok(socket_addr)
+        } else {
+            Err(io::Error::new(ErrorKind::Other, "Not an IP address"))
+        }
+    }
+}
+
+impl TryFrom<OsSockAddr> for SocketAddress {
+    type Error = SerializationError;
+
+    fn try_from(addr: OsSockAddr) -> Result<Self, Self::Error> {
+        addr.as_socket()
+            .map(SocketAddress::Ip)
+            .or_else(|| {
+                addr.as_pathname()
+                    .map(|path| SocketAddress::Unix(Pathname(path.to_owned())))
+            })
+            .or_else(|| {
+                addr.as_abstract_namespace()
+                    .map(|slice| SocketAddress::Unix(Abstract(slice.to_vec())))
+            })
+            .or_else(|| addr.is_unnamed().then_some(SocketAddress::Unix(Unnamed)))
+            .ok_or(SerializationError::SocketAddress)
+    }
+}
+
+impl TryFrom<SocketAddress> for OsSockAddr {
+    type Error = io::Error;
+
+    fn try_from(addr: SocketAddress) -> Result<Self, Self::Error> {
+        match addr {
+            SocketAddress::Ip(socket_addr) => Ok(socket_addr.into()),
+            SocketAddress::Unix(unix_addr) => unix_addr.try_into(),
+        }
+    }
+}
+
+/// For error messages, e.g. [`RemoteError::ConnectTimeOut`].
+impl Display for SocketAddress {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let addr = match self {
+            SocketAddress::Ip(ip_address) => ip_address.to_string(),
+            SocketAddress::Unix(Pathname(path)) => path.to_string_lossy().to_string(),
+            SocketAddress::Unix(Abstract(name)) => String::from_utf8_lossy(name).to_string(),
+            SocketAddress::Unix(Unnamed) => "<UNNAMED-UNIX-ADDRESS>".to_string(),
+        };
+        write!(f, "{addr}")
+    }
+}
+
 /// `user` wants to connect to `remote_address`.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct LayerConnect {
-    pub remote_address: SocketAddr,
+    pub remote_address: SocketAddress,
 }
 
 /// `user` wants to write `bytes` to remote host identified by `connection_id`.
@@ -39,8 +143,8 @@ pub struct LayerClose {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct DaemonConnect {
     pub connection_id: ConnectionId,
-    pub remote_address: SocketAddr,
-    pub local_address: SocketAddr,
+    pub remote_address: SocketAddress,
+    pub local_address: SocketAddress,
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]

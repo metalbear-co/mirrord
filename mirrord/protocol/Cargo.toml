@@ -26,3 +26,4 @@ http-serde = "1.1.2"
 http-body-util = { workspace = true }
 fancy-regex = { workspace = true }
 libc.workspace = true
+socket2.workspace = true

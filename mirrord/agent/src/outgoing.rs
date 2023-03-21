@@ -4,13 +4,10 @@ use mirrord_protocol::{
     outgoing::{tcp::*, *},
     ConnectionId, RemoteError, ResponseError,
 };
+use socket_stream::SocketStream;
 use streammap_ext::StreamMap;
 use tokio::{
-    io::AsyncWriteExt,
-    net::{
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpStream,
-    },
+    io::{split, AsyncWriteExt, ReadHalf, WriteHalf},
     select,
     sync::mpsc::{self, Receiver, Sender},
     time::timeout,
@@ -24,6 +21,7 @@ use crate::{
     util::{run_thread_in_namespace, IndexAllocator},
 };
 
+pub(crate) mod socket_stream;
 pub(crate) mod udp;
 
 type Layer = LayerTcpOutgoing;
@@ -46,29 +44,30 @@ pub(crate) struct TcpOutgoingApi {
 async fn layer_recv(
     layer_message: LayerTcpOutgoing,
     allocator: &mut IndexAllocator<ConnectionId>,
-    writers: &mut HashMap<ConnectionId, OwnedWriteHalf>,
-    readers: &mut StreamMap<ConnectionId, ReaderStream<OwnedReadHalf>>,
+    writers: &mut HashMap<ConnectionId, WriteHalf<SocketStream>>,
+    readers: &mut StreamMap<ConnectionId, ReaderStream<ReadHalf<SocketStream>>>,
     daemon_tx: Sender<DaemonTcpOutgoing>,
+    pid: Option<u64>,
 ) -> Result<()> {
     match layer_message {
-        // [user] -> [layer] -> [agent] -> [layer]
-        // `user` is asking us to connect to some remote host.
+        // [user] -> [layer] -> [agent] -> [remote host]
+        // user is asking us to connect to some remote host.
         LayerTcpOutgoing::Connect(LayerConnect { remote_address }) => {
             // TODO(alex): `timeout` here works around the issue where golang tries to connect to an
             // invalid `IP:port` combination, and hangs until the go socket times out.
             let daemon_connect = timeout(
                 Duration::from_millis(3000),
-                TcpStream::connect(remote_address),
+                SocketStream::connect(remote_address.clone(), pid),
             )
             .await
             .map_err(|elapsed| {
                 warn!("interceptor_task -> Elapsed connect error {:#?}", elapsed);
-                ResponseError::Remote(RemoteError::ConnectTimedOut(remote_address))
+                ResponseError::Remote(RemoteError::ConnectTimedOut(remote_address.clone()))
             })
             .map_err(From::from)
             .and_then(|remote_stream| {
                 let remote_stream = remote_stream?;
-                let local_address = remote_stream.local_addr()?;
+                let agent_address = remote_stream.local_addr()?;
                 let connection_id = allocator
                     .next_index()
                     .ok_or_else(|| ResponseError::AllocationFailure("layer_recv".to_string()))
@@ -76,14 +75,14 @@ async fn layer_recv(
 
                 // Split the `remote_stream` so we can keep reading
                 // and writing from multiple hosts without blocking.
-                let (read_half, write_half) = remote_stream.into_split();
+                let (read_half, write_half) = split(remote_stream);
                 writers.insert(connection_id, write_half);
                 readers.insert(connection_id, ReaderStream::new(read_half));
 
                 Ok(DaemonConnect {
                     connection_id,
                     remote_address,
-                    local_address,
+                    local_address: agent_address,
                 })
             });
 
@@ -130,7 +129,7 @@ impl TcpOutgoingApi {
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
         let task = run_thread_in_namespace(
-            Self::interceptor_task(layer_rx, daemon_tx),
+            Self::interceptor_task(layer_rx, daemon_tx, pid),
             "TcpOutgoing".to_string(),
             pid,
             "net",
@@ -148,13 +147,14 @@ impl TcpOutgoingApi {
     async fn interceptor_task(
         mut layer_rx: Receiver<Layer>,
         daemon_tx: Sender<Daemon>,
+        pid: Option<u64>,
     ) -> Result<()> {
         let mut allocator: IndexAllocator<ConnectionId> = IndexAllocator::new();
 
         // TODO: Right now we're manually keeping these 2 maps in sync (aviram suggested using
         // `Weak` for `writers`).
-        let mut writers: HashMap<ConnectionId, OwnedWriteHalf> = HashMap::default();
-        let mut readers: StreamMap<ConnectionId, ReaderStream<OwnedReadHalf>> =
+        let mut writers: HashMap<ConnectionId, WriteHalf<SocketStream>> = HashMap::default();
+        let mut readers: StreamMap<ConnectionId, ReaderStream<ReadHalf<SocketStream>>> =
             StreamMap::default();
 
         loop {
@@ -163,7 +163,7 @@ impl TcpOutgoingApi {
 
                 // [layer] -> [agent]
                 Some(layer_message) = layer_rx.recv() => {
-                    layer_recv(layer_message, &mut allocator, &mut writers, &mut readers, daemon_tx.clone()).await?
+                    layer_recv(layer_message, &mut allocator, &mut writers, &mut readers, daemon_tx.clone(), pid).await?
                 }
 
                 // [remote] -> [agent] -> [layer] -> [user]
