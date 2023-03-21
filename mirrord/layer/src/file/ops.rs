@@ -6,7 +6,7 @@ use mirrord_protocol::file::{
     XstatResponse,
 };
 use tokio::sync::oneshot;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info};
 
 use super::{filter::FILE_FILTER, *};
 use crate::{

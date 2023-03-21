@@ -21,9 +21,8 @@ use mirrord_protocol::file::{
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
 use num_traits::Bounded;
-use tracing::trace;
 #[cfg(target_os = "linux")]
-use tracing::{error, info, warn};
+use tracing::{error, info, trace, warn};
 
 use super::{ops::*, OpenOptionsInternalExt};
 #[cfg(target_os = "linux")]
@@ -584,6 +583,7 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         FnClosedir,
         FN_CLOSEDIR
     );
+    replace!(hook_manager, "lseek", lseek_detour, FnLseek, FN_LSEEK);
     replace!(hook_manager, "pread", pread_detour, FnPread, FN_PREAD);
     replace!(hook_manager, "write", write_detour, FnWrite, FN_WRITE);
     replace!(hook_manager, "pwrite", pwrite_detour, FnPwrite, FN_PWRITE);
