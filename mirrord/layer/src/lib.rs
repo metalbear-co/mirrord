@@ -822,6 +822,23 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
             FnClose_nocancel,
             FN_CLOSE_NOCANCEL
         );
+
+        replace!(
+            &mut hook_manager,
+            "__close_nocancel",
+            __close_nocancel_detour,
+            Fn__close_nocancel,
+            FN___CLOSE_NOCANCEL
+        );
+
+        replace!(
+            &mut hook_manager,
+            "__close",
+            __close_detour,
+            Fn__close,
+            FN___CLOSE
+        );
+
         // Solve leak on uvloop which calls the syscall directly.
         #[cfg(target_os = "linux")]
         {
@@ -901,6 +918,16 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 /// Replaces `?`.
 #[hook_fn]
 pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
+    close_detour(fd)
+}
+
+#[hook_fn]
+pub(crate) unsafe extern "C" fn __close_nocancel_detour(fd: c_int) -> c_int {
+    close_detour(fd)
+}
+
+#[hook_fn]
+pub(crate) unsafe extern "C" fn __close_detour(fd: c_int) -> c_int {
     close_detour(fd)
 }
 
