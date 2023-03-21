@@ -383,25 +383,6 @@ fn remote_read(remote_fd: u64, read_amount: u64) -> Detour<ReadFileResponse> {
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn fgets(local_fd: RawFd, buffer_size: usize) -> Detour<ReadFileResponse> {
-    // We're only interested in files that are paired with mirrord-agent.
-    let remote_fd = get_remote_fd(local_fd)?;
-
-    let (file_channel_tx, file_channel_rx) = oneshot::channel();
-
-    let reading_file = Read {
-        remote_fd,
-        buffer_size: buffer_size as u64,
-        start_from: 0,
-        file_channel_tx,
-    };
-
-    blocking_send_file_message(FileOperation::ReadLine(reading_file))?;
-
-    Detour::Success(file_channel_rx.blocking_recv()??)
-}
-
-#[tracing::instrument(level = "trace")]
 pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<ReadFileResponse> {
     // We're only interested in files that are paired with mirrord-agent.
     let remote_fd = get_remote_fd(local_fd)?;

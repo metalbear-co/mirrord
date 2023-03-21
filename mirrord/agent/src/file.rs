@@ -18,8 +18,8 @@ use mirrord_protocol::{
         FdOpenDirRequest, GetDEnts64Request, GetDEnts64Response, OpenDirResponse, OpenFileRequest,
         OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest, ReadDirRequest,
         ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
-        ReadLineFileRequest, SeekFileRequest, SeekFileResponse, WriteFileRequest,
-        WriteFileResponse, WriteLimitedFileRequest, XstatRequest, XstatResponse,
+        SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+        WriteLimitedFileRequest, XstatRequest, XstatResponse,
     },
     FileRequest, FileResponse, RemoteResult, ResponseError,
 };
@@ -150,13 +150,6 @@ impl FileManager {
             }) => {
                 let read_result = self.read(remote_fd, buffer_size);
                 Some(FileResponse::Read(read_result))
-            }
-            FileRequest::ReadLine(ReadLineFileRequest {
-                remote_fd,
-                buffer_size,
-            }) => {
-                let read_result = self.read_line(remote_fd, buffer_size);
-                Some(FileResponse::ReadLine(read_result))
             }
             FileRequest::ReadLimited(ReadLimitedFileRequest {
                 remote_fd,

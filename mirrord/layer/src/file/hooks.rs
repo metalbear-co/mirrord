@@ -16,7 +16,6 @@ use std::{
 use errno::{set_errno, Errno};
 use libc::{
     self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, DIR,
-    FILE,
 };
 #[cfg(target_os = "linux")]
 use libc::{EBADF, EINVAL, ENOENT, ENOTDIR};
@@ -31,22 +30,21 @@ use tracing::trace;
 #[cfg(target_os = "linux")]
 use tracing::{error, info, warn};
 
-use super::{ops::*, OpenOptionsInternalExt, OPEN_FILES};
+use super::{ops::*, OpenOptionsInternalExt};
 #[cfg(target_os = "linux")]
 use crate::error::HookError::ResponseError;
 use crate::{
-    close_layer_fd,
     detour::{Detour, DetourGuard},
     error::HookError,
     file::ops::{access, lseek, open, read, write},
     hooks::HookManager,
-    replace, FN_CLOSE,
+    replace,
 };
 
 /// Implementation of open_detour, used in open_detour and openat_detour
 /// We ignore mode in case we don't bypass the call.
 #[tracing::instrument(level = "trace")]
-unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, mode: c_int) -> RawFd {
+unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, mode: c_int) -> Detour<RawFd> {
     let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
@@ -56,7 +54,7 @@ unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, mode: c_int) ->
         open_options
     );
 
-    open(rawish_path, open_options).unwrap_or_bypass_with(|_| FN_OPEN(raw_path, open_flags, mode))
+    open(rawish_path, open_options)
 }
 
 /// Hook for `libc::open`.
@@ -73,33 +71,27 @@ pub(super) unsafe extern "C" fn open_detour(
     if guard.is_none() {
         FN_OPEN(raw_path, open_flags, mode)
     } else {
-        open_logic(raw_path, open_flags, mode)
+        open_logic(raw_path, open_flags, mode).unwrap_or_bypass_with(|_| FN_OPEN(raw_path, open_flags, mode))
     }
 }
 
-/// Hook for `libc::fopen`.
+
+/// Hook for `libc::open$NOCANCEL`.
 ///
 /// **Bypassed** by `raw_path`s that match `IGNORE_FILES` regex.
-#[hook_guard_fn]
-pub(super) unsafe extern "C" fn fopen_detour(
+#[hook_fn]
+pub(super) unsafe extern "C" fn open_nocancel_detour(
     raw_path: *const c_char,
-    raw_mode: *const c_char,
-) -> *mut FILE {
-    let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    let rawish_mode = (!raw_mode.is_null()).then(|| CStr::from_ptr(raw_mode));
-
-    fopen(rawish_path, rawish_mode).unwrap_or_bypass_with(|_| FN_FOPEN(raw_path, raw_mode))
-}
-
-/// Hook for `libc::fdopen`.
-///
-/// Converts a `RawFd` into `*mut FILE` only for files that are already being managed by
-/// mirrord-layer.
-#[hook_guard_fn]
-pub(super) unsafe extern "C" fn fdopen_detour(fd: RawFd, raw_mode: *const c_char) -> *mut FILE {
-    let rawish_mode = (!raw_mode.is_null()).then(|| CStr::from_ptr(raw_mode));
-
-    fdopen(fd, rawish_mode).unwrap_or_bypass_with(|_| FN_FDOPEN(fd, raw_mode))
+    open_flags: c_int,
+    mut args: ...
+) -> RawFd {
+    let mode: c_int = args.arg();
+    let guard = DetourGuard::new();
+    if guard.is_none() {
+        FN_OPEN(raw_path, open_flags, mode)
+    } else {
+        open_logic(raw_path, open_flags, mode).unwrap_or_bypass_with(|_| FN_OPEN_NOCANCEL(raw_path, open_flags, mode))
+    }
 }
 
 #[hook_guard_fn]
@@ -283,83 +275,6 @@ pub(crate) unsafe extern "C" fn read_detour(
         .unwrap_or_bypass_with(|_| FN_READ(fd, out_buffer, count))
 }
 
-/// Hook for `libc::fread`.
-///
-/// Reads `element_size * number_of_elements` bytes into `out_buffer`, only for `*mut FILE`s that
-/// are being managed by mirrord-layer.
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fread_detour(
-    out_buffer: *mut c_void,
-    element_size: size_t,
-    number_of_elements: size_t,
-    file_stream: *mut FILE,
-) -> size_t {
-    // Extract the fd from stream and check if it's managed by us, or should be bypassed.
-    let fd = fileno_logic(file_stream);
-    let read_amount = (element_size * number_of_elements) as u64;
-
-    read(fd, read_amount)
-        .map(|read_file| {
-            let ReadFileResponse { bytes, read_amount } = read_file;
-
-            // There is no distinction between reading 0 bytes or if we hit EOF, but we only copy to
-            // buffer if we have something to copy.
-            if read_amount > 0 {
-                let read_ptr = bytes.as_ptr();
-                let out_buffer = out_buffer.cast();
-                ptr::copy(read_ptr, out_buffer, read_amount as usize);
-            }
-
-            // TODO: The function fread() does not distinguish between end-of-file and error,
-            // and callers must use feof(3) and ferror(3) to determine which occurred.
-            read_amount as usize
-        })
-        .unwrap_or_bypass_with(|_| {
-            FN_FREAD(out_buffer, element_size, number_of_elements, file_stream)
-        })
-}
-
-/// Reads at most `capacity - 1` characters. Reading stops on `'\n'`, `EOF` or on error. On success,
-/// it appends `'\0'` to the end of the string (thus the limit on `capacity`).
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fgets_detour(
-    out_buffer: *mut c_char,
-    capacity: c_int,
-    file_stream: *mut FILE,
-) -> *mut c_char {
-    // Extract the fd from stream and check if it's managed by us, or should be bypassed.
-    let fd = fileno_logic(file_stream);
-
-    // `fgets` reads 1 LESS character than specified by `capacity`, so instead of having
-    // branching code to check if this is an `fgets` call elsewhere, we just subtract 1 from
-    // `capacity` here.
-    let buffer_size = capacity - 1;
-
-    fgets(fd, buffer_size as usize)
-        .map(|read_file| {
-            let ReadFileResponse { bytes, read_amount } = read_file;
-
-            // There is no distinction between reading 0 bytes or if we hit EOF, but we only
-            // copy to buffer if we have something to copy.
-            //
-            // Callers can check for EOF by using `ferror`.
-            if read_amount > 0 {
-                let bytes_slice = &bytes[0..buffer_size.min(read_amount as i32) as usize];
-                let eof = vec![0; 1];
-
-                // Append '\0' to comply with `fgets`.
-                let read = [bytes_slice, &eof].concat();
-
-                ptr::copy(read.as_ptr().cast(), out_buffer, read.len());
-
-                out_buffer
-            } else {
-                ptr::null_mut()
-            }
-        })
-        .unwrap_or_bypass_with(|_| FN_FGETS(out_buffer, capacity, file_stream))
-}
-
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn pread_detour(
     fd: RawFd,
@@ -466,57 +381,6 @@ pub(crate) unsafe extern "C" fn faccessat_detour(
     } else {
         FN_FACCESSAT(dirfd, pathname, mode, flags)
     }
-}
-
-/// Used to distinguish between an error or `EOF` (especially relevant for `fgets`).
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn ferror_detour(file_stream: *mut FILE) -> c_int {
-    // Extract the fd from stream and check if it's managed by us, or should be bypassed.
-    let fd = fileno_logic(file_stream);
-
-    // We're only interested in files that are handled by `mirrord-agent`.
-    let remote_fd = OPEN_FILES.lock().unwrap().get(&fd).map(|file| file.fd);
-    if remote_fd.is_some() {
-        std::io::Error::last_os_error()
-            .raw_os_error()
-            .unwrap_or_default()
-    } else {
-        FN_FERROR(file_stream)
-    }
-}
-
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fclose_detour(file_stream: *mut FILE) -> c_int {
-    let (res, fd) = match open_file_stream_fd(file_stream) {
-        Some(local_fd) => (FN_CLOSE(local_fd), local_fd),
-        None => (FN_FCLOSE(file_stream), fileno_logic(file_stream)),
-    };
-
-    close_layer_fd(fd);
-    res
-}
-
-/// Hook for `libc::fileno`.
-///
-/// Converts a `*mut FILE` stream into an fd.
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fileno_detour(file_stream: *mut FILE) -> c_int {
-    fileno_logic(file_stream)
-}
-
-/// Implementation of fileno_detour, used in fileno_detour and fread_detour
-unsafe fn fileno_logic(file_stream: *mut FILE) -> c_int {
-    open_file_stream_fd(file_stream).unwrap_or_else(|| FN_FILENO(file_stream))
-}
-
-unsafe fn open_file_stream_fd(file_stream: *mut FILE) -> Option<RawFd> {
-    let local_fd = *(file_stream as *const _);
-
-    OPEN_FILES
-        .lock()
-        .unwrap()
-        .contains_key(&local_fd)
-        .then_some(local_fd)
 }
 
 /// Tries to convert input to type O, if it fails it returns the max value of O.
@@ -694,9 +558,8 @@ unsafe extern "C" fn fstatat_detour(
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
+    replace!(hook_manager, "open$NOCANCEL", open_nocancel_detour, FnOpen_nocancel, FN_OPEN_NOCANCEL);
     replace!(hook_manager, "openat", openat_detour, FnOpenat, FN_OPENAT);
-    replace!(hook_manager, "fopen", fopen_detour, FnFopen, FN_FOPEN);
-    replace!(hook_manager, "fdopen", fdopen_detour, FnFdopen, FN_FDOPEN);
 
     replace!(hook_manager, "read", read_detour, FnRead, FN_READ);
 
@@ -707,12 +570,7 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         FnClosedir,
         FN_CLOSEDIR
     );
-    replace!(hook_manager, "fread", fread_detour, FnFread, FN_FREAD);
-    replace!(hook_manager, "fgets", fgets_detour, FnFgets, FN_FGETS);
     replace!(hook_manager, "pread", pread_detour, FnPread, FN_PREAD);
-    replace!(hook_manager, "ferror", ferror_detour, FnFerror, FN_FERROR);
-    replace!(hook_manager, "fclose", fclose_detour, FnFclose, FN_FCLOSE);
-    replace!(hook_manager, "fileno", fileno_detour, FnFileno, FN_FILENO);
     replace!(hook_manager, "lseek", lseek_detour, FnLseek, FN_LSEEK);
     replace!(hook_manager, "write", write_detour, FnWrite, FN_WRITE);
     replace!(hook_manager, "pwrite", pwrite_detour, FnPwrite, FN_PWRITE);

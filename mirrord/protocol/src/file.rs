@@ -215,12 +215,6 @@ impl fmt::Debug for ReadFileResponse {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct ReadLineFileRequest {
-    pub remote_fd: u64,
-    pub buffer_size: u64,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadLimitedFileRequest {
     pub remote_fd: u64,
     pub buffer_size: u64,
