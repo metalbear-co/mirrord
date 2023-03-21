@@ -182,6 +182,19 @@ pub(crate) unsafe extern "C" fn openat_detour(
         .unwrap_or_bypass_with(|_| FN_OPENAT(fd, raw_path, open_flags))
 }
 
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn _openat_nocancel_detour(
+    fd: RawFd,
+    raw_path: *const c_char,
+    open_flags: c_int,
+) -> RawFd {
+    let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
+    let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_flags(open_flags);
+
+    openat(fd, rawish_path, open_options)
+        .unwrap_or_bypass_with(|_| FN__OPENAT_NOCANCEL(fd, raw_path, open_flags))
+}
+
 /// Hook for getdents64, for Go's `os.ReadDir` on Linux.
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
@@ -277,6 +290,108 @@ pub(crate) unsafe extern "C" fn read_detour(
 }
 
 #[hook_guard_fn]
+pub(crate) unsafe extern "C" fn _read_nocancel_detour(
+    fd: RawFd,
+    out_buffer: *mut c_void,
+    count: size_t,
+) -> ssize_t {
+    read(fd, count as u64)
+        .map(|read_file| {
+            let ReadFileResponse { bytes, read_amount } = read_file;
+
+            // There is no distinction between reading 0 bytes or if we hit EOF, but we only copy to
+            // buffer if we have something to copy.
+            if read_amount > 0 {
+                let read_ptr = bytes.as_ptr();
+                let out_buffer = out_buffer.cast();
+                ptr::copy(read_ptr, out_buffer, read_amount as usize);
+            }
+
+            // WARN: Must be careful when it comes to `EOF`, incorrect handling may appear as the
+            // `read` call being repeated.
+            ssize_t::try_from(read_amount).unwrap()
+        })
+        .unwrap_or_bypass_with(|_| FN__READ_NOCANCEL(fd, out_buffer, count))
+}
+
+/// Hook for `libc::fread`.
+///
+/// Reads `element_size * number_of_elements` bytes into `out_buffer`, only for `*mut FILE`s that
+/// are being managed by mirrord-layer.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn fread_detour(
+    out_buffer: *mut c_void,
+    element_size: size_t,
+    number_of_elements: size_t,
+    file_stream: *mut FILE,
+) -> size_t {
+    // Extract the fd from stream and check if it's managed by us, or should be bypassed.
+    let fd = fileno_logic(file_stream);
+    let read_amount = (element_size * number_of_elements) as u64;
+
+    read(fd, read_amount)
+        .map(|read_file| {
+            let ReadFileResponse { bytes, read_amount } = read_file;
+
+            // There is no distinction between reading 0 bytes or if we hit EOF, but we only copy to
+            // buffer if we have something to copy.
+            if read_amount > 0 {
+                let read_ptr = bytes.as_ptr();
+                let out_buffer = out_buffer.cast();
+                ptr::copy(read_ptr, out_buffer, read_amount as usize);
+            }
+
+            // TODO: The function fread() does not distinguish between end-of-file and error,
+            // and callers must use feof(3) and ferror(3) to determine which occurred.
+            read_amount as usize
+        })
+        .unwrap_or_bypass_with(|_| {
+            FN_FREAD(out_buffer, element_size, number_of_elements, file_stream)
+        })
+}
+
+/// Reads at most `capacity - 1` characters. Reading stops on `'\n'`, `EOF` or on error. On success,
+/// it appends `'\0'` to the end of the string (thus the limit on `capacity`).
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn fgets_detour(
+    out_buffer: *mut c_char,
+    capacity: c_int,
+    file_stream: *mut FILE,
+) -> *mut c_char {
+    // Extract the fd from stream and check if it's managed by us, or should be bypassed.
+    let fd = fileno_logic(file_stream);
+
+    // `fgets` reads 1 LESS character than specified by `capacity`, so instead of having
+    // branching code to check if this is an `fgets` call elsewhere, we just subtract 1 from
+    // `capacity` here.
+    let buffer_size = capacity - 1;
+
+    fgets(fd, buffer_size as usize)
+        .map(|read_file| {
+            let ReadFileResponse { bytes, read_amount } = read_file;
+
+            // There is no distinction between reading 0 bytes or if we hit EOF, but we only
+            // copy to buffer if we have something to copy.
+            //
+            // Callers can check for EOF by using `ferror`.
+            if read_amount > 0 {
+                let bytes_slice = &bytes[0..buffer_size.min(read_amount as i32) as usize];
+                let eof = vec![0; 1];
+
+                // Append '\0' to comply with `fgets`.
+                let read = [bytes_slice, &eof].concat();
+
+                ptr::copy(read.as_ptr().cast(), out_buffer, read.len());
+
+                out_buffer
+            } else {
+                ptr::null_mut()
+            }
+        })
+        .unwrap_or_bypass_with(|_| FN_FGETS(out_buffer, capacity, file_stream))
+}
+
+#[hook_guard_fn]
 pub(crate) unsafe extern "C" fn pread_detour(
     fd: RawFd,
     out_buffer: *mut c_void,
@@ -303,6 +418,32 @@ pub(crate) unsafe extern "C" fn pread_detour(
 }
 
 #[hook_guard_fn]
+pub(crate) unsafe extern "C" fn _pread_nocancel_detour(
+    fd: RawFd,
+    out_buffer: *mut c_void,
+    amount_to_read: size_t,
+    offset: off_t,
+) -> ssize_t {
+    pread(fd, amount_to_read as u64, offset as u64)
+        .map(|read_file| {
+            let ReadFileResponse { bytes, read_amount } = read_file;
+            let fixed_read = (amount_to_read as u64).min(read_amount);
+
+            // There is no distinction between reading 0 bytes or if we hit EOF, but we only
+            // copy to buffer if we have something to copy.
+            //
+            // Callers can check for EOF by using `ferror`.
+            if read_amount > 0 {
+                let bytes_slice = &bytes[0..fixed_read as usize];
+
+                ptr::copy(bytes_slice.as_ptr().cast(), out_buffer, bytes_slice.len());
+            }
+            fixed_read as ssize_t
+        })
+        .unwrap_or_bypass_with(|_| FN__PREAD_NOCANCEL(fd, out_buffer, amount_to_read, offset))
+}
+
+#[hook_guard_fn]
 pub(crate) unsafe extern "C" fn pwrite_detour(
     fd: RawFd,
     in_buffer: *const c_void,
@@ -318,6 +459,24 @@ pub(crate) unsafe extern "C" fn pwrite_detour(
             written_amount as ssize_t
         })
         .unwrap_or_bypass_with(|_| FN_PWRITE(fd, in_buffer, amount_to_write, offset))
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn _pwrite_nocancel_detour(
+    fd: RawFd,
+    in_buffer: *const c_void,
+    amount_to_write: size_t,
+    offset: off_t,
+) -> ssize_t {
+    // Convert the given buffer into a u8 slice, upto the amount to write.
+    let casted_in_buffer: &[u8] = slice::from_raw_parts(in_buffer.cast(), amount_to_write);
+
+    pwrite(fd, casted_in_buffer, offset as u64)
+        .map(|write_response| {
+            let WriteFileResponse { written_amount } = write_response;
+            written_amount as ssize_t
+        })
+        .unwrap_or_bypass_with(|_| FN__PWRITE_NOCANCEL(fd, in_buffer, amount_to_write, offset))
 }
 
 /// Hook for `libc::lseek`.
@@ -354,6 +513,20 @@ pub(crate) unsafe extern "C" fn write_detour(
     count: size_t,
 ) -> ssize_t {
     write_logic(fd, buffer, count)
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn _write_nocancel_detour(
+    fd: RawFd,
+    buffer: *const c_void,
+    count: size_t,
+) -> ssize_t {
+    // WARN: Be veeery careful here, you cannot construct the `Vec` directly, as the buffer
+    // allocation is handled on the C side.
+    let write_bytes =
+        (!buffer.is_null()).then(|| slice::from_raw_parts(buffer as *const u8, count).to_vec());
+
+    write(fd, write_bytes).unwrap_or_bypass_with(|_| FN__WRITE_NOCANCEL(fd, buffer, count))
 }
 
 /// Implementation of access_detour, used in access_detour and faccessat_detour
@@ -559,16 +732,24 @@ unsafe extern "C" fn fstatat_detour(
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
+
+    replace!(hook_manager, "openat", openat_detour, FnOpenat, FN_OPENAT);
     replace!(
         hook_manager,
-        "open$NOCANCEL",
-        open_nocancel_detour,
-        FnOpen_nocancel,
-        FN_OPEN_NOCANCEL
+        "_openat$NOCANCEL",
+        _openat_nocancel_detour,
+        Fn_openat_nocancel,
+        FN__OPENAT_NOCANCEL
     );
-    replace!(hook_manager, "openat", openat_detour, FnOpenat, FN_OPENAT);
 
     replace!(hook_manager, "read", read_detour, FnRead, FN_READ);
+    replace!(
+        hook_manager,
+        "_read$NOCANCEL",
+        _read_nocancel_detour,
+        Fn_read_nocancel,
+        FN__READ_NOCANCEL
+    );
 
     replace!(
         hook_manager,
@@ -577,10 +758,36 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         FnClosedir,
         FN_CLOSEDIR
     );
+
     replace!(hook_manager, "pread", pread_detour, FnPread, FN_PREAD);
+    replace!(
+        hook_manager,
+        "_pread$NOCANCEL",
+        _pread_nocancel_detour,
+        Fn_pread_nocancel,
+        FN__PREAD_NOCANCEL
+    );
+
     replace!(hook_manager, "lseek", lseek_detour, FnLseek, FN_LSEEK);
+
     replace!(hook_manager, "write", write_detour, FnWrite, FN_WRITE);
+    replace!(
+        hook_manager,
+        "_write$NOCANCEL",
+        _write_nocancel_detour,
+        Fn_write_nocancel,
+        FN__WRITE_NOCANCEL
+    );
+
     replace!(hook_manager, "pwrite", pwrite_detour, FnPwrite, FN_PWRITE);
+    replace!(
+        hook_manager,
+        "_pwrite$NOCANCEL",
+        _pwrite_nocancel_detour,
+        Fn_pwrite_nocancel,
+        FN__PWRITE_NOCANCEL
+    );
+
     replace!(hook_manager, "access", access_detour, FnAccess, FN_ACCESS);
     replace!(
         hook_manager,
