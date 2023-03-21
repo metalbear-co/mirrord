@@ -203,7 +203,6 @@ pub struct ReadFileRequest {
 pub struct ReadFileResponse {
     pub bytes: Vec<u8>,
     pub read_amount: u64,
-    pub is_eof: bool,
 }
 
 impl fmt::Debug for ReadFileResponse {
@@ -211,7 +210,6 @@ impl fmt::Debug for ReadFileResponse {
         f.debug_struct("ReadFileResponse")
             .field("bytes (length)", &self.bytes.len())
             .field("read_amount", &self.read_amount)
-            .field("is_eof", &self.is_eof)
             .finish()
     }
 }

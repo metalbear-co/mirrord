@@ -306,7 +306,6 @@ impl FileManager {
                         file.read(&mut buffer).map(|read_amount| ReadFileResponse {
                             bytes: buffer,
                             read_amount: read_amount as u64,
-                            is_eof: 0 == read_amount,
                         })?;
 
                     Ok(read_amount)
@@ -336,7 +335,6 @@ impl FileManager {
                         ReadFileResponse {
                             bytes: buffer,
                             read_amount: read_amount as u64,
-                            is_eof: 0 == read_amount,
                         }
                     })?;
 

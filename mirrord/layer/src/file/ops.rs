@@ -44,9 +44,7 @@ impl Drop for RemoteFile {
         // operation to complete. The write operation is hooked and at some point tries to lock
         // `OPEN_FILES`, which means the thread deadlocks with itself (we call
         // `OPEN_FILES.lock()?.remove()` and then while still locked, `OPEN_FILES.lock()` again)
-        let closing_file = Close { fd: self.fd };
-
-        blocking_send_file_message(FileOperation::Close(closing_file)).expect(
+        remote_close(self.fd).expect(
             "mirrord failed to send close file message to main layer thread. Error: {err:?}",
         );
     }
@@ -105,17 +103,40 @@ unsafe fn create_local_fake_file(fake_local_file_name: CString, remote_fd: u64) 
     }
 }
 
+/// Send close for the remote file
+#[tracing::instrument(level = "trace")]
+pub(crate) fn remote_close(fd: u64) -> Result<()> {
+    blocking_send_file_message(FileOperation::Close(Close { fd }))?;
+    Ok(())
+}
+
 /// Close the remote file if the call to [`libc::shm_open`] failed and we have an invalid local fd.
 #[tracing::instrument(level = "error")]
 fn close_remote_file_on_failure(fd: u64) -> Result<()> {
     error!("Call to `libc::shm_open` resulted in an error, closing the file remotely!");
 
-    blocking_send_file_message(FileOperation::Close(Close { fd }))?;
-    Ok(())
+    remote_close(fd)
 }
 
 fn blocking_send_file_message(message: FileOperation) -> Result<()> {
     blocking_send_hook_message(HookMessage::File(message))
+}
+
+#[tracing::instrument(level = "trace")]
+pub(crate) fn remote_open(
+    path: PathBuf,
+    open_options: OpenOptionsInternal,
+) -> Detour<OpenFileResponse> {
+    let (file_channel_tx, file_channel_rx) = oneshot::channel();
+    let requesting_file = Open {
+        path,
+        open_options,
+        file_channel_tx,
+    };
+
+    blocking_send_file_message(FileOperation::Open(requesting_file))?;
+
+    Detour::Success(file_channel_rx.blocking_recv()??)
 }
 
 /// Blocking wrapper around `libc::open` call.
@@ -140,17 +161,7 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
 
     should_ignore!(path, open_options.is_write());
 
-    let (file_channel_tx, file_channel_rx) = oneshot::channel();
-
-    let requesting_file = Open {
-        path: path.clone(),
-        open_options,
-        file_channel_tx,
-    };
-
-    blocking_send_file_message(FileOperation::Open(requesting_file))?;
-
-    let OpenFileResponse { fd: remote_fd } = file_channel_rx.blocking_recv()??;
+    let OpenFileResponse { fd: remote_fd } = remote_open(path.clone(), open_options)?;
 
     // TODO: Need a way to say "open a directory", right now `is_dir` always returns false.
     // This requires having a fake directory name (`/fake`, for example), instead of just converting
@@ -273,6 +284,26 @@ pub(crate) fn openat(
     }
 }
 
+/// fd - remote fd.
+#[tracing::instrument(level = "trace")]
+pub(crate) fn remote_read(fd: u64, read_amount: u64) -> Detour<ReadFileResponse> {
+    let (file_channel_tx, file_channel_rx) = oneshot::channel();
+
+    // Limit read size because if we read too much it can lead to a timeout
+    // Seems also that bincode doesn't do well with large buffers
+    let read_amount = std::cmp::min(read_amount, MAX_READ_SIZE);
+    let reading_file = Read {
+        remote_fd: fd,
+        buffer_size: read_amount,
+        start_from: 0,
+        file_channel_tx,
+    };
+
+    blocking_send_file_message(FileOperation::Read(reading_file))?;
+
+    Detour::Success(file_channel_rx.blocking_recv()??)
+}
+
 /// Blocking wrapper around [`libc::read`] call.
 ///
 /// **Bypassed** when trying to load system files, and files from the current working directory, see
@@ -281,23 +312,7 @@ pub(crate) fn openat(
 pub(crate) fn read(local_fd: RawFd, read_amount: u64) -> Detour<ReadFileResponse> {
     let remote_fd = get_remote_fd(local_fd)?;
 
-    let (file_channel_tx, file_channel_rx) = oneshot::channel();
-
-    // Limit read size because if we read too much it can lead to a timeout
-    // Seems also that bincode doesn't do well with large buffers
-    let read_amount = std::cmp::min(read_amount, MAX_READ_SIZE);
-    let reading_file = Read {
-        remote_fd,
-        buffer_size: read_amount,
-        start_from: 0,
-        file_channel_tx,
-    };
-
-    blocking_send_file_message(FileOperation::Read(reading_file))?;
-
-    let read = file_channel_rx.blocking_recv()??;
-
-    Detour::Success(read)
+    remote_read(remote_fd, read_amount)
 }
 
 #[tracing::instrument(level = "trace")]

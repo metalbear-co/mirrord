@@ -17,7 +17,6 @@ use tracing::{debug, error, trace};
 
 use super::{hooks::*, *};
 use crate::{
-    close_layer_fd,
     common::{blocking_send_hook_message, HookMessage},
     detour::{Detour, OnceLockExt, OptionExt},
     dns::GetAddrInfo,
@@ -694,16 +693,19 @@ pub(super) fn getaddrinfo(
 fn remote_hostname_string() -> Detour<CString> {
     let hostname_path = PathBuf::from(r"/etc/hostname");
 
-    let hostname_fd = file::ops::open(
-        Detour::Success(hostname_path),
+    let remote_fd = file::ops::remote_open(
+        hostname_path,
         OpenOptionsInternal {
             read: true,
             ..Default::default()
         },
-    )?;
+    )?
+    .fd;
 
-    let hostname_file = file::ops::read(hostname_fd, 256)?;
-    close_layer_fd(hostname_fd);
+    // note: if we fail here we probably leak that fd, not big deal.
+    let hostname_file = file::ops::remote_read(remote_fd, 256)?;
+
+    file::ops::remote_close(remote_fd)?;
 
     CString::new(
         hostname_file

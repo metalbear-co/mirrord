@@ -504,7 +504,7 @@ jobs:
         with:
           container-runtime: ${{matrix.container-runtime}}
       - run: minikube image load /tmp/test.tar
-      - name: cargo test containerd
+      - name: cargo test docker
         run: cargo test -p tests
       - name: Collect logs
         if: ${{ failure() }}

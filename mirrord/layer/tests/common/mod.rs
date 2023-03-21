@@ -399,7 +399,6 @@ impl LayerConnection {
                 mirrord_protocol::file::ReadFileResponse {
                     bytes: contents,
                     read_amount: read_amount as u64,
-                    is_eof: false,
                 },
             ))))
             .await
