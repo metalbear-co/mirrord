@@ -3,7 +3,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     fs::{DirEntry, File, OpenOptions, ReadDir},
     io,
-    io::{prelude::*, BufReader, SeekFrom},
+    io::{prelude::*, SeekFrom},
     iter::{Enumerate, Map, Peekable},
     os::unix::{fs::MetadataExt, prelude::FileExt},
     path::{Path, PathBuf},
