@@ -71,10 +71,10 @@ pub(super) unsafe extern "C" fn open_detour(
     if guard.is_none() {
         FN_OPEN(raw_path, open_flags, mode)
     } else {
-        open_logic(raw_path, open_flags, mode).unwrap_or_bypass_with(|_| FN_OPEN(raw_path, open_flags, mode))
+        open_logic(raw_path, open_flags, mode)
+            .unwrap_or_bypass_with(|_| FN_OPEN(raw_path, open_flags, mode))
     }
 }
-
 
 /// Hook for `libc::open$NOCANCEL`.
 ///
@@ -90,7 +90,8 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
     if guard.is_none() {
         FN_OPEN(raw_path, open_flags, mode)
     } else {
-        open_logic(raw_path, open_flags, mode).unwrap_or_bypass_with(|_| FN_OPEN_NOCANCEL(raw_path, open_flags, mode))
+        open_logic(raw_path, open_flags, mode)
+            .unwrap_or_bypass_with(|_| FN_OPEN_NOCANCEL(raw_path, open_flags, mode))
     }
 }
 
@@ -558,7 +559,13 @@ unsafe extern "C" fn fstatat_detour(
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
-    replace!(hook_manager, "open$NOCANCEL", open_nocancel_detour, FnOpen_nocancel, FN_OPEN_NOCANCEL);
+    replace!(
+        hook_manager,
+        "open$NOCANCEL",
+        open_nocancel_detour,
+        FnOpen_nocancel,
+        FN_OPEN_NOCANCEL
+    );
     replace!(hook_manager, "openat", openat_detour, FnOpenat, FN_OPENAT);
 
     replace!(hook_manager, "read", read_detour, FnRead, FN_READ);
