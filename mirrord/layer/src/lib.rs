@@ -870,11 +870,7 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         CONNECTION_QUEUE.lock().unwrap().remove(socket.id);
     } else if file_mode_active {
         // might not be enabled if `local`
-        let _removed = OPEN_FILES
-            .lock()
-            .unwrap()
-            .remove(&fd)
-            .map(|_| unsafe { FN_CLOSE(fd) });
+        OPEN_FILES.lock().unwrap().remove(&fd);
     }
 }
 
