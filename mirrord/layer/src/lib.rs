@@ -12,6 +12,7 @@
 #![feature(trait_alias)]
 #![feature(c_size_t)]
 #![feature(pointer_byte_offsets)]
+#![feature(is_some_and)]
 #![allow(rustdoc::private_intra_doc_links)]
 
 //! Loaded dynamically with your local process.
@@ -98,6 +99,7 @@ use mirrord_protocol::{
     ClientMessage, DaemonMessage,
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
+use regex::RegexSet;
 use socket::SOCKETS;
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
@@ -204,6 +206,13 @@ pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
 /// Used to change the behavior of the `socket::ops::connect` hook operation.
 pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
+/// Unix streams to connect to remotely.
+///
+/// ## Usage
+///
+/// Used to change the behavior of the `socket::ops::connect` hook operation.
+pub(crate) static REMOTE_UNIX_STREAMS: OnceLock<Option<RegexSet>> = OnceLock::new();
+
 /// Tells us if the user enabled wants to ignore localhots connections in [`OutgoingConfig`].
 ///
 /// ## Usage
@@ -249,7 +258,7 @@ fn is_nix_or_devbox() -> bool {
 }
 
 /// Prevent mirrord from connecting to ports used by the intelliJ debugger
-pub(crate) fn port_debug_patch(addr: SocketAddr) -> bool {
+pub(crate) fn port_debug_patch(addr: &SocketAddr) -> bool {
     if let Ok(ports) = std::env::var("DEBUGGER_IGNORE_PORTS_PATCH") {
         let (ip, port) = (addr.ip(), addr.port());
         let ignored_ip =
@@ -401,6 +410,20 @@ fn layer_start(config: LayerConfig) {
     ENABLED_UDP_OUTGOING
         .set(config.feature.network.outgoing.udp)
         .expect("Setting ENABLED_UDP_OUTGOING singleton");
+    REMOTE_UNIX_STREAMS
+        .set(
+            config
+                .feature
+                .network
+                .outgoing
+                .unix_streams
+                .clone()
+                .map(|vec_or_single| vec_or_single.to_vec())
+                .map(RegexSet::new)
+                .transpose()
+                .expect("Invalid unix stream regex set."),
+        )
+        .expect("Setting REMOTE_UNIX_STREAMS failed.");
 
     OUTGOING_IGNORE_LOCALHOST
         .set(config.feature.network.outgoing.ignore_localhost)

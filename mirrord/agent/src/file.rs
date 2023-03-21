@@ -61,10 +61,17 @@ pub struct FileManager {
     index_allocator: IndexAllocator<u64>,
 }
 
+pub fn get_root_path_from_optional_pid(pid: Option<u64>) -> PathBuf {
+    match pid {
+        Some(pid) => PathBuf::from("/proc").join(pid.to_string()).join("root"),
+        None => PathBuf::from("/"),
+    }
+}
+
 /// Resolve a path that might contain symlinks from a specific container to a path accessible from
 /// the root host
 #[tracing::instrument(level = "trace")]
-fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt::Debug>(
+pub fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt::Debug>(
     path: P,
     root_path: R,
 ) -> std::io::Result<PathBuf> {
@@ -214,10 +221,7 @@ impl FileManager {
 
     #[tracing::instrument(level = "trace")]
     pub fn new(pid: Option<u64>) -> Self {
-        let root_path = match pid {
-            Some(pid) => PathBuf::from("/proc").join(pid.to_string()).join("root"),
-            None => PathBuf::from("/"),
-        };
+        let root_path = get_root_path_from_optional_pid(pid);
         trace!("Agent root path >> {root_path:?}");
         Self {
             open_files: HashMap::new(),

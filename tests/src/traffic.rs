@@ -2,7 +2,7 @@ mod steal;
 
 #[cfg(test)]
 mod traffic {
-    use std::{net::UdpSocket, time::Duration};
+    use std::{net::UdpSocket, path::PathBuf, time::Duration};
 
     use futures::Future;
     use futures_util::stream::TryStreamExt;
@@ -308,6 +308,68 @@ mod traffic {
         let mut process = run_exec(node_command, &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+    }
+
+    /// Verify that when executed with mirrord an app can connect to a unix socket on the cluster.
+    ///
+    /// 1. Deploy to the cluster a server that listens to a pathname unix socket and echos incoming
+    /// data.
+    /// 2. Run with mirrord a client application that connects to that socket, sends data, verifies
+    /// its echo and panics if anything went wrong
+    /// 3. Verify the client app did not panic.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(60))]
+    pub async fn outgoing_unix_stream_pathname(
+        #[future]
+        #[with(
+            "default",
+            "ClusterIP",
+            "ghcr.io/metalbear-co/mirrord-unix-socket-server:latest",
+            "unix-echo"
+        )]
+        service: KubeService,
+    ) {
+        let service = service.await;
+        let app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../target/debug/rust-unix-socket-client")
+            .to_string_lossy()
+            .to_string();
+        let executable = vec![app_path.as_str()];
+
+        // Tell mirrord to connect remotely to the pathname the deployed app is listening on.
+        let env = Some(vec![(
+            "MIRRORD_OUTGOING_REMOTE_UNIX_STREAMS",
+            "/app/unix-socket-server.sock",
+        )]);
+        let mut process = run_exec(executable, &service.target, None, None, env).await;
+        let res = process.child.wait().await.unwrap();
+
+        // The test application panics if it does not successfully connect to the socket, send data,
+        // and get the same data back. So if it exits with success everything worked.
+        assert!(res.success());
+    }
+
+    /// Verify that mirrord does not interfere with ignored unix sockets and connecting to a unix
+    /// socket that is NOT configured to happen remotely works fine locally (testing the Bypass
+    /// case of connections to unix sockets).
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    pub async fn outgoing_bypassed_unix_stream_pathname(#[future] service: KubeService) {
+        let service = service.await;
+        let app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../target/debug/rust-bypassed-unix-socket")
+            .to_string_lossy()
+            .to_string();
+        let executable = vec![app_path.as_str()];
+
+        let mut process = run_exec(executable, &service.target, None, None, None).await;
+        let res = process.child.wait().await.unwrap();
+
+        // The test application panics if it does not successfully connect to the socket, send data,
+        // and get the same data back. So if it exits with success everything worked.
         assert!(res.success());
     }
 }

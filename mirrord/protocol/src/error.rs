@@ -1,14 +1,17 @@
-use std::{
-    io,
-    net::{AddrParseError, SocketAddr},
-};
+use std::{io, net::AddrParseError};
 
 use bincode::{Decode, Encode};
 use thiserror::Error;
 use tracing::warn;
 use trust_dns_resolver::error::{ResolveError, ResolveErrorKind};
 
-use crate::{tcp::Filter, Port};
+use crate::{outgoing::SocketAddress, tcp::Filter, Port};
+
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
+pub enum SerializationError {
+    #[error("Could not convert the socket address into a supported owned address type.")]
+    SocketAddress,
+}
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
 pub enum ResponseError {
@@ -35,6 +38,9 @@ pub enum ResponseError {
 
     #[error("Could not subscribe to port `{0}`, as it is being stolen by another mirrord client.")]
     PortAlreadyStolen(Port),
+
+    #[error("Operation is not yet supported by mirrord.")]
+    NotImplemented,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
@@ -46,12 +52,12 @@ pub enum RemoteError {
     AddressParsing(String),
 
     #[error("Failed operation to `SocketAddr` with `{0}`!")]
-    InvalidAddress(SocketAddr),
+    InvalidAddress(SocketAddress),
 
     /// Especially relevant for the outgoing traffic feature, when `golang` attempts to connect
     /// on both IPv6 and IPv4.
-    #[error("Connect call to `SocketAddr` `{0}` timed out!")]
-    ConnectTimedOut(SocketAddr),
+    #[error("Connect call to `SocketAddress` `{0}` timed out!")]
+    ConnectTimedOut(SocketAddress),
 
     #[error(r#"Got bad regex "{0}" for http filter subscriptions. Regex error: `{1}`."#)]
     BadHttpFilterRegex(Filter, String),
