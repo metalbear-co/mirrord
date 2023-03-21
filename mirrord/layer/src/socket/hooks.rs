@@ -171,7 +171,7 @@ pub(super) unsafe extern "C" fn dup_detour(fd: c_int) -> c_int {
     if dup_result == -1 {
         dup_result
     } else {
-        match dup(fd, dup_result) {
+        match dup(fd, dup_result, false) {
             Ok(()) => dup_result,
             Err(e) => e.into(),
         }
@@ -189,7 +189,7 @@ pub(super) unsafe extern "C" fn dup2_detour(oldfd: c_int, newfd: c_int) -> c_int
     if dup2_result == -1 {
         dup2_result
     } else {
-        match dup(oldfd, dup2_result) {
+        match dup(oldfd, dup2_result, true) {
             Ok(()) => dup2_result,
             Err(e) => e.into(),
         }
@@ -204,7 +204,7 @@ pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c
     if dup3_result == -1 {
         dup3_result
     } else {
-        match dup(oldfd, dup3_result) {
+        match dup(oldfd, dup3_result, true) {
             Ok(()) => dup3_result,
             Err(e) => e.into(),
         }

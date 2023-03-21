@@ -555,17 +555,21 @@ pub(super) fn accept(
 #[tracing::instrument(level = "trace")]
 pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), HookError> {
     match cmd {
-        libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => dup(orig_fd, fcntl_fd),
+        libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => dup(orig_fd, fcntl_fd, true),
         _ => Ok(()),
     }
 }
 
+/// replace controls the behavior on which the `dup_fd` is closed in case it is already open
 #[tracing::instrument(level = "trace")]
-pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
+pub(super) fn dup(fd: c_int, dup_fd: i32, replace: bool) -> Result<(), HookError> {
     {
         let mut sockets = SOCKETS.lock()?;
         if let Some(socket) = sockets.get(&fd).cloned() {
             sockets.insert(dup_fd as RawFd, socket);
+            if replace {
+                OPEN_FILES.lock()?.remove(&dup_fd);
+            }
             return Ok(());
         }
     } // Drop sockets, free Mutex.
@@ -573,6 +577,9 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
     let mut files = OPEN_FILES.lock()?;
     if let Some(file) = files.get(&fd).cloned() {
         files.insert(dup_fd as RawFd, file);
+        if replace {
+            SOCKETS.lock()?.remove(&dup_fd);
+        }
     }
     Ok(())
 }
