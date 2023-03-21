@@ -122,6 +122,7 @@ impl HookError {
                 // never appears as HookError::ResponseError(PortAlreadyStolen(_)).
                 // this could be changed by waiting for the Subscribed response from agent.
                 ResponseError::PortAlreadyStolen(_port) => libc::EINVAL,
+                ResponseError::NotImplemented => libc::EINVAL,
             },
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,

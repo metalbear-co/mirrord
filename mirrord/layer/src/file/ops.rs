@@ -6,7 +6,7 @@ use mirrord_protocol::file::{
     XstatResponse,
 };
 use tokio::sync::oneshot;
-use tracing::{debug, error, info};
+use tracing::error;
 
 use super::{filter::FILE_FILTER, *};
 use crate::{
@@ -297,10 +297,6 @@ pub(crate) fn read(local_fd: RawFd, read_amount: u64) -> Detour<ReadFileResponse
 
     let read = file_channel_rx.blocking_recv()??;
 
-    let d = String::from_utf8_lossy(&read.bytes[..read.read_amount as usize]);
-    info!("reading {:#?} | file {:#?}", read, local_fd);
-    info!("reading got {:#?}", d);
-
     Detour::Success(read)
 }
 
@@ -431,8 +427,6 @@ pub(crate) fn xstat(
     let (path, fd) = match (path, fd) {
         // fstatat
         (Some(path), Some(fd)) => {
-            debug!("path and fd are {path:#?} {fd:#?}");
-
             let path = path?;
             let fd = {
                 if fd == AT_FDCWD {
@@ -448,12 +442,10 @@ pub(crate) fn xstat(
                 }
             };
 
-            debug!("path and remote_fd are {path:#?} {fd:#?}");
             (Some(path), fd)
         }
         // lstat/stat
         (Some(path), None) => {
-            debug!("path and none fd are {path:#?}");
             let path = path?;
             if path.is_relative() {
                 // Calls with non absolute paths are sent to libc::open.
@@ -461,7 +453,6 @@ pub(crate) fn xstat(
             }
             should_ignore!(path, false);
 
-            debug!("path and none fd are {path:#?}");
             (Some(path), None)
         }
         // fstat
@@ -469,8 +460,6 @@ pub(crate) fn xstat(
         // can't happen
         (None, None) => return Detour::Error(HookError::NullPointer),
     };
-
-    debug!("what was returned in xstat match was path {path:#?}, and fd {fd:#?}");
 
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
@@ -484,7 +473,6 @@ pub(crate) fn xstat(
     blocking_send_file_message(FileOperation::Xstat(lstat))?;
 
     let xstat_result = file_channel_rx.blocking_recv();
-    debug!("xstat result is {xstat_result:#?}");
 
     Detour::Success(xstat_result??)
 }

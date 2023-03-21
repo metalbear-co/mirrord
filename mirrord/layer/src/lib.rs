@@ -110,7 +110,7 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
     time::{sleep, Duration},
 };
-use tracing::{debug, error, info, trace};
+use tracing::{error, info, trace};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -890,7 +890,6 @@ pub(crate) fn close_layer_fd(fd: c_int) {
 /// Replaces [`libc::close`].
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
-    debug!("CLOSING FD {fd:#?}");
     let res = FN_CLOSE(fd);
     close_layer_fd(fd);
     res

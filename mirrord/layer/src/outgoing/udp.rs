@@ -122,7 +122,6 @@ impl UdpOutgoingHandler {
                 biased; // To allow local socket to be read before being closed
 
                 read = mirror_socket.recv_from(&mut recv_from_buffer) => {
-                    debug!("read from recv_from");
                     match read {
                         Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
                             continue;
