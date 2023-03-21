@@ -835,9 +835,9 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
             replace!(
                 &mut hook_manager,
                 "uv__close_nocancel",
-                uv__close_nocancel_detour,
-                FnUv__close_nocancel,
-                FN_UV__CLOSE_NOCANCEL
+                uv_close_nocancel_detour,
+                FnUv_close_nocancel,
+                FN_UV_CLOSE_NOCANCEL
             );
         }
     };
@@ -935,8 +935,8 @@ pub(crate) unsafe extern "C" fn uv_fs_close_detour(
 /// https://github.dev/libuv/libuv/blob/7b84d5b0ecb737b4cc30ce63eade690d994e00a6/src/unix/core.c#L557-L558
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn uv__close_nocancel_detour(fd: c_int) -> c_int {
-    let res = FN_UV__CLOSE_NOCANCEL(fd);
+pub(crate) unsafe extern "C" fn uv_close_nocancel_detour(fd: c_int) -> c_int {
+    let res = FN_UV_CLOSE_NOCANCEL(fd);
     close_layer_fd(fd);
     res
 }
