@@ -23,11 +23,12 @@ const MAX_READ_SIZE: u64 = 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RemoteFile {
     pub fd: u64,
+    pub path: String,
 }
 
 impl RemoteFile {
-    pub(crate) fn new(fd: u64) -> Self {
-        Self { fd }
+    pub(crate) fn new(fd: u64, path: String) -> Self {
+        Self { fd, path }
     }
 }
 
@@ -66,7 +67,10 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<u64> {
         OPEN_FILES
             .lock()?
             .get(&local_fd)
-            .map(|remote_file| remote_file.fd)
+            .map(|remote_file| {
+                trace!("Found remote fd for local fd {remote_file:?}");
+                remote_file.fd
+            })
             // Bypass if we're not managing the relative part.
             .ok_or(Bypass::LocalFdNotFound(local_fd))?,
     )
@@ -161,7 +165,7 @@ pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
     let requesting_file = Open {
-        path,
+        path: path.clone(),
         open_options,
         file_channel_tx,
     };
@@ -176,10 +180,10 @@ pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal
     let fake_local_file_name = CString::new(remote_fd.to_string())?;
     let local_file_fd = unsafe { create_local_fake_file(fake_local_file_name, remote_fd) }?;
 
-    OPEN_FILES
-        .lock()
-        .unwrap()
-        .insert(local_file_fd, Arc::new(RemoteFile::new(remote_fd)));
+    OPEN_FILES.lock().unwrap().insert(
+        local_file_fd,
+        Arc::new(RemoteFile::new(remote_fd, path.display().to_string())),
+    );
 
     Detour::Success(local_file_fd)
 }
@@ -335,7 +339,7 @@ pub(crate) fn openat(
 
         let requesting_file = OpenRelative {
             relative_fd: remote_fd,
-            path,
+            path: path.clone(),
             open_options,
             file_channel_tx,
         };
@@ -346,9 +350,10 @@ pub(crate) fn openat(
         let fake_local_file_name = CString::new(remote_fd.to_string())?;
         let local_file_fd = unsafe { create_local_fake_file(fake_local_file_name, remote_fd) }?;
 
-        OPEN_FILES
-            .lock()?
-            .insert(local_file_fd, Arc::new(RemoteFile::new(remote_fd)));
+        OPEN_FILES.lock()?.insert(
+            local_file_fd,
+            Arc::new(RemoteFile::new(remote_fd, path.display().to_string())),
+        );
 
         Detour::Success(local_file_fd)
     }
