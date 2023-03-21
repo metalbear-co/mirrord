@@ -95,7 +95,6 @@ impl AsyncRead for SocketStream {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         match self.get_mut() {
-            // TODO: review, help please - is this correct? ↓
             SocketStream::Ip(tcp_stream) => Pin::new(tcp_stream).poll_read(cx, buf),
             SocketStream::Unix(unix_stream) => Pin::new(unix_stream).poll_read(cx, buf),
         }
