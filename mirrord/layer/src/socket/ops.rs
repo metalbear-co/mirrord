@@ -4,6 +4,7 @@ use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
+    path::PathBuf,
     ptr,
     sync::{Arc, OnceLock},
 };
@@ -21,7 +22,7 @@ use crate::{
     detour::{Detour, OnceLockExt, OptionExt},
     dns::GetAddrInfo,
     error::HookError,
-    file::{self, OPEN_FILES},
+    file::{self, ops::RemoteFile, OPEN_FILES},
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
     port_debug_patch,
     tcp::{Listen, TcpIncoming},
@@ -690,19 +691,21 @@ pub(super) fn getaddrinfo(
 
 /// Retrieves the `hostname` from the agent's `/etc/hostname` to be used by [`gethostname`]
 fn remote_hostname_string() -> Detour<CString> {
-    let hostname_path = CString::new("/etc/hostname")?;
+    let hostname_path = PathBuf::from("/etc/hostname");
 
-    let hostname_fd = file::ops::open(
-        Some(&hostname_path),
+    let hostname_fd = RemoteFile::remote_open(
+        hostname_path,
         OpenOptionsInternal {
             read: true,
             ..Default::default()
         },
-    )?;
+    )?
+    .fd;
 
-    let hostname_file = file::ops::read(hostname_fd, 256)?;
+    // If we fail here we probably leak that fd, not a big deal.
+    let hostname_file = RemoteFile::remote_read(hostname_fd, 256)?;
 
-    close_layer_fd(hostname_fd);
+    RemoteFile::remote_close(hostname_fd)?;
 
     CString::new(
         hostname_file
