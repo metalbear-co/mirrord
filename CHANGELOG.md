@@ -8,6 +8,39 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.33.0](https://github.com/metalbear-co/mirrord/tree/3.33.0) - 2023-03-22
+
+
+### Added
+
+- Support for outgoing unix stream sockets (configurable via config file or
+  environment variable).
+  [#1105](https://github.com/metalbear-co/mirrord/issues/1105)
+- Add  version of hooked functions.
+  [#1203](https://github.com/metalbear-co/mirrord/issues/1203)
+
+
+### Changed
+
+- add `Hash` trait on `mirrord_operator::license::License` struct
+- dependencies bump and cleanup
+- fix mirrord loading twice (to build also) and improve error message when no
+  pods found
+
+
+### Fixed
+
+- fix f-stream functions by removing its hooks and add missing underlying libc
+  calls [#947](https://github.com/metalbear-co/mirrord/issues/947)
+- fix deadlock in go20 test (remove trace?)
+  [#1206](https://github.com/metalbear-co/mirrord/issues/1206)
+
+
+### Internal
+
+- set timeout for flaky/hanging test
+
+
 ## [3.32.3](https://github.com/metalbear-co/mirrord/tree/3.32.3) - 2023-03-19
 
 
