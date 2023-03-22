@@ -4,7 +4,6 @@ use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
-    path::PathBuf,
     ptr,
     sync::{Arc, OnceLock},
 };
@@ -17,11 +16,12 @@ use tracing::{debug, error, trace};
 
 use super::{hooks::*, *};
 use crate::{
+    close_layer_fd,
     common::{blocking_send_hook_message, HookMessage},
     detour::{Detour, OnceLockExt, OptionExt},
     dns::GetAddrInfo,
     error::HookError,
-    file::{ops::RemoteFile, OPEN_FILES},
+    file::{self, OPEN_FILES},
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
     port_debug_patch,
     tcp::{Listen, TcpIncoming},
@@ -555,17 +555,22 @@ pub(super) fn accept(
 #[tracing::instrument(level = "trace")]
 pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), HookError> {
     match cmd {
-        libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => dup(orig_fd, fcntl_fd),
+        libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => dup::<true>(orig_fd, fcntl_fd),
         _ => Ok(()),
     }
 }
 
 #[tracing::instrument(level = "trace")]
-pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
+pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
     {
         let mut sockets = SOCKETS.lock()?;
         if let Some(socket) = sockets.get(&fd).cloned() {
             sockets.insert(dup_fd as RawFd, socket);
+
+            if SWITCH_MAP {
+                OPEN_FILES.lock()?.remove(&dup_fd);
+            }
+
             return Ok(());
         }
     } // Drop sockets, free Mutex.
@@ -573,6 +578,10 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
     let mut files = OPEN_FILES.lock()?;
     if let Some(file) = files.get(&fd).cloned() {
         files.insert(dup_fd as RawFd, file);
+
+        if SWITCH_MAP {
+            SOCKETS.lock()?.remove(&dup_fd);
+        }
     }
     Ok(())
 }
@@ -690,21 +699,19 @@ pub(super) fn getaddrinfo(
 
 /// Retrieves the `hostname` from the agent's `/etc/hostname` to be used by [`gethostname`]
 fn remote_hostname_string() -> Detour<CString> {
-    let hostname_path = PathBuf::from("/etc/hostname");
+    let hostname_path = CString::new("/etc/hostname")?;
 
-    let hostname_fd = RemoteFile::remote_open(
-        hostname_path,
+    let hostname_fd = file::ops::open(
+        Some(&hostname_path),
         OpenOptionsInternal {
             read: true,
             ..Default::default()
         },
-    )?
-    .fd;
+    )?;
 
-    // If we fail here we probably leak that fd, not a big deal.
-    let hostname_file = RemoteFile::remote_read(hostname_fd, 256)?;
+    let hostname_file = file::ops::read(hostname_fd, 256)?;
 
-    RemoteFile::remote_close(hostname_fd)?;
+    close_layer_fd(hostname_fd);
 
     CString::new(
         hostname_file
