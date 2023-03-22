@@ -49,6 +49,8 @@ impl RemoteFile {
         Detour::Success(file_channel_rx.blocking_recv()??)
     }
 
+    /// Sends a [`FileOperation::Read`] message, reading the file in the agent.
+    ///
     /// Blocking request and wait on already found remote_fd
     #[tracing::instrument(level = "trace")]
     pub(crate) fn remote_read(remote_fd: u64, read_amount: u64) -> Detour<ReadFileResponse> {
