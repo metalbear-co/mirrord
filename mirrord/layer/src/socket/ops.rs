@@ -560,6 +560,12 @@ pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), Hoo
     }
 }
 
+/// Managed part of our [`dup_detour`], that clones the `Arc<T>` thing we have keyed by `fd`
+/// ([`UserSocket`], or [`RemoteFile`]).
+///
+/// - `SWITCH_MAP`: Used to indicate that we're switching the `fd` from [`SOCKETS`] to
+///   [`OPEN_FILES`] (or vice-versa). We need this to properly handle some cases in [`fcntl`],
+///   [`dup2_detour`], and [`dup3_detour`]. Extra relevant for node on macos.
 #[tracing::instrument(level = "trace")]
 pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
     {
