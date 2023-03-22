@@ -17,12 +17,11 @@ use tracing::{debug, error, trace};
 
 use super::{hooks::*, *};
 use crate::{
-    close_layer_fd,
     common::{blocking_send_hook_message, HookMessage},
     detour::{Detour, OnceLockExt, OptionExt},
     dns::GetAddrInfo,
     error::HookError,
-    file::{self, ops::RemoteFile, OPEN_FILES},
+    file::{ops::RemoteFile, OPEN_FILES},
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
     port_debug_patch,
     tcp::{Listen, TcpIncoming},
