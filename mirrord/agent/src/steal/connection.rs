@@ -221,8 +221,6 @@ impl TcpConnectionStealer {
             }
         }
 
-        self.iptables()?.cleanup().await?;
-
         Ok(())
     }
 
@@ -498,9 +496,15 @@ impl TcpConnectionStealer {
                 .await?;
 
             self.port_subscriptions.remove(&port);
+
+            // Cleanup iptables if not stealing any ports anymore.
             if self.port_subscriptions.is_empty() {
-                // Was this the last client?
-                self.iptables = None; // The Drop impl of iptables cleans up.
+                if let Some(safe_iptables) = self.iptables.as_ref() {
+                    if let Err(e) = safe_iptables.cleanup().await {
+                        error!("Error in iptables cleanup: {e}");
+                    }
+                }
+                self.iptables = None;
             }
         }
         Ok(())
