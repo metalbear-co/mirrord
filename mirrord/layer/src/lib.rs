@@ -12,6 +12,7 @@
 #![feature(trait_alias)]
 #![feature(c_size_t)]
 #![feature(pointer_byte_offsets)]
+#![feature(is_some_and)]
 #![allow(rustdoc::private_intra_doc_links)]
 
 //! Loaded dynamically with your local process.
@@ -98,6 +99,7 @@ use mirrord_protocol::{
     ClientMessage, DaemonMessage,
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
+use regex::RegexSet;
 use socket::SOCKETS;
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
@@ -204,6 +206,13 @@ pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
 /// Used to change the behavior of the `socket::ops::connect` hook operation.
 pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
 
+/// Unix streams to connect to remotely.
+///
+/// ## Usage
+///
+/// Used to change the behavior of the `socket::ops::connect` hook operation.
+pub(crate) static REMOTE_UNIX_STREAMS: OnceLock<Option<RegexSet>> = OnceLock::new();
+
 /// Tells us if the user enabled wants to ignore localhots connections in [`OutgoingConfig`].
 ///
 /// ## Usage
@@ -249,7 +258,7 @@ fn is_nix_or_devbox() -> bool {
 }
 
 /// Prevent mirrord from connecting to ports used by the intelliJ debugger
-pub(crate) fn port_debug_patch(addr: SocketAddr) -> bool {
+pub(crate) fn port_debug_patch(addr: &SocketAddr) -> bool {
     if let Ok(ports) = std::env::var("DEBUGGER_IGNORE_PORTS_PATCH") {
         let (ip, port) = (addr.ip(), addr.port());
         let ignored_ip =
@@ -401,6 +410,20 @@ fn layer_start(config: LayerConfig) {
     ENABLED_UDP_OUTGOING
         .set(config.feature.network.outgoing.udp)
         .expect("Setting ENABLED_UDP_OUTGOING singleton");
+    REMOTE_UNIX_STREAMS
+        .set(
+            config
+                .feature
+                .network
+                .outgoing
+                .unix_streams
+                .clone()
+                .map(|vec_or_single| vec_or_single.to_vec())
+                .map(RegexSet::new)
+                .transpose()
+                .expect("Invalid unix stream regex set."),
+        )
+        .expect("Setting REMOTE_UNIX_STREAMS failed.");
 
     OUTGOING_IGNORE_LOCALHOST
         .set(config.feature.network.outgoing.ignore_localhost)
@@ -799,15 +822,34 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
             FnClose_nocancel,
             FN_CLOSE_NOCANCEL
         );
-        // Solve leak on uvloop which calls the syscall directly.
-        #[cfg(target_os = "linux")]
+
         replace!(
             &mut hook_manager,
-            "uv_fs_close",
-            uv_fs_close,
-            FnUv_fs_close,
-            FN_UV_FS_CLOSE
+            "__close_nocancel",
+            __close_nocancel_detour,
+            Fn__close_nocancel,
+            FN___CLOSE_NOCANCEL
         );
+
+        replace!(
+            &mut hook_manager,
+            "__close",
+            __close_detour,
+            Fn__close,
+            FN___CLOSE
+        );
+
+        // Solve leak on uvloop which calls the syscall directly.
+        #[cfg(target_os = "linux")]
+        {
+            replace!(
+                &mut hook_manager,
+                "uv_fs_close",
+                uv_fs_close_detour,
+                FnUv_fs_close,
+                FN_UV_FS_CLOSE
+            );
+        }
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut hook_manager, enabled_remote_dns) };
@@ -879,14 +921,30 @@ pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
     close_detour(fd)
 }
 
+#[hook_fn]
+pub(crate) unsafe extern "C" fn __close_nocancel_detour(fd: c_int) -> c_int {
+    close_detour(fd)
+}
+
+#[hook_fn]
+pub(crate) unsafe extern "C" fn __close_detour(fd: c_int) -> c_int {
+    close_detour(fd)
+}
+
 // TODO(alex) [mid] 2023-01-24: What is this?
 ///
 /// ## Hook
 ///
-/// Replaces `?`.
+/// Needed for libuv that calls the syscall directly.
+/// https://github.dev/libuv/libuv/blob/7b84d5b0ecb737b4cc30ce63eade690d994e00a6/src/unix/core.c#L557-L558
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn uv_fs_close(a: usize, b: usize, fd: c_int, c: usize) -> c_int {
+pub(crate) unsafe extern "C" fn uv_fs_close_detour(
+    a: usize,
+    b: usize,
+    fd: c_int,
+    c: usize,
+) -> c_int {
     // In this case we call `close_layer_fd` before the original close function, because execution
     // does not return to here after calling `FN_UV_FS_CLOSE`.
     close_layer_fd(fd);
