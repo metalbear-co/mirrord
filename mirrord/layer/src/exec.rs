@@ -2,7 +2,7 @@
 
 use std::{
     env,
-    ffi::{c_void, CStr, CString},
+    ffi::{c_void, CString},
     marker::PhantomData,
     ptr,
     sync::OnceLock,
@@ -137,7 +137,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
             // that we don't just keep going indefinitely if a bad argv was passed.
             return Bypass(TooManyArgs);
         }
-        let arg_str = arg.checked_into()?;
+        let arg_str: &str = arg.checked_into()?;
         trace!("exec arg: {arg_str}");
 
         c_string_vec.0.push(
