@@ -24,7 +24,7 @@ mod steal {
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(
-            // Application::PythonFlaskHTTP,
+            Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP,
             Application::NodeHTTP
         )]
@@ -60,7 +60,7 @@ mod steal {
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(
-            // Application::PythonFlaskHTTP,
+            Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP,
             Application::NodeHTTP
         )]
@@ -102,7 +102,7 @@ mod steal {
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(
-            // Application::PythonFlaskHTTP,
+            Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP,
             Application::NodeHTTP
         )]
@@ -149,7 +149,7 @@ mod steal {
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(
-            // Application::PythonFlaskHTTP, // TODO?
+            Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP,
             Application::NodeHTTP
         )]
