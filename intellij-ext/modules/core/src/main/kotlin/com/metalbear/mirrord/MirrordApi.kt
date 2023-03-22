@@ -49,10 +49,14 @@ object MirrordApi {
     fun listPods(configFile: String?, project: Project?, wslDistribution: WSLDistribution?): List<String> {
         MirrordLogger.logger.debug("listing pods")
         var commandLine = GeneralCommandLine(cliPath(wslDistribution), "ls", "-o", "json")
-        configFile?.let {
+        configFile?.let {config ->
             MirrordLogger.logger.debug("adding configFile to command line")
             commandLine.addParameter("-f")
-            commandLine.addParameter(it)
+            wslDistribution?.let {
+                commandLine.addParameter(it.getWslPath(config) ?: config)
+            } ?: {
+                commandLine.addParameter(config)
+            }
         }
 
 
