@@ -485,6 +485,10 @@ mod utils {
         #[default(false)] delete_after_fail: bool,
         #[future] kube_client: Client,
     ) -> KubeService {
+        println!(
+            "{:?} creating service {service_name:?} in namespace {namespace:?}",
+            Utc::now()
+        );
         let kube_client = kube_client.await;
         let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
         let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
@@ -637,6 +641,10 @@ mod utils {
             .await
             .unwrap();
 
+        println!(
+            "{:?} done creating service {service_name:?} in namespace {namespace:?}",
+            Utc::now()
+        );
         KubeService {
             name: name.to_string(),
             namespace: namespace.to_string(),
