@@ -5,12 +5,7 @@ use core::ffi::{c_size_t, c_ssize_t};
 ///
 /// NOTICE: If a file operation fails, it might be because it depends on some `libc` function
 /// that is not being hooked (`strace` the program to check).
-use std::{
-    ffi::{CStr, CString},
-    os::unix::io::RawFd,
-    ptr, slice,
-    time::Duration,
-};
+use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
 
 #[cfg(target_os = "linux")]
 use errno::{set_errno, Errno};
@@ -21,7 +16,7 @@ use libc::{
 use libc::{EBADF, EINVAL, ENOENT, ENOTDIR};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
-    DirEntryInternal, MetadataInternal, OpenOptionsInternal, ReadFileResponse, WriteFileResponse,
+    DirEntryInternal, MetadataInternal, ReadFileResponse, WriteFileResponse,
 };
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
@@ -34,6 +29,7 @@ use super::{ops::*, OpenOptionsInternalExt};
 #[cfg(target_os = "linux")]
 use crate::error::HookError::ResponseError;
 use crate::{
+    common::CheckedInto,
     detour::{Detour, DetourGuard},
     error::HookError,
     file::ops::{access, lseek, open, read, write},
@@ -45,16 +41,12 @@ use crate::{
 /// We ignore mode in case we don't bypass the call.
 #[tracing::instrument(level = "trace")]
 unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, mode: c_int) -> Detour<RawFd> {
-    let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
+    let path = raw_path.checked_into();
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
-    trace!(
-        "rawish_path {:#?} | open_options {:#?}",
-        rawish_path,
-        open_options
-    );
+    trace!("path {:#?} | open_options {:#?}", path, open_options);
 
-    open(rawish_path, open_options)
+    open(path, open_options)
 }
 
 /// Hook for `libc::open`.
@@ -175,10 +167,9 @@ pub(crate) unsafe extern "C" fn openat_detour(
     raw_path: *const c_char,
     open_flags: c_int,
 ) -> RawFd {
-    let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_flags(open_flags);
+    let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
-    openat(fd, rawish_path, open_options)
+    openat(fd, raw_path.checked_into(), open_options)
         .unwrap_or_bypass_with(|_| FN_OPENAT(fd, raw_path, open_flags))
 }
 
@@ -188,10 +179,9 @@ pub(crate) unsafe extern "C" fn _openat_nocancel_detour(
     raw_path: *const c_char,
     open_flags: c_int,
 ) -> RawFd {
-    let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    let open_options: OpenOptionsInternal = OpenOptionsInternalExt::from_flags(open_flags);
+    let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
-    openat(fd, rawish_path, open_options)
+    openat(fd, raw_path.checked_into(), open_options)
         .unwrap_or_bypass_with(|_| FN__OPENAT_NOCANCEL(fd, raw_path, open_flags))
 }
 
@@ -454,9 +444,7 @@ pub(crate) unsafe extern "C" fn _write_nocancel_detour(
 
 /// Implementation of access_detour, used in access_detour and faccessat_detour
 unsafe fn access_logic(raw_path: *const c_char, mode: c_int) -> c_int {
-    let rawish_path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-
-    access(rawish_path, mode as u8).unwrap_or_bypass_with(|_| FN_ACCESS(raw_path, mode))
+    access(raw_path.checked_into(), mode as u8).unwrap_or_bypass_with(|_| FN_ACCESS(raw_path, mode))
 }
 
 /// Hook for `libc::access`.
@@ -518,8 +506,7 @@ unsafe extern "C" fn fill_stat(out_stat: *mut stat, metadata: &MetadataInternal)
 /// Hook for `libc::lstat`.
 #[hook_guard_fn]
 unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
-    let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    xstat(Some(path), None, false)
+    xstat(Some(raw_path.checked_into()), None, false)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
@@ -543,8 +530,7 @@ pub(crate) unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> 
 /// Hook for `libc::stat`.
 #[hook_guard_fn]
 unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
-    let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    xstat(Some(path), None, true)
+    xstat(Some(raw_path.checked_into()), None, true)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
@@ -563,8 +549,7 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
     if ver != 1 {
         return FN___XSTAT(ver, raw_path, out_stat);
     }
-    let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    xstat(Some(path), None, true)
+    xstat(Some(raw_path.checked_into()), None, true)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
@@ -581,8 +566,7 @@ pub(crate) unsafe fn fstatat_logic(
     flag: c_int,
 ) -> Detour<i32> {
     let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
-    let path = (!raw_path.is_null()).then(|| CStr::from_ptr(raw_path));
-    xstat(Some(path), Some(fd), follow_symlink).map(|res| {
+    xstat(Some(raw_path.checked_into()), Some(fd), follow_symlink).map(|res| {
         let res = res.metadata;
         fill_stat(out_stat, &res);
         0

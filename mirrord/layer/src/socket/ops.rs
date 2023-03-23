@@ -4,6 +4,7 @@ use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
+    path::PathBuf,
     ptr,
     sync::{Arc, OnceLock},
 };
@@ -708,10 +709,10 @@ pub(super) fn getaddrinfo(
 
 /// Retrieves the `hostname` from the agent's `/etc/hostname` to be used by [`gethostname`]
 fn remote_hostname_string() -> Detour<CString> {
-    let hostname_path = CString::new("/etc/hostname")?;
+    let hostname_path = PathBuf::from("/etc/hostname");
 
     let hostname_fd = file::ops::open(
-        Some(&hostname_path),
+        Detour::Success(hostname_path),
         OpenOptionsInternal {
             read: true,
             ..Default::default()

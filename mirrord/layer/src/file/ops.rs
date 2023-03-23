@@ -157,29 +157,6 @@ fn blocking_send_file_message(message: FileOperation) -> Result<()> {
     blocking_send_hook_message(HookMessage::File(message))
 }
 
-/// Converts a [`CStr`] path into a [`&str`], or bypasses when this fails.
-pub(crate) fn str_from_rawish(rawish_path: Option<&CStr>) -> Detour<&str> {
-    let path = rawish_path
-        .map(CStr::to_str)
-        .transpose()
-        .map_err(|fail| {
-            warn!(
-                "Failed converting `rawish_path` from `CStr` with {:#?}",
-                fail
-            );
-
-            Bypass::CStrConversion
-        })?
-        .ok_or(HookError::NullPointer)?;
-
-    Detour::Success(path)
-}
-
-/// Converts a [`CStr`] path into a [`PathBuf`], or bypasses when this fails.
-fn path_from_rawish(rawish_path: Option<&CStr>) -> Detour<PathBuf> {
-    str_from_rawish(rawish_path).map(PathBuf::from)
-}
-
 /// Blocking wrapper around `libc::open` call.
 ///
 /// **Bypassed** when trying to load system files, and files from the current working directory
@@ -192,8 +169,8 @@ fn path_from_rawish(rawish_path: Option<&CStr>) -> Detour<PathBuf> {
 /// _local_ and _remote_ file association, plus **inserting** it into the storage for
 /// [`OPEN_FILES`].
 #[tracing::instrument(level = "trace")]
-pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
-    let path = path_from_rawish(rawish_path)?;
+pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
+    let path = path?;
 
     if path.is_relative() {
         // Calls with non absolute paths are sent to libc::open.
@@ -216,35 +193,6 @@ pub(crate) fn open(rawish_path: Option<&CStr>, open_options: OpenOptionsInternal
     );
 
     Detour::Success(local_file_fd)
-}
-
-/// Calls [`open`] and returns a [`FILE`] pointer based on the **local** `fd`.
-#[tracing::instrument(level = "trace")]
-pub(crate) fn fopen(rawish_path: Option<&CStr>, rawish_mode: Option<&CStr>) -> Detour<*mut FILE> {
-    let open_options: OpenOptionsInternal = rawish_mode
-        .map(CStr::to_str)
-        .transpose()
-        .map_err(|fail| {
-            warn!(
-                "Failed converting `rawish_mode` from `CStr` with {:#?}",
-                fail
-            );
-
-            Bypass::CStrConversion
-        })?
-        .map(String::from)
-        .map(OpenOptionsInternalExt::from_mode)
-        .unwrap_or_default();
-
-    let local_file_fd = open(rawish_path, open_options)?;
-    let result = OPEN_FILES
-        .lock()?
-        .get_key_value(&local_file_fd)
-        .ok_or(Bypass::LocalFdNotFound(local_file_fd))
-        // Convert the fd into a `*FILE`, this is be ok as long as `OPEN_FILES` holds the fd.
-        .map(|(local_fd, _)| local_fd as *const _ as *mut _)?;
-
-    Detour::Success(result)
 }
 
 #[tracing::instrument(level = "trace")]
@@ -351,15 +299,15 @@ pub(crate) fn closedir(dir_stream: usize) -> Detour<c_int> {
 #[tracing::instrument(level = "trace")]
 pub(crate) fn openat(
     fd: RawFd,
-    rawish_path: Option<&CStr>,
+    path: Detour<PathBuf>,
     open_options: OpenOptionsInternal,
 ) -> Detour<RawFd> {
-    let path = path_from_rawish(rawish_path)?;
+    let path = path?;
 
     // `openat` behaves the same as `open` when the path is absolute. When called with AT_FDCWD, the
     // call is propagated to `open`.
     if path.is_absolute() || fd == AT_FDCWD {
-        open(rawish_path, open_options)
+        open(Detour::Success(path), open_options)
     } else {
         // Relative path requires special handling, we must identify the relative part (relative to
         // what).
@@ -483,8 +431,8 @@ pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isi
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn access(rawish_path: Option<&CStr>, mode: u8) -> Detour<c_int> {
-    let path = path_from_rawish(rawish_path)?;
+pub(crate) fn access(path: Detour<PathBuf>, mode: u8) -> Detour<c_int> {
+    let path = path?;
 
     should_ignore!(path, false);
 
@@ -515,7 +463,7 @@ pub(crate) fn access(rawish_path: Option<&CStr>, mode: u8) -> Detour<c_int> {
 /// and non existing argument (For error handling)
 #[tracing::instrument(level = "trace")]
 pub(crate) fn xstat(
-    rawish_path: Option<Option<&CStr>>,
+    rawish_path: Option<Detour<PathBuf>>,
     fd: Option<RawFd>,
     follow_symlink: bool,
 ) -> Detour<XstatResponse> {
@@ -523,7 +471,7 @@ pub(crate) fn xstat(
     let (path, fd) = match (rawish_path, fd) {
         // fstatat
         (Some(path), Some(fd)) => {
-            let path = path_from_rawish(path)?;
+            let path = path?;
             let fd = {
                 if fd == AT_FDCWD {
                     if path.is_relative() {
@@ -541,7 +489,7 @@ pub(crate) fn xstat(
         }
         // lstat/stat
         (Some(path), None) => {
-            let path = path_from_rawish(path)?;
+            let path = path?;
             if path.is_relative() {
                 // Calls with non absolute paths are sent to libc::open.
                 return Detour::Bypass(Bypass::RelativePath(path));
