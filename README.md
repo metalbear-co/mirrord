@@ -141,7 +141,8 @@ If you wish to work an issue, please comment so you can be assigned.
 
 ## Development
 
-Read our development guide [here](https://mirrord.dev/docs/developer/testing/).
+- Read the [testing guide](TESTING.md) that explains how to run the tests locally.
+- Read the [debugging guide](DEBUGGING.md) for tips on how to debug different components of mirrord.
 
 ## Help and Community
 
