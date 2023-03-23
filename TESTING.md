@@ -1,17 +1,4 @@
----
-title: "Testing & Development"
-description: "Setup environment for testing and developing mirrord"
-date: 2022-06-15T08:48:45+00:00
-lastmod: 2022-06-15T08:48:45+00:00
-draft: false
-images: []
-menu:
-  docs:
-    parent: "testing"
-weight: 110
-toc: true
----
-
+# Testing Guide
 
 ### Prerequisites
 
@@ -35,11 +22,11 @@ For the ease of illustration and testing, we will conform to using Docker Deskto
 
 Download [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 
-{{<figure src="mirrord-docker-desktop.png" alt="mirrord - Download Docker Desktop" class="white-background center large-width">}}
+![Docker Desktop UI](images/mirrord-docker-desktop.png "Docker Desktop")
 
 Enable Kubernetes in preferences, Apply and Restart
 
-{{<figure src="mirrord-enable-kubernetes.png" alt="mirrord - Download Docker Desktop" class="white-background center large-width">}}
+![Enable Kubernetes in Docker Desktop](images/mirrord-enable-kubernetes.png "Enable Kubernetes")
 
 #### Preparing a cluster
 
