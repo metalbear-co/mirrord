@@ -40,6 +40,62 @@ kubectl config get-contexts
 kubectl config use-context docker-desktop
 ```
 
+## E2E Tests
+
+The E2E tests create kubernetes resources in the cluster that kubectl is configured to use and then run sample apps 
+with the mirrord cli. The mirrord cli spawns an agent for the target on the cluster, and runs the test app, with the 
+layer injected into it. Some test apps need to be compiled before they can be used in the tests 
+([this should be automated in the future](https://github.com/metalbear-co/mirrord/issues/982)).
+
+The basic command to run the E2E tests is:
+```bash
+cargo test --package tests
+```
+
+However, when running on macOS a universal binary has to be created first:
+```bash
+scripts/build_fat_mac.sh
+```
+
+And then in order to use that binary in the tests, run the tests like this:
+```bash
+MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord cargo test -p tests
+```
+
+## Integration Tests
+
+The layer's integration tests test the hooks and their logic without actually using a kubernetes cluster and spawning
+an agent. The integration tests usually execute a test app and load the dynamic library of the layer into them. The 
+tests set the layer to connect to a TCP/IP address instead of spawning a new agent. The tests then have to simulate the 
+agent - they accept the layer's connection, receive the layers messages and answer them as the agent would.
+
+Since they do not need to create kubernetes resources and spawn agents, the integration tests complete much faster than 
+the E2E tests, especially on GitHub Actions.
+
+Therefore, whenever possible we create integration tests and only as few E2E tests as necessary.
+
+### Running the Integration Tests
+
+Some test apps need to be compiled before they can be used in the tests
+([this should be automated in the future](https://github.com/metalbear-co/mirrord/issues/982)).
+
+The basic command to run the integration tests is:
+```bash
+cargo test --package tests
+```
+
+However, when running on macOS a dylib has to be created first:
+```bash
+scripts/build_fat_mac.sh
+```
+
+And then in order to use that dylib in the tests, run the tests like this:
+```bash
+MIRRORD_TEST_USE_EXISTING_LIB=../../target/universal-apple-darwin/debug/libmirrord_layer.dylib cargo test -p mirrord-layer
+```
+
+## Testing mirrord manually with a sample app.
+
 From the root directory of the mirrord repository, create a new testing deployment and service:
 
 ```bash
@@ -271,12 +327,4 @@ Check the traffic was received by the local process
 2022-06-30T05:17:31.878193Z  WARN mirrord_layer::tcp_mirror: tcp_tunnel -> exiting due to remote stream closed!
 2022-06-30T05:17:31.878255Z DEBUG mirrord_layer::tcp_mirror: tcp_tunnel -> exiting
 OK - GET: Request completed
-```
-
-### Run E2E tests
-
-Run Cargo test
-
-```bash
-cargo test --package tests
 ```
