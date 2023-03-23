@@ -270,7 +270,7 @@ pub(super) struct ExtensionExecArgs {
 pub(super) struct InternalProxyArgs {
     /// Launch timeout until we get first connection.
     /// If layer doesn't connect in this time, we timeout and exit.
-    #[arg(short = 't', default_value_t = 2)]
+    #[arg(short = 't', default_value_t = 30)]
     pub timeout: u64,
 
     /// Specify config file to use
