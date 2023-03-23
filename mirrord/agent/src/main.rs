@@ -4,10 +4,13 @@
 #![feature(is_some_and)]
 #![feature(let_chains)]
 #![feature(type_alias_impl_trait)]
+#![feature(unix_socket_abstract)]
+#![feature(tcp_quickack)]
 
 use std::{
     collections::{HashMap, HashSet},
     net::{Ipv4Addr, SocketAddrV4},
+    path::PathBuf,
 };
 
 use actix_codec::Framed;
@@ -41,7 +44,10 @@ use crate::{
     runtime::{get_container, Container, ContainerRuntime},
     steal::{
         connection::TcpConnectionStealer,
-        ip_tables::{IPTableFormatter, SafeIpTables, MIRRORD_IPTABLE_CHAIN_ENV},
+        ip_tables::{
+            SafeIpTables, IPTABLE_MESH, IPTABLE_MESH_ENV, IPTABLE_PREROUTING,
+            IPTABLE_PREROUTING_ENV,
+        },
         StealerCommand,
     },
     util::{run_thread_in_namespace, ClientId, IndexAllocator},
@@ -444,10 +450,24 @@ async fn start_agent() -> Result<()> {
     .await?;
 
     let mut state = State::new(&args).await?;
-    let (pid, env) = match state.get_container_info().await? {
+    let (pid, mut env) = match state.get_container_info().await? {
         Some(ContainerInfo { pid, env }) => (Some(pid), env),
         None => (None, HashMap::new()),
     };
+
+    let environ_path = PathBuf::from("/proc")
+        .join(
+            pid.map(|i| i.to_string())
+                .unwrap_or_else(|| "self".to_string()),
+        )
+        .join("environ");
+
+    match env::get_proc_environ(environ_path).await {
+        Ok(environ) => env.extend(environ.into_iter()),
+        Err(err) => {
+            error!("Failed to get process environment variables: {err:?}");
+        }
+    }
 
     let cancellation_token = CancellationToken::new();
     // Cancel all other tasks on exit
@@ -467,8 +487,14 @@ async fn start_agent() -> Result<()> {
 
     let sniffer_cancellation_token = cancellation_token.clone();
     let sniffer_task = run_thread_in_namespace(
-        TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface)
-            .and_then(|sniffer| sniffer.start(sniffer_cancellation_token)),
+        TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface).and_then(
+            |sniffer| async move {
+                if let Err(err) = sniffer.start(sniffer_cancellation_token).await {
+                    error!("Sniffer failed: {err}");
+                }
+                Ok(())
+            },
+        ),
         "Sniffer".to_string(),
         pid,
         "net",
@@ -476,8 +502,12 @@ async fn start_agent() -> Result<()> {
 
     let stealer_cancellation_token = cancellation_token.clone();
     let stealer_task = run_thread_in_namespace(
-        TcpConnectionStealer::new(stealer_command_rx)
-            .and_then(|stealer| stealer.start(stealer_cancellation_token)),
+        TcpConnectionStealer::new(stealer_command_rx).and_then(|stealer| async move {
+            if let Err(err) = stealer.start(stealer_cancellation_token).await {
+                error!("Stealer failed: {err}");
+            }
+            Ok(())
+        }),
         "Stealer".to_string(),
         pid,
         "net",
@@ -561,6 +591,7 @@ async fn start_agent() -> Result<()> {
 
     trace!("Agent shutting down.");
     drop(cancel_guard);
+
     if let Err(err) = sniffer_task.join().map_err(|_| AgentError::JoinTask)? {
         error!("start_agent -> sniffer task failed with error: {}", err);
     }
@@ -573,11 +604,12 @@ async fn start_agent() -> Result<()> {
     Ok(())
 }
 
-async fn clear_iptable_chain(chain_name: String) -> Result<()> {
+async fn clear_iptable_chain() -> Result<()> {
     let ipt = iptables::new(false).unwrap();
-    let formatter = IPTableFormatter::detect(&ipt)?;
 
-    SafeIpTables::remove_chain(&ipt, &formatter, &chain_name)
+    SafeIpTables::load(ipt, false).await?.cleanup().await?;
+
+    Ok(())
 }
 
 fn spawn_child_agent() -> Result<()> {
@@ -599,14 +631,13 @@ async fn start_iptable_guard() -> Result<()> {
     let state = State::new(&args).await?;
     let pid = state.get_container_info().await?.map(|c| c.pid);
 
-    let chain_name = SafeIpTables::<iptables::IPTables>::get_chain_name();
-
-    std::env::set_var(MIRRORD_IPTABLE_CHAIN_ENV, &chain_name);
+    std::env::set_var(IPTABLE_PREROUTING_ENV, IPTABLE_PREROUTING.as_str());
+    std::env::set_var(IPTABLE_MESH_ENV, IPTABLE_MESH.as_str());
 
     let result = spawn_child_agent();
 
     let _ = run_thread_in_namespace(
-        clear_iptable_chain(chain_name),
+        clear_iptable_chain(),
         "clear iptables".to_owned(),
         pid,
         "net",
@@ -631,7 +662,9 @@ async fn main() -> Result<()> {
 
     debug!("main -> Initializing mirrord-agent.");
 
-    let agent_result = if std::env::var(MIRRORD_IPTABLE_CHAIN_ENV).is_ok() {
+    let agent_result = if std::env::var(IPTABLE_PREROUTING_ENV).is_ok()
+        && std::env::var(IPTABLE_MESH_ENV).is_ok()
+    {
         start_agent().await
     } else {
         start_iptable_guard().await

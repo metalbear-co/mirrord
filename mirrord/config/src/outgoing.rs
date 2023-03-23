@@ -3,7 +3,7 @@ use schemars::JsonSchema;
 
 use crate::{
     config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
-    util::MirrordToggleableConfig,
+    util::{MirrordToggleableConfig, VecOrSingle},
 };
 
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
@@ -19,18 +19,34 @@ pub struct OutgoingConfig {
     /// Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702
     #[config(unstable, default = false)]
     pub ignore_localhost: bool,
+
+    /// Connect to these unix streams remotely (and to all other paths locally).
+    ///
+    /// You can either specify a single value or an array of values.
+    /// Each value is interpreted as a regular expression
+    /// ([Supported Syntax](https://docs.rs/regex/1.7.1/regex/index.html#syntax)).
+    ///
+    /// When your application connects to a unix socket, the target address will be converted to a
+    /// string (non-utf8 bytes are replaced by a placeholder character) and matched against the set
+    /// of regexes specified here. If there is a match, mirrord will connect your application with
+    /// the target unix socket address on the target pod. Otherwise, it will leave the connection
+    /// to happen locally on your machine.
+    #[config(unstable, env = "MIRRORD_OUTGOING_REMOTE_UNIX_STREAMS")]
+    pub unix_streams: Option<VecOrSingle<String>>,
 }
 
 impl MirrordToggleableConfig for OutgoingFileConfig {
     fn disabled_config() -> Result<Self::Generated, ConfigError> {
-        let tcp = FromEnv::new("MIRRORD_TCP_OUTGOING")
-            .source_value()
-            .unwrap_or(Ok(false))?;
         Ok(OutgoingConfig {
-            tcp,
+            tcp: FromEnv::new("MIRRORD_TCP_OUTGOING")
+                .source_value()
+                .unwrap_or(Ok(false))?,
             udp: FromEnv::new("MIRRORD_UDP_OUTGOING")
                 .source_value()
                 .unwrap_or(Ok(false))?,
+            unix_streams: FromEnv::new("MIRRORD_OUTGOING_REMOTE_UNIX_STREAMS")
+                .source_value()
+                .transpose()?,
             ..Default::default()
         })
     }

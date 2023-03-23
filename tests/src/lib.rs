@@ -37,7 +37,7 @@ mod utils {
     use rstest::*;
     use serde::{de::DeserializeOwned, Serialize};
     use serde_json::json;
-    use tempdir::TempDir;
+    use tempfile::{tempdir, TempDir};
     use tokio::{
         io::{AsyncReadExt, BufReader},
         process::{Child, Command},
@@ -79,6 +79,7 @@ mod utils {
     }
 
     #[derive(Debug)]
+    #[allow(dead_code)]
     pub enum Application {
         PythonFlaskHTTP,
         PythonFastApiHTTP,
@@ -323,7 +324,7 @@ mod utils {
             None => env!("CARGO_BIN_FILE_MIRRORD"),
             Some(binary_path) => binary_path,
         };
-        let temp_dir = tempdir::TempDir::new("test").unwrap();
+        let temp_dir = tempdir().unwrap();
         let mut mirrord_args = vec!["exec", "--target", target, "-c"];
         if let Some(namespace) = namespace {
             mirrord_args.extend(["--target-namespace", namespace].into_iter());
@@ -373,7 +374,7 @@ mod utils {
             None => env!("CARGO_BIN_FILE_MIRRORD"),
             Some(binary_path) => binary_path,
         };
-        let temp_dir = tempdir::TempDir::new("test").unwrap();
+        let temp_dir = tempdir().unwrap();
         let mut mirrord_args = vec!["ls"];
         if let Some(args) = args {
             mirrord_args.extend(args);
@@ -485,6 +486,10 @@ mod utils {
         #[default(false)] delete_after_fail: bool,
         #[future] kube_client: Client,
     ) -> KubeService {
+        println!(
+            "{:?} creating service {service_name:?} in namespace {namespace:?}",
+            Utc::now()
+        );
         let kube_client = kube_client.await;
         let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
         let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
@@ -637,6 +642,10 @@ mod utils {
             .await
             .unwrap();
 
+        println!(
+            "{:?} done creating service {service_name:?} in namespace {namespace:?}",
+            Utc::now()
+        );
         KubeService {
             name: name.to_string(),
             namespace: namespace.to_string(),

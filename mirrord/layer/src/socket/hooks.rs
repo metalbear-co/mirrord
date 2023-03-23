@@ -53,6 +53,19 @@ pub(crate) unsafe extern "C" fn connect_detour(
         .unwrap_or_bypass_with(|_| FN_CONNECT(sockfd, raw_address, address_length))
 }
 
+/// Hook for `_connect$NOCANCEL` (for macos, see
+/// [this](https://opensource.apple.com/source/xnu/xnu-4570.41.2/libsyscall/Platforms/MacOSX/x86_64/syscall.map.auto.html)).
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn _connect_nocancel_detour(
+    sockfd: RawFd,
+    raw_address: *const sockaddr,
+    address_length: socklen_t,
+) -> c_int {
+    connect(sockfd, raw_address, address_length)
+        .map(From::from)
+        .unwrap_or_bypass_with(|_| FN__CONNECT_NOCANCEL(sockfd, raw_address, address_length))
+}
+
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn getpeername_detour(
     sockfd: RawFd,
@@ -84,7 +97,7 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
 ) -> c_int {
     gethostname()
         .map(|host| {
-            let host_len = host.as_bytes().len();
+            let host_len = host.as_bytes_with_nul().len();
 
             raw_name.copy_from_nonoverlapping(host.as_ptr(), cmp::min(name_length, host_len));
 
@@ -143,6 +156,18 @@ pub(super) unsafe extern "C" fn uv__accept4_detour(
     tracing::trace!("uv__accept4_detour -> sockfd {:#?}", sockfd);
 
     accept4_detour(sockfd, address, address_len, flags)
+}
+
+/// Hook for `_accept$NOCANCEL` (for macos, see
+/// [this](https://opensource.apple.com/source/xnu/xnu-4570.41.2/libsyscall/Platforms/MacOSX/x86_64/syscall.map.auto.html)).
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn _accept_nocancel_detour(
+    sockfd: c_int,
+    address: *mut sockaddr,
+    address_len: *mut socklen_t,
+) -> c_int {
+    let accept_result = FN__ACCEPT_NOCANCEL(sockfd, address, address_len);
+    accept(sockfd, address, address_len, accept_result).unwrap_or_bypass(accept_result)
 }
 
 /// <https://github.com/metalbear-co/mirrord/issues/184>
@@ -304,6 +329,13 @@ pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled
         FnConnect,
         FN_CONNECT
     );
+    replace!(
+        hook_manager,
+        "_connect$NOCANCEL",
+        _connect_nocancel_detour,
+        Fn_connect_nocancel,
+        FN__CONNECT_NOCANCEL
+    );
 
     replace!(hook_manager, "fcntl", fcntl_detour, FnFcntl, FN_FCNTL);
     replace!(hook_manager, "dup", dup_detour, FnDup, FN_DUP);
@@ -356,6 +388,13 @@ pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled
     }
 
     replace!(hook_manager, "accept", accept_detour, FnAccept, FN_ACCEPT);
+    replace!(
+        hook_manager,
+        "_accept$NOCANCEL",
+        _accept_nocancel_detour,
+        Fn_accept_nocancel,
+        FN__ACCEPT_NOCANCEL
+    );
 
     if enabled_remote_dns {
         replace!(

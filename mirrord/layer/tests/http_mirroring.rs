@@ -11,6 +11,7 @@ mod common;
 
 pub use common::*;
 use futures::{SinkExt, StreamExt};
+use mirrord_protocol::outgoing::SocketAddress;
 
 /// For running locally, so that new developers don't have the extra step of building the go app
 /// before running the tests.
@@ -38,7 +39,7 @@ fn build_go_app() {
 #[timeout(Duration::from_secs(60))]
 async fn mirroring_with_http(
     #[values(
-        // Application::PythonFlaskHTTP,
+        Application::PythonFlaskHTTP,
         Application::PythonFastApiHTTP,
         Application::NodeHTTP
     )]
@@ -79,7 +80,10 @@ async fn mirroring_with_http(
         assert_eq!(
             layer_connection.codec.next().await.unwrap().unwrap(),
             UdpOutgoing(Connect(LayerConnect {
-                remote_address: std::net::SocketAddr::from(([10, 253, 155, 219], 58162))
+                remote_address: SocketAddress::Ip(std::net::SocketAddr::from((
+                    [10, 253, 155, 219],
+                    58162
+                )))
             }))
         );
         // Refer: https://github.com/pallets/werkzeug/blob/main/src/werkzeug/serving.py#L640
@@ -90,8 +94,14 @@ async fn mirroring_with_http(
                 mirrord_protocol::outgoing::udp::DaemonUdpOutgoing::Connect(Ok(
                     mirrord_protocol::outgoing::DaemonConnect {
                         connection_id: 0,
-                        remote_address: std::net::SocketAddr::from(([10, 253, 155, 219], 58162)),
-                        local_address: std::net::SocketAddr::from(([10, 253, 155, 218], 58161)),
+                        remote_address: SocketAddress::Ip(std::net::SocketAddr::from((
+                            [10, 253, 155, 219],
+                            58162,
+                        ))),
+                        local_address: SocketAddress::Ip(std::net::SocketAddr::from((
+                            [10, 253, 155, 218],
+                            58161,
+                        ))),
                     },
                 )),
             ))

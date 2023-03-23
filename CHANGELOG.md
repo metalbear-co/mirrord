@@ -1,11 +1,147 @@
 # Change Log
 
-All notable changes to the mirrord's cli, agent, protocol, extensions will be documented in this file.
-Previous versions had CHANGELOG per component, we decided to combine all repositories to a mono-repo with one CHANGELOG.
+All notable changes to this project will be documented in this file.
 
-Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the changes for the upcoming release can be found in <https://github.com/metalbear-co/mirrord/tree/main/changelog.d/>.
+
+<!-- towncrier release notes start -->
+
+## [3.33.0](https://github.com/metalbear-co/mirrord/tree/3.33.0) - 2023-03-22
+
+
+### Added
+
+- Support for outgoing unix stream sockets (configurable via config file or
+  environment variable).
+  [#1105](https://github.com/metalbear-co/mirrord/issues/1105)
+- Add  version of hooked functions.
+  [#1203](https://github.com/metalbear-co/mirrord/issues/1203)
+
+
+### Changed
+
+- add `Hash` trait on `mirrord_operator::license::License` struct
+- dependencies bump and cleanup
+- fix mirrord loading twice (to build also) and improve error message when no
+  pods found
+
+
+### Fixed
+
+- fix f-stream functions by removing its hooks and add missing underlying libc
+  calls [#947](https://github.com/metalbear-co/mirrord/issues/947)
+- fix deadlock in go20 test (remove trace?)
+  [#1206](https://github.com/metalbear-co/mirrord/issues/1206)
+
+
+### Internal
+
+- set timeout for flaky/hanging test
+
+
+## [3.32.3](https://github.com/metalbear-co/mirrord/tree/3.32.3) - 2023-03-19
+
+
+### Changed
+
+- change outgoing connection drop to be trace instead of error since it's not
+  an error
+
+
+### Fixed
+
+- Support stealing on meshed services with ports specified in
+  --skip-inbound-ports on linkerd and itsio equivalent.
+  [#1041](https://github.com/metalbear-co/mirrord/issues/1041)
+
+
+## [3.32.2](https://github.com/metalbear-co/mirrord/tree/3.32.2) - 2023-03-14
+
+
+### Fixed
+
+- fix microk8s support by adding possible containerd socket path
+  [#1186](https://github.com/metalbear-co/mirrord/issues/1186)
+- fix gethostname null termination missing
+  [#1189](https://github.com/metalbear-co/mirrord/issues/1189)
+- Update webbrowser dependency to fix security issue.
+
+
+## [3.32.1](https://github.com/metalbear-co/mirrord/tree/3.32.1) - 2023-03-12
+
+
+### Fixed
+
+- fix mirroring not handling big requests - increase buffer size (in rawsocket
+  dependency).
+  also trace logs to not log the data.
+  [#1178](https://github.com/metalbear-co/mirrord/issues/1178)
+- fix environment regression by mixing the two approaches together.
+  priority is proc > oci (via container api)
+  [#1180](https://github.com/metalbear-co/mirrord/issues/1180)
+
+
+### Internal
+
+- compile/test speed improvements
+
+  1. add CARGO_NET_GIT_FETCH_WITH_CLI=true to agent's Dockerfile since we found
+  out it
+      saves a lot of time on fetching (around takes 60s when using libgit2)
+  2. change `rust-toolchain.toml` so it won't auto install unneeded targets
+  always
+  3. remove `toolchain: nightly` parameter from `actions-rs/toolchain@v1` since
+  it's
+      not needed because we have `rust-toolchain.toml`
+      saves a lot of time on fetching (takes around 60s when using libgit2)
+  4. switch to use `actions-rust-lang/setup-rust-toolchain@v1` instead of
+  `actions-rs/toolchain@v1`
+      since it's deprecated and doesn't support `rust-toolchain.toml`
+  5. remove s`Swatinem/rust-cache@v2` since it's included in
+  `actions-rust-lang/setup-rust-toolchain@v1`
+  6. use latest version of `Apple-Actions/import-codesign-certs` to remove
+  warnings
+- print logs of stealer/sniffer start failure
+- run docker/containerd runtime at the same time to make e2e faster
+- use base images for agent to reduce build time
+
+
+## [3.32.0](https://github.com/metalbear-co/mirrord/tree/3.32.0) - 2023-03-08
+
+
+### Changed
+
+- mirrord-layer: changed result of `getsockname` to return requested socket on
+  `bind` instead of the detoured socket address
+  [#1047](https://github.com/metalbear-co/mirrord/issues/1047)
+- mirrord-layer: Added `SocketId` to `UserSocket` as a better way of
+  identifying sockets, part of #1054.
+  [#1054](https://github.com/metalbear-co/mirrord/issues/1054)
+- CHANGELOG - changed to use towncrier
+- Change socket error on reading from outgoing sockets and mirror to be info
+  instead of error
+
+
+### Fixed
+
+- Possible bug when bound address is bypassed and socket stays in `SOCKETS`
+  map.
+
+
+### Internal
+
+- Change release.yaml so pushing final tags will occur only on real releases
+  while manual releases will push into `ghcr.io/metalbear-co/mirrord-staging:
+  ${{ github.sha }}`
+  so we can leverage github CI for testing images.
+- Don't build builder image as part of the build, use a prebuilt image -
+  improve cd time
+  Use `taiki-e/install-action` instead of `cargo install` (compiles from
+  source) for installing `cross`.
+- Fix broken aarch build
+
 
 ## 3.31.0
 

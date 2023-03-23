@@ -5,7 +5,6 @@ use std::{
     hash::{Hash, Hasher},
     net::SocketAddr,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    os::unix::io::RawFd,
 };
 
 use async_trait::async_trait;
@@ -20,7 +19,7 @@ use tracing::{debug, error, log::trace};
 use crate::{
     detour::DetourGuard,
     error::LayerError,
-    socket::{SocketInformation, CONNECTION_QUEUE},
+    socket::{id::SocketId, SocketInformation, CONNECTION_QUEUE},
     LayerError::{PortAlreadyStolen, UnexpectedResponseError},
 };
 
@@ -34,7 +33,7 @@ pub(crate) struct Listen {
     pub mirror_port: Port,
     pub requested_port: Port,
     pub ipv6: bool,
-    pub fd: RawFd,
+    pub id: SocketId,
 }
 
 impl PartialEq for Listen {
@@ -162,7 +161,7 @@ pub(crate) trait TcpHandler {
         );
 
         {
-            CONNECTION_QUEUE.lock().unwrap().add(&listen.fd, info);
+            CONNECTION_QUEUE.lock().unwrap().add(listen.id, info);
         }
 
         #[allow(clippy::let_and_return)]

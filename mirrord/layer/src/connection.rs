@@ -9,7 +9,7 @@ use tokio::{
     net::TcpStream,
     sync::mpsc::{self, Receiver, Sender},
 };
-use tracing::log::{error, info};
+use tracing::{error, info, trace};
 
 use crate::graceful_exit;
 
@@ -57,6 +57,7 @@ fn wrap_raw_connection(
                 msg = client_in_rx.recv() => {
                     match msg {
                         Some(msg) => {
+                            trace!("Sending client message: {:?}", &msg);
                             if let Err(fail) = codec.send(msg).await {
                                 error!("Error sending client message: {:#?}", fail);
                                 break;

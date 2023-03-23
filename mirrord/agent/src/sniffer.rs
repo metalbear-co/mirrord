@@ -148,7 +148,7 @@ struct TcpPacketData {
     flags: u16,
 }
 
-#[tracing::instrument(level = "trace", fields(bytes = %eth_packet.len()))]
+#[tracing::instrument(skip(eth_packet), level = "trace", fields(bytes = %eth_packet.len()))]
 fn get_tcp_packet(eth_packet: Vec<u8>) -> Option<(TcpSessionIdentifier, TcpPacketData)> {
     let eth_packet = EthernetPacket::new(&eth_packet[..])?;
     let ip_packet = match eth_packet.get_ethertype() {
@@ -466,7 +466,7 @@ impl TcpConnectionSniffer {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self), fields(bytes = %eth_packet.len()))]
+    #[tracing::instrument(level = "trace", skip(self, eth_packet), fields(bytes = %eth_packet.len()))]
     async fn handle_packet(&mut self, eth_packet: Vec<u8>) -> Result<(), AgentError> {
         let (identifier, tcp_packet) = match get_tcp_packet(eth_packet) {
             Some(res) => res,

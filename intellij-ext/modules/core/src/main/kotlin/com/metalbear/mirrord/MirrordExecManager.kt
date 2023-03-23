@@ -18,18 +18,23 @@ object MirrordExecManager {
     private fun chooseTarget(wslDistribution: WSLDistribution?, project: Project): String? {
         MirrordLogger.logger.debug("choose target called")
         val path = MirrordConfigAPI.getConfigPath(project)
-        val configPath = when(path.exists())
-        {
+        val configPath = when (path.exists()) {
             true -> path.toString()
             false -> null
         }
 
         val pods =
-                MirrordApi.listPods(
-                        configPath,
-                        project,
-                        wslDistribution
-                )
+            MirrordApi.listPods(
+                configPath,
+                project,
+                wslDistribution
+            )
+
+        if (pods.isEmpty()) {
+            MirrordNotifier.progress("no pods found, please check namespace/kubeconfig.", project)
+            return null
+        }
+
         MirrordLogger.logger.debug("returning pods")
         return MirrordExecDialog.selectTargetDialog(pods)
     }
@@ -42,6 +47,7 @@ object MirrordExecManager {
             null
         }
     }
+
     /** Starts mirrord, shows dialog for selecting pod if target not set and returns env to set. */
     fun start(wslDistribution: WSLDistribution?, project: Project): Map<String, String>? {
         if (!enabled) {
@@ -70,8 +76,7 @@ object MirrordExecManager {
             if (application.isDispatchThread) {
                 MirrordLogger.logger.debug("Running from current thread")
                 target = chooseTarget(wslDistribution, project)
-            }
-            else {
+            } else {
                 application.executeOnPooledThread {
                     MirrordLogger.logger.debug("executing on pooled thread")
                     application.invokeAndWait {

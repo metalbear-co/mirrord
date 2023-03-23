@@ -13,7 +13,7 @@ use crate::{sniffer::SnifferCommand, steal::StealerCommand};
 
 #[derive(Debug, Error)]
 pub enum AgentError {
-    #[error("Agent failed with `{0}`")]
+    #[error("Agent failed with `{0:?}`")]
     IO(#[from] std::io::Error),
 
     #[error("SnifferCommand sender failed with `{0}`")]
@@ -128,6 +128,13 @@ pub enum AgentError {
         Check agent logs for errors and please report a bug if kernel version >=4.20"#
     )]
     SnifferApiError,
+
+    #[error(
+        r#"Couldn't find containerd socket to use, please open a bug report
+           providing information on how you installed k8s and if you know where
+           the containerd socket is"#
+    )]
+    ContainerdSocketNotFound,
 
     #[error("Returning an error to test the agent's error cleanup. Should only ever be used when testing mirrord.")]
     TestError,

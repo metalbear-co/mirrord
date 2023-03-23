@@ -146,7 +146,7 @@ impl UdpOutgoingApi {
                         // [user] -> [layer] -> [agent] -> [layer]
                         // `user` is asking us to connect to some remote host.
                         LayerUdpOutgoing::Connect(LayerConnect { remote_address }) => {
-                            let daemon_connect = connect(remote_address)
+                            let daemon_connect = connect(remote_address.clone().try_into()?)
                                     .await
                                     .and_then(|mirror_socket| {
                                         let connection_id = allocator
@@ -157,6 +157,7 @@ impl UdpOutgoingApi {
                                         debug!("interceptor_task -> mirror_socket {:#?}", mirror_socket);
                                         let peer_address = mirror_socket.peer_addr()?;
                                         let local_address = mirror_socket.local_addr()?;
+                                        let local_address = SocketAddress::Ip(local_address);
                                         let framed = UdpFramed::new(mirror_socket, BytesCodec::new());
                                         debug!("interceptor_task -> framed {:#?}", framed);
                                         let (sink, stream): (

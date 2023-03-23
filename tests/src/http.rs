@@ -11,6 +11,9 @@ mod http {
         get_service_url, kube_client, send_requests, service, Agent, Application, KubeService,
     };
 
+    /// ## Warning
+    ///
+    /// These tests are marked with `ignore` due to flakyness!
     #[ignore]
     #[cfg(target_os = "linux")]
     #[rstest]
@@ -29,7 +32,7 @@ mod http {
             Application::Go18HTTP,
             Application::Go19HTTP,
             Application::Go20HTTP,
-            // Application::PythonFlaskHTTP,
+            Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP
         )]
         application: Application,

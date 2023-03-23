@@ -1,13 +1,16 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::collections::VecDeque;
+use std::{collections::VecDeque, ffi::CStr, path::PathBuf};
 
-use mirrord_protocol::RemoteResult;
+use libc::c_char;
+use mirrord_protocol::{file::OpenOptionsInternal, RemoteResult};
 use tokio::sync::oneshot;
+use tracing::warn;
 
 use crate::{
+    detour::{Bypass, Detour},
     dns::GetAddrInfo,
     error::{HookError, HookResult},
-    file::FileOperation,
+    file::{FileOperation, OpenOptionsInternalExt},
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing},
     tcp::TcpIncoming,
     HOOK_SENDER,
@@ -80,4 +83,51 @@ pub(crate) enum HookMessage {
 
     /// Message originating from `getaddrinfo`, see [`GetAddrInfo`].
     GetAddrinfo(GetAddrInfo),
+}
+
+/// Converts raw pointer values `P` to some other type.
+///
+/// ## Usage
+///
+/// Mainly used to convert from raw C strings (`*const c_char`) into a Rust type wrapped in
+/// [`Detour`].
+///
+/// These conversions happen in the unsafe `hook` functions, and we pass the converted value inside
+/// a [`Detour`] to defer the handling of `null` pointers (and other _invalid-ish_ values) when the
+/// `ops` version of the function returns an `Error` or [`Bypass`].
+pub(crate) trait CheckedInto<T>: Sized {
+    /// Converts `Self` to `Detour<T>`.
+    fn checked_into(self) -> Detour<T>;
+}
+
+impl<'a> CheckedInto<&'a str> for *const c_char {
+    fn checked_into(self) -> Detour<&'a str> {
+        let converted = (!self.is_null())
+            .then(|| unsafe { CStr::from_ptr(self) })
+            .map(CStr::to_str)?
+            .map_err(|fail| {
+                warn!("Failed converting `value` from `CStr` with {:#?}", fail);
+                Bypass::CStrConversion
+            })?;
+
+        Detour::Success(converted)
+    }
+}
+
+impl CheckedInto<String> for *const c_char {
+    fn checked_into(self) -> Detour<String> {
+        CheckedInto::<&str>::checked_into(self).map(From::from)
+    }
+}
+
+impl CheckedInto<PathBuf> for *const c_char {
+    fn checked_into(self) -> Detour<PathBuf> {
+        CheckedInto::<&str>::checked_into(self).map(From::from)
+    }
+}
+
+impl CheckedInto<OpenOptionsInternal> for *const c_char {
+    fn checked_into(self) -> Detour<OpenOptionsInternal> {
+        CheckedInto::<String>::checked_into(self).map(OpenOptionsInternal::from_mode)
+    }
 }

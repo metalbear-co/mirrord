@@ -26,4 +26,4 @@ reqwest = { workspace = true, features=["json", "rustls-tls"], default-features 
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-webbrowser = { version = "0.7", optional = true }
+webbrowser = { version = "0.8", optional = true }

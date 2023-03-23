@@ -14,6 +14,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  towncrier_check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: install towncrier
+        run: pip install towncrier
+      - name: verify newsfragment exist
+        run: towncrier check
+
   changed_files:
     runs-on: ubuntu-latest
     # don't run CI on drafts
@@ -52,7 +63,6 @@ jobs:
         uses: tj-actions/changed-files@v32
         with:
           files: |
-            CHANGELOG.md
             README.md
       - name: output test
         run: |
@@ -68,12 +78,9 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
-          toolchain: nightly
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
       # Needed for agent
       - run: cargo fmt --all -- --check
       - run: cargo clippy -- -D warnings
@@ -87,11 +94,7 @@ jobs:
       RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
       - run: cargo doc --document-private-items
 
   lint_macos:
@@ -100,74 +103,44 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      # the setup rust toolchain action ignores the input if file exists.. so remove it
+      - run: rm rust-toolchain.toml
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
-          toolchain: nightly
           components: rustfmt, clippy
           target: aarch64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
+          toolchain: nightly-2023-01-31
       # only mirrord, mirrord-sip contain macOS specific, so run clippy on that.
       - run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -D warnings
       - run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -D warnings
 
   test_mirrord_protocol:
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{matrix.os}}
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
       - run: |
           cargo test -p mirrord-protocol
 
   test_mirrord_config:
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{matrix.os}}
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
       - run: |
           cargo test -p mirrord-config
 
   test_mirrord_kube:
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{matrix.os}}
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
       - run: |
           cargo test -p mirrord-kube --all-features
 
@@ -177,11 +150,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
       - run: |
           cargo test -p mirrord-sip
 
@@ -189,18 +158,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    container:
+      image: ghcr.io/metalbear-co/ci-agent-build:latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          components: rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - run: |
-          sudo PATH=/home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin:/usr/bin:/usr/sbin /home/runner/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/cargo test -p mirrord-agent
-          sudo chown runner -R /home/runner
-          sudo chmod u+rwx -R /home/runner
+      - name: test
+        run: CARGO_NET_GIT_FETCH_WITH_CLI=true cargo test -p mirrord-agent
 
   test_agent_image:
     runs-on: ubuntu-latest
@@ -246,14 +209,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      # the setup rust toolchain action ignores the input if file exists.. so remove it
+      - if: ${{matrix.target == 'aarch64-apple-darwin'}}
+        run: rm rust-toolchain.toml
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
-          toolchain: nightly
           target: ${{matrix.target}}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{matrix.os}}-${{matrix.target}}
+          toolchain: nightly-2023-01-31
       # For now, just verify it compiles.
       - run: cargo build -p mirrord-layer -p mirrord --target=${{matrix.target}}
 
@@ -264,14 +226,9 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
-          toolchain: nightly
           components: rustfmt
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ubuntu-latest
       - run: cargo build --manifest-path=./Cargo.toml
       - name: upload layer
         uses: actions/upload-artifact@v3
@@ -288,14 +245,9 @@ jobs:
       MIRRORD_TEST_USE_EXISTING_LIB: /home/runner/work/mirrord/mirrord/target/debug/libmirrord_layer.so
     steps:
       - uses: actions/checkout@v3 # Checkout the mirrord repo.
-      - uses: actions-rs/toolchain@v1 # Install rust.
+      - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install rust.
         with:
-          profile: minimal
-          toolchain: nightly
           target: x86_64-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
-        with:
-          cache-on-failure: true
       - uses: actions/setup-node@v3 # For http mirroring test.
         with:
           node-version: 14
@@ -402,14 +354,9 @@ jobs:
       MIRRORD_TEST_USE_EXISTING_LIB: ../../target/debug/libmirrord_layer.dylib
     steps:
       - uses: actions/checkout@v3 # Checkout the mirrord repo.
-      - uses: actions-rs/toolchain@v1 # Install Rust.
+      - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install Rust.
         with:
-          profile: minimal
-          toolchain: nightly
           target: x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2 # Restore rust cache from earlier runs to avoid recompiling dependencies.
-        with:
-          cache-on-failure: true
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
           go-version: "1.18"
@@ -460,6 +407,9 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        container-runtime: ["docker", "containerd"]
     name: e2e
     needs: [build_mirrord, test_agent_image, changed_files]
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
@@ -467,15 +417,9 @@ jobs:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
-          toolchain: nightly
           components: rustfmt
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ubuntu-latest
-          cache-on-failure: true
       - uses: actions/setup-node@v3
         with:
           node-version: 14
@@ -544,24 +488,23 @@ jobs:
       - run: |
           cd tests/rust-e2e-fileops
           cargo build
-      - name: start minikube
-        uses: medyagh/setup-minikube@master
-        with:
-          container-runtime: containerd
+      - run: |
+          cd tests/rust-unix-socket-client
+          cargo build
+      - run: |
+          cd tests/rust-bypassed-unix-socket
+          cargo build
       - name: download image
         uses: actions/download-artifact@v2
         with:
           name: test
           path: /tmp
+      - name: start minikube
+        uses: medyagh/setup-minikube@master
+        with:
+          container-runtime: ${{matrix.container-runtime}}
       - run: minikube image load /tmp/test.tar
-      - name: cargo test
-        run: cargo test -p tests
-      - name: switch minikube runtime
-        run: |
-          minikube delete
-          minikube start --container-runtime=docker
-          minikube image load /tmp/test.tar
-      - name: test with docker runtime
+      - name: cargo test containerd
         run: cargo test -p tests
       - name: Collect logs
         if: ${{ failure() }}
@@ -598,7 +541,7 @@ jobs:
       - uses: avto-dev/markdown-lint@v1
         with:
           config: "markdownlint-config.json"
-          args: "README.md CHANGELOG.md"
+          args: "README.md"
   # We need some "accummulation" job here because bors fails (timeouts) to
   # listen on matrix builds.
   # Hence, we have some kind of dummy here that bors can listen on
@@ -608,6 +551,7 @@ jobs:
     if: always()
     needs:
       [
+        towncrier_check,
         changed_files,
         build_mirrord,
         test_agent_image,
@@ -631,19 +575,19 @@ jobs:
         # then skipping is considered success by branch protection rules
         env:
           CI_SUCCESS: ${{ (needs.changed_files.result == 'success') &&
-                      (needs.build_mirrord.result == 'success' || needs.build_mirrord.result == 'skipped') &&
-                      (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
-                      (needs.integration_tests_macos.result == 'success' || needs.integration_tests_macos.result == 'skipped') &&
-                      (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped') &&
-                      (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
-                      (needs.test_mirrord_layer_cli.result == 'success' || needs.test_mirrord_layer_cli.result == 'skipped') &&
-                      (needs.test_agent.result == 'success' || needs.test_agent.result == 'skipped') &&
-                      (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
-                      (needs.lint_macos.result == 'success' || needs.lint_macos.result == 'skipped') &&
-                      (needs.test_mirrord_config.result == 'success' || needs.test_mirrord_config.result == 'skipped') &&
-                      (needs.test_mirrord_protocol.result == 'success' || needs.test_mirrord_protocol.result == 'skipped') &&
-                      (needs.test_mirrord_sip.result == 'success' || needs.test_mirrord_sip.result == 'skipped') &&
-                      (needs.build_intellij_plugin.result == 'success' || needs.build_intellij_plugin.result == 'skipped') &&
-                      (needs.lint_markdown.result == 'success' || needs.lint_markdown.result == 'skipped') }}
+            (needs.towncrier_check.result == 'success') &&
+            (needs.build_mirrord.result == 'success' || needs.build_mirrord.result == 'skipped') &&
+            (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
+            (needs.integration_tests_macos.result == 'success' || needs.integration_tests_macos.result == 'skipped') &&
+            (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped') &&
+            (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
+            (needs.test_mirrord_layer_cli.result == 'success' || needs.test_mirrord_layer_cli.result == 'skipped') &&
+            (needs.test_agent.result == 'success' || needs.test_agent.result == 'skipped') &&
+            (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
+            (needs.lint_macos.result == 'success' || needs.lint_macos.result == 'skipped') &&
+            (needs.test_mirrord_config.result == 'success' || needs.test_mirrord_config.result == 'skipped') &&
+            (needs.test_mirrord_protocol.result == 'success' || needs.test_mirrord_protocol.result == 'skipped') &&
+            (needs.test_mirrord_sip.result == 'success' || needs.test_mirrord_sip.result == 'skipped') &&
+            (needs.build_intellij_plugin.result == 'success' || needs.build_intellij_plugin.result == 'skipped') &&
+            (needs.lint_markdown.result == 'success' || needs.lint_markdown.result == 'skipped') }}
         run: echo $CI_SUCCESS && if [ "$CI_SUCCESS" == "true" ]; then echo "SUCCESS" && exit 0; else echo "Failure" && exit 1; fi
-
