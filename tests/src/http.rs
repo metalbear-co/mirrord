@@ -11,6 +11,9 @@ mod http {
         get_service_url, kube_client, send_requests, service, Agent, Application, KubeService,
     };
 
+    /// ## Warning
+    ///
+    /// These tests are marked with `ignore` due to flakyness!
     #[ignore]
     #[cfg(target_os = "linux")]
     #[rstest]
