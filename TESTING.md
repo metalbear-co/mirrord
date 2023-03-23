@@ -42,8 +42,8 @@ kubectl config use-context docker-desktop
 
 ## E2E Tests
 
-The E2E tests create kubernetes resources in the cluster that kubectl is configured to use and then run sample apps 
-with the mirrord cli. The mirrord cli spawns an agent for the target on the cluster, and runs the test app, with the 
+The E2E tests create Kubernetes resources in the cluster that kubectl is configured to use and then run sample apps 
+with the mirrord CLI. The mirrord CLI spawns an agent for the target on the cluster, and runs the test app, with the 
 layer injected into it. Some test apps need to be compiled before they can be used in the tests 
 ([this should be automated in the future](https://github.com/metalbear-co/mirrord/issues/982)).
 
@@ -64,15 +64,15 @@ MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord cargo te
 
 ## Integration Tests
 
-The layer's integration tests test the hooks and their logic without actually using a kubernetes cluster and spawning
+The layer's integration tests test the hooks and their logic without actually using a Kubernetes cluster and spawning
 an agent. The integration tests usually execute a test app and load the dynamic library of the layer into them. The 
 tests set the layer to connect to a TCP/IP address instead of spawning a new agent. The tests then have to simulate the 
 agent - they accept the layer's connection, receive the layers messages and answer them as the agent would.
 
-Since they do not need to create kubernetes resources and spawn agents, the integration tests complete much faster than 
+Since they do not need to create Kubernetes resources and spawn agents, the integration tests complete much faster than 
 the E2E tests, especially on GitHub Actions.
 
-Therefore, whenever possible we create integration tests and only as few E2E tests as necessary.
+Therefore, whenever possible we create integration tests, and only resort to E2E tests when necessary.
 
 ### Running the Integration Tests
 
@@ -182,7 +182,7 @@ REPOSITORY                                     TAG       IMAGE ID       CREATED 
 test                                           latest    5080c20a8222   2 hours ago     300MB
 ```
 
-> **Note:** mirrord-agent is shipped as a container image as it creates a job with this image, providing it with
+> **Note:** mirrord-agent is shipped as a container image as mirrord creates a job with this image, providing it with
 > elevated permissions on the same node as the impersonated pod.
 
 ### Build and run mirrord

@@ -21,7 +21,7 @@ configuration file:
 ttl = 30
 ```
 
-Then, when running with some reasonable ttl, you can retrieve the agent log like this:
+Then, when running with some reasonable TTL, you can retrieve the agent log like this:
 ```bash
 kubectl logs -l app=mirrord --tail=-1 | less -R
 ```
