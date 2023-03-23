@@ -23,18 +23,38 @@ pub(crate) struct AgentConnection {
     pub receiver: mpsc::Receiver<DaemonMessage>,
 }
 
-pub(crate) async fn connect_operator(
+pub(crate) async fn connect_operator<P>(
     config: &LayerConfig,
-) -> Option<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-    OperatorApi::discover(config)
+    progress: &P,
+) -> Option<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)>
+where
+    P: Progress + Send + Sync,
+{
+    let sub_progress = progress.subtask("Checking Operator");
+
+    match OperatorApi::discover(config)
         .await
         .map_err(CliError::OperatorConnectionFailed)
         .into_diagnostic()
-        .unwrap_or_else(|err| {
+    {
+        Ok(Some(connection)) => {
+            sub_progress.done_with("Connected to Operator");
+
+            Some(connection)
+        }
+        Ok(None) => {
+            sub_progress.done_with("No Operator Detected");
+
+            None
+        }
+        Err(err) => {
+            sub_progress.fail_with("Unable to connect to Operator");
+
             warn!("{err}");
 
             None
-        })
+        }
+    }
 }
 
 /// Creates an agent if needed then connects to it.
@@ -45,7 +65,7 @@ pub(crate) async fn create_and_connect<P>(
 where
     P: Progress + Send + Sync,
 {
-    if config.operator && let Some((sender, receiver)) = connect_operator(config).await {
+    if config.operator && let Some((sender, receiver)) = connect_operator(config, progress).await {
         Ok((
             AgentConnectInfo::Operator,
             AgentConnection { sender, receiver },
