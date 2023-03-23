@@ -100,7 +100,6 @@ impl ConnectionTask<HttpV2> {
         port: Port,
         connection_id: ConnectionId,
     ) -> Result<Self, HttpForwarderError> {
-        println!("httpv2::new -> {connect_to:#?}");
         let http_version = Self::connect_to_application(connect_to).await?;
 
         Ok(Self {
@@ -118,11 +117,9 @@ impl ConnectionTask<HttpV2> {
     /// user.
     #[tracing::instrument(level = "trace")]
     async fn connect_to_application(connect_to: SocketAddr) -> Result<HttpV2, HttpForwarderError> {
-        println!("connect_to_application");
         let http_request_sender = {
             let _ = DetourGuard::new();
             let target_stream = TcpStream::connect(connect_to).await?;
-            println!("{target_stream:#?}");
 
             let (http_request_sender, connection) = http2::Builder::new()
                 .executor(TokioExecutor::default())
