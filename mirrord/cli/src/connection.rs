@@ -1,11 +1,13 @@
 use std::time::Duration;
 
+use miette::IntoDiagnostic;
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
+use tracing::warn;
 
 use crate::{CliError, Result};
 
@@ -21,6 +23,20 @@ pub(crate) struct AgentConnection {
     pub receiver: mpsc::Receiver<DaemonMessage>,
 }
 
+pub(crate) async fn connect_operator(
+    config: &LayerConfig,
+) -> Option<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+    OperatorApi::discover(config)
+        .await
+        .map_err(CliError::OperatorConnectionFailed)
+        .into_diagnostic()
+        .unwrap_or_else(|err| {
+            warn!("{err}");
+
+            None
+        })
+}
+
 /// Creates an agent if needed then connects to it.
 pub(crate) async fn create_and_connect<P>(
     config: &LayerConfig,
@@ -29,9 +45,7 @@ pub(crate) async fn create_and_connect<P>(
 where
     P: Progress + Send + Sync,
 {
-    if config.operator && let Some(connection) = OperatorApi::discover(config).await.transpose() {
-        let (sender, receiver) = connection.map_err(CliError::OperatorConnectionFailed)?;
-
+    if config.operator && let Some((sender, receiver)) = connect_operator(config).await {
         Ok((
             AgentConnectInfo::Operator,
             AgentConnection { sender, receiver },
