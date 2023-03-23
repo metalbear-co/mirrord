@@ -4,12 +4,7 @@ import com.google.gson.Gson
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.wsl.WSLCommandLineOptions
 import com.intellij.execution.wsl.WSLDistribution
-import com.intellij.idea.LoggerFactory
-import com.intellij.notification.NotificationType
-import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
-import com.intellij.util.io.runClosingOnFailure
 import java.util.concurrent.TimeUnit
 
 
@@ -48,11 +43,16 @@ object MirrordApi {
 
     fun listPods(configFile: String?, project: Project?, wslDistribution: WSLDistribution?): List<String> {
         MirrordLogger.logger.debug("listing pods")
-        var commandLine = GeneralCommandLine(cliPath(wslDistribution), "ls", "-o", "json")
+        val commandLine = GeneralCommandLine(cliPath(wslDistribution), "ls", "-o", "json")
         configFile?.let {config ->
             MirrordLogger.logger.debug("adding configFile to command line")
             commandLine.addParameter("-f")
             wslDistribution?.let {
+                // I don't know why `getWslPath` would fail, but I have a guess
+                // that it might be because the config path is already WSL'd
+                // for example if project is opened from a WSL path
+                // so a falling back to the original path seems like a fine (??)
+                // option
                 commandLine.addParameter(it.getWslPath(config) ?: config)
             } ?: {
                 commandLine.addParameter(config)
@@ -77,15 +77,15 @@ object MirrordApi {
         process.waitFor(60, TimeUnit.SECONDS)
 
         MirrordLogger.logger.debug("process wait finished, reading output")
-        val data = process.inputStream.bufferedReader().readText();
-        val gson = Gson();
+        val data = process.inputStream.bufferedReader().readText()
+        val gson = Gson()
         MirrordLogger.logger.debug("parsing %s".format(data))
         return gson.fromJson(data, Array<String>::class.java).asList()
 
     }
 
     fun exec(target: String?, configFile: String?, project: Project?, wslDistribution: WSLDistribution?): MutableMap<String, String> {
-        var commandLine = GeneralCommandLine(cliPath(wslDistribution), "ext")
+        val commandLine = GeneralCommandLine(cliPath(wslDistribution), "ext")
 
         target?.let {
             commandLine.addParameter("-t")
@@ -113,7 +113,7 @@ object MirrordApi {
             .start()
 
         val bufferedReader = process.inputStream.reader().buffered()
-        val gson = Gson();
+        val gson = Gson()
         for (line in bufferedReader.lines()) {
             val message = gson.fromJson(line, Message::class.java)
             // See if it's the final message
