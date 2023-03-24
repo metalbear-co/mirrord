@@ -12,9 +12,12 @@ use mirrord_protocol::{
     ConnectionId, Port,
 };
 use tokio::net::TcpStream;
-use tracing::{error, trace};
+use tracing::trace;
 
-use super::{handle_response, ConnectionTask, HttpVersionT};
+use super::{
+    connection::{ConnectionT, ConnectionTask, HttpVersionT},
+    handle_response,
+};
 use crate::{detour::DetourGuard, tcp_steal::http_forwarding::HttpForwarderError};
 
 // TODO(alex): Import this from `hyper-util` when the crate is actually published.
@@ -89,40 +92,6 @@ impl HttpV2 {
 }
 
 impl ConnectionTask<HttpV2> {
-    /// Creates a new [`ConnectionTask`] that handles [`HttpV1`] requests.
-    ///
-    /// Connects to the user's application with `Self::connect_to_application`.
-    /// Creates a client HTTP/2 [`http2::Connection`] to the user's application.
-    ///
-    /// Requests that match the user specified filter will be sent through this connection to the
-    /// user.
-    #[tracing::instrument(level = "trace")]
-    async fn connect_to_application(connect_to: SocketAddr) -> Result<HttpV2, HttpForwarderError> {
-        let http_request_sender = {
-            let _ = DetourGuard::new();
-            let target_stream = TcpStream::connect(connect_to).await?;
-
-            let (http_request_sender, connection) = http2::Builder::new()
-                .executor(TokioExecutor::default())
-                .handshake(target_stream)
-                .await?;
-
-            // spawn a task to poll the connection.
-            tokio::spawn(async move {
-                if let Err(fail) = connection.await {
-                    error!("Error in http connection with addr {connect_to:?}: {fail:?}");
-                }
-            });
-
-            http_request_sender
-        };
-
-        Ok(HttpV2 {
-            destination: connect_to,
-            sender: http_request_sender,
-        })
-    }
-
     /// Starts the communication handling of `matched request -> user application -> response` by
     /// "listening" on the `request_receiver`.
     #[tracing::instrument(level = "trace", skip(self))]

@@ -19,33 +19,29 @@ use streammap_ext::StreamMap;
 use tokio::{
     io::{AsyncWriteExt, ReadHalf, WriteHalf},
     net::TcpStream,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::mpsc::{channel, Sender},
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
 use tracing::{error, info, trace, warn};
 
 use crate::{
-    detour::DetourGuard,
     error::LayerError,
     tcp::{Listen, TcpHandler},
-    tcp_steal::{httpv1::HttpV1, httpv2::HttpV2},
+    tcp_steal::{
+        connection::{ConnectionT, ConnectionTask},
+        httpv1::HttpV1,
+        httpv2::HttpV2,
+    },
 };
 
 pub(crate) mod http_forwarding;
 
 use crate::tcp_steal::http_forwarding::HttpForwarderError;
 
+mod connection;
 mod httpv1;
 mod httpv2;
-
-struct ConnectionTask<HttpVersion> {
-    request_receiver: Receiver<HttpRequest>,
-    response_sender: Sender<HttpResponse>,
-    port: Port,
-    connection_id: ConnectionId,
-    http_version: HttpVersion,
-}
 
 #[tracing::instrument(level = "trace")]
 async fn handle_response(
@@ -381,58 +377,5 @@ impl TcpStealHandler {
 
         trace!("main task done creating http connection.");
         Ok(())
-    }
-}
-
-use std::future::Future;
-trait HttpVersionT {
-    type Sender;
-    type Connection: Future + Send + 'static;
-
-    fn new(connect_to: SocketAddr, http_request_sender: Self::Sender) -> Self;
-
-    async fn handshake(
-        target_stream: TcpStream,
-    ) -> Result<(Self::Sender, Self::Connection), HttpForwarderError>;
-}
-
-impl<V> ConnectionT<V> for ConnectionTask<V> where V: HttpVersionT {}
-
-trait ConnectionT<V>: Sized
-where
-    V: HttpVersionT,
-{
-    async fn new(
-        connect_to: SocketAddr,
-        request_receiver: Receiver<HttpRequest>,
-        response_sender: Sender<HttpResponse>,
-        port: Port,
-        connection_id: ConnectionId,
-    ) -> Result<ConnectionTask<V>, HttpForwarderError> {
-        let http_version = Self::connect_to_application(connect_to).await?;
-
-        Ok(ConnectionTask {
-            request_receiver,
-            response_sender,
-            port,
-            connection_id,
-            http_version,
-        })
-    }
-
-    async fn connect_to_application(connect_to: SocketAddr) -> Result<V, HttpForwarderError> {
-        let target_stream = {
-            let _ = DetourGuard::new();
-            TcpStream::connect(connect_to).await?
-        };
-
-        let (http_request_sender, connection) = V::handshake(target_stream).await?;
-
-        // spawn a task to poll the connection.
-        tokio::spawn(async move {
-            connection.await;
-        });
-
-        Ok(HttpVersionT::new(connect_to, http_request_sender))
     }
 }

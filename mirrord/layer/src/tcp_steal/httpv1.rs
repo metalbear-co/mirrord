@@ -9,10 +9,12 @@ use mirrord_protocol::{
     ConnectionId, Port,
 };
 use tokio::net::TcpStream;
-use tracing::error;
 
-use super::{handle_response, ConnectionTask, HttpVersionT};
-use crate::{detour::DetourGuard, tcp_steal::http_forwarding::HttpForwarderError};
+use super::{
+    connection::{ConnectionT, ConnectionTask, HttpVersionT},
+    handle_response,
+};
+use crate::tcp_steal::http_forwarding::HttpForwarderError;
 
 /// Handles HTTP/1 requests.
 ///
@@ -66,34 +68,6 @@ impl HttpV1 {
 }
 
 impl ConnectionTask<HttpV1> {
-    /// Creates a new [`ConnectionTask`] that handles [`HttpV1`] requests.
-    ///
-    /// Connects to the user's application with `Self::connect_to_application`.
-    /// Creates a client HTTP/1 [`http1::Connection`] to the user's application.
-    ///
-    /// Requests that match the user specified filter will be sent through this connection to the
-    /// user.
-    async fn connect_to_application(connect_to: SocketAddr) -> Result<HttpV1, HttpForwarderError> {
-        let target_stream = {
-            let _ = DetourGuard::new();
-            TcpStream::connect(connect_to).await?
-        };
-
-        let (http_request_sender, connection) = http1::handshake(target_stream).await?;
-
-        // spawn a task to poll the connection.
-        tokio::spawn(async move {
-            if let Err(fail) = connection.await {
-                error!("Error in http connection with addr {connect_to:?}: {fail:?}");
-            }
-        });
-
-        Ok(HttpV1 {
-            destination: connect_to,
-            sender: http_request_sender,
-        })
-    }
-
     /// Starts the communication handling of `matched request -> user application -> response` by
     /// "listening" on the `request_receiver`.
     pub(super) async fn start(self) -> Result<(), HttpForwarderError> {
