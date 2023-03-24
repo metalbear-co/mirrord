@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    future::IntoFuture,
     net::SocketAddr,
 };
 
@@ -26,6 +27,7 @@ use tokio_util::io::ReaderStream;
 use tracing::{error, info, trace, warn};
 
 use crate::{
+    detour::DetourGuard,
     error::LayerError,
     tcp::{Listen, TcpHandler},
     tcp_steal::{httpv1::HttpV1, httpv2::HttpV2},
@@ -333,7 +335,7 @@ impl TcpStealHandler {
             trace!("HTTP client task started.");
             let connection_task_result = match http_version {
                 hyper::Version::HTTP_2 => {
-                    ConnectionTask::<HttpV2>::new(
+                    <ConnectionTask<HttpV2> as ConnectionT<_>>::new(
                         addr,
                         request_receiver,
                         response_sender,
@@ -347,7 +349,7 @@ impl TcpStealHandler {
                     todo!()
                 }
                 _http_v1 => {
-                    ConnectionTask::<HttpV1>::new(
+                    <ConnectionTask<HttpV1> as ConnectionT<_>>::new(
                         addr,
                         request_receiver,
                         response_sender,
@@ -380,5 +382,58 @@ impl TcpStealHandler {
 
         trace!("main task done creating http connection.");
         Ok(())
+    }
+}
+
+use std::future::Future;
+trait HttpVersionT {
+    type Sender;
+    type Connection: Future + Send + 'static;
+
+    fn new(connect_to: SocketAddr, http_request_sender: Self::Sender) -> Self;
+
+    async fn handshake(
+        target_stream: TcpStream,
+    ) -> Result<(Self::Sender, Self::Connection), HttpForwarderError>;
+}
+
+impl<V> ConnectionT<V> for ConnectionTask<V> where V: HttpVersionT {}
+
+trait ConnectionT<V>: Sized
+where
+    V: HttpVersionT,
+{
+    async fn new(
+        connect_to: SocketAddr,
+        request_receiver: Receiver<HttpRequest>,
+        response_sender: Sender<HttpResponse>,
+        port: Port,
+        connection_id: ConnectionId,
+    ) -> Result<ConnectionTask<V>, HttpForwarderError> {
+        let http_version = Self::connect_to_application(connect_to).await?;
+
+        Ok(ConnectionTask {
+            request_receiver,
+            response_sender,
+            port,
+            connection_id,
+            http_version,
+        })
+    }
+
+    async fn connect_to_application(connect_to: SocketAddr) -> Result<V, HttpForwarderError> {
+        let target_stream = {
+            let _ = DetourGuard::new();
+            TcpStream::connect(connect_to).await?
+        };
+
+        let (http_request_sender, connection) = V::handshake(target_stream).await?;
+
+        // spawn a task to poll the connection.
+        tokio::spawn(async move {
+            connection.await;
+        });
+
+        Ok(HttpVersionT::new(connect_to, http_request_sender))
     }
 }

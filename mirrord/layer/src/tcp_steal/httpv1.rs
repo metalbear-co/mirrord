@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use bytes::Bytes;
 use futures::FutureExt;
 use http_body_util::Full;
-use hyper::client::conn::http1;
+use hyper::client::conn::http1::{self, Connection, SendRequest};
 use mirrord_protocol::{
     tcp::{HttpRequest, HttpResponse},
     ConnectionId, Port,
@@ -14,7 +14,7 @@ use tokio::{
 };
 use tracing::error;
 
-use super::{handle_response, ConnectionTask};
+use super::{handle_response, ConnectionTask, HttpVersionT};
 use crate::{detour::DetourGuard, tcp_steal::http_forwarding::HttpForwarderError};
 
 /// Handles HTTP/1 requests.
@@ -135,5 +135,24 @@ impl ConnectionTask<HttpV1> {
         }
 
         Ok(())
+    }
+}
+
+impl HttpVersionT for HttpV1 {
+    type Sender = SendRequest<Full<Bytes>>;
+
+    type Connection = Connection<TcpStream, Full<Bytes>>;
+
+    fn new(connect_to: SocketAddr, http_request_sender: Self::Sender) -> Self {
+        Self {
+            destination: connect_to,
+            sender: http_request_sender,
+        }
+    }
+
+    async fn handshake(
+        target_stream: TcpStream,
+    ) -> Result<(Self::Sender, Self::Connection), HttpForwarderError> {
+        Ok(http1::handshake(target_stream).await?)
     }
 }
