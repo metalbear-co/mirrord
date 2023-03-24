@@ -16,6 +16,7 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
+use dashmap::DashMap;
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 #[cfg(target_os = "linux")]
 use mirrord_protocol::file::{GetDEnts64Request, GetDEnts64Response};
@@ -54,8 +55,8 @@ pub(crate) struct DirStream {
 /// We use Arc so we can support dup more nicely, this means that if user
 /// Opens file `A`, receives fd 1, then dups, receives 2 - both stay open, until both are closed.
 /// Previously in such scenario we would close the remote, causing issues.
-pub(crate) static OPEN_FILES: LazyLock<Mutex<HashMap<LocalFd, Arc<ops::RemoteFile>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::with_capacity(4)));
+pub(crate) static OPEN_FILES: LazyLock<DashMap<LocalFd, Arc<ops::RemoteFile>>> =
+    LazyLock::new(|| DashMap::with_capacity(4));
 
 pub(crate) static OPEN_DIRS: LazyLock<Mutex<HashMap<DirStreamFd, RemoteFd>>> =
     LazyLock::new(|| Mutex::new(HashMap::with_capacity(4)));

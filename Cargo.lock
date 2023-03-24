@@ -2283,6 +2283,7 @@ dependencies = [
  "bytes",
  "chrono",
  "ctor",
+ "dashmap",
  "errno",
  "fancy-regex",
  "frida-gum",
