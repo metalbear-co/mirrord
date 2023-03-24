@@ -8,10 +8,7 @@ use mirrord_protocol::{
     tcp::{HttpRequest, HttpResponse},
     ConnectionId, Port,
 };
-use tokio::{
-    net::TcpStream,
-    sync::mpsc::{Receiver, Sender},
-};
+use tokio::net::TcpStream;
 use tracing::error;
 
 use super::{handle_response, ConnectionTask, HttpVersionT};
@@ -72,24 +69,6 @@ impl ConnectionTask<HttpV1> {
     /// Creates a new [`ConnectionTask`] that handles [`HttpV1`] requests.
     ///
     /// Connects to the user's application with `Self::connect_to_application`.
-    pub(super) async fn new(
-        connect_to: SocketAddr,
-        request_receiver: Receiver<HttpRequest>,
-        response_sender: Sender<HttpResponse>,
-        port: Port,
-        connection_id: ConnectionId,
-    ) -> Result<Self, HttpForwarderError> {
-        let http_version = Self::connect_to_application(connect_to).await?;
-
-        Ok(Self {
-            request_receiver,
-            response_sender,
-            port,
-            connection_id,
-            http_version,
-        })
-    }
-
     /// Creates a client HTTP/1 [`http1::Connection`] to the user's application.
     ///
     /// Requests that match the user specified filter will be sent through this connection to the

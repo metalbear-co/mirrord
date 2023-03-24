@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, HashSet},
-    future::IntoFuture,
     net::SocketAddr,
 };
 
