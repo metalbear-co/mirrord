@@ -571,8 +571,8 @@ pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
         }
     } // Drop sockets, free Mutex.
 
-    if let Some(file) = OPEN_FILES.get(&fd).cloned() {
-        files.insert(dup_fd as RawFd, file);
+    if let Some(file) = OPEN_FILES.view(&fd, |_, file| file.clone()) {
+        OPEN_FILES.insert(dup_fd as RawFd, file);
     }
     Ok(())
 }
