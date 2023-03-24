@@ -1,23 +1,16 @@
 use std::{future::Future, net::SocketAddr};
 
 use bytes::Bytes;
-use futures::FutureExt;
 use http_body_util::Full;
 use hyper::{
     client::conn::http2::{self, Connection, SendRequest},
     rt::Executor,
 };
-use mirrord_protocol::{
-    tcp::{HttpRequest, HttpResponse},
-    ConnectionId, Port,
-};
+use mirrord_protocol::tcp::HttpRequest;
 use tokio::net::TcpStream;
 use tracing::trace;
 
-use super::{
-    connection::{ConnectionT, ConnectionTask, HttpVersionT},
-    handle_response,
-};
+use super::connection::{ConnectionTask, HttpVersionT};
 use crate::{detour::DetourGuard, tcp_steal::http_forwarding::HttpForwarderError};
 
 // TODO(alex): Import this from `hyper-util` when the crate is actually published.
@@ -50,47 +43,6 @@ pub(super) struct HttpV2 {
     /// Sends the request to `destination`, and gets back a response.
     sender: http2::SendRequest<Full<Bytes>>,
 }
-
-impl HttpV2 {
-    /// Sends the [`HttpRequest`] through `Self::sender`, converting the response into a
-    /// [`HttpResponse`].
-    async fn send_http_request_to_application(
-        &mut self,
-        request: HttpRequest,
-        port: Port,
-        connection_id: ConnectionId,
-    ) -> Result<HttpResponse, HttpForwarderError> {
-        let request_id = request.request_id;
-
-        let response = self
-            .sender
-            .send_request(request.internal_request.clone().into())
-            .map(|response| handle_response(request, response, port, connection_id, request_id))
-            .await
-            .await;
-
-        // Retry once if the connection was closed.
-        if let Err(HttpForwarderError::ConnectionClosedTooSoon(request)) = response {
-            let Self {
-                destination: address,
-                sender,
-            } = ConnectionTask::<Self>::connect_to_application(self.destination).await?;
-
-            self.destination = address;
-            self.sender = sender;
-
-            Ok(self
-                .sender
-                .send_request(request.internal_request.clone().into())
-                .map(|response| handle_response(request, response, port, connection_id, request_id))
-                .await
-                .await?)
-        } else {
-            response
-        }
-    }
-}
-
 impl ConnectionTask<HttpV2> {
     /// Starts the communication handling of `matched request -> user application -> response` by
     /// "listening" on the `request_receiver`.
@@ -132,5 +84,30 @@ impl HttpVersionT for HttpV2 {
         target_stream: TcpStream,
     ) -> Result<(Self::Sender, Self::Connection), HttpForwarderError> {
         Ok(http2::handshake(target_stream).await?)
+    }
+
+    fn destination(&self) -> SocketAddr {
+        self.destination
+    }
+
+    async fn send_request(
+        &mut self,
+        request: HttpRequest,
+    ) -> hyper::Result<hyper::Response<hyper::body::Incoming>> {
+        self.sender
+            .send_request(request.internal_request.into())
+            .await
+    }
+
+    fn set_destination(&mut self, new_destination: SocketAddr) {
+        self.destination = new_destination;
+    }
+
+    fn take_sender(self) -> Self::Sender {
+        self.sender
+    }
+
+    fn set_sender(&mut self, new_sender: Self::Sender) {
+        self.sender = new_sender;
     }
 }

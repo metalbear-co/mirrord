@@ -1,19 +1,12 @@
 use std::net::SocketAddr;
 
 use bytes::Bytes;
-use futures::FutureExt;
 use http_body_util::Full;
 use hyper::client::conn::http1::{self, Connection, SendRequest};
-use mirrord_protocol::{
-    tcp::{HttpRequest, HttpResponse},
-    ConnectionId, Port,
-};
+use mirrord_protocol::tcp::HttpRequest;
 use tokio::net::TcpStream;
 
-use super::{
-    connection::{ConnectionT, ConnectionTask, HttpVersionT},
-    handle_response,
-};
+use super::connection::{ConnectionTask, HttpVersionT};
 use crate::tcp_steal::http_forwarding::HttpForwarderError;
 
 /// Handles HTTP/1 requests.
@@ -25,46 +18,6 @@ pub(super) struct HttpV1 {
 
     /// Sends the request to `destination`, and gets back a response.
     sender: http1::SendRequest<Full<Bytes>>,
-}
-
-impl HttpV1 {
-    /// Sends the [`HttpRequest`] through `Self::sender`, converting the response into a
-    /// [`HttpResponse`].
-    async fn send_http_request_to_application(
-        &mut self,
-        request: HttpRequest,
-        port: Port,
-        connection_id: ConnectionId,
-    ) -> Result<HttpResponse, HttpForwarderError> {
-        let request_id = request.request_id;
-
-        let response = self
-            .sender
-            .send_request(request.internal_request.clone().into())
-            .map(|response| handle_response(request, response, port, connection_id, request_id))
-            .await
-            .await;
-
-        // Retry once if the connection was closed.
-        if let Err(HttpForwarderError::ConnectionClosedTooSoon(request)) = response {
-            let Self {
-                destination,
-                sender,
-            } = ConnectionTask::<Self>::connect_to_application(self.destination).await?;
-
-            self.destination = destination;
-            self.sender = sender;
-
-            Ok(self
-                .sender
-                .send_request(request.internal_request.clone().into())
-                .map(|response| handle_response(request, response, port, connection_id, request_id))
-                .await
-                .await?)
-        } else {
-            response
-        }
-    }
 }
 
 impl ConnectionTask<HttpV1> {
@@ -107,5 +60,30 @@ impl HttpVersionT for HttpV1 {
         target_stream: TcpStream,
     ) -> Result<(Self::Sender, Self::Connection), HttpForwarderError> {
         Ok(http1::handshake(target_stream).await?)
+    }
+
+    fn destination(&self) -> SocketAddr {
+        self.destination
+    }
+
+    async fn send_request(
+        &mut self,
+        request: HttpRequest,
+    ) -> hyper::Result<hyper::Response<hyper::body::Incoming>> {
+        self.sender
+            .send_request(request.internal_request.into())
+            .await
+    }
+
+    fn set_destination(&mut self, new_destination: SocketAddr) {
+        self.destination = new_destination;
+    }
+
+    fn take_sender(self) -> Self::Sender {
+        self.sender
+    }
+
+    fn set_sender(&mut self, new_sender: Self::Sender) {
+        self.sender = new_sender;
     }
 }

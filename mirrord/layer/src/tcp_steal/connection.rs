@@ -1,5 +1,7 @@
 use std::{future::Future, net::SocketAddr};
 
+use futures::FutureExt;
+use hyper::{body::Incoming, Response};
 use mirrord_protocol::{
     tcp::{HttpRequest, HttpResponse},
     ConnectionId, Port,
@@ -9,6 +11,7 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 
+use super::handle_response;
 use crate::{detour::DetourGuard, tcp_steal::HttpForwarderError};
 
 pub(crate) struct ConnectionTask<HttpVersion> {
@@ -19,7 +22,7 @@ pub(crate) struct ConnectionTask<HttpVersion> {
     pub(crate) http_version: HttpVersion,
 }
 
-pub(super) trait HttpVersionT {
+pub(super) trait HttpVersionT: Sized {
     type Sender;
     type Connection: Future + Send + 'static;
 
@@ -31,6 +34,48 @@ pub(super) trait HttpVersionT {
     async fn handshake(
         target_stream: TcpStream,
     ) -> Result<(Self::Sender, Self::Connection), HttpForwarderError>;
+
+    fn destination(&self) -> SocketAddr;
+    fn set_destination(&mut self, new_destination: SocketAddr);
+
+    fn take_sender(self) -> Self::Sender;
+    fn set_sender(&mut self, new_sender: Self::Sender);
+
+    async fn send_request(&mut self, request: HttpRequest) -> hyper::Result<Response<Incoming>>;
+
+    /// Sends the [`HttpRequest`] through `Self::sender`, converting the response into a
+    /// [`HttpResponse`].
+    async fn send_http_request_to_application(
+        &mut self,
+        request: HttpRequest,
+        port: Port,
+        connection_id: ConnectionId,
+    ) -> Result<HttpResponse, HttpForwarderError> {
+        let request_id = request.request_id;
+
+        let response = self
+            .send_request(request.clone())
+            .map(|response| handle_response(request, response, port, connection_id, request_id))
+            .await
+            .await;
+
+        // Retry once if the connection was closed.
+        if let Err(HttpForwarderError::ConnectionClosedTooSoon(request)) = response {
+            let http_version =
+                ConnectionTask::<Self>::connect_to_application(self.destination()).await?;
+
+            self.set_destination(http_version.destination());
+            self.set_sender(http_version.take_sender());
+
+            Ok(self
+                .send_request(request.clone())
+                .map(|response| handle_response(request, response, port, connection_id, request_id))
+                .await
+                .await?)
+        } else {
+            response
+        }
+    }
 }
 
 impl<V> ConnectionT<V> for ConnectionTask<V> where V: HttpVersionT {}
