@@ -14,7 +14,6 @@
 #![feature(pointer_byte_offsets)]
 #![feature(is_some_and)]
 #![feature(async_fn_in_trait)]
-#![feature(return_position_impl_trait_in_trait)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![allow(incomplete_features)]
 
