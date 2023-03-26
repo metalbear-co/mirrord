@@ -38,7 +38,7 @@ static OPERATOR_SERVICE_NAME: &str = "mirrord-operator";
 
 static APP_LABELS: LazyLock<BTreeMap<String, String>> =
     LazyLock::new(|| BTreeMap::from([("app".to_owned(), OPERATOR_NAME.to_owned())]));
-static RESOURCE_LIMITS: LazyLock<BTreeMap<String, Quantity>> = LazyLock::new(|| {
+static RESOURCE_REQUESTS: LazyLock<BTreeMap<String, Quantity>> = LazyLock::new(|| {
     BTreeMap::from([
         ("cpu".to_owned(), Quantity("100m".to_owned())),
         ("memory".to_owned(), Quantity("100Mi".to_owned())),
@@ -230,8 +230,7 @@ impl OperatorDeployment {
                 ..Default::default()
             }),
             resources: Some(ResourceRequirements {
-                requests: Some(RESOURCE_LIMITS.clone()),
-                limits: Some(RESOURCE_LIMITS.clone()),
+                requests: Some(RESOURCE_REQUESTS.clone()),
                 ..Default::default()
             }),
             ..Default::default()
