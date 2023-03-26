@@ -5,12 +5,13 @@ use k8s_openapi::{
         apps::v1::{Deployment, DeploymentSpec},
         core::v1::{
             Container, ContainerPort, EnvFromSource, EnvVar, Namespace, PodSpec, PodTemplateSpec,
-            Secret, SecretEnvSource, SecretVolumeSource, SecurityContext, Service, ServiceAccount,
-            ServicePort, ServiceSpec, Volume, VolumeMount,
+            ResourceRequirements, Secret, SecretEnvSource, SecretVolumeSource, SecurityContext,
+            Service, ServiceAccount, ServicePort, ServiceSpec, Volume, VolumeMount,
         },
         rbac::v1::{ClusterRole, ClusterRoleBinding, PolicyRule, RoleRef, Subject},
     },
     apimachinery::pkg::{
+        api::resource::Quantity,
         apis::meta::v1::{LabelSelector, ObjectMeta},
         util::intstr::IntOrString,
     },
@@ -37,6 +38,12 @@ static OPERATOR_SERVICE_NAME: &str = "mirrord-operator";
 
 static APP_LABELS: LazyLock<BTreeMap<String, String>> =
     LazyLock::new(|| BTreeMap::from([("app".to_owned(), OPERATOR_NAME.to_owned())]));
+static RESOURCE_LIMITS: LazyLock<BTreeMap<String, Quantity>> = LazyLock::new(|| {
+    BTreeMap::from([
+        ("cpu".to_owned(), Quantity("100m".to_owned())),
+        ("memory".to_owned(), Quantity("100Mi".to_owned())),
+    ])
+});
 
 /// General Operator Error
 #[derive(Debug, Error)]
@@ -220,6 +227,11 @@ impl OperatorDeployment {
                 allow_privilege_escalation: Some(false),
                 privileged: Some(false),
                 run_as_user: Some(1001),
+                ..Default::default()
+            }),
+            resources: Some(ResourceRequirements {
+                requests: Some(RESOURCE_LIMITS.clone()),
+                limits: Some(RESOURCE_LIMITS.clone()),
                 ..Default::default()
             }),
             ..Default::default()
