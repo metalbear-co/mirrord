@@ -1,7 +1,6 @@
 #![feature(let_chains)]
 
 use std::{collections::HashMap, time::Duration};
-use which::which;
 
 use clap::Parser;
 use config::*;
@@ -25,6 +24,7 @@ use semver::Version;
 use serde_json::json;
 use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
+use which::which;
 
 mod config;
 mod connection;
