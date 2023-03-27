@@ -52,7 +52,7 @@ impl HttpVersionT for HttpV2 {
     async fn handshake(
         target_stream: TcpStream,
     ) -> Result<(Self::Sender, Self::Connection), HttpForwarderError> {
-        Ok(http2::handshake(target_stream).await?)
+        Ok(http2::handshake(TokioExecutor::default(), target_stream).await?)
     }
 
     async fn send_request(

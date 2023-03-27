@@ -19,6 +19,7 @@ use tokio::{
 use tracing::error;
 
 use super::{
+    filter::TokioExecutor,
     hyper_handler::{prepare_response, HyperHandler},
     HttpVersionT, RawHyperConnection,
 };
@@ -40,9 +41,10 @@ impl HttpVersionT for HttpV2 {
         target_stream: TcpStream,
         _: Option<oneshot::Sender<RawHyperConnection>>,
     ) -> Result<Self::Sender, HttpTrafficError> {
-        let (request_sender, connection) = client::conn::http2::handshake(target_stream)
-            .await
-            .inspect_err(|fail| error!("Handshake failed with {fail:#?}"))?;
+        let (request_sender, connection) =
+            client::conn::http2::handshake(TokioExecutor::default(), target_stream)
+                .await
+                .inspect_err(|fail| error!("Handshake failed with {fail:#?}"))?;
 
         // We need this to progress the connection forward (hyper thing).
         tokio::spawn(async move {
