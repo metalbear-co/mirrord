@@ -890,7 +890,7 @@ pub(crate) fn close_layer_fd(fd: c_int) {
     if let Some(socket) = SOCKETS.lock().unwrap().remove(&fd) {
         CONNECTION_QUEUE.lock().unwrap().remove(socket.id);
     } else if file_mode_active {
-        OPEN_FILES.lock().unwrap().remove(&fd);
+        OPEN_FILES.remove(&fd);
     }
 }
 

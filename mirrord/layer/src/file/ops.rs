@@ -66,7 +66,6 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<u64> {
     // don't add a trace here since it causes deadlocks in some cases.
     Detour::Success(
         OPEN_FILES
-            .lock()?
             .get(&local_fd)
             .map(|remote_file| remote_file.fd)
             // Bypass if we're not managing the relative part.
@@ -155,7 +154,7 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
     let fake_local_file_name = CString::new(remote_fd.to_string())?;
     let local_file_fd = unsafe { create_local_fake_file(fake_local_file_name, remote_fd) }?;
 
-    OPEN_FILES.lock().unwrap().insert(
+    OPEN_FILES.insert(
         local_file_fd,
         Arc::new(RemoteFile::new(remote_fd, path.display().to_string())),
     );
@@ -185,11 +184,9 @@ pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE>
     // TODO: Check that the constraint: remote file must have the same mode stuff that is passed
     // here.
     let result = OPEN_FILES
-        .lock()?
-        .get_key_value(&fd)
+        .get(&fd)
         .ok_or(Bypass::LocalFdNotFound(fd))
-        .inspect(|(local_fd, remote_fd)| trace!("fdopen -> {local_fd:#?} {remote_fd:#?}"))
-        .map(|(local_fd, _)| local_fd as *const _ as *mut _)?;
+        .map(|_| fd as *const RawFd as *mut _)?;
 
     Detour::Success(result)
 }
@@ -200,11 +197,7 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
     // usize == ptr size
     // we don't return a pointer to an address that contains DIR
 
-    let remote_file_fd = OPEN_FILES
-        .lock()?
-        .get(&fd)
-        .ok_or(Bypass::LocalFdNotFound(fd))?
-        .fd;
+    let remote_file_fd = OPEN_FILES.get(&fd).ok_or(Bypass::LocalFdNotFound(fd))?.fd;
 
     let (dir_channel_tx, dir_channel_rx) = oneshot::channel();
 
@@ -224,7 +217,7 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
         .insert(local_dir_fd as usize, remote_dir_fd);
 
     // According to docs, when using fdopendir, the fd is now managed by OS - i.e closed
-    OPEN_FILES.lock()?.remove(&fd);
+    OPEN_FILES.remove(&fd);
 
     Detour::Success(local_dir_fd as usize)
 }
@@ -296,7 +289,7 @@ pub(crate) fn openat(
         let fake_local_file_name = CString::new(remote_fd.to_string())?;
         let local_file_fd = unsafe { create_local_fake_file(fake_local_file_name, remote_fd) }?;
 
-        OPEN_FILES.lock()?.insert(
+        OPEN_FILES.insert(
             local_file_fd,
             Arc::new(RemoteFile::new(remote_fd, path.display().to_string())),
         );
