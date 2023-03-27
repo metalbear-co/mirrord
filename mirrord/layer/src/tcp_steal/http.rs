@@ -39,7 +39,7 @@ pub(super) trait HttpVersionT: Sized {
     /// Connects to the user's application with `Self::connect_to_application`.
     fn new(http_request_sender: Self::Sender) -> Self;
 
-    /// Calls the appropriate HTTP/V `handshake` method.
+    /// Calls the appropriate `HTTP/V` `handshake` method.
     async fn handshake(
         target_stream: TcpStream,
     ) -> Result<(Self::Sender, Self::Connection), HttpForwarderError>;
@@ -68,8 +68,10 @@ pub(super) trait HttpVersionT: Sized {
 
         // Retry once if the connection was closed.
         if let Err(HttpForwarderError::ConnectionClosedTooSoon(request)) = response {
+            // Create a new `HttpVersion` handler for this second attempt.
             let http_version = ConnectionTask::<Self>::connect_to_application(destination).await?;
 
+            // Swap the old `HttpVersion` handler with the one we just created.
             self.set_sender(http_version.take_sender());
 
             Ok(self
