@@ -17,7 +17,7 @@ use crate::{detour::DetourGuard, tcp_steal::HttpForwarderError};
 pub(super) mod v1;
 pub(super) mod v2;
 
-pub(super) struct ConnectionTask<HttpVersion: HttpVersionT> {
+pub(super) struct ConnectionTask<HttpVersion: HttpV> {
     request_receiver: Receiver<HttpRequest>,
     response_sender: Sender<HttpResponse>,
     port: Port,
@@ -30,7 +30,7 @@ pub(super) struct ConnectionTask<HttpVersion: HttpVersionT> {
     http_version: HttpVersion,
 }
 
-pub(super) trait HttpVersionT: Sized {
+pub(super) trait HttpV: Sized {
     type Sender;
     type Connection: Future + Send + 'static;
 
@@ -87,7 +87,7 @@ pub(super) trait HttpVersionT: Sized {
 
 impl<V> ConnectionTask<V>
 where
-    V: HttpVersionT,
+    V: HttpV,
 {
     pub(super) async fn new(
         connect_to: SocketAddr,
@@ -148,6 +148,6 @@ where
             connection.await;
         });
 
-        Ok(HttpVersionT::new(http_request_sender))
+        Ok(HttpV::new(http_request_sender))
     }
 }

@@ -30,7 +30,7 @@ pub(super) mod v2;
 /// Handy alias due to [`ReversibleStream`] being generic, avoiding value mismatches.
 pub(super) type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
 
-trait HttpVersionT {
+trait HttpV {
     /// Type for hyper's `SendRequest`.
     ///
     /// It's a different type for HTTP/1 and HTTP/2.

@@ -21,7 +21,7 @@ use tracing::error;
 use super::{
     filter::TokioExecutor,
     hyper_handler::{prepare_response, HyperHandler},
-    HttpVersionT, RawHyperConnection,
+    HttpV, RawHyperConnection,
 };
 use crate::{
     steal::{http::error::HttpTrafficError, HandlerHttpRequest},
@@ -34,7 +34,7 @@ use crate::{
 #[derive(Debug)]
 pub(crate) struct HttpV2;
 
-impl HttpVersionT for HttpV2 {
+impl HttpV for HttpV2 {
     type Sender = SendRequest<Incoming>;
 
     async fn connect(

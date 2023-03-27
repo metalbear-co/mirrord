@@ -10,7 +10,7 @@ use mirrord_protocol::tcp::HttpRequest;
 use tokio::net::TcpStream;
 use tracing::trace;
 
-use super::HttpVersionT;
+use super::HttpV;
 use crate::{detour::DetourGuard, tcp_steal::http_forwarding::HttpForwarderError};
 
 // TODO(alex): Import this from `hyper-util` when the crate is actually published.
@@ -40,7 +40,7 @@ where
 /// See [`ConnectionTask`] for usage.
 pub(crate) struct HttpV2(http2::SendRequest<Full<Bytes>>);
 
-impl HttpVersionT for HttpV2 {
+impl HttpV for HttpV2 {
     type Sender = SendRequest<Full<Bytes>>;
 
     type Connection = Connection<TcpStream, Full<Bytes>>;

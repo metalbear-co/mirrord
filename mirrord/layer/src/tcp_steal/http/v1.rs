@@ -4,7 +4,7 @@ use hyper::client::conn::http1::{self, Connection, SendRequest};
 use mirrord_protocol::tcp::HttpRequest;
 use tokio::net::TcpStream;
 
-use super::HttpVersionT;
+use super::HttpV;
 use crate::tcp_steal::http_forwarding::HttpForwarderError;
 
 /// Handles HTTP/1 requests.
@@ -14,7 +14,7 @@ use crate::tcp_steal::http_forwarding::HttpForwarderError;
 /// See [`ConnectionTask`] for usage.
 pub(crate) struct HttpV1(http1::SendRequest<Full<Bytes>>);
 
-impl HttpVersionT for HttpV1 {
+impl HttpV for HttpV1 {
     type Sender = SendRequest<Full<Bytes>>;
 
     type Connection = Connection<TcpStream, Full<Bytes>>;

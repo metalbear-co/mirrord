@@ -18,7 +18,7 @@ use tokio::{
 };
 use tracing::error;
 
-use super::{error::HttpTrafficError, HttpVersionT};
+use super::{error::HttpTrafficError, HttpV};
 use crate::{
     steal::{HandlerHttpRequest, MatchedHttpRequest},
     util::ClientId,
@@ -139,7 +139,7 @@ async fn matched_request(
 
 impl<V> HyperHandler<V>
 where
-    V: HttpVersionT + Debug,
+    V: HttpV + Debug,
 {
     /// Handles the case when no filter matches a header in the request (or we have an HTTP upgrade
     /// request).

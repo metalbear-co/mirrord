@@ -22,7 +22,7 @@ use tracing::error;
 
 use super::{
     hyper_handler::{prepare_response, HyperHandler},
-    HttpVersionT, RawHyperConnection,
+    HttpV, RawHyperConnection,
 };
 use crate::{
     steal::{http::error::HttpTrafficError, HandlerHttpRequest},
@@ -45,7 +45,7 @@ impl HttpV1 {
     }
 }
 
-impl HttpVersionT for HttpV1 {
+impl HttpV for HttpV1 {
     type Sender = SendRequest<Incoming>;
 
     async fn connect(
