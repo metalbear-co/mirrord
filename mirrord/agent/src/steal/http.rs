@@ -1,11 +1,20 @@
 use std::{net::SocketAddr, sync::Arc};
 
+use bytes::Bytes;
 use dashmap::DashMap;
 use fancy_regex::Regex;
+use http_body_util::Full;
+use hyper::{body::Incoming, Request, Response};
 use mirrord_protocol::ConnectionId;
-use tokio::{net::TcpStream, sync::mpsc::Sender};
+use tokio::{
+    net::TcpStream,
+    sync::{mpsc::Sender, oneshot},
+};
 
-use self::{filter::MINIMAL_HEADER_SIZE, reversible_stream::ReversibleStream};
+use self::{
+    error::HttpTrafficError, filter::MINIMAL_HEADER_SIZE, hyper_handler::RawHyperConnection,
+    reversible_stream::ReversibleStream,
+};
 use crate::{
     steal::{http::filter::filter_task, HandlerHttpRequest},
     util::ClientId,
@@ -13,11 +22,31 @@ use crate::{
 
 pub(crate) mod error;
 pub(super) mod filter;
-mod hyper_handler;
+pub(super) mod hyper_handler;
 pub(super) mod reversible_stream;
+pub(super) mod v1;
+pub(super) mod v2;
 
 /// Handy alias due to [`ReversibleStream`] being generic, avoiding value mismatches.
 pub(super) type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
+
+trait HttpVersionT {
+    type Sender;
+
+    async fn connect(
+        target_stream: TcpStream,
+        upgrade_tx: Option<oneshot::Sender<RawHyperConnection>>,
+    ) -> Result<Self::Sender, HttpTrafficError>;
+
+    async fn send_request(
+        sender: &mut Self::Sender,
+        request: Request<Incoming>,
+    ) -> Result<Response<Full<Bytes>>, HttpTrafficError>;
+
+    fn is_upgrade(_: &Request<Incoming>) -> bool {
+        false
+    }
+}
 
 /// Identifies a message as being HTTP or not.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

@@ -19,7 +19,9 @@ use tracing::{error, trace};
 
 use super::{
     error::HttpTrafficError,
-    hyper_handler::{httpv1::HttpV1, httpv2::HttpV2, HyperHandler, RawHyperConnection},
+    hyper_handler::{HyperHandler, RawHyperConnection},
+    v1::HttpV1,
+    v2::HttpV2,
     DefaultReversibleStream, HttpVersion,
 };
 use crate::{steal::HandlerHttpRequest, util::ClientId};
