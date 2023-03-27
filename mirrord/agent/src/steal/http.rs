@@ -31,18 +31,34 @@ pub(super) mod v2;
 pub(super) type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
 
 trait HttpVersionT {
+    /// Type for hyper's `SendRequest`.
+    ///
+    /// It's a different type for HTTP/1 and HTTP/2.
     type Sender;
 
+    /// Performs a client handshake with `target_stream`, creating an HTTP connection.
+    ///
+    /// # HTTP/1
+    ///
+    /// The HTTP/1 connection is a bit more involved, as we have to deal with potential `UPGRADE`
+    /// requests.
+    ///
+    /// We do this manually, by keeping the connection alive with `poll_without_shutdown`, and by
+    /// sending it as a [`RawHyperConnection`] through `upgrade_tx` to the HTTP stealer handler.
     async fn connect(
         target_stream: TcpStream,
         upgrade_tx: Option<oneshot::Sender<RawHyperConnection>>,
     ) -> Result<Self::Sender, HttpTrafficError>;
 
+    /// Sends the request to the original destination.
     async fn send_request(
         sender: &mut Self::Sender,
         request: Request<Incoming>,
     ) -> Result<Response<Full<Bytes>>, HttpTrafficError>;
 
+    /// Returns `true` if this [`Request`] contains an `UPGRADE` header.
+    ///
+    /// This implementation always returns `false` for HTTP/2.
     fn is_upgrade(_: &Request<Incoming>) -> bool {
         false
     }

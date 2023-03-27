@@ -85,7 +85,6 @@ impl HttpVersionT for HttpV1 {
         sender: &mut Self::Sender,
         request: Request<Incoming>,
     ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
-        // Send the request to the original destination.
         prepare_response(
             sender
                 .send_request(request)

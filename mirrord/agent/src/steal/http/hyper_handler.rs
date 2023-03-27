@@ -71,6 +71,7 @@ pub(super) struct RawHyperConnection {
     pub(super) unprocessed_bytes: Bytes,
 }
 
+/// Checks if the [`Request`]'s [`HeaderMap`] contains a header that matches any of the `filters`.
 fn header_matches(
     request: &Request<Incoming>,
     filters: &Arc<DashMap<ClientId, Regex>>,
@@ -97,11 +98,13 @@ fn header_matches(
         })
 }
 
+/// Converts the body of this response from [`Incoming`] into [`Full`].
 pub(super) async fn prepare_response(
     (mut parts, body): (response::Parts, Incoming),
 ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
-    // Remove headers that would be invalid due to us fiddling with the `body`.
     let body = body.collect().await?.to_bytes();
+
+    // Remove headers that would be invalid due to us fiddling with the `body`.
     parts.headers.remove(http::header::CONTENT_LENGTH);
     parts.headers.remove(http::header::TRANSFER_ENCODING);
 
