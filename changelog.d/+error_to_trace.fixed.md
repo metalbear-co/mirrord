@@ -1,0 +1,1 @@
+Change connection reset to be a trace message instead of error
