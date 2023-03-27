@@ -14,12 +14,15 @@ use tokio::{
 use super::handle_response;
 use crate::{detour::DetourGuard, tcp_steal::HttpForwarderError};
 
-pub(crate) struct ConnectionTask<HttpVersion> {
-    pub(crate) request_receiver: Receiver<HttpRequest>,
-    pub(crate) response_sender: Sender<HttpResponse>,
-    pub(crate) port: Port,
-    pub(crate) connection_id: ConnectionId,
-    pub(crate) http_version: HttpVersion,
+pub(super) mod v1;
+pub(super) mod v2;
+
+pub(super) struct ConnectionTask<HttpVersion: HttpVersionT> {
+    request_receiver: Receiver<HttpRequest>,
+    response_sender: Sender<HttpResponse>,
+    port: Port,
+    connection_id: ConnectionId,
+    http_version: HttpVersion,
 }
 
 pub(super) trait HttpVersionT: Sized {
@@ -78,13 +81,11 @@ pub(super) trait HttpVersionT: Sized {
     }
 }
 
-impl<V> ConnectionT<V> for ConnectionTask<V> where V: HttpVersionT {}
-
-pub(super) trait ConnectionT<V>: Sized
+impl<V> ConnectionTask<V>
 where
     V: HttpVersionT,
 {
-    async fn new(
+    pub(super) async fn new(
         connect_to: SocketAddr,
         request_receiver: Receiver<HttpRequest>,
         response_sender: Sender<HttpResponse>,
@@ -100,6 +101,28 @@ where
             connection_id,
             http_version,
         })
+    }
+
+    /// Starts the communication handling of `matched request -> user application -> response` by
+    /// "listening" on the `request_receiver`.
+    pub(super) async fn start(self) -> Result<(), HttpForwarderError> {
+        let Self {
+            mut request_receiver,
+            response_sender,
+            port,
+            connection_id,
+            mut http_version,
+        } = self;
+
+        while let Some(request) = request_receiver.recv().await {
+            let response = http_version
+                .send_http_request_to_application(request, port, connection_id)
+                .await?;
+
+            response_sender.send(response).await?;
+        }
+
+        Ok(())
     }
 
     /// Creates a client HTTP [`http1::Connection`]/[`http2::Connection`] to the user's application.

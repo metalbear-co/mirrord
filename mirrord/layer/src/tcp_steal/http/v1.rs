@@ -6,42 +6,18 @@ use hyper::client::conn::http1::{self, Connection, SendRequest};
 use mirrord_protocol::tcp::HttpRequest;
 use tokio::net::TcpStream;
 
-use super::connection::{ConnectionTask, HttpVersionT};
+use super::HttpVersionT;
 use crate::tcp_steal::http_forwarding::HttpForwarderError;
 
 /// Handles HTTP/1 requests.
 ///
 /// See [`ConnectionTask`] for usage.
-pub(super) struct HttpV1 {
+pub(crate) struct HttpV1 {
     /// Address we're connecting to.
     destination: SocketAddr,
 
     /// Sends the request to `destination`, and gets back a response.
     sender: http1::SendRequest<Full<Bytes>>,
-}
-
-impl ConnectionTask<HttpV1> {
-    /// Starts the communication handling of `matched request -> user application -> response` by
-    /// "listening" on the `request_receiver`.
-    pub(super) async fn start(self) -> Result<(), HttpForwarderError> {
-        let Self {
-            mut request_receiver,
-            response_sender,
-            port,
-            connection_id,
-            mut http_version,
-        } = self;
-
-        while let Some(request) = request_receiver.recv().await {
-            let response = http_version
-                .send_http_request_to_application(request, port, connection_id)
-                .await?;
-
-            response_sender.send(response).await?;
-        }
-
-        Ok(())
-    }
 }
 
 impl HttpVersionT for HttpV1 {

@@ -10,7 +10,7 @@ use mirrord_protocol::tcp::HttpRequest;
 use tokio::net::TcpStream;
 use tracing::trace;
 
-use super::connection::{ConnectionTask, HttpVersionT};
+use super::HttpVersionT;
 use crate::{detour::DetourGuard, tcp_steal::http_forwarding::HttpForwarderError};
 
 // TODO(alex): Import this from `hyper-util` when the crate is actually published.
@@ -36,36 +36,12 @@ where
 /// Handles HTTP/2 requests.
 ///
 /// See [`ConnectionTask`] for usage.
-pub(super) struct HttpV2 {
+pub(crate) struct HttpV2 {
     /// Address we're connecting to.
     destination: SocketAddr,
 
     /// Sends the request to `destination`, and gets back a response.
     sender: http2::SendRequest<Full<Bytes>>,
-}
-impl ConnectionTask<HttpV2> {
-    /// Starts the communication handling of `matched request -> user application -> response` by
-    /// "listening" on the `request_receiver`.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) async fn start(self) -> Result<(), HttpForwarderError> {
-        let Self {
-            mut request_receiver,
-            response_sender,
-            port,
-            connection_id,
-            mut http_version,
-        } = self;
-
-        while let Some(request) = request_receiver.recv().await {
-            let response = http_version
-                .send_http_request_to_application(request, port, connection_id)
-                .await?;
-
-            response_sender.send(response).await?;
-        }
-
-        Ok(())
-    }
 }
 
 impl HttpVersionT for HttpV2 {

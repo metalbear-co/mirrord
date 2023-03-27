@@ -28,20 +28,14 @@ use tracing::{error, info, trace, warn};
 use crate::{
     error::LayerError,
     tcp::{Listen, TcpHandler},
-    tcp_steal::{
-        connection::{ConnectionT, ConnectionTask},
-        httpv1::HttpV1,
-        httpv2::HttpV2,
-    },
+    tcp_steal::http::{v1::HttpV1, v2::HttpV2, ConnectionTask},
 };
 
 pub(crate) mod http_forwarding;
 
 use crate::tcp_steal::http_forwarding::HttpForwarderError;
 
-mod connection;
-mod httpv1;
-mod httpv2;
+mod http;
 
 #[tracing::instrument(level = "trace")]
 async fn handle_response(
@@ -330,7 +324,7 @@ impl TcpStealHandler {
             trace!("HTTP client task started.");
             let connection_task_result = match http_version {
                 hyper::Version::HTTP_2 => {
-                    <ConnectionTask<HttpV2> as ConnectionT<_>>::new(
+                    ConnectionTask::<HttpV2>::new(
                         addr,
                         request_receiver,
                         response_sender,
@@ -344,7 +338,7 @@ impl TcpStealHandler {
                     todo!()
                 }
                 _http_v1 => {
-                    <ConnectionTask<HttpV1> as ConnectionT<_>>::new(
+                    ConnectionTask::<HttpV1>::new(
                         addr,
                         request_receiver,
                         response_sender,
