@@ -22,6 +22,11 @@ pub(super) struct ConnectionTask<HttpVersion: HttpVersionT> {
     response_sender: Sender<HttpResponse>,
     port: Port,
     connection_id: ConnectionId,
+
+    /// Address we're connecting to.
+    destination: SocketAddr,
+
+    /// Handles the differences between [`http1`] and [`http2`] in [`hyper`].
     http_version: HttpVersion,
 }
 
@@ -32,14 +37,12 @@ pub(super) trait HttpVersionT: Sized {
     /// Creates a new [`ConnectionTask`] that handles [`HttpV1`]/[`HttpV2`] requests.
     ///
     /// Connects to the user's application with `Self::connect_to_application`.
-    fn new(connect_to: SocketAddr, http_request_sender: Self::Sender) -> Self;
+    fn new(http_request_sender: Self::Sender) -> Self;
 
+    /// Calls the appropriate HTTP/V `handshake` method.
     async fn handshake(
         target_stream: TcpStream,
     ) -> Result<(Self::Sender, Self::Connection), HttpForwarderError>;
-
-    fn destination(&self) -> SocketAddr;
-    fn set_destination(&mut self, new_destination: SocketAddr);
 
     fn take_sender(self) -> Self::Sender;
     fn set_sender(&mut self, new_sender: Self::Sender);
@@ -53,6 +56,7 @@ pub(super) trait HttpVersionT: Sized {
         request: HttpRequest,
         port: Port,
         connection_id: ConnectionId,
+        destination: SocketAddr,
     ) -> Result<HttpResponse, HttpForwarderError> {
         let request_id = request.request_id;
 
@@ -64,10 +68,8 @@ pub(super) trait HttpVersionT: Sized {
 
         // Retry once if the connection was closed.
         if let Err(HttpForwarderError::ConnectionClosedTooSoon(request)) = response {
-            let http_version =
-                ConnectionTask::<Self>::connect_to_application(self.destination()).await?;
+            let http_version = ConnectionTask::<Self>::connect_to_application(destination).await?;
 
-            self.set_destination(http_version.destination());
             self.set_sender(http_version.take_sender());
 
             Ok(self
@@ -99,6 +101,7 @@ where
             response_sender,
             port,
             connection_id,
+            destination: connect_to,
             http_version,
         })
     }
@@ -111,12 +114,13 @@ where
             response_sender,
             port,
             connection_id,
+            destination,
             mut http_version,
         } = self;
 
         while let Some(request) = request_receiver.recv().await {
             let response = http_version
-                .send_http_request_to_application(request, port, connection_id)
+                .send_http_request_to_application(request, port, connection_id, destination)
                 .await?;
 
             response_sender.send(response).await?;
@@ -142,6 +146,6 @@ where
             connection.await;
         });
 
-        Ok(HttpVersionT::new(connect_to, http_request_sender))
+        Ok(HttpVersionT::new(http_request_sender))
     }
 }
