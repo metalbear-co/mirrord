@@ -578,21 +578,21 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
             sockets.insert(dup_fd as RawFd, socket);
 
             if SWITCH_MAP {
-                OPEN_FILES.lock()?.remove(&dup_fd);
+                OPEN_FILES.remove(&dup_fd);
             }
 
             return Ok(());
         }
     } // Drop sockets, free Mutex.
 
-    let mut files = OPEN_FILES.lock()?;
-    if let Some(file) = files.get(&fd).cloned() {
-        files.insert(dup_fd as RawFd, file);
+    if let Some(file) = OPEN_FILES.view(&fd, |_, file| file.clone()) {
+        OPEN_FILES.insert(dup_fd as RawFd, file);
 
         if SWITCH_MAP {
             SOCKETS.lock()?.remove(&dup_fd);
         }
     }
+
     Ok(())
 }
 

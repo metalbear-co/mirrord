@@ -17,8 +17,8 @@ file_issue_prompt() {
 }
 
 get_latest_version() {
-  VERSION="$(curl -fsSL https://github.com/metalbear-co/mirrord/raw/latest/Cargo.toml | grep -m 1 version | cut -d' ' -f3 | tr -d '\"')"
-  echo $VERSION
+  local res=$(curl -fsSL https://github.com/metalbear-co/mirrord/raw/latest/Cargo.toml | grep -m 1 version | cut -d' ' -f3 | tr -d '\"')
+  echo $res
 }
 
 copy() {
@@ -33,8 +33,24 @@ copy() {
   fi
 }
 
-install() {
-  VERSION=$(get_latest_version);
+# This function decides what version will be installed based on the following priority:
+# 1. Environment variable `VERSION` is set.
+# 2. Command line argument is passed.
+# 3. Latest available on GitHub
+function get_version() {
+  if [[ -z "$VERSION" ]]; then
+      if [[ -n "$1" ]]; then
+          VERSION="$1"
+      else
+          VERSION=$(get_latest_version)
+      fi
+  fi
+  echo $VERSION
+}
+
+function install() {
+  local version=$(get_version $1);
+  echo "Installing version $version"
   if [[ "$OSTYPE" == "linux"* ]]; then
       ARCH=$(uname -m);
       OS="linux";
@@ -51,11 +67,11 @@ install() {
       file_issue_prompt
       exit 1
   fi
-  curl -o /tmp/mirrord -fsSL https://github.com/metalbear-co/mirrord/releases/download/$VERSION/mirrord_$OS\_$ARCH
+  curl -o /tmp/mirrord -fsSL https://github.com/metalbear-co/mirrord/releases/download/$version/mirrord_$OS\_$ARCH
   chmod +x /tmp/mirrord
   copy
   echo "mirrord installed! Have fun! Join our discord server for help: https://discord.gg/pSKEdmNZcK"
   }
 
 
-install
+install $1
