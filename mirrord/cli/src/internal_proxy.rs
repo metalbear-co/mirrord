@@ -11,6 +11,7 @@
 //! or let the [`OperatorApi`] handle the connection.
 
 use std::{
+    io::ErrorKind,
     net::{Ipv4Addr, SocketAddrV4},
     time::Duration,
 };
@@ -62,6 +63,10 @@ async fn connection_task(
                             trace!("Error sending layer message to agent: {err:#?}");
                             break;
                         }
+                    },
+                    Some(Err(ref error)) if error.kind() == ErrorKind::ConnectionReset => {
+                        trace!("layer connection reset");
+                        break;
                     },
                     Some(Err(fail)) => {
                         error!("Error receiving layer message: {fail:#?}");
