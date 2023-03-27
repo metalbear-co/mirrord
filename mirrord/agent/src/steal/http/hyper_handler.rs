@@ -213,6 +213,7 @@ where
     /// matches one of the user specified filters.
     ///
     /// Helper function due to the fact that [`Service::call`] is not an `async` function.
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn handle_request(
         request: Request<Incoming>,
         original_destination: SocketAddr,
