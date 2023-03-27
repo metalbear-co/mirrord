@@ -5,7 +5,7 @@
 #![feature(let_chains)]
 #![feature(type_alias_impl_trait)]
 #![feature(unix_socket_abstract)]
-#![feature(tcp_quickack)]
+// #![feature(tcp_quickack)]
 
 use std::{
     collections::{HashMap, HashSet},
@@ -14,6 +14,7 @@ use std::{
 };
 
 use actix_codec::Framed;
+use async_trait::async_trait;
 use cli::parse_args;
 use dns::{dns_worker, DnsRequest};
 use error::{AgentError, Result};
@@ -23,7 +24,10 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
 };
-use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest};
+use mirrord_protocol::{
+    api::{agent_server, BincodeMessage, Empty},
+    ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
+};
 use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
 use runtime::ContainerInfo;
 use sniffer::{SnifferCommand, TcpConnectionSniffer, TcpSnifferApi};
@@ -434,6 +438,23 @@ impl ClientConnectionHandler {
             }
         }
         Ok(true)
+    }
+}
+
+#[async_trait]
+impl agent_server::Agent for ClientConnectionHandler {
+    async fn client_message(
+        &self,
+        request: tonic::Request<BincodeMessage>,
+    ) -> Result<tonic::Response<Empty>, tonic::Status> {
+        todo!()
+    }
+
+    async fn daemon_message(
+        &self,
+        request: tonic::Request<Empty>,
+    ) -> Result<tonic::Response<Self::DaemonMessageStream>, tonic::Status> {
+        todo!()
     }
 }
 

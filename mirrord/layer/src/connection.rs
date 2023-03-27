@@ -4,11 +4,15 @@
 use std::net::SocketAddr;
 
 use futures::{SinkExt, StreamExt};
-use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
+use mirrord_protocol::{
+    api::{agent_client::AgentClient, BincodeMessage, Empty},
+    ClientCodec, ClientMessage, DaemonMessage,
+};
 use tokio::{
     net::TcpStream,
     sync::mpsc::{self, Receiver, Sender},
 };
+use tonic::transport::Channel;
 use tracing::{error, info, trace};
 
 use crate::graceful_exit;
@@ -86,6 +90,66 @@ fn wrap_raw_connection(
                         None => {
                             error!("agent disconnected");
 
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    (client_in_tx, daemon_out_rx)
+}
+
+pub async fn agent_connection(
+    channel: Channel,
+) -> (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>) {
+    let (client_in_tx, mut client_in_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
+    let (daemon_out_tx, daemon_out_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
+
+    let mut client = AgentClient::new(channel);
+
+    let mut recev = client
+        .daemon_message(Empty::default())
+        .await
+        .unwrap()
+        .into_inner();
+
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                msg = client_in_rx.recv() => {
+                    match msg {
+                        Some(msg) => {
+                            trace!("Sending client message: {:?}", &msg);
+                            if let Err(fail) = client.client_message(BincodeMessage::from_bincode(msg).unwrap()).await {
+                                error!("Error sending client message: {:#?}", fail);
+                                break;
+                            }
+                        }
+                        None => {
+                            info!("mirrord-kube: initiated disconnect from agent");
+
+                            break;
+                        }
+                    }
+                }
+                daemon_message = recev.message() => {
+                    match daemon_message {
+                        Ok(Some(msg)) => {
+                            if let Err(fail) = daemon_out_tx.send(msg.as_bincode().unwrap()).await {
+                                error!("DaemonMessage dropped: {:#?}", fail);
+
+                                break;
+                            }
+                        }
+                        Ok(None) =>  {
+                            error!("agent disconnected");
+
+                            break;
+                        }
+                        Err(err) => {
+                            error!("Error receiving daemon message: {:?}", err);
                             break;
                         }
                     }

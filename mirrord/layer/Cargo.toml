@@ -56,6 +56,7 @@ hyper = { workspace = true, features = ["client"] }
 http-body-util  = { workspace = true }
 bimap.workspace = true
 dashmap = "5.4"
+tonic = "0.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

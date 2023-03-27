@@ -2,6 +2,7 @@
 #![feature(io_error_more)]
 #![feature(result_option_inspect)]
 
+pub mod api;
 pub mod codec;
 pub mod dns;
 pub mod error;

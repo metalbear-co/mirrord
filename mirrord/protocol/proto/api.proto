@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package mirrord.api;
+
+message Empty {}
+
+message BincodeMessage {
+  bytes encoded = 1;
+}
+
+service Agent {
+  rpc ClientMessage (BincodeMessage) returns (Empty) {}
+  rpc DaemonMessage (Empty) returns (stream BincodeMessage) {}
+}
+
