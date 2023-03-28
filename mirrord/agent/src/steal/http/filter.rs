@@ -1,3 +1,17 @@
+//! Contains a couple of handy constants and the [`filter_task`].
+//!
+//! # [`filter_task`]
+//!
+//! The _meaty_ part of our HTTP traffic stealing feature, that creates the whole HTTP filtering
+//! mechanism.
+//!
+//! # [`TokioExecutor`]
+//!
+//! Temporary affair required for HTTP/2 handshaking in [`hyper`].
+//!
+//! # [`close_connection`]
+//!
+//! Notifies that the connection for this current [`filter_task`] should be closed.
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Duration};
 
 use dashmap::DashMap;
@@ -62,24 +76,24 @@ pub(super) const MINIMAL_HEADER_SIZE: usize = 10;
 /// Reads the start of the [`TcpStream`], and decides if it's HTTP (we currently only support
 /// HTTP/1) or not,
 ///
-/// ## HTTP/1
+/// ## HTTP/1 and HTTP/2
 ///
 /// If the stream is identified as HTTP/1 by our check in [`HttpVersion::new`], then we serve the
 /// connection with [`HyperHandler`].
 ///
-/// ### Upgrade
+/// ### Upgrade (HTTP/1 only)
 ///
 /// If an upgrade request is detected in the [`HyperHandler`], then we take the HTTP connection
 /// that's being served (after HTTP processing is done), and use [`copy_bidirectional`] to copy the
-/// data from the upgraded connection to its original destination (similar to the Not HTTP/1
+/// data from the upgraded connection to its original destination (similar to the "Not HTTP"
 /// handling).
 ///
-/// ## Not HTTP/1
+/// ## Not HTTP
 ///
 /// Forwards the whole TCP connection to the original destination with [`copy_bidirectional`].
 ///
 /// It's important to note that, we don't lose the bytes read from the original stream, due to us
-/// converting it into a  [`DefaultReversibleStream`].
+/// converting it into a [`DefaultReversibleStream`].
 #[tracing::instrument(
     level = "trace",
     skip(stolen_stream, matched_tx, connection_close_sender)
@@ -152,8 +166,6 @@ pub(super) async fn filter_task(
                     close_connection(connection_close_sender, connection_id).await
                 }
                 HttpVersion::V2 => {
-                    // We have to keep the connection alive to handle a possible upgrade request
-                    // manually.
                     http2::Builder::new(TokioExecutor::default())
                         .serve_connection(
                             reversible_stream,
