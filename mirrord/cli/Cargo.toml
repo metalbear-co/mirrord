@@ -32,6 +32,7 @@ serde_json.workspace = true
 serde.workspace = true
 tracing-subscriber.workspace = true
 futures.workspace = true
+which.workspace = true
 regex = "1.6.0"
 errno = "0.2"
 exec = "0.3"
