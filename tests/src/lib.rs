@@ -872,10 +872,8 @@ mod utils {
         // Create client for each request until we have a match between local app and remote app
         // as connection state is flaky
         println!("{url}");
-        let client_builder = reqwest::Client::builder();
 
-        let client = client_builder.build().unwrap();
-
+        let client = reqwest::Client::new();
         let req_builder = client.get(url);
         send_request(
             req_builder,
