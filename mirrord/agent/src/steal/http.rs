@@ -1,3 +1,14 @@
+//! Home for most of the HTTP stealer implementation / modules.
+//!
+//! # [`HttpV`]
+//!
+//! Helper trait to deal with [`hyper`] differences betwen HTTP/1 and HTTP/2 types.
+//!
+//! # [`HttpVersion`]
+//!
+//! # [`HttpFilterManager`]
+//!
+//! Holds the filters for a port we're stealing HTTP traffic on.
 use std::{net::SocketAddr, sync::Arc};
 
 use bytes::Bytes;
@@ -21,15 +32,22 @@ use crate::{
 };
 
 pub(crate) mod error;
-pub(super) mod filter;
-pub(super) mod hyper_handler;
-pub(super) mod reversible_stream;
-pub(super) mod v1;
-pub(super) mod v2;
+mod filter;
+mod hyper_handler;
+mod reversible_stream;
+mod v1;
+mod v2;
 
 /// Handy alias due to [`ReversibleStream`] being generic, avoiding value mismatches.
-pub(super) type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
+type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
 
+/// Unifies [`hyper`] handling for HTTP/1 and HTTP/2.
+///
+/// # Details
+///
+/// As most of the `hyper` types around HTTP/1 and HTTP/2 are different, and do not share a trait,
+/// we use [`HttpV`] to create a shared implementation that is used by
+/// [`hyper_handler::HyperHandler`].
 trait HttpV {
     /// Type for hyper's `SendRequest`.
     ///
@@ -67,8 +85,11 @@ trait HttpV {
 /// Identifies a message as being HTTP or not.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum HttpVersion {
+    /// HTTP/1
     #[default]
     V1,
+
+    /// HTTP/2
     V2,
 
     /// Handled as a special passthrough case, where the captured stream just forwards messages to
@@ -101,6 +122,7 @@ impl HttpVersion {
 /// Created for every new port we want to filter HTTP traffic on.
 #[derive(Debug)]
 pub(super) struct HttpFilterManager {
+    /// Filters that we're going to be matching against (specified by the user).
     client_filters: Arc<DashMap<ClientId, Regex>>,
 
     /// We clone this to pass them down to the hyper tasks.
@@ -145,6 +167,7 @@ impl HttpFilterManager {
         self.client_filters.remove(client_id)
     }
 
+    /// Checks if we have a filter for this `client_id`.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn contains_client(&self, client_id: &ClientId) -> bool {
         self.client_filters.contains_key(client_id)
@@ -169,6 +192,8 @@ impl HttpFilterManager {
         ));
     }
 
+    /// Used by [`TcpConnectionStealer::port_unsubscribe`] to check if we have remaining subscribers
+    /// or not.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn is_empty(&self) -> bool {
         self.client_filters.is_empty()

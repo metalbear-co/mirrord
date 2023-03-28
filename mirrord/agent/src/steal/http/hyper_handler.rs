@@ -31,9 +31,9 @@ use crate::{
 ///
 /// Each [`TcpStream`] connection (for stealer) requires this.
 #[derive(Debug)]
-pub(super) struct HyperHandler<HandleVersion>
+pub(super) struct HyperHandler<V>
 where
-    HandleVersion: Debug,
+    V: HttpV + Debug,
 {
     /// The (shared with the stealer) HTTP filter regexes that are used to filter traffic for this
     /// particular connection.
@@ -58,7 +58,7 @@ where
     /// Keeps track of which HTTP request we're dealing with, so we don't mix up [`Request`]s.
     pub(crate) request_id: RequestId,
 
-    pub(super) handle_version: HandleVersion,
+    pub(super) handle_version: V,
 }
 
 /// Holds a connection and bytes that were left unprocessed by the [`hyper`] state machine.

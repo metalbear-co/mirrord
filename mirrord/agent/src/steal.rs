@@ -23,7 +23,7 @@ use crate::{
 
 pub(super) mod api;
 pub(super) mod connection;
-pub(crate) mod http;
+pub(super) mod http;
 pub(super) mod ip_tables;
 mod orig_dst;
 
