@@ -1,3 +1,8 @@
+//! The core part of the whole HTTP traffic stealing feature.
+//!
+//! # [`HyperHandler`]
+//!
+//! # [`RawHyperConnection`]
 use core::fmt::Debug;
 use std::{net::SocketAddr, sync::Arc};
 
