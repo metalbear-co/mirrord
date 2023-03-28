@@ -189,4 +189,6 @@ pub(crate) enum CliError {
     InternalProxyExecutionFailed(std::io::Error),
     #[error("Internal proxy port parse error: {0:#?}")]
     InternalProxyPortParseError(std::num::ParseIntError),
+    #[error("Internal proxy wait error: {0:#?}")]
+    InternalProxyWaitError(std::io::Error),
 }
