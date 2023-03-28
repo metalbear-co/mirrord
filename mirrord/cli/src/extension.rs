@@ -38,5 +38,6 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
 
     let output = serde_json::to_string(&execution_info)?;
     progress.done_with(&output);
+    execution_info.wait().await?;
     Ok(())
 }

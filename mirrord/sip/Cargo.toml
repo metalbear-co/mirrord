@@ -16,10 +16,10 @@ edition.workspace = true
 [dependencies]
 object = "0.29"
 memchr = "2"
-which = "4.3.0"
 
 tracing.workspace = true
 thiserror.workspace = true
+which.workspace = true
 
 
 [dev-dependencies]
