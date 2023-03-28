@@ -1,3 +1,6 @@
+//! # [`HttpV`]
+//!
+//! # [`ConnectionTask`]
 use std::{future::Future, net::SocketAddr};
 
 use futures::FutureExt;
@@ -37,6 +40,10 @@ pub(super) struct ConnectionTask<HttpVersion: HttpV> {
     http_version: HttpVersion,
 }
 
+/// Handles the differences between hyper's HTTP/1 and HTTP/2 connections.
+///
+/// Thanks to this trait being implemented for both [`v1::HttpV1`] and [`v2::HttpV2`], we can have
+/// most of the implementation for dealing with requests in [`ConnectionTask`].
 pub(super) trait HttpV: Sized {
     type Sender;
     type Connection: Future + Send + 'static;
