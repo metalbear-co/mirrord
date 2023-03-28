@@ -80,10 +80,10 @@ trait HttpV {
 
     /// Returns `true` if this [`Request`] contains an `UPGRADE` header.
     ///
-    /// This implementation always returns `false` for HTTP/2.
-    fn is_upgrade(_: &Request<Incoming>) -> bool {
-        false
-    }
+    /// # Warning:
+    ///
+    /// This implementation should **always** return `false` for HTTP/2.
+    fn is_upgrade(r: &Request<Incoming>) -> bool;
 }
 
 /// Identifies a message as being HTTP or not.

@@ -75,6 +75,10 @@ impl HttpV for HttpV2 {
         )
         .await
     }
+
+    fn is_upgrade(_: &Request<Incoming>) -> bool {
+        false
+    }
 }
 
 impl HyperHandler<HttpV2> {
