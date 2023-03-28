@@ -447,7 +447,13 @@ impl agent_server::Agent for ClientConnectionHandler {
         &self,
         request: tonic::Request<BincodeMessage>,
     ) -> Result<tonic::Response<Empty>, tonic::Status> {
-        todo!()
+        let message = request.into_inner().as_bincode().unwrap();
+
+        self.handle_client_message(message)
+            .await
+            .map_err(tonic::Status::from_error)?;
+
+        Ok(tonic::Response::new(Empty::default()))
     }
 
     async fn daemon_message(
