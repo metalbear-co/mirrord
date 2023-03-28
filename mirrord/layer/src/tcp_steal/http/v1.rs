@@ -1,3 +1,6 @@
+//! [`HttpV1`]
+//!
+//! Handles HTTP/1 requests.
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::client::conn::http1::{self, Connection, SendRequest};

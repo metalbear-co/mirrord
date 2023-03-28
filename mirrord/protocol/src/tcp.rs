@@ -161,6 +161,7 @@ pub struct HttpRequest {
 }
 
 impl HttpRequest {
+    /// Gets this request's HTTP version.
     pub fn version(&self) -> Version {
         self.internal_request.version
     }

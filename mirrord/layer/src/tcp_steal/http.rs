@@ -17,6 +17,13 @@ use crate::{detour::DetourGuard, tcp_steal::HttpForwarderError};
 pub(super) mod v1;
 pub(super) mod v2;
 
+/// Handles the connection between our _middle-man_ stream and the target `destination`.
+///
+/// # Details
+///
+/// Mainly responsible for starting a task that will get requests through `request_receiver` and
+/// send them through `response_sender`, which is where we get the responses that will be sent back
+/// to the agent, and finally back to the remote pod.
 pub(super) struct ConnectionTask<HttpVersion: HttpV> {
     request_receiver: Receiver<HttpRequest>,
     response_sender: Sender<HttpResponse>,
@@ -44,9 +51,28 @@ pub(super) trait HttpV: Sized {
         target_stream: TcpStream,
     ) -> Result<(Self::Sender, Self::Connection), HttpForwarderError>;
 
+    /// Takes the [`HttpV::Sender`], inserting `None` back into this instance.
+    ///
+    /// # Usage
+    ///
+    /// Mainly used for our retry connection mechanism, where we create a new [`HttpV`] implementor,
+    /// but we want to swap the "failed attempt" [`HttpV::Sender`] with the newly created one.
     fn take_sender(self) -> Self::Sender;
+
+    /// Sets this instance's [`HttpV::Sender`].
+    ///
+    /// # Usage
+    ///
+    /// Required as part of the [`HttpV::take_sender`] retry mechanism.
     fn set_sender(&mut self, new_sender: Self::Sender);
 
+    /// Sends the [`HttpRequest`] to its destination.
+    ///
+    /// Required due to this mechanism having distinct types;
+    /// HTTP/1 with [`http1::SendRequest`], and HTTP/2 with [`http2::SendRequest`].
+    ///
+    /// [`http1::SendRequest`]: hyper::client::conn::http1::SendRequest
+    /// [`http2::SendRequest`]: hyper::client::conn::http2::SendRequest
     async fn send_request(&mut self, request: HttpRequest) -> hyper::Result<Response<Incoming>>;
 
     /// Sends the [`HttpRequest`] through `Self::sender`, converting the response into a
@@ -89,6 +115,10 @@ impl<V> ConnectionTask<V>
 where
     V: HttpV,
 {
+    /// Creates a new [`ConnectionTask`] for handling HTTP/V requests.
+    ///
+    /// Has a side-effect of connecting to the application with the (aptly named)
+    /// `connect_to_application`.
     pub(super) async fn new(
         connect_to: SocketAddr,
         request_receiver: Receiver<HttpRequest>,

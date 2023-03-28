@@ -1,3 +1,6 @@
+//! # [`HttpV2`]
+//!
+//! Handles HTTP/2 requests.
 use std::future::Future;
 
 use bytes::Bytes;
