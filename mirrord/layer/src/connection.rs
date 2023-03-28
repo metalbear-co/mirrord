@@ -102,12 +102,10 @@ fn wrap_raw_connection(
 }
 
 pub async fn agent_connection(
-    channel: Channel,
+    mut client: AgentClient<Channel>,
 ) -> (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>) {
     let (client_in_tx, mut client_in_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
     let (daemon_out_tx, daemon_out_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
-
-    let mut client = AgentClient::new(channel);
 
     let mut recev = client
         .daemon_message(Empty::default())
