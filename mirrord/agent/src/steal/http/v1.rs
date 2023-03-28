@@ -1,3 +1,8 @@
+//! Holds the implementation of [`Service`] for [`HyperHandler`] (HTTP/1).
+//!
+//! # [`HttpV1`]
+//!
+//! Handles HTTP/1 requests (with support for upgrades).
 use core::{fmt::Debug, future::Future, pin::Pin};
 use std::{net::SocketAddr, sync::Arc};
 

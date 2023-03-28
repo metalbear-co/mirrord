@@ -1,3 +1,8 @@
+//! Holds the implementation of [`Service`] for [`HyperHandler`] (HTTP/2).
+//!
+//! # [`HttpV2`]
+//!
+//! Handles HTTP/2 requests.
 use core::{fmt::Debug, future::Future, pin::Pin};
 use std::{net::SocketAddr, sync::Arc};
 

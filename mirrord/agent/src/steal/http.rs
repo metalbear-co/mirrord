@@ -51,7 +51,11 @@ type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
 trait HttpV {
     /// Type for hyper's `SendRequest`.
     ///
-    /// It's a different type for HTTP/1 and HTTP/2.
+    /// It's a different type for HTTP/1 ([`http1::SendRequest`]) and
+    /// HTTP/2 ([`http2::SendRequest`]).
+    ///
+    /// [`http1::SendRequest`]: hyper::client::conn::http1::SendRequest
+    /// [`http2::SendRequest`]: hyper::client::conn::http2::SendRequest
     type Sender;
 
     /// Performs a client handshake with `target_stream`, creating an HTTP connection.
@@ -68,7 +72,7 @@ trait HttpV {
         upgrade_tx: Option<oneshot::Sender<RawHyperConnection>>,
     ) -> Result<Self::Sender, HttpTrafficError>;
 
-    /// Sends the request to the original destination.
+    /// Sends the request to the original destination with [`HttpV::Sender`].
     async fn send_request(
         sender: &mut Self::Sender,
         request: Request<Incoming>,
