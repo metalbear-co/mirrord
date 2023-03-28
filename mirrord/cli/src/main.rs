@@ -368,9 +368,9 @@ async fn prompt_outdated_version() {
             {
                 if let Ok(latest_version) = Version::parse(&result.text().await.unwrap()) {
                     if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
-                        let is_homebrew = which("mirrord").ok().and_then(|mirrord_path| Some(mirrord_path.to_string_lossy().contains("homebrew"))).unwrap_or_default();
+                        let is_homebrew = which("mirrord").ok().map(|mirrord_path| mirrord_path.to_string_lossy().contains("homebrew")).unwrap_or_default();
                         let command = if is_homebrew { "brew install metalbear-co/mirrord/mirrord" } else { "curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash" };
-                        println!("New mirrord version available: {latest_version}. To update, run: `{:?}`.", command);
+                        println!("New mirrord version available: {latest_version}. To update, run: `{command:?}`.");
                         println!("To disable version checks, set env variable MIRRORD_CHECK_VERSION to 'false'.")
                     }
                 }
