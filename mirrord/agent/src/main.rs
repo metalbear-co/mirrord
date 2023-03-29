@@ -4,7 +4,6 @@
 #![feature(is_some_and)]
 #![feature(let_chains)]
 #![feature(type_alias_impl_trait)]
-#![feature(unix_socket_abstract)]
 #![feature(tcp_quickack)]
 #![feature(async_fn_in_trait)]
 #![allow(incomplete_features)]
