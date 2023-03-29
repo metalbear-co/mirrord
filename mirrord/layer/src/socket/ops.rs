@@ -556,24 +556,43 @@ pub(super) fn accept(
 #[tracing::instrument(level = "trace")]
 pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), HookError> {
     match cmd {
-        libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => dup(orig_fd, fcntl_fd),
+        libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => dup::<true>(orig_fd, fcntl_fd),
         _ => Ok(()),
     }
 }
 
+/// Managed part of our [`dup_detour`], that clones the `Arc<T>` thing we have keyed by `fd`
+/// ([`UserSocket`], or [`RemoteFile`]).
+///
+/// - `SWITCH_MAP`:
+///
+/// Indicates that we're switching the `fd` from [`SOCKETS`] to [`OPEN_FILES`] (or vice-versa).
+///
+/// We need this to properly handle some cases in [`fcntl`], [`dup2_detour`], and [`dup3_detour`].
+/// Extra relevant for node on macos.
 #[tracing::instrument(level = "trace")]
-pub(super) fn dup(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
+pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
     {
         let mut sockets = SOCKETS.lock()?;
         if let Some(socket) = sockets.get(&fd).cloned() {
             sockets.insert(dup_fd as RawFd, socket);
+
+            if SWITCH_MAP {
+                OPEN_FILES.remove(&dup_fd);
+            }
+
             return Ok(());
         }
     } // Drop sockets, free Mutex.
 
     if let Some(file) = OPEN_FILES.view(&fd, |_, file| file.clone()) {
         OPEN_FILES.insert(dup_fd as RawFd, file);
+
+        if SWITCH_MAP {
+            SOCKETS.lock()?.remove(&dup_fd);
+        }
     }
+
     Ok(())
 }
 

@@ -8,6 +8,58 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.33.1](https://github.com/metalbear-co/mirrord/tree/3.33.1) - 2023-03-28
+
+
+### Changed
+
+- Add default requests and limits values to mirrord-operator setup
+  (100m/100Mi).
+
+
+### Fixed
+
+- Change CLI's version update message to display the correct command when
+  mirrord has been installed with homebrew.
+  [#1194](https://github.com/metalbear-co/mirrord/issues/1194)
+- fix using config with WSL on JetBrains
+  [#1210](https://github.com/metalbear-co/mirrord/issues/1210)
+- Fix internal proxy exiting before IntelliJ connects to it in some situations
+  (maven). Issue was parent process closing causing child to exit. Fixed by
+  waiting from the extension call to the child.
+  [#1211](https://github.com/metalbear-co/mirrord/issues/1211)
+- mirrord-cli: update cli so failing to use operator will fallback to
+  no-operator mode.
+  [#1218](https://github.com/metalbear-co/mirrord/issues/1218)
+- Add option to install specific version using the `install.sh` script via
+  command line argument or `VERSION` environment variable
+  [#1222](https://github.com/metalbear-co/mirrord/issues/1222)
+- Change connection reset to be a trace message instead of error
+- Error when agent exits.
+
+
+### Internal
+
+- Bring the testing documentation into the repo, link it in readme, and add
+  some information.
+- Introduce CheckedInto trait to convert raw pointers (checking for null) in
+  Detour values.
+  [#detours](https://github.com/metalbear-co/mirrord/issues/detours)
+- Re-enable http mirror e2e tests..
+  [#947](https://github.com/metalbear-co/mirrord/issues/947)
+- Change OPEN_FILES from Mutex HashMap to just using DashMap.
+  [#1206](https://github.com/metalbear-co/mirrord/issues/1206)
+- Refactor file ops open/read/close to allow us to directly manipulate the
+  remote file (in agent) withouht going through C (mainly used to not leak the
+  remote file due to how gethostname works).
+
+  Change dup to take an argument that signals if we should change the fd from
+  SOCKETS to OPEN_FILES (or vice-versa).
+  [#1202](https://github.com/metalbear-co/mirrord/issues/1202)
+
+
+
+
 ## [3.33.0](https://github.com/metalbear-co/mirrord/tree/3.33.0) - 2023-03-22
 
 

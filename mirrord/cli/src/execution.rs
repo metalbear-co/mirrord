@@ -9,7 +9,7 @@ use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest}
 use serde::Serialize;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    process::Command,
+    process::{Child, Command},
 };
 use tracing::trace;
 
@@ -28,9 +28,11 @@ const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
 
 /// Struct for holding the execution information
 /// What agent to connect to, what environment variables to set
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Serialize)]
 pub(crate) struct MirrordExecution {
     pub environment: HashMap<String, String>,
+    #[serde(skip)]
+    child: Child,
 }
 
 impl MirrordExecution {
@@ -129,12 +131,13 @@ impl MirrordExecution {
             AgentConnectInfo::Operator => {}
         };
 
-        let proxy_process = proxy_command
+        let mut proxy_process = proxy_command
             .spawn()
             .map_err(CliError::InternalProxyExecutionFailed)?;
 
         let stdout = proxy_process
             .stdout
+            .take()
             .ok_or(CliError::InternalProxyStdoutError)?;
 
         let port: u16 = BufReader::new(stdout)
@@ -154,6 +157,20 @@ impl MirrordExecution {
 
         Ok(Self {
             environment: env_vars,
+            child: proxy_process,
         })
+    }
+
+    /// Wait for the internal proxy to exit.
+    /// Required when called from extension since sometimes the extension
+    /// cleans up the process when the parent process exits, so we need the parent to stay alive
+    /// while the internal proxy is running.
+    /// See https://github.com/metalbear-co/mirrord/issues/1211
+    pub(crate) async fn wait(mut self) -> Result<()> {
+        self.child
+            .wait()
+            .await
+            .map_err(CliError::InternalProxyWaitError)?;
+        Ok(())
     }
 }
