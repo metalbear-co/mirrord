@@ -99,6 +99,10 @@ async fn connection_task(
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
 pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
+    // Create a new session for the proxy process, detaching from the original terminal.
+    // This makes the process not to receive signals from the "mirrord" process or it's parent
+    // terminal fixes some side effects such as https://github.com/metalbear-co/mirrord/issues/1232
+    nix::unistd::setsid().map_err(InternalProxyError::SetSidError)?;
     // Let it assign port for us then print it for the user.
     let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
         .await

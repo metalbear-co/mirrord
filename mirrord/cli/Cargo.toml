@@ -32,6 +32,7 @@ serde_json.workspace = true
 serde.workspace = true
 tracing-subscriber.workspace = true
 futures.workspace = true
+which.workspace = true
 regex = "1.6.0"
 errno = "0.2"
 exec = "0.3"
@@ -46,6 +47,7 @@ miette = { version = "5", features = ["fancy"] }
 thiserror.workspace = true
 prettytable-rs = "0.10"
 humantime = "2"
+nix.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

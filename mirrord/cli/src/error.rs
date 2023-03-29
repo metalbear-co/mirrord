@@ -36,6 +36,8 @@ pub(crate) enum InternalProxyError {
     AgentClosedConnection,
     #[error("Ping error {0:#?} - image version/arch mismatch?")]
     PingError(#[from] tokio::sync::mpsc::error::SendError<mirrord_protocol::ClientMessage>),
+    #[error("Set sid failed {0:#?}, please report a bug")]
+    SetSidError(nix::Error),
 }
 
 #[derive(Debug, Error, Diagnostic)]
@@ -189,4 +191,6 @@ pub(crate) enum CliError {
     InternalProxyExecutionFailed(std::io::Error),
     #[error("Internal proxy port parse error: {0:#?}")]
     InternalProxyPortParseError(std::num::ParseIntError),
+    #[error("Internal proxy wait error: {0:#?}")]
+    InternalProxyWaitError(std::io::Error),
 }
