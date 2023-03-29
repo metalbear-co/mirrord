@@ -47,6 +47,7 @@ miette = { version = "5", features = ["fancy"] }
 thiserror.workspace = true
 prettytable-rs = "0.10"
 humantime = "2"
+nix.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

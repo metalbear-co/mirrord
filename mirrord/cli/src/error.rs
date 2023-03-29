@@ -36,6 +36,8 @@ pub(crate) enum InternalProxyError {
     AgentClosedConnection,
     #[error("Ping error {0:#?} - image version/arch mismatch?")]
     PingError(#[from] tokio::sync::mpsc::error::SendError<mirrord_protocol::ClientMessage>),
+    #[error("Set sid failed {0:#?}, please report a bug")]
+    SetSidError(nix::Error),
 }
 
 #[derive(Debug, Error, Diagnostic)]
