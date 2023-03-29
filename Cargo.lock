@@ -2122,6 +2122,7 @@ dependencies = [
  "mirrord-progress",
  "mirrord-protocol",
  "mirrord-sip",
+ "nix 0.24.3",
  "prettytable-rs",
  "rand",
  "regex",
