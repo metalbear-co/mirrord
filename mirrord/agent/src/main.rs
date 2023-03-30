@@ -5,12 +5,13 @@
 #![feature(let_chains)]
 #![feature(type_alias_impl_trait)]
 #![feature(unix_socket_abstract)]
-// #![feature(tcp_quickack)]
+#![feature(tcp_quickack)]
 
 use std::{
     collections::{HashMap, HashSet},
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
+    sync::Arc,
 };
 
 use actix_codec::Framed;
@@ -35,10 +36,14 @@ use steal::api::TcpStealerApi;
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc::{self, Sender},
+    sync::{
+        mpsc::{self, Sender},
+        Mutex,
+    },
     task::JoinHandle,
     time::{timeout, Duration},
 };
+use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
@@ -235,6 +240,8 @@ struct ClientConnectionHandler {
     /// Handles mirrord's file operations, see [`FileManager`].
     file_manager: FileManager,
     stream: Framed<TcpStream, DaemonCodec>,
+    stream_sender: Sender<DaemonMessage>,
+    stream_reciver: mpsc::Receiver<DaemonMessage>,
     tcp_sniffer_api: Option<TcpSnifferApi>,
     tcp_stealer_api: TcpStealerApi,
     tcp_outgoing_api: TcpOutgoingApi,
@@ -283,10 +290,14 @@ impl ClientConnectionHandler {
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
         let udp_outgoing_api = UdpOutgoingApi::new(pid);
 
+        let (stream_sender, stream_reciver) = mpsc::channel(1000);
+
         let client_handler = ClientConnectionHandler {
             id,
             file_manager,
             stream,
+            stream_sender,
+            stream_reciver,
             tcp_sniffer_api,
             tcp_stealer_api,
             tcp_outgoing_api,
@@ -441,17 +452,24 @@ impl ClientConnectionHandler {
     }
 }
 
+struct ClientConnectionMutex(Arc<Mutex<ClientConnectionHandler>>);
+
 #[async_trait]
-impl agent_server::Agent for ClientConnectionHandler {
+impl agent_server::Agent for ClientConnectionMutex {
+    type DaemonMessageStream = ReceiverStream<Result<BincodeMessage, tonic::Status>>;
+
     async fn client_message(
         &self,
         request: tonic::Request<BincodeMessage>,
     ) -> Result<tonic::Response<Empty>, tonic::Status> {
         let message = request.into_inner().as_bincode().unwrap();
 
-        self.handle_client_message(message)
+        self.0
+            .lock()
             .await
-            .map_err(tonic::Status::from_error)?;
+            .handle_client_message(message)
+            .await
+            .map_err(|err| tonic::Status::from_error(Box::new(err)))?;
 
         Ok(tonic::Response::new(Empty::default()))
     }
@@ -460,7 +478,26 @@ impl agent_server::Agent for ClientConnectionHandler {
         &self,
         request: tonic::Request<Empty>,
     ) -> Result<tonic::Response<Self::DaemonMessageStream>, tonic::Status> {
-        todo!()
+        let message_recev = self.0.lock().await.stream_reciver.clone();
+        let (tx, rx) = mpsc::channel(1000);
+
+        tokio::spawn(async move {
+            while let Some(message) = message_recev.recv() {
+                if tx
+                    .send(
+                        BincodeMessage::from_bincode(message)
+                            .map_err(|err| tonic::Status::from_error(Box::new(err))),
+                    )
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+
+        let stream = ReceiverStream::new(rx);
+
+        Ok(tonic::Response::new(stream))
     }
 }
 
