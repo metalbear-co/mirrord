@@ -135,6 +135,9 @@ impl HttpVersion {
         }
     }
 
+    /// Handles the HTTP connection accordingly to its version.
+    ///
+    /// See [`filter_task`] for more details.
     #[tracing::instrument(level = "trace")]
     async fn serve_connection(
         self,
