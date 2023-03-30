@@ -204,10 +204,12 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     let err = execvp(binary.clone(), binary_args.clone());
     error!("Couldn't execute {:?}", err);
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    if let exec::Error::Errno(errno::Errno(86)) = err {
-        // "Bad CPU type in executable"
-        if _did_sip_patch {
-            return Err(CliError::RosettaMissing(binary));
+    if let exec::Error::Errno(errno) = err {
+        if Into::<i32>::into(errno) == 86 {
+            // "Bad CPU type in executable"
+            if _did_sip_patch {
+                return Err(CliError::RosettaMissing(binary));
+            }
         }
     }
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
