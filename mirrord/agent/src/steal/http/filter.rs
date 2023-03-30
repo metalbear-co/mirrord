@@ -106,8 +106,6 @@ pub(super) async fn filter_task(
     matched_tx: Sender<HandlerHttpRequest>,
     connection_close_sender: Sender<ConnectionId>,
 ) -> Result<(), HttpTrafficError> {
-    let port = original_destination.port();
-
     match DefaultReversibleStream::read_header(
         stolen_stream,
         DEFAULT_HTTP_VERSION_DETECTION_TIMEOUT,
@@ -115,114 +113,19 @@ pub(super) async fn filter_task(
     .await
     {
         Ok(mut reversible_stream) => {
-            match HttpVersion::new(
+            HttpVersion::new(
                 reversible_stream.get_header(),
                 &H2_PREFACE[..MINIMAL_HEADER_SIZE],
-            ) {
-                HttpVersion::V1 => {
-                    // Contains the upgraded interceptor connection, if any.
-                    let (upgrade_tx, upgrade_rx) = oneshot::channel::<RawHyperConnection>();
-
-                    // We have to keep the connection alive to handle a possible upgrade request
-                    // manually.
-                    let server::conn::http1::Parts {
-                        io: mut client_agent, // i.e. browser-agent connection
-                        read_buf: agent_unprocessed,
-                        ..
-                    } = http1::Builder::new()
-                        .preserve_header_case(true)
-                        .serve_connection(
-                            reversible_stream,
-                            HyperHandler::<HttpV1>::new(
-                                filters,
-                                matched_tx,
-                                connection_id,
-                                port,
-                                original_destination,
-                                Some(upgrade_tx),
-                            ),
-                        )
-                        .without_shutdown()
-                        .await?;
-
-                    if let Ok(RawHyperConnection {
-                        stream: mut agent_remote, // i.e. agent-original destination connection
-                        unprocessed_bytes: client_unprocessed,
-                    }) = upgrade_rx.await
-                    {
-                        // Send the data we received from the client, and have not processed as
-                        // HTTP, to the original destination.
-                        agent_remote.write_all(&agent_unprocessed).await?;
-
-                        // Send the data we received from the original destination, and have not
-                        // processed as HTTP, to the client.
-                        client_agent.write_all(&client_unprocessed).await?;
-
-                        // Now both the client and original destinations should be in sync, so we
-                        // can just copy the bytes from one into the other.
-                        copy_bidirectional(&mut client_agent, &mut agent_remote).await?;
-                    }
-
-                    close_connection(connection_close_sender, connection_id).await
-                }
-                HttpVersion::V2 => {
-                    http2::Builder::new(TokioExecutor::default())
-                        .serve_connection(
-                            reversible_stream,
-                            HyperHandler::<HttpV2>::new(
-                                filters,
-                                matched_tx,
-                                connection_id,
-                                port,
-                                original_destination,
-                            ),
-                        )
-                        .await?;
-
-                    close_connection(connection_close_sender, connection_id).await
-                }
-                HttpVersion::NotHttp => {
-                    trace!(
-                        "Got a connection with unsupported protocol version, passing it through \
-                        to its original destination."
-                    );
-                    match TcpStream::connect(original_destination).await {
-                        Ok(mut interceptor_to_original) => {
-                            match copy_bidirectional(
-                                &mut reversible_stream,
-                                &mut interceptor_to_original,
-                            )
-                            .await
-                            {
-                                Ok((incoming, outgoing)) => {
-                                    trace!(
-                                        "Forwarded {incoming} incoming bytes and {outgoing} \
-                                        outgoing bytes in passthrough connection"
-                                    );
-
-                                    Ok(())
-                                }
-                                Err(err) => {
-                                    error!(
-                                        "Encountered error while forwarding unsupported \
-                                    connection to its original destination: {err:?}"
-                                    );
-
-                                    Err(err)?
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            error!(
-                                "Could not connect to original destination {original_destination:?}\
-                                 . Received a connection with an unsupported protocol version to a \
-                                 filtered HTTP port, but cannot forward the connection because of \
-                                 the connection error: {err:?}");
-                            Err(err)?
-                        }
-                    }
-                }
-            }
+            )
+            .serve_connection(
+                reversible_stream,
+                original_destination,
+                connection_id,
+                filters,
+                matched_tx,
+                connection_close_sender,
+            )
+            .await
         }
 
         Err(read_error) => {
@@ -234,7 +137,7 @@ pub(super) async fn filter_task(
 
 /// Notifies the [`filter_task`] that the connection with `connection_id` should be closed.
 #[tracing::instrument(level = "trace", skip(sender))]
-async fn close_connection(
+pub(super) async fn close_connection(
     sender: Sender<ConnectionId>,
     connection_id: ConnectionId,
 ) -> Result<(), HttpTrafficError> {

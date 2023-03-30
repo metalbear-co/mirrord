@@ -15,16 +15,29 @@ use bytes::Bytes;
 use dashmap::DashMap;
 use fancy_regex::Regex;
 use http_body_util::Full;
-use hyper::{body::Incoming, Request, Response};
+use hyper::{
+    body::Incoming,
+    server::{
+        self,
+        conn::{http1, http2},
+    },
+    Request, Response,
+};
 use mirrord_protocol::ConnectionId;
 use tokio::{
+    io::{copy_bidirectional, AsyncWriteExt},
     net::TcpStream,
     sync::{mpsc::Sender, oneshot},
 };
+use tracing::{error, trace};
 
 use self::{
-    error::HttpTrafficError, filter::MINIMAL_HEADER_SIZE, hyper_handler::RawHyperConnection,
+    error::HttpTrafficError,
+    filter::{close_connection, TokioExecutor, MINIMAL_HEADER_SIZE},
+    hyper_handler::{HyperHandler, RawHyperConnection},
     reversible_stream::ReversibleStream,
+    v1::HttpV1,
+    v2::HttpV2,
 };
 use crate::{
     steal::{http::filter::filter_task, HandlerHttpRequest},
@@ -119,6 +132,119 @@ impl HttpVersion {
             Self::V1
         } else {
             Self::NotHttp
+        }
+    }
+
+    #[tracing::instrument(level = "trace")]
+    async fn serve_connection(
+        self,
+        mut stream: DefaultReversibleStream,
+        original_destination: SocketAddr,
+        connection_id: ConnectionId,
+        filters: Arc<DashMap<ClientId, Regex>>,
+        matched_tx: Sender<HandlerHttpRequest>,
+        connection_close_sender: Sender<ConnectionId>,
+    ) -> Result<(), HttpTrafficError> {
+        match self {
+            HttpVersion::V1 => {
+                // Contains the upgraded interceptor connection, if any.
+                let (upgrade_tx, upgrade_rx) = oneshot::channel::<RawHyperConnection>();
+
+                // We have to keep the connection alive to handle a possible upgrade request
+                // manually.
+                let server::conn::http1::Parts {
+                    io: mut client_agent, // i.e. browser-agent connection
+                    read_buf: agent_unprocessed,
+                    ..
+                } = http1::Builder::new()
+                    .preserve_header_case(true)
+                    .serve_connection(
+                        stream,
+                        HyperHandler::<HttpV1>::new(
+                            filters,
+                            matched_tx,
+                            connection_id,
+                            original_destination.port(),
+                            original_destination,
+                            Some(upgrade_tx),
+                        ),
+                    )
+                    .without_shutdown()
+                    .await?;
+
+                if let Ok(RawHyperConnection {
+                    stream: mut agent_remote, // i.e. agent-original destination connection
+                    unprocessed_bytes: client_unprocessed,
+                }) = upgrade_rx.await
+                {
+                    // Send the data we received from the client, and have not processed as
+                    // HTTP, to the original destination.
+                    agent_remote.write_all(&agent_unprocessed).await?;
+
+                    // Send the data we received from the original destination, and have not
+                    // processed as HTTP, to the client.
+                    client_agent.write_all(&client_unprocessed).await?;
+
+                    // Now both the client and original destinations should be in sync, so we
+                    // can just copy the bytes from one into the other.
+                    copy_bidirectional(&mut client_agent, &mut agent_remote).await?;
+                }
+
+                close_connection(connection_close_sender, connection_id).await
+            }
+            HttpVersion::V2 => {
+                http2::Builder::new(TokioExecutor::default())
+                    .serve_connection(
+                        stream,
+                        HyperHandler::<HttpV2>::new(
+                            filters,
+                            matched_tx,
+                            connection_id,
+                            original_destination.port(),
+                            original_destination,
+                        ),
+                    )
+                    .await?;
+
+                close_connection(connection_close_sender, connection_id).await
+            }
+            HttpVersion::NotHttp => {
+                trace!(
+                    "Got a connection with unsupported protocol version, passing it through \
+                        to its original destination."
+                );
+                match TcpStream::connect(original_destination).await {
+                    Ok(mut interceptor_to_original) => {
+                        match copy_bidirectional(&mut stream, &mut interceptor_to_original).await {
+                            Ok((incoming, outgoing)) => {
+                                trace!(
+                                    "Forwarded {incoming} incoming bytes and {outgoing} \
+                                        outgoing bytes in passthrough connection"
+                                );
+
+                                Ok(())
+                            }
+                            Err(err) => {
+                                error!(
+                                    "Encountered error while forwarding unsupported \
+                                    connection to its original destination: {err:?}"
+                                );
+
+                                Err(err)?
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        error!(
+                            "Could not connect to original destination {original_destination:?}\
+                                 . Received a connection with an unsupported protocol version to a \
+                                 filtered HTTP port, but cannot forward the connection because of \
+                                 the connection error: {err:?}"
+                        );
+                        Err(err)?
+                    }
+                }
+            }
         }
     }
 }
