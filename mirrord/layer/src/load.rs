@@ -1,4 +1,5 @@
 use mirrord_config::{util::VecOrSingle, LayerConfig};
+use tracing::trace;
 
 /// For processes that spawn other processes and also specified in `MIRRORD_SKIP_PROCESSES` list we
 /// should patch sip for the spawned instances, curretly limiting to list from
@@ -31,13 +32,16 @@ pub fn load_type(given_process: &str, config: LayerConfig) -> LoadType {
     let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
 
     if should_load(given_process, skip_processes) {
+        trace!("Loading into process: {given_process}.");
         LoadType::Full(Box::new(config))
     } else {
         #[cfg(target_os = "macos")]
         if sip::is_sip_only(given_process) {
+            trace!("Loading into process: {given_process}, but only hooking exec/spawn.");
             return LoadType::SIPOnly;
         }
 
+        trace!("Not loading into process: {given_process}.");
         LoadType::Skip
     }
 }
