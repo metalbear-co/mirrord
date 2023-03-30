@@ -20,7 +20,7 @@ mirrord-protocol = { path = "../protocol"}
 mirrord-layer-macro = { path = "./macro"}
 mirrord-console = { path = "../console" }
 
-ctor = "0.1"
+ctor = "0.2"
 libc.workspace = true
 nix.workspace = true
 tracing.workspace = true
@@ -43,7 +43,7 @@ num-traits.workspace = true
 rand = "0.8"
 fancy-regex.workspace = true
 regex.workspace = true
-errno = "0.2"
+errno = "0.3"
 async-trait.workspace = true
 socket2.workspace = true
 anyhow.workspace = true
@@ -64,7 +64,7 @@ null-terminated = "0.3"
 [dev-dependencies]
 k8s-openapi.workspace = true
 chrono = { version = "0.4", features = ["clock"] }
-base64 = "0.13"
+base64 = "0.21"
 http-body = { workspace = true }
 hyper = { workspace = true }
 rstest = "*"

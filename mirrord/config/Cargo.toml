@@ -21,9 +21,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 serde_yaml = "0.9"
-toml = "0.5"
+toml = "0.7"
 schemars = { version = "0.8.11" }
 bimap.workspace = true
 
 [dev-dependencies]
-rstest = "0.15"
+rstest = "0.17"
