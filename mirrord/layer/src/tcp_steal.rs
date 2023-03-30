@@ -321,7 +321,7 @@ impl TcpStealHandler {
         let http_version = http_request.version();
 
         tokio::spawn(async move {
-            trace!("HTTP client task started.");
+            trace!("HTTP/{http_version:?} client task started.");
             let connection_task_result = match http_version {
                 hyper::Version::HTTP_2 => {
                     ConnectionTask::<HttpV2>::new(
@@ -331,10 +331,11 @@ impl TcpStealHandler {
                         port,
                         connection_id,
                     )
-                    .and_then(|task| async move { task.start().await })
+                    .and_then(ConnectionTask::start)
                     .await
                 }
                 hyper::Version::HTTP_3 => {
+                    error!("mirrord (currently) does not support HTTP/3!");
                     todo!()
                 }
                 _http_v1 => {
@@ -345,7 +346,7 @@ impl TcpStealHandler {
                         port,
                         connection_id,
                     )
-                    .and_then(|task| async move { task.start().await })
+                    .and_then(ConnectionTask::start)
                     .await
                 }
             };
