@@ -34,7 +34,7 @@ tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-base64 = "0.13"
+base64 = "0.21"
 http-body = "0.4"
 hyper = "0.14"
 rstest = "*"
