@@ -44,19 +44,11 @@ object MirrordApi {
     fun listPods(configFile: String?, project: Project?, wslDistribution: WSLDistribution?): List<String> {
         MirrordLogger.logger.debug("listing pods")
         val commandLine = GeneralCommandLine(cliPath(wslDistribution), "ls", "-o", "json")
-        configFile?.let {config ->
+        configFile?.let {
             MirrordLogger.logger.debug("adding configFile to command line")
             commandLine.addParameter("-f")
-            wslDistribution?.let {
-                // I don't know why `getWslPath` would fail, but I have a guess
-                // that it might be because the config path is already WSL'd
-                // for example if project is opened from a WSL path
-                // so a falling back to the original path seems like a fine (??)
-                // option
-                commandLine.addParameter(it.getWslPath(config) ?: config)
-            } ?: {
-                commandLine.addParameter(config)
-            }
+            val formattedPath = wslDistribution?.getWslPath(it) ?: it
+            commandLine.addParameter(formattedPath)
         }
 
 
