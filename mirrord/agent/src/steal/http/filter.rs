@@ -16,20 +16,12 @@ use std::{future::Future, net::SocketAddr, sync::Arc, time::Duration};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
-use hyper::{
-    rt::Executor,
-};
+use hyper::rt::Executor;
 use mirrord_protocol::ConnectionId;
-use tokio::{
-    net::TcpStream,
-    sync::{mpsc::Sender},
-};
+use tokio::{net::TcpStream, sync::mpsc::Sender};
 use tracing::{error, trace};
 
-use super::{
-    error::HttpTrafficError,
-    DefaultReversibleStream, HttpVersion,
-};
+use super::{error::HttpTrafficError, DefaultReversibleStream, HttpVersion};
 use crate::{steal::HandlerHttpRequest, util::ClientId};
 
 /// Default start of an HTTP/2 request.
