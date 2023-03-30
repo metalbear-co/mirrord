@@ -37,7 +37,7 @@ pub(crate) struct MirrordExecution {
     #[serde(skip)]
     child: Child,
 
-    /// The path to the patched binary, if patched.
+    /// The path to the patched binary, if patched for SIP sidestepping.
     pub patched_path: Option<String>,
 }
 
