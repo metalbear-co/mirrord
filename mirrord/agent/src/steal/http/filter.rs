@@ -18,24 +18,16 @@ use dashmap::DashMap;
 use fancy_regex::Regex;
 use hyper::{
     rt::Executor,
-    server::{
-        self,
-        conn::{http1, http2},
-    },
 };
 use mirrord_protocol::ConnectionId;
 use tokio::{
-    io::{copy_bidirectional, AsyncWriteExt},
     net::TcpStream,
-    sync::{mpsc::Sender, oneshot},
+    sync::{mpsc::Sender},
 };
 use tracing::{error, trace};
 
 use super::{
     error::HttpTrafficError,
-    hyper_handler::{HyperHandler, RawHyperConnection},
-    v1::HttpV1,
-    v2::HttpV2,
     DefaultReversibleStream, HttpVersion,
 };
 use crate::{steal::HandlerHttpRequest, util::ClientId};
