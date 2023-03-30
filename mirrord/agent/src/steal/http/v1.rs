@@ -9,6 +9,7 @@ use std::{net::SocketAddr, sync::Arc};
 use bytes::Bytes;
 use dashmap::DashMap;
 use fancy_regex::Regex;
+use futures::TryFutureExt;
 use http_body_util::Full;
 use hyper::{
     body::Incoming,
@@ -26,7 +27,7 @@ use tokio::{
 use tracing::error;
 
 use super::{
-    hyper_handler::{prepare_response, HyperHandler},
+    hyper_handler::{collect_response, prepare_response, HyperHandler},
     HttpV, RawHyperConnection,
 };
 use crate::{
@@ -53,6 +54,7 @@ impl HttpV1 {
 impl HttpV for HttpV1 {
     type Sender = SendRequest<Incoming>;
 
+    #[tracing::instrument(level = "trace")]
     async fn connect(
         target_stream: TcpStream,
         upgrade_tx: Option<oneshot::Sender<RawHyperConnection>>,
@@ -86,6 +88,7 @@ impl HttpV for HttpV1 {
         Ok(request_sender)
     }
 
+    #[tracing::instrument(level = "trace")]
     async fn send_request(
         sender: &mut Self::Sender,
         request: Request<Incoming>,
@@ -93,13 +96,15 @@ impl HttpV for HttpV1 {
         prepare_response(
             sender
                 .send_request(request)
-                .await
-                .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))?
-                .into_parts(),
+                .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))
+                .map_err(HttpTrafficError::from)
+                .and_then(collect_response)
+                .await?,
         )
         .await
     }
 
+    #[tracing::instrument(level = "trace")]
     fn is_upgrade(request: &Request<Incoming>) -> bool {
         request.headers().get(UPGRADE).is_some()
     }
@@ -107,6 +112,7 @@ impl HttpV for HttpV1 {
 
 impl HyperHandler<HttpV1> {
     /// Creates a new [`HyperHandler`] specifically tuned to handle HTTP/1 requests.
+    #[tracing::instrument(level = "trace")]
     pub(super) fn new(
         filters: Arc<DashMap<ClientId, Regex>>,
         matched_tx: Sender<HandlerHttpRequest>,

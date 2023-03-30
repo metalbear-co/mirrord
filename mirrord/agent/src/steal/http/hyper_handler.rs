@@ -103,18 +103,28 @@ fn header_matches(
         })
 }
 
-/// Converts the body of this response from [`Incoming`] into [`Full`].
+/// Remove headers that would be invalid due to us fiddling with the `body`, and rebuilds the
+/// [`Response`].
+#[tracing::instrument(level = "trace")]
 pub(super) async fn prepare_response(
-    (mut parts, body): (response::Parts, Incoming),
+    (mut parts, body): (response::Parts, Full<Bytes>),
 ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
-    let body = body.collect().await?.to_bytes();
-
-    // Remove headers that would be invalid due to us fiddling with the `body`.
     parts.headers.remove(http::header::CONTENT_LENGTH);
     parts.headers.remove(http::header::TRANSFER_ENCODING);
 
     // Rebuild the `Response` after our fiddling.
-    Ok(Response::from_parts(parts, body.into()))
+    Ok(Response::from_parts(parts, body))
+}
+
+/// Converts the body of this response from [`Incoming`] into [`Full`].
+///
+/// To be used with [`prepare_response`].
+#[tracing::instrument(level = "trace")]
+pub(super) async fn collect_response(
+    response: Response<Incoming>,
+) -> Result<(response::Parts, Full<Bytes>), HttpTrafficError> {
+    let (parts, body) = response.into_parts();
+    Ok((parts, Full::new(body.collect().await?.to_bytes())))
 }
 
 /// Sends a [`MatchedHttpRequest`] through `tx` to be handled by the stealer -> layer,
@@ -135,11 +145,7 @@ async fn matched_request(
         .map_err(HttpTrafficError::from)
         .await?;
 
-    let (mut parts, body) = response_rx.await?.into_parts();
-    parts.headers.remove(http::header::CONTENT_LENGTH);
-    parts.headers.remove(http::header::TRANSFER_ENCODING);
-
-    Ok(Response::from_parts(parts, body))
+    prepare_response(response_rx.await?.into_parts()).await
 }
 
 impl<V> HyperHandler<V>
