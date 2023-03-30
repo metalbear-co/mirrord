@@ -7,6 +7,7 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
+use dashmap::DashMap;
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
@@ -23,8 +24,7 @@ pub(super) mod hooks;
 pub(crate) mod id;
 pub(crate) mod ops;
 
-pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock::new(DashMap::new);
 
 /// Holds the connections that have yet to be [`accept`](ops::accept)ed.
 ///
