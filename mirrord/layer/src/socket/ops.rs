@@ -655,7 +655,6 @@ pub(super) fn getaddrinfo(
 
     // Convert `service` into a port.
     let service = service.map_or(0, |s| s.parse().unwrap_or_default());
-    let mut addrinfo_set = MANAGED_ADDRINFO.lock()?;
     // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
     let result = addr_info_list
         .into_iter()
@@ -684,7 +683,7 @@ pub(super) fn getaddrinfo(
         .map(Box::new)
         .map(Box::into_raw)
         .map(|raw| {
-            addrinfo_set.insert(raw as usize);
+            MANAGED_ADDRINFO.insert(raw as usize);
             raw
         })
         .reduce(|current, mut previous| {
