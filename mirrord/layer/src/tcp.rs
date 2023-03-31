@@ -160,9 +160,7 @@ pub(crate) trait TcpHandler {
             SocketAddr::new(tcp_connection.local_address, local_destination_port),
         );
 
-        {
-            CONNECTION_QUEUE.lock().unwrap().add(listen.id, info);
-        }
+        CONNECTION_QUEUE.add(listen.id, info);
 
         #[allow(clippy::let_and_return)]
         let tcp_stream = {

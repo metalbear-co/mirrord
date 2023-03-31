@@ -525,7 +525,6 @@ pub(super) fn accept(
 
     let (local_address, remote_address) = {
         CONNECTION_QUEUE
-            .lock()?
             .pop_front(id)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .map(|socket| {
