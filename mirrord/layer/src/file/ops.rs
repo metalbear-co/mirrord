@@ -244,9 +244,7 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
 
     let fake_local_dir_name = CString::new(fd.to_string())?;
     let local_dir_fd = unsafe { create_local_fake_file(fake_local_dir_name, remote_dir_fd) }?;
-    OPEN_DIRS
-        .lock()?
-        .insert(local_dir_fd as usize, remote_dir_fd);
+    OPEN_DIRS.insert(local_dir_fd as usize, remote_dir_fd);
 
     // According to docs, when using fdopendir, the fd is now managed by OS - i.e closed
     OPEN_FILES.remove(&fd);
@@ -258,7 +256,6 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
 #[tracing::instrument(level = "trace")]
 pub(crate) fn readdir_r(dir_stream: usize) -> Detour<Option<DirEntryInternal>> {
     let remote_fd = *OPEN_DIRS
-        .lock()?
         .get(&dir_stream)
         .ok_or(Bypass::LocalDirStreamNotFound(dir_stream))?;
 
@@ -278,7 +275,6 @@ pub(crate) fn readdir_r(dir_stream: usize) -> Detour<Option<DirEntryInternal>> {
 #[tracing::instrument(level = "trace")]
 pub(crate) fn closedir(dir_stream: usize) -> Detour<c_int> {
     let remote_fd = *OPEN_DIRS
-        .lock()?
         .get(&dir_stream)
         .ok_or(Bypass::LocalDirStreamNotFound(dir_stream))?;
 

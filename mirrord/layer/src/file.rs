@@ -9,11 +9,10 @@
 /// `[FsConfig]`.
 use core::fmt;
 use std::{
-    collections::HashMap,
     io::SeekFrom,
     os::unix::io::RawFd,
     path::PathBuf,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{Arc, LazyLock},
 };
 
 use dashmap::DashMap;
@@ -58,8 +57,8 @@ pub(crate) struct DirStream {
 pub(crate) static OPEN_FILES: LazyLock<DashMap<LocalFd, Arc<ops::RemoteFile>>> =
     LazyLock::new(|| DashMap::with_capacity(4));
 
-pub(crate) static OPEN_DIRS: LazyLock<Mutex<HashMap<DirStreamFd, RemoteFd>>> =
-    LazyLock::new(|| Mutex::new(HashMap::with_capacity(4)));
+pub(crate) static OPEN_DIRS: LazyLock<DashMap<DirStreamFd, RemoteFd>> =
+    LazyLock::new(|| DashMap::with_capacity(4));
 
 /// Extension trait for [`OpenOptionsInternal`], used to convert between `libc`-ish open options and
 /// Rust's [`std::fs::OpenOptions`]
