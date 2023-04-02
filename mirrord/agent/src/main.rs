@@ -4,29 +4,25 @@
 #![feature(is_some_and)]
 #![feature(let_chains)]
 #![feature(type_alias_impl_trait)]
-#![feature(tcp_quickack)]
+#![cfg_attr(target_os = "linux", feature(tcp_quickack))]
 
 use std::{
     collections::{HashMap, HashSet},
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
+    sync::Arc,
 };
 
-use actix_codec::Framed;
 use cli::parse_args;
 use dns::{dns_worker, DnsRequest};
 use error::{AgentError, Result};
-use file::FileManager;
 use futures::{
     executor,
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
 };
-use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest};
-use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
 use runtime::ContainerInfo;
-use sniffer::{SnifferCommand, TcpConnectionSniffer, TcpSnifferApi};
-use steal::api::TcpStealerApi;
+use sniffer::{SnifferCommand, TcpConnectionSniffer};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -35,11 +31,12 @@ use tokio::{
     time::{timeout, Duration},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
     cli::Args,
+    client::ClientConnection,
     runtime::{get_container, Container, ContainerRuntime},
     steal::{
         connection::TcpConnectionStealer,
@@ -53,6 +50,7 @@ use crate::{
 };
 
 mod cli;
+mod client;
 mod dns;
 mod env;
 mod error;
@@ -67,31 +65,32 @@ mod util;
 mod iptables {
     use super::*;
 
-    pub struct NoIpt;
+    pub struct IPTables;
 
-    impl crate::steal::ip_tables::IPTables for NoIpt {
-        fn create_chain(&self, _: &str) -> Result<()> {
-            todo!()
+    impl IPTables {
+        pub fn new_chain(&self, _: &str, _: &str) -> Result<()> {
+            unimplemented!()
         }
-        fn remove_chain(&self, _: &str) -> Result<()> {
-            todo!()
+
+        pub fn flush_chain(&self, _: &str, _: &str, _: &str) -> Result<()> {
+            unimplemented!()
         }
-        fn add_rule(&self, _: &str, _: &str) -> Result<()> {
-            todo!()
+
+        pub fn delete_chain(&self, _: &str, _: &str, _: &str) -> Result<()> {
+            unimplemented!()
         }
-        fn insert_rule(&self, _: &str, _: &str, _: i32) -> Result<()> {
-            todo!()
+
+        pub fn append(&self, _: &str, _: &str, _: &str) -> Result<()> {
+            unimplemented!()
         }
-        fn list_rules(&self, _: &str) -> Result<Vec<String>> {
-            todo!()
-        }
-        fn remove_rule(&self, _: &str, _: &str) -> Result<()> {
-            todo!()
+
+        pub fn insert(&self, _: &str, _: &str, _: &str, _: i32) -> Result<()> {
+            unimplemented!()
         }
     }
 
-    pub fn new(_: bool) -> Result<NoIpt> {
-        Ok(NoIpt)
+    pub fn new(_: bool) -> Result<IPTables> {
+        Ok(IPTables)
     }
 }
 
@@ -191,30 +190,34 @@ impl State {
         match self.new_client().await {
             Ok(client_id) => {
                 let client = tokio::spawn(async move {
-                    match ClientConnectionHandler::new(
+                    match ClientConnection::create(
                         client_id,
-                        stream,
                         pid,
                         ephemeral_container,
                         sniffer_command_tx,
                         stealer_command_tx,
                         dns_sender,
                         env,
+                        cancellation_token,
                     )
-                    .and_then(|client| client.start(cancellation_token))
+                    .and_then(|client| {
+                        let client = Arc::new(client);
+                        async move {
+                            tokio::select! {
+                                ret = client.start() => ret,
+                                ret = client.serve(stream) => ret,
+                            }
+                        }
+                    })
                     .await
                     {
                         Ok(_) => {
                             trace!(
-                                "ClientConnectionHandler::start -> Client {} disconnected",
-                                client_id
+                                "ClientConnectionHandler::start -> Client {client_id} disconnected"
                             );
                         }
                         Err(e) => {
-                            error!(
-                                    "ClientConnectionHandler::start -> Client {} disconnected with error: {}",
-                                    client_id, e
-                                );
+                            error!("ClientConnectionHandler::start -> Client {client_id} disconnected with error: {e}");
                         }
                     }
                     client_id
@@ -251,226 +254,6 @@ impl State {
 
     pub fn no_clients_left(&self) -> bool {
         self.clients.is_empty()
-    }
-}
-
-struct ClientConnectionHandler {
-    /// Used to prevent closing the main loop [`ClientConnectionHandler::start`] when any
-    /// request is done (tcp outgoing feature). Stays `true` until `agent` receives an
-    /// `ExitRequest`.
-    id: ClientId,
-    /// Handles mirrord's file operations, see [`FileManager`].
-    file_manager: FileManager,
-    stream: Framed<TcpStream, DaemonCodec>,
-    stream_sender: Sender<DaemonMessage>,
-    stream_reciver: mpsc::Receiver<DaemonMessage>,
-    tcp_sniffer_api: Option<TcpSnifferApi>,
-    tcp_stealer_api: TcpStealerApi,
-    tcp_outgoing_api: TcpOutgoingApi,
-    udp_outgoing_api: UdpOutgoingApi,
-    dns_sender: Sender<DnsRequest>,
-    env: HashMap<String, String>,
-}
-
-impl ClientConnectionHandler {
-    #[allow(clippy::too_many_arguments)]
-    /// Initializes [`ClientConnectionHandler`].
-    pub async fn new(
-        id: ClientId,
-        stream: TcpStream,
-        pid: Option<u64>,
-        ephemeral: bool,
-        sniffer_command_sender: Sender<SnifferCommand>,
-        stealer_command_sender: Sender<StealerCommand>,
-        dns_sender: Sender<DnsRequest>,
-        env: HashMap<String, String>,
-    ) -> Result<Self> {
-        let file_manager = match pid {
-            Some(_) => FileManager::new(pid),
-            None if ephemeral => FileManager::new(Some(1)),
-            None => FileManager::new(None),
-        };
-        let stream = actix_codec::Framed::new(stream, DaemonCodec::new());
-
-        let (tcp_sender, tcp_receiver) = mpsc::channel(CHANNEL_SIZE);
-
-        let tcp_sniffer_api =
-            TcpSnifferApi::new(id, sniffer_command_sender, tcp_receiver, tcp_sender)
-                .await
-                .map_err(|e| {
-                    warn!(
-                        "Failed to create TcpSnifferApi: {}, this could be due to kernel version.",
-                        e
-                    );
-                    e
-                })
-                .ok();
-
-        let tcp_stealer_api =
-            TcpStealerApi::new(id, stealer_command_sender, mpsc::channel(CHANNEL_SIZE)).await?;
-
-        let tcp_outgoing_api = TcpOutgoingApi::new(pid);
-        let udp_outgoing_api = UdpOutgoingApi::new(pid);
-
-        let (stream_sender, stream_reciver) = mpsc::channel(1000);
-
-        let client_handler = ClientConnectionHandler {
-            id,
-            file_manager,
-            stream,
-            stream_sender,
-            stream_reciver,
-            tcp_sniffer_api,
-            tcp_stealer_api,
-            tcp_outgoing_api,
-            udp_outgoing_api,
-            dns_sender,
-            env,
-        };
-
-        Ok(client_handler)
-    }
-
-    /// Starts a loop that handles client connection and state.
-    ///
-    /// Breaks upon receiver/sender drop.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn start(mut self, cancellation_token: CancellationToken) -> Result<()> {
-        loop {
-            select! {
-                message = self.stream.next() => {
-                    if let Some(message) = message {
-                        match self.handle_client_message(message?).await {
-                            Ok(true) => {},
-                            Ok(false) => {
-                                break;
-                            }
-                            Err(e) => {
-                                error!("Error handling client message: {e:?}");
-                                self.respond(DaemonMessage::Close(format!("{e:?}"))).await?;
-                                break;
-                            }
-                        }
-                    } else {
-                        debug!("Client {} disconnected", self.id);
-                        break;
-                    }
-                },
-                // poll the sniffer API only when it's available
-                // exit when it stops (means something bad happened if
-                // it ran and then stopped)
-                message = async {
-                    if let Some(ref mut sniffer_api) = self.tcp_sniffer_api {
-                        sniffer_api.recv().await
-                    } else {
-                        unreachable!()
-                    }
-                }, if self.tcp_sniffer_api.is_some()=> {
-                    if let Some(message) = message {
-                        self.respond(DaemonMessage::Tcp(message)).await?;
-                    } else {
-                        error!("tcp sniffer stopped?");
-                        break;
-                    }
-                },
-                message = self.tcp_stealer_api.recv() => {
-                    if let Some(message) = message {
-                        self.stream.send(DaemonMessage::TcpSteal(message)).await?;
-                    } else {
-                        error!("tcp stealer stopped?");
-                        break;
-                    }
-                },
-                message = self.tcp_outgoing_api.daemon_message() => {
-                    self.respond(DaemonMessage::TcpOutgoing(message?)).await?;
-                },
-                message = self.udp_outgoing_api.daemon_message() => {
-                    self.respond(DaemonMessage::UdpOutgoing(message?)).await?;
-                },
-                _ = cancellation_token.cancelled() => {
-                    break;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Sends a [`DaemonMessage`] response to the connected client (`mirrord-layer`).
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn respond(&mut self, response: DaemonMessage) -> Result<()> {
-        Ok(self.stream.send(response).await?)
-    }
-
-    /// Handles incoming messages from the connected client (`mirrord-layer`).
-    ///
-    /// Returns `false` if the client disconnected.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn handle_client_message(&mut self, message: ClientMessage) -> Result<bool> {
-        match message {
-            ClientMessage::FileRequest(req) => {
-                if let Some(response) = self.file_manager.handle_message(req)? {
-                    self.respond(DaemonMessage::File(response))
-                        .await
-                        .inspect_err(|fail| {
-                            error!(
-                                "handle_client_message -> Failed responding to file message {:#?}!",
-                                fail
-                            )
-                        })?
-                }
-            }
-            ClientMessage::TcpOutgoing(layer_message) => {
-                self.tcp_outgoing_api.layer_message(layer_message).await?
-            }
-            ClientMessage::UdpOutgoing(layer_message) => {
-                self.udp_outgoing_api.layer_message(layer_message).await?
-            }
-            ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
-                env_vars_filter,
-                env_vars_select,
-            }) => {
-                debug!(
-                    "ClientMessage::GetEnvVarsRequest client id {:?} filter {:?} select {:?}",
-                    self.id, env_vars_filter, env_vars_select
-                );
-
-                let env_vars_result =
-                    env::select_env_vars(&self.env, env_vars_filter, env_vars_select);
-
-                self.respond(DaemonMessage::GetEnvVarsResponse(env_vars_result))
-                    .await?
-            }
-            ClientMessage::GetAddrInfoRequest(request) => {
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                let dns_request = DnsRequest::new(request, tx);
-                self.dns_sender.send(dns_request).await?;
-
-                trace!("waiting for answer from dns thread");
-                let response = rx.await?;
-
-                trace!("GetAddrInfoRequest -> response {:#?}", response);
-
-                self.respond(DaemonMessage::GetAddrInfoResponse(response))
-                    .await?
-            }
-            ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
-            ClientMessage::Tcp(message) => {
-                if let Some(sniffer_api) = &mut self.tcp_sniffer_api {
-                    sniffer_api.handle_client_message(message).await?
-                } else {
-                    warn!("received tcp sniffer request while not available");
-                    return Err(AgentError::SnifferApiError);
-                }
-            }
-            ClientMessage::TcpSteal(message) => {
-                self.tcp_stealer_api.handle_client_message(message).await?
-            }
-            ClientMessage::Close => {
-                return Ok(false);
-            }
-        }
-        Ok(true)
     }
 }
 

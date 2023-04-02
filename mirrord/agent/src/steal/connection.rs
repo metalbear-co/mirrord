@@ -8,6 +8,7 @@ use bytes::Bytes;
 use fancy_regex::Regex;
 use http_body_util::Full;
 use hyper::Response;
+#[cfg(target_os = "linux")]
 use iptables::IPTables;
 use mirrord_protocol::{
     tcp::{NewTcpConnection, TcpClose},
@@ -25,6 +26,8 @@ use tokio_util::io::ReaderStream;
 use tracing::error;
 
 use super::*;
+#[cfg(not(target_os = "linux"))]
+use crate::iptables::{self, IPTables};
 use crate::{
     error::Result,
     steal::{

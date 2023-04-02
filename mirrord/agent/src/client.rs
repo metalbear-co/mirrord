@@ -1,19 +1,23 @@
 use std::{
     collections::HashMap,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
 use async_trait::async_trait;
 use futures::Stream;
+use hyper::server::conn::http1;
 use mirrord_protocol::{
-    api::{agent_server, BincodeMessage, Empty},
+    api::{agent_server, agent_server::AgentServer, BincodeMessage, Empty},
     codec::{ClientMessage, DaemonMessage, GetEnvVarsRequest},
 };
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::{
+    net::TcpStream,
+    sync::{broadcast, mpsc, Mutex},
+};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::sync::CancellationToken;
-use tower::Service;
 use tracing::{debug, error, trace, warn};
 
 use crate::{
@@ -53,9 +57,8 @@ impl ClientConnection {
         stealer_command_sender: mpsc::Sender<StealerCommand>,
         dns_sender: mpsc::Sender<DnsRequest>,
         env: HashMap<String, String>,
+        cancellation_token: CancellationToken,
     ) -> Result<Self> {
-        let cancellation_token = CancellationToken::new();
-
         let file_manager = Mutex::new(match pid {
             Some(_) => FileManager::new(pid),
             None if ephemeral => FileManager::new(Some(1)),
@@ -101,6 +104,57 @@ impl ClientConnection {
         })
     }
 
+    pub async fn start(&self) -> Result<()> {
+        loop {
+            tokio::select! {
+                // poll the sniffer API only when it's available
+                // exit when it stops (means something bad happened if
+                // it ran and then stopped)
+                message = async {
+                    if let Some(ref mut sniffer_api) = self.tcp_sniffer_api.lock().await {
+                        sniffer_api.recv().await
+                    } else {
+                        unreachable!()
+                    }
+                }, if self.tcp_sniffer_api.lock().await.is_some()=> {
+                    if let Some(message) = message {
+                        self.respond(DaemonMessage::Tcp(message)).await?;
+                    } else {
+                        error!("tcp sniffer stopped?");
+                        break;
+                    }
+                },
+                message = self.tcp_stealer_api.lock().await.recv() => {
+                    if let Some(message) = message {
+                        self.stream.send(DaemonMessage::TcpSteal(message)).await?;
+                    } else {
+                        error!("tcp stealer stopped?");
+                        break;
+                    }
+                },
+                message = self.tcp_outgoing_api.lock().await.daemon_message() => {
+                    self.respond(DaemonMessage::TcpOutgoing(message?)).await?;
+                },
+                message = self.udp_outgoing_api.lock().await.daemon_message() => {
+                    self.respond(DaemonMessage::UdpOutgoing(message?)).await?;
+                },
+                _ = self.cancellation_token.cancelled() => {
+                    break;
+                }
+            }
+        }
+    }
+
+    pub async fn serve(self: Arc<Self>, tcp_stream: TcpStream) -> Result<()> {
+        if let Err(http_err) = http1::Builder::new()
+            .keep_alive(true)
+            .serve_connection(tcp_stream, AgentServer::from_arc(self))
+            .await
+        {
+            eprintln!("Error while serving HTTP connection: {http_err}");
+        }
+    }
+
     async fn respond(&self, message: DaemonMessage) -> Result<()> {
         self.stream_responce.send(message)?;
 
@@ -127,8 +181,7 @@ impl agent_server::Agent for ClientConnection {
                         .await
                         .inspect_err(|fail| {
                             error!(
-                                "handle_client_message -> Failed responding to file message {:#?}!",
-                                fail
+                                "handle_client_message -> Failed responding to file message {fail:#?}!"
                             )
                         })
                         .map_err(|err| tonic::Status::from_error(Box::new(err)))?
@@ -153,8 +206,8 @@ impl agent_server::Agent for ClientConnection {
                 env_vars_select,
             }) => {
                 debug!(
-                    "ClientMessage::GetEnvVarsRequest client id {:?} filter {:?} select {:?}",
-                    self.id, env_vars_filter, env_vars_select
+                    "ClientMessage::GetEnvVarsRequest client id {:?} filter {env_vars_filter:?} select {env_vars_select:?}",
+                    self.id
                 );
 
                 let env_vars_result = select_env_vars(&self.env, env_vars_filter, env_vars_select);
@@ -173,7 +226,7 @@ impl agent_server::Agent for ClientConnection {
                 trace!("waiting for answer from dns thread");
                 let response = rx.await.map_err(AgentError::from)?;
 
-                trace!("GetAddrInfoRequest -> response {:#?}", response);
+                trace!("GetAddrInfoRequest -> response {response:#?}");
 
                 self.respond(DaemonMessage::GetAddrInfoResponse(response))
                     .await?

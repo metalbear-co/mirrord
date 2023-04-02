@@ -4,6 +4,8 @@ use enum_dispatch::enum_dispatch;
 use mirrord_protocol::Port;
 use rand::distributions::{Alphanumeric, DistString};
 
+#[cfg(not(target_os = "linux"))]
+use crate::iptables;
 use crate::{
     error::{AgentError, Result},
     steal::ip_tables::{

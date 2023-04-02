@@ -143,4 +143,10 @@ pub enum AgentError {
     TestError,
 }
 
+impl From<AgentError> for tonic::Status {
+    fn from(err: AgentError) -> Self {
+        tonic::Status::from_error(Box::new(err))
+    }
+}
+
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;
