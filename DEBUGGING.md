@@ -1,5 +1,7 @@
 # Debugging mirrord
 
+## mirrord console
+
 Debugging mirrord can get hard since we're running from another app flow, so the fact we're debugging might affect the program and make it unusable/buggy (due to sharing stdout with scripts/other applications).
 
 The recommended way to do it is to use `mirrord-console`. It is a small application that receives log information from different mirrord instances and prints it, controlled via `RUST_LOG` environment variable.
@@ -39,3 +41,23 @@ kubectl logs <YOUR_POD_NAME> | less -R
 ```
 
 where you would replace `<YOUR_POD_NAME>` with the name of the pod.
+
+## Debugging the vscode extension
+In order to debug the vscode extension, first [build the mirrord binary](TESTING.md#build-and-run-mirrord). Then run:
+```bash
+cd vscode-ext
+```
+```bash
+npm install
+npm run compile
+```
+Now you can just open the extension's code in vscode and run. Another vscode window will start. You can set breakpoints
+in the extension's code in the first window, and use the extension in the second window to reach the breakpoints.
+When in debug mode, the extension will automatically use the debug mirrord binary.
+
+If you want to see the layer's logs, [use the console](#mirrord-console) by setting the environment variable in the
+launch configuration of the second window.
+
+## Debugging the JetBrains plugin
+
+TODO

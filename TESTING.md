@@ -173,7 +173,7 @@ py-serv-deployment-ff89b5974-x9tjx   1/1     Running   0          3h8m
 ### Build mirrord-agent Docker Image
 
 ```bash
-docker build -t test . --file mirrord/agent/Dockerfile
+docker buildx build -t test . --file mirrord/agent/Dockerfile
 ```
 
 ```bash
@@ -187,13 +187,19 @@ test                                           latest    5080c20a8222   2 hours 
 
 ### Build and run mirrord
 
-| OSX | `cargo +nightly build --workspace --exclude mirrord-agent` |
-| - | - |
-| **Linux** | **`cargo +nightly build`** |
+#### macOS
+```bash
+scripts/build_fat_mac.sh
+```
 
-Run mirrord with a local process
+#### Linux
+```bash
+cargo +nightly build
+```
 
-Sample web server - `app.js`
+#### Run mirrord with a local process
+
+Sample web server - `app.js` (present in that path in the repo)
 
 <details>
   <summary>sample/node/app.mjs</summary>
@@ -327,4 +333,72 @@ Check the traffic was received by the local process
 2022-06-30T05:17:31.878193Z  WARN mirrord_layer::tcp_mirror: tcp_tunnel -> exiting due to remote stream closed!
 2022-06-30T05:17:31.878255Z DEBUG mirrord_layer::tcp_mirror: tcp_tunnel -> exiting
 OK - GET: Request completed
+```
+
+## Building the vscode extension
+Please note you don't need to create a .vsix file and install it, in order to debug the extension. See
+[the debugging guide](DEBUGGING.md#debugging-the-vscode-extension).
+
+If for some reason you still want to build the extension, here are the instructions:
+
+```commandline
+cd vscode-ext
+```
+
+If you haven't built the mirrord binary yet, [do it now](#build-and-run-mirrord). Then copy the binary into the
+vscode-ext directory. On macOS that would be:
+```commandline
+cp ../target/universal-apple-darwin/debug/mirrord .
+```
+(Change the path on Linux to wherever the binary is)
+
+Then run
+```bash
+npm install
+npm run compile
+vsce package
+```
+
+You should see something like
+```text
+DONE  Packaged: /Users/you/Documents/projects/mirrord/vscode-ext/mirrord-3.34.0.vsix (11 files, 92.14MB)
+```
+
+## Building the JetBrains plugin
+
+First, [build the mirrord binaries](#build-and-run-mirrord) if not yet built. Then:
+
+```bash
+cd intellij-ext
+```
+
+### On macOS
+
+```bash
+cp ../target/universal-apple-darwin/debug/libmirrord_layer.dylib .
+touch libmirrord_layer.so
+cp ../target/universal-apple-darwin/debug/mirrord bin/macos/
+```
+
+### On Linux x86-64
+
+```bash
+cp ../target/debug/libmirrord_layer.so .
+touch libmirrord_layer.dylib
+cp ../target/debug/mirrord bin/linux/x86-64/mirrord
+```
+
+### In order to "cross build"
+Just include all the binaries:
+```text
+libmirrord_layer.dylib
+libmirrord_layer.so
+bin/macos/mirrord
+bin/linux/x86-64/mirrord
+bin/linux/arm64/mirrord
+```
+
+Then build the plugin:
+```bash
+./gradlew buildPlugin
 ```
