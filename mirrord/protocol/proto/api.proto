@@ -9,7 +9,6 @@ message BincodeMessage {
 }
 
 service Agent {
-  rpc ClientMessage (BincodeMessage) returns (Empty) {}
-  rpc DaemonMessage (Empty) returns (stream BincodeMessage) {}
+  rpc LayerConnect (stream BincodeMessage) returns (stream BincodeMessage) {}
 }
 

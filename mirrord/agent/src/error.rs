@@ -32,7 +32,7 @@ pub enum AgentError {
     SendDaemonTcp(#[from] tokio::sync::mpsc::error::SendError<DaemonTcp>),
 
     #[error("DaemonMessage sender failed with `{0}`")]
-    SendDaemonMessage(#[from] tokio::sync::broadcast::error::SendError<DaemonMessage>),
+    SendDaemonMessage(#[from] tokio::sync::mpsc::error::SendError<DaemonMessage>),
 
     #[error("StealerCommand sender failed with `{0}`")]
     TrySendStealerCommand(#[from] tokio::sync::mpsc::error::TrySendError<StealerCommand>),

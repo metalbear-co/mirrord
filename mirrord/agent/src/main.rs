@@ -10,25 +10,17 @@ use std::{
     collections::{HashMap, HashSet},
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
-    sync::Arc,
 };
 
 use cli::parse_args;
-use dns::{dns_worker, DnsRequest};
+use dns::dns_worker;
 use error::{AgentError, Result};
-use futures::{
-    executor,
-    stream::{FuturesUnordered, StreamExt},
-    SinkExt, TryFutureExt,
-};
+use futures::{executor, stream::FuturesUnordered, TryFutureExt};
 use runtime::ContainerInfo;
 use sniffer::{SnifferCommand, TcpConnectionSniffer};
 use tokio::{
-    net::{TcpListener, TcpStream},
-    select,
-    sync::mpsc::{self, Sender},
-    task::JoinHandle,
-    time::{timeout, Duration},
+    net::TcpListener,
+    sync::mpsc::{self},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace};
@@ -36,7 +28,6 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
     cli::Args,
-    client::ClientConnection,
     runtime::{get_container, Container, ContainerRuntime},
     steal::{
         connection::TcpConnectionStealer,
@@ -175,63 +166,55 @@ impl State {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub async fn new_connection(
-        &mut self,
-        stream: TcpStream,
-        sniffer_command_tx: Sender<SnifferCommand>,
-        stealer_command_tx: Sender<StealerCommand>,
-        cancellation_token: CancellationToken,
-        dns_sender: Sender<DnsRequest>,
-        ephemeral_container: bool,
-        pid: Option<u64>,
-        env: HashMap<String, String>,
-    ) -> Result<Option<JoinHandle<u32>>> {
-        match self.new_client().await {
-            Ok(client_id) => {
-                let client = tokio::spawn(async move {
-                    match ClientConnection::create(
-                        client_id,
-                        pid,
-                        ephemeral_container,
-                        sniffer_command_tx,
-                        stealer_command_tx,
-                        dns_sender,
-                        env,
-                        cancellation_token,
-                    )
-                    .and_then(|client| {
-                        let client = Arc::new(client);
-                        async move {
-                            tokio::select! {
-                                ret = client.start() => ret,
-                                ret = client.serve(stream) => ret,
-                            }
-                        }
-                    })
-                    .await
-                    {
-                        Ok(_) => {
-                            trace!(
-                                "ClientConnectionHandler::start -> Client {client_id} disconnected"
-                            );
-                        }
-                        Err(e) => {
-                            error!("ClientConnectionHandler::start -> Client {client_id} disconnected with error: {e}");
-                        }
-                    }
-                    client_id
-                });
-                Ok(Some(client))
-            }
-            Err(AgentError::ConnectionLimitReached) => {
-                error!("start_client -> Ran out of connections, dropping new connection");
-                Ok(None)
-            }
-            // Propagate all errors that are not ConnectionLimitReached.
-            Err(err) => Err(err),
-        }
-    }
+    // #[allow(clippy::too_many_arguments)]
+    // pub async fn new_connection(
+    //     &mut self,
+    //     stream: TcpStream,
+    //     sniffer_command_tx: Sender<SnifferCommand>,
+    //     stealer_command_tx: Sender<StealerCommand>,
+    //     cancellation_token: CancellationToken,
+    //     dns_sender: Sender<DnsRequest>,
+    //     ephemeral_container: bool,
+    //     pid: Option<u64>,
+    //     env: HashMap<String, String>,
+    // ) -> Result<Option<JoinHandle<u32>>> {
+    //     match self.new_client().await {
+    //         Ok(client_id) => {
+    //             let client = tokio::spawn(async move {
+    //                 match ClientConnection::create(
+    //                     client_id,
+    //                     pid,
+    //                     ephemeral_container,
+    //                     sniffer_command_tx,
+    //                     stealer_command_tx,
+    //                     dns_sender,
+    //                     env,
+    //                     cancellation_token,
+    //                 )
+    //                 .and_then(|client| Arc::new(client).serve(stream))
+    //                 .await
+    //                 {
+    //                     Ok(_) => {
+    //                         trace!(
+    //                             "ClientConnectionHandler::start -> Client {client_id}
+    // disconnected"                         );
+    //                     }
+    //                     Err(e) => {
+    //                         error!("ClientConnectionHandler::start -> Client {client_id}
+    // disconnected with error: {e}");                     }
+    //                 }
+    //                 client_id
+    //             });
+    //             Ok(Some(client))
+    //         }
+    //         Err(AgentError::ConnectionLimitReached) => {
+    //             error!("start_client -> Ran out of connections, dropping new connection");
+    //             Ok(None)
+    //         }
+    //         // Propagate all errors that are not ConnectionLimitReached.
+    //         Err(err) => Err(err),
+    //     }
+    // }
 
     fn generate_id(&mut self) -> Option<ClientId> {
         self.index_allocator.next_index()
@@ -341,73 +324,73 @@ async fn start_agent() -> Result<()> {
 
     // For the first client, we use communication_timeout, then we exit when no more
     // no connections.
-    match timeout(
-        Duration::from_secs(args.communication_timeout.into()),
-        listener.accept(),
-    )
-    .await
-    {
-        Ok(Ok((stream, addr))) => {
-            trace!("start -> Connection accepted from {:?}", addr);
-            if let Some(client) = state
-                .new_connection(
-                    stream,
-                    sniffer_command_tx.clone(),
-                    stealer_command_tx.clone(),
-                    cancellation_token.clone(),
-                    dns_sender.clone(),
-                    args.ephemeral_container,
-                    pid,
-                    env.clone(),
-                )
-                .await?
-            {
-                clients.push(client)
-            };
-        }
-        Ok(Err(err)) => {
-            error!("start -> Failed to accept connection: {:?}", err);
-            return Err(err.into());
-        }
-        Err(err) => {
-            error!("start -> Failed to accept first connection: timeout");
-            return Err(err.into());
-        }
-    }
+    // match timeout(
+    //     Duration::from_secs(args.communication_timeout.into()),
+    //     listener.accept(),
+    // )
+    // .await
+    // {
+    //     Ok(Ok((stream, addr))) => {
+    //         trace!("start -> Connection accepted from {:?}", addr);
+    //         if let Some(client) = state
+    //             .new_connection(
+    //                 stream,
+    //                 sniffer_command_tx.clone(),
+    //                 stealer_command_tx.clone(),
+    //                 cancellation_token.clone(),
+    //                 dns_sender.clone(),
+    //                 args.ephemeral_container,
+    //                 pid,
+    //                 env.clone(),
+    //             )
+    //             .await?
+    //         {
+    //             clients.push(client)
+    //         };
+    //     }
+    //     Ok(Err(err)) => {
+    //         error!("start -> Failed to accept connection: {:?}", err);
+    //         return Err(err.into());
+    //     }
+    //     Err(err) => {
+    //         error!("start -> Failed to accept first connection: timeout");
+    //         return Err(err.into());
+    //     }
+    // }
 
     if args.test_error {
         return Err(AgentError::TestError);
     }
 
-    loop {
-        select! {
-            Ok((stream, addr)) = listener.accept() => {
-                trace!("start -> Connection accepted from {:?}", addr);
-                if let Some(client) = state.new_connection(
-                    stream,
-                    sniffer_command_tx.clone(),
-                    stealer_command_tx.clone(),
-                    cancellation_token.clone(),
-                    dns_sender.clone(),
-                    args.ephemeral_container,
-                    pid,
-                    env.clone()
-                ).await? {clients.push(client) };
-            },
-            client = clients.next() => {
-                match client {
-                    Some(client) => {
-                        let client_id = client?;
-                        state.remove_client(client_id).await?;
-                    }
-                    None => {
-                        trace!("Main thread timeout, no clients left.");
-                        break
-                    }
-                }
-            },
-        }
-    }
+    // loop {
+    //     select! {
+    //         Ok((stream, addr)) = listener.accept() => {
+    //             trace!("start -> Connection accepted from {:?}", addr);
+    //             if let Some(client) = state.new_connection(
+    //                 stream,
+    //                 sniffer_command_tx.clone(),
+    //                 stealer_command_tx.clone(),
+    //                 cancellation_token.clone(),
+    //                 dns_sender.clone(),
+    //                 args.ephemeral_container,
+    //                 pid,
+    //                 env.clone()
+    //             ).await? {clients.push(client) };
+    //         },
+    //         client = clients.next() => {
+    //             match client {
+    //                 Some(client) => {
+    //                     let client_id = client?;
+    //                     state.remove_client(client_id).await?;
+    //                 }
+    //                 None => {
+    //                     trace!("Main thread timeout, no clients left.");
+    //                     break
+    //                 }
+    //             }
+    //         },
+    //     }
+    // }
 
     trace!("Agent shutting down.");
     drop(cancel_guard);
