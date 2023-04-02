@@ -51,7 +51,7 @@ cd vscode-ext
 npm install
 npm run compile
 ```
-Now you can just open the extension's code in vscode and run. Another vscode window will start. You can set breakpoints
+Now you can just open the extension's code in vscode and run, using the "Launch Extension" run configuration. Another vscode window will start. You can set breakpoints
 in the extension's code in the first window, and use the extension in the second window to reach the breakpoints.
 When in debug mode, the extension will automatically use the debug mirrord binary.
 
