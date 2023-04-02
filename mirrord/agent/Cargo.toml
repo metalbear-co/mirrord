@@ -19,7 +19,7 @@ containerd-client = {git = "https://github.com/containerd/rust-extensions", rev=
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "macros", "fs", "process"] }
 serde.workspace = true
 serde_json.workspace = true
-pnet = "0.31"
+pnet = "0.33"
 nix.workspace = true
 clap.workspace = true
 mirrord-protocol = { path = "../protocol"}
@@ -31,7 +31,7 @@ tokio-stream = { workspace = true, features = ["sync"] }
 thiserror.workspace = true
 trust-dns-resolver.workspace = true
 num-traits.workspace = true
-bollard = "0.13"
+bollard = "0.14"
 tokio-util.workspace = true
 rand.workspace = true
 streammap-ext.workspace = true

@@ -95,6 +95,9 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          # TODO(alex): update this when https://github.com/rust-lang/rust/issues/109631 is fixed 
+          toolchain: nightly-2023-01-31 
       - run: cargo doc --document-private-items
 
   lint_macos:
@@ -109,7 +112,7 @@ jobs:
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
-          toolchain: nightly-2023-01-31
+          toolchain: nightly-2023-03-29
       # only mirrord, mirrord-sip contain macOS specific, so run clippy on that.
       - run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -D warnings
       - run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -D warnings
@@ -215,7 +218,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{matrix.target}}
-          toolchain: nightly-2023-01-31
+          toolchain: nightly-2023-03-29
       # For now, just verify it compiles.
       - run: cargo build -p mirrord-layer -p mirrord --target=${{matrix.target}}
 
@@ -527,7 +530,6 @@ jobs:
         env:
           CI_BUILD_PLUGIN: true
         run: |
-          cp CHANGELOG.md intellij-ext/
           cd intellij-ext
           chmod +x ./gradlew
           ./gradlew buildPlugin

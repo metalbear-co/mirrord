@@ -155,7 +155,7 @@ impl LayerFileConfig {
 
         match path.extension().and_then(|os_val| os_val.to_str()) {
             Some("json") => Ok(serde_json::from_slice::<Self>(&file[..])?),
-            Some("toml") => Ok(toml::from_slice::<Self>(&file[..])?),
+            Some("toml") => Ok(toml::from_str::<Self>(&String::from_utf8_lossy(&file))?),
             Some("yaml") => Ok(serde_yaml::from_slice::<Self>(&file[..])?),
             _ => Err(ConfigError::UnsupportedFormat),
         }

@@ -8,6 +8,41 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.34.0](https://github.com/metalbear-co/mirrord/tree/3.34.0) - 2023-03-30
+
+
+### Added
+
+- Support for running SIP binaries via the vscode extension, for common
+  configuration types.
+  [#1061](https://github.com/metalbear-co/mirrord/issues/1061)
+
+
+### Changed
+
+- Add the failed connection address on failure to debug easily
+- New IntelliJ icons - feel free to give feedback
+
+
+### Fixed
+
+- Fix internal proxy receiving signals from terminal targeted for the mirrord
+  process/parent process by using setsid
+  [#1232](https://github.com/metalbear-co/mirrord/issues/1232)
+- fix listing pods failing when config file exists on macOS
+  [#1245](https://github.com/metalbear-co/mirrord/issues/1245)
+
+
+### Internal
+
+- Use DashMap instead of Mutex<HashMap> for `SOCKETS`
+  [#1239](https://github.com/metalbear-co/mirrord/issues/1239)
+- Some small changes to make building the JetBrains plugin locally simpler.
+- Update IntelliJ dependencies
+- Update dependencies
+- Update rust and remove unneccessary feature.
+
+
 ## [3.33.1](https://github.com/metalbear-co/mirrord/tree/3.33.1) - 2023-03-28
 
 

@@ -59,6 +59,23 @@ function mirrordFailure(err: any) {
 	});
 }
 
+// Like the Rust MirrordExecution struct.
+class MirrordExecution {
+	env: Map<string, string>;
+	patched_path: string | null;
+
+	constructor(env: Map<string, string>, patched_path: string | null) {
+		this.env = env;
+		this.patched_path = patched_path;
+	}
+
+}
+
+function mirrordExecutionFromJson(data: string): MirrordExecution {
+	let parsed = JSON.parse(data);
+	return new MirrordExecution(parsed["environment"], parsed["patched_path"]);
+}
+
 class MirrordAPI {
 	context: vscode.ExtensionContext;
 	cliPath: string;
@@ -67,8 +84,13 @@ class MirrordAPI {
 		this.context = context;
 		// for easier debugging, use the local mirrord cli if we're in development mode
 		if (context.extensionMode === vscode.ExtensionMode.Development) {
-			const debugPath = path.join(path.dirname(this.context.extensionPath), "target", "debug");
-			this.cliPath = path.join(debugPath, "mirrord");
+			const universalApplePath = path.join(path.dirname(this.context.extensionPath), "target", "universal-apple-darwin", "debug", "mirrord");
+			if (process.platform == "darwin" && fs.existsSync(universalApplePath)) {
+				this.cliPath = universalApplePath;
+			} else {
+				const debugPath = path.join(path.dirname(this.context.extensionPath), "target", "debug");
+				this.cliPath = path.join(debugPath, "mirrord");
+			}
 		} else {
 			if(process.platform === "darwin") { // macos binary is universal for all architectures
 				this.cliPath = path.join(context.extensionPath, 'bin', process.platform, 'mirrord');
@@ -133,15 +155,17 @@ class MirrordAPI {
 	// Run the extension execute sequence
 	// Creating agent and gathering execution runtime (env vars to set)
 	// Has 60 seconds timeout
-	async binaryExecute(target: string | null, configFile: string | null): Promise<Map<string, string> | null> {
+	async binaryExecute(target: string | null, configFile: string | null, executable: string | null): Promise<MirrordExecution | null> {
 		/// Create a promise that resolves when the mirrord process exits
 		return await vscode.window.withProgress({
 			location: vscode.ProgressLocation.Notification,
 			title: "mirrord",
 			cancellable: false
 		}, (progress, _) => {
-			return new Promise<Map<string, string> | null>((resolve, reject) => {
-				setTimeout(() => { reject("Timeout"); }, 60 * 1000);
+			return new Promise<MirrordExecution | null>((resolve, reject) => {
+				setTimeout(() => {
+					reject("Timeout");
+				}, 60 * 1000);
 
 				const args = ["ext"];
 				if (target) {
@@ -149,6 +173,9 @@ class MirrordAPI {
 				}
 				if (configFile) {
 					args.push("-f", configFile);
+				}
+				if (executable) {
+					args.push("-e", executable)
 				}
 				let child = this.spawn(args);
 
@@ -178,8 +205,7 @@ class MirrordAPI {
 						let message;
 						try {
 							message = JSON.parse(rawMessage);
-						}
-						catch (e) {
+						} catch (e) {
 							console.error("Failed to parse message from mirrord: " + data);
 							return;
 						}
@@ -188,8 +214,9 @@ class MirrordAPI {
 						if ((message["name"] === "mirrord preparing to launch") && (message["type"]) === "FinishedTask") {
 							if (message["success"]) {
 								progress.report({message: "mirrord started successfully, launching target."});
+								resolve(mirrordExecutionFromJson(message["message"]));
 								let res = JSON.parse(message["message"]);
-								resolve(res["environment"]);
+								resolve(res);
 							} else {
 								mirrordFailure(null);
 								reject(null);
@@ -314,6 +341,24 @@ export async function activate(context: vscode.ExtensionContext) {
 	};
 }
 
+// Get the name of the field that holds the exectuable in a debug configuration of the given type.
+function getExecutableFieldName(debuggerType: string): keyof vscode.DebugConfiguration{
+	switch (debuggerType) {
+		case "pwa-node":
+		case "node": {
+			return "runtimeExecutable";
+		}
+		case "python": {
+			return "python";
+		}
+		default: {
+			return "program";
+		}
+	}
+
+}
+
+
 class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 	async resolveDebugConfiguration(folder: vscode.WorkspaceFolder | undefined, config: vscode.DebugConfiguration, token: vscode.CancellationToken): Promise<vscode.DebugConfiguration | null | undefined> {
 
@@ -340,13 +385,13 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		let target = null;
 
 		let configPath = await configFilePath();
-		// If target wasn't specified in the config file, let user choose pod from dropdown         
+		// If target wasn't specified in the config file, let user choose pod from dropdown
 		if (!await isTargetInFile()) {
 			let targets = await mirrordApi.listTargets(configPath);
 			let targetName = await vscode.window.showQuickPick(targets, { placeHolder: 'Select a target path to mirror' });
 
 			if (targetName) {
-				target = targetName;	
+				target = targetName;
 			}
 		}
 
@@ -363,7 +408,23 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		// todo: find better way to resolve the exact ports.
 		config.env["DEBUGGER_IGNORE_PORTS_PATCH"] = "45000-65535";
 
-		let env = await mirrordApi.binaryExecute(target, configPath);
+		let executableFieldName = getExecutableFieldName(config.type);
+
+		let executionInfo;
+		if (executableFieldName in config) {
+			executionInfo = await mirrordApi.binaryExecute(target, configPath, config[executableFieldName]);
+		} else {
+			// Even `program` is not in config, so no idea what's the executable in the end.
+			executionInfo = await mirrordApi.binaryExecute(target, configPath, null);
+		}
+
+		// For sidestepping SIP on macOS. If we didn't patch, we don't change that config value.
+		let patched_path = executionInfo?.patched_path;
+		if (executableFieldName in config) {
+			config[executableFieldName] = patched_path;
+		}
+
+		let env = executionInfo?.env;
 		config.env = Object.assign({}, config.env, env);
 
 		config.env["__MIRRORD_EXT_INJECTED"] = 'true';

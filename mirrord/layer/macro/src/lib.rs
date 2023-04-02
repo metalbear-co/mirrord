@@ -153,7 +153,8 @@ pub fn hook_guard_fn(
                 crate::detour::HookFn::default()
         };
 
-        let mut modified_function = proper_function.clone();
+        let statements = proper_function.block.stmts.to_vec();
+        let mut modified_function = proper_function;
         modified_function.block.stmts = Block::parse_within
             .parse2(quote!(
                 let __bypass = crate::detour::DetourGuard::new();
@@ -162,10 +163,7 @@ pub fn hook_guard_fn(
                 }
             ))
             .unwrap();
-        modified_function
-            .block
-            .stmts
-            .extend(proper_function.block.stmts.iter().cloned());
+        modified_function.block.stmts.extend(statements);
 
         let output = quote! {
             #type_alias;

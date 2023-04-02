@@ -1,12 +1,13 @@
 //! We implement each hook function in a safe function as much as possible, having the unsafe do the
 //! absolute minimum
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{Arc, LazyLock},
 };
 
+use dashmap::DashMap;
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
@@ -23,8 +24,7 @@ pub(super) mod hooks;
 pub(crate) mod id;
 pub(crate) mod ops;
 
-pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock::new(DashMap::new);
 
 /// Holds the connections that have yet to be [`accept`](ops::accept)ed.
 ///
@@ -38,8 +38,7 @@ pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> =
 ///
 /// Finally, we remove a socket's queue when the socket's `fd` is closed in
 /// [`close_layer_fd`](crate::close_layer_fd).
-pub static CONNECTION_QUEUE: LazyLock<Mutex<ConnectionQueue>> =
-    LazyLock::new(|| Mutex::new(ConnectionQueue::default()));
+pub static CONNECTION_QUEUE: LazyLock<ConnectionQueue> = LazyLock::new(ConnectionQueue::default);
 
 /// Struct sent over the socket once created to pass metadata to the hook
 #[derive(Debug)]
@@ -53,7 +52,7 @@ pub struct SocketInformation {
 /// poll_agent loop inserts connection data into this queue, and accept reads it.
 #[derive(Debug, Default)]
 pub struct ConnectionQueue {
-    connections: HashMap<SocketId, VecDeque<SocketInformation>>,
+    connections: DashMap<SocketId, VecDeque<SocketInformation>>,
 }
 
 impl ConnectionQueue {
@@ -61,7 +60,7 @@ impl ConnectionQueue {
     ///
     /// See [`TcpHandler::create_local_stream`](crate::tcp::TcpHandler::create_local_stream).
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) fn add(&mut self, id: SocketId, info: SocketInformation) {
+    pub(crate) fn add(&self, id: SocketId, info: SocketInformation) {
         self.connections.entry(id).or_default().push_back(info);
     }
 
@@ -69,7 +68,7 @@ impl ConnectionQueue {
     ///
     /// See [`ops::accept].
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) fn pop_front(&mut self, id: SocketId) -> Option<SocketInformation> {
+    pub(crate) fn pop_front(&self, id: SocketId) -> Option<SocketInformation> {
         self.connections.get_mut(&id)?.pop_front()
     }
 
@@ -77,8 +76,8 @@ impl ConnectionQueue {
     ///
     /// See [`crate::close_layer_fd].
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) fn remove(&mut self, id: SocketId) -> Option<VecDeque<SocketInformation>> {
-        self.connections.remove(&id)
+    pub(crate) fn remove(&self, id: SocketId) -> Option<VecDeque<SocketInformation>> {
+        self.connections.remove(&id).map(|(_, v)| v)
     }
 }
 

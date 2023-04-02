@@ -885,8 +885,8 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         .is_active();
 
     // Remove from sockets, also removing the `ConnectionQueue` associated with the socket.
-    if let Some(socket) = SOCKETS.lock().unwrap().remove(&fd) {
-        CONNECTION_QUEUE.lock().unwrap().remove(socket.id);
+    if let Some((_, socket)) = SOCKETS.remove(&fd) {
+        CONNECTION_QUEUE.remove(socket.id);
     } else if file_mode_active {
         OPEN_FILES.remove(&fd);
     }

@@ -101,7 +101,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
 
     let new_socket = UserSocket::new(domain, type_, protocol, Default::default(), socket_kind);
 
-    SOCKETS.lock()?.insert(socket_fd, Arc::new(new_socket));
+    SOCKETS.insert(socket_fd, Arc::new(new_socket));
 
     Detour::Success(socket_fd)
 }
@@ -124,10 +124,9 @@ pub(super) fn bind(
 
     let mut socket = {
         SOCKETS
-            .lock()?
             .remove(&sockfd)
             .ok_or(Bypass::LocalFdNotFound(sockfd))
-            .and_then(|socket| {
+            .and_then(|(_, socket)| {
                 if !matches!(socket.state, SocketState::Initialized) {
                     Err(Bypass::InvalidState(sockfd))
                 } else {
@@ -191,7 +190,7 @@ pub(super) fn bind(
         address,
     });
 
-    SOCKETS.lock()?.insert(sockfd, socket);
+    SOCKETS.insert(sockfd, socket);
 
     Detour::Success(bind_result)
 }
@@ -200,10 +199,10 @@ pub(super) fn bind(
 /// later be routed to the fake local port.
 #[tracing::instrument(level = "trace")]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
-    let mut socket: Arc<UserSocket> = {
+    let mut socket = {
         SOCKETS
-            .lock()?
             .remove(&sockfd)
+            .map(|(_, socket)| socket)
             .bypass(Bypass::LocalFdNotFound(sockfd))?
     };
 
@@ -231,7 +230,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
                 address,
             });
 
-            SOCKETS.lock()?.insert(sockfd, socket);
+            SOCKETS.insert(sockfd, socket);
 
             Detour::Success(listen_result)
         }
@@ -300,7 +299,7 @@ fn connect_outgoing<const TYPE: ConnectType>(
     };
 
     Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
-    SOCKETS.lock()?.insert(sockfd, user_socket_info);
+    SOCKETS.insert(sockfd, user_socket_info);
 
     Detour::Success(connect_result)
 }
@@ -327,9 +326,8 @@ pub(super) fn connect(
         .get()
         .expect("Should be set during initialization!");
 
-    let user_socket_info = {
+    let (_, user_socket_info) = {
         SOCKETS
-            .lock()?
             .remove(&sockfd)
             .ok_or(Bypass::LocalFdNotFound(sockfd))?
     };
@@ -349,7 +347,8 @@ pub(super) fn connect(
                 // application is now trying to connect to - then don't forward this connection
                 // to the agent, and instead of connecting to the requested address, connect to
                 // the actual address where the application is locally listening.
-                SOCKETS.lock()?.values().find_map(|socket| {
+                SOCKETS.iter().find_map(|entry| {
+                    let socket = entry.value();
                     if let SocketState::Listening(Bound {
                         requested_address,
                         address,
@@ -461,10 +460,9 @@ pub(super) fn getpeername(
 ) -> Detour<i32> {
     let remote_address = {
         SOCKETS
-            .lock()?
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
-            .and_then(|socket| match &socket.state {
+            .and_then(|entry| match &entry.value().state {
                 SocketState::Connected(connected) => {
                     Detour::Success(connected.remote_address.clone())
                 }
@@ -485,10 +483,9 @@ pub(super) fn getsockname(
 ) -> Detour<i32> {
     let local_address = {
         SOCKETS
-            .lock()?
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
-            .and_then(|socket| match &socket.state {
+            .and_then(|entry| match &entry.value().state {
                 SocketState::Connected(connected) => {
                     Detour::Success(connected.local_address.clone())
                 }
@@ -516,7 +513,6 @@ pub(super) fn accept(
 ) -> Detour<RawFd> {
     let (id, domain, protocol, type_) = {
         SOCKETS
-            .lock()?
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
@@ -529,7 +525,6 @@ pub(super) fn accept(
 
     let (local_address, remote_address) = {
         CONNECTION_QUEUE
-            .lock()?
             .pop_front(id)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .map(|socket| {
@@ -548,7 +543,7 @@ pub(super) fn accept(
 
     fill_address(address, address_len, remote_address.try_into()?)?;
 
-    SOCKETS.lock()?.insert(new_fd, Arc::new(new_socket));
+    SOCKETS.insert(new_fd, Arc::new(new_socket));
 
     Detour::Success(new_fd)
 }
@@ -572,24 +567,21 @@ pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), Hoo
 /// Extra relevant for node on macos.
 #[tracing::instrument(level = "trace")]
 pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
-    {
-        let mut sockets = SOCKETS.lock()?;
-        if let Some(socket) = sockets.get(&fd).cloned() {
-            sockets.insert(dup_fd as RawFd, socket);
+    if let Some(socket) = SOCKETS.get(&fd).map(|entry| entry.value().clone()) {
+        SOCKETS.insert(dup_fd as RawFd, socket);
 
-            if SWITCH_MAP {
-                OPEN_FILES.remove(&dup_fd);
-            }
-
-            return Ok(());
+        if SWITCH_MAP {
+            OPEN_FILES.remove(&dup_fd);
         }
-    } // Drop sockets, free Mutex.
+
+        return Ok(());
+    }
 
     if let Some(file) = OPEN_FILES.view(&fd, |_, file| file.clone()) {
         OPEN_FILES.insert(dup_fd as RawFd, file);
 
         if SWITCH_MAP {
-            SOCKETS.lock()?.remove(&dup_fd);
+            SOCKETS.remove(&dup_fd);
         }
     }
 
@@ -662,7 +654,6 @@ pub(super) fn getaddrinfo(
 
     // Convert `service` into a port.
     let service = service.map_or(0, |s| s.parse().unwrap_or_default());
-    let mut addrinfo_set = MANAGED_ADDRINFO.lock()?;
     // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
     let result = addr_info_list
         .into_iter()
@@ -691,7 +682,7 @@ pub(super) fn getaddrinfo(
         .map(Box::new)
         .map(Box::into_raw)
         .map(|raw| {
-            addrinfo_set.insert(raw as usize);
+            MANAGED_ADDRINFO.insert(raw as usize);
             raw
         })
         .reduce(|current, mut previous| {

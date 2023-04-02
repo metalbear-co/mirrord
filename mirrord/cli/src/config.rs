@@ -264,6 +264,9 @@ pub(super) struct ExtensionExecArgs {
     /// Specify target
     #[arg(short = 't')]
     pub target: Option<String>,
+    /// User executable - the executable the layer is going to be injected to.
+    #[arg(short = 'e')]
+    pub executable: Option<String>,
 }
 
 #[derive(Args, Debug)]

@@ -38,7 +38,7 @@ pub(crate) async fn connect_to_proxy(
     let stream = match TcpStream::connect(addr).await {
         Ok(stream) => stream,
         Err(e) => {
-            error!("Couldn't connect to internal proxy: {e:?}");
+            error!("Couldn't connect to internal proxy: {e:?}, {addr:?}");
             graceful_exit!("{FAIL_STILL_STUCK:?}");
         }
     };
