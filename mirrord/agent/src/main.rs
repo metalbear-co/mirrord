@@ -11,11 +11,9 @@ use std::{
     collections::{HashMap, HashSet},
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
-    sync::Arc,
 };
 
 use actix_codec::Framed;
-use async_trait::async_trait;
 use cli::parse_args;
 use dns::{dns_worker, DnsRequest};
 use error::{AgentError, Result};
@@ -25,10 +23,7 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
 };
-use mirrord_protocol::{
-    api::{agent_server, BincodeMessage, Empty},
-    ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
-};
+use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest};
 use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
 use runtime::ContainerInfo;
 use sniffer::{SnifferCommand, TcpConnectionSniffer, TcpSnifferApi};
@@ -36,14 +31,10 @@ use steal::api::TcpStealerApi;
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
-    sync::{
-        mpsc::{self, Sender},
-        Mutex,
-    },
+    sync::mpsc::{self, Sender},
     task::JoinHandle,
     time::{timeout, Duration},
 };
-use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
@@ -72,6 +63,38 @@ mod runtime;
 mod sniffer;
 mod steal;
 mod util;
+
+#[cfg(not(target_os = "linux"))]
+mod iptables {
+    use super::*;
+
+    pub struct NoIpt;
+
+    impl crate::steal::ip_tables::IPTables for NoIpt {
+        fn create_chain(&self, _: &str) -> Result<()> {
+            todo!()
+        }
+        fn remove_chain(&self, _: &str) -> Result<()> {
+            todo!()
+        }
+        fn add_rule(&self, _: &str, _: &str) -> Result<()> {
+            todo!()
+        }
+        fn insert_rule(&self, _: &str, _: &str, _: i32) -> Result<()> {
+            todo!()
+        }
+        fn list_rules(&self, _: &str) -> Result<Vec<String>> {
+            todo!()
+        }
+        fn remove_rule(&self, _: &str, _: &str) -> Result<()> {
+            todo!()
+        }
+    }
+
+    pub fn new(_: bool) -> Result<NoIpt> {
+        Ok(NoIpt)
+    }
+}
 
 const CHANNEL_SIZE: usize = 1024;
 
@@ -449,55 +472,6 @@ impl ClientConnectionHandler {
             }
         }
         Ok(true)
-    }
-}
-
-struct ClientConnectionMutex(Arc<Mutex<ClientConnectionHandler>>);
-
-#[async_trait]
-impl agent_server::Agent for ClientConnectionMutex {
-    type DaemonMessageStream = ReceiverStream<Result<BincodeMessage, tonic::Status>>;
-
-    async fn client_message(
-        &self,
-        request: tonic::Request<BincodeMessage>,
-    ) -> Result<tonic::Response<Empty>, tonic::Status> {
-        let message = request.into_inner().as_bincode().unwrap();
-
-        self.0
-            .lock()
-            .await
-            .handle_client_message(message)
-            .await
-            .map_err(|err| tonic::Status::from_error(Box::new(err)))?;
-
-        Ok(tonic::Response::new(Empty::default()))
-    }
-
-    async fn daemon_message(
-        &self,
-        request: tonic::Request<Empty>,
-    ) -> Result<tonic::Response<Self::DaemonMessageStream>, tonic::Status> {
-        let message_recev = self.0.lock().await.stream_reciver.clone();
-        let (tx, rx) = mpsc::channel(1000);
-
-        tokio::spawn(async move {
-            while let Some(message) = message_recev.recv() {
-                if tx
-                    .send(
-                        BincodeMessage::from_bincode(message)
-                            .map_err(|err| tonic::Status::from_error(Box::new(err))),
-                    )
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
-
-        let stream = ReceiverStream::new(rx);
-
-        Ok(tonic::Response::new(stream))
     }
 }
 

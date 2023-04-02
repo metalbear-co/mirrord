@@ -13,6 +13,7 @@ use mirrord_protocol::{
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::sync::CancellationToken;
+use tower::Service;
 use tracing::{debug, error, trace, warn};
 
 use crate::{
