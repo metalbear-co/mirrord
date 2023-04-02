@@ -27,7 +27,7 @@ actix-codec.workspace = true
 futures.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-tokio-stream.workspace = true
+tokio-stream = { workspace = true, features = ["sync"] }
 thiserror.workspace = true
 trust-dns-resolver.workspace = true
 num-traits.workspace = true

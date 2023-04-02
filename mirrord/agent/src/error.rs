@@ -5,7 +5,7 @@ use mirrord_protocol::{
         LayerConnect,
     },
     tcp::{DaemonTcp, LayerTcpSteal},
-    FileRequest, FileResponse, Port,
+    DaemonMessage, FileRequest, FileResponse, Port,
 };
 use thiserror::Error;
 
@@ -30,6 +30,9 @@ pub enum AgentError {
 
     #[error("DaemonTcp sender failed with `{0}`")]
     SendDaemonTcp(#[from] tokio::sync::mpsc::error::SendError<DaemonTcp>),
+
+    #[error("DaemonMessage sender failed with `{0}`")]
+    SendDaemonMessage(#[from] tokio::sync::broadcast::error::SendError<DaemonMessage>),
 
     #[error("StealerCommand sender failed with `{0}`")]
     TrySendStealerCommand(#[from] tokio::sync::mpsc::error::TrySendError<StealerCommand>),
