@@ -63,8 +63,7 @@ If you want to see the layer's logs, [use the console](#mirrord-console) by sett
             }
 
 ```
- in the
-launch configuration of the second window.
+in the launch configuration of the second window.
 
 ## Debugging the JetBrains plugin
 
