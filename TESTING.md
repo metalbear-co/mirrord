@@ -199,7 +199,7 @@ cargo +nightly build
 
 #### Run mirrord with a local process
 
-Sample web server - `app.js` (present in that path in the repo)
+Sample web server - `app.js` (present at `sample/node/app.mjs` in the repo)
 
 <details>
   <summary>sample/node/app.mjs</summary>
