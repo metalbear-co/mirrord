@@ -55,7 +55,15 @@ Now you can just open the extension's code in vscode and run, using the "Launch 
 in the extension's code in the first window, and use the extension in the second window to reach the breakpoints.
 When in debug mode, the extension will automatically use the debug mirrord binary.
 
-If you want to see the layer's logs, [use the console](#mirrord-console) by setting the environment variable in the
+If you want to see the layer's logs, [use the console](#mirrord-console) by setting
+```json
+            "env": {
+                "RUST_LOG": "warn,mirrord=trace",
+                "MIRRORD_CONSOLE_ADDR": "127.0.0.1:11233"
+            }
+
+```
+ in the
 launch configuration of the second window.
 
 ## Debugging the JetBrains plugin
