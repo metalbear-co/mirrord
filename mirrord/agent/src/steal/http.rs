@@ -15,29 +15,16 @@ use bytes::Bytes;
 use dashmap::DashMap;
 use fancy_regex::Regex;
 use http_body_util::Full;
-use hyper::{
-    body::Incoming,
-    server::{
-        self,
-        conn::{http1, http2},
-    },
-    Request, Response,
-};
+use hyper::{body::Incoming, Request, Response};
 use mirrord_protocol::ConnectionId;
 use tokio::{
-    io::{copy_bidirectional, AsyncWriteExt},
     net::TcpStream,
     sync::{mpsc::Sender, oneshot},
 };
-use tracing::{error, trace};
 
 use self::{
-    error::HttpTrafficError,
-    filter::{close_connection, TokioExecutor, MINIMAL_HEADER_SIZE},
-    hyper_handler::{HyperHandler, RawHyperConnection},
+    error::HttpTrafficError, filter::MINIMAL_HEADER_SIZE, hyper_handler::RawHyperConnection,
     reversible_stream::ReversibleStream,
-    v1::HttpV1,
-    v2::HttpV2,
 };
 use crate::{
     steal::{http::filter::filter_task, HandlerHttpRequest},
