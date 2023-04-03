@@ -242,24 +242,6 @@ pub struct ClientConnectionHandler {
 impl agent_server::Agent for ClientConnectionHandler {
     type LayerConnectStream = streaming::DaemonMessageStream;
 
-    // async fn client_message(
-    //     &self,
-    //     request: tonic::Request<BincodeMessage>,
-    // ) -> Result<tonic::Response<Empty>, tonic::Status> {
-    //     let message = request.into_inner().as_bincode().map_err(|err| {
-    //         tonic::Status::invalid_argument(format!("Unable to decode message {err}"))
-    //     })?;
-
-    //     Ok(tonic::Response::new(Empty::default()))
-    // }
-
-    // async fn daemon_message(
-    //     &self,
-    //     _request: tonic::Request<Empty>,
-    // ) -> Result<tonic::Response<Self::DaemonMessageStream>, tonic::Status> {
-
-    // }
-
     async fn layer_connect(
         &self,
         request: tonic::Request<tonic::Streaming<BincodeMessage>>,
