@@ -1,1 +1,0 @@
-Update IntelliJ dependencies

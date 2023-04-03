@@ -1,1 +1,0 @@
-New IntelliJ icons - feel free to give feedback
