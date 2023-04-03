@@ -14,6 +14,7 @@ use http_body_util::Full;
 use hyper::{
     body::Incoming,
     client::{self, conn::http2::SendRequest},
+    server::conn::http2,
     service::Service,
     Request, Response,
 };
@@ -25,9 +26,9 @@ use tokio::{
 use tracing::error;
 
 use super::{
-    filter::TokioExecutor,
+    filter::{close_connection, TokioExecutor},
     hyper_handler::{collect_response, prepare_response, HyperHandler},
-    HttpV, RawHyperConnection,
+    DefaultReversibleStream, HttpV, RawHyperConnection,
 };
 use crate::{
     steal::{http::error::HttpTrafficError, HandlerHttpRequest},
@@ -42,6 +43,30 @@ pub(crate) struct HttpV2;
 
 impl HttpV for HttpV2 {
     type Sender = SendRequest<Incoming>;
+
+    async fn serve_connection(
+        stream: DefaultReversibleStream,
+        original_destination: SocketAddr,
+        connection_id: ConnectionId,
+        filters: Arc<DashMap<ClientId, Regex>>,
+        matched_tx: Sender<HandlerHttpRequest>,
+        connection_close_sender: Sender<ConnectionId>,
+    ) -> Result<(), HttpTrafficError> {
+        http2::Builder::new(TokioExecutor::default())
+            .serve_connection(
+                stream,
+                HyperHandler::<HttpV2>::new(
+                    filters,
+                    matched_tx,
+                    connection_id,
+                    original_destination.port(),
+                    original_destination,
+                ),
+            )
+            .await?;
+
+        close_connection(connection_close_sender, connection_id).await
+    }
 
     #[tracing::instrument(level = "trace")]
     async fn connect(

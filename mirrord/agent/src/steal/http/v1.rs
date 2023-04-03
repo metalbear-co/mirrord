@@ -15,11 +15,13 @@ use hyper::{
     body::Incoming,
     client::{self, conn::http1::SendRequest},
     header::UPGRADE,
+    server::{self, conn::http1},
     service::Service,
     Request, Response,
 };
 use mirrord_protocol::{ConnectionId, Port};
 use tokio::{
+    io::{copy_bidirectional, AsyncWriteExt},
     macros::support::poll_fn,
     net::TcpStream,
     sync::{mpsc::Sender, oneshot},
@@ -27,8 +29,9 @@ use tokio::{
 use tracing::error;
 
 use super::{
+    filter::close_connection,
     hyper_handler::{collect_response, prepare_response, HyperHandler},
-    HttpV, RawHyperConnection,
+    DefaultReversibleStream, HttpV, RawHyperConnection,
 };
 use crate::{
     steal::{http::error::HttpTrafficError, HandlerHttpRequest},
@@ -53,6 +56,60 @@ impl HttpV1 {
 
 impl HttpV for HttpV1 {
     type Sender = SendRequest<Incoming>;
+
+    async fn serve_connection(
+        stream: DefaultReversibleStream,
+        original_destination: SocketAddr,
+        connection_id: ConnectionId,
+        filters: Arc<DashMap<ClientId, Regex>>,
+        matched_tx: Sender<HandlerHttpRequest>,
+        connection_close_sender: Sender<ConnectionId>,
+    ) -> Result<(), HttpTrafficError> {
+        // Contains the upgraded interceptor connection, if any.
+        let (upgrade_tx, upgrade_rx) = oneshot::channel::<RawHyperConnection>();
+
+        // We have to keep the connection alive to handle a possible upgrade request
+        // manually.
+        let server::conn::http1::Parts {
+            io: mut client_agent, // i.e. browser-agent connection
+            read_buf: agent_unprocessed,
+            ..
+        } = http1::Builder::new()
+            .preserve_header_case(true)
+            .serve_connection(
+                stream,
+                HyperHandler::<HttpV1>::new(
+                    filters,
+                    matched_tx,
+                    connection_id,
+                    original_destination.port(),
+                    original_destination,
+                    Some(upgrade_tx),
+                ),
+            )
+            .without_shutdown()
+            .await?;
+
+        if let Ok(RawHyperConnection {
+            stream: mut agent_remote, // i.e. agent-original destination connection
+            unprocessed_bytes: client_unprocessed,
+        }) = upgrade_rx.await
+        {
+            // Send the data we received from the client, and have not processed as
+            // HTTP, to the original destination.
+            agent_remote.write_all(&agent_unprocessed).await?;
+
+            // Send the data we received from the original destination, and have not
+            // processed as HTTP, to the client.
+            client_agent.write_all(&client_unprocessed).await?;
+
+            // Now both the client and original destinations should be in sync, so we
+            // can just copy the bytes from one into the other.
+            copy_bidirectional(&mut client_agent, &mut agent_remote).await?;
+        }
+
+        close_connection(connection_close_sender, connection_id).await
+    }
 
     #[tracing::instrument(level = "trace")]
     async fn connect(

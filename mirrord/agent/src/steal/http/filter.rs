@@ -18,10 +18,12 @@ use dashmap::DashMap;
 use fancy_regex::Regex;
 use hyper::rt::Executor;
 use mirrord_protocol::ConnectionId;
-use tokio::{net::TcpStream, sync::mpsc::Sender};
+use tokio::{io::copy_bidirectional, net::TcpStream, sync::mpsc::Sender};
 use tracing::{error, trace};
 
-use super::{error::HttpTrafficError, DefaultReversibleStream, HttpVersion};
+use super::{
+    error::HttpTrafficError, v1::HttpV1, v2::HttpV2, DefaultReversibleStream, HttpV, HttpVersion,
+};
 use crate::{steal::HandlerHttpRequest, util::ClientId};
 
 /// Default start of an HTTP/2 request.
@@ -97,19 +99,75 @@ pub(super) async fn filter_task(
     .await
     {
         Ok(mut reversible_stream) => {
-            HttpVersion::new(
+            match HttpVersion::new(
                 reversible_stream.get_header(),
                 &H2_PREFACE[..MINIMAL_HEADER_SIZE],
-            )
-            .serve_connection(
-                reversible_stream,
-                original_destination,
-                connection_id,
-                filters,
-                matched_tx,
-                connection_close_sender,
-            )
-            .await
+            ) {
+                HttpVersion::V1 => {
+                    HttpV1::serve_connection(
+                        reversible_stream,
+                        original_destination,
+                        connection_id,
+                        filters,
+                        matched_tx,
+                        connection_close_sender,
+                    )
+                    .await
+                }
+                HttpVersion::V2 => {
+                    HttpV2::serve_connection(
+                        reversible_stream,
+                        original_destination,
+                        connection_id,
+                        filters,
+                        matched_tx,
+                        connection_close_sender,
+                    )
+                    .await
+                }
+                HttpVersion::NotHttp => {
+                    trace!(
+                        "Got a connection with unsupported protocol version, passing it through \
+                        to its original destination."
+                    );
+                    match TcpStream::connect(original_destination).await {
+                        Ok(mut interceptor_to_original) => {
+                            match copy_bidirectional(
+                                &mut reversible_stream,
+                                &mut interceptor_to_original,
+                            )
+                            .await
+                            {
+                                Ok((incoming, outgoing)) => {
+                                    trace!(
+                                        "Forwarded {incoming} incoming bytes and {outgoing} \
+                                        outgoing bytes in passthrough connection"
+                                    );
+
+                                    Ok(())
+                                }
+                                Err(err) => {
+                                    error!(
+                                        "Encountered error while forwarding unsupported \
+                                    connection to its original destination: {err:?}"
+                                    );
+
+                                    Err(err)?
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            error!(
+                            "Could not connect to original destination {original_destination:?}\
+                                 . Received a connection with an unsupported protocol version to a \
+                                 filtered HTTP port, but cannot forward the connection because of \
+                                 the connection error: {err:?}"
+                        );
+                            Err(err)?
+                        }
+                    }
+                }
+            }
         }
 
         Err(read_error) => {
