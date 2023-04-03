@@ -1,12 +1,13 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use async_trait::async_trait;
+use futures::Stream;
 use mirrord_protocol::{
     api::{agent_server, BincodeMessage},
     codec::{ClientMessage, DaemonMessage},
     GetEnvVarsRequest,
 };
-use tokio::{net::TcpStream, sync::mpsc};
+use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, trace, warn};
@@ -42,7 +43,10 @@ pub struct ClientConnection<S> {
     cancellation_token: CancellationToken,
 }
 
-impl<S> ClientConnection<S> {
+impl<S> ClientConnection<S>
+where
+    S: Stream<Item = Result<BincodeMessage, tonic::Status>> + Unpin,
+{
     pub async fn create(
         id: ClientId,
         client_messages: streaming::ClientMessageStream<S>,
@@ -96,9 +100,17 @@ impl<S> ClientConnection<S> {
         })
     }
 
-    pub async fn start(&mut self) -> Result<()> {
+    pub async fn start(&mut self) -> Result<(), tonic::Status> {
         loop {
             tokio::select! {
+                message = self.client_messages.next() => {
+                    match message {
+                        Some(message) => self.handle_client_message(message?).await?,
+                        None => {
+                            break
+                        }
+                    }
+                }
                 // poll the sniffer API only when it's available
                 // exit when it stops (means something bad happened if
                 // it ran and then stopped)
@@ -208,21 +220,6 @@ impl<S> ClientConnection<S> {
         Ok(())
     }
 
-    pub async fn serve(self: Arc<Self>, tcp_stream: TcpStream) -> Result<()> {
-        // let service = ServiceBuilder::new().service(AgentServer::from_arc(self));
-
-        // if let Err(http_err) = http1::Builder::new()
-        //     .keep_alive(true)
-        //     .serve_connection(tcp_stream, service)
-        //     .await
-        // {
-        //     eprintln!("Error while serving HTTP connection: {http_err}");
-        // }
-
-        // Ok(())
-        todo!()
-    }
-
     async fn respond(&self, message: DaemonMessage) -> Result<()> {
         self.stream_responce.send(message).await?;
 
@@ -230,7 +227,16 @@ impl<S> ClientConnection<S> {
     }
 }
 
-pub struct ClientConnectionHandler {}
+pub struct ClientConnectionHandler {
+    id: ClientId,
+    pid: Option<u64>,
+    ephemeral: bool,
+    sniffer_command_sender: mpsc::Sender<SnifferCommand>,
+    stealer_command_sender: mpsc::Sender<StealerCommand>,
+    dns_sender: mpsc::Sender<DnsRequest>,
+    env: HashMap<String, String>,
+    cancellation_token: CancellationToken,
+}
 
 #[async_trait]
 impl agent_server::Agent for ClientConnectionHandler {
@@ -263,15 +269,19 @@ impl agent_server::Agent for ClientConnectionHandler {
         let in_stream = streaming::ClientMessageStream(request.into_inner());
         let out_stream = streaming::DaemonMessageStream(ReceiverStream::new(response_receiver));
 
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    message = in_stream.next() => {
-
-                    }
-                }
-            }
-        });
+        let connection = ClientConnection::create(
+            self.id,
+            in_stream,
+            response_sender,
+            self.pid,
+            self.ephemeral,
+            self.sniffer_command_sender.clone(),
+            self.stealer_command_sender.clone(),
+            self.dns_sender.clone(),
+            self.env.clone(),
+            self.cancellation_token.child_token(),
+        )
+        .await?;
 
         Ok(tonic::Response::new(out_stream))
     }

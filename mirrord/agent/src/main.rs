@@ -320,7 +320,7 @@ async fn start_agent() -> Result<()> {
     // `wait_for_agent_startup`. If you change this then mirrord fails to initialize.
     println!("agent ready");
 
-    let mut clients = FuturesUnordered::new();
+    // let mut clients = FuturesUnordered::new();
 
     // For the first client, we use communication_timeout, then we exit when no more
     // no connections.
