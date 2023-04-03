@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use futures::Stream;
 use mirrord_protocol::{
-    api::{agent_server, BincodeMessage},
+    api::{agent_server, agent_server::AgentServer, BincodeMessage},
     codec::{ClientMessage, DaemonMessage},
     GetEnvVarsRequest,
 };
-use tokio::sync::mpsc;
+use tokio::{net::TcpStream, sync::mpsc};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, trace, warn};
@@ -236,6 +236,36 @@ pub struct ClientConnectionHandler {
     dns_sender: mpsc::Sender<DnsRequest>,
     env: HashMap<String, String>,
     cancellation_token: CancellationToken,
+}
+
+impl ClientConnectionHandler {
+    pub async fn new(
+        id: ClientId,
+        pid: Option<u64>,
+        ephemeral: bool,
+        sniffer_command_sender: mpsc::Sender<SnifferCommand>,
+        stealer_command_sender: mpsc::Sender<StealerCommand>,
+        dns_sender: mpsc::Sender<DnsRequest>,
+        env: HashMap<String, String>,
+        cancellation_token: CancellationToken,
+    ) -> Self {
+        ClientConnectionHandler {
+            id,
+            pid,
+            ephemeral,
+            sniffer_command_sender,
+            stealer_command_sender,
+            dns_sender,
+            env,
+            cancellation_token,
+        }
+    }
+
+    pub async fn serve(self, tcp_stream: TcpStream) -> Result<()> {
+        let service = AgentServer::new(self);
+
+        todo!()
+    }
 }
 
 #[async_trait]

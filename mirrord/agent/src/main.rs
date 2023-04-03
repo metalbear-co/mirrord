@@ -19,8 +19,9 @@ use futures::{executor, stream::FuturesUnordered, TryFutureExt};
 use runtime::ContainerInfo;
 use sniffer::{SnifferCommand, TcpConnectionSniffer};
 use tokio::{
-    net::TcpListener,
-    sync::mpsc::{self},
+    net::{TcpListener, TcpStream},
+    sync::mpsc::{self, Sender},
+    task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace};
@@ -28,6 +29,8 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
     cli::Args,
+    client::ClientConnectionHandler,
+    dns::DnsRequest,
     runtime::{get_container, Container, ContainerRuntime},
     steal::{
         connection::TcpConnectionStealer,
@@ -166,55 +169,59 @@ impl State {
         }
     }
 
-    // #[allow(clippy::too_many_arguments)]
-    // pub async fn new_connection(
-    //     &mut self,
-    //     stream: TcpStream,
-    //     sniffer_command_tx: Sender<SnifferCommand>,
-    //     stealer_command_tx: Sender<StealerCommand>,
-    //     cancellation_token: CancellationToken,
-    //     dns_sender: Sender<DnsRequest>,
-    //     ephemeral_container: bool,
-    //     pid: Option<u64>,
-    //     env: HashMap<String, String>,
-    // ) -> Result<Option<JoinHandle<u32>>> {
-    //     match self.new_client().await {
-    //         Ok(client_id) => {
-    //             let client = tokio::spawn(async move {
-    //                 match ClientConnection::create(
-    //                     client_id,
-    //                     pid,
-    //                     ephemeral_container,
-    //                     sniffer_command_tx,
-    //                     stealer_command_tx,
-    //                     dns_sender,
-    //                     env,
-    //                     cancellation_token,
-    //                 )
-    //                 .and_then(|client| Arc::new(client).serve(stream))
-    //                 .await
-    //                 {
-    //                     Ok(_) => {
-    //                         trace!(
-    //                             "ClientConnectionHandler::start -> Client {client_id}
-    // disconnected"                         );
-    //                     }
-    //                     Err(e) => {
-    //                         error!("ClientConnectionHandler::start -> Client {client_id}
-    // disconnected with error: {e}");                     }
-    //                 }
-    //                 client_id
-    //             });
-    //             Ok(Some(client))
-    //         }
-    //         Err(AgentError::ConnectionLimitReached) => {
-    //             error!("start_client -> Ran out of connections, dropping new connection");
-    //             Ok(None)
-    //         }
-    //         // Propagate all errors that are not ConnectionLimitReached.
-    //         Err(err) => Err(err),
-    //     }
-    // }
+    #[allow(clippy::too_many_arguments)]
+    pub async fn new_connection(
+        &mut self,
+        stream: TcpStream,
+        sniffer_command_tx: Sender<SnifferCommand>,
+        stealer_command_tx: Sender<StealerCommand>,
+        cancellation_token: CancellationToken,
+        dns_sender: Sender<DnsRequest>,
+        ephemeral_container: bool,
+        pid: Option<u64>,
+        env: HashMap<String, String>,
+    ) -> Result<Option<JoinHandle<u32>>> {
+        match self.new_client().await {
+            Ok(client_id) => {
+                let client = tokio::spawn(async move {
+                    match ClientConnectionHandler::new(
+                        client_id,
+                        pid,
+                        ephemeral_container,
+                        sniffer_command_tx,
+                        stealer_command_tx,
+                        dns_sender,
+                        env,
+                        cancellation_token,
+                    )
+                    .and_then(|client| client.serve(stream))
+                    .await
+                    {
+                        Ok(_) => {
+                            trace!(
+                                "ClientConnectionHandler::start -> Client {client_id}
+    disconnected"
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                "ClientConnectionHandler::start -> Client {client_id}
+    disconnected with error: {e}"
+                            );
+                        }
+                    }
+                    client_id
+                });
+                Ok(Some(client))
+            }
+            Err(AgentError::ConnectionLimitReached) => {
+                error!("start_client -> Ran out of connections, dropping new connection");
+                Ok(None)
+            }
+            // Propagate all errors that are not ConnectionLimitReached.
+            Err(err) => Err(err),
+        }
+    }
 
     fn generate_id(&mut self) -> Option<ClientId> {
         self.index_allocator.next_index()
