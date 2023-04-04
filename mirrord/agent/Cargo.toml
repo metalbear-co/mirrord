@@ -45,6 +45,7 @@ enum_dispatch = "0.3.8"
 async-trait.workspace = true
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["full"] }
+hyper_14 = { package = "hyper", version = "0.14", features = ["http1", "server"] }
 httparse = "1"
 fancy-regex = { workspace = true }
 dashmap = { version = "5" }

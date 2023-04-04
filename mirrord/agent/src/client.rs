@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use futures::Stream;
+use hyper_14::server::conn::Http;
 use mirrord_protocol::{
     api::{agent_server, agent_server::AgentServer, BincodeMessage},
     codec::{ClientMessage, DaemonMessage},
@@ -264,7 +265,16 @@ impl ClientConnectionHandler {
     pub async fn serve(self, tcp_stream: TcpStream) -> Result<()> {
         let service = AgentServer::new(self);
 
-        todo!()
+        if let Err(http_err) = Http::new()
+            .http1_only(true)
+            .http1_keep_alive(true)
+            .serve_connection(tcp_stream, service)
+            .await
+        {
+            error!("Error while serving HTTP connection: {}", http_err);
+        }
+
+        Ok(())
     }
 }
 

@@ -2186,6 +2186,7 @@ dependencies = [
  "futures",
  "http-body-util",
  "httparse",
+ "hyper 0.14.25",
  "hyper 1.0.0-rc.3",
  "iptables",
  "libc",
