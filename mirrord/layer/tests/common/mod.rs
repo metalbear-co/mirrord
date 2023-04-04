@@ -17,6 +17,10 @@ use mirrord_protocol::{
         AccessFileRequest, AccessFileResponse, OpenFileRequest, OpenOptionsInternal,
         ReadFileRequest, SeekFromInternal, XstatRequest, XstatResponse,
     },
+    outgoing::{
+        udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
+        DaemonConnect, LayerWrite, SocketAddress,
+    },
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse,
 };
@@ -208,8 +212,13 @@ impl LayerConnection {
         listener: &TcpListener,
         app_port: u16,
     ) -> LayerConnection {
-        let mut codec = Self::accept_library_connection(listener).await;
-        let open_file_request = match codec.next().await {
+        let mut layer_connection = LayerConnection {
+            codec: Self::accept_library_connection(listener).await,
+            num_connections: 0,
+        };
+
+        // open file
+        let open_file_request = match layer_connection.codec.next().await {
             Some(option) => option.unwrap(),
             None => {
                 // Python runs in 2 processes, only one of which is the application. The library is
@@ -218,8 +227,8 @@ impl LayerConnection {
                 // triggered by the app.
                 // So accept the next connection which will be the one by the library that was
                 // loaded to the python process that actually runs the application.
-                codec = Self::accept_library_connection(listener).await;
-                codec.next().await.unwrap().unwrap()
+                layer_connection.codec = Self::accept_library_connection(listener).await;
+                layer_connection.codec.next().await.unwrap().unwrap()
             }
         };
 
@@ -238,16 +247,11 @@ impl LayerConnection {
                 }
             }))
         );
+        layer_connection.answer_file_open().await;
 
-        // Answer open.
-        codec
-            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Open(
-                Ok(mirrord_protocol::file::OpenFileResponse { fd: 1337 }),
-            )))
-            .await
-            .unwrap();
-
-        let read_request = codec
+        // read file
+        let read_request = layer_connection
+            .codec
             .next()
             .await
             .expect("Read request success!")
@@ -257,21 +261,80 @@ impl LayerConnection {
         assert_eq!(
             read_request,
             ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
-                remote_fd: 1337,
-                buffer_size: u16::MAX as u64,
+                remote_fd: 0xb16,
+                buffer_size: 256,
             }))
         );
 
-        let bytes = b"metalbear-hostname".to_vec();
-        let read_amount = bytes.len() as u64;
-        codec
-            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Read(
-                Ok(mirrord_protocol::file::ReadFileResponse { bytes, read_amount }),
-            )))
-            .await
-            .unwrap();
+        layer_connection
+            .answer_file_read(b"metalbear-hostname".to_vec())
+            .await;
 
-        let port_subscribe = codec
+        // close file
+        let close_request = layer_connection
+            .codec
+            .next()
+            .await
+            .expect("Close request success!")
+            .expect("Close request exists!");
+
+        println!("Should be a close file request: {read_request:#?}");
+        assert_eq!(
+            close_request,
+            ClientMessage::FileRequest(FileRequest::Close(
+                mirrord_protocol::file::CloseFileRequest { fd: 0xb16 }
+            ))
+        );
+
+        // udp connect
+        let udp_connect = layer_connection
+            .codec
+            .next()
+            .await
+            .expect("Udp outgoing success!")
+            .expect("Udp outgoing exists!");
+
+        println!("Should be an udp outgoing: {udp_connect:#?}");
+        assert_eq!(
+            udp_connect,
+            ClientMessage::UdpOutgoing(mirrord_protocol::outgoing::udp::LayerUdpOutgoing::Connect(
+                mirrord_protocol::outgoing::LayerConnect {
+                    remote_address: mirrord_protocol::outgoing::SocketAddress::Ip(
+                        std::net::SocketAddr::from(([181, 213, 132, 2], 53))
+                    )
+                }
+            ))
+        );
+        layer_connection.answer_udp_connect().await;
+
+        // udp write
+        while let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
+            bytes, ..
+        })) = layer_connection
+            .codec
+            .next()
+            .await
+            .expect("Udp write success!")
+            .expect("Udp write exists!")
+        {
+            println!("Receiving write from layer: {bytes:?}");
+
+            layer_connection
+                .codec
+                .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
+                    mirrord_protocol::outgoing::DaemonRead {
+                        connection_id: 0,
+                        bytes: b"127.0.0.1:53".to_vec(),
+                    },
+                ))))
+                .await
+                .unwrap();
+        }
+
+        // TODO(alex) [high] 2023-04-04: Udp close connection, then calls connect again(?).
+
+        let port_subscribe = layer_connection
+            .codec
             .next()
             .await
             .expect("PortSubscribe request success!")
@@ -283,10 +346,7 @@ impl LayerConnection {
             ClientMessage::Tcp(LayerTcp::PortSubscribe(app_port))
         );
 
-        LayerConnection {
-            codec,
-            num_connections: 0,
-        }
+        layer_connection
     }
 
     pub async fn is_ended(&mut self) -> bool {
@@ -311,6 +371,23 @@ impl LayerConnection {
             )))
             .await
             .unwrap();
+        self.num_connections += 1;
+        new_connection_id
+    }
+
+    async fn answer_udp_connect(&mut self) -> u64 {
+        let new_connection_id = self.num_connections;
+        self.codec
+            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Ok(
+                DaemonConnect {
+                    connection_id: new_connection_id,
+                    remote_address: SocketAddress::Ip("181.213.132.3:53".parse().unwrap()),
+                    local_address: SocketAddress::Ip("1.1.1.1:1337".parse().unwrap()),
+                },
+            ))))
+            .await
+            .unwrap();
+
         self.num_connections += 1;
         new_connection_id
     }
@@ -475,6 +552,15 @@ impl LayerConnection {
     pub async fn expect_only_file_read(&mut self, expected_fd: u64) -> u64 {
         // Verify the app reads the file.
         Self::expect_message_file_read(self.codec.next().await.unwrap().unwrap(), expected_fd).await
+    }
+
+    pub async fn answer_file_open(&mut self) {
+        self.codec
+            .send(DaemonMessage::File(FileResponse::Open(Ok(
+                mirrord_protocol::file::OpenFileResponse { fd: 0xb16 },
+            ))))
+            .await
+            .unwrap();
     }
 
     /// Send file read response with given `contents`.
