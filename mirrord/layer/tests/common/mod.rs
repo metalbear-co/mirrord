@@ -209,7 +209,7 @@ impl LayerConnection {
         app_port: u16,
     ) -> LayerConnection {
         let mut codec = Self::accept_library_connection(listener).await;
-        let msg = match codec.next().await {
+        let open_file_request = match codec.next().await {
             Some(option) => option.unwrap(),
             None => {
                 // Python runs in 2 processes, only one of which is the application. The library is
@@ -223,8 +223,9 @@ impl LayerConnection {
             }
         };
 
+        println!("Should be an open file request: {open_file_request:#?}");
         assert_eq!(
-            msg,
+            open_file_request,
             ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
                 path: PathBuf::from("/etc/hostname"),
                 open_options: OpenOptionsInternal {
@@ -238,19 +239,37 @@ impl LayerConnection {
             }))
         );
 
+        // Answer open.
+        codec
+            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Open(
+                Ok(mirrord_protocol::file::OpenFileResponse { fd: 1337 }),
+            )))
+            .await
+            .unwrap();
+
         let read_request = codec
             .next()
             .await
             .expect("Read request success!")
             .expect("Read request exists!");
 
+        println!("Should be a read file request: {read_request:#?}");
         assert_eq!(
             read_request,
             ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
-                remote_fd: 0,
+                remote_fd: 1337,
                 buffer_size: u16::MAX as u64,
             }))
         );
+
+        let bytes = b"metalbear-hostname".to_vec();
+        let read_amount = bytes.len() as u64;
+        codec
+            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Read(
+                Ok(mirrord_protocol::file::ReadFileResponse { bytes, read_amount }),
+            )))
+            .await
+            .unwrap();
 
         let port_subscribe = codec
             .next()
@@ -258,6 +277,7 @@ impl LayerConnection {
             .expect("PortSubscribe request success!")
             .expect("PortSubscribe request exists!");
 
+        println!("Should be a port subscribe: {port_subscribe:#?}");
         assert_eq!(
             port_subscribe,
             ClientMessage::Tcp(LayerTcp::PortSubscribe(app_port))
