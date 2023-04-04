@@ -879,8 +879,8 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
 /// ## Details
 ///
 /// Removes the `fd` key from either [`SOCKETS`] or [`OPEN_FILES`].
+/// **DON'T ADD LOGS HERE SINCE CALLER MIGHT CLOSE STDOUT/STDERR CAUSING THIS TO CRASH**
 pub(crate) fn close_layer_fd(fd: c_int) {
-    trace!("Closing fd {}", fd);
     let file_mode_active = FILE_MODE
         .get()
         .expect("Should be set during initialization!")

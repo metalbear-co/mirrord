@@ -1,0 +1,1 @@
+Fixed random crash in `close_layer_fd` caused by supposed closing of stdout/stderr then calling to log that writes to it
