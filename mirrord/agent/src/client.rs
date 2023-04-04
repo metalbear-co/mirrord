@@ -239,7 +239,7 @@ pub struct ClientConnectionHandler {
 }
 
 impl ClientConnectionHandler {
-    pub async fn new(
+    pub fn new(
         id: ClientId,
         pid: Option<u64>,
         ephemeral: bool,
