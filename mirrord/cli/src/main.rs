@@ -17,8 +17,6 @@ use mirrord_kube::{
     error::KubeApiError,
 };
 use mirrord_progress::{Progress, TaskProgress};
-#[cfg(target_os = "macos")]
-use mirrord_sip::sip_patch;
 use operator::operator_command;
 use semver::Version;
 use serde_json::json;
@@ -160,22 +158,6 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 
     let config = LayerConfig::from_env()?;
 
-    #[cfg(target_os = "macos")]
-    let (_did_sip_patch, binary) = match sip_patch(
-        &args.binary,
-        &config
-            .sip_binaries
-            .clone()
-            .map(|x| x.to_vec())
-            .unwrap_or_default(),
-    )? {
-        None => (false, args.binary.clone()),
-        Some(sip_result) => (true, sip_result),
-    };
-
-    #[cfg(not(target_os = "macos"))]
-    let binary = args.binary.clone();
-
     if config.agent.pause {
         if config.agent.ephemeral {
             error!("Pausing is not yet supported together with an ephemeral agent container.");
@@ -186,7 +168,20 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    let execution_info =
+        MirrordExecution::start(&config, Some(&args.binary), progress, None).await?;
+    #[cfg(not(target_os = "macos"))]
     let execution_info = MirrordExecution::start(&config, progress, None).await?;
+
+    #[cfg(target_os = "macos")]
+    let (_did_sip_patch, binary) = match execution_info.patched_path {
+        None => (false, args.binary.clone()),
+        Some(sip_result) => (true, sip_result),
+    };
+
+    #[cfg(not(target_os = "macos"))]
+    let binary = args.binary.clone();
 
     // Stop confusion with layer
     std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
@@ -197,6 +192,7 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     }
 
     let mut binary_args = args.binary_args.clone();
+    // Put original executable in argv[0] even if actually running patched version.
     binary_args.insert(0, args.binary.clone());
 
     sub_progress.done_with("ready to launch process");
@@ -204,10 +200,12 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     let err = execvp(binary.clone(), binary_args.clone());
     error!("Couldn't execute {:?}", err);
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    if let exec::Error::Errno(errno::Errno(86)) = err {
-        // "Bad CPU type in executable"
-        if _did_sip_patch {
-            return Err(CliError::RosettaMissing(binary));
+    if let exec::Error::Errno(errno) = err {
+        if Into::<i32>::into(errno) == 86 {
+            // "Bad CPU type in executable"
+            if _did_sip_patch {
+                return Err(CliError::RosettaMissing(binary));
+            }
         }
     }
     Err(CliError::BinaryExecuteFailed(binary, binary_args))

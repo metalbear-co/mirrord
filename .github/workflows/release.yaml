@@ -254,7 +254,6 @@ jobs:
         with:
           distribution: zulu
           java-version: 11
-      - run: cp LICENSE CHANGELOG.md intellij-ext/
       - run: |
           mkdir -p intellij-ext/bin/linux/arm64
           mkdir -p intellij-ext/bin/linux/x86-64
