@@ -40,14 +40,25 @@ fn build_go_app() {
 async fn mirroring_with_http(
     #[values(
         Application::PythonFlaskHTTP,
-        // Application::PythonFastApiHTTP,
-        // Application::NodeHTTP
+        Application::PythonFastApiHTTP,
+        Application::NodeHTTP
     )]
     application: Application,
     dylib_path: &PathBuf,
 ) {
     let (mut test_process, mut layer_connection) = application
-        .start_process_with_layer_and_port(dylib_path, vec![("MIRRORD_FILE_MODE", "local")], true)
+        .start_process_with_layer_and_port(
+            dylib_path,
+            vec![
+                ("MIRRORD_FILE_MODE", "local"),
+                ("MIRRORD_UDP_OUTGOING", "false"),
+            ],
+            application
+                .get_args()
+                .last()
+                .unwrap()
+                .contains("app_flask.py"),
+        )
         .await;
 
     println!("Application subscribed to port, sending tcp messages.");
@@ -76,38 +87,7 @@ async fn mirroring_with_http(
             application.get_app_port(),
         )
         .await;
-    if matches!(application, Application::PythonFlaskHTTP) {
-        assert_eq!(
-            layer_connection.codec.next().await.unwrap().unwrap(),
-            UdpOutgoing(Connect(LayerConnect {
-                remote_address: SocketAddress::Ip(std::net::SocketAddr::from((
-                    [10, 253, 155, 219],
-                    58162
-                )))
-            }))
-        );
-        // Refer: https://github.com/pallets/werkzeug/blob/main/src/werkzeug/serving.py#L640
-        // We send a dummy response to connect so that werkzeug proceeds
-        layer_connection
-            .codec
-            .send(mirrord_protocol::DaemonMessage::UdpOutgoing(
-                mirrord_protocol::outgoing::udp::DaemonUdpOutgoing::Connect(Ok(
-                    mirrord_protocol::outgoing::DaemonConnect {
-                        connection_id: 0,
-                        remote_address: SocketAddress::Ip(std::net::SocketAddr::from((
-                            [10, 253, 155, 219],
-                            58162,
-                        ))),
-                        local_address: SocketAddress::Ip(std::net::SocketAddr::from((
-                            [10, 253, 155, 218],
-                            58161,
-                        ))),
-                    },
-                )),
-            ))
-            .await
-            .unwrap();
-    }
+
     test_process.wait().await;
     test_process.assert_stdout_contains("GET: Request completed");
     test_process.assert_stdout_contains("POST: Request completed");

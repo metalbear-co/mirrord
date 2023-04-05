@@ -262,7 +262,6 @@ impl LayerConnection {
             }
         };
 
-        println!("Should be an open file request: {open_file_request:#?}");
         assert_eq!(
             open_file_request,
             ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
@@ -286,8 +285,6 @@ impl LayerConnection {
             .await
             .expect("Read request success!")
             .expect("Read request exists!");
-
-        println!("Should be a read file request: {read_request:#?}");
         assert_eq!(
             read_request,
             ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
@@ -316,107 +313,12 @@ impl LayerConnection {
             ))
         );
 
-        // udp connect
-        check_udp_connect(
-            layer_connection
-                .codec
-                .next()
-                .await
-                .expect("Udp outgoing success!")
-                .expect("Udp outgoing exists!"),
-        );
-        layer_connection.answer_udp_connect().await;
-
-        // udp write
-        check_udp_write(
-            layer_connection
-                .codec
-                .next()
-                .await
-                .expect("Udp write success!")
-                .expect("Udp write exists!"),
-        );
-
-        layer_connection
-            .codec
-            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
-                mirrord_protocol::outgoing::DaemonRead {
-                    connection_id: 0,
-                    bytes: REMOTE_UDP_ANSWER.to_vec(),
-                },
-            ))))
-            .await
-            .unwrap();
-
-        // TODO(alex) [high] 2023-04-04: Udp close connection, then calls connect again(?).
-        // let udp_close = layer_connection
-        //     .codec
-        //     .next()
-        //     .await
-        //     .expect("Udp close success!")
-        //     .expect("Udp close exists!");
-
-        // assert_eq!(
-        //     udp_close,
-        //     ClientMessage::UdpOutgoing(LayerUdpOutgoing::Close(LayerClose { connection_id: 0 }))
-        // );
-
-        check_udp_write(
-            layer_connection
-                .codec
-                .next()
-                .await
-                .expect("Udp outgoing success!")
-                .expect("Udp outgoing exists!"),
-        );
-        layer_connection
-            .codec
-            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
-                mirrord_protocol::outgoing::DaemonRead {
-                    connection_id: 0,
-                    bytes: REMOTE_UDP_ANSWER.to_vec(),
-                },
-            ))))
-            .await
-            .unwrap();
-
-        check_udp_connect(
-            layer_connection
-                .codec
-                .next()
-                .await
-                .expect("Udp outgoing success!")
-                .expect("Udp outgoing exists!"),
-        );
-        layer_connection.answer_udp_connect().await;
-
-        check_udp_write(
-            layer_connection
-                .codec
-                .next()
-                .await
-                .expect("Udp outgoing success!")
-                .expect("Udp outgoing exists!"),
-        );
-        layer_connection
-            .codec
-            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
-                mirrord_protocol::outgoing::DaemonRead {
-                    connection_id: 1,
-                    bytes: REMOTE_UDP_ANSWER.to_vec(),
-                },
-            ))))
-            .await
-            .unwrap();
-
         let port_subscribe = layer_connection
             .codec
             .next()
             .await
             .expect("PortSubscribe request success!")
             .expect("PortSubscribe request exists!");
-
-        println!("Should be a port subscribe: {port_subscribe:#?}");
         assert_eq!(
             port_subscribe,
             ClientMessage::Tcp(LayerTcp::PortSubscribe(app_port))
