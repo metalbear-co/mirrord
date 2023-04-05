@@ -19,7 +19,7 @@ use mirrord_protocol::{
     },
     outgoing::{
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
-        DaemonConnect, LayerWrite, SocketAddress,
+        DaemonConnect, LayerClose, LayerWrite, SocketAddress,
     },
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse,
@@ -30,6 +30,36 @@ use tokio::{
     net::{TcpListener, TcpStream},
     process::{Child, Command},
 };
+
+const REMOTE_UDP_ANSWER: &'static [u8] = &[
+    255, 144, 133, 0, 0, 1, 0, 1, 0, 0, 0, 0, 3, 50, 51, 57, 1, 48, 3, 50, 52, 52, 2, 49, 48, 7,
+    105, 110, 45, 97, 100, 100, 114, 4, 97, 114, 112, 97, 0, 0, 12, 0, 1, 3, 50, 51, 57, 1, 48, 3,
+    50, 52, 52, 2, 49, 48, 7, 105, 110, 45, 97, 100, 100, 114, 4, 97, 114, 112, 97, 0, 0, 12, 0, 1,
+    0, 0, 0, 30, 0, 61, 12, 49, 48, 45, 50, 52, 52, 45, 48, 45, 50, 51, 57, 20, 115, 97, 109, 112,
+    108, 101, 115, 45, 112, 121, 116, 104, 111, 110, 45, 102, 108, 97, 115, 107, 7, 100, 101, 102,
+    97, 117, 108, 116, 3, 115, 118, 99, 7, 99, 108, 117, 115, 116, 101, 114, 5, 108, 111, 99, 97,
+    108, 0,
+];
+
+/// Can't use `assert_eq!` here as we don't want to check if the IPs are the same, just if
+/// it's the appropriate message (DNS resolving IP is different per environment).
+fn check_udp_connect(message: ClientMessage) {
+    match message {
+        ClientMessage::UdpOutgoing(mirrord_protocol::outgoing::udp::LayerUdpOutgoing::Connect(
+            mirrord_protocol::outgoing::LayerConnect {
+                remote_address: mirrord_protocol::outgoing::SocketAddress::Ip(_),
+            },
+        )) => (),
+        _ => panic!("Expected `LayerUdpOutgoing::Connect, but got {message:#?}`"),
+    }
+}
+
+fn check_udp_write(message: ClientMessage) {
+    match message {
+        ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite { .. })) => (),
+        _ => panic!("Expected `LayerUdpOutgoing::Connect, but got {message:#?}`"),
+    }
+}
 
 pub struct TestProcess {
     pub child: Option<Child>,
@@ -287,51 +317,97 @@ impl LayerConnection {
         );
 
         // udp connect
-        let udp_connect = layer_connection
-            .codec
-            .next()
-            .await
-            .expect("Udp outgoing success!")
-            .expect("Udp outgoing exists!");
-
-        println!("Should be an udp outgoing: {udp_connect:#?}");
-        assert_eq!(
-            udp_connect,
-            ClientMessage::UdpOutgoing(mirrord_protocol::outgoing::udp::LayerUdpOutgoing::Connect(
-                mirrord_protocol::outgoing::LayerConnect {
-                    remote_address: mirrord_protocol::outgoing::SocketAddress::Ip(
-                        std::net::SocketAddr::from(([181, 213, 132, 2], 53))
-                    )
-                }
-            ))
+        check_udp_connect(
+            layer_connection
+                .codec
+                .next()
+                .await
+                .expect("Udp outgoing success!")
+                .expect("Udp outgoing exists!"),
         );
         layer_connection.answer_udp_connect().await;
 
         // udp write
-        while let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
-            bytes, ..
-        })) = layer_connection
-            .codec
-            .next()
-            .await
-            .expect("Udp write success!")
-            .expect("Udp write exists!")
-        {
-            println!("Receiving write from layer: {bytes:?}");
-
+        check_udp_write(
             layer_connection
                 .codec
-                .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
-                    mirrord_protocol::outgoing::DaemonRead {
-                        connection_id: 0,
-                        bytes: b"127.0.0.1:53".to_vec(),
-                    },
-                ))))
+                .next()
                 .await
-                .unwrap();
-        }
+                .expect("Udp write success!")
+                .expect("Udp write exists!"),
+        );
+
+        layer_connection
+            .codec
+            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
+                mirrord_protocol::outgoing::DaemonRead {
+                    connection_id: 0,
+                    bytes: REMOTE_UDP_ANSWER.to_vec(),
+                },
+            ))))
+            .await
+            .unwrap();
 
         // TODO(alex) [high] 2023-04-04: Udp close connection, then calls connect again(?).
+        // let udp_close = layer_connection
+        //     .codec
+        //     .next()
+        //     .await
+        //     .expect("Udp close success!")
+        //     .expect("Udp close exists!");
+
+        // assert_eq!(
+        //     udp_close,
+        //     ClientMessage::UdpOutgoing(LayerUdpOutgoing::Close(LayerClose { connection_id: 0 }))
+        // );
+
+        check_udp_write(
+            layer_connection
+                .codec
+                .next()
+                .await
+                .expect("Udp outgoing success!")
+                .expect("Udp outgoing exists!"),
+        );
+        layer_connection
+            .codec
+            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
+                mirrord_protocol::outgoing::DaemonRead {
+                    connection_id: 0,
+                    bytes: REMOTE_UDP_ANSWER.to_vec(),
+                },
+            ))))
+            .await
+            .unwrap();
+
+        check_udp_connect(
+            layer_connection
+                .codec
+                .next()
+                .await
+                .expect("Udp outgoing success!")
+                .expect("Udp outgoing exists!"),
+        );
+        layer_connection.answer_udp_connect().await;
+
+        check_udp_write(
+            layer_connection
+                .codec
+                .next()
+                .await
+                .expect("Udp outgoing success!")
+                .expect("Udp outgoing exists!"),
+        );
+        layer_connection
+            .codec
+            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
+                mirrord_protocol::outgoing::DaemonRead {
+                    connection_id: 1,
+                    bytes: REMOTE_UDP_ANSWER.to_vec(),
+                },
+            ))))
+            .await
+            .unwrap();
 
         let port_subscribe = layer_connection
             .codec
@@ -381,7 +457,7 @@ impl LayerConnection {
             .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Ok(
                 DaemonConnect {
                     connection_id: new_connection_id,
-                    remote_address: SocketAddress::Ip("181.213.132.3:53".parse().unwrap()),
+                    remote_address: SocketAddress::Ip("1.2.3.4:5678".parse().unwrap()),
                     local_address: SocketAddress::Ip("1.1.1.1:1337".parse().unwrap()),
                 },
             ))))
