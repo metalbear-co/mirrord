@@ -4,13 +4,8 @@ use std::{
 };
 
 use actix_codec::{Decoder, Encoder};
-use bincode::{
-    de, enc,
-    error::{DecodeError, EncodeError},
-    BorrowDecode, Decode, Encode,
-};
+use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
-use tracing::Level;
 
 #[cfg(target_os = "linux")]
 use crate::file::{GetDEnts64Request, GetDEnts64Response};
@@ -31,41 +26,16 @@ use crate::{
     ResponseError,
 };
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy)]
+pub enum LogLevel {
+    Warn,
+    Error,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct LogMessage {
     pub message: String,
-    pub level: Level,
-}
-
-impl Encode for LogMessage {
-    fn encode<E: enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        self.message.encode(encoder)?;
-        self.level.as_str().encode(encoder)?;
-
-        Ok(())
-    }
-}
-
-impl Decode for LogMessage {
-    fn decode<D: de::Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let message = Decode::decode(decoder)?;
-        let level = <String as Decode>::decode(decoder)?
-            .parse::<Level>()
-            .map_err(|e| DecodeError::OtherString(e.to_string()))?;
-
-        Ok(Self { message, level })
-    }
-}
-
-impl<'de> BorrowDecode<'de> for LogMessage {
-    fn borrow_decode<D: de::BorrowDecoder<'de>>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let message = BorrowDecode::borrow_decode(decoder)?;
-        let level = <&'de str as BorrowDecode>::borrow_decode(decoder)?
-            .parse::<Level>()
-            .map_err(|e| DecodeError::OtherString(e.to_string()))?;
-
-        Ok(Self { message, level })
-    }
+    pub level: LogLevel,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

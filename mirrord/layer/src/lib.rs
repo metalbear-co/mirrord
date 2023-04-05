@@ -96,6 +96,7 @@ use mirrord_config::{
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
+    codec::LogLevel,
     dns::{DnsLookup, GetAddrInfoRequest},
     tcp::{HttpResponse, LayerTcpSteal},
     ClientMessage, DaemonMessage,
@@ -112,7 +113,7 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
     time::{sleep, Duration},
 };
-use tracing::{debug, error, info, trace, warn, Level};
+use tracing::{error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -681,15 +682,10 @@ impl Layer {
             DaemonMessage::Close(error_message) => Err(LayerError::AgentErrorClosed(error_message)),
             DaemonMessage::LogMessage(log_message) => {
                 match log_message.level {
-                    Level::DEBUG => {
-                        debug!(message = log_message.message, "Daemon sent log message")
+                    LogLevel::Warn => {
+                        warn!(message = log_message.message, "Daemon sent log message")
                     }
-                    Level::TRACE => {
-                        trace!(message = log_message.message, "Daemon sent log message")
-                    }
-                    Level::INFO => info!(message = log_message.message, "Daemon sent log message"),
-                    Level::WARN => warn!(message = log_message.message, "Daemon sent log message"),
-                    Level::ERROR => {
+                    LogLevel::Error => {
                         error!(message = log_message.message, "Daemon sent log message")
                     }
                 }
