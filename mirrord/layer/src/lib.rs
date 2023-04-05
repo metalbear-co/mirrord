@@ -112,7 +112,7 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
     time::{sleep, Duration},
 };
-use tracing::{error, info, trace};
+use tracing::{debug, error, info, trace, warn, Level};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -160,7 +160,7 @@ mod go_hooks;
 /// ## Bypass
 ///
 /// To prevent us from intercepting neccessary (local) syscalls (like creating a socket), we use
-/// `detour::detour_bypass_on`] [`on_thread_start`, and [`detour::detour_bypass_off`]
+/// [`detour::detour_bypass_on`] `on_thread_start`, and [`detour::detour_bypass_off`]
 /// `on_thread_stop`.
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
@@ -635,6 +635,10 @@ impl Layer {
     /// Also (somewhat) dealt with here, as there is no dedicated handler for it. We just pass the
     /// response along in one of the feature's channels from
     /// `Self::getaddrinfo_handler_queue`.
+    ///
+    /// ### [`DaemonMessage::LogMessage`]
+    ///
+    /// This message has no dedicated handler, the internal message is simply logged here.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_daemon_message(&mut self, daemon_message: DaemonMessage) -> Result<()> {
         match daemon_message {
@@ -675,7 +679,23 @@ impl Layer {
                 .send(get_addr_info.0)
                 .map_err(|_| LayerError::SendErrorGetAddrInfoResponse),
             DaemonMessage::Close(error_message) => Err(LayerError::AgentErrorClosed(error_message)),
-            DaemonMessage::LogMessage(_) => todo!(),
+            DaemonMessage::LogMessage(log_message) => {
+                match log_message.level {
+                    Level::DEBUG => {
+                        debug!(message = log_message.message, "Daemon sent log message")
+                    }
+                    Level::TRACE => {
+                        trace!(message = log_message.message, "Daemon sent log message")
+                    }
+                    Level::INFO => info!(message = log_message.message, "Daemon sent log message"),
+                    Level::WARN => warn!(message = log_message.message, "Daemon sent log message"),
+                    Level::ERROR => {
+                        error!(message = log_message.message, "Daemon sent log message")
+                    }
+                }
+
+                Ok(())
+            }
         }
     }
 }
