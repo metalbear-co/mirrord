@@ -1,10 +1,10 @@
 #[cfg(test)]
 
 mod pause {
+    use std::{io::ErrorKind::UnexpectedEof, time::Duration};
 
-    use std::time::Duration;
-
-    use futures::StreamExt;
+    use futures::{AsyncBufReadExt, StreamExt};
+    use futures_util::TryStreamExt;
     use k8s_openapi::api::{batch::v1::Job, core::v1::Pod};
     use kube::{
         api::{ListParams, LogParams},
@@ -14,8 +14,8 @@ mod pause {
     use rstest::*;
 
     use crate::utils::{
-        get_next_log, get_service_url, http_log_requester_service, http_logger_service,
-        kube_client, random_namespace_self_deleting_service, run_exec, KubeService,
+        get_service_url, http_log_requester_service, http_logger_service, kube_client,
+        random_namespace_self_deleting_service, run_exec, KubeService,
     };
 
     /// http_logger_service is a service that logs strings from the uri of incoming http requests.
@@ -71,21 +71,28 @@ mod pause {
         };
 
         println!("getting log stream.");
+
         let log_stream = pod_api.log_stream(pod_name, &lp).await.unwrap();
 
-        let command = vec!["pause/send_reqs.sh"];
+        // `IntoAsyncRead` needs a stream with `Error = io::Error`, so convert the error type of the
+        // result from kube::Error to io::Error.
+        let log_stream =
+            log_stream.map(|res| res.map_err(|_| std::io::Error::new(UnexpectedEof, "idk")));
 
+        let log_lines = log_stream.into_async_read().lines();
+
+        // skip 2 lines of flask prints.
+        let mut log_lines = log_lines.skip(2);
+
+        let command = vec!["pause/send_reqs.sh"];
         let mirrord_pause_arg = vec!["--pause"];
 
-        println!("Waiting for 2 flask lines.");
-        let mut log_stream = log_stream.skip(2); // Skip flask prints.
-
-        let hi_from_deployed_app = "hi-from-deployed-app\n";
-        let hi_from_local_app = "hi-from-local-app\n";
-        let hi_again_from_local_app = "hi-again-from-local-app\n";
+        let hi_from_deployed_app = "hi-from-deployed-app";
+        let hi_from_local_app = "hi-from-local-app";
+        let hi_again_from_local_app = "hi-again-from-local-app";
 
         println!("Waiting for first log by deployed app.");
-        let first_log = get_next_log(&mut log_stream).await;
+        let first_log = log_lines.next().await.unwrap().unwrap();
 
         assert_eq!(first_log, hi_from_deployed_app);
 
@@ -104,9 +111,9 @@ mod pause {
 
         println!("Spooling logs forward to get to local app's first log.");
         // Skip all the logs by the deployed app from before we ran local.
-        let mut next_log = get_next_log(&mut log_stream).await;
+        let mut next_log = log_lines.next().await.unwrap().unwrap();
         while next_log == hi_from_deployed_app {
-            next_log = get_next_log(&mut log_stream).await;
+            next_log = log_lines.next().await.unwrap().unwrap();
         }
 
         // Verify first log from local app.
@@ -114,11 +121,11 @@ mod pause {
 
         // Verify that the second log from local app comes right after it - the deployed requester
         // was paused.
-        let log_from_local = get_next_log(&mut log_stream).await;
+        let log_from_local = log_lines.next().await.unwrap().unwrap();
         assert_eq!(log_from_local, hi_again_from_local_app);
 
         // Verify that the deployed app resumes after the local app is done.
-        let log_from_deployed_after_resume = get_next_log(&mut log_stream).await;
+        let log_from_deployed_after_resume = log_lines.next().await.unwrap().unwrap();
         assert_eq!(log_from_deployed_after_resume, hi_from_deployed_app);
     }
 
