@@ -1,17 +1,11 @@
 #![feature(assert_matches)]
 use std::{path::PathBuf, time::Duration};
 
-use mirrord_protocol::{
-    outgoing::{udp::LayerUdpOutgoing::Connect, LayerConnect},
-    ClientMessage::UdpOutgoing,
-};
 use rstest::rstest;
 
 mod common;
 
 pub use common::*;
-use futures::{SinkExt, StreamExt};
-use mirrord_protocol::outgoing::SocketAddress;
 
 /// For running locally, so that new developers don't have the extra step of building the go app
 /// before running the tests.
