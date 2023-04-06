@@ -973,6 +973,17 @@ pub fn dylib_path() -> PathBuf {
     }
 }
 
+#[cfg(target_os = "macos")]
+#[fixture]
+pub const fn is_go() -> bool {
+    true
+}
+
+#[fixture]
+pub const fn is_go() -> bool {
+    false
+}
+
 pub fn get_env<'a>(
     dylib_path_str: &'a str,
     addr: &'a str,

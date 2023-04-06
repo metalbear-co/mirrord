@@ -39,9 +39,8 @@ async fn mirroring_with_http(
     )]
     application: Application,
     dylib_path: &PathBuf,
+    is_go: bool,
 ) {
-    panic!("args: {:#?}", application.get_args());
-
     let (mut test_process, mut layer_connection) = application
         .start_process_with_layer_and_port(
             dylib_path,
@@ -53,7 +52,8 @@ async fn mirroring_with_http(
                 .get_args()
                 .last()
                 .unwrap()
-                .contains("app_flask.py"),
+                .contains("app_flask.py")
+                || is_go,
         )
         .await;
 
@@ -102,5 +102,5 @@ async fn mirroring_with_http_go(
     dylib_path: &PathBuf,
     #[values(Application::Go19HTTP, Application::Go20HTTP)] application: Application,
 ) {
-    mirroring_with_http(application, dylib_path).await;
+    mirroring_with_http(application, dylib_path, true).await;
 }
