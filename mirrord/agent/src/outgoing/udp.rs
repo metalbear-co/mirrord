@@ -29,6 +29,7 @@ use tracing::{debug, trace, warn};
 use crate::{
     error::{AgentError, Result},
     util::{run_thread_in_namespace, IndexAllocator},
+    watched_task::{TaskStatus, WatchedTask},
 };
 
 type Layer = LayerUdpOutgoing;
@@ -41,7 +42,10 @@ const DNS_PORT: u16 = 53;
 /// passing of these messages to the `interceptor_task` thread.
 pub(crate) struct UdpOutgoingApi {
     /// Holds the `interceptor_task`.
-    _task: thread::JoinHandle<Result<()>>,
+    _task: thread::JoinHandle<()>,
+
+    /// Status of the `interceptor_task`.
+    task_status: TaskStatus,
 
     /// Sends the `Layer` message to the `interceptor_task`.
     layer_tx: Sender<Layer>,
@@ -96,19 +100,25 @@ async fn connect(remote_address: SocketAddr) -> Result<UdpSocket, ResponseError>
 }
 
 impl UdpOutgoingApi {
+    const TASK_NAME: &'static str = "UdpOutgoing";
+
     pub(crate) fn new(pid: Option<u64>) -> Self {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
+        let watched_task =
+            WatchedTask::new(Self::TASK_NAME, Self::interceptor_task(layer_rx, daemon_tx));
+        let task_status = watched_task.status();
         let task = run_thread_in_namespace(
-            Self::interceptor_task(layer_rx, daemon_tx),
-            "UdpOutgoing".to_string(),
+            watched_task.start(),
+            Self::TASK_NAME.to_string(),
             pid,
             "net",
         );
 
         Self {
             _task: task,
+            task_status,
             layer_tx,
             daemon_rx,
         }
@@ -256,14 +266,20 @@ impl UdpOutgoingApi {
             "UdpOutgoingApi::layer_message -> layer_message {:#?}",
             message
         );
-        Ok(self.layer_tx.send(message).await?)
+
+        self.layer_tx
+            .send(message)
+            .await
+            .map_err(AgentError::from)
+            .map_err(|e| self.task_status.check().unwrap_or(e))
     }
 
     /// Receives a `UdpOutgoingResponse` from the `interceptor_task`.
     pub(crate) async fn daemon_message(&mut self) -> Result<DaemonUdpOutgoing> {
-        self.daemon_rx
-            .recv()
-            .await
-            .ok_or(AgentError::ReceiverClosed)
+        self.daemon_rx.recv().await.ok_or_else(|| {
+            self.task_status
+                .check()
+                .unwrap_or(AgentError::ReceiverClosed)
+        })
     }
 }

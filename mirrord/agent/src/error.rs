@@ -136,6 +136,9 @@ pub enum AgentError {
     )]
     ContainerdSocketNotFound,
 
+    #[error("Background task `{task}` failed with `{cause}`")]
+    BackgroundTaskFailed { task: &'static str, cause: String },
+
     #[error("Returning an error to test the agent's error cleanup. Should only ever be used when testing mirrord.")]
     TestError,
 }

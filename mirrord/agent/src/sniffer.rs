@@ -20,7 +20,7 @@ use rawsocket::RawCapture;
 use tokio::{
     net::UdpSocket,
     select,
-    sync::mpsc::{Receiver, Sender},
+    sync::mpsc::{self, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, trace, warn};
@@ -28,6 +28,7 @@ use tracing::{debug, error, trace, warn};
 use crate::{
     error::AgentError,
     util::{ClientId, IndexAllocator, Subscriptions},
+    watched_task::TaskStatus,
 };
 
 #[derive(Debug, Eq, Copy, Clone)]
@@ -190,6 +191,16 @@ enum SnifferCommands {
     AgentClosed,
 }
 
+impl From<LayerTcp> for SnifferCommands {
+    fn from(value: LayerTcp) -> Self {
+        match value {
+            LayerTcp::PortSubscribe(port) => Self::Subscribe(port),
+            LayerTcp::PortUnsubscribe(port) => Self::UnsubscribePort(port),
+            LayerTcp::ConnectionUnsubscribe(id) => Self::UnsubscribeConnection(id),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct SnifferCommand {
     client_id: ClientId,
@@ -199,78 +210,56 @@ pub struct SnifferCommand {
 pub struct TcpSnifferApi {
     client_id: ClientId,
     sender: Sender<SnifferCommand>,
-    pub receiver: Receiver<DaemonTcp>,
+    receiver: Receiver<DaemonTcp>,
+    /// View on the sniffer task's status.
+    task_status: TaskStatus,
 }
 
 impl TcpSnifferApi {
     pub async fn new(
         client_id: ClientId,
         sniffer_sender: Sender<SnifferCommand>,
-        receiver: Receiver<DaemonTcp>,
-        tcp_sender: Sender<DaemonTcp>,
+        task_status: TaskStatus,
+        channel_size: usize,
     ) -> Result<TcpSnifferApi, AgentError> {
+        let (sender, receiver) = mpsc::channel(channel_size);
+
         sniffer_sender
             .send(SnifferCommand {
                 client_id,
-                command: SnifferCommands::NewAgent(tcp_sender),
+                command: SnifferCommands::NewAgent(sender),
             })
             .await?;
+
         Ok(Self {
             client_id,
             sender: sniffer_sender,
             receiver,
+            task_status,
         })
     }
 
-    pub async fn subscribe(&mut self, port: Port) -> Result<(), AgentError> {
+    async fn send_command(&self, command: SnifferCommands) -> Result<(), AgentError> {
         self.sender
             .send(SnifferCommand {
                 client_id: self.client_id,
-                command: SnifferCommands::Subscribe(port),
+                command,
             })
             .await
-            .map_err(From::from)
+            .map_err(AgentError::from)
+            .map_err(|e| self.task_status.check().unwrap_or(e))
     }
 
-    pub async fn connection_unsubscribe(
-        &mut self,
-        connection_id: ConnectionId,
-    ) -> Result<(), AgentError> {
-        self.sender
-            .send(SnifferCommand {
-                client_id: self.client_id,
-                command: SnifferCommands::UnsubscribeConnection(connection_id),
-            })
-            .await
-            .map_err(From::from)
-    }
-
-    pub async fn port_unsubscribe(&mut self, port: Port) -> Result<(), AgentError> {
-        self.sender
-            .send(SnifferCommand {
-                client_id: self.client_id,
-                command: SnifferCommands::UnsubscribePort(port),
-            })
-            .await
-            .map_err(From::from)
-    }
-
-    pub async fn recv(&mut self) -> Option<DaemonTcp> {
-        self.receiver.recv().await
+    pub async fn recv(&mut self) -> Result<DaemonTcp, AgentError> {
+        self.receiver.recv().await.ok_or_else(|| {
+            self.task_status
+                .check()
+                .unwrap_or(AgentError::ReceiverClosed)
+        })
     }
 
     pub async fn handle_client_message(&mut self, message: LayerTcp) -> Result<(), AgentError> {
-        match message {
-            LayerTcp::PortSubscribe(port) => self.subscribe(port).await,
-            LayerTcp::ConnectionUnsubscribe(connection_id) => {
-                self.connection_unsubscribe(connection_id).await
-            }
-            LayerTcp::PortUnsubscribe(port) => self.port_unsubscribe(port).await,
-        }
-        .map_err(|_| AgentError::SnifferApiError)
-        // Translate all errors to a single error type
-        // so we can notify the user the sniffer api is unavailable.
-        // and steal might work for them.
+        self.send_command(message.into()).await
     }
 }
 
@@ -297,6 +286,8 @@ pub struct TcpConnectionSniffer {
 }
 
 impl TcpConnectionSniffer {
+    pub const TASK_NAME: &'static str = "Sniffer";
+
     /// Runs the sniffer loop, capturing packets.
     #[tracing::instrument(level = "trace", skip(self))]
     pub async fn start(mut self, cancel_token: CancellationToken) -> Result<(), AgentError> {

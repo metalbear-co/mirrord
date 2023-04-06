@@ -7,22 +7,23 @@ use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse},
     RemoteResult,
 };
-use tokio::sync::{mpsc::Receiver, oneshot::Sender};
+use tokio::sync::{
+    mpsc::{self, Receiver, Sender},
+    oneshot,
+};
 use tracing::{error, trace};
 use trust_dns_resolver::{system_conf::parse_resolv_conf, AsyncResolver, Hosts};
 
-use crate::error::Result;
+use crate::{
+    error::Result,
+    util::run_thread_in_namespace,
+    watched_task::{TaskStatus, WatchedTask},
+};
 
 #[derive(Debug)]
 pub struct DnsRequest {
     request: GetAddrInfoRequest,
-    tx: Sender<GetAddrInfoResponse>,
-}
-
-impl DnsRequest {
-    pub fn new(request: GetAddrInfoRequest, tx: Sender<GetAddrInfoResponse>) -> Self {
-        Self { request, tx }
-    }
+    tx: oneshot::Sender<GetAddrInfoResponse>,
 }
 
 // TODO(alex): aviram's suggested caching the resolver, but this should not be done by having a
@@ -73,4 +74,45 @@ pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Resul
     }
 
     Ok(())
+}
+
+#[derive(Clone)]
+pub struct DnsApi {
+    task_status: TaskStatus,
+    sender: Sender<DnsRequest>,
+}
+
+impl DnsApi {
+    const TASK_NAME: &'static str = "DNS worker";
+
+    pub fn new(pid: Option<u64>, channel_size: usize) -> Self {
+        let (sender, receiver) = mpsc::channel(channel_size);
+
+        let watched_task = WatchedTask::new(Self::TASK_NAME, dns_worker(receiver, pid));
+        let task_status = watched_task.status();
+        run_thread_in_namespace(
+            watched_task.start(),
+            Self::TASK_NAME.to_string(),
+            pid,
+            "net",
+        );
+
+        Self {
+            task_status,
+            sender,
+        }
+    }
+
+    async fn try_make_request(&self, request: GetAddrInfoRequest) -> Result<GetAddrInfoResponse> {
+        let (tx, rx) = oneshot::channel();
+        let request = DnsRequest { request, tx };
+        self.sender.send(request).await?;
+        rx.await.map_err(Into::into)
+    }
+
+    pub async fn make_request(&self, request: GetAddrInfoRequest) -> Result<GetAddrInfoResponse> {
+        self.try_make_request(request)
+            .await
+            .map_err(|e| self.task_status.check().unwrap_or(e))
+    }
 }

@@ -1,10 +1,11 @@
 use mirrord_protocol::tcp::{DaemonTcp, HttpResponse, LayerTcpSteal, TcpData};
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use super::*;
 use crate::{
     error::{AgentError, Result},
     util::ClientId,
+    watched_task::TaskStatus,
 };
 
 /// Bridges the communication between the agent and the [`TcpConnectionStealer`] task.
@@ -24,6 +25,9 @@ pub(crate) struct TcpStealerApi {
     ///
     /// This is where we get the messages that should be passed back to agent or layer.
     daemon_rx: Receiver<DaemonTcp>,
+
+    /// View on the stealer task's status.
+    task_status: TaskStatus,
 }
 
 impl TcpStealerApi {
@@ -33,8 +37,11 @@ impl TcpStealerApi {
     pub(crate) async fn new(
         client_id: ClientId,
         command_tx: Sender<StealerCommand>,
-        (daemon_tx, daemon_rx): (Sender<DaemonTcp>, Receiver<DaemonTcp>),
+        task_status: TaskStatus,
+        channel_size: usize,
     ) -> Result<Self, AgentError> {
+        let (daemon_tx, daemon_rx) = mpsc::channel(channel_size);
+
         command_tx
             .send(StealerCommand {
                 client_id,
@@ -46,6 +53,7 @@ impl TcpStealerApi {
             client_id,
             command_tx,
             daemon_rx,
+            task_status,
         })
     }
 
@@ -57,7 +65,8 @@ impl TcpStealerApi {
                 command,
             })
             .await
-            .map_err(From::from)
+            .map_err(AgentError::from)
+            .map_err(|e| self.task_status.check().unwrap_or(e))
     }
 
     /// Send `command` synchronously to stealer with `try_send`, with the client id of the client
@@ -68,7 +77,8 @@ impl TcpStealerApi {
                 client_id: self.client_id,
                 command,
             })
-            .map_err(From::from)
+            .map_err(AgentError::from)
+            .map_err(|e| self.task_status.check().unwrap_or(e))
     }
 
     /// Helper function that passes the [`DaemonTcp`] messages we generated in the
@@ -76,8 +86,12 @@ impl TcpStealerApi {
     ///
     /// Called in the [`ClientConnectionHandler`].
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) async fn recv(&mut self) -> Option<DaemonTcp> {
-        self.daemon_rx.recv().await
+    pub(crate) async fn recv(&mut self) -> Result<DaemonTcp> {
+        self.daemon_rx.recv().await.ok_or_else(|| {
+            self.task_status
+                .check()
+                .unwrap_or(AgentError::ReceiverClosed)
+        })
     }
 
     /// Handles the conversion of [`LayerTcpSteal::PortSubscribe`], that is passed from the

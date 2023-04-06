@@ -16,7 +16,7 @@ use std::{
 
 use actix_codec::Framed;
 use cli::parse_args;
-use dns::{dns_worker, DnsRequest};
+use dns::DnsApi;
 use error::{AgentError, Result};
 use file::FileManager;
 use futures::{
@@ -24,9 +24,7 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
 };
-use mirrord_protocol::{
-    ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest, LogLevel, LogMessage,
-};
+use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
 use runtime::ContainerInfo;
 use sniffer::{SnifferCommand, TcpConnectionSniffer, TcpSnifferApi};
@@ -54,6 +52,7 @@ use crate::{
         StealerCommand,
     },
     util::{run_thread_in_namespace, ClientId, IndexAllocator},
+    watched_task::{TaskStatus, WatchedTask},
 };
 
 mod cli;
@@ -66,6 +65,7 @@ mod runtime;
 mod sniffer;
 mod steal;
 mod util;
+mod watched_task;
 
 const CHANNEL_SIZE: usize = 1024;
 
@@ -148,14 +148,11 @@ impl State {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn new_connection(
         &mut self,
         stream: TcpStream,
-        sniffer_command_tx: Sender<SnifferCommand>,
-        stealer_command_tx: Sender<StealerCommand>,
+        tasks: BackgroundTasks,
         cancellation_token: CancellationToken,
-        dns_sender: Sender<DnsRequest>,
         ephemeral_container: bool,
         pid: Option<u64>,
         env: HashMap<String, String>,
@@ -193,9 +190,7 @@ impl State {
                 stream,
                 pid,
                 ephemeral_container,
-                sniffer_command_tx,
-                stealer_command_tx,
-                dns_sender,
+                tasks,
                 env,
             )
             .and_then(|client| client.start(cancellation_token))
@@ -246,6 +241,16 @@ impl State {
     }
 }
 
+/// Handles to background tasks used by [`ClientConnectionHandler`].
+#[derive(Clone)]
+struct BackgroundTasks {
+    sniffer_status: TaskStatus,
+    sniffer_sender: Sender<SnifferCommand>,
+    stealer_status: TaskStatus,
+    stealer_sender: Sender<StealerCommand>,
+    dns_api: DnsApi,
+}
+
 struct ClientConnectionHandler {
     /// Used to prevent closing the main loop [`ClientConnectionHandler::start`] when any
     /// request is done (tcp outgoing feature). Stays `true` until `agent` receives an
@@ -258,21 +263,18 @@ struct ClientConnectionHandler {
     tcp_stealer_api: TcpStealerApi,
     tcp_outgoing_api: TcpOutgoingApi,
     udp_outgoing_api: UdpOutgoingApi,
-    dns_sender: Sender<DnsRequest>,
+    dns_api: DnsApi,
     env: HashMap<String, String>,
 }
 
 impl ClientConnectionHandler {
-    #[allow(clippy::too_many_arguments)]
     /// Initializes [`ClientConnectionHandler`].
     pub async fn new(
         id: ClientId,
         mut stream: Framed<TcpStream, DaemonCodec>,
         pid: Option<u64>,
         ephemeral: bool,
-        sniffer_command_sender: Sender<SnifferCommand>,
-        stealer_command_sender: Sender<StealerCommand>,
-        dns_sender: Sender<DnsRequest>,
+        bg_tasks: BackgroundTasks,
         env: HashMap<String, String>,
     ) -> Result<Self> {
         let file_manager = match pid {
@@ -281,43 +283,49 @@ impl ClientConnectionHandler {
             None => FileManager::new(None),
         };
 
-        let (tcp_sender, tcp_receiver) = mpsc::channel(CHANNEL_SIZE);
+        let tcp_sniffer_api = match TcpSnifferApi::new(
+            id,
+            bg_tasks.sniffer_sender,
+            bg_tasks.sniffer_status,
+            CHANNEL_SIZE,
+        )
+        .await
+        {
+            Ok(api) => Some(api),
+            Err(e) => {
+                let message = format!(
+                    "Failed to create TcpSnifferApi: {e}, this could be due to kernel version."
+                );
+                warn!(message);
+                stream
+                    .send(DaemonMessage::LogMessage(LogMessage::warn(message)))
+                    .await
+                    .ok();
 
-        let tcp_sniffer_api =
-            match TcpSnifferApi::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await {
-                Ok(api) => Some(api),
-                Err(e) => {
-                    let message = format!(
-                        "Failed to create TcpSnifferApi: {e}, this could be due to kernel version."
-                    );
-                    warn!(message);
-                    stream
-                        .send(DaemonMessage::LogMessage(LogMessage {
-                            message,
-                            level: LogLevel::Warn,
-                        }))
-                        .await
-                        .ok();
+                None
+            }
+        };
 
-                    None
-                }
-            };
+        let tcp_stealer_api = match TcpStealerApi::new(
+            id,
+            bg_tasks.stealer_sender,
+            bg_tasks.stealer_status,
+            CHANNEL_SIZE,
+        )
+        .await
+        {
+            Ok(api) => api,
+            Err(e) => {
+                stream
+                    .send(DaemonMessage::Close(format!(
+                        "Failed to create TcpStealerApi: {e}."
+                    )))
+                    .await
+                    .ok();
 
-        let tcp_stealer_api =
-            match TcpStealerApi::new(id, stealer_command_sender, mpsc::channel(CHANNEL_SIZE)).await
-            {
-                Ok(api) => api,
-                Err(e) => {
-                    stream
-                        .send(DaemonMessage::Close(format!(
-                            "Failed to create TcpStealerApi: {e}."
-                        )))
-                        .await
-                        .ok();
-
-                    return Err(e);
-                }
-            };
+                return Err(e);
+            }
+        };
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
         let udp_outgoing_api = UdpOutgoingApi::new(pid);
@@ -330,7 +338,7 @@ impl ClientConnectionHandler {
             tcp_stealer_api,
             tcp_outgoing_api,
             udp_outgoing_api,
-            dns_sender,
+            dns_api: bg_tasks.dns_api,
             env,
         };
 
@@ -342,24 +350,21 @@ impl ClientConnectionHandler {
     /// Breaks upon receiver/sender drop.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn start(mut self, cancellation_token: CancellationToken) -> Result<()> {
-        loop {
+        let error = loop {
             select! {
                 message = self.stream.next() => {
-                    if let Some(message) = message {
-                        match self.handle_client_message(message?).await {
-                            Ok(true) => {},
-                            Ok(false) => {
-                                break;
-                            }
-                            Err(e) => {
-                                error!("Error handling client message: {e:?}");
-                                self.respond(DaemonMessage::Close(format!("{e:?}"))).await?;
-                                break;
-                            }
-                        }
-                    } else {
+                    let Some(message) = message else {
                         debug!("Client {} disconnected", self.id);
-                        break;
+                        return Ok(());
+                    };
+
+                    match self.handle_client_message(message?).await {
+                        Ok(true) => {},
+                        Ok(false) => return Ok(()),
+                        Err(e) => {
+                            error!("Error handling client message: {e:?}");
+                            break e;
+                        }
                     }
                 },
                 // poll the sniffer API only when it's available
@@ -371,51 +376,37 @@ impl ClientConnectionHandler {
                     } else {
                         unreachable!()
                     }
-                }, if self.tcp_sniffer_api.is_some()=> {
-                    if let Some(message) = message {
-                        self.respond(DaemonMessage::Tcp(message)).await?;
-                    } else {
-                        error!("tcp sniffer stopped?");
-                        self.respond(DaemonMessage::Close("TcpConnectionSniffer stopped unexpectedly".into())).await.ok();
-                        break;
-                    }
+                }, if self.tcp_sniffer_api.is_some() => match message {
+                    Ok(message) => self.respond(DaemonMessage::Tcp(message)).await?,
+                    Err(e) => break e,
                 },
-                message = self.tcp_stealer_api.recv() => {
-                    if let Some(message) = message {
-                        self.respond(DaemonMessage::TcpSteal(message)).await?;
-                    } else {
-                        error!("tcp stealer stopped?");
-                        self.respond(DaemonMessage::Close("TcpConnectionStealer stopped unexpectedly".into())).await.ok();
-                        break;
-                    }
+                message = self.tcp_stealer_api.recv() => match message {
+                    Ok(message) => self.respond(DaemonMessage::TcpSteal(message)).await?,
+                    Err(e) => break e,
                 },
                 message = self.tcp_outgoing_api.daemon_message() => match message {
                     Ok(message) => self.respond(DaemonMessage::TcpOutgoing(message)).await?,
-                    Err(e) => {
-                        self.respond(DaemonMessage::Close("TCP interceptor task stopped unexpectedly".into())).await.ok();
-                        return Err(e);
-                    }
+                    Err(e) => break e,
                 },
                 message = self.udp_outgoing_api.daemon_message() => match message {
                     Ok(message) => self.respond(DaemonMessage::UdpOutgoing(message)).await?,
-                    Err(e) => {
-                        self.respond(DaemonMessage::Close("UDP interceptor task stopped unexpectedly".into())).await.ok();
-                        return Err(e);
-                    }
+                    Err(e) => break e,
                 },
-                _ = cancellation_token.cancelled() => {
-                    break;
-                }
+                _ = cancellation_token.cancelled() => return Ok(()),
             }
+        };
+
+        if let Err(e) = self.respond(DaemonMessage::Close(error.to_string())).await {
+            error!("Failed to send error to client: {e:?}");
         }
 
-        Ok(())
+        Err(error)
     }
 
     /// Sends a [`DaemonMessage`] response to the connected client (`mirrord-layer`).
     #[tracing::instrument(level = "trace", skip(self))]
     async fn respond(&mut self, response: DaemonMessage) -> Result<()> {
-        Ok(self.stream.send(response).await?)
+        self.stream.send(response).await.map_err(Into::into)
     }
 
     /// Handles incoming messages from the connected client (`mirrord-layer`).
@@ -458,13 +449,7 @@ impl ClientConnectionHandler {
                     .await?
             }
             ClientMessage::GetAddrInfoRequest(request) => {
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                let dns_request = DnsRequest::new(request, tx);
-                self.dns_sender.send(dns_request).await?;
-
-                trace!("waiting for answer from dns thread");
-                let response = rx.await?;
-
+                let response = self.dns_api.make_request(request).await?;
                 trace!("GetAddrInfoRequest -> response {:#?}", response);
 
                 self.respond(DaemonMessage::GetAddrInfoResponse(response))
@@ -529,42 +514,63 @@ async fn start_agent() -> Result<()> {
     let (sniffer_command_tx, sniffer_command_rx) = mpsc::channel::<SnifferCommand>(1000);
     let (stealer_command_tx, stealer_command_rx) = mpsc::channel::<StealerCommand>(1000);
 
-    let (dns_sender, dns_receiver) = mpsc::channel(1000);
+    let dns_api = DnsApi::new(pid, 1000);
 
-    let _ = run_thread_in_namespace(
-        dns_worker(dns_receiver, pid),
-        "DNS worker".to_string(),
-        pid,
-        "net",
-    );
+    let (sniffer_task, sniffer_status) = {
+        let cancellation_token = cancellation_token.clone();
+        let watched_task = WatchedTask::new(
+            TcpConnectionSniffer::TASK_NAME,
+            TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface).and_then(
+                |sniffer| async move {
+                    let res = sniffer.start(cancellation_token).await;
+                    if let Err(err) = res.as_ref() {
+                        error!("Sniffer failed: {err}");
+                    }
+                    Ok(())
+                },
+            ),
+        );
+        let status = watched_task.status();
+        let task = run_thread_in_namespace(
+            watched_task.start(),
+            TcpConnectionSniffer::TASK_NAME.to_string(),
+            pid,
+            "net",
+        );
 
-    let sniffer_cancellation_token = cancellation_token.clone();
-    let sniffer_task = run_thread_in_namespace(
-        TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface).and_then(
-            |sniffer| async move {
-                if let Err(err) = sniffer.start(sniffer_cancellation_token).await {
-                    error!("Sniffer failed: {err}");
+        (task, status)
+    };
+
+    let (stealer_task, stealer_status) = {
+        let cancellation_token = cancellation_token.clone();
+        let watched_task = WatchedTask::new(
+            TcpConnectionStealer::TASK_NAME,
+            TcpConnectionStealer::new(stealer_command_rx).and_then(|stealer| async move {
+                let res = stealer.start(cancellation_token).await;
+                if let Err(err) = res.as_ref() {
+                    error!("Stealer failed: {err}");
                 }
-                Ok(())
-            },
-        ),
-        "Sniffer".to_string(),
-        pid,
-        "net",
-    );
+                res
+            }),
+        );
+        let status = watched_task.status();
+        let task = run_thread_in_namespace(
+            watched_task.start(),
+            TcpConnectionStealer::TASK_NAME.to_string(),
+            pid,
+            "net",
+        );
 
-    let stealer_cancellation_token = cancellation_token.clone();
-    let stealer_task = run_thread_in_namespace(
-        TcpConnectionStealer::new(stealer_command_rx).and_then(|stealer| async move {
-            if let Err(err) = stealer.start(stealer_cancellation_token).await {
-                error!("Stealer failed: {err}");
-            }
-            Ok(())
-        }),
-        "Stealer".to_string(),
-        pid,
-        "net",
-    );
+        (task, status)
+    };
+
+    let bg_tasks = BackgroundTasks {
+        sniffer_status,
+        sniffer_sender: sniffer_command_tx,
+        stealer_status,
+        stealer_sender: stealer_command_tx,
+        dns_api,
+    };
 
     // WARNING: This exact string is expected to be read in `pod_api.rs`, more specifically in
     // `wait_for_agent_startup`. If you change this then mirrord fails to initialize.
@@ -585,10 +591,8 @@ async fn start_agent() -> Result<()> {
             if let Some(client) = state
                 .new_connection(
                     stream,
-                    sniffer_command_tx.clone(),
-                    stealer_command_tx.clone(),
+                    bg_tasks.clone(),
                     cancellation_token.clone(),
-                    dns_sender.clone(),
                     args.ephemeral_container,
                     pid,
                     env.clone(),
@@ -618,10 +622,8 @@ async fn start_agent() -> Result<()> {
                 trace!("start -> Connection accepted from {:?}", addr);
                 if let Some(client) = state.new_connection(
                     stream,
-                    sniffer_command_tx.clone(),
-                    stealer_command_tx.clone(),
+                    bg_tasks.clone(),
                     cancellation_token.clone(),
-                    dns_sender.clone(),
                     args.ephemeral_container,
                     pid,
                     env.clone()
@@ -645,11 +647,13 @@ async fn start_agent() -> Result<()> {
     trace!("Agent shutting down.");
     drop(cancel_guard);
 
-    if let Err(err) = sniffer_task.join().map_err(|_| AgentError::JoinTask)? {
+    sniffer_task.join().map_err(|_| AgentError::JoinTask)?;
+    if let Some(err) = &*bg_tasks.sniffer_status.err() {
         error!("start_agent -> sniffer task failed with error: {}", err);
     }
 
-    if let Err(err) = stealer_task.join().map_err(|_| AgentError::JoinTask)? {
+    stealer_task.join().map_err(|_| AgentError::JoinTask)?;
+    if let Some(err) = &*bg_tasks.stealer_status.err() {
         error!("start_agent -> stealer task failed with error: {}", err);
     }
 
