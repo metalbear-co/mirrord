@@ -979,6 +979,7 @@ pub const fn is_go() -> bool {
     true
 }
 
+#[cfg(not(target_os = "macos"))]
 #[fixture]
 pub const fn is_go() -> bool {
     false
