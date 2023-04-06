@@ -109,7 +109,7 @@ impl State {
         }
         Ok(State {
             clients: HashSet::new(),
-            index_allocator: IndexAllocator::new(),
+            index_allocator: Default::default(),
             should_pause: args.pause,
             container,
         })

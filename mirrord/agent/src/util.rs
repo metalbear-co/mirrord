@@ -7,7 +7,7 @@ use std::{
     thread::JoinHandle,
 };
 
-use num_traits::{zero, CheckedAdd, Num, NumCast};
+use num_traits::{CheckedAdd, Num};
 use tracing::error;
 
 use crate::{error::AgentError, runtime::set_namespace};
@@ -103,15 +103,8 @@ where
 
 impl<T> IndexAllocator<T>
 where
-    T: Num + CheckedAdd + NumCast + Clone,
+    T: Num + CheckedAdd + Clone,
 {
-    pub fn new() -> IndexAllocator<T> {
-        IndexAllocator {
-            index: zero(),
-            vacant_indices: Vec::new(),
-        }
-    }
-
     /// Returns the next available index, returns None if not available (reached max)
     pub fn next_index(&mut self) -> Option<T> {
         if let Some(i) = self.vacant_indices.pop() {
@@ -132,14 +125,15 @@ where
     }
 }
 
-// TODO(alex): Make this more generic, so we can use `default` everywhere, and
-// delete `new`.
 impl<T> Default for IndexAllocator<T>
 where
-    T: Default + Num + CheckedAdd + NumCast + Clone,
+    T: Num,
 {
     fn default() -> Self {
-        IndexAllocator::new()
+        Self {
+            index: T::zero(),
+            vacant_indices: Default::default(),
+        }
     }
 }
 
@@ -255,7 +249,7 @@ mod indexallocator_tests {
 
     #[test]
     fn sanity() {
-        let mut index_allocator = IndexAllocator::<u32>::new();
+        let mut index_allocator: IndexAllocator<u32> = Default::default();
         let index = index_allocator.next_index().unwrap();
         assert_eq!(0, index);
         let index = index_allocator.next_index().unwrap();
@@ -267,7 +261,7 @@ mod indexallocator_tests {
 
     #[test]
     fn check_max() {
-        let mut index_allocator = IndexAllocator::<u8>::new();
+        let mut index_allocator: IndexAllocator<u8> = Default::default();
         for _ in 0..=u8::MAX - 1 {
             index_allocator.next_index().unwrap();
         }

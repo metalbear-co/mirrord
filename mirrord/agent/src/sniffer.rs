@@ -340,7 +340,7 @@ impl TcpConnectionSniffer {
             sessions: TCPSessionMap::new(),
             //todo: impl drop for index allocator and connection id..
             connection_id_to_tcp_identifier: HashMap::new(),
-            index_allocator: IndexAllocator::new(),
+            index_allocator: Default::default(),
         })
     }
 
