@@ -7,7 +7,7 @@ use std::{
     thread::JoinHandle,
 };
 
-use num_traits::{CheckedAdd, Num, NumCast};
+use num_traits::{CheckedAdd, Num};
 use tracing::error;
 
 use crate::{error::AgentError, runtime::set_namespace};
@@ -103,7 +103,7 @@ where
 
 impl<T> IndexAllocator<T>
 where
-    T: Num + CheckedAdd + NumCast + Clone,
+    T: Num + CheckedAdd + Clone,
 {
     /// Returns the next available index, returns None if not available (reached max)
     pub fn next_index(&mut self) -> Option<T> {
