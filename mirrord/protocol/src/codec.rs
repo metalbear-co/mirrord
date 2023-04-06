@@ -38,6 +38,22 @@ pub struct LogMessage {
     pub level: LogLevel,
 }
 
+impl LogMessage {
+    pub fn warn(message: String) -> Self {
+        Self {
+            message,
+            level: LogLevel::Warn,
+        }
+    }
+
+    pub fn error(message: String) -> Self {
+        Self {
+            message,
+            level: LogLevel::Error,
+        }
+    }
+}
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct GetEnvVarsRequest {
     pub env_vars_filter: HashSet<String>,

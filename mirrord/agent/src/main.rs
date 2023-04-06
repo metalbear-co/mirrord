@@ -24,7 +24,9 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
 };
-use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest};
+use mirrord_protocol::{
+    ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest, LogLevel, LogMessage,
+};
 use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
 use runtime::ContainerInfo;
 use sniffer::{SnifferCommand, TcpConnectionSniffer, TcpSnifferApi};
@@ -158,46 +160,66 @@ impl State {
         pid: Option<u64>,
         env: HashMap<String, String>,
     ) -> Result<Option<JoinHandle<u32>>> {
-        match self.new_client().await {
-            Ok(client_id) => {
-                let client = tokio::spawn(async move {
-                    match ClientConnectionHandler::new(
-                        client_id,
-                        stream,
-                        pid,
-                        ephemeral_container,
-                        sniffer_command_tx,
-                        stealer_command_tx,
-                        dns_sender,
-                        env,
-                    )
-                    .and_then(|client| client.start(cancellation_token))
-                    .await
-                    {
-                        Ok(_) => {
-                            trace!(
-                                "ClientConnectionHandler::start -> Client {} disconnected",
-                                client_id
-                            );
-                        }
-                        Err(e) => {
-                            error!(
-                                    "ClientConnectionHandler::start -> Client {} disconnected with error: {}",
-                                    client_id, e
-                                );
-                        }
-                    }
-                    client_id
-                });
-                Ok(Some(client))
-            }
+        let mut stream = Framed::new(stream, DaemonCodec::new());
+
+        let client_id = match self.new_client().await {
+            Ok(id) => id,
             Err(AgentError::ConnectionLimitReached) => {
                 error!("start_client -> Ran out of connections, dropping new connection");
-                Ok(None)
+                stream
+                    .send(DaemonMessage::Close(
+                        "maximum concurrent connections reached".into(),
+                    ))
+                    .await
+                    .ok();
+
+                return Ok(None);
             }
-            // Propagate all errors that are not ConnectionLimitReached.
-            Err(err) => Err(err),
-        }
+            Err(err) => {
+                // Propagate all errors that are not ConnectionLimitReached.
+
+                stream
+                    .send(DaemonMessage::Close(err.to_string()))
+                    .await
+                    .ok();
+
+                return Err(err);
+            }
+        };
+
+        let task = tokio::spawn(async move {
+            let result = ClientConnectionHandler::new(
+                client_id,
+                stream,
+                pid,
+                ephemeral_container,
+                sniffer_command_tx,
+                stealer_command_tx,
+                dns_sender,
+                env,
+            )
+            .and_then(|client| client.start(cancellation_token))
+            .await;
+
+            match result {
+                Ok(_) => {
+                    trace!(
+                        "ClientConnectionHandler::start -> Client {} disconnected",
+                        client_id
+                    );
+                }
+                Err(e) => {
+                    error!(
+                        "ClientConnectionHandler::start -> Client {} disconnected with error: {}",
+                        client_id, e
+                    );
+                }
+            }
+
+            client_id
+        });
+
+        Ok(Some(task))
     }
 
     fn generate_id(&mut self) -> Option<ClientId> {
@@ -245,7 +267,7 @@ impl ClientConnectionHandler {
     /// Initializes [`ClientConnectionHandler`].
     pub async fn new(
         id: ClientId,
-        stream: TcpStream,
+        mut stream: Framed<TcpStream, DaemonCodec>,
         pid: Option<u64>,
         ephemeral: bool,
         sniffer_command_sender: Sender<SnifferCommand>,
@@ -258,24 +280,44 @@ impl ClientConnectionHandler {
             None if ephemeral => FileManager::new(Some(1)),
             None => FileManager::new(None),
         };
-        let stream = actix_codec::Framed::new(stream, DaemonCodec::new());
 
         let (tcp_sender, tcp_receiver) = mpsc::channel(CHANNEL_SIZE);
 
         let tcp_sniffer_api =
-            TcpSnifferApi::new(id, sniffer_command_sender, tcp_receiver, tcp_sender)
-                .await
-                .map_err(|e| {
-                    warn!(
-                        "Failed to create TcpSnifferApi: {}, this could be due to kernel version.",
-                        e
+            match TcpSnifferApi::new(id, sniffer_command_sender, tcp_receiver, tcp_sender).await {
+                Ok(api) => Some(api),
+                Err(e) => {
+                    let message = format!(
+                        "Failed to create TcpSnifferApi: {e}, this could be due to kernel version."
                     );
-                    e
-                })
-                .ok();
+                    warn!(message);
+                    stream
+                        .send(DaemonMessage::LogMessage(LogMessage {
+                            message,
+                            level: LogLevel::Warn,
+                        }))
+                        .await
+                        .ok();
+
+                    None
+                }
+            };
 
         let tcp_stealer_api =
-            TcpStealerApi::new(id, stealer_command_sender, mpsc::channel(CHANNEL_SIZE)).await?;
+            match TcpStealerApi::new(id, stealer_command_sender, mpsc::channel(CHANNEL_SIZE)).await
+            {
+                Ok(api) => api,
+                Err(e) => {
+                    stream
+                        .send(DaemonMessage::Close(format!(
+                            "Failed to create TcpStealerApi: {e}."
+                        )))
+                        .await
+                        .ok();
+
+                    return Err(e);
+                }
+            };
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
         let udp_outgoing_api = UdpOutgoingApi::new(pid);
@@ -334,22 +376,32 @@ impl ClientConnectionHandler {
                         self.respond(DaemonMessage::Tcp(message)).await?;
                     } else {
                         error!("tcp sniffer stopped?");
+                        self.respond(DaemonMessage::Close("TcpConnectionSniffer stopped unexpectedly".into())).await.ok();
                         break;
                     }
                 },
                 message = self.tcp_stealer_api.recv() => {
                     if let Some(message) = message {
-                        self.stream.send(DaemonMessage::TcpSteal(message)).await?;
+                        self.respond(DaemonMessage::TcpSteal(message)).await?;
                     } else {
                         error!("tcp stealer stopped?");
+                        self.respond(DaemonMessage::Close("TcpConnectionStealer stopped unexpectedly".into())).await.ok();
                         break;
                     }
                 },
-                message = self.tcp_outgoing_api.daemon_message() => {
-                    self.respond(DaemonMessage::TcpOutgoing(message?)).await?;
+                message = self.tcp_outgoing_api.daemon_message() => match message {
+                    Ok(message) => self.respond(DaemonMessage::TcpOutgoing(message)).await?,
+                    Err(e) => {
+                        self.respond(DaemonMessage::Close("TCP interceptor task stopped unexpectedly".into())).await.ok();
+                        return Err(e);
+                    }
                 },
-                message = self.udp_outgoing_api.daemon_message() => {
-                    self.respond(DaemonMessage::UdpOutgoing(message?)).await?;
+                message = self.udp_outgoing_api.daemon_message() => match message {
+                    Ok(message) => self.respond(DaemonMessage::UdpOutgoing(message)).await?,
+                    Err(e) => {
+                        self.respond(DaemonMessage::Close("UDP interceptor task stopped unexpectedly".into())).await.ok();
+                        return Err(e);
+                    }
                 },
                 _ = cancellation_token.cancelled() => {
                     break;
