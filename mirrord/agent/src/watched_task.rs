@@ -77,3 +77,26 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[tokio::test]
+    async fn simple_successfull() {
+        let task = WatchedTask::new("task", async move { Ok(()) });
+        let status = task.status();
+        task.start().await;
+        assert!(status.check().is_none());
+        assert!(status.err().is_none());
+    }
+
+    #[tokio::test]
+    async fn simple_failing() {
+        let task = WatchedTask::new("task", async move { Err(AgentError::ReceiverClosed) });
+        let status = task.status();
+        task.start().await;
+        assert!(status.check().is_some());
+        assert!(status.err().is_some());
+    }
+}
