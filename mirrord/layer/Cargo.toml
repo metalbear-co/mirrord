@@ -52,7 +52,7 @@ urlencoding = "2"
 itertools = "0.10"
 os_info = "3"
 bytemuck = "1"
-hyper = { workspace = true, features = ["client"] }
+hyper = { workspace = true, features = ["client", "http1", "http2"] }
 http-body-util  = { workspace = true }
 bimap.workspace = true
 dashmap = "5.4"
@@ -65,8 +65,8 @@ null-terminated = "0.3"
 k8s-openapi.workspace = true
 chrono = { version = "0.4", features = ["clock"] }
 base64 = "0.21"
-http-body = "0.4"
-hyper = "0.14"
+http-body = { workspace = true }
+hyper = { workspace = true }
 rstest = "*"
 test-cdylib = "*"
 tower = "0.4"

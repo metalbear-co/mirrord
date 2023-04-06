@@ -9,7 +9,6 @@ mod traffic;
 
 #[cfg(test)]
 mod utils {
-
     use std::{
         collections::HashMap,
         fmt::Debug,
@@ -85,10 +84,10 @@ mod utils {
         PythonFlaskHTTP,
         PythonFastApiHTTP,
         NodeHTTP,
+        NodeHTTP2,
         Go18HTTP,
         Go19HTTP,
         Go20HTTP,
-        NodeTcpEcho,
     }
 
     #[derive(Debug)]
@@ -223,10 +222,12 @@ mod utils {
                     ]
                 }
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
+                Application::NodeHTTP2 => {
+                    vec!["node", "node-e2e/http2/test_http2_traffic_steal.mjs"]
+                }
                 Application::Go18HTTP => vec!["go-e2e/18"],
                 Application::Go19HTTP => vec!["go-e2e/19"],
                 Application::Go20HTTP => vec!["go-e2e/20"],
-                Application::NodeTcpEcho => vec!["node", "node-e2e/tcp-echo/app.js"],
             }
         }
 
@@ -735,6 +736,20 @@ mod utils {
         .await
     }
 
+    #[fixture]
+    pub async fn http2_service(#[future] kube_client: Client) -> KubeService {
+        service(
+            "default",
+            "NodePort",
+            "ghcr.io/metalbear-co/mirrord-pytest:latest",
+            "http2-echo",
+            true,
+            false,
+            kube_client,
+        )
+        .await
+    }
+
     /// Service that listens on port 80 and returns "remote: <DATA>" when getting "<DATA>" directly
     /// over TCP, not HTTP.
     #[fixture]
@@ -857,6 +872,7 @@ mod utils {
         // Create client for each request until we have a match between local app and remote app
         // as connection state is flaky
         println!("{url}");
+
         let client = reqwest::Client::new();
         let req_builder = client.get(url);
         send_request(
