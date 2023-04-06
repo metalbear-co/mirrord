@@ -973,6 +973,8 @@ pub fn dylib_path() -> PathBuf {
     }
 }
 
+/// Used by [`http_mirroring::mirroring_with_http`] to identify if it's a `go` application, and thus
+/// manually resolve DNS, which brings some file ops messages before `TcpSubscribe`.
 #[fixture]
 pub const fn is_go(#[default(false)] go: bool) -> bool {
     go

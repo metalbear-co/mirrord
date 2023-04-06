@@ -51,7 +51,8 @@ async fn mirroring_with_http(
             application
                 .get_args()
                 .last()
-                .map(|x| x.contains("app_flask.py") || is_go)
+                // flask and go "manually" resolve DNS (they don't use `getaddrinfo`).
+                .map(|arg| arg.contains("app_flask.py") || is_go)
                 .unwrap_or_default(),
         )
         .await;
