@@ -40,6 +40,8 @@ async fn mirroring_with_http(
     application: Application,
     dylib_path: &PathBuf,
 ) {
+    panic!("args: {:#?}", application.get_args());
+
     let (mut test_process, mut layer_connection) = application
         .start_process_with_layer_and_port(
             dylib_path,
