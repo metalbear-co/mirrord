@@ -102,5 +102,5 @@ async fn mirroring_with_http_go(
     dylib_path: &PathBuf,
     #[values(Application::Go19HTTP, Application::Go20HTTP)] application: Application,
 ) {
-    mirroring_with_http(application, dylib_path, true).await;
+    mirroring_with_http(application, dylib_path, is_go(true)).await;
 }
