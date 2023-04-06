@@ -51,9 +51,8 @@ async fn mirroring_with_http(
             application
                 .get_args()
                 .last()
-                .unwrap()
-                .contains("app_flask.py")
-                || is_go,
+                .map(|x| x.contains("app_flask.py") || is_go)
+                .unwrap_or_default(),
         )
         .await;
 
