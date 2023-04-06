@@ -160,6 +160,13 @@ pub struct HttpRequest {
     pub port: Port,
 }
 
+impl HttpRequest {
+    /// Gets this request's HTTP version.
+    pub fn version(&self) -> Version {
+        self.internal_request.version
+    }
+}
+
 /// (De-)Serializable HTTP response.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct InternalHttpResponse {

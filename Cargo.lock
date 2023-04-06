@@ -1457,8 +1457,7 @@ dependencies = [
 [[package]]
 name = "http-body"
 version = "1.0.0-rc.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "951dfc2e32ac02d67c90c0d65bd27009a635dc9b381a2cc7d284ab01e3a0150d"
+source = "git+https://github.com/meowjesty/http-body?branch=issue/922/http2#8288c0d21717997b0c4638142b96e090ff58436c"
 dependencies = [
  "bytes",
  "http",
@@ -1467,8 +1466,7 @@ dependencies = [
 [[package]]
 name = "http-body-util"
 version = "0.1.0-rc.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92445bc9cc14bfa0a3ce56817dc3b5bcc227a168781a356b702410789cec0d10"
+source = "git+https://github.com/meowjesty/http-body?branch=issue/922/http2#8288c0d21717997b0c4638142b96e090ff58436c"
 dependencies = [
  "bytes",
  "futures-util",
@@ -1538,8 +1536,7 @@ dependencies = [
 [[package]]
 name = "hyper"
 version = "1.0.0-rc.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b75264b2003a3913f118d35c586e535293b3e22e41f074930762929d071e092"
+source = "git+https://github.com/meowjesty/hyper?branch=issue/922/http2#1b7c2bf95f70425954e34df2b2f757daa9b0e020"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -2312,9 +2309,8 @@ dependencies = [
  "fancy-regex",
  "frida-gum",
  "futures",
- "http-body 0.4.5",
+ "http-body 1.0.0-rc.2",
  "http-body-util",
- "hyper 0.14.25",
  "hyper 1.0.0-rc.3",
  "itertools",
  "k8s-openapi",

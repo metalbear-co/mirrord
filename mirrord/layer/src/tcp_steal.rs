@@ -3,28 +3,23 @@ use std::{
     net::SocketAddr,
 };
 
-use anyhow::Result;
 use async_trait::async_trait;
 use bimap::BiMap;
-use bytes::Bytes;
-use http_body_util::Full;
-use hyper::{
-    client::conn::http1::{handshake, SendRequest},
-    StatusCode,
-};
+use futures::TryFutureExt;
+use hyper::{body::Incoming, Response, StatusCode};
 use mirrord_protocol::{
     tcp::{
         Filter, HttpRequest, HttpResponse, LayerTcpSteal, NewTcpConnection,
         StealType::{All, FilteredHttp},
         TcpClose, TcpData,
     },
-    ClientMessage, ConnectionId, Port,
+    ClientMessage, ConnectionId, Port, RequestId,
 };
 use streammap_ext::StreamMap;
 use tokio::{
     io::{AsyncWriteExt, ReadHalf, WriteHalf},
     net::TcpStream,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::mpsc::{channel, Sender},
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
@@ -33,11 +28,67 @@ use tracing::{error, info, trace, warn};
 use crate::{
     error::LayerError,
     tcp::{Listen, TcpHandler},
+    tcp_steal::http::{v1::HttpV1, v2::HttpV2, ConnectionTask},
 };
 
 pub(crate) mod http_forwarding;
 
-use crate::{detour::DetourGuard, tcp_steal::http_forwarding::HttpForwarderError};
+use crate::tcp_steal::http_forwarding::HttpForwarderError;
+
+mod http;
+
+#[tracing::instrument(level = "trace")]
+async fn handle_response(
+    request: HttpRequest,
+    response: Result<Response<Incoming>, hyper::Error>,
+    port: Port,
+    connection_id: ConnectionId,
+    request_id: RequestId,
+) -> Result<HttpResponse, HttpForwarderError> {
+    match response {
+            Err(err) if err.is_closed() => {
+                warn!(
+                    "Sending request to local application failed with: {err:?}.
+                        Seems like the local application closed the connection too early, so
+                        creating a new connection and trying again."
+                );
+                trace!("The request to be retried: {request:?}.");
+                Err(HttpForwarderError::ConnectionClosedTooSoon(request))
+            }
+            Err(err) if err.is_parse() => {
+                warn!("Could not parse HTTP response to filtered HTTP request, got error: {err:?}.");
+                let body_message = format!("mirrord: could not parse HTTP response from local application - {err:?}");
+                Ok(HttpResponse::response_from_request(
+                    request,
+                    StatusCode::BAD_GATEWAY,
+                    &body_message,
+                ))
+            }
+            Err(err) => {
+                warn!("Request to local application failed with: {err:?}.");
+                let body_message = format!("mirrord tried to forward the request to the local application and got {err:?}");
+                Ok(HttpResponse::response_from_request(
+                    request,
+                    StatusCode::BAD_GATEWAY,
+                    &body_message,
+                ))
+            }
+            Ok(res) => Ok(
+                HttpResponse::from_hyper_response(res, port, connection_id, request_id)
+                    .await
+                    .unwrap_or_else(|e| {
+                        error!("Failed to read response to filtered http request: {e:?}. \
+                        Please consider reporting this issue on \
+                        https://github.com/metalbear-co/mirrord/issues/new?labels=bug&template=bug_report.yml");
+                        HttpResponse::response_from_request(
+                            request,
+                            StatusCode::BAD_GATEWAY,
+                            "mirrord",
+                        )
+                    }),
+            ),
+        }
+}
 
 pub struct TcpStealHandler {
     ports: HashSet<Listen>,
@@ -244,150 +295,6 @@ impl TcpStealHandler {
         }
     }
 
-    async fn create_http_connection_with_application(
-        addr: SocketAddr,
-    ) -> Result<SendRequest<Full<Bytes>>, HttpForwarderError> {
-        let target_stream = {
-            let _ = DetourGuard::new();
-            TcpStream::connect(addr).await?
-        };
-        let (http_request_sender, connection): (SendRequest<Full<Bytes>>, _) =
-            handshake(target_stream)
-                .await
-                .map_err::<HttpForwarderError, _>(From::from)?;
-
-        // spawn a task to poll the connection.
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                error!("Error in http connection with addr {addr:?}: {e:?}");
-            }
-        });
-        Ok(http_request_sender)
-    }
-
-    /// Return Ok(HttpResponse) if there is a response to send back - either the response we got
-    /// from the local process, or an error response we generated.
-    /// Return Err(HttpRequest) if the connection was closed too soon, and that request should be
-    /// retried after reconnecting with the server.
-    async fn send_http_request_to_application(
-        http_request_sender: &mut SendRequest<Full<Bytes>>,
-        req: HttpRequest,
-        port: Port,
-        connection_id: ConnectionId,
-    ) -> Result<HttpResponse, HttpRequest> {
-        let request_id = req.request_id;
-        match http_request_sender
-            .send_request(req.internal_request.clone().into())
-            .await
-        {
-            Err(err) if err.is_closed() => {
-                warn!(
-                    "Sending request to local application failed with: {err:?}.
-                        Seems like the local application closed the connection too early, so
-                        creating a new connection and trying again."
-                );
-                trace!("The request to be retried: {req:?}.");
-                Err(req)
-            }
-            Err(err) if err.is_parse() => {
-                warn!("Could not parse HTTP response to filtered HTTP request, got error: {err:?}.");
-                let body_message = format!("mirrord: could not parse HTTP response from local application - {err:?}");
-                Ok(HttpResponse::response_from_request(
-                    req,
-                    StatusCode::BAD_GATEWAY,
-                    &body_message,
-                ))
-            }
-            Err(err) => {
-                warn!("Request to local application failed with: {err:?}.");
-                let body_message = format!("mirrord tried to forward the request to the local application and got {err:?}");
-                Ok(HttpResponse::response_from_request(
-                    req,
-                    StatusCode::BAD_GATEWAY,
-                    &body_message,
-                ))
-            }
-            Ok(res) => Ok(
-                HttpResponse::from_hyper_response(res, port, connection_id, request_id)
-                    .await
-                    .unwrap_or_else(|e| {
-                        error!("Failed to read response to filtered http request: {e:?}. \
-                        Please consider reporting this issue on \
-                        https://github.com/metalbear-co/mirrord/issues/new?labels=bug&template=bug_report.yml");
-                        HttpResponse::response_from_request(
-                            req,
-                            StatusCode::BAD_GATEWAY,
-                            "mirrord",
-                        )
-                    }),
-            ),
-        }
-    }
-
-    /// Manage a single tcp connection, forward requests, wait for responses, send responses back.
-    async fn connection_task(
-        addr: SocketAddr,
-        mut request_receiver: Receiver<HttpRequest>,
-        response_sender: Sender<HttpResponse>,
-        port: Port,
-        connection_id: ConnectionId,
-    ) -> Result<(), HttpForwarderError> {
-        let mut http_request_sender = Self::create_http_connection_with_application(addr).await?;
-        // Listen for more requests in this connection and forward them to app.
-        while let Some(req) = request_receiver.recv().await {
-            trace!("HTTP client task received a new request to send: {req:?}.");
-
-            let http_response = match Self::send_http_request_to_application(
-                &mut http_request_sender,
-                req,
-                port,
-                connection_id,
-            )
-            .await
-            {
-                Err(req) => {
-                    // The connection was closed. Recreate connection and retry send.
-                    match Self::create_http_connection_with_application(addr).await {
-                        Ok(request_sender) => {
-                            // Reconnecting was successful.
-                            http_request_sender = request_sender;
-                            Self::send_http_request_to_application(
-                                &mut http_request_sender,
-                                req,
-                                port,
-                                connection_id,
-                            )
-                            .await
-                                .unwrap_or_else(|req| {
-                                    warn!("Application closed connection too early AGAIN. Not retrying, returning error HTTP response.");
-                                    HttpResponse::response_from_request(
-                                        req,
-                                        StatusCode::INTERNAL_SERVER_ERROR,
-                                        "mirrord: local process closed the connection too early twice in a row."
-                                    )
-                                })
-                        }
-                        Err(err) => {
-                            error!(
-                                "The local application closed the http connection early and a \
-                            new connection could not be created. Got error {err:?} when tried to \
-                            reconnect."
-                            );
-                            HttpResponse::response_from_request(
-                                req,
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                "mirrord: the local process closed the connection.",
-                            )
-                        }
-                    }
-                }
-                Ok(res) => res,
-            };
-            response_sender.send(http_response).await?;
-        }
-        Ok(())
-    }
-
     /// Create a new TCP connection with the application to send all the filtered HTTP requests
     /// from this connection in.
     /// Spawn a task that receives requests on a channel and sends them to the application on that
@@ -411,12 +318,40 @@ impl TcpStealHandler {
 
         let response_sender = self.http_response_sender.clone();
 
+        let http_version = http_request.version();
+
         tokio::spawn(async move {
-            trace!("HTTP client task started.");
-            if let Err(e) =
-                Self::connection_task(addr, request_receiver, response_sender, port, connection_id)
+            trace!("HTTP/{http_version:?} client task started.");
+            let connection_task_result = match http_version {
+                hyper::Version::HTTP_2 => {
+                    ConnectionTask::<HttpV2>::new(
+                        addr,
+                        request_receiver,
+                        response_sender,
+                        port,
+                        connection_id,
+                    )
+                    .and_then(ConnectionTask::start)
                     .await
-            {
+                }
+                hyper::Version::HTTP_3 => {
+                    error!("mirrord (currently) does not support HTTP/3!");
+                    todo!()
+                }
+                _http_v1 => {
+                    ConnectionTask::<HttpV1>::new(
+                        addr,
+                        request_receiver,
+                        response_sender,
+                        port,
+                        connection_id,
+                    )
+                    .and_then(ConnectionTask::start)
+                    .await
+                }
+            };
+
+            if let Err(e) = connection_task_result {
                 error!(
                     "Error while forwarding http connection {connection_id} (port {port}): {e:?}."
                 )
