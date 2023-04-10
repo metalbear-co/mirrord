@@ -388,6 +388,15 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		// If target wasn't specified in the config file, let user choose pod from dropdown
 		if (!await isTargetInFile()) {
 			let targets = await mirrordApi.listTargets(configPath);
+			if (targets.length === 0) {
+				await vscode.window.showErrorMessage(
+					"No mirrord target available in the configured namespace. " +
+					"Set a different target namespace or kubeconfig in the mirrord configuration file.",
+				);
+
+				return undefined;
+			}
+
 			let targetName = await vscode.window.showQuickPick(targets, { placeHolder: 'Select a target path to mirror' });
 
 			if (targetName) {
