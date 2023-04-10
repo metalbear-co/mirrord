@@ -15,7 +15,7 @@ use crate::{error::AgentError, runtime::set_namespace};
 /// Struct that helps you manage topic -> subscribers
 ///
 /// When a topic has no subscribers, it is removed.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Subscriptions<T, C> {
     _inner: HashMap<T, HashSet<C>>,
 }
@@ -27,13 +27,6 @@ where
     T: Eq + Hash + Clone + Copy,
     C: Eq + Hash + Clone + Copy,
 {
-    // TODO(alex): Same as `IndexAllocator`, make a good `Default` impl, then delete this.
-    pub fn new() -> Subscriptions<T, C> {
-        Subscriptions {
-            _inner: HashMap::new(),
-        }
-    }
-
     /// Add a new subscription to a topic for a given client.
     pub fn subscribe(&mut self, client: C, topic: T) {
         self._inner
@@ -212,7 +205,7 @@ mod subscription_tests {
 
     #[test]
     fn sanity() {
-        let mut subscriptions = Subscriptions::<Port, _>::new();
+        let mut subscriptions: Subscriptions<Port, _> = Default::default();
         subscriptions.subscribe(3, 2);
         subscriptions.subscribe(3, 3);
         subscriptions.subscribe(3, 1);
