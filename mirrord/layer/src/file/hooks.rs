@@ -1,14 +1,14 @@
 #[cfg(target_os = "linux")]
 use core::ffi::{c_size_t, c_ssize_t};
-use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
-
-#[cfg(target_os = "linux")]
-use errno::{set_errno, Errno};
 /// FFI functions that override the `libc` calls (see `file` module documentation on how to
 /// enable/disable these).
 ///
 /// NOTICE: If a file operation fails, it might be because it depends on some `libc` function
 /// that is not being hooked (`strace` the program to check).
+use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
+
+#[cfg(target_os = "linux")]
+use errno::{set_errno, Errno};
 use libc::{
     self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
     AT_FDCWD, DIR,
@@ -22,7 +22,7 @@ use mirrord_protocol::file::{
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
 use num_traits::Bounded;
-use tracing::{debug, trace};
+use tracing::trace;
 #[cfg(target_os = "linux")]
 use tracing::{error, info, warn};
 
