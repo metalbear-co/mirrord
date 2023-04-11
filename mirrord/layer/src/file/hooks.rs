@@ -1,27 +1,28 @@
 #[cfg(target_os = "linux")]
 use core::ffi::{c_size_t, c_ssize_t};
+use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
+
+#[cfg(target_os = "linux")]
+use errno::{set_errno, Errno};
 /// FFI functions that override the `libc` calls (see `file` module documentation on how to
 /// enable/disable these).
 ///
 /// NOTICE: If a file operation fails, it might be because it depends on some `libc` function
 /// that is not being hooked (`strace` the program to check).
-use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
-
-#[cfg(target_os = "linux")]
-use errno::{set_errno, Errno};
 use libc::{
-    self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, DIR,
+    self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
+    AT_FDCWD, DIR,
 };
 #[cfg(target_os = "linux")]
 use libc::{EBADF, EINVAL, ENOENT, ENOTDIR};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
-    DirEntryInternal, MetadataInternal, ReadFileResponse, WriteFileResponse,
+    DirEntryInternal, FsMetadataInternal, MetadataInternal, ReadFileResponse, WriteFileResponse,
 };
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
 use num_traits::Bounded;
-use tracing::trace;
+use tracing::{debug, trace};
 #[cfg(target_os = "linux")]
 use tracing::{error, info, warn};
 
@@ -503,40 +504,77 @@ unsafe extern "C" fn fill_stat(out_stat: *mut stat, metadata: &MetadataInternal)
     out.st_blocks = best_effort_cast(metadata.blocks);
 }
 
+/// Fills the `stat` struct with the metadata
+unsafe extern "C" fn fill_statfs(out_stat: *mut statfs, metadata: &FsMetadataInternal) {
+    out_stat.write_bytes(0, 1);
+    let out = &mut *out_stat;
+    // on macOS the types might be different, so we try to cast and do our best..
+    out.f_type = best_effort_cast(metadata.r#type);
+    out.f_bsize = best_effort_cast(metadata.bsize);
+    out.f_blocks = metadata.blocks;
+    out.f_bfree = metadata.bfree;
+    out.f_bavail = metadata.bavail;
+    out.f_files = metadata.files;
+    out.f_ffree = metadata.ffree;
+    // out.f_fsid = metadata.fsid;
+}
+
 /// Hook for `libc::lstat`.
 #[hook_guard_fn]
 unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
-    xstat(Some(raw_path.checked_into()), None, false)
+    let display_raw_path = std::ffi::CStr::from_ptr(raw_path);
+
+    let out = xstat(Some(raw_path.checked_into()), None, false)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
             0
         })
-        .unwrap_or_bypass_with(|_| FN_LSTAT(raw_path, out_stat))
+        .unwrap_or_bypass_with(|_| FN_LSTAT(raw_path, out_stat));
+
+    debug!(
+        "lstat_detour raw_path {display_raw_path:?} | out_stat {:#?}",
+        *out_stat
+    );
+
+    out
 }
 
 /// Hook for `libc::fstat`.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> c_int {
-    xstat(None, Some(fd), true)
+    let out = xstat(None, Some(fd), true)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
             0
         })
-        .unwrap_or_bypass_with(|_| FN_FSTAT(fd, out_stat))
+        .unwrap_or_bypass_with(|_| FN_FSTAT(fd, out_stat));
+
+    debug!("fstat_detour fd: {fd} | out_stat {:#?}", *out_stat);
+
+    out
 }
 
 /// Hook for `libc::stat`.
 #[hook_guard_fn]
 unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
-    xstat(Some(raw_path.checked_into()), None, true)
+    let display_raw_path = std::ffi::CStr::from_ptr(raw_path);
+
+    let out = xstat(Some(raw_path.checked_into()), None, true)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
             0
         })
-        .unwrap_or_bypass_with(|_| FN_STAT(raw_path, out_stat))
+        .unwrap_or_bypass_with(|_| FN_STAT(raw_path, out_stat));
+
+    debug!(
+        "stat_detour raw_path {display_raw_path:?} | out_stat {:#?}",
+        *out_stat
+    );
+
+    out
 }
 
 /// Hook for libc's stat syscall wrapper.
@@ -549,13 +587,22 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
     if ver != 1 {
         return FN___XSTAT(ver, raw_path, out_stat);
     }
-    xstat(Some(raw_path.checked_into()), None, true)
+    let display_raw_path = std::ffi::CStr::from_ptr(raw_path);
+
+    let out = xstat(Some(raw_path.checked_into()), None, true)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
             0
         })
-        .unwrap_or_bypass_with(|_| FN___XSTAT(ver, raw_path, out_stat))
+        .unwrap_or_bypass_with(|_| FN___XSTAT(ver, raw_path, out_stat));
+
+    debug!(
+        "__xstat_detour raw_path {display_raw_path:?} | out_stat {:#?}",
+        *out_stat
+    );
+
+    out
 }
 
 /// Separated out logic for `fstatat` so that it can be used by go to match on the xstat result.
@@ -566,11 +613,15 @@ pub(crate) unsafe fn fstatat_logic(
     flag: c_int,
 ) -> Detour<i32> {
     let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
-    xstat(Some(raw_path.checked_into()), Some(fd), follow_symlink).map(|res| {
+    let out = xstat(Some(raw_path.checked_into()), Some(fd), follow_symlink).map(|res| {
         let res = res.metadata;
         fill_stat(out_stat, &res);
         0
-    })
+    });
+
+    debug!("fstatat_logic fd: {fd} | out_stat {:#?}", *out_stat);
+
+    out
 }
 
 /// Hook for `libc::fstatat`.
@@ -583,6 +634,17 @@ unsafe extern "C" fn fstatat_detour(
 ) -> c_int {
     fstatat_logic(fd, raw_path, out_stat, flag)
         .unwrap_or_bypass_with(|_| FN_FSTATAT(fd, raw_path, out_stat, flag))
+}
+
+#[hook_guard_fn]
+unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs) -> c_int {
+    xstatfs(fd)
+        .map(|res| {
+            let res = res.metadata;
+            fill_statfs(out_stat, &res);
+            0
+        })
+        .unwrap_or_bypass_with(|_| FN_FSTATFS(fd, out_stat))
 }
 
 // this requires newer libc which we don't link with to support old libc..
@@ -735,6 +797,14 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FnFstatat,
             FN_FSTATAT
         );
+
+        replace!(
+            hook_manager,
+            "fstatfs",
+            fstatfs_detour,
+            FnFstatfs,
+            FN_FSTATFS
+        );
         replace!(
             hook_manager,
             "fdopendir",
@@ -774,6 +844,13 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             fstatat_detour,
             FnFstatat,
             FN_FSTATAT
+        );
+        replace!(
+            hook_manager,
+            "fstatfs$INODE64",
+            fstatfs_detour,
+            FnFstatfs,
+            FN_FSTATFS
         );
         replace!(
             hook_manager,

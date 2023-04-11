@@ -62,6 +62,24 @@ impl From<Metadata> for MetadataInternal {
     }
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq, Default)]
+pub struct FsMetadataInternal {
+    /// f_type
+    pub r#type: i64,
+    /// f_bsize
+    pub bsize: i64,
+    /// f_blocks
+    pub blocks: u64,
+    /// f_bfree
+    pub bfree: u64,
+    /// f_bavail
+    pub bavail: u64,
+    /// f_files
+    pub files: u64,
+    /// f_ffree
+    pub ffree: u64,
+}
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct DirEntryInternal {
     pub inode: u64,
@@ -309,8 +327,18 @@ pub struct XstatRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct XstatFsRequest {
+    pub fd: u64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct XstatResponse {
     pub metadata: MetadataInternal,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct XstatFsResponse {
+    pub metadata: FsMetadataInternal,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

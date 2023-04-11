@@ -1,12 +1,3 @@
-/// File operations on remote pod.
-///
-/// Read-only file operations are enabled by default, you can turn it off by setting
-/// `MIRRORD_FILE_RO_OPS` to `false`.
-///
-///
-/// Some file paths and types are ignored by default (bypassed by mirrord, meaning they are
-/// opened locally), these are controlled by configuring the [`filter::FileFilter`] with
-/// `[FsConfig]`.
 use core::fmt;
 use std::{
     io::SeekFrom,
@@ -17,6 +8,15 @@ use std::{
 
 use dashmap::DashMap;
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
+/// File operations on remote pod.
+///
+/// Read-only file operations are enabled by default, you can turn it off by setting
+/// `MIRRORD_FILE_RO_OPS` to `false`.
+///
+///
+/// Some file paths and types are ignored by default (bypassed by mirrord, meaning they are
+/// opened locally), these are controlled by configuring the [`filter::FileFilter`] with
+/// `[FsConfig]`.
 #[cfg(target_os = "linux")]
 use mirrord_protocol::file::{GetDEnts64Request, GetDEnts64Response};
 use mirrord_protocol::{
@@ -25,7 +25,8 @@ use mirrord_protocol::{
         FdOpenDirRequest, OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
         OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
         ReadFileResponse, ReadLimitedFileRequest, SeekFileRequest, SeekFileResponse,
-        WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest, XstatRequest, XstatResponse,
+        WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest, XstatFsRequest,
+        XstatFsResponse, XstatRequest, XstatResponse,
     },
     ClientMessage, FileRequest, FileResponse, RemoteResult,
 };
@@ -125,6 +126,7 @@ pub struct FileHandler {
     write_limited_queue: ResponseDeque<WriteFileResponse>,
     access_queue: ResponseDeque<AccessFileResponse>,
     xstat_queue: ResponseDeque<XstatResponse>,
+    xstatfs_queue: ResponseDeque<XstatFsResponse>,
     opendir_queue: ResponseDeque<OpenDirResponse>,
     readdir_queue: ResponseDeque<ReadDirResponse>,
     #[cfg(target_os = "linux")]
@@ -202,24 +204,25 @@ impl FileHandler {
                     });
 
                 pop_send(&mut self.write_limited_queue, write).inspect_err(|fail| {
-                    error!(
-                        "handle_daemon_message -> Failed `pop_send` with {:#?}",
-                        fail,
-                    )
+                    error!("handle_daemon_message -> Failed `pop_send` with {fail:#?}")
                 })
             }
             Xstat(xstat) => {
-                trace!("DaemonMessage::XstatResponse {:#?}!", xstat);
+                trace!("DaemonMessage::XstatResponse {xstat:#?}!");
                 pop_send(&mut self.xstat_queue, xstat)
             }
+            XstatFs(xstatfs) => {
+                trace!("DaemonMessage::XstatFsResponse {xstatfs:#?}!");
+                pop_send(&mut self.xstatfs_queue, xstatfs)
+            }
             ReadDir(read_dir) => {
-                trace!("DaemonMessage::ReadDirResponse {:#?}!", read_dir);
+                trace!("DaemonMessage::ReadDirResponse {read_dir:#?}!");
                 pop_send(&mut self.readdir_queue, read_dir)
             }
             OpenDir(open_dir) => pop_send(&mut self.opendir_queue, open_dir),
             #[cfg(target_os = "linux")]
             GetDEnts64(getdents64) => {
-                trace!("DaemonMessage::GetDEnts64Response {:#?}!", getdents64);
+                trace!("DaemonMessage::GetDEnts64Response {getdents64:#?}!");
                 pop_send(&mut self.getdents64_queue, getdents64)
             }
         }
@@ -244,6 +247,7 @@ impl FileHandler {
             Close(close) => self.handle_hook_close(close, tx).await,
             Access(access) => self.handle_hook_access(access, tx).await,
             Xstat(xstat) => self.handle_hook_xstat(xstat, tx).await,
+            XstatFs(xstatfs) => self.handle_hook_xstatfs(xstatfs, tx).await,
             ReadDir(read_dir) => self.handle_hook_read_dir(read_dir, tx).await,
             FdOpenDir(open_dir) => self.handle_hook_fdopen_dir(open_dir, tx).await,
             CloseDir(close_dir) => self.handle_hook_close_dir(close_dir, tx).await,
@@ -496,6 +500,21 @@ impl FileHandler {
         tx.send(request).await.map_err(From::from)
     }
 
+    async fn handle_hook_xstatfs(
+        &mut self,
+        xstat: XstatFs,
+        tx: &Sender<ClientMessage>,
+    ) -> Result<()> {
+        let XstatFs { fd, fs_channel_tx } = xstat;
+
+        self.xstatfs_queue.push_back(fs_channel_tx);
+
+        let xstatfs_request = XstatFsRequest { fd };
+
+        let request = ClientMessage::FileRequest(FileRequest::XstatFs(xstatfs_request));
+        tx.send(request).await.map_err(From::from)
+    }
+
     #[tracing::instrument(level = "trace", skip(self, tx))]
     async fn handle_hook_fdopen_dir(
         &mut self,
@@ -620,6 +639,12 @@ pub struct Xstat {
 }
 
 #[derive(Debug)]
+pub struct XstatFs {
+    pub(crate) fd: RemoteFd,
+    pub(crate) fs_channel_tx: ResponseChannel<XstatFsResponse>,
+}
+
+#[derive(Debug)]
 pub struct ReadDir {
     pub(crate) remote_fd: u64,
     pub(crate) dir_channel_tx: ResponseChannel<ReadDirResponse>,
@@ -656,6 +681,7 @@ pub enum FileOperation {
     Close(Close),
     Access(Access),
     Xstat(Xstat),
+    XstatFs(XstatFs),
     ReadDir(ReadDir),
     FdOpenDir(FdOpenDir),
     CloseDir(CloseDir),

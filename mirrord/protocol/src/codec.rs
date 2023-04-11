@@ -16,7 +16,7 @@ use crate::{
         OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest,
         ReadDirRequest, ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
         SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
-        WriteLimitedFileRequest, XstatRequest, XstatResponse,
+        WriteLimitedFileRequest, XstatFsRequest, XstatFsResponse, XstatRequest, XstatResponse,
     },
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -49,6 +49,7 @@ pub enum FileRequest {
     Close(CloseFileRequest),
     Access(AccessFileRequest),
     Xstat(XstatRequest),
+    XstatFs(XstatFsRequest),
     FdOpenDir(FdOpenDirRequest),
     ReadDir(ReadDirRequest),
     CloseDir(CloseDirRequest),
@@ -83,6 +84,7 @@ pub enum FileResponse {
     Seek(RemoteResult<SeekFileResponse>),
     Access(RemoteResult<AccessFileResponse>),
     Xstat(RemoteResult<XstatResponse>),
+    XstatFs(RemoteResult<XstatFsResponse>),
     ReadDir(RemoteResult<ReadDirResponse>),
     OpenDir(RemoteResult<OpenDirResponse>),
     #[cfg(target_os = "linux")]
