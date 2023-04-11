@@ -5,6 +5,8 @@
 #![feature(let_chains)]
 #![feature(type_alias_impl_trait)]
 #![feature(tcp_quickack)]
+#![feature(async_fn_in_trait)]
+#![allow(incomplete_features)]
 
 use std::{
     collections::{HashMap, HashSet},
@@ -107,7 +109,7 @@ impl State {
         }
         Ok(State {
             clients: HashSet::new(),
-            index_allocator: IndexAllocator::new(),
+            index_allocator: Default::default(),
             should_pause: args.pause,
             container,
         })

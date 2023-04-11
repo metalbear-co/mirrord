@@ -149,7 +149,7 @@ impl TcpOutgoingApi {
         daemon_tx: Sender<Daemon>,
         pid: Option<u64>,
     ) -> Result<()> {
-        let mut allocator: IndexAllocator<ConnectionId> = IndexAllocator::new();
+        let mut allocator: IndexAllocator<ConnectionId> = Default::default();
 
         // TODO: Right now we're manually keeping these 2 maps in sync (aviram suggested using
         // `Weak` for `writers`).

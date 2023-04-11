@@ -13,7 +13,9 @@
 #![feature(c_size_t)]
 #![feature(pointer_byte_offsets)]
 #![feature(is_some_and)]
+#![feature(async_fn_in_trait)]
 #![allow(rustdoc::private_intra_doc_links)]
+#![allow(incomplete_features)]
 
 //! Loaded dynamically with your local process.
 //!
