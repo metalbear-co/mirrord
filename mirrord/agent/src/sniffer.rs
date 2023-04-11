@@ -335,7 +335,7 @@ impl TcpConnectionSniffer {
         Ok(Self {
             receiver,
             raw_capture,
-            port_subscriptions: Subscriptions::new(),
+            port_subscriptions: Default::default(),
             client_senders: HashMap::new(),
             sessions: TCPSessionMap::new(),
             //todo: impl drop for index allocator and connection id..
