@@ -522,59 +522,37 @@ unsafe extern "C" fn fill_statfs(out_stat: *mut statfs, metadata: &FsMetadataInt
 /// Hook for `libc::lstat`.
 #[hook_guard_fn]
 unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
-    let display_raw_path = std::ffi::CStr::from_ptr(raw_path);
-
-    let out = xstat(Some(raw_path.checked_into()), None, false)
+    xstat(Some(raw_path.checked_into()), None, false)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
             0
         })
-        .unwrap_or_bypass_with(|_| FN_LSTAT(raw_path, out_stat));
-
-    debug!(
-        "lstat_detour raw_path {display_raw_path:?} | out_stat {:#?}",
-        *out_stat
-    );
-
-    out
+        .unwrap_or_bypass_with(|_| FN_LSTAT(raw_path, out_stat))
 }
 
 /// Hook for `libc::fstat`.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> c_int {
-    let out = xstat(None, Some(fd), true)
+    xstat(None, Some(fd), true)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
             0
         })
-        .unwrap_or_bypass_with(|_| FN_FSTAT(fd, out_stat));
-
-    debug!("fstat_detour fd: {fd} | out_stat {:#?}", *out_stat);
-
-    out
+        .unwrap_or_bypass_with(|_| FN_FSTAT(fd, out_stat))
 }
 
 /// Hook for `libc::stat`.
 #[hook_guard_fn]
 unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
-    let display_raw_path = std::ffi::CStr::from_ptr(raw_path);
-
-    let out = xstat(Some(raw_path.checked_into()), None, true)
+    xstat(Some(raw_path.checked_into()), None, true)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
             0
         })
-        .unwrap_or_bypass_with(|_| FN_STAT(raw_path, out_stat));
-
-    debug!(
-        "stat_detour raw_path {display_raw_path:?} | out_stat {:#?}",
-        *out_stat
-    );
-
-    out
+        .unwrap_or_bypass_with(|_| FN_STAT(raw_path, out_stat))
 }
 
 /// Hook for libc's stat syscall wrapper.
@@ -587,22 +565,13 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
     if ver != 1 {
         return FN___XSTAT(ver, raw_path, out_stat);
     }
-    let display_raw_path = std::ffi::CStr::from_ptr(raw_path);
-
-    let out = xstat(Some(raw_path.checked_into()), None, true)
+    xstat(Some(raw_path.checked_into()), None, true)
         .map(|res| {
             let res = res.metadata;
             fill_stat(out_stat, &res);
             0
         })
-        .unwrap_or_bypass_with(|_| FN___XSTAT(ver, raw_path, out_stat));
-
-    debug!(
-        "__xstat_detour raw_path {display_raw_path:?} | out_stat {:#?}",
-        *out_stat
-    );
-
-    out
+        .unwrap_or_bypass_with(|_| FN___XSTAT(ver, raw_path, out_stat))
 }
 
 /// Separated out logic for `fstatat` so that it can be used by go to match on the xstat result.
@@ -613,15 +582,11 @@ pub(crate) unsafe fn fstatat_logic(
     flag: c_int,
 ) -> Detour<i32> {
     let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
-    let out = xstat(Some(raw_path.checked_into()), Some(fd), follow_symlink).map(|res| {
+    xstat(Some(raw_path.checked_into()), Some(fd), follow_symlink).map(|res| {
         let res = res.metadata;
         fill_stat(out_stat, &res);
         0
-    });
-
-    debug!("fstatat_logic fd: {fd} | out_stat {:#?}", *out_stat);
-
-    out
+    })
 }
 
 /// Hook for `libc::fstatat`.
