@@ -1,1 +1,0 @@
-Removed unnecessary trait bounds for `Default` implementation on `IndexAllocator`. Replaced usages of `IndexAllocator::new` with `Default::default`.
