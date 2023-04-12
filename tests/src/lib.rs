@@ -50,6 +50,9 @@ mod utils {
     /// However, if this variable is set, resources will always be deleted.
     pub const FORCE_CLEANUP_ENV_NAME: &'static str = "MIRRORD_E2E_FORCE_CLEANUP";
 
+    /// All Kubernetes resources created for testing purposes share this label.
+    pub const TEST_RESOURCE_LABEL: (&'static str, &'static str) = ("MIRRORD_E2E_TEST_RESOURCE", "true");
+
     pub async fn watch_resource_exists<K: Debug + Clone + DeserializeOwned>(
         api: &Api<K>,
         name: &str,
@@ -534,6 +537,9 @@ mod utils {
             "kind": "Namespace",
             "metadata": {
                 "name": namespace,
+                "labels": {
+                    TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+                }
             },
         }))
         .unwrap();
@@ -556,7 +562,8 @@ mod utils {
             "metadata": {
                 "name": &name,
                 "labels": {
-                    "app": &name
+                    "app": &name,
+                    TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
                 }
             },
             "spec": {
@@ -619,7 +626,8 @@ mod utils {
             "metadata": {
                 "name": &name,
                 "labels": {
-                    "app": &name
+                    "app": &name,
+                    TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
                 }
             },
             "spec": {
