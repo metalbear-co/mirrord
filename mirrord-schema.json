@@ -199,7 +199,7 @@
           ]
         },
         "image_pull_secrets": {
-          "description": "List of secrets the agent pod has access to.\n\nTakes an array of hash with the format {name: <secret-name>. Read more [here](https://kubernetes.io/docs/concepts/containers/images/).",
+          "description": "List of secrets the agent pod has access to.\n\nTakes an array of hash with the format `{ name: <secret-name> }`. Read more [here](https://kubernetes.io/docs/concepts/containers/images/).",
           "type": [
             "array",
             "null"

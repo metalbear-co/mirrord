@@ -217,6 +217,7 @@ mod tests {
                             "namespace": "default",
                             "image": "",
                             "image_pull_policy": "",
+                            "image_pull_secrets": [{"name": "testsecret"}],
                             "ttl": 60,
                             "ephemeral": false,
                             "pause": false,
@@ -252,6 +253,7 @@ mod tests {
                     namespace = "default"
                     image = ""
                     image_pull_policy = ""
+                    image_pull_secrets = [{name = "testsecret"}]
                     ttl = 60
                     ephemeral = false
                     pause = false
@@ -284,6 +286,8 @@ mod tests {
                         namespace: "default"
                         image: ""
                         image_pull_policy: ""
+                        image_pull_secrets:
+                            - name: "testsecret"
                         ttl: 60
                         ephemeral: false
                         pause: false
