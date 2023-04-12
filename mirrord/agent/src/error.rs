@@ -100,7 +100,7 @@ pub enum AgentError {
     #[error("Pause was set, but container id or runtime is missing.")]
     MissingContainerInfo,
 
-    #[error("start_client -> Ran out of connections, dropping new connection")]
+    #[error("Ran out of connections, dropping new connection")]
     ConnectionLimitReached,
 
     #[error("An internal invariant of the agent was violated, this should not happen.")]

@@ -161,26 +161,19 @@ impl State {
 
         let client_id = match self.new_client().await {
             Ok(id) => id,
-            Err(AgentError::ConnectionLimitReached) => {
-                error!("start_client -> Ran out of connections, dropping new connection");
-                stream
-                    .send(DaemonMessage::Close(
-                        "maximum concurrent connections reached".into(),
-                    ))
-                    .await
-                    .ok(); // Ignore message send error.
-
-                return Ok(None);
-            }
             Err(err) => {
-                // Propagate all errors that are not ConnectionLimitReached.
-
                 stream
                     .send(DaemonMessage::Close(err.to_string()))
                     .await
                     .ok(); // Ignore message send error.
 
-                return Err(err);
+                if let AgentError::ConnectionLimitReached = err {
+                    error!("{err}");
+                    return Ok(None);
+                } else {
+                    // Propagate all errors that are not ConnectionLimitReached.
+                    return Err(err);
+                }
             }
         };
 
