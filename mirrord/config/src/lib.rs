@@ -18,7 +18,7 @@ pub mod util;
 ///
 /// Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
 /// including if you only made documentation changes.
-use std::{collections::HashMap, path::Path};
+use std::path::Path;
 
 use config::{ConfigError, MirrordConfig};
 use mirrord_config_derive::MirrordConfig;
@@ -168,6 +168,7 @@ mod tests {
     use std::{
         fs::{File, OpenOptions},
         io::{Read, Write},
+        collections::HashMap
     };
 
     use rstest::*;
