@@ -19,7 +19,7 @@ mod utils {
     };
 
     use chrono::Utc;
-    use futures_util::stream::{StreamExt, TryStreamExt};
+    use futures_util::stream::TryStreamExt;
     use k8s_openapi::api::{
         apps::v1::Deployment,
         core::v1::{Namespace, Pod, Service},
@@ -42,7 +42,7 @@ mod utils {
         sync::oneshot::{self, Sender},
     };
 
-    static TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
+    const TEXT: &'static str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
     pub const CONTAINER_NAME: &str = "test";
 
     pub async fn watch_resource_exists<K: Debug + Clone + DeserializeOwned>(
@@ -52,7 +52,8 @@ mod utils {
         let params = ListParams::default()
             .fields(&format!("metadata.name={name}"))
             .timeout(10);
-        let mut stream = api.watch(&params, "0").await.unwrap().boxed();
+        let stream = api.watch(&params, "0").await.unwrap();
+        tokio::pin!(stream);
         while let Some(status) = stream.try_next().await.unwrap() {
             match status {
                 WatchEvent::Modified(_) => break,
@@ -64,14 +65,14 @@ mod utils {
         }
     }
 
+    /// Creates a random string of 7 alphanumeric lowercase characters.
     fn random_string() -> String {
-        let mut rand_str: String = rand::thread_rng()
+        rand::thread_rng()
             .sample_iter(&Alphanumeric)
             .take(7)
             .map(char::from)
-            .collect();
-        rand_str.make_ascii_lowercase();
-        rand_str
+            .collect::<String>()
+            .to_ascii_lowercase()
     }
 
     #[derive(Debug)]
@@ -499,24 +500,26 @@ mod utils {
             "{:?} creating service {service_name:?} in namespace {namespace:?}",
             Utc::now()
         );
+
         let kube_client = kube_client.await;
         let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
         let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
         let service_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
-        let name;
-        if randomize_name {
-            name = format!("{}-{}", service_name, random_string());
+
+        let name = if randomize_name {
+            format!("{}-{}", service_name, random_string())
         } else {
             // if using non-random name, delete existing resources first.
             // Just continue if they don't exist.
-            let _res = service_api
+            let _ = service_api
                 .delete(service_name, &DeleteParams::default())
                 .await;
-            let _res = deployment_api
+            let _ = deployment_api
                 .delete(service_name, &DeleteParams::default())
                 .await;
-            name = service_name.to_string();
-        }
+
+            service_name.to_string()
+        };
 
         let namespace_resource: Namespace = serde_json::from_value(json!({
             "apiVersion": "v1",
@@ -526,9 +529,7 @@ mod utils {
             },
         }))
         .unwrap();
-
-        // Create namespace if does not yet exist. If already exits, it will also not going to be
-        // deleted when the calling test is done.
+        // Create namespace and wrap it in ResourceGuard if it does not yet exist.
         let namespace_guard = ResourceGuard::create(
             namespace_api.clone(),
             namespace.to_string(),
@@ -537,7 +538,6 @@ mod utils {
         )
         .await
         .ok();
-
         if namespace_guard.is_some() {
             watch_resource_exists(&namespace_api, namespace).await;
         }
@@ -636,7 +636,6 @@ mod utils {
             }
         }))
         .unwrap();
-
         let service_guard = ResourceGuard::create(
             service_api.clone(),
             name.clone(),
@@ -647,7 +646,7 @@ mod utils {
         .unwrap();
         watch_resource_exists(&service_api, "default").await;
 
-        let target = get_pod_instance(&kube_client, &name, namespace)
+        let target = get_pod_instance(kube_client.clone(), &name, namespace)
             .await
             .unwrap();
         let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
@@ -659,8 +658,9 @@ mod utils {
             "{:?} done creating service {service_name:?} in namespace {namespace:?}",
             Utc::now()
         );
+
         KubeService {
-            name: name.to_string(),
+            name,
             namespace: namespace.to_string(),
             target: format!("pod/{target}/container/{CONTAINER_NAME}"),
             _pod: pod_guard,
@@ -848,18 +848,19 @@ mod utils {
         format!("http://{host_ip}:{port}")
     }
 
+    /// Returns a name of any pod belonging to the given app.
     pub async fn get_pod_instance(
-        client: &Client,
+        client: Client,
         app_name: &str,
         namespace: &str,
     ) -> Option<String> {
-        let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
-        let pods = pod_api
+        let pod_api: Api<Pod> = Api::namespaced(client, namespace);
+        pod_api
             .list(&ListParams::default().labels(&format!("app={app_name}")))
             .await
-            .unwrap();
-        let pod = pods.iter().next().and_then(|pod| pod.metadata.name.clone());
-        pod
+            .unwrap()
+            .into_iter()
+            .find_map(|pod| pod.metadata.name)
     }
 
     /// Take a request builder of any method, add headers, send the request, verify success, and
