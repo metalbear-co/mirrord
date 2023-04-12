@@ -75,8 +75,8 @@ mod pause {
 
         // `IntoAsyncRead` needs a stream with `Error = io::Error`, so convert the error type of the
         // result from kube::Error to io::Error.
-        let log_stream =
-            log_stream.map(|res| res.map_err(|_| std::io::Error::new(UnexpectedEof, "idk")));
+        let log_stream = log_stream
+            .map(|res| res.map_err(|err| std::io::Error::new(UnexpectedEof, err.to_string())));
 
         let log_lines = log_stream.into_async_read().lines();
 
