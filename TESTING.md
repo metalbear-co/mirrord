@@ -91,6 +91,13 @@ The Kubernetes resources created by an E2E test are automatically deleted when t
 MIRRORD_E2E_FORCE_CLEANUP=y cargo test --package tests
 ```
 
+All test resources share a common label `MIRRORD_E2E_TEST_RESOURCE=true`. To delete them, simply run:
+
+```bash
+kubectl delete namespaces,deployments,services -l MIRRORD_E2E_TEST_RESOURCE=true
+```
+
+
 ## Integration Tests
 
 The layer's integration tests test the hooks and their logic without actually using a Kubernetes cluster and spawning
