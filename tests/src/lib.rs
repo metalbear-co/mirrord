@@ -45,6 +45,11 @@ mod utils {
     const TEXT: &'static str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
     pub const CONTAINER_NAME: &str = "test";
 
+    /// Name of the environment variable used to control cleanup after failed tests.
+    /// By default, resources from failed tests are preserved for debugging.
+    /// However, if this variable is set, resources will always be deleted.
+    pub const FORCE_CLEANUP_ENV_NAME: &'static str = "MIRRORD_E2E_FORCE_CLEANUP";
+
     pub async fn watch_resource_exists<K: Debug + Clone + DeserializeOwned>(
         api: &Api<K>,
         name: &str,
@@ -483,9 +488,11 @@ mod utils {
         _namespace: Option<ResourceGuard>,
     }
 
-    /// randomize_name: should a random suffix be added to the end of resource names? e.g.
-    ///                 for `echo-service`, should we create as `echo-service-ybtdb`.
-    /// delete_after_fail: delete resources even if the test fails.
+    /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
+    /// when the returned service is dropped, unless it is dropped during panic.
+    /// This behavior can be changed, see [`FORCE_CLEANUP_ENV_NAME`].
+    /// * `randomize_name` - whether a random suffix should be added to the end of the resource
+    ///   names
     #[fixture]
     pub async fn service(
         #[default("default")] namespace: &str,
@@ -493,9 +500,10 @@ mod utils {
         #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
         #[default("http-echo")] service_name: &str,
         #[default(true)] randomize_name: bool,
-        #[default(false)] delete_after_fail: bool,
         #[future] kube_client: Client,
     ) -> KubeService {
+        let delete_after_fail = std::env::var_os(FORCE_CLEANUP_ENV_NAME).is_some();
+
         println!(
             "{:?} creating service {service_name:?} in namespace {namespace:?}",
             Utc::now()
@@ -509,7 +517,7 @@ mod utils {
         let name = if randomize_name {
             format!("{}-{}", service_name, random_string())
         } else {
-            // if using non-random name, delete existing resources first.
+            // If using a non-random name, delete existing resources first.
             // Just continue if they don't exist.
             let _ = service_api
                 .delete(service_name, &DeleteParams::default())
@@ -680,7 +688,6 @@ mod utils {
             "ghcr.io/metalbear-co/mirrord-node-udp-logger:latest",
             "udp-logger",
             true,
-            false,
             kube_client,
         )
         .await
@@ -694,7 +701,6 @@ mod utils {
             "ghcr.io/metalbear-co/mirrord-http-logger:latest",
             "mirrord-tests-http-logger",
             false, // So that requester can reach logger by name.
-            true,
             kube_client,
         )
         .await
@@ -710,7 +716,6 @@ mod utils {
             // Have a non-random name, so that there can only be one requester at any point in time
             // so that another requester does not send requests while this one is paused.
             false,
-            true, // Delete also on fail, cause this service constantly does work.
             kube_client,
         )
         .await
@@ -726,7 +731,6 @@ mod utils {
             "ghcr.io/metalbear-co/mirrord-tcp-echo:latest",
             "tcp-echo",
             true,
-            false,
             kube_client,
         )
         .await
@@ -743,7 +747,6 @@ mod utils {
             "ghcr.io/metalbear-co/mirrord-websocket:latest",
             "websocket",
             true,
-            false,
             kube_client,
         )
         .await
@@ -757,7 +760,6 @@ mod utils {
             "ghcr.io/metalbear-co/mirrord-pytest:latest",
             "http2-echo",
             true,
-            false,
             kube_client,
         )
         .await
@@ -772,7 +774,6 @@ mod utils {
             "NodePort",
             "ghcr.io/metalbear-co/mirrord-pytest:latest",
             "hostname-echo",
-            true,
             true,
             kube_client,
         )
@@ -789,7 +790,6 @@ mod utils {
             "NodePort",
             "ghcr.io/metalbear-co/mirrord-pytest:latest",
             "pytest-echo",
-            true,
             true,
             kube_client,
         )

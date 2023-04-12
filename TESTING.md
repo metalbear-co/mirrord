@@ -83,6 +83,14 @@ And then in order to use that binary in the tests, run the tests like this:
 MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord cargo test -p tests
 ```
 
+### Cleanup
+
+The Kubernetes resources created by an E2E test are automatically deleted when the test exists successfully. However, failed tests by default don't delete their resources to allow debugging. You can force resource deletion by setting a `MIRRORD_E2E_FORCE_CLEANUP` variable to any value.
+
+```bash
+MIRRORD_E2E_FORCE_CLEANUP=y cargo test --package tests
+```
+
 ## Integration Tests
 
 The layer's integration tests test the hooks and their logic without actually using a Kubernetes cluster and spawning
