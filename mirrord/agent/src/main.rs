@@ -107,7 +107,7 @@ impl State {
         let container =
             get_container(args.container_id.as_ref(), args.container_runtime.as_ref()).await?;
         if container.is_none() && args.pause {
-            return Err(AgentError::MissingContainerInfo);
+            Err(AgentError::MissingContainerInfo)?
         }
         Ok(State {
             clients: HashSet::new(),
@@ -162,17 +162,14 @@ impl State {
         let client_id = match self.new_client().await {
             Ok(id) => id,
             Err(err) => {
-                stream
-                    .send(DaemonMessage::Close(err.to_string()))
-                    .await
-                    .ok(); // Ignore message send error.
+                let _ = stream.send(DaemonMessage::Close(err.to_string())).await; // Ignore message send error.
 
                 if let AgentError::ConnectionLimitReached = err {
                     error!("{err}");
                     return Ok(None);
                 } else {
                     // Propagate all errors that are not ConnectionLimitReached.
-                    return Err(err);
+                    Err(err)?
                 }
             }
         };
@@ -290,10 +287,9 @@ impl ClientConnectionHandler {
                     "Failed to create TcpSnifferApi: {e}, this could be due to kernel version."
                 );
                 warn!(message);
-                stream
+                let _ = stream
                     .send(DaemonMessage::LogMessage(LogMessage::warn(message)))
-                    .await
-                    .ok(); // Ignore message send error.
+                    .await; // Ignore message send error.
 
                 None
             }
@@ -309,14 +305,13 @@ impl ClientConnectionHandler {
         {
             Ok(api) => api,
             Err(e) => {
-                stream
+                let _ = stream
                     .send(DaemonMessage::Close(format!(
                         "Failed to create TcpStealerApi: {e}."
                     )))
-                    .await
-                    .ok(); // Ignore message send error.
+                    .await; // Ignore message send error.
 
-                return Err(e);
+                Err(e)?
             }
         };
 
@@ -454,7 +449,7 @@ impl ClientConnectionHandler {
                     sniffer_api.handle_client_message(message).await?
                 } else {
                     warn!("received tcp sniffer request while not available");
-                    return Err(AgentError::SnifferApiError);
+                    Err(AgentError::SnifferApiError)?
                 }
             }
             ClientMessage::TcpSteal(message) => {
@@ -597,16 +592,16 @@ async fn start_agent() -> Result<()> {
         }
         Ok(Err(err)) => {
             error!("start -> Failed to accept connection: {:?}", err);
-            return Err(err.into());
+            Err(err)?
         }
         Err(err) => {
             error!("start -> Failed to accept first connection: timeout");
-            return Err(err.into());
+            Err(err)?
         }
     }
 
     if args.test_error {
-        return Err(AgentError::TestError);
+        Err(AgentError::TestError)?
     }
 
     loop {
