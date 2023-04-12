@@ -20,6 +20,7 @@ pub struct Subscriptions<T, C> {
     _inner: HashMap<T, HashSet<C>>,
 }
 
+/// Id of an agent's client. Each new client connection is assigned with a unique id.
 pub type ClientId = u32;
 
 impl<T, C> Subscriptions<T, C>
