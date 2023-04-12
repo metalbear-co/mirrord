@@ -504,19 +504,18 @@ unsafe extern "C" fn fill_stat(out_stat: *mut stat, metadata: &MetadataInternal)
     out.st_blocks = best_effort_cast(metadata.blocks);
 }
 
-/// Fills the `stat` struct with the metadata
+/// Fills the `statfs` struct with the metadata
 unsafe extern "C" fn fill_statfs(out_stat: *mut statfs, metadata: &FsMetadataInternal) {
     out_stat.write_bytes(0, 1);
     let out = &mut *out_stat;
     // on macOS the types might be different, so we try to cast and do our best..
-    out.f_type = best_effort_cast(metadata.r#type);
-    out.f_bsize = best_effort_cast(metadata.bsize);
+    out.f_type = best_effort_cast(metadata.filesystem_type);
+    out.f_bsize = best_effort_cast(metadata.block_size);
     out.f_blocks = metadata.blocks;
-    out.f_bfree = metadata.bfree;
-    out.f_bavail = metadata.bavail;
+    out.f_bfree = metadata.blocks_free;
+    out.f_bavail = metadata.blocks_available;
     out.f_files = metadata.files;
-    out.f_ffree = metadata.ffree;
-    // out.f_fsid = metadata.fsid;
+    out.f_ffree = metadata.files_free;
 }
 
 /// Hook for `libc::lstat`.

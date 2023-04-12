@@ -15,12 +15,11 @@ use libc::DT_DIR;
 use mirrord_protocol::{
     file::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, DirEntryInternal,
-        FdOpenDirRequest, FsMetadataInternal, GetDEnts64Request, GetDEnts64Response,
-        OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
-        OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
-        ReadFileResponse, ReadLimitedFileRequest, SeekFileRequest, SeekFileResponse,
-        WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest, XstatFsRequest,
-        XstatFsResponse, XstatRequest, XstatResponse,
+        FdOpenDirRequest, GetDEnts64Request, GetDEnts64Response, OpenDirResponse, OpenFileRequest,
+        OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest, ReadDirRequest,
+        ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
+        SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+        WriteLimitedFileRequest, XstatFsRequest, XstatFsResponse, XstatRequest, XstatResponse,
     },
     FileRequest, FileResponse, RemoteResult, ResponseError,
 };
@@ -581,21 +580,15 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))?;
 
         let statfs = match target {
-            RemoteFile::File(file) => nix::sys::statfs::fstatfs(file).unwrap(),
-            RemoteFile::Directory(path) => nix::sys::statfs::statfs(path).unwrap(),
+            RemoteFile::File(file) => nix::sys::statfs::fstatfs(file)
+                .map_err(|err| std::io::Error::from_raw_os_error(err as i32))?,
+            RemoteFile::Directory(path) => nix::sys::statfs::statfs(path)
+                .map_err(|err| std::io::Error::from_raw_os_error(err as i32))?,
         };
 
-        let metadata = FsMetadataInternal {
-            r#type: statfs.filesystem_type().0,
-            bsize: statfs.block_size(),
-            blocks: statfs.blocks(),
-            bfree: statfs.blocks_free(),
-            bavail: statfs.blocks_available(),
-            files: statfs.files(),
-            ffree: statfs.files_free(),
-        };
-
-        Ok(XstatFsResponse { metadata })
+        Ok(XstatFsResponse {
+            metadata: statfs.into(),
+        })
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
