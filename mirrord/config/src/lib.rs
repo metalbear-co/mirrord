@@ -18,7 +18,7 @@ pub mod util;
 ///
 /// Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
 /// including if you only made documentation changes.
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
 use config::{ConfigError, MirrordConfig};
 use mirrord_config_derive::MirrordConfig;
@@ -353,6 +353,10 @@ mod tests {
                 namespace: Some("default".to_owned()),
                 image: Some("".to_owned()),
                 image_pull_policy: Some("".to_owned()),
+                image_pull_secrets: Some(vec![HashMap::from([(
+                    "name".to_owned(),
+                    "testsecret".to_owned(),
+                )])]),
                 ttl: Some(60),
                 ephemeral: Some(false),
                 communication_timeout: None,

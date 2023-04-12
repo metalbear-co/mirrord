@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
@@ -35,6 +37,11 @@ pub struct AgentConfig {
     /// policy](https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy)
     #[config(env = "MIRRORD_AGENT_IMAGE_PULL_POLICY", default = "IfNotPresent")]
     pub image_pull_policy: String,
+
+    /// List of secrets the agent pod has access to.
+    ///
+    /// Takes an array of hash with the format {name: <secret-name>. Read more [here](https://kubernetes.io/docs/concepts/containers/images/).
+    pub image_pull_secrets: Option<Vec<HashMap<String, String>>>,
 
     /// Controls how long the agent pod persists for after the agent exits (in seconds).
     ///
