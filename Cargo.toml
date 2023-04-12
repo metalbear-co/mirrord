@@ -27,7 +27,6 @@ categories = ["development-tools", "backend", "devtool"]
 
 [workspace.dependencies]
 actix-codec = "0.5"
-async-trait = "0.1"
 bytes = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros"] }
 tokio-stream = "0.1"
