@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use mirrord_protocol::Port;
 use tokio::process::Command;
 use tracing::warn;
@@ -19,7 +18,6 @@ where
     }
 }
 
-#[async_trait]
 impl<T> Redirect for FlushConnections<T>
 where
     T: Redirect + Send + Sync,

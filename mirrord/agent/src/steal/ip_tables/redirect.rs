@@ -1,6 +1,5 @@
 use std::{ops::Deref, sync::Arc};
 
-use async_trait::async_trait;
 use enum_dispatch::enum_dispatch;
 use mirrord_protocol::Port;
 
@@ -9,7 +8,6 @@ use crate::{
     steal::ip_tables::{chain::IPTableChain, IPTables, IPTABLE_PREROUTING},
 };
 
-#[async_trait]
 #[enum_dispatch]
 pub trait Redirect {
     async fn mount_entrypoint(&self) -> Result<()>;
@@ -45,7 +43,6 @@ where
     }
 }
 
-#[async_trait]
 impl<IPT> Redirect for PreroutingRedirect<IPT>
 where
     IPT: IPTables + Send + Sync,

@@ -2171,7 +2171,6 @@ name = "mirrord-agent"
 version = "3.35.0"
 dependencies = [
  "actix-codec",
- "async-trait",
  "bollard",
  "bytes",
  "clap",
@@ -2297,7 +2296,6 @@ version = "3.35.0"
 dependencies = [
  "actix-codec",
  "anyhow",
- "async-trait",
  "base64 0.21.0",
  "bimap",
  "bytemuck",

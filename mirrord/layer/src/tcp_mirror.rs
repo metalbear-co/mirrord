@@ -5,7 +5,6 @@ use std::{
     time::Duration,
 };
 
-use async_trait::async_trait;
 use bimap::BiMap;
 use mirrord_protocol::{
     tcp::{HttpRequest, LayerTcp, NewTcpConnection, TcpClose, TcpData},
@@ -129,7 +128,6 @@ impl TcpMirrorHandler {
     }
 }
 
-#[async_trait]
 impl TcpHandler for TcpMirrorHandler {
     /// Handle NewConnection messages
     #[tracing::instrument(level = "trace", skip(self))]
