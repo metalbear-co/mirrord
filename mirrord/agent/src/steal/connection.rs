@@ -114,6 +114,8 @@ pub(crate) struct TcpConnectionStealer {
 }
 
 impl TcpConnectionStealer {
+    pub const TASK_NAME: &'static str = "Stealer";
+
     /// Initializes a new [`TcpConnectionStealer`] fields, but doesn't start the actual working
     /// task (call [`TcpConnectionStealer::start`] to do so).
     #[tracing::instrument(level = "trace")]

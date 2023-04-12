@@ -43,9 +43,6 @@ pub enum AgentError {
     #[error("UdpOutgoingTrafficRequest sender failed with `{0}`")]
     SendUdpOutgoingTrafficRequest(#[from] tokio::sync::mpsc::error::SendError<LayerUdpOutgoing>),
 
-    #[error("Receiver channel is closed!")]
-    ReceiverClosed,
-
     #[error("Request channel closed unexpectedly.")]
     HttpRequestReceiverClosed,
 
@@ -103,7 +100,7 @@ pub enum AgentError {
     #[error("Pause was set, but container id or runtime is missing.")]
     MissingContainerInfo,
 
-    #[error("start_client -> Ran out of connections, dropping new connection")]
+    #[error("Ran out of connections, dropping new connection")]
     ConnectionLimitReached,
 
     #[error("An internal invariant of the agent was violated, this should not happen.")]
@@ -135,6 +132,9 @@ pub enum AgentError {
            the containerd socket is"#
     )]
     ContainerdSocketNotFound,
+
+    #[error("Background task `{task}` failed with `{cause}`")]
+    BackgroundTaskFailed { task: &'static str, cause: String },
 
     #[error("Returning an error to test the agent's error cleanup. Should only ever be used when testing mirrord.")]
     TestError,
