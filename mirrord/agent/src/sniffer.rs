@@ -225,7 +225,8 @@ impl TcpSnifferApi {
     /// * `client_id` - id of the client using this struct
     /// * `sniffer_sender` - channel used to send commands to the [`TcpConnectionSniffer`]
     /// * `task_status` - handle to the [`TcpConnectionSniffer`] exit status
-    /// * `channel_size` - capacity of the channel connecting [`TcpConnectionSniffer`] back to this struct
+    /// * `channel_size` - capacity of the channel connecting [`TcpConnectionSniffer`] back to this
+    ///   struct
     pub async fn new(
         client_id: ClientId,
         sniffer_sender: Sender<SnifferCommand>,
@@ -271,7 +272,8 @@ impl TcpSnifferApi {
         }
     }
 
-    /// Tansform the given message into a [`SnifferCommands`] and pass it to the connected [`TcpConnectionSniffer`].
+    /// Tansform the given message into a [`SnifferCommands`] and pass it to the connected
+    /// [`TcpConnectionSniffer`].
     pub async fn handle_client_message(&mut self, message: LayerTcp) -> Result<(), AgentError> {
         self.send_command(message.into()).await
     }
