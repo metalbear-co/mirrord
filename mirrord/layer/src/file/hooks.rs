@@ -506,6 +506,8 @@ unsafe extern "C" fn fill_stat(out_stat: *mut stat, metadata: &MetadataInternal)
 
 /// Fills the `statfs` struct with the metadata
 unsafe extern "C" fn fill_statfs(out_stat: *mut statfs, metadata: &FsMetadataInternal) {
+    // Acording to linux documentation "Fields that are undefined for a particular file system are
+    // set to 0."
     out_stat.write_bytes(0, 1);
     let out = &mut *out_stat;
     // on macOS the types might be different, so we try to cast and do our best..
