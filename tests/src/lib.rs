@@ -14,7 +14,7 @@ mod utils {
         fmt::Debug,
         net::Ipv4Addr,
         process::Stdio,
-        sync::{Arc, Mutex},
+        sync::{Arc, Condvar, Mutex},
         time::Duration,
     };
 
@@ -39,10 +39,8 @@ mod utils {
     use tokio::{
         io::{AsyncReadExt, BufReader},
         process::{Child, Command},
-        task::JoinHandle,
+        sync::oneshot::{self, Sender},
     };
-    // 0.8
-    use tokio_util::sync::{CancellationToken, DropGuard};
 
     static TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
     pub const CONTAINER_NAME: &str = "test";
@@ -402,59 +400,72 @@ mod utils {
         Client::try_from(config).unwrap()
     }
 
+    /// RAII-style guard for deleting kube resources after tests.
+    /// This guard spawns a background task to delete the kube resource.
     struct ResourceGuard {
-        guard: Option<DropGuard>,
-        barrier: std::sync::Arc<std::sync::Barrier>,
-        handle: JoinHandle<()>,
-        delete_on_fail: bool,
+        /// Used in the implementation of [`Drop`] for this struct to block until the background
+        /// task exits.
+        task_finished: Arc<(Mutex<bool>, Condvar)>,
+        /// Used to inform the background task whether this guard was dropped during panic.
+        panic_tx: Option<Sender<bool>>,
     }
 
     impl ResourceGuard {
-        /// Creates a resource and spawns a task to delete it when dropped
-        /// Returns Error if already exists.
-        /// I'm not sure why I have to add the `static here but this works?
+        /// Create a kube resource and spawn a task to delete it when this guard is dropped.
+        /// Return [`Error`] if creating the resource failed.
         pub async fn create<K: Debug + Clone + DeserializeOwned + Serialize + 'static>(
-            api: &Api<K>,
+            api: Api<K>,
             name: String,
             data: &K,
             delete_on_fail: bool,
         ) -> Result<ResourceGuard, Error> {
             api.create(&PostParams::default(), data).await?;
-            let cancel_token = CancellationToken::new();
-            let resource_token = cancel_token.clone();
-            let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
-            let guard_barrier = barrier.clone();
-            let name = name.clone();
-            let cloned_api = api.clone();
-            let handle = tokio::spawn(async move {
-                cancel_token.cancelled().await;
-                // Don't clean pods on failure, so that we can debug
-                println!("deleting {:?}", &name);
-                cloned_api
-                    .delete(&name, &DeleteParams::default())
-                    .await
-                    .unwrap();
-                barrier.wait();
+
+            let (panic_tx, panic_rx) = oneshot::channel::<bool>();
+            let task_finished = Arc::new((Mutex::new(false), Condvar::new()));
+            let finished = task_finished.clone();
+
+            tokio::spawn(async move {
+                let panic = panic_rx.await.unwrap_or(true);
+
+                if !panic || delete_on_fail {
+                    println!("Deleting resource `{name}`",);
+                    if let Err(e) = api.delete(&name, &DeleteParams::default()).await {
+                        println!("Failed to delete resource `{name}`: {e:?}");
+                    }
+                }
+
+                *finished.0.lock().expect("ResourceGuard lock poisoned") = true;
+                finished.1.notify_one();
             });
+
             Ok(Self {
-                guard: Some(resource_token.drop_guard()),
-                barrier: guard_barrier,
-                handle,
-                delete_on_fail,
+                task_finished,
+                panic_tx: Some(panic_tx),
             })
         }
     }
 
     impl Drop for ResourceGuard {
         fn drop(&mut self) {
-            if !self.delete_on_fail && std::thread::panicking() {
-                // If we're panicking and we shouldn't delete the resources on fail (to allow for
-                // inspection) then abort the cleaning task.
-                self.handle.abort();
-            } else {
-                let guard = self.guard.take();
-                drop(guard);
-                self.barrier.wait();
+            let task_alive = self
+                .panic_tx
+                .take()
+                .expect("ResourceGuard holds empty panic_tx")
+                .send(std::thread::panicking())
+                .is_ok();
+
+            if task_alive {
+                let lock = self
+                    .task_finished
+                    .0
+                    .lock()
+                    .expect("ResourceGuard lock poisoned");
+                let _lock = self
+                    .task_finished
+                    .1
+                    .wait_while(lock, |deleted| !*deleted)
+                    .expect("ResourceGuard lock poisoned");
             }
         }
     }
@@ -519,7 +530,7 @@ mod utils {
         // Create namespace if does not yet exist. If already exits, it will also not going to be
         // deleted when the calling test is done.
         let namespace_guard = ResourceGuard::create(
-            &namespace_api,
+            namespace_api.clone(),
             namespace.to_string(),
             &namespace_resource,
             delete_after_fail,
@@ -585,7 +596,7 @@ mod utils {
         }))
         .unwrap();
         let pod_guard = ResourceGuard::create(
-            &deployment_api,
+            deployment_api.clone(),
             name.to_string(),
             &deployment,
             delete_after_fail,
@@ -626,10 +637,14 @@ mod utils {
         }))
         .unwrap();
 
-        let service_guard =
-            ResourceGuard::create(&service_api, name.to_string(), &service, delete_after_fail)
-                .await
-                .unwrap();
+        let service_guard = ResourceGuard::create(
+            service_api.clone(),
+            name.clone(),
+            &service,
+            delete_after_fail,
+        )
+        .await
+        .unwrap();
         watch_resource_exists(&service_api, "default").await;
 
         let target = get_pod_instance(&kube_client, &name, namespace)
