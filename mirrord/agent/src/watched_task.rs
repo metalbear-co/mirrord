@@ -61,6 +61,7 @@ pub(crate) struct WatchedTask<F> {
 }
 
 impl<F> WatchedTask<F> {
+    /// Wrap the given task in a new instance of this struct.
     pub(crate) fn new(task_name: &'static str, task: F) -> Self {
         let (result_tx, result_rx) = watch::channel(None);
 

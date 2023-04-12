@@ -154,7 +154,7 @@ impl TcpOutgoingApi {
         }
     }
 
-    /// Does the actual work for `Request`s and prepares the `Responses:
+    /// Does the actual work for `Request`s and prepares the `Response`s:
     #[tracing::instrument(level = "trace", skip(layer_rx, daemon_tx))]
     async fn interceptor_task(
         mut layer_rx: Receiver<Layer>,

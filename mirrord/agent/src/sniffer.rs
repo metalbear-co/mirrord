@@ -207,15 +207,25 @@ pub struct SnifferCommand {
     command: SnifferCommands,
 }
 
+/// Interface used by clients to interact with the [`TcpConnectionSniffer`].
+/// Multiple instances of this struct operate on a single sniffer instance.
 pub struct TcpSnifferApi {
+    /// Id of the client using this struct.
     client_id: ClientId,
+    /// Channel used to send commands to the [`TcpConnectionSniffer`].
     sender: Sender<SnifferCommand>,
+    /// Channel used to receive messages from the [`TcpConnectionSniffer`].
     receiver: Receiver<DaemonTcp>,
     /// View on the sniffer task's status.
     task_status: TaskStatus,
 }
 
 impl TcpSnifferApi {
+    /// Create a new instance of this struct and connect it to a [`TcpConnectionSniffer`] instance.
+    /// * `client_id` - id of the client using this struct
+    /// * `sniffer_sender` - channel used to send commands to the [`TcpConnectionSniffer`]
+    /// * `task_status` - handle to the [`TcpConnectionSniffer`] exit status
+    /// * `channel_size` - capacity of the channel connecting [`TcpConnectionSniffer`] back to this struct
     pub async fn new(
         client_id: ClientId,
         sniffer_sender: Sender<SnifferCommand>,
@@ -239,6 +249,7 @@ impl TcpSnifferApi {
         })
     }
 
+    /// Send the given command to the connected [`TcpConnectionSniffer`].
     async fn send_command(&mut self, command: SnifferCommands) -> Result<(), AgentError> {
         let command = SnifferCommand {
             client_id: self.client_id,
@@ -252,6 +263,7 @@ impl TcpSnifferApi {
         }
     }
 
+    /// Return the next message from the connected [`TcpConnectionSniffer`].
     pub async fn recv(&mut self) -> Result<DaemonTcp, AgentError> {
         match self.receiver.recv().await {
             Some(msg) => Ok(msg),
@@ -259,6 +271,7 @@ impl TcpSnifferApi {
         }
     }
 
+    /// Tansform the given message into a [`SnifferCommands`] and pass it to the connected [`TcpConnectionSniffer`].
     pub async fn handle_client_message(&mut self, message: LayerTcp) -> Result<(), AgentError> {
         self.send_command(message.into()).await
     }
