@@ -54,17 +54,17 @@ impl<F> WatchedTask<F> {
             task,
         }
     }
+
+    /// Return a shared view over the inner [`TaskStatus`].
+    pub(crate) fn status(&self) -> TaskStatus {
+        self.status.clone()
+    }
 }
 
 impl<T> WatchedTask<T>
 where
     T: Future<Output = Result<(), AgentError>>,
 {
-    /// Return a shared view over the inner [`TaskStatus`].
-    pub(crate) fn status(&self) -> TaskStatus {
-        self.status.clone()
-    }
-
     /// Execute the wrapped task.
     /// If an error occurred during the execution, store it in the inner [`TaskStatus`].
     pub(crate) async fn start(self) {
