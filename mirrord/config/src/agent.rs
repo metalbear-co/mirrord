@@ -40,7 +40,7 @@ pub struct AgentConfig {
 
     /// List of secrets the agent pod has access to.
     ///
-    /// Takes an array of hash with the format {name: <secret-name>. Read more [here](https://kubernetes.io/docs/concepts/containers/images/).
+    /// Takes an array of hash with the format `{ name: <secret-name> }`. Read more [here](https://kubernetes.io/docs/concepts/containers/images/).
     pub image_pull_secrets: Option<Vec<HashMap<String, String>>>,
 
     /// Controls how long the agent pod persists for after the agent exits (in seconds).
