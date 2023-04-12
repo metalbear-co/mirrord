@@ -156,7 +156,7 @@ impl TcpHandler for TcpStealHandler {
         );
 
         // Returns AppClosedConnection Error with message to send to agent if this fails.
-        let _ = connection.write_all(&data.bytes[..]).await.map_err(|err| {
+        connection.write_all(&data.bytes[..]).await.map_err(|err| {
             trace!(
                 "mirrord could not forward all the incoming data in connection id {}. \
                     Got error: {:?}",

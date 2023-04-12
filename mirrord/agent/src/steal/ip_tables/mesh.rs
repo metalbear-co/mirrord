@@ -1,5 +1,6 @@
 use std::sync::{Arc, LazyLock};
 
+use async_trait::async_trait;
 use fancy_regex::Regex;
 use mirrord_protocol::Port;
 use nix::unistd::getgid;
@@ -107,6 +108,7 @@ where
     }
 }
 
+#[async_trait]
 impl<IPT> Redirect for MeshRedirect<IPT>
 where
     IPT: IPTables + Send + Sync,
