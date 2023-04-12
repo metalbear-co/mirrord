@@ -31,11 +31,11 @@ impl TaskStatus {
     /// Return a view over the error that occurred during the execution of the task.
     /// This guard should not be held for a long time, especially across .await points.
     pub fn err(&self) -> RwLockReadGuard<'_, Option<AgentError>> {
-        self.error.read().expect("task statuc lock poisoned")
+        self.error.read().expect("task status lock poisoned")
     }
 }
 
-/// A wrapper aroung asynchronous task.
+/// A wrapper around asynchronous task.
 /// Captures the task's status and exposes it through [`TaskStatus`].
 pub(crate) struct WatchedTask<F> {
     /// Shared view on the task status.
@@ -83,7 +83,7 @@ mod test {
     use super::*;
 
     #[tokio::test]
-    async fn simple_successfull() {
+    async fn simple_successful() {
         let task = WatchedTask::new("task", async move { Ok(()) });
         let status = task.status();
         task.start().await;
