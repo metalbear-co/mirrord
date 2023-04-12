@@ -43,9 +43,6 @@ pub enum AgentError {
     #[error("UdpOutgoingTrafficRequest sender failed with `{0}`")]
     SendUdpOutgoingTrafficRequest(#[from] tokio::sync::mpsc::error::SendError<LayerUdpOutgoing>),
 
-    #[error("Receiver channel is closed!")]
-    ReceiverClosed,
-
     #[error("Request channel closed unexpectedly.")]
     HttpRequestReceiverClosed,
 

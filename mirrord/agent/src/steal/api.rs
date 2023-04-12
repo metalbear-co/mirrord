@@ -58,15 +58,17 @@ impl TcpStealerApi {
     }
 
     /// Send `command` to stealer, with the client id of the client that is using this API instance.
-    async fn send_command(&self, command: Command) -> Result<()> {
-        self.command_tx
-            .send(StealerCommand {
-                client_id: self.client_id,
-                command,
-            })
-            .await
-            .map_err(AgentError::from)
-            .map_err(|e| self.task_status.check().unwrap_or(e))
+    async fn send_command(&mut self, command: Command) -> Result<()> {
+        let command = StealerCommand {
+            client_id: self.client_id,
+            command,
+        };
+
+        if self.command_tx.send(command).await.is_ok() {
+            Ok(())
+        } else {
+            Err(self.task_status.unwrap_err().await)
+        }
     }
 
     /// Send `command` synchronously to stealer with `try_send`, with the client id of the client
@@ -78,7 +80,6 @@ impl TcpStealerApi {
                 command,
             })
             .map_err(AgentError::from)
-            .map_err(|e| self.task_status.check().unwrap_or(e))
     }
 
     /// Helper function that passes the [`DaemonTcp`] messages we generated in the
@@ -87,11 +88,10 @@ impl TcpStealerApi {
     /// Called in the [`ClientConnectionHandler`].
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn recv(&mut self) -> Result<DaemonTcp> {
-        self.daemon_rx.recv().await.ok_or_else(|| {
-            self.task_status
-                .check()
-                .unwrap_or(AgentError::ReceiverClosed)
-        })
+        match self.daemon_rx.recv().await {
+            Some(msg) => Ok(msg),
+            None => Err(self.task_status.unwrap_err().await),
+        }
     }
 
     /// Handles the conversion of [`LayerTcpSteal::PortSubscribe`], that is passed from the

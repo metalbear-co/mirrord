@@ -17,7 +17,7 @@ use tokio_util::io::ReaderStream;
 use tracing::{trace, warn};
 
 use crate::{
-    error::{AgentError, Result},
+    error::Result,
     util::{run_thread_in_namespace, IndexAllocator},
     watched_task::{TaskStatus, WatchedTask},
 };
@@ -216,19 +216,18 @@ impl TcpOutgoingApi {
     /// Sends a `TcpOutgoingRequest` to the `interceptor_task`.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn layer_message(&mut self, message: LayerTcpOutgoing) -> Result<()> {
-        self.layer_tx
-            .send(message)
-            .await
-            .map_err(AgentError::from)
-            .map_err(|e| self.task_status.check().unwrap_or(e))
+        if self.layer_tx.send(message).await.is_ok() {
+            Ok(())
+        } else {
+            Err(self.task_status.unwrap_err().await)
+        }
     }
 
     /// Receives a `TcpOutgoingResponse` from the `interceptor_task`.
     pub(crate) async fn daemon_message(&mut self) -> Result<DaemonTcpOutgoing> {
-        self.daemon_rx.recv().await.ok_or_else(|| {
-            self.task_status
-                .check()
-                .unwrap_or(AgentError::ReceiverClosed)
-        })
+        match self.daemon_rx.recv().await {
+            Some(msg) => Ok(msg),
+            None => Err(self.task_status.unwrap_err().await),
+        }
     }
 }

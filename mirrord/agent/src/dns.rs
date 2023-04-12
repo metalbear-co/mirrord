@@ -110,9 +110,13 @@ impl DnsApi {
         rx.await.map_err(Into::into)
     }
 
-    pub async fn make_request(&self, request: GetAddrInfoRequest) -> Result<GetAddrInfoResponse> {
-        self.try_make_request(request)
-            .await
-            .map_err(|e| self.task_status.check().unwrap_or(e))
+    pub async fn make_request(
+        &mut self,
+        request: GetAddrInfoRequest,
+    ) -> Result<GetAddrInfoResponse> {
+        match self.try_make_request(request).await {
+            Ok(res) => Ok(res),
+            Err(_) => Err(self.task_status.unwrap_err().await),
+        }
     }
 }

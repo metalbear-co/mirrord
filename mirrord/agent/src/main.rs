@@ -564,7 +564,7 @@ async fn start_agent() -> Result<()> {
         (task, status)
     };
 
-    let bg_tasks = BackgroundTasks {
+    let mut bg_tasks = BackgroundTasks {
         sniffer_status,
         sniffer_sender: sniffer_command_tx,
         stealer_status,
@@ -648,12 +648,12 @@ async fn start_agent() -> Result<()> {
     drop(cancel_guard);
 
     sniffer_task.join().map_err(|_| AgentError::JoinTask)?;
-    if let Some(err) = &*bg_tasks.sniffer_status.err() {
+    if let Some(err) = bg_tasks.sniffer_status.err().await {
         error!("start_agent -> sniffer task failed with error: {}", err);
     }
 
     stealer_task.join().map_err(|_| AgentError::JoinTask)?;
-    if let Some(err) = &*bg_tasks.stealer_status.err() {
+    if let Some(err) = bg_tasks.stealer_status.err().await {
         error!("start_agent -> stealer task failed with error: {}", err);
     }
 

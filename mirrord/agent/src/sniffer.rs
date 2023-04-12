@@ -239,23 +239,24 @@ impl TcpSnifferApi {
         })
     }
 
-    async fn send_command(&self, command: SnifferCommands) -> Result<(), AgentError> {
-        self.sender
-            .send(SnifferCommand {
-                client_id: self.client_id,
-                command,
-            })
-            .await
-            .map_err(AgentError::from)
-            .map_err(|e| self.task_status.check().unwrap_or(e))
+    async fn send_command(&mut self, command: SnifferCommands) -> Result<(), AgentError> {
+        let command = SnifferCommand {
+            client_id: self.client_id,
+            command,
+        };
+
+        if self.sender.send(command).await.is_ok() {
+            Ok(())
+        } else {
+            Err(self.task_status.unwrap_err().await)
+        }
     }
 
     pub async fn recv(&mut self) -> Result<DaemonTcp, AgentError> {
-        self.receiver.recv().await.ok_or_else(|| {
-            self.task_status
-                .check()
-                .unwrap_or(AgentError::ReceiverClosed)
-        })
+        match self.receiver.recv().await {
+            Some(msg) => Ok(msg),
+            None => Err(self.task_status.unwrap_err().await),
+        }
     }
 
     pub async fn handle_client_message(&mut self, message: LayerTcp) -> Result<(), AgentError> {
