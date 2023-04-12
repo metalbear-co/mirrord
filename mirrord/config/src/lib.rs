@@ -166,9 +166,9 @@ impl LayerFileConfig {
 mod tests {
 
     use std::{
+        collections::HashMap,
         fs::{File, OpenOptions},
         io::{Read, Write},
-        collections::HashMap
     };
 
     use rstest::*;
