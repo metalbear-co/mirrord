@@ -168,7 +168,7 @@ impl State {
                         "maximum concurrent connections reached".into(),
                     ))
                     .await
-                    .ok();
+                    .ok(); // Ignore message send error.
 
                 return Ok(None);
             }
@@ -178,7 +178,7 @@ impl State {
                 stream
                     .send(DaemonMessage::Close(err.to_string()))
                     .await
-                    .ok();
+                    .ok(); // Ignore message send error.
 
                 return Err(err);
             }
@@ -300,7 +300,7 @@ impl ClientConnectionHandler {
                 stream
                     .send(DaemonMessage::LogMessage(LogMessage::warn(message)))
                     .await
-                    .ok();
+                    .ok(); // Ignore message send error.
 
                 None
             }
@@ -321,7 +321,7 @@ impl ClientConnectionHandler {
                         "Failed to create TcpStealerApi: {e}."
                     )))
                     .await
-                    .ok();
+                    .ok(); // Ignore message send error.
 
                 return Err(e);
             }
