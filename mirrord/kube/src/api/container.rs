@@ -134,7 +134,6 @@ impl ContainerApi for JobContainer {
     where
         P: Progress + Send + Sync,
     {
-        let agent_image = Self::agent_image(agent);
         let pod_progress = progress.subtask("creating agent pod...");
         let mirrord_agent_job_name = get_agent_name();
 
@@ -159,8 +158,6 @@ impl ContainerApi for JobContainer {
         if agent.test_error {
             agent_command_line.push("--test-error".to_owned());
         }
-
-        let flush_connections = agent.flush_connections.to_string();
 
         let agent_pod: Job = serde_json::from_value(
             json!({ // Only Jobs support self deletion after completion
@@ -208,10 +205,11 @@ impl ContainerApi for JobContainer {
                                 }
                             }
                         ],
+                        "imagePullSecrets": agent.image_pull_secrets,
                         "containers": [
                             {
                                 "name": "mirrord-agent",
-                                "image": agent_image,
+                                "image": Self::agent_image(agent),
                                 "imagePullPolicy": agent.image_pull_policy,
                                 "securityContext": {
                                     "runAsGroup": agent_gid,
@@ -230,7 +228,7 @@ impl ContainerApi for JobContainer {
                                 "command": agent_command_line,
                                 "env": [
                                     { "name": "RUST_LOG", "value": agent.log_level },
-                                    { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": flush_connections }
+                                    { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() }
                                 ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                                 {
@@ -311,7 +309,6 @@ impl ContainerApi for EphemeralContainer {
     where
         P: Progress + Send + Sync,
     {
-        let agent_image = Self::agent_image(agent);
         let container_progress = progress.subtask("creating ephemeral container...");
 
         warn!("Ephemeral Containers is an experimental feature
@@ -330,11 +327,9 @@ impl ContainerApi for EphemeralContainer {
             agent_command_line.push(timeout.to_string());
         }
 
-        let flush_connections = agent.flush_connections.to_string();
-
         let ephemeral_container: KubeEphemeralContainer = serde_json::from_value(json!({
             "name": mirrord_agent_name,
-            "image": agent_image,
+            "image": Self::agent_image(agent),
             "securityContext": {
                 "runAsGroup": agent_gid,
                 "capabilities": {
@@ -346,7 +341,7 @@ impl ContainerApi for EphemeralContainer {
             "targetContainerName": runtime_data.container_name,
             "env": [
                 {"name": "RUST_LOG", "value": agent.log_level},
-                { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": flush_connections }
+                { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() }
             ],
             "command": agent_command_line,
         }))?;
