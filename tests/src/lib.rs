@@ -51,7 +51,8 @@ mod utils {
     pub const FORCE_CLEANUP_ENV_NAME: &'static str = "MIRRORD_E2E_FORCE_CLEANUP";
 
     /// All Kubernetes resources created for testing purposes share this label.
-    pub const TEST_RESOURCE_LABEL: (&'static str, &'static str) = ("MIRRORD_E2E_TEST_RESOURCE", "true");
+    pub const TEST_RESOURCE_LABEL: (&'static str, &'static str) =
+        ("MIRRORD_E2E_TEST_RESOURCE", "true");
 
     pub async fn watch_resource_exists<K: Debug + Clone + DeserializeOwned>(
         api: &Api<K>,
