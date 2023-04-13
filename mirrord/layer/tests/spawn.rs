@@ -21,13 +21,7 @@ pub use common::*;
 async fn node_spawn(dylib_path: &PathBuf) {
     let application = Application::NodeSpawn;
     let (mut test_process, listener) = application
-        .get_test_process_and_listener(
-            dylib_path,
-            vec![
-                ("MIRRORD_FILE_MODE", "local"),
-                ("MIRRORD_UDP_OUTGOING", "false"),
-            ],
-        )
+        .get_test_process_and_listener(dylib_path, vec![("MIRRORD_FILE_MODE", "local")])
         .await;
 
     // Accept the connection from the layer and verify initial messages.
