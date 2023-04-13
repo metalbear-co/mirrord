@@ -1,1 +1,0 @@
-Improve testing guide.

@@ -1,25 +1,56 @@
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+//! Contains a couple of handy constants and the [`filter_task`].
+//!
+//! # [`filter_task`]
+//!
+//! The _meaty_ part of our HTTP traffic stealing feature, that creates the whole HTTP filtering
+//! mechanism.
+//!
+//! # [`TokioExecutor`]
+//!
+//! Temporary affair required for HTTP/2 handshaking in [`hyper`].
+//!
+//! # [`close_connection`]
+//!
+//! Notifies that the connection for this current [`filter_task`] should be closed.
+use std::{future::Future, net::SocketAddr, sync::Arc, time::Duration};
 
 use dashmap::DashMap;
 use fancy_regex::Regex;
-use hyper::server::{self, conn::http1};
+use hyper::rt::Executor;
 use mirrord_protocol::ConnectionId;
-use tokio::{
-    io::{copy_bidirectional, AsyncWriteExt},
-    net::TcpStream,
-    sync::{mpsc::Sender, oneshot},
-};
+use tokio::{io::copy_bidirectional, net::TcpStream, sync::mpsc::Sender};
 use tracing::{error, trace};
 
 use super::{
-    error::HttpTrafficError,
-    hyper_handler::{HyperHandler, RawHyperConnection},
-    DefaultReversibleStream, HttpVersion,
+    error::HttpTrafficError, v1::HttpV1, v2::HttpV2, DefaultReversibleStream, HttpV, HttpVersion,
 };
 use crate::{steal::HandlerHttpRequest, util::ClientId};
 
+/// Default start of an HTTP/2 request.
+///
+/// Used by [`HttpVersion`] to check if the connection should be treated as HTTP/2.
 const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
+
+/// Timeout value for how long we wait for a stream to contain enough bytes to assert which HTTP
+/// version we're dealing with.
 const DEFAULT_HTTP_VERSION_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
+
+// TODO(alex): Import this from `hyper-util` when the crate is actually published.
+/// Future executor that utilises `tokio` threads.
+#[non_exhaustive]
+#[derive(Default, Debug, Clone)]
+pub struct TokioExecutor;
+
+impl<Fut> Executor<Fut> for TokioExecutor
+where
+    Fut: Future + Send + 'static,
+    Fut::Output: Send + 'static,
+{
+    fn execute(&self, fut: Fut) {
+        trace!("starting tokio executor for hyper HTTP/2");
+        tokio::spawn(fut);
+    }
+}
 
 /// Controls the amount of data we read when trying to detect if the stream's first message contains
 /// an HTTP request.
@@ -31,24 +62,24 @@ pub(super) const MINIMAL_HEADER_SIZE: usize = 10;
 /// Reads the start of the [`TcpStream`], and decides if it's HTTP (we currently only support
 /// HTTP/1) or not,
 ///
-/// ## HTTP/1
+/// ## HTTP/1 and HTTP/2
 ///
 /// If the stream is identified as HTTP/1 by our check in [`HttpVersion::new`], then we serve the
 /// connection with [`HyperHandler`].
 ///
-/// ### Upgrade
+/// ### Upgrade (HTTP/1 only)
 ///
 /// If an upgrade request is detected in the [`HyperHandler`], then we take the HTTP connection
 /// that's being served (after HTTP processing is done), and use [`copy_bidirectional`] to copy the
-/// data from the upgraded connection to its original destination (similar to the Not HTTP/1
+/// data from the upgraded connection to its original destination (similar to the "Not HTTP"
 /// handling).
 ///
-/// ## Not HTTP/1
+/// ## Not HTTP
 ///
 /// Forwards the whole TCP connection to the original destination with [`copy_bidirectional`].
 ///
 /// It's important to note that, we don't lose the bytes read from the original stream, due to us
-/// converting it into a  [`DefaultReversibleStream`].
+/// converting it into a [`DefaultReversibleStream`].
 #[tracing::instrument(
     level = "trace",
     skip(stolen_stream, matched_tx, connection_close_sender)
@@ -61,8 +92,6 @@ pub(super) async fn filter_task(
     matched_tx: Sender<HandlerHttpRequest>,
     connection_close_sender: Sender<ConnectionId>,
 ) -> Result<(), HttpTrafficError> {
-    let port = original_destination.port();
-
     match DefaultReversibleStream::read_header(
         stolen_stream,
         DEFAULT_HTTP_VERSION_DETECTION_TIMEOUT,
@@ -75,63 +104,28 @@ pub(super) async fn filter_task(
                 &H2_PREFACE[..MINIMAL_HEADER_SIZE],
             ) {
                 HttpVersion::V1 => {
-                    // Contains the upgraded interceptor connection, if any.
-                    let (upgrade_tx, upgrade_rx) = oneshot::channel::<RawHyperConnection>();
-
-                    // We have to keep the connection alive to handle a possible upgrade request
-                    // manually.
-                    let server::conn::http1::Parts {
-                        io: mut client_agent, // i.e. browser-agent connection
-                        read_buf: agent_unprocessed,
-                        ..
-                    } = http1::Builder::new()
-                        .preserve_header_case(true)
-                        .serve_connection(
-                            reversible_stream,
-                            HyperHandler {
-                                filters,
-                                matched_tx,
-                                connection_id,
-                                port,
-                                original_destination,
-                                request_id: 0,
-                                upgrade_tx: Some(upgrade_tx),
-                            },
-                        )
-                        .without_shutdown()
-                        .await?;
-
-                    if let Ok(RawHyperConnection {
-                        stream: mut agent_remote, // i.e. agent-original destination connection
-                        unprocessed_bytes: client_unprocessed,
-                    }) = upgrade_rx.await
-                    {
-                        // Send the data we received from the client, and have not processed as
-                        // HTTP, to the original destination.
-                        agent_remote.write_all(&agent_unprocessed).await?;
-
-                        // Send the data we received from the original destination, and have not
-                        // processed as HTTP, to the client.
-                        client_agent.write_all(&client_unprocessed).await?;
-
-                        // Now both the client and original destinations should be in sync, so we
-                        // can just copy the bytes from one into the other.
-                        copy_bidirectional(&mut client_agent, &mut agent_remote).await?;
-                    }
-
-                    connection_close_sender
-                        .send(connection_id)
-                        .await
-                        .inspect_err(|connection_id| {
-                            error!("Main TcpConnectionStealer dropped connection close channel while HTTP filter is still running. \
-                            Cannot report the closing of connection {connection_id}.");
-                        }).map_err(From::from)
+                    HttpV1::serve_connection(
+                        reversible_stream,
+                        original_destination,
+                        connection_id,
+                        filters,
+                        matched_tx,
+                        connection_close_sender,
+                    )
+                    .await
                 }
-
-                // TODO(alex): hyper handling of HTTP/2 requires a bit more work, as it takes an
-                // "executor" (just `tokio::spawn` in the `Builder::new` function is good enough),
-                // and some more effort to chase some missing implementations.
-                HttpVersion::V2 | HttpVersion::NotHttp => {
+                HttpVersion::V2 => {
+                    HttpV2::serve_connection(
+                        reversible_stream,
+                        original_destination,
+                        connection_id,
+                        filters,
+                        matched_tx,
+                        connection_close_sender,
+                    )
+                    .await
+                }
+                HttpVersion::NotHttp => {
                     trace!(
                         "Got a connection with unsupported protocol version, passing it through \
                         to its original destination."
@@ -164,10 +158,11 @@ pub(super) async fn filter_task(
                         }
                         Err(err) => {
                             error!(
-                                "Could not connect to original destination {original_destination:?}\
+                            "Could not connect to original destination {original_destination:?}\
                                  . Received a connection with an unsupported protocol version to a \
                                  filtered HTTP port, but cannot forward the connection because of \
-                                 the connection error: {err:?}");
+                                 the connection error: {err:?}"
+                        );
                             Err(err)?
                         }
                     }
@@ -180,4 +175,22 @@ pub(super) async fn filter_task(
             Err(read_error)
         }
     }
+}
+
+/// Notifies the [`filter_task`] that the connection with `connection_id` should be closed.
+#[tracing::instrument(level = "trace", skip(sender))]
+pub(super) async fn close_connection(
+    sender: Sender<ConnectionId>,
+    connection_id: ConnectionId,
+) -> Result<(), HttpTrafficError> {
+    sender
+        .send(connection_id)
+        .await
+        .inspect_err(|connection_id| {
+            error!(r"
+                Main TcpConnectionStealer dropped connection close channel while HTTP filter is still running.
+                Cannot report the closing of connection {connection_id}."
+            );
+        })
+        .map_err(From::from)
 }

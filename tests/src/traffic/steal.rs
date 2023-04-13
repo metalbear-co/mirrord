@@ -12,8 +12,9 @@ mod steal {
     use tokio_tungstenite::connect_async;
 
     use crate::utils::{
-        get_service_host_and_port, get_service_url, kube_client, send_request, send_requests,
-        service, tcp_echo_service, websocket_service, Agent, Application, KubeService,
+        get_service_host_and_port, get_service_url, http2_service, kube_client, send_request,
+        send_requests, service, tcp_echo_service, websocket_service, Agent, Application,
+        KubeService,
     };
 
     #[cfg(target_os = "linux")]
@@ -138,6 +139,71 @@ mod steal {
             .unwrap();
 
         application.assert(&client);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(45))]
+    async fn test_filter_with_single_client_and_only_matching_requests_http2(
+        #[future] http2_service: KubeService,
+        #[future] kube_client: Client,
+        #[values(Application::NodeHTTP2)] application: Application,
+        #[values(Agent::Job)] agent: Agent,
+    ) {
+        let service = http2_service.await;
+        let kube_client = kube_client.await;
+        let url = get_service_url(kube_client.clone(), &service).await;
+        let mut flags = vec!["--steal", "--fs-mode=local"];
+        if let Some(flag) = agent.flag() {
+            flags.extend(flag)
+        }
+
+        let mut mirrored_process = application
+            .run(
+                &service.target,
+                Some(&service.namespace),
+                Some(flags),
+                Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
+            )
+            .await;
+
+        mirrored_process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+
+        // Send a GET that should be matched and stolen.
+        // And a DELETE that closes the app.
+        {
+            let client = reqwest::Client::builder()
+                .http2_prior_knowledge()
+                .build()
+                .unwrap();
+
+            let get_builder = client.get(&url);
+            let mut headers = HeaderMap::default();
+            headers.insert("x-filter", "yes".parse().unwrap());
+            send_request(
+                get_builder,
+                Some("<h1>Hello HTTP/2: <b>from local app</b></h1>"),
+                headers.clone(),
+            )
+            .await;
+
+            let delete_builder = client.delete(&url);
+            let mut headers = HeaderMap::default();
+            headers.insert("x-filter", "yes".parse().unwrap());
+            send_request(
+                delete_builder,
+                Some("<h1>Hello HTTP/2: <b>from local app</b></h1>"),
+                headers.clone(),
+            )
+            .await;
+        }
+
+        tokio::time::timeout(Duration::from_secs(40), mirrored_process.child.wait())
+            .await
+            .expect("Timed out waiting for mirrored_process!")
+            .expect("mirrored_process failed!");
+
+        application.assert(&mirrored_process);
     }
 
     /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`

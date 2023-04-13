@@ -13,7 +13,9 @@
 #![feature(c_size_t)]
 #![feature(pointer_byte_offsets)]
 #![feature(is_some_and)]
+#![feature(async_fn_in_trait)]
 #![allow(rustdoc::private_intra_doc_links)]
+#![allow(incomplete_features)]
 
 //! Loaded dynamically with your local process.
 //!
@@ -94,6 +96,7 @@ use mirrord_config::{
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
+    codec::LogLevel,
     dns::{DnsLookup, GetAddrInfoRequest},
     tcp::{HttpResponse, LayerTcpSteal},
     ClientMessage, DaemonMessage,
@@ -110,7 +113,7 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
     time::{sleep, Duration},
 };
-use tracing::{error, info, trace};
+use tracing::{error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -158,7 +161,7 @@ mod go_hooks;
 /// ## Bypass
 ///
 /// To prevent us from intercepting neccessary (local) syscalls (like creating a socket), we use
-/// `detour::detour_bypass_on`] [`on_thread_start`, and [`detour::detour_bypass_off`]
+/// [`detour::detour_bypass_on`] `on_thread_start`, and [`detour::detour_bypass_off`]
 /// `on_thread_stop`.
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
@@ -633,6 +636,10 @@ impl Layer {
     /// Also (somewhat) dealt with here, as there is no dedicated handler for it. We just pass the
     /// response along in one of the feature's channels from
     /// `Self::getaddrinfo_handler_queue`.
+    ///
+    /// ### [`DaemonMessage::LogMessage`]
+    ///
+    /// This message has no dedicated handler, the internal message is simply logged here.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_daemon_message(&mut self, daemon_message: DaemonMessage) -> Result<()> {
         match daemon_message {
@@ -673,7 +680,18 @@ impl Layer {
                 .send(get_addr_info.0)
                 .map_err(|_| LayerError::SendErrorGetAddrInfoResponse),
             DaemonMessage::Close(error_message) => Err(LayerError::AgentErrorClosed(error_message)),
-            DaemonMessage::LogMessage(_) => todo!(),
+            DaemonMessage::LogMessage(log_message) => {
+                match log_message.level {
+                    LogLevel::Warn => {
+                        warn!(message = log_message.message, "Daemon sent log message")
+                    }
+                    LogLevel::Error => {
+                        error!(message = log_message.message, "Daemon sent log message")
+                    }
+                }
+
+                Ok(())
+            }
         }
     }
 }

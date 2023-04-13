@@ -342,14 +342,19 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 // Get the name of the field that holds the exectuable in a debug configuration of the given type.
-function getExecutableFieldName(debuggerType: string): keyof vscode.DebugConfiguration{
-	switch (debuggerType) {
+function getExecutableFieldName(config: vscode.DebugConfiguration): keyof vscode.DebugConfiguration{
+	switch (config.type) {
 		case "pwa-node":
 		case "node": {
 			return "runtimeExecutable";
 		}
 		case "python": {
-			return "python";
+			if ("python" in config) {
+				return "python";
+			}
+			// Official documentation states the relevant field name is "python" (https://code.visualstudio.com/docs/python/debugging#_python), 
+			// but when debugging we see the field is called "pythonPath".
+			return "pythonPath";
 		}
 		default: {
 			return "program";
@@ -388,6 +393,15 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		// If target wasn't specified in the config file, let user choose pod from dropdown
 		if (!await isTargetInFile()) {
 			let targets = await mirrordApi.listTargets(configPath);
+			if (targets.length === 0) {
+				await vscode.window.showErrorMessage(
+					"No mirrord target available in the configured namespace. " +
+					"Set a different target namespace or kubeconfig in the mirrord configuration file.",
+				);
+
+				return undefined;
+			}
+
 			let targetName = await vscode.window.showQuickPick(targets, { placeHolder: 'Select a target path to mirror' });
 
 			if (targetName) {
@@ -408,7 +422,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		// todo: find better way to resolve the exact ports.
 		config.env["DEBUGGER_IGNORE_PORTS_PATCH"] = "45000-65535";
 
-		let executableFieldName = getExecutableFieldName(config.type);
+		let executableFieldName = getExecutableFieldName(config);
 
 		let executionInfo;
 		if (executableFieldName in config) {
@@ -420,7 +434,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 
 		// For sidestepping SIP on macOS. If we didn't patch, we don't change that config value.
 		let patched_path = executionInfo?.patched_path;
-		if (executableFieldName in config) {
+		if (patched_path) {
 			config[executableFieldName] = patched_path;
 		}
 

@@ -1111,7 +1111,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.34.0"
+version = "3.36.0"
 dependencies = [
  "libc",
 ]
@@ -1457,8 +1457,7 @@ dependencies = [
 [[package]]
 name = "http-body"
 version = "1.0.0-rc.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "951dfc2e32ac02d67c90c0d65bd27009a635dc9b381a2cc7d284ab01e3a0150d"
+source = "git+https://github.com/meowjesty/http-body?branch=issue/922/http2#8288c0d21717997b0c4638142b96e090ff58436c"
 dependencies = [
  "bytes",
  "http",
@@ -1467,8 +1466,7 @@ dependencies = [
 [[package]]
 name = "http-body-util"
 version = "0.1.0-rc.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92445bc9cc14bfa0a3ce56817dc3b5bcc227a168781a356b702410789cec0d10"
+source = "git+https://github.com/meowjesty/http-body?branch=issue/922/http2#8288c0d21717997b0c4638142b96e090ff58436c"
 dependencies = [
  "bytes",
  "futures-util",
@@ -1538,8 +1536,7 @@ dependencies = [
 [[package]]
 name = "hyper"
 version = "1.0.0-rc.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b75264b2003a3913f118d35c586e535293b3e22e41f074930762929d071e092"
+source = "git+https://github.com/meowjesty/hyper?branch=issue/922/http2#1b7c2bf95f70425954e34df2b2f757daa9b0e020"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -2133,7 +2130,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.34.0"
+version = "3.36.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -2171,7 +2168,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.34.0"
+version = "3.36.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -2216,7 +2213,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.34.0"
+version = "3.36.0"
 dependencies = [
  "lazy_static",
  "rand",
@@ -2229,7 +2226,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.34.0"
+version = "3.36.0"
 dependencies = [
  "bimap",
  "mirrord-config-derive",
@@ -2245,7 +2242,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.34.0"
+version = "3.36.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -2255,7 +2252,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.34.0"
+version = "3.36.0"
 dependencies = [
  "axum",
  "futures",
@@ -2272,7 +2269,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.34.0"
+version = "3.36.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -2296,7 +2293,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.34.0"
+version = "3.36.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -2312,9 +2309,8 @@ dependencies = [
  "fancy-regex",
  "frida-gum",
  "futures",
- "http-body 0.4.5",
+ "http-body 1.0.0-rc.2",
  "http-body-util",
- "hyper 0.14.25",
  "hyper 1.0.0-rc.3",
  "itertools",
  "k8s-openapi",
@@ -2349,7 +2345,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.34.0"
+version = "3.36.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2358,7 +2354,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.34.0"
+version = "3.36.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -2387,7 +2383,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.34.0"
+version = "3.36.0"
 dependencies = [
  "atty",
  "serde",
@@ -2397,7 +2393,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "3.34.0"
+version = "3.36.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -2416,7 +2412,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.34.0"
+version = "3.36.0"
 dependencies = [
  "memchr",
  "object 0.29.0",
@@ -3317,21 +3313,21 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.34.0"
+version = "3.36.0"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.34.0"
+version = "3.36.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.34.0"
+version = "3.36.0"
 dependencies = [
  "tokio",
 ]

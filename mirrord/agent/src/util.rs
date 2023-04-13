@@ -7,7 +7,7 @@ use std::{
     thread::JoinHandle,
 };
 
-use num_traits::{zero, CheckedAdd, Num, NumCast};
+use num_traits::{CheckedAdd, Num};
 use tracing::error;
 
 use crate::{error::AgentError, runtime::set_namespace};
@@ -15,11 +15,12 @@ use crate::{error::AgentError, runtime::set_namespace};
 /// Struct that helps you manage topic -> subscribers
 ///
 /// When a topic has no subscribers, it is removed.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Subscriptions<T, C> {
     _inner: HashMap<T, HashSet<C>>,
 }
 
+/// Id of an agent's client. Each new client connection is assigned with a unique id.
 pub type ClientId = u32;
 
 impl<T, C> Subscriptions<T, C>
@@ -27,13 +28,6 @@ where
     T: Eq + Hash + Clone + Copy,
     C: Eq + Hash + Clone + Copy,
 {
-    // TODO(alex): Same as `IndexAllocator`, make a good `Default` impl, then delete this.
-    pub fn new() -> Subscriptions<T, C> {
-        Subscriptions {
-            _inner: HashMap::new(),
-        }
-    }
-
     /// Add a new subscription to a topic for a given client.
     pub fn subscribe(&mut self, client: C, topic: T) {
         self._inner
@@ -103,15 +97,8 @@ where
 
 impl<T> IndexAllocator<T>
 where
-    T: Num + CheckedAdd + NumCast + Clone,
+    T: Num + CheckedAdd + Clone,
 {
-    pub fn new() -> IndexAllocator<T> {
-        IndexAllocator {
-            index: zero(),
-            vacant_indices: Vec::new(),
-        }
-    }
-
     /// Returns the next available index, returns None if not available (reached max)
     pub fn next_index(&mut self) -> Option<T> {
         if let Some(i) = self.vacant_indices.pop() {
@@ -132,14 +119,15 @@ where
     }
 }
 
-// TODO(alex): Make this more generic, so we can use `default` everywhere, and
-// delete `new`.
 impl<T> Default for IndexAllocator<T>
 where
-    T: Default + Num + CheckedAdd + NumCast + Clone,
+    T: Num,
 {
     fn default() -> Self {
-        IndexAllocator::new()
+        Self {
+            index: T::zero(),
+            vacant_indices: Default::default(),
+        }
     }
 }
 
@@ -218,7 +206,7 @@ mod subscription_tests {
 
     #[test]
     fn sanity() {
-        let mut subscriptions = Subscriptions::<Port, _>::new();
+        let mut subscriptions: Subscriptions<Port, _> = Default::default();
         subscriptions.subscribe(3, 2);
         subscriptions.subscribe(3, 3);
         subscriptions.subscribe(3, 1);
@@ -255,7 +243,7 @@ mod indexallocator_tests {
 
     #[test]
     fn sanity() {
-        let mut index_allocator = IndexAllocator::<u32>::new();
+        let mut index_allocator: IndexAllocator<u32> = Default::default();
         let index = index_allocator.next_index().unwrap();
         assert_eq!(0, index);
         let index = index_allocator.next_index().unwrap();
@@ -267,7 +255,7 @@ mod indexallocator_tests {
 
     #[test]
     fn check_max() {
-        let mut index_allocator = IndexAllocator::<u8>::new();
+        let mut index_allocator: IndexAllocator<u8> = Default::default();
         for _ in 0..=u8::MAX - 1 {
             index_allocator.next_index().unwrap();
         }
