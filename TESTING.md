@@ -85,7 +85,7 @@ MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord cargo te
 
 ### Cleanup
 
-The Kubernetes resources created by an E2E test are automatically deleted when the test exists successfully. However, failed tests by default don't delete their resources to allow debugging. You can force resource deletion by setting a `MIRRORD_E2E_FORCE_CLEANUP` variable to any value.
+The Kubernetes resources created by the E2E tests are automatically deleted when the test exits successfully. However, failed tests by default don't delete their resources to allow debugging. You can force resource deletion even for failed tests by setting the `MIRRORD_E2E_FORCE_CLEANUP` variable to any value.
 
 ```bash
 MIRRORD_E2E_FORCE_CLEANUP=y cargo test --package tests
