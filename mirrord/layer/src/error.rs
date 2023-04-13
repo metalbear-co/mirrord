@@ -90,6 +90,9 @@ pub(crate) enum HookError {
         supported IP or unix socket address."
     )]
     UnsupportedSocketType,
+
+    #[error("mirrord-layer: Pointer argument points to an invalid address")]
+    BadPointer,
 }
 
 /// Errors internal to mirrord-layer.
@@ -276,6 +279,7 @@ impl From<HookError> for i64 {
             HookError::FailedSipPatch(_) => libc::EACCES,
             HookError::SocketUnsuportedIpv6 => libc::EAFNOSUPPORT,
             HookError::UnsupportedSocketType => libc::EAFNOSUPPORT,
+            HookError::BadPointer => libc::EFAULT,
         };
 
         set_errno(errno::Errno(libc_error));
