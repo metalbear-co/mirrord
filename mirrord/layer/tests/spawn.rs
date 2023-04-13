@@ -29,7 +29,7 @@ async fn node_spawn(dylib_path: &PathBuf) {
     // Accept the connection from the layer and verify initial messages.
     let _shell_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
 
-    test_process.wait().await;
+    test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stdout();
     test_process.assert_no_error_in_stderr();
 }
