@@ -574,7 +574,6 @@ pub enum Application {
     PythonFlaskHTTP,
     PythonSelfConnect,
     PythonDontLoad,
-    PythonStatFs,
     RustFileOps,
     Go19FileOps,
     Go20FileOps,
@@ -629,8 +628,7 @@ impl Application {
         match self {
             Application::PythonFlaskHTTP
             | Application::PythonSelfConnect
-            | Application::PythonDontLoad
-            | Application::PythonStatFs => Self::get_python3_executable().await,
+            | Application::PythonDontLoad => Self::get_python3_executable().await,
             Application::PythonFastApiHTTP => String::from("uvicorn"),
             Application::NodeHTTP => String::from("node"),
             Application::Go19HTTP => String::from("tests/apps/app_go/19"),
@@ -691,10 +689,6 @@ impl Application {
                 String::from("--app-dir=tests/apps/"),
                 String::from("app_fastapi:app"),
             ],
-            Application::PythonStatFs => {
-                app_path.push("statfs.py");
-                vec![String::from("-u"), app_path.to_string_lossy().to_string()]
-            }
             Application::NodeHTTP => {
                 app_path.push("app_node.js");
                 vec![app_path.to_string_lossy().to_string()]
@@ -751,7 +745,6 @@ impl Application {
             | Application::PythonFlaskHTTP => 80,
             Application::PythonFastApiHTTP => 1234,
             Application::PythonDontLoad
-            | Application::PythonStatFs
             | Application::RustFileOps
             | Application::EnvBashCat
             | Application::NodeFileOps
