@@ -28,6 +28,7 @@ use tokio::{
 };
 
 pub const RUST_OUTGOING_PEERS: &str = "1.1.1.1:1111,2.2.2.2:2222,3.3.3.3:3333";
+pub const RUST_OUTGOING_LOCAL: &str = "4.4.4.4:4444";
 
 pub struct TestProcess {
     pub child: Option<Child>,
@@ -748,11 +749,11 @@ impl Application {
             | Application::Go19SelfOpen
             | Application::Go19DirBypass
             | Application::Go20DirBypass => vec![],
-            Application::RustOutgoingUdp => ["--udp", "0.0.0.0:4444", RUST_OUTGOING_PEERS]
+            Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
                 .collect(),
-            Application::RustOutgoingTcp => ["--tcp", "0.0.0.0:4444", RUST_OUTGOING_PEERS]
+            Application::RustOutgoingTcp => ["--tcp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
                 .collect(),

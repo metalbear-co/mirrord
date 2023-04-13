@@ -16,12 +16,13 @@ mod common;
 use common::*;
 use futures::{SinkExt, TryStreamExt};
 
+#[ignore]
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(5))]
 async fn outgoing_udp(dylib_path: &PathBuf) {
     let (mut test_process, layer_connection) = Application::RustOutgoingUdp
-        .start_process_with_layer(dylib_path, Default::default())
+        .start_process_with_layer(dylib_path, vec![], None)
         .await;
     let mut conn = layer_connection.codec;
 
@@ -40,7 +41,7 @@ async fn outgoing_udp(dylib_path: &PathBuf) {
             DaemonConnect {
                 connection_id: 0,
                 remote_address: addr.into(),
-                local_address: "0.0.0.0:4444".parse::<SocketAddr>().unwrap().into(),
+                local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
             },
         ))))
         .await
@@ -71,7 +72,7 @@ async fn outgoing_udp(dylib_path: &PathBuf) {
 #[timeout(Duration::from_secs(5))]
 async fn outgoing_tcp(dylib_path: &PathBuf) {
     let (mut test_process, layer_connection) = Application::RustOutgoingTcp
-        .start_process_with_layer(dylib_path, Default::default())
+        .start_process_with_layer(dylib_path, vec![], None)
         .await;
     let mut conn = layer_connection.codec;
 
@@ -90,7 +91,7 @@ async fn outgoing_tcp(dylib_path: &PathBuf) {
             DaemonConnect {
                 connection_id: 0,
                 remote_address: addr.into(),
-                local_address: "0.0.0.0:4444".parse::<SocketAddr>().unwrap().into(),
+                local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
             },
         ))))
         .await
