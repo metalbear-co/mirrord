@@ -17,8 +17,9 @@ use tokio_util::io::ReaderStream;
 use tracing::{trace, warn};
 
 use crate::{
-    error::{AgentError, Result},
+    error::Result,
     util::{run_thread_in_namespace, IndexAllocator},
+    watched_task::{TaskStatus, WatchedTask},
 };
 
 pub(crate) mod socket_stream;
@@ -31,7 +32,10 @@ type Daemon = DaemonTcpOutgoing;
 /// passing of these messages to the `interceptor_task` thread.
 pub(crate) struct TcpOutgoingApi {
     /// Holds the `interceptor_task`.
-    _task: thread::JoinHandle<Result<()>>,
+    _task: thread::JoinHandle<()>,
+
+    /// Status of the `interceptor_task`.
+    task_status: TaskStatus,
 
     /// Sends the `Layer` message to the `interceptor_task`.
     layer_tx: Sender<Layer>,
@@ -124,25 +128,33 @@ async fn layer_recv(
 }
 
 impl TcpOutgoingApi {
+    const TASK_NAME: &'static str = "TcpOutgoing";
+
     pub(crate) fn new(pid: Option<u64>) -> Self {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
-        let task = run_thread_in_namespace(
+        let watched_task = WatchedTask::new(
+            Self::TASK_NAME,
             Self::interceptor_task(layer_rx, daemon_tx, pid),
-            "TcpOutgoing".to_string(),
+        );
+        let task_status = watched_task.status();
+        let task = run_thread_in_namespace(
+            watched_task.start(),
+            Self::TASK_NAME.to_string(),
             pid,
             "net",
         );
 
         Self {
             _task: task,
+            task_status,
             layer_tx,
             daemon_rx,
         }
     }
 
-    /// Does the actual work for `Request`s and prepares the `Responses:
+    /// Does the actual work for `Request`s and prepares the `Response`s:
     #[tracing::instrument(level = "trace", skip(layer_rx, daemon_tx))]
     async fn interceptor_task(
         mut layer_rx: Receiver<Layer>,
@@ -204,14 +216,18 @@ impl TcpOutgoingApi {
     /// Sends a `TcpOutgoingRequest` to the `interceptor_task`.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn layer_message(&mut self, message: LayerTcpOutgoing) -> Result<()> {
-        Ok(self.layer_tx.send(message).await?)
+        if self.layer_tx.send(message).await.is_ok() {
+            Ok(())
+        } else {
+            Err(self.task_status.unwrap_err().await)
+        }
     }
 
     /// Receives a `TcpOutgoingResponse` from the `interceptor_task`.
     pub(crate) async fn daemon_message(&mut self) -> Result<DaemonTcpOutgoing> {
-        self.daemon_rx
-            .recv()
-            .await
-            .ok_or(AgentError::ReceiverClosed)
+        match self.daemon_rx.recv().await {
+            Some(msg) => Ok(msg),
+            None => Err(self.task_status.unwrap_err().await),
+        }
     }
 }

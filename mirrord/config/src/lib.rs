@@ -166,6 +166,7 @@ impl LayerFileConfig {
 mod tests {
 
     use std::{
+        collections::HashMap,
         fs::{File, OpenOptions},
         io::{Read, Write},
     };
@@ -216,6 +217,7 @@ mod tests {
                             "namespace": "default",
                             "image": "",
                             "image_pull_policy": "",
+                            "image_pull_secrets": [{"name": "testsecret"}],
                             "ttl": 60,
                             "ephemeral": false,
                             "pause": false,
@@ -251,6 +253,7 @@ mod tests {
                     namespace = "default"
                     image = ""
                     image_pull_policy = ""
+                    image_pull_secrets = [{name = "testsecret"}]
                     ttl = 60
                     ephemeral = false
                     pause = false
@@ -283,6 +286,8 @@ mod tests {
                         namespace: "default"
                         image: ""
                         image_pull_policy: ""
+                        image_pull_secrets:
+                            - name: "testsecret"
                         ttl: 60
                         ephemeral: false
                         pause: false
@@ -353,6 +358,10 @@ mod tests {
                 namespace: Some("default".to_owned()),
                 image: Some("".to_owned()),
                 image_pull_policy: Some("".to_owned()),
+                image_pull_secrets: Some(vec![HashMap::from([(
+                    "name".to_owned(),
+                    "testsecret".to_owned(),
+                )])]),
                 ttl: Some(60),
                 ephemeral: Some(false),
                 communication_timeout: None,
