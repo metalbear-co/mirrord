@@ -675,3 +675,43 @@ async fn faccessat_go(
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr();
 }
+
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(10))]
+async fn statfs(
+    #[values(Application::PythonStatFs)] application: Application,
+    dylib_path: &PathBuf,
+) {
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(dylib_path, get_rw_test_file_env_vars())
+        .await;
+
+    assert_eq!(
+        layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::FileRequest(FileRequest::XstatFs(XstatFsRequest { fd: 1 }))
+    );
+
+    let _ = layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::XstatFs(Ok(
+            XstatFsResponse {
+                metadata: FsMetadataInternal {
+                    filesystem_type: 0,
+                    blocks: 10,
+                    block_size: 4096,
+                    blocks_free: 10,
+                    blocks_available: 8,
+                    files: 1,
+                    files_free: 1000,
+                },
+            },
+        ))))
+        .await;
+
+    assert!(layer_connection.is_ended().await);
+
+    // Assert all clear
+    test_process.wait_assert_success().await;
+    test_process.assert_no_error_in_stderr();
+}
