@@ -523,6 +523,10 @@ unsafe extern "C" fn fill_statfs(out_stat: *mut statfs, metadata: &FsMetadataInt
 /// Hook for `libc::lstat`.
 #[hook_guard_fn]
 unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
+    if out_stat.is_null() {
+        return HookError::BadPointer.into();
+    }
+
     xstat(Some(raw_path.checked_into()), None, false)
         .map(|res| {
             let res = res.metadata;
@@ -535,6 +539,10 @@ unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) 
 /// Hook for `libc::fstat`.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> c_int {
+    if out_stat.is_null() {
+        return HookError::BadPointer.into();
+    }
+
     xstat(None, Some(fd), true)
         .map(|res| {
             let res = res.metadata;
@@ -547,6 +555,10 @@ pub(crate) unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> 
 /// Hook for `libc::stat`.
 #[hook_guard_fn]
 unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
+    if out_stat.is_null() {
+        return HookError::BadPointer.into();
+    }
+
     xstat(Some(raw_path.checked_into()), None, true)
         .map(|res| {
             let res = res.metadata;
@@ -563,6 +575,10 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
     raw_path: *const c_char,
     out_stat: *mut stat,
 ) -> c_int {
+    if out_stat.is_null() {
+        return HookError::BadPointer.into();
+    }
+
     if ver != 1 {
         return FN___XSTAT(ver, raw_path, out_stat);
     }
@@ -582,6 +598,10 @@ pub(crate) unsafe fn fstatat_logic(
     out_stat: *mut stat,
     flag: c_int,
 ) -> Detour<i32> {
+    if out_stat.is_null() {
+        return Detour::Error(HookError::BadPointer);
+    }
+
     let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
     xstat(Some(raw_path.checked_into()), Some(fd), follow_symlink).map(|res| {
         let res = res.metadata;
@@ -604,6 +624,10 @@ unsafe extern "C" fn fstatat_detour(
 
 #[hook_guard_fn]
 unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs) -> c_int {
+    if out_stat.is_null() {
+        return HookError::BadPointer.into();
+    }
+
     xstatfs(fd)
         .map(|res| {
             let res = res.metadata;
