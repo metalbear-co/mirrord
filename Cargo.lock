@@ -2272,7 +2272,6 @@ name = "mirrord-kube"
 version = "3.36.0"
 dependencies = [
  "actix-codec",
- "async-trait",
  "base64 0.21.0",
  "futures",
  "http-body 0.4.5",
@@ -2297,7 +2296,6 @@ version = "3.36.0"
 dependencies = [
  "actix-codec",
  "anyhow",
- "async-trait",
  "base64 0.21.0",
  "bimap",
  "bytemuck",

@@ -1,5 +1,4 @@
 use actix_codec::{AsyncRead, AsyncWrite};
-use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
 use k8s_openapi::NamespaceResourceScope;
 use kube::{Api, Client};
@@ -86,7 +85,6 @@ pub fn wrap_raw_connection(
     (in_tx, out_rx)
 }
 
-#[async_trait]
 pub trait AgentManagment {
     type AgentRef;
     type Err;
@@ -116,7 +114,6 @@ pub trait AgentManagment {
 
 pub struct Connection<T: ToSocketAddrs>(pub T); // TODO: Replace with generic address
 
-#[async_trait]
 impl<T> AgentManagment for Connection<T>
 where
     T: ToSocketAddrs + Send + Sync,
