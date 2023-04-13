@@ -52,7 +52,7 @@ mod utils {
 
     /// All Kubernetes resources created for testing purposes share this label.
     pub const TEST_RESOURCE_LABEL: (&'static str, &'static str) =
-        ("MIRRORD_E2E_TEST_RESOURCE", "true");
+        ("mirrord-e2e-test-resource", "true");
 
     pub async fn watch_resource_exists<K: Debug + Clone + DeserializeOwned>(
         api: &Api<K>,
