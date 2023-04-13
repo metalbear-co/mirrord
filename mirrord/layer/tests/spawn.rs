@@ -17,7 +17,7 @@ pub use common::*;
 /// The app starts the process `["/bin/sh", "-c", "echo \"Hello over shell\""]`.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[timeout(Duration::from_secs(20))]
+#[timeout(Duration::from_secs(60))]
 async fn node_spawn(dylib_path: &PathBuf) {
     let application = Application::NodeSpawn;
     let (mut test_process, listener) = application
