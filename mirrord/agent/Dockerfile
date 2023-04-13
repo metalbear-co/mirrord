@@ -2,6 +2,8 @@ FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:latest as bui
 ARG TARGETARCH
 WORKDIR /app
 
+RUN apt-get install -y protobuf-compiler
+
 COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /app/
 COPY sample/rust /app/sample/rust
 COPY mirrord /app/mirrord

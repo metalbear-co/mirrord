@@ -24,7 +24,10 @@ use tracing::trace;
 use crate::{
     env::parse_raw_env,
     error::{AgentError, Result},
+    runtime::crio::CriOContainer,
 };
+
+mod crio;
 
 const CONTAINERD_DEFAULT_SOCK_PATH: &str = "/host/run/containerd/containerd.sock";
 const CONTAINERD_ALTERNATIVE_SOCK_PATH: &str = "/host/run/dockershim.sock";
@@ -69,6 +72,7 @@ pub(crate) trait ContainerRuntime {
 pub(crate) enum Container {
     Docker(DockerContainer),
     Containerd(ContainerdContainer),
+    CriO(CriOContainer),
 }
 
 /// get a container object according to args.
@@ -86,6 +90,7 @@ pub(crate) async fn get_container(
             "containerd" => Ok(Some(Container::Containerd(ContainerdContainer {
                 container_id,
             }))),
+            "cri-o" => Ok(Some(Container::CriO(CriOContainer { container_id }))),
             _ => Err(AgentError::NotFound(format!(
                 "Unknown runtime {container_runtime:?}"
             ))),

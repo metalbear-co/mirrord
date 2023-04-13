@@ -50,6 +50,10 @@ fancy-regex = { workspace = true }
 dashmap = { version = "5" }
 pin-project = "1"
 oci-spec = "0.6.0"
+k8s-cri = "0.6"
+tonic = "0.8"
+tower = "0.4"
+http = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 iptables = "0.5"
