@@ -198,6 +198,19 @@
             "null"
           ]
         },
+        "image_pull_secrets": {
+          "description": "List of secrets the agent pod has access to.\n\nTakes an array of hash with the format `{ name: <secret-name> }`. Read more [here](https://kubernetes.io/docs/concepts/containers/images/).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
         "log_level": {
           "description": "Log level for the agent.\n\nSupports anything that would work with `RUST_LOG`.",
           "type": [

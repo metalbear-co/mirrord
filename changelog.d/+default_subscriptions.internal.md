@@ -1,1 +1,0 @@
-Implemented `Default` for `Subscriptions`. Replaced usages of `Subscriptions::new` with `Default::default`.
