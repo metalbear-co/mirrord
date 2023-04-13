@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{collections::HashSet, str::FromStr};
 
 use bimap::BiMap;
 use schemars::JsonSchema;
@@ -98,6 +98,10 @@ impl MirrordConfig for IncomingFileConfig {
                     .port_mapping
                     .map(|m| m.into_iter().collect())
                     .unwrap_or_default(),
+                ignore_ports: advanced
+                    .ignore_ports
+                    .map(|m| m.into_iter().collect())
+                    .unwrap_or_default(),
                 ignore_localhost: advanced
                     .ignore_localhost
                     .layer(|layer| Unstable::new("IncomingFileConfig", "ignore_localhost", layer))
@@ -146,6 +150,10 @@ pub struct IncomingAdvancedFileConfig {
 
     /// Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702
     pub ignore_localhost: Option<bool>,
+
+    /// Ports to ignore when mirroring/stealing traffic. Useful if you want
+    /// specific ports to be used locally only.
+    pub ignore_ports: Option<Vec<u16>>,
 }
 
 #[derive(Default, PartialEq, Eq, Clone, Debug)]
@@ -157,6 +165,8 @@ pub struct IncomingConfig {
     pub port_mapping: BiMap<u16, u16>,
 
     pub ignore_localhost: bool,
+
+    pub ignore_ports: HashSet<u16>,
 }
 
 impl IncomingConfig {

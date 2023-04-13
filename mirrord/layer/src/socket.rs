@@ -18,6 +18,7 @@ use self::id::SocketId;
 use crate::{
     detour::{Bypass, Detour, OptionExt},
     error::{HookError, HookResult},
+    INCOMING_IGNORE_PORTS,
 };
 
 pub(super) mod hooks;
