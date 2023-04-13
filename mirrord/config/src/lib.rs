@@ -381,7 +381,7 @@ mod tests {
                             http_header_filter: None,
                             port_mapping: None,
                             ignore_localhost: None,
-                            ignore_ports: None
+                            ignore_ports: None,
                         },
                     ))),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {
