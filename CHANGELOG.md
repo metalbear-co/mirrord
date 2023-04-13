@@ -8,6 +8,24 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.36.0](https://github.com/metalbear-co/mirrord/tree/3.36.0) - 2023-04-13
+
+
+### Added
+
+- Notify clients about errors happening in agent's background tasks.
+  [#1163](https://github.com/metalbear-co/mirrord/issues/1163)
+- Add support for the imagePullSecrets parameter on the agent pod. This can be
+  specified in the configuration file, under agent.image_pull_secrets.
+  [#1276](https://github.com/metalbear-co/mirrord/issues/1276)
+
+
+### Internal
+
+- Fix pause E2E test.
+  [#1261](https://github.com/metalbear-co/mirrord/issues/1261)
+
+
 ## [3.35.0](https://github.com/metalbear-co/mirrord/tree/3.35.0) - 2023-04-11
 
 
