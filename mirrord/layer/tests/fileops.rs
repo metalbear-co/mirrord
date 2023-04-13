@@ -687,6 +687,8 @@ async fn statfs(
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars())
         .await;
 
+    layer_connection.consume_xstats().await;
+
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
         ClientMessage::FileRequest(FileRequest::XstatFs(XstatFsRequest { fd: 1 }))
