@@ -1,1 +1,0 @@
-Rely more on Rusts own async trait and drop async-trait crate (the agent cant fully switch yet though).
