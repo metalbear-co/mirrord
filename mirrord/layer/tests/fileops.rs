@@ -241,6 +241,7 @@ async fn go_stat(
         .start_process_with_layer(
             dylib_path,
             vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt")],
+            None,
         )
         .await;
 
@@ -424,6 +425,7 @@ async fn go_dir_on_linux(
         .start_process_with_layer(
             dylib_path,
             vec![("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo")],
+            None,
         )
         .await;
 
