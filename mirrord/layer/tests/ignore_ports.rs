@@ -1,3 +1,4 @@
+#![cfg(target_os = "linux")]
 #![feature(assert_matches)]
 use std::{path::PathBuf, time::Duration};
 
@@ -12,7 +13,6 @@ pub use common::*;
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
-#[cfg(target_os = "linux")]
 async fn ignore_ports(
     #[values(Application::PythonListen)] application: Application,
     dylib_path: &PathBuf,
