@@ -19,7 +19,7 @@ use mirrord_protocol::{
         OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest, ReadDirRequest,
         ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
         SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
-        WriteLimitedFileRequest, XstatRequest, XstatResponse,
+        WriteLimitedFileRequest, XstatFsRequest, XstatFsResponse, XstatRequest, XstatResponse,
     },
     FileRequest, FileResponse, RemoteResult, ResponseError,
 };
@@ -196,7 +196,10 @@ impl FileManager {
                 let xstat_result = self.xstat(path, fd, follow_symlink);
                 Some(FileResponse::Xstat(xstat_result))
             }
-
+            FileRequest::XstatFs(XstatFsRequest { fd }) => {
+                let xstat_result = self.xstatfs(fd);
+                Some(FileResponse::XstatFs(xstat_result))
+            }
             FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd }) => {
                 let open_dir_result = self.fdopen_dir(remote_fd);
                 Some(FileResponse::OpenDir(open_dir_result))
@@ -567,6 +570,25 @@ impl FileManager {
             metadata: metadata.into(),
         })
         .map_err(ResponseError::from)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn xstatfs(&mut self, fd: u64) -> RemoteResult<XstatFsResponse> {
+        let target = self
+            .open_files
+            .get(&fd)
+            .ok_or(ResponseError::NotFound(fd))?;
+
+        let statfs = match target {
+            RemoteFile::File(file) => nix::sys::statfs::fstatfs(file)
+                .map_err(|err| std::io::Error::from_raw_os_error(err as i32))?,
+            RemoteFile::Directory(path) => nix::sys::statfs::statfs(path)
+                .map_err(|err| std::io::Error::from_raw_os_error(err as i32))?,
+        };
+
+        Ok(XstatFsResponse {
+            metadata: statfs.into(),
+        })
     }
 
     #[tracing::instrument(level = "trace", skip(self))]

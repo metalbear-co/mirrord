@@ -3,7 +3,6 @@ use std::{
     net::SocketAddr,
 };
 
-use async_trait::async_trait;
 use bimap::BiMap;
 use futures::TryFutureExt;
 use hyper::{body::Incoming, Response, StatusCode};
@@ -113,7 +112,6 @@ pub struct TcpStealHandler {
     port_mapping: BiMap<u16, u16>,
 }
 
-#[async_trait]
 impl TcpHandler for TcpStealHandler {
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_new_connection(
@@ -158,7 +156,7 @@ impl TcpHandler for TcpStealHandler {
         );
 
         // Returns AppClosedConnection Error with message to send to agent if this fails.
-        let _ = connection.write_all(&data.bytes[..]).await.map_err(|err| {
+        connection.write_all(&data.bytes[..]).await.map_err(|err| {
             trace!(
                 "mirrord could not forward all the incoming data in connection id {}. \
                     Got error: {:?}",

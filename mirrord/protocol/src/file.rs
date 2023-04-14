@@ -8,6 +8,8 @@ use std::os::unix::fs::DirEntryExt;
 use std::{fs::Metadata, io::SeekFrom, os::unix::prelude::MetadataExt, path::PathBuf};
 
 use bincode::{Decode, Encode};
+#[cfg(target_os = "linux")]
+use nix::sys::statfs::Statfs;
 
 /// Internal version of Metadata across operating system (macOS, Linux)
 /// Only mutual attributes
@@ -58,6 +60,39 @@ impl From<Metadata> for MetadataInternal {
             creation_time: metadata.ctime_nsec(),
             block_size: metadata.blksize(),
             blocks: metadata.blocks(),
+        }
+    }
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq, Default)]
+pub struct FsMetadataInternal {
+    /// f_type
+    pub filesystem_type: i64,
+    /// f_bsize
+    pub block_size: i64,
+    /// f_blocks
+    pub blocks: u64,
+    /// f_bfree
+    pub blocks_free: u64,
+    /// f_bavail
+    pub blocks_available: u64,
+    /// f_files
+    pub files: u64,
+    /// f_ffree
+    pub files_free: u64,
+}
+
+#[cfg(target_os = "linux")]
+impl From<Statfs> for FsMetadataInternal {
+    fn from(stat: Statfs) -> Self {
+        FsMetadataInternal {
+            filesystem_type: stat.filesystem_type().0,
+            block_size: stat.block_size(),
+            blocks: stat.blocks(),
+            blocks_free: stat.blocks_free(),
+            blocks_available: stat.blocks_available(),
+            files: stat.files(),
+            files_free: stat.files_free(),
         }
     }
 }
@@ -309,8 +344,18 @@ pub struct XstatRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct XstatFsRequest {
+    pub fd: u64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct XstatResponse {
     pub metadata: MetadataInternal,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct XstatFsResponse {
+    pub metadata: FsMetadataInternal,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

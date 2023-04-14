@@ -2,7 +2,6 @@ use std::path::Path;
 #[cfg(feature = "incluster")]
 use std::time::Duration;
 
-use async_trait::async_trait;
 use k8s_openapi::api::core::v1::Pod;
 use kube::{
     config::{KubeConfigOptions, Kubeconfig},
@@ -57,7 +56,6 @@ impl KubernetesAPI {
     }
 }
 
-#[async_trait]
 impl AgentManagment for KubernetesAPI {
     type AgentRef = (String, u16);
     type Err = KubeApiError;

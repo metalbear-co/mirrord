@@ -1,6 +1,5 @@
 use std::{collections::HashSet, sync::LazyLock};
 
-use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::{
     batch::v1::Job,
@@ -23,7 +22,6 @@ use crate::{
     error::{KubeApiError, Result},
 };
 
-#[async_trait]
 pub trait ContainerApi {
     fn agent_image(agent: &AgentConfig) -> String {
         match &agent.image {
@@ -124,7 +122,6 @@ async fn wait_for_agent_startup(
 #[derive(Debug)]
 pub struct JobContainer;
 
-#[async_trait]
 impl ContainerApi for JobContainer {
     async fn create_agent<P>(
         client: &Client,
@@ -300,7 +297,6 @@ impl ContainerApi for JobContainer {
 #[derive(Debug)]
 pub struct EphemeralContainer;
 
-#[async_trait]
 impl ContainerApi for EphemeralContainer {
     async fn create_agent<P>(
         client: &Client,
