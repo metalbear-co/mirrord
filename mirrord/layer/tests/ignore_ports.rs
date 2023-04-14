@@ -47,7 +47,7 @@ async fn ignore_ports(
         )
         .await;
 
-    // Make sure listen request was made.
+    // Make sure no listen request was made.
     assert!(layer_connection.is_ended().await);
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr();
