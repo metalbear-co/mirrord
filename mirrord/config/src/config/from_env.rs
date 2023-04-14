@@ -25,7 +25,7 @@ where
     }
 }
 
-/// This is the same as `FromEnvWithError` but doesn't discard the error
+/// This is the same as `FromEnv` but doesn't discard the error
 /// returned from parse. This is for parsing `Target`.
 /// I (A.H) couldn't find any better way to do this since you can't
 /// do specialization on associated types.
