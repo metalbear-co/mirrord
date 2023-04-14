@@ -86,7 +86,7 @@ pub struct FsMetadataInternal {
 impl From<Statfs> for FsMetadataInternal {
     fn from(stat: Statfs) -> Self {
         FsMetadataInternal {
-            // use `as _` for armv7 where it's smaller for some reason
+            // use `as _` for armv7 where it's 32 bit
             filesystem_type: stat.filesystem_type().0 as _,
             block_size: stat.block_size() as _,
             blocks: stat.blocks() as _,
