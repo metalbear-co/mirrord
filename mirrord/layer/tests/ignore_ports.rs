@@ -7,10 +7,8 @@ mod common;
 
 pub use common::*;
 
-/// Start a web server injected with the layer, simulate the agent, verify expected messages from
-/// the layer, send tcp messages and verify in the server output that the application received them.
-/// Tests the layer's communication with the agent, the bind hook, and the forwarding of mirrored
-/// traffic to the application.
+/// Start an application (and load the layer into it) that listens on a port that is configured to be 
+/// ignored, and verify that no messages are sent to the agent.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
