@@ -1,1 +1,0 @@
-Cover more areas of the code and targets using clippy in CI and fix its warnings
