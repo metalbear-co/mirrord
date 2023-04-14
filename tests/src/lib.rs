@@ -95,6 +95,7 @@ mod utils {
     }
 
     #[derive(Debug)]
+    #[allow(dead_code)]
     pub enum FileOps {
         Python,
         Rust,

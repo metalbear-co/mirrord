@@ -2,7 +2,11 @@
 
 #[cfg(target_os = "linux")]
 use std::assert_matches::assert_matches;
-use std::{env::temp_dir, path::PathBuf, time::Duration};
+use std::{
+    env::temp_dir,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use futures::{stream::StreamExt, SinkExt};
 use libc::{pid_t, O_RDWR};
@@ -27,7 +31,7 @@ fn get_rw_test_file_env_vars() -> Vec<(&'static str, &'static str)> {
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(20))]
-async fn self_open(dylib_path: &PathBuf) {
+async fn self_open(dylib_path: &Path) {
     let application = Application::Go19SelfOpen;
 
     let (mut test_process, mut layer_connection) = application
@@ -46,10 +50,7 @@ async fn self_open(dylib_path: &PathBuf) {
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
-async fn pwrite(
-    #[values(Application::RustFileOps)] application: Application,
-    dylib_path: &PathBuf,
-) {
+async fn pwrite(#[values(Application::RustFileOps)] application: Application, dylib_path: &Path) {
     // add rw override for the specific path
     let (mut test_process, mut layer_connection) = application
         .start_process_with_layer(
@@ -171,7 +172,7 @@ async fn pwrite(
 #[timeout(Duration::from_secs(60))]
 async fn node_close(
     #[values(Application::NodeFileOps)] application: Application,
-    dylib_path: &PathBuf,
+    dylib_path: &Path,
 ) {
     let (mut test_process, mut layer_connection) = application
         .start_process_with_layer(
@@ -232,7 +233,7 @@ async fn node_close(
 #[cfg(target_os = "linux")]
 async fn go_stat(
     #[values(Application::Go19FileOps, Application::Go20FileOps)] application: Application,
-    dylib_path: &PathBuf,
+    dylib_path: &Path,
 ) {
     // add rw override for the specific path
     let (mut test_process, mut layer_connection) = application
@@ -292,7 +293,7 @@ async fn go_stat(
 #[cfg(target_os = "macos")]
 async fn go_dir(
     #[values(Application::Go19Dir, Application::Go20Dir)] application: Application,
-    dylib_path: &PathBuf,
+    dylib_path: &Path,
 ) {
     let (mut test_process, mut layer_connection) = application
         .start_process_with_layer(
@@ -415,7 +416,7 @@ async fn go_dir(
 #[cfg(target_os = "linux")]
 async fn go_dir_on_linux(
     #[values(Application::Go19Dir, Application::Go20Dir)] application: Application,
-    dylib_path: &PathBuf,
+    dylib_path: &Path,
 ) {
     let (mut test_process, mut layer_connection) = application
         .start_process_with_layer(
@@ -510,7 +511,7 @@ async fn go_dir_on_linux(
 #[timeout(Duration::from_secs(10))]
 async fn go_dir_bypass(
     #[values(Application::Go19DirBypass, Application::Go20DirBypass)] application: Application,
-    dylib_path: &PathBuf,
+    dylib_path: &Path,
 ) {
     let tmp_dir = temp_dir().join("go_dir_bypass_test");
     std::fs::create_dir_all(tmp_dir.clone()).unwrap();
@@ -550,7 +551,7 @@ async fn go_dir_bypass(
 async fn read_go(
     #[values(Application::Go18Read, Application::Go19Read, Application::Go20Read)]
     application: Application,
-    dylib_path: &PathBuf,
+    dylib_path: &Path,
 ) {
     let (mut test_process, mut layer_connection) = application
         .start_process_with_layer(dylib_path, vec![("MIRRORD_FILE_MODE", "read")])
@@ -572,13 +573,13 @@ async fn read_go(
     // Notify Go test app that the close detour completed and it can exit.
     // (The go app waits for this, since Go does not wait for the close detour to complete before
     // returning from `Close`).
-    test_process.child.as_ref().map(|process| {
+    if let Some(process) = test_process.child.as_ref() {
         signal::kill(
             Pid::from_raw(process.id().unwrap() as pid_t),
             Signal::SIGTERM,
         )
         .unwrap()
-    });
+    };
 
     assert!(layer_connection.is_ended().await);
 
@@ -594,7 +595,7 @@ async fn read_go(
 async fn write_go(
     #[values(Application::Go18Write, Application::Go19Write, Application::Go20Write)]
     application: Application,
-    dylib_path: &PathBuf,
+    dylib_path: &Path,
 ) {
     let (mut test_process, mut layer_connection) = application
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars())
@@ -623,7 +624,7 @@ async fn write_go(
 async fn lseek_go(
     #[values(Application::Go18LSeek, Application::Go19LSeek, Application::Go20LSeek)]
     application: Application,
-    dylib_path: &PathBuf,
+    dylib_path: &Path,
 ) {
     let (mut test_process, mut layer_connection) = application
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars())
@@ -660,7 +661,7 @@ async fn faccessat_go(
         Application::Go20FAccessAt
     )]
     application: Application,
-    dylib_path: &PathBuf,
+    dylib_path: &Path,
 ) {
     let (mut test_process, mut layer_connection) = application
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars())

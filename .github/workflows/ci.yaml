@@ -81,9 +81,13 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt, clippy
+          target: armv7-unknown-linux-gnueabihf,aarch64-unknown-linux-gnu
       # Needed for agent
       - run: cargo fmt --all -- --check
-      - run: cargo clippy -- -D warnings
+      - run: cargo clippy --lib --bins --all-features -- -D warnings
+      # Check that agent compiles for the supported targets (armv7, aarch64)
+      - run: cargo clippy -p mirrord-agent --target armv7-unknown-linux-gnueabihf -- -D warnings
+      - run: cargo clippy -p mirrord-agent --target aarch64-unknown-linux-gnu -- -D warnings
 
   check-rust-docs:
     runs-on: ubuntu-latest

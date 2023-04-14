@@ -52,7 +52,7 @@ mod file_ops {
         #[future]
         #[notrace]
         service: KubeService,
-        #[values(Agent::Job)] agent: Agent,
+        #[values(Agent::Job)] _agent: Agent,
     ) {
         let service = service.await;
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));

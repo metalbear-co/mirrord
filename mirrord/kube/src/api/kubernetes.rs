@@ -71,7 +71,7 @@ impl AgentManagment for KubernetesAPI {
             .get(&pod_agent_name)
             .await?
             .status
-            .and_then(|status| status.pod_ip.clone())
+            .and_then(|status| status.pod_ip)
             .unwrap_or(pod_agent_name);
 
         let agent_addr = format!("{}:{}", pod_addr, agent_port);

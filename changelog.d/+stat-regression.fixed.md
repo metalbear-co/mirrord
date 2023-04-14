@@ -1,0 +1,1 @@
+Fixed a regression on armv7 for agent because of new stat thingy

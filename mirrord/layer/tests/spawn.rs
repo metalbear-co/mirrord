@@ -1,6 +1,6 @@
 #![feature(assert_matches)]
 
-use std::{path::PathBuf, time::Duration};
+use std::{path::Path, time::Duration};
 
 use rstest::rstest;
 
@@ -18,7 +18,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(20))]
-async fn node_spawn(dylib_path: &PathBuf) {
+async fn node_spawn(dylib_path: &Path) {
     let application = Application::NodeSpawn;
     let (mut test_process, listener) = application
         .get_test_process_and_listener(dylib_path, vec![("MIRRORD_FILE_MODE", "local")])
