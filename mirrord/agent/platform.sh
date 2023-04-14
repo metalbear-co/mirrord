@@ -12,9 +12,5 @@ case $TARGETARCH in
 	echo "aarch64-unknown-linux-gnu" > /.platform
 	echo "gcc-aarch64-linux-gnu" > /.compiler
 	;;
-    "arm")
-	echo "armv7-unknown-linux-gnueabihf" > /.platform
-	echo "gcc-arm-linux-gnueabihf" > /.compiler
-	;;
 esac
 
