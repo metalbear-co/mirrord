@@ -31,7 +31,7 @@ async fn self_open(dylib_path: &PathBuf) {
     let application = Application::Go19SelfOpen;
 
     let (mut test_process, mut layer_connection) = application
-        .start_process_with_layer(dylib_path, vec![])
+        .start_process_with_layer(dylib_path, vec![], None)
         .await;
 
     assert!(layer_connection.is_ended().await);
@@ -55,6 +55,7 @@ async fn pwrite(
         .start_process_with_layer(
             dylib_path,
             vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt")],
+            None,
         )
         .await;
 
@@ -178,6 +179,7 @@ async fn node_close(
             dylib_path,
             // add rw override for the specific path
             vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt")],
+            None,
         )
         .await;
 
@@ -298,6 +300,7 @@ async fn go_dir(
         .start_process_with_layer(
             dylib_path,
             vec![("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo")],
+            None,
         )
         .await;
 
@@ -527,6 +530,7 @@ async fn go_dir_bypass(
                 ("MIRRORD_TEST_GO_DIR_BYPASS_PATH", &path_string),
                 ("MIRRORD_FILE_LOCAL_PATTERN", &path_string),
             ],
+            None,
         )
         .await;
 
@@ -553,7 +557,7 @@ async fn read_go(
     dylib_path: &PathBuf,
 ) {
     let (mut test_process, mut layer_connection) = application
-        .start_process_with_layer(dylib_path, vec![("MIRRORD_FILE_MODE", "read")])
+        .start_process_with_layer(dylib_path, vec![("MIRRORD_FILE_MODE", "read")], None)
         .await;
 
     let fd = 1;
@@ -597,7 +601,7 @@ async fn write_go(
     dylib_path: &PathBuf,
 ) {
     let (mut test_process, mut layer_connection) = application
-        .start_process_with_layer(dylib_path, get_rw_test_file_env_vars())
+        .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;
 
     let fd = 1;
@@ -626,7 +630,7 @@ async fn lseek_go(
     dylib_path: &PathBuf,
 ) {
     let (mut test_process, mut layer_connection) = application
-        .start_process_with_layer(dylib_path, get_rw_test_file_env_vars())
+        .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;
 
     let fd = 1;
@@ -663,7 +667,7 @@ async fn faccessat_go(
     dylib_path: &PathBuf,
 ) {
     let (mut test_process, mut layer_connection) = application
-        .start_process_with_layer(dylib_path, get_rw_test_file_env_vars())
+        .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;
 
     layer_connection
