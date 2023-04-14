@@ -7,8 +7,8 @@ mod common;
 
 pub use common::*;
 
-/// Start an application (and load the layer into it) that listens on a port that is configured to be 
-/// ignored, and verify that no messages are sent to the agent.
+/// Start an application (and load the layer into it) that listens on a port that is configured to
+/// be ignored, and verify that no messages are sent to the agent.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
