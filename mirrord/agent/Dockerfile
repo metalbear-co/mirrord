@@ -2,11 +2,16 @@ FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:latest as bui
 ARG TARGETARCH
 WORKDIR /app
 
-COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /app/
-COPY sample/rust /app/sample/rust
-COPY mirrord /app/mirrord
-COPY tests /app/tests
+# Copy order is important here, since we want the cache to be invalidated as less as possible
+# so we start with the most static files, then the most dynamic ones
 COPY .cargo /app/.cargo
+COPY mirrord/protocol /app/mirrord/protocol
+COPY mirrord/agent /app/mirrord/agent
+COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /app/
+
+# workspace files requires all members to exist while most of those aren't really needed
+# so we remove from the workspace
+RUN sed -i '/members = \[/,/\]/c\members = [\n    "mirrord/*",\n]' /app/Cargo.toml
 
 RUN ./mirrord/agent/platform.sh
 RUN echo $PATH
