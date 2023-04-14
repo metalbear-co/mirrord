@@ -31,6 +31,7 @@ fn build_go_app() {
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
+#[cfg(target_os = "linux")]
 async fn ignore_ports(
     #[values(Application::PythonListen)] application: Application,
     dylib_path: &PathBuf,
