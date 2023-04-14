@@ -1,5 +1,5 @@
 #![feature(assert_matches)]
-use std::{path::Path, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use mirrord_protocol::{
     outgoing::{udp::LayerUdpOutgoing::Connect, LayerConnect},
@@ -44,7 +44,7 @@ async fn mirroring_with_http(
         Application::NodeHTTP
     )]
     application: Application,
-    dylib_path: &Path,
+    dylib_path: &PathBuf,
 ) {
     let (mut test_process, mut layer_connection) = application
         .start_process_with_layer_and_port(dylib_path, vec![("MIRRORD_FILE_MODE", "local")])
@@ -123,7 +123,7 @@ async fn mirroring_with_http(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
 async fn mirroring_with_http_go(
-    dylib_path: &Path,
+    dylib_path: &PathBuf,
     #[values(Application::Go19HTTP, Application::Go20HTTP)] application: Application,
 ) {
     mirroring_with_http(application, dylib_path).await;

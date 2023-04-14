@@ -3,7 +3,7 @@ use std::{
     cmp::min,
     collections::HashMap,
     fmt::Debug,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::Stdio,
     sync::{Arc, Mutex},
 };
@@ -788,7 +788,7 @@ impl Application {
     /// supposed to connect to.
     pub async fn get_test_process_and_listener(
         &self,
-        dylib_path: &Path,
+        dylib_path: &PathBuf,
         extra_env_vars: Vec<(&str, &str)>,
     ) -> (TestProcess, TcpListener) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -812,7 +812,7 @@ impl Application {
     /// Will start it with env from `get_env` plus whatever is passed in `extra_env_vars`.
     pub async fn start_process_with_layer(
         &self,
-        dylib_path: &Path,
+        dylib_path: &PathBuf,
         extra_env_vars: Vec<(&str, &str)>,
     ) -> (TestProcess, LayerConnection) {
         let (test_process, listener) = self
@@ -825,7 +825,7 @@ impl Application {
     /// Like `start_process_with_layer`, but also verify a port subscribe.
     pub async fn start_process_with_layer_and_port(
         &self,
-        dylib_path: &Path,
+        dylib_path: &PathBuf,
         extra_env_vars: Vec<(&str, &str)>,
     ) -> (TestProcess, LayerConnection) {
         let (test_process, listener) = self

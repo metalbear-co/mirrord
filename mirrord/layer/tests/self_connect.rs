@@ -1,6 +1,6 @@
 #![feature(assert_matches)]
 
-use std::{path::Path, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use rstest::rstest;
 
@@ -13,7 +13,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
-async fn self_connect(dylib_path: &Path) {
+async fn self_connect(dylib_path: &PathBuf) {
     let application = Application::PythonSelfConnect;
     let (mut test_process, mut layer_connection) = application
         .start_process_with_layer_and_port(dylib_path, vec![("MIRRORD_FILE_MODE", "local")])
