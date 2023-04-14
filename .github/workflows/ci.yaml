@@ -78,11 +78,13 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
+      # Otherwise the arguments to the setup-rust-toolchain action are ignored.
+      - run: rm rust-toolchain.toml
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: nightly-2023-03-29
           components: rustfmt, clippy
-          target: armv7-unknown-linux-gnueabihf,aarch64-unknown-linux-gnu
+          target: armv7-unknown-linux-gnueabihf,aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
       # Needed for agent
       - run: cargo fmt --all -- --check
       - run: cargo clippy --lib --bins --all-features -- -D warnings
