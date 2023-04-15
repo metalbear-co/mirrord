@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     config::{
-        from_env::FromEnv, source::MirrordConfigSource, ConfigError, FromMirrordConfig,
-        MirrordConfig, Result,
+        from_env::{FromEnv, FromEnvWithError},
+        source::MirrordConfigSource,
+        ConfigError, FromMirrordConfig, MirrordConfig, Result,
     },
     util::string_or_struct_option,
 };
@@ -59,7 +60,7 @@ impl MirrordConfig for TargetFileConfig {
     fn generate_config(self) -> Result<Self::Generated> {
         let config = match self {
             TargetFileConfig::Simple(path) => TargetConfig {
-                path: FromEnv::new("MIRRORD_IMPERSONATED_TARGET")
+                path: FromEnvWithError::new("MIRRORD_IMPERSONATED_TARGET")
                     .or(path)
                     .source_value()
                     .transpose()?,
@@ -68,7 +69,7 @@ impl MirrordConfig for TargetFileConfig {
                     .transpose()?,
             },
             TargetFileConfig::Advanced { path, namespace } => TargetConfig {
-                path: FromEnv::new("MIRRORD_IMPERSONATED_TARGET")
+                path: FromEnvWithError::new("MIRRORD_IMPERSONATED_TARGET")
                     .or(path)
                     .source_value()
                     .transpose()?,

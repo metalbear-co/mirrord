@@ -23,7 +23,7 @@ async fn test_issue834(
     dylib_path: &PathBuf,
 ) {
     let (mut test_process, _layer_connection) = application
-        .start_process_with_layer(dylib_path, vec![])
+        .start_process_with_layer(dylib_path, vec![], None)
         .await;
 
     test_process.wait().await;

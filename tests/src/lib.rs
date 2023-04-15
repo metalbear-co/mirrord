@@ -18,9 +18,7 @@ mod utils {
         time::Duration,
     };
 
-    use bytes::Bytes;
     use chrono::Utc;
-    use futures::Stream;
     use futures_util::stream::{StreamExt, TryStreamExt};
     use k8s_openapi::api::{
         apps::v1::Deployment,
@@ -908,11 +906,5 @@ mod utils {
             headers.clone(),
         )
         .await;
-    }
-
-    pub async fn get_next_log<T: Stream<Item = Result<Bytes, kube::Error>> + Unpin>(
-        stream: &mut T,
-    ) -> String {
-        String::from_utf8_lossy(&stream.try_next().await.unwrap().unwrap()).to_string()
     }
 }

@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    io::{self},
+    io,
 };
 
 use actix_codec::{Decoder, Encoder};
@@ -16,7 +16,7 @@ use crate::{
         OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest,
         ReadDirRequest, ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
         SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
-        WriteLimitedFileRequest, XstatRequest, XstatResponse,
+        WriteLimitedFileRequest, XstatFsRequest, XstatFsResponse, XstatRequest, XstatResponse,
     },
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -26,9 +26,32 @@ use crate::{
     ResponseError,
 };
 
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy)]
+pub enum LogLevel {
+    Warn,
+    Error,
+}
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct LogMessage {
     pub message: String,
+    pub level: LogLevel,
+}
+
+impl LogMessage {
+    pub fn warn(message: String) -> Self {
+        Self {
+            message,
+            level: LogLevel::Warn,
+        }
+    }
+
+    pub fn error(message: String) -> Self {
+        Self {
+            message,
+            level: LogLevel::Error,
+        }
+    }
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -49,6 +72,7 @@ pub enum FileRequest {
     Close(CloseFileRequest),
     Access(AccessFileRequest),
     Xstat(XstatRequest),
+    XstatFs(XstatFsRequest),
     FdOpenDir(FdOpenDirRequest),
     ReadDir(ReadDirRequest),
     CloseDir(CloseDirRequest),
@@ -83,6 +107,7 @@ pub enum FileResponse {
     Seek(RemoteResult<SeekFileResponse>),
     Access(RemoteResult<AccessFileResponse>),
     Xstat(RemoteResult<XstatResponse>),
+    XstatFs(RemoteResult<XstatFsResponse>),
     ReadDir(RemoteResult<ReadDirResponse>),
     OpenDir(RemoteResult<OpenDirResponse>),
     #[cfg(target_os = "linux")]

@@ -8,6 +8,102 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.37.0](https://github.com/metalbear-co/mirrord/tree/3.37.0) - 2023-04-14
+
+
+### Removed
+
+- Removed armv7 builds that were wrongly added
+
+
+### Added
+
+- Add `ignore_ports` to `incoming` configuration so you can have ports that
+  only listen
+  locally (mirrord will not steal/mirror those ports).
+  [#1295](https://github.com/metalbear-co/mirrord/issues/1295)
+- Add support for `xstatfs` to prevent unexpected behavior with SQLite.
+  [#1270](https://github.com/metalbear-co/mirrord/issues/1270)
+
+
+### Changed
+
+- Improved bad target error
+  [#1291](https://github.com/metalbear-co/mirrord/issues/1291)
+
+
+### Internal
+
+- Optimize agent Dockerfile for better cache use
+  [#1280](https://github.com/metalbear-co/mirrord/issues/1280)
+- Cover more areas of the code and targets using clippy in CI and fix its
+  warnings
+- Rely more on Rusts own async trait and drop async-trait crate (the agent cant
+  fully switch yet though).
+  [#use-rust-async-traits](https://github.com/metalbear-co/mirrord/issues/use-rust-async-traits)
+
+
+## [3.36.0](https://github.com/metalbear-co/mirrord/tree/3.36.0) - 2023-04-13
+
+
+### Added
+
+- Notify clients about errors happening in agent's background tasks.
+  [#1163](https://github.com/metalbear-co/mirrord/issues/1163)
+- Add support for the imagePullSecrets parameter on the agent pod. This can be
+  specified in the configuration file, under agent.image_pull_secrets.
+  [#1276](https://github.com/metalbear-co/mirrord/issues/1276)
+
+
+### Internal
+
+- Fix pause E2E test.
+  [#1261](https://github.com/metalbear-co/mirrord/issues/1261)
+
+
+## [3.35.0](https://github.com/metalbear-co/mirrord/tree/3.35.0) - 2023-04-11
+
+
+### Added
+
+- Added an error prompt to the VS Code extension when there is no available
+  target in the configured namespace.
+  [#1266](https://github.com/metalbear-co/mirrord/issues/1266)
+
+
+### Changed
+
+- HTTP traffic stealer now supports HTTP/2 requests.
+  [#922](https://github.com/metalbear-co/mirrord/issues/922)
+
+
+### Fixed
+
+- Executable field was set to null if present, but no SIP patching was done.
+  [#1271](https://github.com/metalbear-co/mirrord/issues/1271)
+- Fixed random crash in `close_layer_fd` caused by supposed closing of
+  stdout/stderr then calling to log that writes to it
+
+
+### Internal
+
+- Use DashMap for `OPEN_DIRS`
+  [#1240](https://github.com/metalbear-co/mirrord/issues/1240)
+- Use DashMap for `MANAGED_ADDRINFO`
+  [#1241](https://github.com/metalbear-co/mirrord/issues/1241)
+- Use DashMap for `ConnectionQueue`
+  [#1242](https://github.com/metalbear-co/mirrord/issues/1242)
+- Implemented `Default` for `Subscriptions`. Replaced usages of
+  `Subscriptions::new` with `Default::default`.
+- Improve testing guide.
+- Removed unnecessary trait bounds for `Default` implementation on
+  `IndexAllocator`. Replaced usages of `IndexAllocator::new` with
+  `Default::default`.
+- Update contributing guide.
+- Update testing and building docs, and add instructions for the IDE
+  extensions.
+
+
 ## [3.34.0](https://github.com/metalbear-co/mirrord/tree/3.34.0) - 2023-03-30
 
 

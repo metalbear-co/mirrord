@@ -44,7 +44,6 @@ rand = "0.8"
 fancy-regex.workspace = true
 regex.workspace = true
 errno = "0.3"
-async-trait.workspace = true
 socket2.workspace = true
 anyhow.workspace = true
 streammap-ext.workspace = true

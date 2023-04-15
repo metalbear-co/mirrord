@@ -372,7 +372,7 @@ mod main {
         fn is_sip_false() {
             let mut f = tempfile::NamedTempFile::new().unwrap();
             let data = std::fs::read("/bin/ls").unwrap();
-            f.write(&data).unwrap();
+            f.write_all(&data).unwrap();
             f.flush().unwrap();
             assert!(matches!(
                 get_sip_status(f.path().to_str().unwrap(), &vec![]).unwrap(),
@@ -409,7 +409,7 @@ mod main {
             let mut original_file = tempfile::NamedTempFile::new().unwrap();
             let patched_path = temp_dir().join(original_file.path().strip_prefix("/").unwrap());
             original_file
-                .write("#!/usr/bin/env bash\n".as_ref())
+                .write_all("#!/usr/bin/env bash\n".as_ref())
                 .unwrap();
             original_file.flush().unwrap();
             std::fs::create_dir_all(patched_path.parent().unwrap()).unwrap();
@@ -434,7 +434,7 @@ mod main {
         fn patch_shebang_and_binary() {
             let mut script = tempfile::NamedTempFile::new().unwrap();
             let script_contents = "#!/usr/bin/env bash\nexit\n";
-            script.write(script_contents.as_ref()).unwrap();
+            script.write_all(script_contents.as_ref()).unwrap();
             script.flush().unwrap();
             let changed_script_path = sip_patch(script.path().to_str().unwrap(), &Vec::new())
                 .unwrap()
@@ -459,7 +459,7 @@ mod main {
         fn patch_twice() {
             let mut script = tempfile::NamedTempFile::new().unwrap();
             let script_contents = "#!/bin/bash\nexit\n";
-            script.write(script_contents.as_ref()).unwrap();
+            script.write_all(script_contents.as_ref()).unwrap();
             script.flush().unwrap();
 
             let path = script.path();
@@ -478,7 +478,7 @@ mod main {
         fn cyclic_shebangs() {
             let mut script = tempfile::NamedTempFile::new().unwrap();
             let contents = "#!".to_string() + script.path().to_str().unwrap();
-            script.write(contents.as_bytes()).unwrap();
+            script.write_all(contents.as_bytes()).unwrap();
             script.flush().unwrap();
             let res = sip_patch(script.path().to_str().unwrap(), &Vec::new());
             assert!(matches!(res, Ok(None)));

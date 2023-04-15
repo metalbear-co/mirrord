@@ -106,6 +106,38 @@ mod file_ops {
         process.assert_python_fileops_stderr();
     }
 
+    #[rstest]
+    #[trace]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    pub async fn statfs(
+        #[future]
+        #[notrace]
+        service: KubeService,
+    ) {
+        let service = service.await;
+        let python_command = vec![
+            "python3",
+            "-B",
+            "-m",
+            "unittest",
+            "-f",
+            "python-e2e/statfs.py",
+        ];
+
+        let mut process = run_exec(
+            python_command,
+            &service.target,
+            Some(&service.namespace),
+            None,
+            None,
+        )
+        .await;
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_python_fileops_stderr();
+    }
+
     // Currently fails due to Layer >> AddressConversion in ci for some reason
 
     #[ignore]

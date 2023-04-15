@@ -574,6 +574,7 @@ pub enum Application {
     PythonFlaskHTTP,
     PythonSelfConnect,
     PythonDontLoad,
+    PythonListen,
     RustFileOps,
     Go19FileOps,
     Go20FileOps,
@@ -628,7 +629,8 @@ impl Application {
         match self {
             Application::PythonFlaskHTTP
             | Application::PythonSelfConnect
-            | Application::PythonDontLoad => Self::get_python3_executable().await,
+            | Application::PythonDontLoad
+            | Application::PythonListen => Self::get_python3_executable().await,
             Application::PythonFastApiHTTP => String::from("uvicorn"),
             Application::NodeHTTP => String::from("node"),
             Application::Go19HTTP => String::from("tests/apps/app_go/19"),
@@ -680,6 +682,11 @@ impl Application {
             }
             Application::PythonDontLoad => {
                 app_path.push("dont_load.py");
+                println!("using script from {app_path:?}");
+                vec![String::from("-u"), app_path.to_string_lossy().to_string()]
+            }
+            Application::PythonListen => {
+                app_path.push("app_listen.py");
                 println!("using script from {app_path:?}");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
@@ -744,6 +751,7 @@ impl Application {
             | Application::NodeHTTP
             | Application::PythonFlaskHTTP => 80,
             Application::PythonFastApiHTTP => 1234,
+            Application::PythonListen => 21232,
             Application::PythonDontLoad
             | Application::RustFileOps
             | Application::EnvBashCat
@@ -790,18 +798,16 @@ impl Application {
         &self,
         dylib_path: &PathBuf,
         extra_env_vars: Vec<(&str, &str)>,
+        configuration_file: Option<&str>,
     ) -> (TestProcess, TcpListener) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap().to_string();
         println!("Listening for messages from the layer on {addr}");
-        let mut config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        config_path.push("tests/configs/port_mapping.json");
-        let config_path = config_path.to_str();
         let env = get_env(
             dylib_path.to_str().unwrap(),
             &addr,
             extra_env_vars,
-            config_path,
+            configuration_file,
         );
         let test_process = self.get_test_process(env).await;
 
@@ -814,9 +820,10 @@ impl Application {
         &self,
         dylib_path: &PathBuf,
         extra_env_vars: Vec<(&str, &str)>,
+        configuration_file: Option<&str>,
     ) -> (TestProcess, LayerConnection) {
         let (test_process, listener) = self
-            .get_test_process_and_listener(dylib_path, extra_env_vars)
+            .get_test_process_and_listener(dylib_path, extra_env_vars, configuration_file)
             .await;
         let layer_connection = LayerConnection::get_initialized_connection(&listener).await;
         (test_process, layer_connection)
@@ -827,9 +834,10 @@ impl Application {
         &self,
         dylib_path: &PathBuf,
         extra_env_vars: Vec<(&str, &str)>,
+        configuration_file: Option<&str>,
     ) -> (TestProcess, LayerConnection) {
         let (test_process, listener) = self
-            .get_test_process_and_listener(dylib_path, extra_env_vars)
+            .get_test_process_and_listener(dylib_path, extra_env_vars, configuration_file)
             .await;
         let layer_connection =
             LayerConnection::get_initialized_connection_with_port(&listener, self.get_app_port())
@@ -860,6 +868,15 @@ pub fn dylib_path() -> PathBuf {
             dylib_path
         }
     }
+}
+
+/// Fixture to get configuration files directory.
+#[fixture]
+#[once]
+pub fn config_dir() -> PathBuf {
+    let mut config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    config_path.push("tests/configs");
+    config_path
 }
 
 pub fn get_env<'a>(
