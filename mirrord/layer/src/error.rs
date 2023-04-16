@@ -106,7 +106,7 @@ pub(crate) enum LayerError {
     ResponseError(#[from] ResponseError),
 
     #[error("mirrord-layer: Frida failed with `{0}`!")]
-    Frida(#[from] frida_gum::Error),
+    Frida(frida_gum::Error),
 
     #[error("mirrord-layer: Failed to find export for name `{0}`!")]
     NoExportName(String),
