@@ -1,16 +1,16 @@
 use bytes::Bytes;
 use futures::TryFutureExt;
-use http::Request;
-use http_body_util::Empty;
-use hyper::client::conn;
+use http::{Request, Response};
+use http_body_util::{BodyExt, Empty};
+use hyper::{body::Incoming, client::conn};
 use k8s_cri::v1alpha2::{runtime_service_client::RuntimeServiceClient, ContainerStatusRequest};
 use tokio::net::UnixStream;
 use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
-use tracing::{debug, error};
+use tracing::error;
 
 use crate::{
-    error::Result,
+    error::{AgentError, Result},
     runtime::{ContainerInfo, ContainerRuntime},
 };
 
@@ -24,6 +24,36 @@ pub(crate) struct CriOContainer {
 impl CriOContainer {
     pub fn from_id(container_id: String) -> Self {
         CriOContainer { container_id }
+    }
+
+    async fn request(path: String) -> Result<Response<Incoming>> {
+        let stream = UnixStream::connect(CRIO_DEFAULT_SOCK_PATH).await?;
+        let (mut request_sender, connection) = conn::http1::handshake(stream).await?;
+
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                eprintln!("Error in connection: {}", e);
+            }
+        });
+
+        let request = Request::builder()
+            .method("GET")
+            .header("Host", "localhost")
+            .uri(format!("http://localhost/{}", path))
+            .body(Empty::<Bytes>::new())?;
+
+        let response = request_sender.send_request(request).await?;
+        let status_code = response.status();
+
+        if status_code.is_success() {
+            Ok(response)
+        } else {
+            let err = response.into_body().collect().await.ok();
+
+            Err(AgentError::PauseRuntimeError(format!(
+                "Request to {path} failed, status: {status_code} err: {err:?}"
+            )))
+        }
     }
 }
 
@@ -58,45 +88,13 @@ impl ContainerRuntime for CriOContainer {
     }
 
     async fn pause(&self) -> Result<()> {
-        let stream = UnixStream::connect(CRIO_DEFAULT_SOCK_PATH).await?;
-        let (mut request_sender, connection) = conn::http1::handshake(stream).await?;
-
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                eprintln!("Error in connection: {}", e);
-            }
-        });
-
-        let request = Request::builder()
-            .method("GET")
-            .uri(format!("http://localhost/pause/{}", self.container_id))
-            .body(Empty::<Bytes>::new())?;
-
-        let res = request_sender.send_request(request).await?;
-
-        debug!("{res:#?}");
+        Self::request(format!("/pause/{}", self.container_id)).await?;
 
         Ok(())
     }
 
     async fn unpause(&self) -> Result<()> {
-        let stream = UnixStream::connect(CRIO_DEFAULT_SOCK_PATH).await?;
-        let (mut request_sender, connection) = conn::http1::handshake(stream).await?;
-
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                eprintln!("Error in connection: {}", e);
-            }
-        });
-
-        let request = Request::builder()
-            .method("GET")
-            .uri(format!("http://localhost/unpause/{}", self.container_id))
-            .body(Empty::<Bytes>::new())?;
-
-        let res = request_sender.send_request(request).await?;
-
-        debug!("{res:#?}");
+        Self::request(format!("/unpause/{}", self.container_id)).await?;
 
         Ok(())
     }
