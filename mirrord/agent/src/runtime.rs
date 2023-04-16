@@ -43,6 +43,7 @@ const CONTAINERD_SOCK_PATHS: [&str; 4] = [
 
 const DEFAULT_CONTAINERD_NAMESPACE: &str = "k8s.io";
 
+#[derive(Debug)]
 pub(crate) struct ContainerInfo {
     /// External PID of the container
     pub(crate) pid: u64,
@@ -89,7 +90,7 @@ pub(crate) async fn get_container(
             "containerd" => Ok(Some(Container::Containerd(ContainerdContainer {
                 container_id,
             }))),
-            "cri-o" => Ok(Some(Container::CriO(CriOContainer { container_id }))),
+            "cri-o" => Ok(Some(Container::CriO(CriOContainer::from_id(container_id)))),
             _ => Err(AgentError::NotFound(format!(
                 "Unknown runtime {container_runtime:?}"
             ))),
