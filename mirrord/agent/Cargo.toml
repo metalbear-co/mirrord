@@ -42,7 +42,6 @@ regex = "1"
 socket2.workspace = true
 wildmatch = "2"
 enum_dispatch = "0.3.8"
-async-trait.workspace = true
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["full"] }
 httparse = "1"
@@ -50,6 +49,7 @@ fancy-regex = { workspace = true }
 dashmap = { version = "5" }
 pin-project = "1"
 oci-spec = "0.6.0"
+async-trait = "0.1"
 k8s-cri = "0.6"
 tonic = "0.8"
 tower = "0.4"

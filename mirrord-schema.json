@@ -465,6 +465,18 @@
             "null"
           ]
         },
+        "ignore_ports": {
+          "description": "Ports to ignore when mirroring/stealing traffic. Useful if you want specific ports to be used locally only.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0.0
+          }
+        },
         "mode": {
           "description": "Allows selecting between mirrorring or stealing traffic.\n\nSee [`IncomingMode`] for details.",
           "anyOf": [

@@ -45,9 +45,16 @@ async fn mirroring_with_http(
     )]
     application: Application,
     dylib_path: &PathBuf,
+    config_dir: &PathBuf,
 ) {
+    let mut config_path = config_dir.clone();
+    config_path.push("port_mapping.json");
     let (mut test_process, mut layer_connection) = application
-        .start_process_with_layer_and_port(dylib_path, vec![("MIRRORD_FILE_MODE", "local")])
+        .start_process_with_layer_and_port(
+            dylib_path,
+            vec![("MIRRORD_FILE_MODE", "local")],
+            Some(config_path.to_str().unwrap()),
+        )
         .await;
 
     println!("Application subscribed to port, sending tcp messages.");
@@ -124,7 +131,8 @@ async fn mirroring_with_http(
 #[timeout(Duration::from_secs(60))]
 async fn mirroring_with_http_go(
     dylib_path: &PathBuf,
+    config_dir: &PathBuf,
     #[values(Application::Go19HTTP, Application::Go20HTTP)] application: Application,
 ) {
-    mirroring_with_http(application, dylib_path).await;
+    mirroring_with_http(application, dylib_path, config_dir).await;
 }

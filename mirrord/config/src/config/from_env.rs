@@ -25,6 +25,30 @@ where
     }
 }
 
+/// This is the same as `FromEnv` but doesn't discard the error
+/// returned from parse. This is for parsing `Target`.
+/// I (A.H) couldn't find any better way to do this since you can't
+/// do specialization on associated types.
+#[derive(Clone)]
+pub struct FromEnvWithError<T>(&'static str, PhantomData<T>);
+
+impl<T> FromEnvWithError<T> {
+    pub fn new(env: &'static str) -> Self {
+        FromEnvWithError(env, PhantomData::<T>)
+    }
+}
+
+impl<T> MirrordConfigSource for FromEnvWithError<T>
+where
+    T: FromStr<Err = ConfigError>,
+{
+    type Value = T;
+
+    fn source_value(self) -> Option<Result<Self::Value>> {
+        std::env::var(self.0).ok().map(|var| var.parse())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use rstest::rstest;

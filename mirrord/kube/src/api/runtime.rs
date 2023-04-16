@@ -1,6 +1,5 @@
 use std::fmt::{Display, Formatter};
 
-use async_trait::async_trait;
 use k8s_openapi::api::{apps::v1::Deployment, core::v1::Pod};
 use kube::{api::ListParams, Api, Client};
 use mirrord_config::target::{DeploymentTarget, PodTarget, Target};
@@ -101,12 +100,10 @@ impl RuntimeData {
     }
 }
 
-#[async_trait]
 pub trait RuntimeDataProvider {
     async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData>;
 }
 
-#[async_trait]
 impl RuntimeDataProvider for Target {
     async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
         match self {
@@ -116,7 +113,6 @@ impl RuntimeDataProvider for Target {
     }
 }
 
-#[async_trait]
 impl RuntimeDataProvider for DeploymentTarget {
     async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
         let deployment_api: Api<Deployment> = get_k8s_resource_api(client, namespace);
@@ -159,7 +155,6 @@ impl RuntimeDataProvider for DeploymentTarget {
     }
 }
 
-#[async_trait]
 impl RuntimeDataProvider for PodTarget {
     async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
         let pod_api: Api<Pod> = get_k8s_resource_api(client, namespace);

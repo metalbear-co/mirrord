@@ -10,13 +10,14 @@ use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
 #[cfg(target_os = "linux")]
 use errno::{set_errno, Errno};
 use libc::{
-    self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, AT_EACCESS, AT_FDCWD, DIR,
+    self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
+    AT_FDCWD, DIR,
 };
 #[cfg(target_os = "linux")]
 use libc::{EBADF, EINVAL, ENOENT, ENOTDIR};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
-    DirEntryInternal, MetadataInternal, ReadFileResponse, WriteFileResponse,
+    DirEntryInternal, FsMetadataInternal, MetadataInternal, ReadFileResponse, WriteFileResponse,
 };
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
@@ -503,9 +504,29 @@ unsafe extern "C" fn fill_stat(out_stat: *mut stat, metadata: &MetadataInternal)
     out.st_blocks = best_effort_cast(metadata.blocks);
 }
 
+/// Fills the `statfs` struct with the metadata
+unsafe extern "C" fn fill_statfs(out_stat: *mut statfs, metadata: &FsMetadataInternal) {
+    // Acording to linux documentation "Fields that are undefined for a particular file system are
+    // set to 0."
+    out_stat.write_bytes(0, 1);
+    let out = &mut *out_stat;
+    // on macOS the types might be different, so we try to cast and do our best..
+    out.f_type = best_effort_cast(metadata.filesystem_type);
+    out.f_bsize = best_effort_cast(metadata.block_size);
+    out.f_blocks = metadata.blocks;
+    out.f_bfree = metadata.blocks_free;
+    out.f_bavail = metadata.blocks_available;
+    out.f_files = metadata.files;
+    out.f_ffree = metadata.files_free;
+}
+
 /// Hook for `libc::lstat`.
 #[hook_guard_fn]
 unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
+    if out_stat.is_null() {
+        return HookError::BadPointer.into();
+    }
+
     xstat(Some(raw_path.checked_into()), None, false)
         .map(|res| {
             let res = res.metadata;
@@ -518,6 +539,10 @@ unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) 
 /// Hook for `libc::fstat`.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> c_int {
+    if out_stat.is_null() {
+        return HookError::BadPointer.into();
+    }
+
     xstat(None, Some(fd), true)
         .map(|res| {
             let res = res.metadata;
@@ -530,6 +555,10 @@ pub(crate) unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> 
 /// Hook for `libc::stat`.
 #[hook_guard_fn]
 unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
+    if out_stat.is_null() {
+        return HookError::BadPointer.into();
+    }
+
     xstat(Some(raw_path.checked_into()), None, true)
         .map(|res| {
             let res = res.metadata;
@@ -546,6 +575,10 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
     raw_path: *const c_char,
     out_stat: *mut stat,
 ) -> c_int {
+    if out_stat.is_null() {
+        return HookError::BadPointer.into();
+    }
+
     if ver != 1 {
         return FN___XSTAT(ver, raw_path, out_stat);
     }
@@ -565,6 +598,10 @@ pub(crate) unsafe fn fstatat_logic(
     out_stat: *mut stat,
     flag: c_int,
 ) -> Detour<i32> {
+    if out_stat.is_null() {
+        return Detour::Error(HookError::BadPointer);
+    }
+
     let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
     xstat(Some(raw_path.checked_into()), Some(fd), follow_symlink).map(|res| {
         let res = res.metadata;
@@ -583,6 +620,21 @@ unsafe extern "C" fn fstatat_detour(
 ) -> c_int {
     fstatat_logic(fd, raw_path, out_stat, flag)
         .unwrap_or_bypass_with(|_| FN_FSTATAT(fd, raw_path, out_stat, flag))
+}
+
+#[hook_guard_fn]
+unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs) -> c_int {
+    if out_stat.is_null() {
+        return HookError::BadPointer.into();
+    }
+
+    xstatfs(fd)
+        .map(|res| {
+            let res = res.metadata;
+            fill_statfs(out_stat, &res);
+            0
+        })
+        .unwrap_or_bypass_with(|_| FN_FSTATFS(fd, out_stat))
 }
 
 // this requires newer libc which we don't link with to support old libc..
@@ -735,6 +787,14 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FnFstatat,
             FN_FSTATAT
         );
+
+        replace!(
+            hook_manager,
+            "fstatfs",
+            fstatfs_detour,
+            FnFstatfs,
+            FN_FSTATFS
+        );
         replace!(
             hook_manager,
             "fdopendir",
@@ -774,6 +834,13 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             fstatat_detour,
             FnFstatat,
             FN_FSTATAT
+        );
+        replace!(
+            hook_manager,
+            "fstatfs$INODE64",
+            fstatfs_detour,
+            FnFstatfs,
+            FN_FSTATFS
         );
         replace!(
             hook_manager,
