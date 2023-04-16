@@ -61,8 +61,14 @@ pub enum AgentError {
     #[error("tonic::Transport failed with `{0}`")]
     Transport(#[from] containerd_client::tonic::transport::Error),
 
+    #[error("tonic::Transport failed with `{0}`")]
+    Transport08(#[from] tonic::transport::Error),
+
     #[error("tonic::Status failed with `{0}`")]
     Status(#[from] containerd_client::tonic::Status),
+
+    #[error("tonic::Status failed with `{0}`")]
+    Status08(#[from] tonic::Status),
 
     #[error("NotFound failed with `{0}`")]
     NotFound(String),

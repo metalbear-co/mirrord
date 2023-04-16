@@ -66,8 +66,7 @@ impl ContainerRuntime for CriOContainer {
             .connect_with_connector(service_fn(move |_: Uri| {
                 UnixStream::connect(CRIO_DEFAULT_SOCK_PATH).inspect_err(|err| error!("{err:?}"))
             }))
-            .await
-            .unwrap();
+            .await?;
 
         let mut client = RuntimeServiceClient::new(channel);
 
@@ -76,15 +75,14 @@ impl ContainerRuntime for CriOContainer {
                 container_id: self.container_id.clone(),
                 verbose: true,
             })
-            .await
-            .unwrap()
+            .await?
             .into_inner();
 
         let pid: u64 = status
             .info
             .get("pid")
             .and_then(|val| val.parse().ok())
-            .unwrap();
+            .ok_or(AgentError::MissingContainerInfo)?;
 
         Ok(ContainerInfo::new(pid, Default::default()))
     }
