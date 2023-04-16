@@ -107,8 +107,6 @@ impl State {
         let container =
             get_container(args.container_id.as_ref(), args.container_runtime.as_ref()).await?;
 
-        debug!("{container:#?}");
-
         if container.is_none() && args.pause {
             Err(AgentError::MissingContainerInfo)?
         }
@@ -125,7 +123,6 @@ impl State {
         if self.container.is_some() {
             let container = self.container.as_ref().unwrap();
             let info = container.get_info().await?;
-            debug!("{info:#?}");
             Ok(Some(info))
         } else {
             Ok(None)
