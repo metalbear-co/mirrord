@@ -331,3 +331,9 @@ impl From<HookError> for *mut c_char {
         ptr::null_mut()
     }
 }
+
+impl From<frida_gum::Error> for LayerError {
+    fn from(err: frida_gum::Error) -> Self {
+        LayerError::Frida(err)
+    }
+}
