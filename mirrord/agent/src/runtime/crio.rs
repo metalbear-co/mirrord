@@ -36,22 +36,24 @@ impl CriOContainer {
             }
         });
 
-        let request = Request::builder()
-            .method("GET")
-            .header("Host", "localhost")
-            .uri(format!("http://localhost/{}", path))
-            .body(Empty::<Bytes>::new())?;
+        let response = request_sender
+            .send_request(
+                Request::builder()
+                    .method("GET")
+                    .header("Host", "localhost")
+                    .uri(format!("http://localhost/{}", path))
+                    .body(Empty::<Bytes>::new())?,
+            )
+            .await?;
 
-        let response = request_sender.send_request(request).await?;
-        let status_code = response.status();
-
-        if status_code.is_success() {
+        if response.status().is_success() {
             Ok(response)
         } else {
-            let err = response.into_body().collect().await.ok();
+            let status_code = response.status();
+            let err_body = response.into_body().collect().await?;
 
             Err(AgentError::PauseRuntimeError(format!(
-                "Request to {path} failed, status: {status_code} err: {err:?}"
+                "Request to {path} failed -> status: {status_code} | err_body: {err_body:?}"
             )))
         }
     }
