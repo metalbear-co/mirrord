@@ -85,6 +85,7 @@ jobs:
           toolchain: nightly-2023-03-29
           components: rustfmt, clippy
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
+      - uses: arduino/setup-protoc@v1
       # Needed for agent
       - run: cargo fmt --all -- --check
       - run: cargo clippy --lib --bins --all-features -- -D warnings
@@ -104,6 +105,7 @@ jobs:
         with:
           # TODO(alex): update this when https://github.com/rust-lang/rust/issues/109631 is fixed 
           toolchain: nightly-2023-01-31 
+      - uses: arduino/setup-protoc@v1
       - run: cargo doc --document-private-items
 
   lint_macos:
@@ -171,6 +173,7 @@ jobs:
       image: ghcr.io/metalbear-co/ci-agent-build:latest
     steps:
       - uses: actions/checkout@v3
+      - uses: arduino/setup-protoc@v1
       - name: test
         run: CARGO_NET_GIT_FETCH_WITH_CLI=true cargo test -p mirrord-agent
 
