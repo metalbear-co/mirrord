@@ -78,6 +78,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
+      - uses: arduino/setup-protoc@v1
       # Otherwise the arguments to the setup-rust-toolchain action are ignored.
       - run: rm rust-toolchain.toml
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -85,7 +86,6 @@ jobs:
           toolchain: nightly-2023-03-29
           components: rustfmt, clippy
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
-      - uses: arduino/setup-protoc@v1
       # Needed for agent
       - run: cargo fmt --all -- --check
       - run: cargo clippy --lib --bins --all-features -- -D warnings
@@ -101,11 +101,11 @@ jobs:
       RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
     steps:
       - uses: actions/checkout@v3
+      - uses: arduino/setup-protoc@v1
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           # TODO(alex): update this when https://github.com/rust-lang/rust/issues/109631 is fixed 
           toolchain: nightly-2023-01-31 
-      - uses: arduino/setup-protoc@v1
       - run: cargo doc --document-private-items
 
   lint_macos:
@@ -238,10 +238,10 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
+      - uses: arduino/setup-protoc@v1
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
-      - uses: arduino/setup-protoc@v1
       - run: cargo build --manifest-path=./Cargo.toml
       - name: upload layer
         uses: actions/upload-artifact@v3
