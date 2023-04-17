@@ -224,31 +224,38 @@ impl LayerConnection {
                     num_connections: 0,
                 };
 
-                layer_connection.handle_gethostname(Some(app_port)).await;
+                layer_connection
+                    .handle_gethostname::<false>(Some(app_port))
+                    .await;
                 layer_connection
             }
             unexpected => panic!("Initialized connection with unexpected message {unexpected:#?}"),
         }
     }
 
-    pub async fn handle_gethostname(&mut self, app_port: Option<u16>) -> Option<()> {
-        // open file
-        let open_file_request = self.codec.next().await?.unwrap();
+    pub async fn handle_gethostname<const FIRST_CALL: bool>(
+        &mut self,
+        app_port: Option<u16>,
+    ) -> Option<()> {
+        if FIRST_CALL {
+            // open file
+            let open_file_request = self.codec.next().await?.unwrap();
 
-        assert_eq!(
-            open_file_request,
-            ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
-                path: PathBuf::from("/etc/hostname"),
-                open_options: OpenOptionsInternal {
-                    read: true,
-                    write: false,
-                    append: false,
-                    truncate: false,
-                    create: false,
-                    create_new: false
-                }
-            }))
-        );
+            assert_eq!(
+                open_file_request,
+                ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
+                    path: PathBuf::from("/etc/hostname"),
+                    open_options: OpenOptionsInternal {
+                        read: true,
+                        write: false,
+                        append: false,
+                        truncate: false,
+                        create: false,
+                        create_new: false
+                    }
+                }))
+            );
+        }
         self.answer_file_open().await;
 
         // read file
