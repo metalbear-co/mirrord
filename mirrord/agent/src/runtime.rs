@@ -20,7 +20,7 @@ use oci_spec::runtime::Spec;
 use tokio::net::UnixStream;
 use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
-use tracing::{debug, trace, warn};
+use tracing::{trace, warn};
 
 use crate::{
     env::parse_raw_env,
