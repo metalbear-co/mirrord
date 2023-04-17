@@ -3,6 +3,7 @@
 members = [
     "mirrord/*",
     "mirrord/layer/tests/apps/fileops",
+    "mirrord/layer/tests/apps/outgoing",
     "sample/rust",
     "tests",
     "tests/rust-e2e-fileops",
