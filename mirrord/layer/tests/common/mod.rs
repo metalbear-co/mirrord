@@ -207,7 +207,10 @@ impl LayerConnection {
 
     pub async fn handle_gethostname(&mut self) {
         // open file
-        let open_file_request = self.codec.next().await.unwrap().unwrap();
+        let open_file_request = match self.codec.next().await {
+            Some(open_file_request) => open_file_request.unwrap(),
+            None => return,
+        };
 
         assert_eq!(
             open_file_request,
