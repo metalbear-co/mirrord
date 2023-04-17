@@ -139,7 +139,13 @@ pub(super) fn bind(
         return Detour::Bypass(Bypass::IgnoreLocalhost(requested_port));
     }
 
-    if is_ignored_port(&requested_address) || port_debug_patch(&requested_address) {
+    if is_ignored_port(&requested_address)
+        || port_debug_patch(&requested_address)
+        || INCOMING_IGNORE_PORTS
+            .get()
+            .expect("`INCOMING_IGNORE_PORTS` not set. Please report a bug")
+            .contains(&requested_port)
+    {
         Err(Bypass::Port(requested_address.port()))?;
     }
 

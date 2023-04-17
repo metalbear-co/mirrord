@@ -9,20 +9,17 @@ mod traffic;
 
 #[cfg(test)]
 mod utils {
-
     use std::{
         collections::HashMap,
         fmt::Debug,
         net::Ipv4Addr,
         process::Stdio,
-        sync::{Arc, Mutex},
+        sync::{Arc, Condvar, Mutex},
         time::Duration,
     };
 
-    use bytes::Bytes;
     use chrono::Utc;
-    use futures::Stream;
-    use futures_util::stream::{StreamExt, TryStreamExt};
+    use futures_util::stream::TryStreamExt;
     use k8s_openapi::api::{
         apps::v1::Deployment,
         core::v1::{Namespace, Pod, Service},
@@ -42,13 +39,20 @@ mod utils {
     use tokio::{
         io::{AsyncReadExt, BufReader},
         process::{Child, Command},
-        task::JoinHandle,
+        sync::oneshot::{self, Sender},
     };
-    // 0.8
-    use tokio_util::sync::{CancellationToken, DropGuard};
 
-    static TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
+    const TEXT: &'static str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
     pub const CONTAINER_NAME: &str = "test";
+
+    /// Name of the environment variable used to control cleanup after failed tests.
+    /// By default, resources from failed tests are deleted.
+    /// However, if this variable is set, resources will always be preserved.
+    pub const PRESERVE_FAILED_ENV_NAME: &'static str = "MIRRORD_E2E_PRESERVE_FAILED";
+
+    /// All Kubernetes resources created for testing purposes share this label.
+    pub const TEST_RESOURCE_LABEL: (&'static str, &'static str) =
+        ("mirrord-e2e-test-resource", "true");
 
     pub async fn watch_resource_exists<K: Debug + Clone + DeserializeOwned>(
         api: &Api<K>,
@@ -57,7 +61,8 @@ mod utils {
         let params = ListParams::default()
             .fields(&format!("metadata.name={name}"))
             .timeout(10);
-        let mut stream = api.watch(&params, "0").await.unwrap().boxed();
+        let stream = api.watch(&params, "0").await.unwrap();
+        tokio::pin!(stream);
         while let Some(status) = stream.try_next().await.unwrap() {
             match status {
                 WatchEvent::Modified(_) => break,
@@ -69,14 +74,14 @@ mod utils {
         }
     }
 
+    /// Creates a random string of 7 alphanumeric lowercase characters.
     fn random_string() -> String {
-        let mut rand_str: String = rand::thread_rng()
+        rand::thread_rng()
             .sample_iter(&Alphanumeric)
             .take(7)
             .map(char::from)
-            .collect();
-        rand_str.make_ascii_lowercase();
-        rand_str
+            .collect::<String>()
+            .to_ascii_lowercase()
     }
 
     #[derive(Debug)]
@@ -85,10 +90,10 @@ mod utils {
         PythonFlaskHTTP,
         PythonFastApiHTTP,
         NodeHTTP,
+        NodeHTTP2,
         Go18HTTP,
         Go19HTTP,
         Go20HTTP,
-        NodeTcpEcho,
     }
 
     #[derive(Debug)]
@@ -223,10 +228,12 @@ mod utils {
                     ]
                 }
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
+                Application::NodeHTTP2 => {
+                    vec!["node", "node-e2e/http2/test_http2_traffic_steal.mjs"]
+                }
                 Application::Go18HTTP => vec!["go-e2e/18"],
                 Application::Go19HTTP => vec!["go-e2e/19"],
                 Application::Go20HTTP => vec!["go-e2e/20"],
-                Application::NodeTcpEcho => vec!["node", "node-e2e/tcp-echo/app.js"],
             }
         }
 
@@ -403,59 +410,72 @@ mod utils {
         Client::try_from(config).unwrap()
     }
 
+    /// RAII-style guard for deleting kube resources after tests.
+    /// This guard spawns a background task to delete the kube resource.
     struct ResourceGuard {
-        guard: Option<DropGuard>,
-        barrier: std::sync::Arc<std::sync::Barrier>,
-        handle: JoinHandle<()>,
-        delete_on_fail: bool,
+        /// Used in the implementation of [`Drop`] for this struct to block until the background
+        /// task exits.
+        task_finished: Arc<(Mutex<bool>, Condvar)>,
+        /// Used to inform the background task whether this guard was dropped during panic.
+        panic_tx: Option<Sender<bool>>,
     }
 
     impl ResourceGuard {
-        /// Creates a resource and spawns a task to delete it when dropped
-        /// Returns Error if already exists.
-        /// I'm not sure why I have to add the `static here but this works?
+        /// Create a kube resource and spawn a task to delete it when this guard is dropped.
+        /// Return [`Error`] if creating the resource failed.
         pub async fn create<K: Debug + Clone + DeserializeOwned + Serialize + 'static>(
-            api: &Api<K>,
+            api: Api<K>,
             name: String,
             data: &K,
             delete_on_fail: bool,
         ) -> Result<ResourceGuard, Error> {
             api.create(&PostParams::default(), data).await?;
-            let cancel_token = CancellationToken::new();
-            let resource_token = cancel_token.clone();
-            let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
-            let guard_barrier = barrier.clone();
-            let name = name.clone();
-            let cloned_api = api.clone();
-            let handle = tokio::spawn(async move {
-                cancel_token.cancelled().await;
-                // Don't clean pods on failure, so that we can debug
-                println!("deleting {:?}", &name);
-                cloned_api
-                    .delete(&name, &DeleteParams::default())
-                    .await
-                    .unwrap();
-                barrier.wait();
+
+            let (panic_tx, panic_rx) = oneshot::channel::<bool>();
+            let task_finished = Arc::new((Mutex::new(false), Condvar::new()));
+            let finished = task_finished.clone();
+
+            tokio::spawn(async move {
+                let panic = panic_rx.await.unwrap_or(true);
+
+                if !panic || delete_on_fail {
+                    println!("Deleting resource `{name}`",);
+                    if let Err(e) = api.delete(&name, &DeleteParams::default()).await {
+                        println!("Failed to delete resource `{name}`: {e:?}");
+                    }
+                }
+
+                *finished.0.lock().expect("ResourceGuard lock poisoned") = true;
+                finished.1.notify_one();
             });
+
             Ok(Self {
-                guard: Some(resource_token.drop_guard()),
-                barrier: guard_barrier,
-                handle,
-                delete_on_fail,
+                task_finished,
+                panic_tx: Some(panic_tx),
             })
         }
     }
 
     impl Drop for ResourceGuard {
         fn drop(&mut self) {
-            if !self.delete_on_fail && std::thread::panicking() {
-                // If we're panicking and we shouldn't delete the resources on fail (to allow for
-                // inspection) then abort the cleaning task.
-                self.handle.abort();
-            } else {
-                let guard = self.guard.take();
-                drop(guard);
-                self.barrier.wait();
+            let task_alive = self
+                .panic_tx
+                .take()
+                .expect("ResourceGuard holds empty panic_tx")
+                .send(std::thread::panicking())
+                .is_ok();
+
+            if task_alive {
+                let lock = self
+                    .task_finished
+                    .0
+                    .lock()
+                    .expect("ResourceGuard lock poisoned");
+                let _lock = self
+                    .task_finished
+                    .1
+                    .wait_while(lock, |deleted| !*deleted)
+                    .expect("ResourceGuard lock poisoned");
             }
         }
     }
@@ -472,9 +492,11 @@ mod utils {
         _namespace: Option<ResourceGuard>,
     }
 
-    /// randomize_name: should a random suffix be added to the end of resource names? e.g.
-    ///                 for `echo-service`, should we create as `echo-service-ybtdb`.
-    /// delete_after_fail: delete resources even if the test fails.
+    /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
+    /// when the returned service is dropped, unless it is dropped during panic.
+    /// This behavior can be changed, see [`FORCE_CLEANUP_ENV_NAME`].
+    /// * `randomize_name` - whether a random suffix should be added to the end of the resource
+    ///   names
     #[fixture]
     pub async fn service(
         #[default("default")] namespace: &str,
@@ -482,52 +504,55 @@ mod utils {
         #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
         #[default("http-echo")] service_name: &str,
         #[default(true)] randomize_name: bool,
-        #[default(false)] delete_after_fail: bool,
         #[future] kube_client: Client,
     ) -> KubeService {
+        let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
+
         println!(
             "{:?} creating service {service_name:?} in namespace {namespace:?}",
             Utc::now()
         );
+
         let kube_client = kube_client.await;
         let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
         let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
         let service_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
-        let name;
-        if randomize_name {
-            name = format!("{}-{}", service_name, random_string());
+
+        let name = if randomize_name {
+            format!("{}-{}", service_name, random_string())
         } else {
-            // if using non-random name, delete existing resources first.
+            // If using a non-random name, delete existing resources first.
             // Just continue if they don't exist.
-            let _res = service_api
+            let _ = service_api
                 .delete(service_name, &DeleteParams::default())
                 .await;
-            let _res = deployment_api
+            let _ = deployment_api
                 .delete(service_name, &DeleteParams::default())
                 .await;
-            name = service_name.to_string();
-        }
+
+            service_name.to_string()
+        };
 
         let namespace_resource: Namespace = serde_json::from_value(json!({
             "apiVersion": "v1",
             "kind": "Namespace",
             "metadata": {
                 "name": namespace,
+                "labels": {
+                    TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+                }
             },
         }))
         .unwrap();
-
-        // Create namespace if does not yet exist. If already exits, it will also not going to be
-        // deleted when the calling test is done.
+        // Create namespace and wrap it in ResourceGuard if it does not yet exist.
         let namespace_guard = ResourceGuard::create(
-            &namespace_api,
+            namespace_api.clone(),
             namespace.to_string(),
             &namespace_resource,
             delete_after_fail,
         )
         .await
         .ok();
-
         if namespace_guard.is_some() {
             watch_resource_exists(&namespace_api, namespace).await;
         }
@@ -538,7 +563,8 @@ mod utils {
             "metadata": {
                 "name": &name,
                 "labels": {
-                    "app": &name
+                    "app": &name,
+                    TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
                 }
             },
             "spec": {
@@ -586,7 +612,7 @@ mod utils {
         }))
         .unwrap();
         let pod_guard = ResourceGuard::create(
-            &deployment_api,
+            deployment_api.clone(),
             name.to_string(),
             &deployment,
             delete_after_fail,
@@ -601,7 +627,8 @@ mod utils {
             "metadata": {
                 "name": &name,
                 "labels": {
-                    "app": &name
+                    "app": &name,
+                    TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
                 }
             },
             "spec": {
@@ -626,14 +653,17 @@ mod utils {
             }
         }))
         .unwrap();
-
-        let service_guard =
-            ResourceGuard::create(&service_api, name.to_string(), &service, delete_after_fail)
-                .await
-                .unwrap();
+        let service_guard = ResourceGuard::create(
+            service_api.clone(),
+            name.clone(),
+            &service,
+            delete_after_fail,
+        )
+        .await
+        .unwrap();
         watch_resource_exists(&service_api, "default").await;
 
-        let target = get_pod_instance(&kube_client, &name, namespace)
+        let target = get_pod_instance(kube_client.clone(), &name, namespace)
             .await
             .unwrap();
         let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
@@ -645,8 +675,9 @@ mod utils {
             "{:?} done creating service {service_name:?} in namespace {namespace:?}",
             Utc::now()
         );
+
         KubeService {
-            name: name.to_string(),
+            name,
             namespace: namespace.to_string(),
             target: format!("pod/{target}/container/{CONTAINER_NAME}"),
             _pod: pod_guard,
@@ -666,7 +697,6 @@ mod utils {
             "ghcr.io/metalbear-co/mirrord-node-udp-logger:latest",
             "udp-logger",
             true,
-            false,
             kube_client,
         )
         .await
@@ -680,7 +710,6 @@ mod utils {
             "ghcr.io/metalbear-co/mirrord-http-logger:latest",
             "mirrord-tests-http-logger",
             false, // So that requester can reach logger by name.
-            true,
             kube_client,
         )
         .await
@@ -696,7 +725,6 @@ mod utils {
             // Have a non-random name, so that there can only be one requester at any point in time
             // so that another requester does not send requests while this one is paused.
             false,
-            true, // Delete also on fail, cause this service constantly does work.
             kube_client,
         )
         .await
@@ -712,7 +740,6 @@ mod utils {
             "ghcr.io/metalbear-co/mirrord-tcp-echo:latest",
             "tcp-echo",
             true,
-            false,
             kube_client,
         )
         .await
@@ -729,7 +756,19 @@ mod utils {
             "ghcr.io/metalbear-co/mirrord-websocket:latest",
             "websocket",
             true,
-            false,
+            kube_client,
+        )
+        .await
+    }
+
+    #[fixture]
+    pub async fn http2_service(#[future] kube_client: Client) -> KubeService {
+        service(
+            "default",
+            "NodePort",
+            "ghcr.io/metalbear-co/mirrord-pytest:latest",
+            "http2-echo",
+            true,
             kube_client,
         )
         .await
@@ -744,7 +783,6 @@ mod utils {
             "NodePort",
             "ghcr.io/metalbear-co/mirrord-pytest:latest",
             "hostname-echo",
-            true,
             true,
             kube_client,
         )
@@ -761,7 +799,6 @@ mod utils {
             "NodePort",
             "ghcr.io/metalbear-co/mirrord-pytest:latest",
             "pytest-echo",
-            true,
             true,
             kube_client,
         )
@@ -820,18 +857,19 @@ mod utils {
         format!("http://{host_ip}:{port}")
     }
 
+    /// Returns a name of any pod belonging to the given app.
     pub async fn get_pod_instance(
-        client: &Client,
+        client: Client,
         app_name: &str,
         namespace: &str,
     ) -> Option<String> {
-        let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
-        let pods = pod_api
+        let pod_api: Api<Pod> = Api::namespaced(client, namespace);
+        pod_api
             .list(&ListParams::default().labels(&format!("app={app_name}")))
             .await
-            .unwrap();
-        let pod = pods.iter().next().and_then(|pod| pod.metadata.name.clone());
-        pod
+            .unwrap()
+            .into_iter()
+            .find_map(|pod| pod.metadata.name)
     }
 
     /// Take a request builder of any method, add headers, send the request, verify success, and
@@ -857,6 +895,7 @@ mod utils {
         // Create client for each request until we have a match between local app and remote app
         // as connection state is flaky
         println!("{url}");
+
         let client = reqwest::Client::new();
         let req_builder = client.get(url);
         send_request(
@@ -892,11 +931,5 @@ mod utils {
             headers.clone(),
         )
         .await;
-    }
-
-    pub async fn get_next_log<T: Stream<Item = Result<Bytes, kube::Error>> + Unpin>(
-        stream: &mut T,
-    ) -> String {
-        String::from_utf8_lossy(&stream.try_next().await.unwrap().unwrap()).to_string()
     }
 }

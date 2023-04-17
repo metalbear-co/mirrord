@@ -114,6 +114,8 @@ pub(crate) struct TcpConnectionStealer {
 }
 
 impl TcpConnectionStealer {
+    pub const TASK_NAME: &'static str = "Stealer";
+
     /// Initializes a new [`TcpConnectionStealer`] fields, but doesn't start the actual working
     /// task (call [`TcpConnectionStealer::start`] to do so).
     #[tracing::instrument(level = "trace")]
@@ -125,7 +127,7 @@ impl TcpConnectionStealer {
             port_subscriptions: HashMap::with_capacity(4),
             command_rx,
             clients: HashMap::with_capacity(8),
-            index_allocator: IndexAllocator::new(),
+            index_allocator: Default::default(),
             stealer: TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await?,
             iptables: None, // Initialize on first subscription.
             write_streams: HashMap::with_capacity(8),

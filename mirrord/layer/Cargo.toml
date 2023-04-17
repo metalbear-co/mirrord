@@ -26,7 +26,7 @@ nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender = { git = "https://github.com/metalbear-co/tracing", package = "tracing-appender", branch = "worker_options_non_blocking_v1" }
-frida-gum = { git = "https://github.com/metalbear-co/frida-rust", version = "0.8", features = ["auto-download"], branch="metalbear2" }
+frida-gum = { version = "0.11", features = ["auto-download"] }
 futures.workspace = true
 
 tokio = { workspace = true, features = ["fs"] }
@@ -44,7 +44,6 @@ rand = "0.8"
 fancy-regex.workspace = true
 regex.workspace = true
 errno = "0.3"
-async-trait.workspace = true
 socket2.workspace = true
 anyhow.workspace = true
 streammap-ext.workspace = true
@@ -52,7 +51,7 @@ urlencoding = "2"
 itertools = "0.10"
 os_info = "3"
 bytemuck = "1"
-hyper = { workspace = true, features = ["client"] }
+hyper = { workspace = true, features = ["client", "http1", "http2"] }
 http-body-util  = { workspace = true }
 bimap.workspace = true
 dashmap = "5.4"
@@ -65,8 +64,8 @@ null-terminated = "0.3"
 k8s-openapi.workspace = true
 chrono = { version = "0.4", features = ["clock"] }
 base64 = "0.21"
-http-body = "0.4"
-hyper = "0.14"
+http-body = { workspace = true }
+hyper = { workspace = true }
 rstest = "*"
 test-cdylib = "*"
 tower = "0.4"

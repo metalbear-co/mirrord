@@ -1,28 +1,111 @@
+//! Home for most of the HTTP stealer implementation / modules.
+//!
+//! # [`HttpV`]
+//!
+//! Helper trait to deal with [`hyper`] differences betwen HTTP/1 and HTTP/2 types.
+//!
+//! # [`HttpVersion`]
+//!
+//! # [`HttpFilterManager`]
+//!
+//! Holds the filters for a port we're stealing HTTP traffic on.
 use std::{net::SocketAddr, sync::Arc};
 
+use bytes::Bytes;
 use dashmap::DashMap;
 use fancy_regex::Regex;
+use http_body_util::Full;
+use hyper::{body::Incoming, Request, Response};
 use mirrord_protocol::ConnectionId;
-use tokio::{net::TcpStream, sync::mpsc::Sender};
+use tokio::{
+    net::TcpStream,
+    sync::{mpsc::Sender, oneshot},
+};
 
-use self::{filter::MINIMAL_HEADER_SIZE, reversible_stream::ReversibleStream};
+use self::{
+    error::HttpTrafficError, filter::MINIMAL_HEADER_SIZE, hyper_handler::RawHyperConnection,
+    reversible_stream::ReversibleStream,
+};
 use crate::{
     steal::{http::filter::filter_task, HandlerHttpRequest},
     util::ClientId,
 };
 
 pub(crate) mod error;
-pub(super) mod filter;
+mod filter;
 mod hyper_handler;
-pub(super) mod reversible_stream;
+mod reversible_stream;
+mod v1;
+mod v2;
 
-pub(super) type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
+/// Handy alias due to [`ReversibleStream`] being generic, avoiding value mismatches.
+type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
+
+/// Unifies [`hyper`] handling for HTTP/1 and HTTP/2.
+///
+/// # Details
+///
+/// As most of the `hyper` types around HTTP/1 and HTTP/2 are different, and do not share a trait,
+/// we use [`HttpV`] to create a shared implementation that is used by
+/// [`hyper_handler::HyperHandler`].
+trait HttpV {
+    /// Type for hyper's `SendRequest`.
+    ///
+    /// It's a different type for HTTP/1 ([`http1::SendRequest`]) and
+    /// HTTP/2 ([`http2::SendRequest`]).
+    ///
+    /// [`http1::SendRequest`]: hyper::client::conn::http1::SendRequest
+    /// [`http2::SendRequest`]: hyper::client::conn::http2::SendRequest
+    type Sender;
+
+    /// Handles the HTTP connection accordingly to its version.
+    ///
+    /// See [`filter_task`] for more details.
+    async fn serve_connection(
+        stream: DefaultReversibleStream,
+        original_destination: SocketAddr,
+        connection_id: ConnectionId,
+        filters: Arc<DashMap<ClientId, Regex>>,
+        matched_tx: Sender<HandlerHttpRequest>,
+        connection_close_sender: Sender<ConnectionId>,
+    ) -> Result<(), HttpTrafficError>;
+
+    /// Performs a client handshake with `target_stream`, creating an HTTP connection.
+    ///
+    /// # HTTP/1
+    ///
+    /// The HTTP/1 connection is a bit more involved, as we have to deal with potential `UPGRADE`
+    /// requests.
+    ///
+    /// We do this manually, by keeping the connection alive with `poll_without_shutdown`, and by
+    /// sending it as a [`RawHyperConnection`] through `upgrade_tx` to the HTTP stealer handler.
+    async fn connect(
+        target_stream: TcpStream,
+        upgrade_tx: Option<oneshot::Sender<RawHyperConnection>>,
+    ) -> Result<Self::Sender, HttpTrafficError>;
+
+    /// Sends the request to the original destination with [`HttpV::Sender`].
+    async fn send_request(
+        sender: &mut Self::Sender,
+        request: Request<Incoming>,
+    ) -> Result<Response<Full<Bytes>>, HttpTrafficError>;
+
+    /// Returns `true` if this [`Request`] contains an `UPGRADE` header.
+    ///
+    /// # Warning:
+    ///
+    /// This implementation should **always** return `false` for HTTP/2.
+    fn is_upgrade(r: &Request<Incoming>) -> bool;
+}
 
 /// Identifies a message as being HTTP or not.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum HttpVersion {
+    /// HTTP/1
     #[default]
     V1,
+
+    /// HTTP/2
     V2,
 
     /// Handled as a special passthrough case, where the captured stream just forwards messages to
@@ -55,6 +138,7 @@ impl HttpVersion {
 /// Created for every new port we want to filter HTTP traffic on.
 #[derive(Debug)]
 pub(super) struct HttpFilterManager {
+    /// Filters that we're going to be matching against (specified by the user).
     client_filters: Arc<DashMap<ClientId, Regex>>,
 
     /// We clone this to pass them down to the hyper tasks.
@@ -81,9 +165,6 @@ impl HttpFilterManager {
         }
     }
 
-    // TODO(alex): Is adding a filter like this enough for it to be added to the hyper task? Do we
-    // have a possible deadlock here? Tune in next week for the conclusion!
-    //
     /// Inserts a new client (layer) and its filter.
     ///
     /// [`HttpFilterManager::client_filters`] are shared between hyper tasks, so adding a new one
@@ -102,12 +183,14 @@ impl HttpFilterManager {
         self.client_filters.remove(client_id)
     }
 
+    /// Checks if we have a filter for this `client_id`.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn contains_client(&self, client_id: &ClientId) -> bool {
         self.client_filters.contains_key(client_id)
     }
 
     /// Start a [`filter_task`] to handle this new connection.
+    #[tracing::instrument(level = "trace", skip(self, original_stream, connection_close_sender))]
     pub(super) async fn new_connection(
         &self,
         original_stream: TcpStream,
@@ -125,6 +208,8 @@ impl HttpFilterManager {
         ));
     }
 
+    /// Used by [`TcpConnectionStealer::port_unsubscribe`] to check if we have remaining subscribers
+    /// or not.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn is_empty(&self) -> bool {
         self.client_filters.is_empty()

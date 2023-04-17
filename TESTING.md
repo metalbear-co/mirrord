@@ -4,40 +4,61 @@
 
 - [Rust](https://www.rust-lang.org/)
 - [Nodejs](https://nodejs.org/en/), [Expressjs](https://expressjs.com/)
-- [Python](https://www.python.org/), [Flask](https://flask.palletsprojects.com/en/2.1.x/)
+- [Python](https://www.python.org/), [Flask](https://flask.palletsprojects.com/en/2.1.x/), [FastAPI](https://fastapi.tiangolo.com/)
 - [Go](https://go.dev/)
 - Kubernetes Cluster (local/remote)
 
 ### Setup a Kubernetes cluster
 
-A minimal Kubernetes cluster can be easily setup locally using either of the following -
+For E2E tests and testing mirrord manually you will need a working Kubernetes cluster. A minimal cluster can be easily setup locally using either of the following:
 
 - [Minikube](https://minikube.sigs.k8s.io/)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/)
 
-For the ease of illustration and testing, we will conform to using Docker Desktop for the rest of the guide.
+For the ease of illustration and testing, we will conform to using Minikube for the rest of the guide.
 
-#### Docker Desktop
+### Minikube
 
-Download [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+Download [Minikube](https://minikube.sigs.k8s.io/)
 
-![Docker Desktop UI](images/mirrord-docker-desktop.png "Docker Desktop")
+Start a Minikube cluster with preferred driver. Here we will use the Docker driver.
 
-Enable Kubernetes in preferences, Apply and Restart
+```bash
+minikube start --driver=docker
+```
 
-![Enable Kubernetes in Docker Desktop](images/mirrord-enable-kubernetes.png "Enable Kubernetes")
+### Prepare a cluster
 
-#### Preparing a cluster
+ Build mirrord-agent Docker Image.
 
-Switch Kubernetes context to `docker-desktop`
+```bash
+docker buildx build -t test . --file mirrord/agent/Dockerfile
+```
+
+```bash
+❯ docker images
+REPOSITORY                                     TAG       IMAGE ID       CREATED         SIZE
+test                                           latest    5080c20a8222   2 hours ago     300MB
+```
+
+> **Note:** mirrord-agent is shipped as a container image as mirrord creates a job with this image, providing it with
+> elevated permissions on the same node as the impersonated pod.
+
+Load mirrord-agent image to Minikube.
+
+```bash
+minikube image load test
+```
+
+Switch Kubernetes context to `minikube`.
 
 ```bash
 kubectl config get-contexts
 ```
 
 ```bash
-kubectl config use-context docker-desktop
+kubectl config use-context minikube
 ```
 
 ## E2E Tests
@@ -62,6 +83,20 @@ And then in order to use that binary in the tests, run the tests like this:
 MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord cargo test -p tests
 ```
 
+### Cleanup
+
+The Kubernetes resources created by the E2E tests are automatically deleted when the test exits. However, you can preserve resources from failed tests for debugging. To do this, set the `MIRRORD_E2E_PRESERVE_FAILED` variable to any value.
+
+```bash
+MIRRORD_E2E_PRESERVE_FAILED=y cargo test --package tests
+```
+
+All test resources share a common label `mirrord-e2e-test-resource=true`. To delete them, simply run:
+
+```bash
+kubectl delete namespaces,deployments,services -l mirrord-e2e-test-resource=true
+```
+
 ## Integration Tests
 
 The layer's integration tests test the hooks and their logic without actually using a Kubernetes cluster and spawning
@@ -81,7 +116,7 @@ Some test apps need to be compiled before they can be used in the tests
 
 The basic command to run the integration tests is:
 ```bash
-cargo test --package tests
+cargo test --package mirrord-layer
 ```
 
 However, when running on macOS a dylib has to be created first:
@@ -170,21 +205,6 @@ NAME                                 READY   STATUS    RESTARTS   AGE
 py-serv-deployment-ff89b5974-x9tjx   1/1     Running   0          3h8m
 ```
 
-### Build mirrord-agent Docker Image
-
-```bash
-docker buildx build -t test . --file mirrord/agent/Dockerfile
-```
-
-```bash
-❯ docker images
-REPOSITORY                                     TAG       IMAGE ID       CREATED         SIZE
-test                                           latest    5080c20a8222   2 hours ago     300MB
-```
-
-> **Note:** mirrord-agent is shipped as a container image as mirrord creates a job with this image, providing it with
-> elevated permissions on the same node as the impersonated pod.
-
 ### Build and run mirrord
 
 #### macOS
@@ -194,7 +214,7 @@ scripts/build_fat_mac.sh
 
 #### Linux
 ```bash
-cargo +nightly build
+cargo build
 ```
 
 #### Run mirrord with a local process
@@ -273,7 +293,7 @@ function handleConnection(conn) {
 </details>
 
 ```bash
-MIRRORD_AGENT_IMAGE=test MIRRORD_AGENT_RUST_LOG=debug RUST_LOG=debug target/debug/mirrord exec -c --target pod/py-serv-deployment-ff89b5974-x9tjx node sample/node/app.mjs
+RUST_LOG=debug target/debug/mirrord exec -i test -l debug -c --target pod/py-serv-deployment-ff89b5974-x9tjx node sample/node/app.mjs
 ```
 > **Note:** You need to change the pod name here to the name of the pod created on your system.
 
@@ -310,7 +330,7 @@ Server listening on port 80
 Send traffic to the Kubernetes Pod through the service
 
 ```bash
-curl localhost:30000
+curl $(minikube service py-serv --url)
 ```
 
 Check the traffic was received by the local process
@@ -356,7 +376,7 @@ Then run
 ```bash
 npm install
 npm run compile
-vsce package
+npm run package
 ```
 
 You should see something like
