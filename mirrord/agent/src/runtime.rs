@@ -7,7 +7,6 @@ use std::{
 
 use bollard::{container::InspectContainerOptions, Docker, API_DEFAULT_VERSION};
 use containerd_client::{
-    connect,
     services::v1::{
         containers_client::ContainersClient, tasks_client::TasksClient, GetContainerRequest,
         GetRequest, PauseTaskRequest, ResumeTaskRequest,
@@ -18,7 +17,10 @@ use containerd_client::{
 use enum_dispatch::enum_dispatch;
 use nix::sched::setns;
 use oci_spec::runtime::Spec;
-use tracing::trace;
+use tokio::net::UnixStream;
+use tonic::transport::{Endpoint, Uri};
+use tower::service_fn;
+use tracing::{debug, trace, warn};
 
 use crate::{
     env::parse_raw_env,
@@ -171,6 +173,15 @@ pub(crate) struct ContainerdContainer {
     container_id: String,
 }
 
+async fn connect(path: impl AsRef<std::path::Path>) -> Result<Channel> {
+    let path = path.as_ref().to_path_buf();
+
+    Endpoint::try_from("http://localhost")?
+        .connect_with_connector(service_fn(move |_: Uri| UnixStream::connect(path.clone())))
+        .await
+        .map_err(AgentError::from)
+}
+
 /// Connects to the given containerd socket
 /// and returns the client only if the given container
 /// exists.
@@ -200,8 +211,9 @@ impl ContainerdContainer {
     /// that manages our target container
     async fn get_channel(&self) -> Result<Channel> {
         for sock_path in CONTAINERD_SOCK_PATHS {
-            if let Ok(channel) =
-                connect_and_find_container(self.container_id.clone(), sock_path).await
+            if let Ok(channel) = connect_and_find_container(self.container_id.clone(), sock_path)
+                .await
+                .inspect_err(|err| warn!("containerd socket error {err}"))
             {
                 return Ok(channel);
             }
