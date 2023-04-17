@@ -20,7 +20,7 @@ intellij {
     type.set("IU")
 //    version.set("192.7142.36")
     version.set(properties("platformVersion"))
-    plugins.set(listOf("JavaScriptLanguage", "NodeJS"))
+    plugins.set(listOf("JavaScript", "NodeJS"))
 }
 
 // TODO: something

@@ -1,8 +1,8 @@
 package com.metalbear.mirrord.products.webstorm
 
 import com.intellij.execution.Executor
-import com.intellij.execution.RunConfigurationExtension
-import com.intellij.execution.configurations.JavaParameters
+//import com.intellij.execution.RunConfigurationExtension
+//import com.intellij.execution.configurations.JavaParameters
 import com.intellij.execution.configurations.RunConfigurationBase
 import com.intellij.execution.configurations.RunnerSettings
 import com.intellij.execution.target.createEnvironmentRequest
@@ -11,9 +11,67 @@ import com.intellij.javascript.nodejs.execution.runConfiguration.AbstractNodeRun
 import com.intellij.openapi.externalSystem.service.execution.ExternalSystemRunConfiguration
 import com.metalbear.mirrord.MirrordExecManager
 import com.metalbear.mirrord.MirrordLogger
+import com.jetbrains.nodejs.run.NodeJsRunConfiguration
+import java.lang.Override
+
+import java.util.concurrent.ExecutionException
+
+
+
 
 
 class NodeRunConfigurationExtension: AbstractNodeRunConfigurationExtension() {
+    override fun readExternal(runConfiguration: AbstractNodeTargetRunProfile?, element: Element?) {
+        RunConfigSettingsEditor.readExternal(runConfiguration, element)
+    }
+
+    protected fun writeExternal(runConfiguration: AbstractNodeTargetRunProfile?, element: Element?) {
+        RunConfigSettingsEditor.writeExternal(runConfiguration, element)
+    }
+
+    override fun <P : AbstractNodeTargetRunProfile> createEditor(configuration: P): SettingsEditor<P> {
+        return RunConfigSettingsEditor(configuration)
+    }
+
+    fun isApplicableFor(configuration: AbstractNodeTargetRunProfile?): Boolean {
+        return true
+    }
+
+    @kotlin.Throws(java.util.concurrent.ExecutionException::class)
+    protected fun patchCommandLine(
+        configuration: AbstractNodeTargetRunProfile,
+        @Nullable runnerSettings: RunnerSettings?,
+        cmdLine: GeneralCommandLine?,
+        runnerId: String?,
+        executor: Executor?
+    ) {
+        configuration.getSelectedOptions()
+    }
+
+    protected fun extendCreatedConfiguration(
+        configuration: AbstractNodeTargetRunProfile?,
+        location: Location?
+    ) {
+        super.extendCreatedConfiguration(configuration, location)
+    }
+
+    @Nullable
+    fun getEditorTitle(): String? {
+        return RunConfigSettingsEditor.getEditorTitle()
+    }
+
+    @Nullable
+    @kotlin.Throws(java.util.concurrent.ExecutionException::class)
+    fun createLaunchSession(
+        configuration: AbstractNodeTargetRunProfile,
+        environment: ExecutionEnvironment?
+    ): NodeRunConfigurationLaunchSession? {
+        val config: NodeJsRunConfiguration = configuration as NodeJsRunConfiguration
+        val newEnvs: Map<String, String> = RunConfigSettingsEditor
+            .collectEnv(configuration, config.getWorkingDirectory(), config.getEnvs())
+        config.setEnvs(newEnvs)
+        return null
+    }
 //    override fun isApplicableFor(configuration: RunConfigurationBase<*>): Boolean {
 //        return true
 //    }
