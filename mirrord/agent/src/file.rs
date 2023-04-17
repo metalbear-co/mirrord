@@ -307,10 +307,10 @@ impl FileManager {
                 let mut buffer = vec![0; buffer_size as usize];
                 let read_amount = file.read(&mut buffer)?;
 
-                // Slice the buffer based on the actual number of bytes read.
+                // Slice the buffer based on the actual number of bytes read
                 let read_bytes = buffer[..read_amount].to_vec();
 
-                // Create the response with the read bytes and the read amount.
+                // Create the response with the read bytes and the read amount
                 let response = ReadFileResponse {
                     bytes: read_bytes,
                     read_amount: read_amount as u64,
@@ -383,10 +383,11 @@ impl FileManager {
 
                 let read_amount = file.read_at(&mut buffer, start_from)?;
 
-                // Further optimization: Slice the buffer based on the actual number of bytes read.
+                // Further optimization: Slice the buffer based on the actual number of bytes read
                 let read_bytes = buffer[..read_amount].to_vec();
 
-                // Further optimization: Create the response with the read bytes and the read amount.
+                // Further optimization: Create the response with the read bytes and the read amount
+                // We will no longer send entire buffer filled with zeroes
                 let response = ReadFileResponse {
                     bytes: read_bytes,
                     read_amount: read_amount as u64,
