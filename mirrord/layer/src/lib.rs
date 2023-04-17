@@ -369,9 +369,7 @@ fn layer_start(config: LayerConfig) {
             .with(tracing_subscriber::EnvFilter::new("mirrord=trace"))
             .init();
     } else if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
-        RUNTIME
-            .block_on(mirrord_console::init_logger(&console_addr))
-            .expect("logger initialization failed");
+        mirrord_console::init_logger(&console_addr).expect("logger initialization failed");
     } else {
         tracing_subscriber::registry()
             .with(
