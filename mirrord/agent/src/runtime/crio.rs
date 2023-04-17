@@ -61,8 +61,7 @@ impl CriOContainer {
 
 impl ContainerRuntime for CriOContainer {
     async fn get_info(&self) -> Result<ContainerInfo> {
-        let channel = Endpoint::try_from("http://localhost")
-            .unwrap()
+        let channel = Endpoint::try_from("http://localhost")?
             .connect_with_connector(service_fn(move |_: Uri| {
                 UnixStream::connect(CRIO_DEFAULT_SOCK_PATH).inspect_err(|err| error!("{err:?}"))
             }))
