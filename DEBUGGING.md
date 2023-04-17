@@ -46,7 +46,6 @@ where you would replace `<YOUR_POD_NAME>` with the name of the pod.
 In order to debug the vscode extension, first [build the mirrord binary](TESTING.md#build-and-run-mirrord). Then run:
 ```bash
 cd vscode-ext
-cp ../target/debug/mirrord .
 npm install
 npm run compile
 ```
