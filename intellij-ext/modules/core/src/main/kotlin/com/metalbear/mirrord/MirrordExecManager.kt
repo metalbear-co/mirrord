@@ -1,6 +1,7 @@
 package com.metalbear.mirrord
 
 import com.intellij.execution.wsl.WSLDistribution
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
@@ -29,9 +30,15 @@ object MirrordExecManager {
                 project,
                 wslDistribution
             )
+        pods ?: return null
 
         if (pods.isEmpty()) {
-            MirrordNotifier.progress("no pods found, please check namespace/kubeconfig.", project)
+            MirrordNotifier.notify(
+                    "No mirrord target available in the configured namespace. " +
+                            "Set a different target namespace or kubeconfig in the mirrord configuration file.",
+                    NotificationType.ERROR,
+                    project,
+            )
             return null
         }
 
