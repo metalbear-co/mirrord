@@ -12,10 +12,10 @@ To use the latest release of mirrord-agent, comment out the line adding the `MIR
 
 # Cleanup
 
-The Kubernetes resources created by the E2E tests are automatically deleted when the test exits successfully. However, failed tests by default don't delete their resources to allow debugging. You can force resource deletion even for failed tests by setting the `MIRRORD_E2E_FORCE_CLEANUP` variable to any value.
+The Kubernetes resources created by the E2E tests are automatically deleted when the test exits. However, you can preserve resources from failed tests for debugging. To do this, set the `MIRRORD_E2E_PRESERVE_FAILED` variable to any value.
 
 ```bash
-MIRRORD_E2E_FORCE_CLEANUP=y cargo test --package tests
+MIRRORD_E2E_PRESERVE_FAILED=y cargo test --package tests
 ```
 
 All test resources share a common label `mirrord-e2e-test-resource=true`. To delete them, simply run:

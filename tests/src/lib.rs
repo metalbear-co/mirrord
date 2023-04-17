@@ -46,9 +46,9 @@ mod utils {
     pub const CONTAINER_NAME: &str = "test";
 
     /// Name of the environment variable used to control cleanup after failed tests.
-    /// By default, resources from failed tests are preserved for debugging.
-    /// However, if this variable is set, resources will always be deleted.
-    pub const FORCE_CLEANUP_ENV_NAME: &'static str = "MIRRORD_E2E_FORCE_CLEANUP";
+    /// By default, resources from failed tests are deleted.
+    /// However, if this variable is set, resources will always be preserved.
+    pub const PRESERVE_FAILED_ENV_NAME: &'static str = "MIRRORD_E2E_PRESERVE_FAILED";
 
     /// All Kubernetes resources created for testing purposes share this label.
     pub const TEST_RESOURCE_LABEL: (&'static str, &'static str) =
@@ -506,7 +506,7 @@ mod utils {
         #[default(true)] randomize_name: bool,
         #[future] kube_client: Client,
     ) -> KubeService {
-        let delete_after_fail = std::env::var_os(FORCE_CLEANUP_ENV_NAME).is_some();
+        let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
 
         println!(
             "{:?} creating service {service_name:?} in namespace {namespace:?}",
