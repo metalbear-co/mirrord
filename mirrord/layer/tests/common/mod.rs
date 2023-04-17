@@ -568,6 +568,7 @@ impl LayerConnection {
     }
 }
 
+/// Various applications used by integration tests.
 #[derive(Debug)]
 pub enum Application {
     Go19HTTP,

@@ -16,6 +16,15 @@ mod common;
 use common::*;
 use futures::{SinkExt, TryStreamExt};
 
+/// Test outgoing UDP.
+/// Application, for each remote peer in [`RUST_OUTGOING_PEERS`]:
+/// 1. Opens a UDP port at [`RUST_OUTGOING_LOCAL`]
+/// 2. Connects to the remote peer
+/// 3. Sends some data
+/// 4. Expects the peer to send the same data back
+///
+/// # Ignored
+/// This test is ignored due to a bug - `recv_from` call returns an invalid remote peer address.
 #[ignore]
 #[rstest]
 #[tokio::test]
@@ -67,6 +76,12 @@ async fn outgoing_udp(dylib_path: &PathBuf) {
     test_process.wait_assert_success().await;
 }
 
+/// Test outgoing TCP.
+/// Application, for each remote peer in [`RUST_OUTGOING_PEERS`]:
+/// 1. Opens a TCP port at [`RUST_OUTGOING_LOCAL`]
+/// 2. Connects to the remote peer
+/// 3. Sends some data
+/// 4. Expects the peer to send the same data back
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(5))]
