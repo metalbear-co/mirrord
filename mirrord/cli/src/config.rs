@@ -22,7 +22,7 @@ pub(super) struct Cli {
 
 #[derive(Subcommand)]
 pub(super) enum Commands {
-    /// Execute a command using mirrord, mirror remote traffic to it, access remote resources
+    /// Execute a binary using mirrord, mirror remote traffic to it, provide it access to remote resources
     /// (network, files) and environment variables.
     Exec(Box<ExecArgs>),
 
