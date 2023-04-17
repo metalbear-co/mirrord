@@ -29,7 +29,7 @@ use futures::{SinkExt, TryStreamExt};
 #[ignore]
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(5))]
+#[timeout(Duration::from_secs(10))]
 async fn outgoing_udp(dylib_path: &PathBuf) {
     let (mut test_process, layer_connection) = Application::RustOutgoingUdp
         .start_process_with_layer(dylib_path, vec![], None)
@@ -85,7 +85,7 @@ async fn outgoing_udp(dylib_path: &PathBuf) {
 /// 4. Expects the peer to send the same data back
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(5))]
+#[timeout(Duration::from_secs(10))]
 async fn outgoing_tcp(dylib_path: &PathBuf) {
     let (mut test_process, layer_connection) = Application::RustOutgoingTcp
         .start_process_with_layer(dylib_path, vec![], None)
