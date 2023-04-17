@@ -22,8 +22,8 @@ pub(super) struct Cli {
 
 #[derive(Subcommand)]
 pub(super) enum Commands {
-    /// Execute a binary using mirrord, mirror remote traffic to it, provide it access to remote resources
-    /// (network, files) and environment variables.
+    /// Execute a binary using mirrord, mirror remote traffic to it, provide it access to remote
+    /// resources (network, files) and environment variables.
     Exec(Box<ExecArgs>),
 
     /// Register an email address to the waitlist for mirrord for Teams (`mirrord waitlist
