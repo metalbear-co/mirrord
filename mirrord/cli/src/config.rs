@@ -22,21 +22,21 @@ pub(super) struct Cli {
 
 #[derive(Subcommand)]
 pub(super) enum Commands {
-    /// Execute a command using mirrord, mirror remote traffic to it, access remote resources
-    /// (network, fs) and environemnt variables.
+    /// Execute a binary using mirrord, mirror remote traffic to it, provide it access to remote resources
+    /// (network, files) and environment variables.
     Exec(Box<ExecArgs>),
 
-    /// Register to mirrord for Teams waitlist using your email address (`mirrord waitlist
+    /// Register an email address to the waitlist for mirrord for Teams (`mirrord waitlist
     /// myemail@gmail.com`)
     ///
-    /// mirrord for Teams is currently invite only, current features include:
+    /// mirrord for Teams is currently invite-only, and features include:
     ///
-    /// 1. Deployment level steal/mirror.
+    /// 1. Traffic stealing/mirroring from multi-pod deployments.
     ///
-    /// 2. Concurrent mirrord sessions on same resources (eg. 2 users using the same
+    /// 2. Concurrent mirrord sessions on the same resource (e.g. multiple users using the same
     /// pod/deployment).
     ///
-    /// 3. Less privleged permissions needed for the end users.
+    /// 3. No privileged permissions required for end users.
     Waitlist(WaitlistArgs),
 
     #[command(hide = true)]

@@ -316,7 +316,7 @@ fn login(args: LoginArgs) -> Result<()> {
 }
 
 /// Register the email to the waitlist.
-async fn register_waitlist(email: EmailAddress) -> Result<()> {
+async fn register_to_waitlist(email: EmailAddress) -> Result<()> {
     const WAITLIST_API: &str = "https://waitlist.metalbear.co/v1/waitlist";
     let mut params = HashMap::new();
     params.insert("email", email.to_string());
@@ -328,7 +328,7 @@ async fn register_waitlist(email: EmailAddress) -> Result<()> {
         .map_err(CliError::WaitlistError)?;
 
     println!(
-        "Email {:?} successfully registered to the waitlist. We'll be in touch soon!",
+        "Email {:?} successfully registered to the mirrord for Teams waitlist. We'll be in touch soon!",
         email.as_str()
     );
 
