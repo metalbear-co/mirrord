@@ -27,6 +27,11 @@ use tokio::{
     process::{Child, Command},
 };
 
+/// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
+pub const RUST_OUTGOING_PEERS: &str = "1.1.1.1:1111,2.2.2.2:2222,3.3.3.3:3333";
+/// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
+pub const RUST_OUTGOING_LOCAL: &str = "4.4.4.4:4444";
+
 pub struct TestProcess {
     pub child: Option<Child>,
     stderr: Arc<Mutex<String>>,
@@ -565,6 +570,7 @@ impl LayerConnection {
     }
 }
 
+/// Various applications used by integration tests.
 #[derive(Debug)]
 pub enum Application {
     Go19HTTP,
@@ -602,6 +608,8 @@ pub enum Application {
     Go19FAccessAt,
     Go20FAccessAt,
     Go19SelfOpen,
+    RustOutgoingUdp,
+    RustOutgoingTcp,
 }
 
 impl Application {
@@ -668,6 +676,11 @@ impl Application {
             Application::Go19FAccessAt => String::from("tests/apps/faccessat_go/19"),
             Application::Go20FAccessAt => String::from("tests/apps/faccessat_go/20"),
             Application::Go19SelfOpen => String::from("tests/apps/self_open/19"),
+            Application::RustOutgoingUdp | Application::RustOutgoingTcp => format!(
+                "{}/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                "../../target/debug/outgoing",
+            ),
         }
     }
 
@@ -739,6 +752,14 @@ impl Application {
             | Application::Go19SelfOpen
             | Application::Go19DirBypass
             | Application::Go20DirBypass => vec![],
+            Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            Application::RustOutgoingTcp => ["--tcp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         }
     }
 
@@ -777,9 +798,9 @@ impl Application {
             | Application::Go20DirBypass
             | Application::Go19SelfOpen
             | Application::Go19Dir
-            | Application::Go20Dir => {
-                unimplemented!("shouldn't get here")
-            }
+            | Application::Go20Dir
+            | Application::RustOutgoingUdp
+            | Application::RustOutgoingTcp => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
         }
     }

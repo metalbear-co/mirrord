@@ -4,6 +4,7 @@ use std::{collections::HashMap, time::Duration};
 
 use clap::Parser;
 use config::*;
+use email_address::EmailAddress;
 use exec::execvp;
 use execution::MirrordExecution;
 use extension::extension_exec;
@@ -314,6 +315,26 @@ fn login(args: LoginArgs) -> Result<()> {
     Ok(())
 }
 
+/// Register the email to the waitlist.
+async fn register_to_waitlist(email: EmailAddress) -> Result<()> {
+    const WAITLIST_API: &str = "https://waitlist.metalbear.co/v1/waitlist";
+    let mut params = HashMap::new();
+    params.insert("email", email.to_string());
+    reqwest::Client::new()
+        .post(WAITLIST_API)
+        .form(&params)
+        .send()
+        .await
+        .map_err(CliError::WaitlistError)?;
+
+    println!(
+        "Email {:?} successfully registered to the mirrord for Teams waitlist. We'll be in touch soon!",
+        email.as_str()
+    );
+
+    Ok(())
+}
+
 fn cli_progress() -> TaskProgress {
     TaskProgress::new("mirrord cli starting")
 }
@@ -323,7 +344,7 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[tokio::main]
 async fn main() -> miette::Result<()> {
     if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
-        mirrord_console::init_logger(&console_addr).await?;
+        mirrord_console::init_logger(&console_addr)?;
     } else {
         registry()
             .with(fmt::layer().with_writer(std::io::stderr))
@@ -343,6 +364,7 @@ async fn main() -> miette::Result<()> {
         Commands::Operator(args) => operator_command(*args).await?,
         Commands::ExtensionExec(args) => extension_exec(*args).await?,
         Commands::InternalProxy(args) => internal_proxy::proxy(*args).await?,
+        Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
     }
 
     Ok(())

@@ -13,8 +13,10 @@ pub enum SipError {
     #[error("Can't patch file format `{0}`")]
     UnsupportedFileFormat(String),
 
-    #[error("No x64 architecture in file")]
-    NoX64Arch,
+    #[error(
+        "No supported architecture in file (x86_64 on intel chips, x86_64 or arm64 on apple chips)"
+    )]
+    NoSupportedArchitecture,
 
     #[error("ObjectParse failed with `{0}`")]
     ObjectParse(#[from] object::Error),
