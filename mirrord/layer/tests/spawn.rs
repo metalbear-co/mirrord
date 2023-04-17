@@ -26,13 +26,16 @@ async fn node_spawn(dylib_path: &PathBuf) {
 
     // Accept the connection from the layer and verify initial messages.
     let _node_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    println!("NODE LAYER CONNECTION HANDLED");
+
     // Accept the connection from the layer and verify initial messages.
-    let _sh_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    let mut sh_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    println!("SH LAYER CONNECTION HANDLED");
+    sh_layer_connection.handle_gethostname().await;
 
     // TODO(alex) [high] 2023-04-13: Handle the `gethostname` dance for the bash program.
-    let mut bash_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-
-    bash_layer_connection.handle_gethostname().await;
+    // let mut bash_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    // println!("BASH LAYER CONNECTION HANDLED");
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stdout();
