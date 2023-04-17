@@ -1,5 +1,4 @@
 #![feature(assert_matches)]
-#![cfg(target_os = "linux")]
 
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
@@ -15,7 +14,7 @@ use rstest::rstest;
 
 mod common;
 
-use common::*;
+pub use common::*;
 use futures::{SinkExt, TryStreamExt};
 
 /// Test outgoing UDP.
