@@ -32,7 +32,7 @@ async fn node_spawn(dylib_path: &PathBuf) {
     let mut sh_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     println!("SH LAYER CONNECTION HANDLED");
 
-    if cfg!(macos) {
+    if cfg!(target_os = "macos") {
         let mut bash_layer_connection =
             LayerConnection::get_initialized_connection(&listener).await;
         println!("BASH LAYER CONNECTION HANDLED");

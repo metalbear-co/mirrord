@@ -242,7 +242,8 @@ impl LayerConnection {
 
         self.answer_file_read(b"metalbear-hostname".to_vec()).await;
 
-        // close file
+        // TODO(alex) [high] 2023-04-17: Add a wait time (sleep?) here, we can end up in the "Close
+        // request success" error. close file
         let close_request = self
             .codec
             .next()
