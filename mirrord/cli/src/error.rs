@@ -193,4 +193,7 @@ pub(crate) enum CliError {
     InternalProxyPortParseError(std::num::ParseIntError),
     #[error("Internal proxy wait error: {0:#?}")]
     InternalProxyWaitError(std::io::Error),
+    #[error("Waitlist registration failed.")]
+    #[diagnostic(help("Please check the email provided and internet connection.{GENERAL_HELP}"))]
+    WaitlistError(reqwest::Error),
 }
