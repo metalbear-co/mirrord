@@ -364,7 +364,7 @@ async fn main() -> miette::Result<()> {
         Commands::Operator(args) => operator_command(*args).await?,
         Commands::ExtensionExec(args) => extension_exec(*args).await?,
         Commands::InternalProxy(args) => internal_proxy::proxy(*args).await?,
-        Commands::Waitlist(args) => register_waitlist(args.email).await?,
+        Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
     }
 
     Ok(())
