@@ -12,17 +12,25 @@ import com.intellij.openapi.externalSystem.service.execution.ExternalSystemRunCo
 import com.metalbear.mirrord.MirrordExecManager
 import com.metalbear.mirrord.MirrordLogger
 import com.jetbrains.nodejs.run.NodeJsRunConfiguration
-import com.jetbrains.nodejs.run.NodeJSRunConfigurationExtension
+import com.intellij.javascript.nodejs.execution.AbstractNodeTargetRunProfile;
+
+// Mensioned
+//import com.jetbrains.nodejs.run.NodeJSRunConfigurationExtension
 
 import java.util.concurrent.ExecutionException
 
-class NodeRunConfigurationExtension: NodeJsRunConfigurationExtension() {
-    override fun isApplicableFor(configuration: AbstractNodeRunConfigurationExtension<*>): Boolean {
+class NodeRunConfigurationExtension: AbstractNodeRunConfigurationExtension {
+
+    override fun <P : AbstractNodeTargetRunProfile> createEditor(configuration: P): SettingsEditor<P> {
+        
+    }
+
+    override fun isApplicableFor(profile: AbstractNodeTargetRunProfile): Boolean {
         return true
     }
 
     override fun isEnabledFor(
-        applicableConfiguration: AbstractNodeRunConfigurationExtension<*>,
+        applicableConfiguration: AbstractNodeRunConfigurationExtension,
         runnerSettings: RunnerSettings?
     ): Boolean {
         return true
@@ -30,7 +38,7 @@ class NodeRunConfigurationExtension: NodeJsRunConfigurationExtension() {
 
 
     override fun patchCommandLine(
-        configuration: AbstractNodeRunConfigurationExtension<*>,
+        configuration: AbstractNodeRunConfigurationExtension,
         runnerSettings: RunnerSettings?,
         cmdLine: GeneralCommandLine,
         runnerId: String
