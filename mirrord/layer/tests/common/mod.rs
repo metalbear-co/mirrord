@@ -176,8 +176,9 @@ impl LayerConnection {
         }
     }
 
-    /// Accept the library's connection and verify initial ENV message and PortSubscribe message
-    /// caused by the listen hook.
+    /// Accept the library's connection and verify initial ENV message, `FileRequest` message
+    /// (depends on tested program), and PortSubscribe message caused by the listen hook.
+    ///
     /// Handle flask's 2 process behaviour.
     pub async fn get_initialized_connection_with_port(
         listener: &TcpListener,
@@ -233,10 +234,25 @@ impl LayerConnection {
         }
     }
 
+    /// Handles the `gethostname` hook that fiddles with the agent's file system by opening
+    /// `/etc/hostname` remotely.
+    ///
+    /// This hook leverages our ability of opening a file on the agent's `FileManager` to `open`,
+    /// `read`, and `close` the `/etc/hostname` file, and thus some of the integration tests that
+    /// rely on hostname resolving must handle these messages before we resume the normal flow for
+    /// mirroring/stealing/outgoing traffic.
+    ///
+    /// ## Args
+    ///
+    /// - `FIRST_CALL`: some tests will consume the first message from [`Self::codec`], so we use
+    ///   this `const` to check if we should call `codec.next` or if it was already called for us.
+    ///   If you're using [`LayerConnection::get_initialized_connection_with_port`], you should set
+    ///   this to `false`.
     pub async fn handle_gethostname<const FIRST_CALL: bool>(
         &mut self,
         app_port: Option<u16>,
     ) -> Option<()> {
+        // Should we call `codec.next` or was it called outside already?
         if FIRST_CALL {
             // open file
             let open_file_request = self.codec.next().await?.unwrap();
@@ -275,8 +291,8 @@ impl LayerConnection {
 
         self.answer_file_read(b"metalbear-hostname".to_vec()).await;
 
-        // TODO(alex) [high] 2023-04-17: Add a wait time (sleep?) here, we can end up in the "Close
-        // request success" error. close file
+        // TODO(alex): Add a wait time here, we can end up in the "Close request success" error.
+        // close file (very rarely?).
         let close_request = self
             .codec
             .next()
