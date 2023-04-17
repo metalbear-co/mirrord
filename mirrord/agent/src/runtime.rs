@@ -5,7 +5,6 @@ use std::{
     path::PathBuf,
 };
 
-use async_trait::async_trait;
 use bollard::{container::InspectContainerOptions, Docker, API_DEFAULT_VERSION};
 use containerd_client::{
     connect,
@@ -53,7 +52,7 @@ impl ContainerInfo {
         ContainerInfo { pid, env }
     }
 }
-#[async_trait]
+
 #[enum_dispatch]
 pub(crate) trait ContainerRuntime {
     /// Get information about the container (pid, env).
@@ -123,7 +122,6 @@ impl DockerContainer {
     }
 }
 
-#[async_trait]
 impl ContainerRuntime for DockerContainer {
     async fn get_info(&self) -> Result<ContainerInfo> {
         let inspect_options = Some(InspectContainerOptions { size: false });
@@ -216,7 +214,6 @@ impl ContainerdContainer {
     }
 }
 
-#[async_trait]
 impl ContainerRuntime for ContainerdContainer {
     async fn get_info(&self) -> Result<ContainerInfo> {
         let mut client = self.get_task_client().await?;

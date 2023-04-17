@@ -73,7 +73,7 @@ extern crate alloc;
 extern crate core;
 
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     panic,
     sync::{LazyLock, OnceLock},
@@ -230,6 +230,9 @@ pub(crate) static OUTGOING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
 /// When true, localhost connections will stay local - wont mirror or steal.
 pub(crate) static INCOMING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
 
+/// Ports to ignore on listening for mirroring/stealing.
+pub(crate) static INCOMING_IGNORE_PORTS: OnceLock<HashSet<u16>> = OnceLock::new();
+
 /// Check if we're running in NixOS or Devbox.
 ///
 /// - If so, add `sh` to the skip list because of
@@ -366,9 +369,7 @@ fn layer_start(config: LayerConfig) {
             .with(tracing_subscriber::EnvFilter::new("mirrord=trace"))
             .init();
     } else if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
-        RUNTIME
-            .block_on(mirrord_console::init_logger(&console_addr))
-            .expect("logger initialization failed");
+        mirrord_console::init_logger(&console_addr).expect("logger initialization failed");
     } else {
         tracing_subscriber::registry()
             .with(
@@ -436,6 +437,9 @@ fn layer_start(config: LayerConfig) {
         .set(config.feature.network.incoming.ignore_localhost)
         .expect("Setting INCOMING_IGNORE_LOCALHOST singleton");
 
+    INCOMING_IGNORE_PORTS
+        .set(config.feature.network.incoming.ignore_ports.clone())
+        .expect("Setting INCOMING_IGNORE_PORTS failed");
     FILE_FILTER.get_or_init(|| FileFilter::new(config.feature.fs.clone()));
 
     enable_hooks(

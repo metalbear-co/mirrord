@@ -90,6 +90,9 @@ pub(crate) enum HookError {
         supported IP or unix socket address."
     )]
     UnsupportedSocketType,
+
+    #[error("mirrord-layer: Pointer argument points to an invalid address")]
+    BadPointer,
 }
 
 /// Errors internal to mirrord-layer.
@@ -103,7 +106,7 @@ pub(crate) enum LayerError {
     ResponseError(#[from] ResponseError),
 
     #[error("mirrord-layer: Frida failed with `{0}`!")]
-    Frida(#[from] frida_gum::Error),
+    Frida(frida_gum::Error),
 
     #[error("mirrord-layer: Failed to find export for name `{0}`!")]
     NoExportName(String),
@@ -276,6 +279,7 @@ impl From<HookError> for i64 {
             HookError::FailedSipPatch(_) => libc::EACCES,
             HookError::SocketUnsuportedIpv6 => libc::EAFNOSUPPORT,
             HookError::UnsupportedSocketType => libc::EAFNOSUPPORT,
+            HookError::BadPointer => libc::EFAULT,
         };
 
         set_errno(errno::Errno(libc_error));
@@ -325,5 +329,11 @@ impl From<HookError> for *mut c_char {
         let _ = i64::from(fail);
 
         ptr::null_mut()
+    }
+}
+
+impl From<frida_gum::Error> for LayerError {
+    fn from(err: frida_gum::Error) -> Self {
+        LayerError::Frida(err)
     }
 }

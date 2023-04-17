@@ -40,7 +40,10 @@ async fn mirroring_with_http(
     application: Application,
     dylib_path: &PathBuf,
     is_go: bool,
+    config_dir: &PathBuf,
 ) {
+    let mut config_path = config_dir.clone();
+    config_path.push("port_mapping.json");
     let (mut test_process, mut layer_connection) = application
         .start_process_with_layer_and_port(
             dylib_path,
@@ -54,6 +57,7 @@ async fn mirroring_with_http(
                 // flask and go "manually" resolve DNS (they don't use `getaddrinfo`).
                 .map(|arg| arg.contains("app_flask.py") || is_go)
                 .unwrap_or_default(),
+            Some(config_path.to_str().unwrap()),
         )
         .await;
 
@@ -100,7 +104,8 @@ async fn mirroring_with_http(
 #[timeout(Duration::from_secs(60))]
 async fn mirroring_with_http_go(
     dylib_path: &PathBuf,
+    config_dir: &PathBuf,
     #[values(Application::Go19HTTP, Application::Go20HTTP)] application: Application,
 ) {
-    mirroring_with_http(application, dylib_path, is_go(true)).await;
+    mirroring_with_http(application, dylib_path, is_go(true), config_dir).await;
 }

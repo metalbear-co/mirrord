@@ -12,7 +12,7 @@ members = [
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.36.0"
+version = "3.37.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -27,7 +27,6 @@ categories = ["development-tools", "backend", "devtool"]
 
 [workspace.dependencies]
 actix-codec = "0.5"
-async-trait = "0.1"
 bytes = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros"] }
 tokio-stream = "0.1"

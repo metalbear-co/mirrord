@@ -7,10 +7,10 @@ pub type Result<T, E = ConsoleError> = std::result::Result<T, E>;
 pub enum ConsoleError {
     #[error("failed to connect to console `{0}`")]
     #[diagnostic(help("Please check that the console is running and address is correct."))]
-    ConnectError(#[source] tokio_tungstenite::tungstenite::Error),
+    ConnectError(#[source] tungstenite::Error),
     #[error("WS Socket occured after connection `{0}`")]
     #[diagnostic(help("Please report a bug."))]
-    WsSocketError(#[from] tokio_tungstenite::tungstenite::Error),
+    WsSocketError(#[from] tungstenite::Error),
     #[error("Set logger failed `{0}`")]
     #[diagnostic(help("Please report a bug."))]
     SetLoggerError(#[from] log::SetLoggerError),

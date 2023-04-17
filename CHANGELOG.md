@@ -8,6 +8,41 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.37.0](https://github.com/metalbear-co/mirrord/tree/3.37.0) - 2023-04-14
+
+
+### Removed
+
+- Removed armv7 builds that were wrongly added
+
+
+### Added
+
+- Add `ignore_ports` to `incoming` configuration so you can have ports that
+  only listen
+  locally (mirrord will not steal/mirror those ports).
+  [#1295](https://github.com/metalbear-co/mirrord/issues/1295)
+- Add support for `xstatfs` to prevent unexpected behavior with SQLite.
+  [#1270](https://github.com/metalbear-co/mirrord/issues/1270)
+
+
+### Changed
+
+- Improved bad target error
+  [#1291](https://github.com/metalbear-co/mirrord/issues/1291)
+
+
+### Internal
+
+- Optimize agent Dockerfile for better cache use
+  [#1280](https://github.com/metalbear-co/mirrord/issues/1280)
+- Cover more areas of the code and targets using clippy in CI and fix its
+  warnings
+- Rely more on Rusts own async trait and drop async-trait crate (the agent cant
+  fully switch yet though).
+  [#use-rust-async-traits](https://github.com/metalbear-co/mirrord/issues/use-rust-async-traits)
+
+
 ## [3.36.0](https://github.com/metalbear-co/mirrord/tree/3.36.0) - 2023-04-13
 
 

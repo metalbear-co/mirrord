@@ -4,7 +4,7 @@ use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 use libc::{c_int, c_uint, AT_FDCWD, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::file::{
     OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse, WriteFileResponse,
-    XstatResponse,
+    XstatFsResponse, XstatResponse,
 };
 use tokio::sync::oneshot;
 use tracing::{error, trace};
@@ -504,6 +504,19 @@ pub(crate) fn xstat(
     blocking_send_file_message(FileOperation::Xstat(lstat))?;
 
     Detour::Success(file_channel_rx.blocking_recv()??)
+}
+
+#[tracing::instrument(level = "trace")]
+pub(crate) fn xstatfs(fd: RawFd) -> Detour<XstatFsResponse> {
+    let fd = get_remote_fd(fd)?;
+
+    let (fs_channel_tx, fs_channel_rx) = oneshot::channel();
+
+    let lstatfs = XstatFs { fd, fs_channel_tx };
+
+    blocking_send_file_message(FileOperation::XstatFs(lstatfs))?;
+
+    Detour::Success(fs_channel_rx.blocking_recv()??)
 }
 
 #[cfg(target_os = "linux")]

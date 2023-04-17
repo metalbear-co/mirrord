@@ -100,6 +100,7 @@ pub struct AgentConfig {
 }
 
 #[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 mod tests {
     use rstest::rstest;
 
