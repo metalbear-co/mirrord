@@ -1,10 +1,11 @@
-use futures::{Sink, SinkExt};
-use log::{LevelFilter, Metadata};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio_tungstenite::{
-    connect_async,
-    tungstenite::{protocol::Message, Error as WsError},
+use std::{
+    io::{Read, Write},
+    sync::mpsc::{sync_channel, Receiver, SyncSender},
+    thread,
 };
+
+use log::{LevelFilter, Metadata};
+use tungstenite::{connect, protocol::Message, WebSocket};
 
 use crate::{
     error::{ConsoleError, Result},
@@ -13,7 +14,7 @@ use crate::{
 
 /// Console logger that sends log messages to the console app.
 pub struct ConsoleLogger {
-    sender: UnboundedSender<protocol::Record>,
+    sender: SyncSender<protocol::Record>,
 }
 
 impl log::Log for ConsoleLogger {
@@ -50,10 +51,7 @@ impl log::Log for ConsoleLogger {
 }
 
 /// Send hello message, containing information about the connected process.
-async fn send_hello<C>(client: &mut C) -> Result<()>
-where
-    C: Sink<Message, Error = WsError> + std::marker::Unpin,
-{
+fn send_hello<S: Read + Write>(client: &mut WebSocket<S>) -> Result<()> {
     let hello = protocol::Hello {
         process_info: protocol::ProcessInfo {
             args: std::env::args().collect(),
@@ -65,33 +63,32 @@ where
         },
     };
     let msg = Message::binary(serde_json::to_vec(&hello).unwrap());
-    client.send(msg).await?;
+    client.write_message(msg)?;
     Ok(())
 }
 
 /// Background task that does the communication
 /// with the console app.
-async fn logger_task<C>(mut client: C, mut rx: UnboundedReceiver<protocol::Record>)
-where
-    C: Sink<Message, Error = WsError> + std::marker::Unpin,
-{
-    while let Some(msg) = rx.recv().await {
+fn logger_task<S: Read + Write>(mut client: WebSocket<S>, rx: Receiver<protocol::Record>) {
+    while let Ok(msg) = rx.recv() {
         let msg = Message::binary(serde_json::to_vec(&msg).unwrap());
-        let _ = client.feed(msg).await;
+        if let Err(err) = client.write_message(msg) {
+            eprintln!("Error sending log message: {err:?}");
+            break;
+        }
     }
 }
 
 /// Initializes the logger
 /// Connects to the console, and sets the global logger to use it.
-pub async fn init_logger(address: &str) -> Result<()> {
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    let (mut client, _) = connect_async(format!("ws://{address}/ws"))
-        .await
-        .map_err(ConsoleError::ConnectError)?;
+pub fn init_logger(address: &str) -> Result<()> {
+    let (tx, rx) = sync_channel(10000);
+    let (mut client, _) =
+        connect(format!("ws://{address}/ws")).map_err(ConsoleError::ConnectError)?;
 
-    send_hello(&mut client).await?;
-    tokio::spawn(async move {
-        logger_task(client, rx).await;
+    send_hello(&mut client)?;
+    thread::spawn(move || {
+        logger_task(client, rx);
     });
     let logger = ConsoleLogger { sender: tx };
     log::set_boxed_logger(Box::new(logger)).map(|()| log::set_max_level(LevelFilter::Trace))?;
