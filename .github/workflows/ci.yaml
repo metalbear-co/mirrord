@@ -88,7 +88,7 @@ jobs:
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
       - run: cargo install cargo-zigbuild
       # Needed for agent
-      - run: cargo-zigbuild fmt --all -- --check
+      - run: cargo fmt --all -- --check
       - run: cargo-zigbuild clippy --lib --bins --all-features -- -D warnings
       # Check that agent compiles for the supported targets (aarch64)
       - run: cargo-zigbuild clippy -p mirrord-agent --target aarch64-unknown-linux-gnu -- -D warnings
