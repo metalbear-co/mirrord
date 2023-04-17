@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
+use email_address::EmailAddress;
 use mirrord_operator::setup::OperatorNamespace;
 
 #[derive(Parser)]
@@ -21,10 +22,25 @@ pub(super) struct Cli {
 
 #[derive(Subcommand)]
 pub(super) enum Commands {
+    /// Execute a binary using mirrord, mirror remote traffic to it, provide it access to remote
+    /// resources (network, files) and environment variables.
     Exec(Box<ExecArgs>),
-    Extract {
-        path: String,
-    },
+
+    /// Register an email address to the waitlist for mirrord for Teams (`mirrord waitlist
+    /// myemail@gmail.com`)
+    ///
+    /// mirrord for Teams is currently invite-only, and features include:
+    ///
+    /// 1. Traffic stealing/mirroring from multi-pod deployments.
+    ///
+    /// 2. Concurrent mirrord sessions on the same resource (e.g. multiple users using the same
+    /// pod/deployment).
+    ///
+    /// 3. No privileged permissions required for end users.
+    Waitlist(WaitlistArgs),
+
+    #[command(hide = true)]
+    Extract { path: String },
     #[allow(dead_code)]
     #[command(skip)]
     Login(LoginArgs),
@@ -279,4 +295,17 @@ pub(super) struct InternalProxyArgs {
     /// Specify config file to use
     #[arg(short = 'f')]
     pub config_file: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct WaitlistArgs {
+    /// Email to register
+    #[arg(value_parser = email_parse)]
+    pub email: EmailAddress,
+}
+
+fn email_parse(email: &str) -> Result<EmailAddress, String> {
+    email
+        .parse()
+        .map_err(|e: email_address::Error| format!("invalid email address provided: {e:?}"))
 }

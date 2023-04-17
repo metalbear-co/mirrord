@@ -47,6 +47,7 @@ thiserror.workspace = true
 prettytable-rs = "0.10"
 humantime = "2"
 nix.workspace = true
+email_address = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
