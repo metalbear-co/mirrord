@@ -1,4 +1,6 @@
 #![feature(assert_matches)]
+#![cfg(target_os = "linux")]
+
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use mirrord_protocol::{
