@@ -204,6 +204,60 @@ impl LayerConnection {
         }
     }
 
+    pub async fn handle_gethostname(&mut self) {
+        // open file
+        let open_file_request = self.codec.next().await.unwrap().unwrap();
+
+        assert_eq!(
+            open_file_request,
+            ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
+                path: PathBuf::from("/etc/hostname"),
+                open_options: OpenOptionsInternal {
+                    read: true,
+                    write: false,
+                    append: false,
+                    truncate: false,
+                    create: false,
+                    create_new: false
+                }
+            }))
+        );
+        self.answer_file_open().await;
+
+        // read file
+        let read_request = self
+            .codec
+            .next()
+            .await
+            .expect("Read request success!")
+            .expect("Read request exists!");
+        assert_eq!(
+            read_request,
+            ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
+                remote_fd: 0xb16,
+                buffer_size: 256,
+            }))
+        );
+
+        self.answer_file_read(b"metalbear-hostname".to_vec()).await;
+
+        // close file
+        let close_request = self
+            .codec
+            .next()
+            .await
+            .expect("Close request success!")
+            .expect("Close request exists!");
+
+        println!("Should be a close file request: {read_request:#?}");
+        assert_eq!(
+            close_request,
+            ClientMessage::FileRequest(FileRequest::Close(
+                mirrord_protocol::file::CloseFileRequest { fd: 0xb16 }
+            ))
+        );
+    }
+
     pub async fn get_initialized_connection_with_port_and_hostname(
         listener: &TcpListener,
         app_port: u16,
