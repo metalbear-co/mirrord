@@ -325,7 +325,7 @@ async fn register_waitlist(email: EmailAddress) -> Result<()> {
         .form(&params)
         .send()
         .await
-        .map_err(|e| CliError::WaitlistError(e))?;
+        .map_err(|e| CliError::WaitlistError)?;
 
     println!(
         "Email {:?} successfully registered to the waitlist. We'll be in touch soon!",
