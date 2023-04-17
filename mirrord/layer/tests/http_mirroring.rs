@@ -39,7 +39,6 @@ async fn mirroring_with_http(
     )]
     application: Application,
     dylib_path: &PathBuf,
-    is_go: bool,
     config_dir: &PathBuf,
 ) {
     let mut config_path = config_dir.clone();
@@ -51,12 +50,6 @@ async fn mirroring_with_http(
                 ("MIRRORD_FILE_MODE", "local"),
                 ("MIRRORD_UDP_OUTGOING", "false"),
             ],
-            application
-                .get_args()
-                .last()
-                // flask and go "manually" resolve DNS (they don't use `getaddrinfo`).
-                .map(|arg| arg.contains("app_flask.py") || is_go)
-                .unwrap_or_default(),
             Some(config_path.to_str().unwrap()),
         )
         .await;
@@ -107,5 +100,5 @@ async fn mirroring_with_http_go(
     config_dir: &PathBuf,
     #[values(Application::Go19HTTP, Application::Go20HTTP)] application: Application,
 ) {
-    mirroring_with_http(application, dylib_path, is_go(true), config_dir).await;
+    mirroring_with_http(application, dylib_path, config_dir).await;
 }

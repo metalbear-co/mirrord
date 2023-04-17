@@ -16,12 +16,7 @@ pub use common::*;
 async fn self_connect(dylib_path: &PathBuf) {
     let application = Application::PythonSelfConnect;
     let (mut test_process, mut layer_connection) = application
-        .start_process_with_layer_and_port(
-            dylib_path,
-            vec![("MIRRORD_FILE_MODE", "local")],
-            false,
-            None,
-        )
+        .start_process_with_layer_and_port(dylib_path, vec![("MIRRORD_FILE_MODE", "local")], None)
         .await;
     assert!(layer_connection.is_ended().await);
     test_process.wait_assert_success().await;
