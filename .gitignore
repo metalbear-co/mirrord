@@ -8,6 +8,7 @@ __pycache__
 **/.DS_Store
 target
 build/
+.mirrord
 
 ### go tests ###
 tests/go-e2e/go-e2e

@@ -70,7 +70,7 @@ function install() {
   curl -o /tmp/mirrord -fsSL https://github.com/metalbear-co/mirrord/releases/download/$version/mirrord_$OS\_$ARCH
   chmod +x /tmp/mirrord
   copy
-  echo "mirrord installed! Have fun! Join our discord server for help: https://discord.gg/metalbear"
+  echo "mirrord installed! Have fun! For help, join our Discord server: https://discord.gg/metalbear, open an issue on our GitHub: https://github.com/metalbear-co/mirrord/issues/new/choose or send us an email at hi@metalbear.co"
   }
 
 
