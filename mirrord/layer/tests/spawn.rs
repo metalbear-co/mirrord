@@ -34,7 +34,7 @@ async fn node_spawn(dylib_path: &PathBuf) {
 
     // There is a 3rd layer connection that happens on macos, where `/bin/sh` starts `bash`, and
     // thus we have to handle the `gethostname` messasges after it.
-    let _ = if cfg!(target_os = "macos") {
+    let _last_layer_connection = if cfg!(target_os = "macos") {
         let mut bash_layer_connection =
             LayerConnection::get_initialized_connection(&listener).await;
         println!("BASH LAYER CONNECTION HANDLED");
