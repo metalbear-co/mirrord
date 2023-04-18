@@ -27,8 +27,6 @@ const FAIL_STILL_STUCK: &str = r#"
 
 "#;
 
-
-
 /// Connects to the internal proxy in given `SocketAddr`
 /// layer uses to communicate with it, in the form of a [`Sender`] for [`ClientMessage`]s, and a
 /// [`Receiver`] for [`DaemonMessage`]s.
