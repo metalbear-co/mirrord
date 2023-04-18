@@ -13,7 +13,7 @@ use mirrord_operator::setup::OperatorNamespace;
     about,
     long_about = r#"
 Encountered an issue? Have a feature request?
-Join our Discord server https://discord.gg/pSKEdmNZcK or create a GitHub issue"#
+Join our Discord server https://discord.gg/metalbear or create a GitHub issue"#
 )]
 pub(super) struct Cli {
     #[command(subcommand)]

@@ -1,0 +1,1 @@
+Changed our Discord invite link to https://discord.gg/metalbear
