@@ -140,7 +140,7 @@ impl UdpOutgoingHandler {
                             break;
                         },
                         Ok((read_amount, from)) => {
-                            trace!("interceptor_task -> Received data {:?} from user socket {:#?}", &recv_from_buffer[..read_amount], from);
+                            trace!("interceptor_task -> Received data from user socket {:#?}", from);
                             user_address = Some(from);
                             // Sends the message that the user wrote to our interceptor socket to
                             // be handled on the `agent`, where it'll be forwarded to the remote.
@@ -158,7 +158,7 @@ impl UdpOutgoingHandler {
                 bytes = remote_stream.next() => {
                     match bytes {
                         Some(bytes) => {
-                            trace!("interceptor_task -> Received data {:?} from remote socket", bytes);
+                            trace!("interceptor_task -> Received data from remote socket");
                             // Writes the data sent by `agent` (that came from the actual remote
                             // stream) to our interceptor socket. When the user tries to read the
                             // remote data, this'll be what they receive.
