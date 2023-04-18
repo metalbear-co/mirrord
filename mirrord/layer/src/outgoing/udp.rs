@@ -142,6 +142,7 @@ impl UdpOutgoingHandler {
                         Ok((read_amount, from)) => {
                             trace!("interceptor_task -> Received data from user socket {:#?}", from);
                             user_address = Some(from);
+
                             // Sends the message that the user wrote to our interceptor socket to
                             // be handled on the `agent`, where it'll be forwarded to the remote.
                             let write = LayerWrite { connection_id, bytes: recv_from_buffer[..read_amount].to_vec() };
