@@ -2,8 +2,6 @@ FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:latest as bui
 ARG TARGETARCH
 WORKDIR /app
 
-RUN apt-get install -y protobuf-compiler
-
 # Copy order is important here, since we want the cache to be invalidated as less as possible
 # so we start with the most static files, then the most dynamic ones
 COPY .cargo /app/.cargo
