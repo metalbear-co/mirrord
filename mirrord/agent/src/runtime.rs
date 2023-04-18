@@ -211,9 +211,8 @@ impl ContainerdContainer {
     /// that manages our target container
     async fn get_channel(&self) -> Result<Channel> {
         for sock_path in CONTAINERD_SOCK_PATHS {
-            if let Ok(channel) = connect_and_find_container(self.container_id.clone(), sock_path)
-                .await
-                .inspect_err(|err| warn!("containerd socket error {err}"))
+            if let Ok(channel) =
+                connect_and_find_container(self.container_id.clone(), sock_path).await
             {
                 return Ok(channel);
             }
