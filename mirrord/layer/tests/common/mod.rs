@@ -172,7 +172,6 @@ impl LayerConnection {
 
     /// Accept the library's connection and verify initial ENV message
     pub async fn get_initialized_connection(listener: &TcpListener) -> LayerConnection {
-        println!("INITIALIZING CONNECTION FOR {listener:#?}");
         let codec = Self::accept_library_connection(listener).await;
         println!("Got connection from layer.");
         LayerConnection {
