@@ -1,1 +1,0 @@
-Sometimes when using console logger mirrord crashes since tokio runtime isn't initialized, changed to just use a thread
