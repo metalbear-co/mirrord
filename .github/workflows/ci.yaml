@@ -179,7 +179,7 @@ jobs:
       - uses: actions/checkout@v3
       - uses: arduino/setup-protoc@v1
       - name: test
-        run: CARGO_NET_GIT_FETCH_WITH_CLI=true cargo test -p mirrord-agent
+        run: cargo test -p mirrord-agent
 
   test_agent_image:
     runs-on: ubuntu-latest
