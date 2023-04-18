@@ -45,6 +45,11 @@ object MirrordNotifier {
                     BrowserUtil.browse("https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&template=bug_report.yml")
                     notification.expire()
                 }
+            }).addAction(object : NotificationAction("Send us an email") {
+                override fun actionPerformed(e: AnActionEvent, notification: Notification) {
+                    BrowserUtil.browse("mailto:hi@metalbear.co")
+                    notification.expire()
+                }
             }).notify(project)
         }
     }
