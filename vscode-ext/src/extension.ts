@@ -54,7 +54,7 @@ async function configFilePath() {
 function mirrordFailure(err: any) {
 	vscode.window.showErrorMessage("mirrord failed to start. Please check the logs/errors.", "Get help on Discord").then(value => {
 		if (value === "Get help on Discord") {
-			vscode.env.openExternal(vscode.Uri.parse('https://discord.gg/pSKEdmNZcK'));
+			vscode.env.openExternal(vscode.Uri.parse('https://discord.gg/metalbear'));
 		}
 	});
 }
