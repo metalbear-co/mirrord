@@ -37,12 +37,17 @@ object MirrordNotifier {
         ApplicationManager.getApplication().invokeLater {
             notifier(message, NotificationType.ERROR).addAction(object : NotificationAction("Get support on Discord") {
                 override fun actionPerformed(e: AnActionEvent, notification: Notification) {
-                    BrowserUtil.browse("https://discord.gg/pSKEdmNZcK")
+                    BrowserUtil.browse("https://discord.gg/metalbear")
                     notification.expire()
                 }
             }).addAction(object : NotificationAction("Report on GitHub") {
                 override fun actionPerformed(e: AnActionEvent, notification: Notification) {
                     BrowserUtil.browse("https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&template=bug_report.yml")
+                    notification.expire()
+                }
+            }).addAction(object : NotificationAction("Send us an email") {
+                override fun actionPerformed(e: AnActionEvent, notification: Notification) {
+                    BrowserUtil.browse("mailto:hi@metalbear.co")
                     notification.expire()
                 }
             }).notify(project)
