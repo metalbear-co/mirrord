@@ -1,1 +1,0 @@
-Updated Frida version, bumped more dependencies
