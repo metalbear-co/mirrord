@@ -76,6 +76,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
     steps:
       - uses: actions/checkout@v3
       - uses: arduino/setup-protoc@v1
@@ -86,8 +88,7 @@ jobs:
           toolchain: nightly-2023-03-29
           components: rustfmt, clippy
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
-      - uses: goto-bus-stop/setup-zig@v2
-      - run: CARGO_NET_GIT_FETCH_WITH_CLI=true python3 -m pip install cargo-zigbuild
+      - run: python3 -m pip install cargo-zigbuild
       # Needed for agent
       - run: cargo fmt --all -- --check
       - run: cargo-zigbuild clippy --lib --bins --all-features -- -D warnings
