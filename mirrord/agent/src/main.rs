@@ -106,6 +106,7 @@ impl State {
     pub async fn new(args: &Args) -> Result<State> {
         let container =
             get_container(args.container_id.as_ref(), args.container_runtime.as_ref()).await?;
+
         if container.is_none() && args.pause {
             Err(AgentError::MissingContainerInfo)?
         }
