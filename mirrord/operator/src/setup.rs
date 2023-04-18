@@ -360,7 +360,14 @@ impl OperatorRole {
                 },
                 PolicyRule {
                     api_groups: Some(vec!["".to_owned()]),
-                    resources: Some(vec!["users".to_owned(), "groups".to_owned()]),
+                    resources: Some(vec![
+                        "groups".to_owned(),
+                        "users".to_owned(),
+                        "userextras/accesskeyid".to_owned(),
+                        "userextras/arn".to_owned(),
+                        "userextras/canonicalarn".to_owned(),
+                        "userextras/sessionname".to_owned(),
+                    ]),
                     verbs: vec!["impersonate".to_owned()],
                     ..Default::default()
                 },
