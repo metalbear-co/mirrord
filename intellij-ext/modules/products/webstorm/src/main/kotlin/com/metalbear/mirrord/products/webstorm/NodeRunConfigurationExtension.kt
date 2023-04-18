@@ -1,61 +1,29 @@
 package com.metalbear.mirrord.products.webstorm
 
-import com.intellij.execution.Executor
 //import com.intellij.execution.RunConfigurationExtension
 //import com.intellij.execution.configurations.JavaParameters
-import com.intellij.execution.configurations.RunConfigurationBase
-import com.intellij.execution.configurations.RunnerSettings
-import com.intellij.execution.target.createEnvironmentRequest
-import com.intellij.execution.wsl.target.WslTargetEnvironmentRequest
-import com.intellij.javascript.nodejs.execution.runConfiguration.AbstractNodeRunConfigurationExtension;
-import com.intellij.openapi.externalSystem.service.execution.ExternalSystemRunConfiguration
-import com.metalbear.mirrord.MirrordExecManager
-import com.metalbear.mirrord.MirrordLogger
-import com.jetbrains.nodejs.run.NodeJsRunConfiguration
-import com.intellij.javascript.nodejs.execution.AbstractNodeTargetRunProfile;
 
 // Mensioned
 //import com.jetbrains.nodejs.run.NodeJSRunConfigurationExtension
 
-import java.util.concurrent.ExecutionException
+import com.intellij.javascript.nodejs.execution.AbstractNodeTargetRunProfile
+import com.intellij.javascript.nodejs.execution.runConfiguration.AbstractNodeRunConfigurationExtension
+import com.intellij.openapi.options.SettingsEditor
 
-class NodeRunConfigurationExtension: AbstractNodeRunConfigurationExtension {
+// I think this is not what we want, because we don't want to change anything about the configuration editor or manage
+// it ourselves.
+class NodeRunConfigurationExtension: AbstractNodeRunConfigurationExtension() {
 
     override fun <P : AbstractNodeTargetRunProfile> createEditor(configuration: P): SettingsEditor<P> {
-        
+        return RunConfigurationSettingsEditor(configuration)
+    }
+
+    override fun getEditorTitle(): String? {
+        // TODO:
+        return "Node Run Configuration"
     }
 
     override fun isApplicableFor(profile: AbstractNodeTargetRunProfile): Boolean {
         return true
-    }
-
-    override fun isEnabledFor(
-        applicableConfiguration: AbstractNodeRunConfigurationExtension,
-        runnerSettings: RunnerSettings?
-    ): Boolean {
-        return true
-    }
-
-
-    override fun patchCommandLine(
-        configuration: AbstractNodeRunConfigurationExtension,
-        runnerSettings: RunnerSettings?,
-        cmdLine: GeneralCommandLine,
-        runnerId: String
-    ) {
-        val wsl = when (val request = createEnvironmentRequest(configuration, configuration.project)) {
-            is WslTargetEnvironmentRequest -> request.configuration.distribution!!
-            else -> null
-        }
-
-        val project = configuration.project
-        val currentEnv = cmdLine.environment
-
-        MirrordExecManager.start(wsl, project)?.let {
-                env ->
-            for (entry in env.entries.iterator()) {
-                currentEnv[entry.key] =  entry.value
-            }
-        }
     }
 }
