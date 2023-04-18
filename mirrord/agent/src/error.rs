@@ -138,6 +138,9 @@ pub enum AgentError {
 
     #[error("Returning an error to test the agent's error cleanup. Should only ever be used when testing mirrord.")]
     TestError,
+
+    #[error("Container Runtime Error while trying to pause: {0}")]
+    PauseRuntimeError(String),
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;

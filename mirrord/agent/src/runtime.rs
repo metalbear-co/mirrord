@@ -7,7 +7,6 @@ use std::{
 
 use bollard::{container::InspectContainerOptions, Docker, API_DEFAULT_VERSION};
 use containerd_client::{
-    connect,
     services::v1::{
         containers_client::ContainersClient, tasks_client::TasksClient, GetContainerRequest,
         GetRequest, PauseTaskRequest, ResumeTaskRequest,
@@ -18,12 +17,18 @@ use containerd_client::{
 use enum_dispatch::enum_dispatch;
 use nix::sched::setns;
 use oci_spec::runtime::Spec;
-use tracing::trace;
+use tokio::net::UnixStream;
+use tonic::transport::{Endpoint, Uri};
+use tower::service_fn;
+use tracing::{trace, warn};
 
 use crate::{
     env::parse_raw_env,
     error::{AgentError, Result},
+    runtime::crio::CriOContainer,
 };
+
+mod crio;
 
 const CONTAINERD_DEFAULT_SOCK_PATH: &str = "/host/run/containerd/containerd.sock";
 const CONTAINERD_ALTERNATIVE_SOCK_PATH: &str = "/host/run/dockershim.sock";
@@ -40,6 +45,7 @@ const CONTAINERD_SOCK_PATHS: [&str; 4] = [
 
 const DEFAULT_CONTAINERD_NAMESPACE: &str = "k8s.io";
 
+#[derive(Debug)]
 pub(crate) struct ContainerInfo {
     /// External PID of the container
     pub(crate) pid: u64,
@@ -68,6 +74,7 @@ pub(crate) trait ContainerRuntime {
 pub(crate) enum Container {
     Docker(DockerContainer),
     Containerd(ContainerdContainer),
+    CriO(CriOContainer),
 }
 
 /// get a container object according to args.
@@ -85,6 +92,7 @@ pub(crate) async fn get_container(
             "containerd" => Ok(Some(Container::Containerd(ContainerdContainer {
                 container_id,
             }))),
+            "cri-o" => Ok(Some(Container::CriO(CriOContainer::from_id(container_id)))),
             _ => Err(AgentError::NotFound(format!(
                 "Unknown runtime {container_runtime:?}"
             ))),
@@ -163,6 +171,15 @@ impl ContainerRuntime for DockerContainer {
 #[derive(Debug)]
 pub(crate) struct ContainerdContainer {
     container_id: String,
+}
+
+async fn connect(path: impl AsRef<std::path::Path>) -> Result<Channel> {
+    let path = path.as_ref().to_path_buf();
+
+    Endpoint::try_from("http://localhost")?
+        .connect_with_connector(service_fn(move |_: Uri| UnixStream::connect(path.clone())))
+        .await
+        .map_err(AgentError::from)
 }
 
 /// Connects to the given containerd socket
