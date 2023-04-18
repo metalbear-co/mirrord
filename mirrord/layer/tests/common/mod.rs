@@ -846,7 +846,7 @@ impl Application {
                 vec![app_path.to_string_lossy().to_string()]
             }
             Application::NodeSpawn => {
-                app_path.push("node_spawn.js");
+                app_path.push("node_spawn.mjs");
                 vec![app_path.to_string_lossy().to_string()]
             }
             Application::PythonSelfConnect => {
