@@ -21,7 +21,7 @@ const FAIL_STILL_STUCK: &str = r#"
 
 >> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
 
->> Or join our discord https://discord.com/invite/J5YSrStDKD and request help in #mirrord-help.
+>> Or join our discord https://discord.gg/metalbear and request help in #mirrord-help.
 
 "#;
 
