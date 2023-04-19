@@ -57,5 +57,6 @@
     <depends optional="true" config-file="mirrord-pycharm.xml">com.intellij.modules.python</depends>
     <depends optional="true" config-file="mirrord-rubymine.xml">com.intellij.modules.ruby</depends>
     <depends optional="true" config-file="mirrord-goland.xml">org.jetbrains.plugins.go</depends>
+    <depends optional="true" config-file="mirrord-js.xml">NodeJS</depends>
 
 </idea-plugin>
