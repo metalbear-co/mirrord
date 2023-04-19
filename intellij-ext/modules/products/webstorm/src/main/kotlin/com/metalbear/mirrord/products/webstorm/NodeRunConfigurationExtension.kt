@@ -28,26 +28,20 @@ class NodeRunConfigurationExtension: AbstractNodeRunConfigurationExtension() {
             else -> null
         }
 
-
         MirrordExecManager.start(wsl, project)?.let {
                 env ->
             val config = configuration as NodeJsRunConfiguration
-            val unionList = (config.envs.asSequence() + env.asSequence())
-                .distinct()
-                .groupBy({ it.key }, { it.value })
-                .mapValues { (_, values) -> values.joinToString(",") }
-            config.envs = unionList
+            config.envs = config.envs + env;
         }
 
         return null
     }
 
-    override fun getEditorTitle(): String {
-        return "Node Run Configuration"
+    override fun getEditorTitle(): String? {
+        return null
     }
 
     override fun isApplicableFor(profile: AbstractNodeTargetRunProfile): Boolean {
-        // TODO: do we sometimes want to return false here?
         return true
     }
 }
