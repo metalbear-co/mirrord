@@ -1,1 +1,0 @@
-Project build instructions in the testing guide now include the protoc dependency.

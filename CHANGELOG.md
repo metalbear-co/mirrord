@@ -8,6 +8,28 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.39.0](https://github.com/metalbear-co/mirrord/tree/3.39.0) - 2023-04-19
+
+
+### Added
+
+- Support for Node.js on IntelliJ - run/debug JavaScript scripts on IntelliJ
+  with mirrord. [#1284](https://github.com/metalbear-co/mirrord/issues/1284)
+
+
+### Fixed
+
+- Use RemoteFile ops in gethostname to not have a local fd.
+  [#1202](https://github.com/metalbear-co/mirrord/issues/1202)
+
+
+### Internal
+
+- Fix latest tag
+- Project build instructions in the testing guide now include the protoc
+  dependency.
+
+
 ## [3.38.1](https://github.com/metalbear-co/mirrord/tree/3.38.1) - 2023-04-19
 
 
