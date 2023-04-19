@@ -29,7 +29,7 @@ use crate::{steal::HandlerHttpRequest, util::ClientId};
 /// Default start of an HTTP/2 request.
 ///
 /// Used by [`HttpVersion`] to check if the connection should be treated as HTTP/2.
-const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
+const H2_PREFACE: &[u8; 14] = b"PRI * HTTP/2.0";
 
 /// Timeout value for how long we wait for a stream to contain enough bytes to assert which HTTP
 /// version we're dealing with.
@@ -101,7 +101,7 @@ pub(super) async fn filter_task(
         Ok(mut reversible_stream) => {
             match HttpVersion::new(
                 reversible_stream.get_header(),
-                H2_PREFACE.get(..MINIMAL_HEADER_SIZE).unwrap(),
+                &H2_PREFACE[..MINIMAL_HEADER_SIZE],
             ) {
                 HttpVersion::V1 => {
                     HttpV1::serve_connection(
