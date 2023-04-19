@@ -1,4 +1,4 @@
-package com.metalbear.mirrord.products.webstorm
+package com.metalbear.mirrord.products.nodejs
 
 import com.intellij.execution.configurations.RunConfigurationBase
 import com.intellij.openapi.options.ConfigurationException

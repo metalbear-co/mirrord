@@ -1,5 +1,5 @@
 <idea-plugin>
     <extensions defaultExtensionNs="JavaScript">
-        <nodeRunConfigurationExtension implementation="com.metalbear.mirrord.products.webstorm.NodeRunConfigurationExtension" id="mirrordJS"/>
+        <nodeRunConfigurationExtension implementation="com.metalbear.mirrord.products.nodejs.NodeRunConfigurationExtension" id="mirrordJS"/>
     </extensions>
 </idea-plugin>
