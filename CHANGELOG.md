@@ -8,6 +8,17 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.38.1](https://github.com/metalbear-co/mirrord/tree/3.38.1) - 2023-04-19
+
+
+### Fixed
+
+- Release action should work now.
+
+### Internal
+
+- Add protobuf-compiler to rust docs action
+
 ## [3.38.0](https://github.com/metalbear-co/mirrord/tree/3.38.0) - 2023-04-18
 
 
