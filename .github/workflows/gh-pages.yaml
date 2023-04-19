@@ -28,6 +28,8 @@ jobs:
       # enables the creation of a workspace index.html page.
       RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
     steps:
+      - name: Install protobuf-compiler
+        run: sudo apt-get update && apt-get install -y protobuf-compiler
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
