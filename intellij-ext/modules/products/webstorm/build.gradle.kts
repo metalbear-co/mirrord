@@ -20,8 +20,7 @@ intellij {
     type.set("IU")
 //    version.set("192.7142.36")
     version.set(properties("platformVersion"))
-    plugins.set(listOf("JavaScript", "NodeJS", "java"))
-//    plugins.set(listOf("java", "gradle", "maven", "org.intellij.scala:2022.3.8"))
+    plugins.set(listOf("JavaScript", "NodeJS"))
 }
 
 // TODO: something
