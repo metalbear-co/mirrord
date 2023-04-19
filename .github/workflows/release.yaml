@@ -357,17 +357,6 @@ jobs:
         with:
           files: /tmp/release/**
 
-      - name: Update latest tag
-        uses: bewuethr/release-tracker-action@v1
-        env:
-          # GitHub token to enable pushing tags
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          # Move "latest" tag
-          update-latest: true
-          # Don't update the vX.Y tags
-          update-minor: false
-
   release_homebrew:
     needs: release_gh
     runs-on: ubuntu-latest
@@ -404,3 +393,25 @@ jobs:
           git add .
           git commit -m "Update to ${{ env.version }}"
           git push
+
+  update_latest:
+    needs: release_homebrew
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch'
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+        with:
+          # Get complete history
+          fetch-depth: 0
+
+      - name: Update major version and latest tags
+        uses: metalbear-co/release-tracker-action@main
+        env:
+          # GitHub token to enable pushing tags
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Move "latest" tag
+          update-latest: true
+          # Don't update the vX.Y tags
+          update-minor: false
