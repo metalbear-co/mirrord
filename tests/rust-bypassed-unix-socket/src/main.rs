@@ -1,3 +1,5 @@
+#![warn(clippy::indexing_slicing)]
+
 use std::env;
 
 use tokio::{

@@ -1,5 +1,7 @@
 #![feature(assert_matches)]
 #![cfg(target_os = "macos")]
+#![warn(clippy::indexing_slicing)]
+
 use std::{path::Path, time::Duration};
 
 use rstest::rstest;

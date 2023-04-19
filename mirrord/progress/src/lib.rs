@@ -1,4 +1,5 @@
 #![feature(once_cell)]
+#![warn(clippy::indexing_slicing)]
 
 use std::{
     io::stdout,

@@ -1,4 +1,5 @@
 #![feature(stmt_expr_attributes)]
+#![warn(clippy::indexing_slicing)]
 
 mod env;
 mod file_ops;

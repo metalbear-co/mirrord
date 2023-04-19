@@ -101,7 +101,7 @@ pub(super) async fn filter_task(
         Ok(mut reversible_stream) => {
             match HttpVersion::new(
                 reversible_stream.get_header(),
-                &H2_PREFACE[..MINIMAL_HEADER_SIZE],
+                H2_PREFACE.get(..MINIMAL_HEADER_SIZE).unwrap(),
             ) {
                 HttpVersion::V1 => {
                     HttpV1::serve_connection(

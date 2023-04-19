@@ -1,3 +1,4 @@
+#![warn(clippy::indexing_slicing)]
 #![cfg(target_os = "macos")]
 mod codesign;
 mod error;

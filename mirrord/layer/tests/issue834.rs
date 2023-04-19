@@ -1,5 +1,6 @@
 #![feature(assert_matches)]
 #![cfg(target_os = "linux")]
+#![warn(clippy::indexing_slicing)]
 
 use std::{path::PathBuf, time::Duration};
 

@@ -185,7 +185,13 @@ impl TcpOutgoingHandler {
                         Ok(read_amount) => {
                             // Sends the message that the user wrote to our interceptor socket to
                             // be handled on the `agent`, where it'll be forwarded to the remote.
-                            let write = LayerWrite { connection_id, bytes: buffer[..read_amount].to_vec() };
+                            let write = LayerWrite {
+                                connection_id,
+                                bytes: buffer
+                                    .get(..read_amount)
+                                    .expect("read returned more bytes than the buffer can hold")
+                                    .to_vec(),
+                            };
                             let outgoing_write = LayerTcpOutgoing::Write(write);
 
                             if let Err(fail) = layer_tx.send(outgoing_write).await {

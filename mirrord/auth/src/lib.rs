@@ -1,3 +1,5 @@
+#![warn(clippy::indexing_slicing)]
+
 #[cfg(feature = "webbrowser")]
 use std::time::Duration;
 use std::{
