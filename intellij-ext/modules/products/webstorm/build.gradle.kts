@@ -18,15 +18,9 @@ tasks {
 
 intellij {
     type.set("IU")
-//    version.set("192.7142.36")
     version.set(properties("platformVersion"))
-    plugins.set(listOf("JavaScript", "NodeJS"))
+    plugins.set(listOf("NodeJS"))
 }
-
-// TODO: something
-//runIde {
-//    ideDir.set("/Users/$USERNAME/Library/Application Support/JetBrains/Toolbox/apps/WebStorm/ch-0/231.8109.174/WebStorm.app/Contents")
-//}
 
 dependencies {
     implementation(project(":mirrord-core"))

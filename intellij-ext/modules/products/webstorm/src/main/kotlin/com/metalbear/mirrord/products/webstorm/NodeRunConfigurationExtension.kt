@@ -10,7 +10,6 @@ import com.intellij.openapi.options.SettingsEditor
 import com.jetbrains.nodejs.run.NodeJsRunConfiguration
 import com.metalbear.mirrord.MirrordExecManager
 
-
 class NodeRunConfigurationExtension: AbstractNodeRunConfigurationExtension() {
 
     override fun <P : AbstractNodeTargetRunProfile> createEditor(configuration: P): SettingsEditor<P> {
@@ -29,10 +28,10 @@ class NodeRunConfigurationExtension: AbstractNodeRunConfigurationExtension() {
             else -> null
         }
 
-        val config = configuration as NodeJsRunConfiguration
 
         MirrordExecManager.start(wsl, project)?.let {
                 env ->
+            val config = configuration as NodeJsRunConfiguration
             val unionList = (config.envs.asSequence() + env.asSequence())
                 .distinct()
                 .groupBy({ it.key }, { it.value })
@@ -43,12 +42,12 @@ class NodeRunConfigurationExtension: AbstractNodeRunConfigurationExtension() {
         return null
     }
 
-    override fun getEditorTitle(): String? {
+    override fun getEditorTitle(): String {
         return "Node Run Configuration"
     }
 
     override fun isApplicableFor(profile: AbstractNodeTargetRunProfile): Boolean {
-        // TODO: do we want to sometimes return false here?
+        // TODO: do we sometimes want to return false here?
         return true
     }
 }
