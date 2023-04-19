@@ -207,6 +207,8 @@ py-serv-deployment-ff89b5974-x9tjx   1/1     Running   0          3h8m
 
 ### Build and run mirrord
 
+To build this project, you will first need a [Protocol Buffer Compiler](https://grpc.io/docs/protoc-installation/) installed.
+
 #### macOS
 ```bash
 scripts/build_fat_mac.sh
