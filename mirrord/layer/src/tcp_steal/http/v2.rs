@@ -68,6 +68,7 @@ impl HttpV for HttpV2 {
         let request_sender = &mut self.0;
 
         // Solves a "connection was not ready" client error.
+        // https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/barbara_tries_unix_socket.html#the-single-magical-line
         future::poll_fn(|cx| request_sender.poll_ready(cx)).await?;
 
         request_sender
