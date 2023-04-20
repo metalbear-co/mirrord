@@ -1,0 +1,1 @@
+Updated IntelliJ usage gif.
