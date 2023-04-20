@@ -92,9 +92,9 @@ jobs:
       - run: python3 -m pip install cargo-zigbuild
       # Needed for agent
       - run: cargo fmt --all -- --check
-      - run: cargo-zigbuild clippy --lib --bins --all-features -- -D warnings
+      - run: cargo-zigbuild clippy --lib --bins --all-features -- -Wclippy::indexing_slicing -D warnings
       # Check that agent compiles for the supported targets (aarch64)
-      - run: cargo-zigbuild clippy -p mirrord-agent --target aarch64-unknown-linux-gnu -- -D warnings
+      - run: cargo-zigbuild clippy -p mirrord-agent --target aarch64-unknown-linux-gnu -- -Wclippy::indexing_slicing -D warnings
 
   check-rust-docs:
     runs-on: ubuntu-latest
@@ -126,8 +126,8 @@ jobs:
           target: aarch64-apple-darwin
           toolchain: nightly-2023-03-29
       # only mirrord, mirrord-sip contain macOS specific, so run clippy on that.
-      - run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -D warnings
-      - run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -D warnings
+      - run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
+      - run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
 
   test_mirrord_protocol:
     runs-on: ubuntu-latest
