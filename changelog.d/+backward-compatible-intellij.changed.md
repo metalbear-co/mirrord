@@ -1,0 +1,1 @@
+IntelliJ plugin is now available for older versions of IDEs

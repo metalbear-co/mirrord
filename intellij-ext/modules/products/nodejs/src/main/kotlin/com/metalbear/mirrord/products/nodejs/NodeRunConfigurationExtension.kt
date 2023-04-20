@@ -13,7 +13,7 @@ import com.metalbear.mirrord.MirrordExecManager
 class NodeRunConfigurationExtension: AbstractNodeRunConfigurationExtension() {
 
     override fun <P : AbstractNodeTargetRunProfile> createEditor(configuration: P): SettingsEditor<P> {
-        return RunConfigurationSettingsEditor(configuration)
+        return RunConfigurationSettingsEditor()
     }
 
     override fun createLaunchSession(

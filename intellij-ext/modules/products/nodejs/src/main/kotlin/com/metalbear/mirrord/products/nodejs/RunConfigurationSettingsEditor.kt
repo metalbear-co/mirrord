@@ -6,7 +6,7 @@ import com.intellij.openapi.options.SettingsEditor
 import javax.swing.JComponent
 import javax.swing.JPanel
 
-class RunConfigurationSettingsEditor<T : RunConfigurationBase<*>>(configuration: RunConfigurationBase<*>?) :
+class RunConfigurationSettingsEditor<T : RunConfigurationBase<*>> :
     SettingsEditor<T>() {
     private val editor: JPanel = JPanel()
 

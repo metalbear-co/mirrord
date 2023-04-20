@@ -18,7 +18,9 @@ tasks {
 
 intellij {
     type.set("IU")
-    version.set(properties("platformVersion"))
+    // couldn't find the specific nodejs plugin builds and the API
+    // we use is supported only from 2023.3.
+    version.set("2022.1")
     plugins.set(listOf("NodeJS"))
 }
 

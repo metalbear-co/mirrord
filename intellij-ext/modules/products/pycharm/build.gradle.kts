@@ -17,8 +17,8 @@ tasks {
 }
 
 intellij {
-    version.set(properties("platformVersion"))
-    plugins.set(listOf("PythonCore:223.7571.4"))
+    version.set("2022.1.4")
+    plugins.set(listOf("PythonCore:221.6008.17"))
 }
 
 dependencies {

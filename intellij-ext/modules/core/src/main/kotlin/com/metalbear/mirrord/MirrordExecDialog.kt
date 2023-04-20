@@ -40,7 +40,7 @@ object MirrordExecDialog {
             }
 
             override fun keyPressed(e: KeyEvent?) {
-                if (e?.keyCode === KeyEvent.VK_TAB) {
+                if (e?.keyCode == KeyEvent.VK_TAB) {
                     if (e.modifiersEx > 0) {
                         searchField.transferFocusBackward()
                     } else {
