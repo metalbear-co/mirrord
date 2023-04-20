@@ -8,6 +8,26 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.39.1](https://github.com/metalbear-co/mirrord/tree/3.39.1) - 2023-04-21
+
+
+### Changed
+
+- Updated IntelliJ usage gif.
+
+
+### Fixed
+
+- Add magic fix (by polling send_request) to (connection was not ready) hyper
+  error. Also adds some more logs around HTTP stealer.
+  [#1302](https://github.com/metalbear-co/mirrord/issues/1302)
+
+
+### Internal
+
+- Fix arduino/setup-protoc rate limiting error.
+
+
 ## [3.39.0](https://github.com/metalbear-co/mirrord/tree/3.39.0) - 2023-04-19
 
 
