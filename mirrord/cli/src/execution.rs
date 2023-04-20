@@ -17,7 +17,7 @@ use tracing::trace;
 
 use crate::{
     connection::{create_and_connect, AgentConnectInfo},
-    error::CliError,
+    error::{CliError, CliError::IncompatibleWithTargetless},
     extract::extract_library,
     Result,
 };
@@ -52,6 +52,7 @@ impl MirrordExecution {
     where
         P: Progress + Send + Sync,
     {
+        Self::check_config_for_targetless_agent(config)?;
         let lib_path = extract_library(None, progress, true)?;
         let mut env_vars = HashMap::new();
         let (connect_info, mut connection) = create_and_connect(config, progress).await?;
@@ -187,6 +188,31 @@ impl MirrordExecution {
             child: proxy_process,
             patched_path,
         })
+    }
+
+    /// Some features don't make a lot of sense together with targetless agents, so if needed,
+    /// warn the user, if possible, disable unnecessary features.
+    ///
+    /// # Errors
+    ///
+    /// [`IncompatibleWithTargetless`]
+    fn check_config_for_targetless_agent(config: &LayerConfig) -> Result<()> {
+        if config.target.is_none() {
+            if config.feature.network.incoming.is_steal() {
+                Err(IncompatibleWithTargetless("Steal mode".into()))?
+            }
+            if config.agent.ephemeral {
+                Err(IncompatibleWithTargetless(
+                    "Using an ephemeral container for the agent".into(),
+                ))?
+            }
+            if config.agent.pause {
+                Err(IncompatibleWithTargetless(
+                    "The target pause feature".into(),
+                ))?
+            }
+        }
+        Ok(())
     }
 
     /// Wait for the internal proxy to exit.

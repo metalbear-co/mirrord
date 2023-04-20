@@ -33,7 +33,7 @@ pub trait ContainerApi {
     async fn create_agent<P>(
         client: &Client,
         agent: &AgentConfig,
-        runtime_data: RuntimeData,
+        runtime_data: Option<RuntimeData>,
         connection_port: u16,
         progress: &P,
         agent_gid: u16,
@@ -123,10 +123,11 @@ async fn wait_for_agent_startup(
 pub struct JobContainer;
 
 impl ContainerApi for JobContainer {
+    /// runtime_data is `None` when targetless.
     async fn create_agent<P>(
         client: &Client,
         agent: &AgentConfig,
-        runtime_data: RuntimeData,
+        runtime_data: Option<RuntimeData>,
         connection_port: u16,
         progress: &P,
         agent_gid: u16,
@@ -139,13 +140,17 @@ impl ContainerApi for JobContainer {
 
         let mut agent_command_line = vec![
             "./mirrord-agent".to_owned(),
-            "--container-id".to_owned(),
-            runtime_data.container_id,
-            "--container-runtime".to_owned(),
-            runtime_data.container_runtime.to_string(),
             "-l".to_owned(),
             connection_port.to_string(),
         ];
+
+        if let Some(runtime_data) = runtime_data.as_ref() {
+            agent_command_line.push("--container-id".to_owned());
+            agent_command_line.push(runtime_data.container_id.to_string());
+            agent_command_line.push("--container-runtime".to_owned());
+            agent_command_line.push(runtime_data.container_runtime.to_string());
+        }
+
         if let Some(timeout) = agent.communication_timeout {
             agent_command_line.push("-t".to_owned());
             agent_command_line.push(timeout.to_string());
@@ -159,7 +164,7 @@ impl ContainerApi for JobContainer {
             agent_command_line.push("--test-error".to_owned());
         }
 
-        let agent_pod: Job = serde_json::from_value(
+        let mut agent_pod: Job = serde_json::from_value(
             json!({ // Only Jobs support self deletion after completion
                     "metadata": {
                         "name": mirrord_agent_job_name,
@@ -189,7 +194,6 @@ impl ContainerApi for JobContainer {
 
                     "spec": {
                         "hostPID": true,
-                        "nodeName": runtime_data.node_name,
                         "restartPolicy": "Never",
                         "volumes": [
                             {
@@ -213,7 +217,9 @@ impl ContainerApi for JobContainer {
                                 "imagePullPolicy": agent.image_pull_policy,
                                 "securityContext": {
                                     "runAsGroup": agent_gid,
-                                    "privileged": true,
+                                    // If runtime_data is None then the agent is targetless and does
+                                    // not need to be privileged.
+                                    "privileged": runtime_data.is_some(),
                                 },
                                 "volumeMounts": [
                                     {
@@ -246,6 +252,17 @@ impl ContainerApi for JobContainer {
                 }
             ),
         )?;
+
+        // Set node_name here and not as part of the json, because it is omitted for targetless mode
+        // in which case we set it here to `None`. With the `json!` macro I don't know how to
+        // conditionally omit a field.
+        // We will always go into both those `if let`s, as we just created the specs above.
+        if let Some(job_spec) = agent_pod.spec.as_mut() {
+            if let Some(pod_spec) = job_spec.template.spec.as_mut() {
+                pod_spec.node_name = runtime_data.map(|rd| rd.node_name);
+            }
+        }
+
         let job_api = get_k8s_resource_api(client, agent.namespace.as_deref());
 
         job_api
@@ -301,7 +318,7 @@ impl ContainerApi for EphemeralContainer {
     async fn create_agent<P>(
         client: &Client,
         agent: &AgentConfig,
-        runtime_data: RuntimeData,
+        runtime_data: Option<RuntimeData>,
         connection_port: u16,
         progress: &P,
         agent_gid: u16,
@@ -309,6 +326,8 @@ impl ContainerApi for EphemeralContainer {
     where
         P: Progress + Send + Sync,
     {
+        // Ephemeral should never be targetless, so there should be runtime data.
+        let runtime_data = runtime_data.ok_or(KubeApiError::MissingRuntimeData)?;
         let container_progress = progress.subtask("creating ephemeral container...");
 
         warn!("Ephemeral Containers is an experimental feature

@@ -29,7 +29,7 @@ use crate::{
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
     tcp::{Listen, TcpIncoming},
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_LOCALHOST,
-    OUTGOING_IGNORE_LOCALHOST, REMOTE_UNIX_STREAMS,
+    OUTGOING_IGNORE_LOCALHOST, REMOTE_UNIX_STREAMS, TARGETLESS,
 };
 
 /// Hostname initialized from the agent with [`gethostname`].
@@ -149,6 +149,20 @@ pub(super) fn bind(
             .contains(&requested_port)
     {
         Err(Bypass::Port(requested_address.port()))?;
+    }
+
+    if TARGETLESS
+        .get()
+        .copied()
+        .expect("Should be set during initialization!")
+    {
+        warn!(
+            "Binding a port ({}) while running targetless. A targetless agent is not exposed by \
+            any service. Therefore, letting this port bind happen locally instead of on the \
+            cluster.",
+            requested_address.port()
+        );
+        return Detour::Bypass(Bypass::BindWhenTargetless);
     }
 
     let unbound_address = match socket.domain {

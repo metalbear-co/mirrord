@@ -6,6 +6,7 @@ mod file_ops;
 mod http;
 mod pause;
 mod target;
+mod targetless;
 mod traffic;
 
 #[cfg(test)]
@@ -95,6 +96,7 @@ mod utils {
         Go18HTTP,
         Go19HTTP,
         Go20HTTP,
+        CurlToKubeApi,
     }
 
     #[derive(Debug)]
@@ -237,7 +239,19 @@ mod utils {
                 Application::Go18HTTP => vec!["go-e2e/18"],
                 Application::Go19HTTP => vec!["go-e2e/19"],
                 Application::Go20HTTP => vec!["go-e2e/20"],
+                Application::CurlToKubeApi => {
+                    vec!["curl", "https://kubernetes/api", "--insecure"]
+                }
             }
+        }
+
+        pub async fn run_targetless(
+            &self,
+            namespace: Option<&str>,
+            args: Option<Vec<&str>>,
+            env: Option<Vec<(&str, &str)>>,
+        ) -> TestProcess {
+            run_exec_targetless(self.get_cmd(), namespace, args, env).await
         }
 
         pub async fn run(
@@ -247,7 +261,7 @@ mod utils {
             args: Option<Vec<&str>>,
             env: Option<Vec<(&str, &str)>>,
         ) -> TestProcess {
-            run_exec(self.get_cmd(), target, namespace, args, env).await
+            run_exec_with_target(self.get_cmd(), target, namespace, args, env).await
         }
 
         pub fn assert(&self, process: &TestProcess) {
@@ -325,9 +339,32 @@ mod utils {
         }
     }
 
-    pub async fn run_exec(
+    /// Run `mirrord exec` without specifying a target, to run in targetless mode.
+    pub async fn run_exec_targetless(
+        process_cmd: Vec<&str>,
+        namespace: Option<&str>,
+        args: Option<Vec<&str>>,
+        env: Option<Vec<(&str, &str)>>,
+    ) -> TestProcess {
+        run_exec(process_cmd, None, namespace, args, env).await
+    }
+
+    /// See [`run_exec`].
+    pub async fn run_exec_with_target(
         process_cmd: Vec<&str>,
         target: &str,
+        namespace: Option<&str>,
+        args: Option<Vec<&str>>,
+        env: Option<Vec<(&str, &str)>>,
+    ) -> TestProcess {
+        run_exec(process_cmd, Some(target), namespace, args, env).await
+    }
+
+    /// Run `mirrord exec` with the given cmd, optional target (`None` for targetless), namespace,
+    /// mirrord args, and env vars.
+    pub async fn run_exec(
+        process_cmd: Vec<&str>,
+        target: Option<&str>,
         namespace: Option<&str>,
         args: Option<Vec<&str>>,
         env: Option<Vec<(&str, &str)>>,
@@ -337,7 +374,10 @@ mod utils {
             Some(binary_path) => binary_path,
         };
         let temp_dir = tempdir().unwrap();
-        let mut mirrord_args = vec!["exec", "--target", target, "-c"];
+        let mut mirrord_args = vec!["exec", "-c"];
+        if let Some(target) = target {
+            mirrord_args.extend(["--target", target].into_iter());
+        }
         if let Some(namespace) = namespace {
             mirrord_args.extend(["--target-namespace", namespace].into_iter());
         }
