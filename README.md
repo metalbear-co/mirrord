@@ -80,7 +80,7 @@ Get the plugin [here](https://plugins.jetbrains.com/plugin/19772-mirrord).
 - The debugged process will be plugged into the selected pod by mirrord
 
 <p align="center">
-  <img src="./images/intellij.gif">
+  <img src="./intellij-ext/src/main/resources/META-INF/usage.gif">
 </p>
 
 ---

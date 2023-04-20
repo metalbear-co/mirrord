@@ -7,6 +7,7 @@ include (
     "modules/products/goland",
     "modules/products/pycharm",
     "modules/products/rubymine",
+    "modules/products/nodejs",
 )
 
 // Rename modules to mirrord-<module>, I think this is required IntelliJ wise.
