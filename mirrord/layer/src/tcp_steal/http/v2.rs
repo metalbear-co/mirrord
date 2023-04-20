@@ -1,7 +1,7 @@
 //! # [`HttpV2`]
 //!
 //! Handles HTTP/2 requests.
-use std::future::Future;
+use std::future::{self, Future};
 
 use bytes::Bytes;
 use http_body_util::Full;
@@ -48,21 +48,31 @@ impl HttpV for HttpV2 {
 
     type Connection = Connection<TcpStream, Full<Bytes>>;
 
+    #[tracing::instrument(level = "trace")]
     fn new(http_request_sender: Self::Sender) -> Self {
         Self(http_request_sender)
     }
 
+    #[tracing::instrument(level = "trace")]
     async fn handshake(
         target_stream: TcpStream,
     ) -> Result<(Self::Sender, Self::Connection), HttpForwarderError> {
         Ok(http2::handshake(TokioExecutor::default(), target_stream).await?)
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn send_request(
         &mut self,
         request: HttpRequest,
     ) -> hyper::Result<hyper::Response<hyper::body::Incoming>> {
-        self.0.send_request(request.internal_request.into()).await
+        let request_sender = &mut self.0;
+
+        // Solves a "connection was not ready" client error.
+        future::poll_fn(|cx| request_sender.poll_ready(cx)).await?;
+
+        request_sender
+            .send_request(request.internal_request.into())
+            .await
     }
 
     fn take_sender(self) -> Self::Sender {
