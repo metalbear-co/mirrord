@@ -53,18 +53,18 @@ allprojects {
     }
 
 
-    properties("javaVersion").let {
-        tasks.withType<JavaCompile> {
-            sourceCompatibility = it
-            targetCompatibility = it
-        }
 
-        tasks.withType<KotlinCompile> {
-            kotlinOptions {
-                jvmTarget = it
-            }
+    tasks.withType<JavaCompile> {
+        sourceCompatibility = "17"
+        targetCompatibility = "11"
+    }
+
+    tasks.withType<KotlinCompile> {
+        kotlinOptions {
+            jvmTarget = "11"
         }
     }
+
 
 }
 
@@ -91,15 +91,15 @@ tasks {
     }
     // Set the JVM compatibility versions
 
-    properties("javaVersion").let {
-        withType<JavaCompile> {
-            sourceCompatibility = it
-            targetCompatibility = it
-        }
-        withType<KotlinCompile> {
-            kotlinOptions.jvmTarget = it
-        }
+
+    withType<JavaCompile> {
+        sourceCompatibility = "17"
+        targetCompatibility = "11"
     }
+    withType<KotlinCompile> {
+        kotlinOptions.jvmTarget = "11"
+    }
+
 
     wrapper {
         gradleVersion = properties("gradleVersion")
@@ -111,6 +111,9 @@ tasks {
 
     }
 
+    runPluginVerifier {
+        ideVersions.set(listOf("PY-213.5744.248", "IU-223.8836.41", "IU-213.5744.223", "IU-231.8109.175"))
+    }
     patchPluginXml {
         version.set(properties("pluginVersion"))
         // Extract the <!-- Plugin description --> section from README.md and provide for the plugin's manifest
