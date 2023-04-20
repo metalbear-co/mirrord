@@ -6,6 +6,8 @@ include (
     "modules/products/idea",
     "modules/products/goland",
     "modules/products/pycharm",
+    // new is targeting newer pycharm versions (222>) while old targets both.
+    "modules/products/pycharm-new",
     "modules/products/rubymine",
     "modules/products/nodejs",
 )
