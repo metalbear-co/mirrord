@@ -65,7 +65,6 @@ pub(crate) async fn create_and_connect<P>(
 where
     P: Progress + Send + Sync,
 {
-
     if config.operator && let Some((sender, receiver)) = connect_operator(config, progress).await {
         Ok((
             AgentConnectInfo::Operator,
