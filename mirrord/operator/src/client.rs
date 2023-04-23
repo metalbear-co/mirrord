@@ -39,6 +39,7 @@ pub enum OperatorApiError {
 type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
 
 pub struct OperatorApi {
+    session_id: u64,
     client: Client,
     target_api: Api<TargetCrd>,
     target_config: TargetConfig,
@@ -69,7 +70,17 @@ impl OperatorApi {
         let target_api: Api<TargetCrd> =
             get_k8s_resource_api(&client, target_config.namespace.as_deref());
 
+        let session_id = std::env::var("MIRRORD_OPERATOR_LAYER_SESSION")
+            .ok()
+            .and_then(|val| val.parse().ok())
+            .unwrap_or_else(|| {
+                let id = rand::random();
+                std::env::set_var("MIRRORD_OPERATOR_LAYER_SESSION", format!("{id}"));
+                id
+            });
+
         Ok(OperatorApi {
+            session_id,
             client,
             target_api,
             target_config,
@@ -104,6 +115,7 @@ impl OperatorApi {
                         self.target_api.resource_url(),
                         target.name()
                     ))
+                    .header("x-session-id", self.session_id)
                     .body(vec![])?,
             )
             .await

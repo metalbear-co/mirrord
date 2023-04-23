@@ -24,6 +24,7 @@ client = [
   "dep:mirrord-kube",
   "dep:mirrord-progress",
   "dep:mirrord-protocol",
+  "dep:rand",
   "dep:tokio-tungstenite",
   "dep:tracing",
 ]
@@ -52,6 +53,7 @@ http = { version = "0.2", optional = true }
 k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, features = ["derive", "ws"], optional = true }
 futures = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
 rcgen = { version = "0.10", features = ["x509-parser"], optional = true }
 reqwest = { workspace = true, default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
 schemars = { version = "0.8", features = ["chrono"] }
