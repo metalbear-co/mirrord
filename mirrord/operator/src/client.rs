@@ -15,6 +15,7 @@ use tracing::error;
 use crate::crd::TargetCrd;
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
+static MIRRORD_OPERATOR_LAYER_SESSION: &str = "MIRRORD_OPERATOR_LAYER_SESSION";
 
 #[derive(Debug, Error)]
 pub enum OperatorApiError {
@@ -70,12 +71,12 @@ impl OperatorApi {
         let target_api: Api<TargetCrd> =
             get_k8s_resource_api(&client, target_config.namespace.as_deref());
 
-        let session_id = std::env::var("MIRRORD_OPERATOR_LAYER_SESSION")
+        let session_id = std::env::var(MIRRORD_OPERATOR_LAYER_SESSION)
             .ok()
             .and_then(|val| val.parse().ok())
             .unwrap_or_else(|| {
                 let id = rand::random();
-                std::env::set_var("MIRRORD_OPERATOR_LAYER_SESSION", format!("{id}"));
+                std::env::set_var(MIRRORD_OPERATOR_LAYER_SESSION, format!("{id}"));
                 id
             });
 
