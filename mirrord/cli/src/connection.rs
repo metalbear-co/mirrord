@@ -65,12 +65,20 @@ pub(crate) async fn create_and_connect<P>(
 where
     P: Progress + Send + Sync,
 {
+
     if config.operator && let Some((sender, receiver)) = connect_operator(config, progress).await {
         Ok((
             AgentConnectInfo::Operator,
             AgentConnection { sender, receiver },
         ))
     } else {
+        if matches!(config.target.path, Some(mirrord_config::target::Target::Deployment{..})) {
+            // progress.subtask("text").done_with("text");
+            println!("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.\n \
+                      Support for multi-pod impersonation is available in mirrord for Teams.\n \
+                      To try it out, join the waitlist with `mirrord waitlist <email address>`, or at this link: https://metalbear.co/#waitlist-form");
+        }
+        
         let k8s_api = KubernetesAPI::create(config)
             .await
             .map_err(CliError::KubernetesApiFailed)?;
