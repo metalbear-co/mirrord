@@ -77,7 +77,6 @@ where
                       Support for multi-pod impersonation is available in mirrord for Teams.\n \
                       To try it out, join the waitlist with `mirrord waitlist <email address>`, or at this link: https://metalbear.co/#waitlist-form");
         }
-        
         let k8s_api = KubernetesAPI::create(config)
             .await
             .map_err(CliError::KubernetesApiFailed)?;
