@@ -40,6 +40,9 @@ const MIRRORD_DIR = function () {
 const versionCheckEndpoint = 'https://version.mirrord.dev/get-latest-version';
 const versionCheckInterval = 1000 * 60 * 3;
 
+/// Key used to store the last selected target in the global state.
+const LAST_TARGET_KEY = "mirrord-last-target";
+
 let buttons: { toggle: vscode.StatusBarItem, settings: vscode.StatusBarItem };
 let globalContext: vscode.ExtensionContext;
 
@@ -139,6 +142,7 @@ class MirrordAPI {
 
 
 	/// Uses `mirrord ls` to get a list of all targets.
+	/// Targets are sorted, with an exception of the last used target being the first on the list.
 	async listTargets(configPath: string | null | undefined): Promise<string[]> {
 		const args = ['ls'];
 
@@ -153,7 +157,23 @@ class MirrordAPI {
 			throw new Error("error occured listing targets: " + stderr);
 		}
 
-		return JSON.parse(stdout);
+		const targets: string[] = JSON.parse(stdout);
+		const lastTarget = globalContext.globalState.get(LAST_TARGET_KEY);
+		targets.sort((t1, t2) => {
+			if (t1 === t2) {
+				return 0;
+			} else if (t1 === lastTarget) {
+				return -1;
+			} else if (t2 === lastTarget) {
+				return 1;
+			} else if (t1 < t2) {
+				return -1;
+			} else {
+				return 1;
+			}
+		});
+
+		return targets;
 	}
 
 	// Run the extension execute sequence
@@ -179,7 +199,7 @@ class MirrordAPI {
 					args.push("-f", configFile);
 				}
 				if (executable) {
-					args.push("-e", executable)
+					args.push("-e", executable);
 				}
 				let child = this.spawn(args);
 
@@ -410,6 +430,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 
 			if (targetName) {
 				target = targetName;
+				globalContext.globalState.update(LAST_TARGET_KEY, targetName);
 			}
 		}
 
