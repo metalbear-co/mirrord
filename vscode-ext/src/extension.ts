@@ -40,7 +40,7 @@ const MIRRORD_DIR = function () {
 const versionCheckEndpoint = 'https://version.mirrord.dev/get-latest-version';
 const versionCheckInterval = 1000 * 60 * 3;
 
-/// Key used to store the last selected target in the global state.
+/// Key used to store the last selected target in the persistent state.
 const LAST_TARGET_KEY = "mirrord-last-target";
 
 let buttons: { toggle: vscode.StatusBarItem, settings: vscode.StatusBarItem };
@@ -160,7 +160,9 @@ class MirrordAPI {
 		const targets: string[] = JSON.parse(stdout);
 		targets.sort();
 
-		const lastTarget: string | undefined = globalContext.globalState.get(LAST_TARGET_KEY);
+		let lastTarget: string | undefined = globalContext.workspaceState.get(LAST_TARGET_KEY)
+			|| globalContext.globalState.get(LAST_TARGET_KEY);
+
 		if (lastTarget !== undefined) {
 			const idx = targets.indexOf(lastTarget);
 			if (idx !== -1) {
@@ -427,6 +429,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 			if (targetName) {
 				target = targetName;
 				globalContext.globalState.update(LAST_TARGET_KEY, targetName);
+				globalContext.workspaceState.update(LAST_TARGET_KEY, targetName);
 			}
 		}
 
