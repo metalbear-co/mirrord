@@ -1,4 +1,6 @@
+#![warn(clippy::indexing_slicing)]
 #![cfg(target_os = "macos")]
+
 mod codesign;
 mod error;
 mod whitespace;
@@ -178,7 +180,9 @@ mod main {
 
         // Just the thin binary - if the file was a thin binary of a supported architecture to
         // begin with then it's the whole file, if its a fat binary then it's just a part of it.
-        let binary = &data[binary_info.offset..binary_info.offset + binary_info.size];
+        let binary = data
+            .get(binary_info.offset..binary_info.offset + binary_info.size)
+            .expect("invalid SIP binary");
         std::fs::write(output.as_ref(), binary)?;
         // Give the new file the same permissions as the old file.
         std::fs::set_permissions(
@@ -198,7 +202,9 @@ mod main {
         read_shebang_from_file(original_path.as_ref())?
             .map(|original_shebang| -> Result<()> {
                 let data = std::fs::read(original_path.as_ref())?;
-                let contents = &data[original_shebang.len()..];
+                let contents = data
+                    .get(original_shebang.len()..)
+                    .expect("original shebang size exceeds file size");
                 let mut new_contents = String::from("#!") + new_shebang;
                 new_contents.push_str(std::str::from_utf8(contents).map_err(|_utf| {
                     UnlikelyError("Can't read script contents as utf8".to_string())
@@ -224,27 +230,20 @@ mod main {
     /// "#!/usr/bin/env bash\n..." -> Some("#!/usr/bin/env")
     fn get_shebang_from_string(file_contents: &str) -> Option<String> {
         const BOM: &str = "\u{feff}";
-        let mut content: &str = file_contents;
-        if content.starts_with(BOM) {
-            content = &content[BOM.len()..];
-        }
+        let content = file_contents.strip_prefix(BOM).unwrap_or(file_contents);
+        let rest = content.strip_prefix("#!")?;
 
-        let mut shebang = None;
-        if let Some(rest) = content.strip_prefix("#!") {
-            let rest = whitespace::skip(rest);
-            if !rest.starts_with('[') {
-                let full_shebang = if let Some(idx) = content.find('\n') {
-                    &content[..idx]
-                } else {
-                    content
-                };
-                shebang = full_shebang
-                    .split_whitespace()
-                    .next()
-                    .map(|s| s.to_string());
-            }
+        if whitespace::skip(rest).starts_with('[') {
+            None
+        } else {
+            content
+                .split_once('\n')
+                .map(|(line, _)| line)
+                .unwrap_or(content)
+                .split_whitespace()
+                .next()
+                .map(ToString::to_string)
         }
-        shebang
     }
 
     /// Including '#!', just until whitespace, no arguments.
@@ -305,7 +304,8 @@ mod main {
         }
         if let Some(shebang) = read_shebang_from_file(&complete_path)? {
             // Start from index 2 of shebang to get only the path.
-            return match get_sip_status_rec(&shebang[2..], seen_paths, patch_binaries)? {
+            let path = shebang.strip_prefix("#!").unwrap_or(&shebang);
+            return match get_sip_status_rec(path, seen_paths, patch_binaries)? {
                 // The file at the end of the shebang chain is not protected.
                 SipStatus::NoSIP => Ok(SipStatus::NoSIP),
                 some_sip => Ok(SipStatus::SomeSIP(complete_path, Some(Box::new(some_sip)))),

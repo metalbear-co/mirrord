@@ -1,4 +1,5 @@
 #![feature(vec_into_raw_parts)]
+#![warn(clippy::indexing_slicing)]
 
 extern crate alloc;
 use alloc::ffi::CString;

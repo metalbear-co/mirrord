@@ -110,7 +110,10 @@ unsafe fn assign_direntry(
 
     let dir_name = CString::new(in_entry.name)?;
     let dir_name_bytes = dir_name.as_bytes_with_nul();
-    (*out_entry).d_name[..dir_name_bytes.len()]
+    (*out_entry)
+        .d_name
+        .get_mut(..dir_name_bytes.len())
+        .expect("directory name length exceeds limit")
         .copy_from_slice(bytemuck::cast_slice(dir_name_bytes));
 
     #[cfg(target_os = "macos")]
@@ -322,7 +325,9 @@ pub(crate) unsafe extern "C" fn pread_detour(
             //
             // Callers can check for EOF by using `ferror`.
             if read_amount > 0 {
-                let bytes_slice = &bytes[0..fixed_read as usize];
+                let bytes_slice = bytes
+                    .get(..fixed_read as usize)
+                    .expect("read_amount exceeds bytes length in ReadFileResponse");
 
                 ptr::copy(bytes_slice.as_ptr().cast(), out_buffer, bytes_slice.len());
             }
@@ -348,7 +353,9 @@ pub(crate) unsafe extern "C" fn _pread_nocancel_detour(
             //
             // Callers can check for EOF by using `ferror`.
             if read_amount > 0 {
-                let bytes_slice = &bytes[0..fixed_read as usize];
+                let bytes_slice = bytes
+                    .get(..fixed_read as usize)
+                    .expect("read_amount exceeds bytes length in ReadFileResponse");
 
                 ptr::copy(bytes_slice.as_ptr().cast(), out_buffer, bytes_slice.len());
             }

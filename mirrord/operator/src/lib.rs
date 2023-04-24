@@ -1,4 +1,5 @@
 #![feature(once_cell)]
+#![warn(clippy::indexing_slicing)]
 
 #[cfg(feature = "client")]
 pub mod client;

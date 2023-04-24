@@ -79,16 +79,13 @@ fn create_github_link<P: AsRef<Path>>(log_file: P) -> String {
 
     if let Ok(logs) = fs::read(log_file) {
         let encoded_logs = urlencoding::encode_binary(&logs);
+        let last_logs = encoded_logs
+            .len()
+            .checked_sub(6000)
+            .and_then(|offset| encoded_logs.get(offset..))
+            .unwrap_or(&encoded_logs);
 
-        if encoded_logs.len() > 6000 {
-            format!(
-                "{}&logs={}",
-                base_url,
-                &encoded_logs[(encoded_logs.len() - 6000)..]
-            )
-        } else {
-            format!("{base_url}&logs={encoded_logs}")
-        }
+        format!("{base_url}&logs={last_logs}")
     } else {
         base_url
     }

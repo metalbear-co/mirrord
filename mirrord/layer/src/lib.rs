@@ -16,6 +16,7 @@
 #![feature(async_fn_in_trait)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![allow(incomplete_features)]
+#![warn(clippy::indexing_slicing)]
 
 //! Loaded dynamically with your local process.
 //!
@@ -76,6 +77,7 @@ use std::{
     collections::{HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     panic,
+    str::FromStr,
     sync::{LazyLock, OnceLock},
 };
 
@@ -270,16 +272,15 @@ pub(crate) fn port_debug_patch(addr: &SocketAddr) -> bool {
         let ignored_ip =
             ip == IpAddr::V4(Ipv4Addr::LOCALHOST) || ip == IpAddr::V6(Ipv6Addr::LOCALHOST);
         // port range can be specified as "45000-65000" or just "45893"
-        let ports: Vec<u16> = ports
+        let ports = ports
             .split('-')
-            .map(|p| {
-                p.parse()
-                    .expect("Failed to parse the given port - not a number!")
-            })
-            .collect();
-        match ports.len() {
-            2 => ignored_ip && (port >= ports[0] && port <= ports[1]),
-            1 => ignored_ip && port == ports[0],
+            .map(u16::from_str)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("failed to parse the given port");
+
+        match ports[..] {
+            [p1, p2] => ignored_ip && (port >= p1 && port <= p2),
+            [p] => ignored_ip && port == p,
             _ => false,
         }
     } else {
