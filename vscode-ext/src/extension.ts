@@ -158,20 +158,16 @@ class MirrordAPI {
 		}
 
 		const targets: string[] = JSON.parse(stdout);
-		const lastTarget = globalContext.globalState.get(LAST_TARGET_KEY);
-		targets.sort((t1, t2) => {
-			if (t1 === t2) {
-				return 0;
-			} else if (t1 === lastTarget) {
-				return -1;
-			} else if (t2 === lastTarget) {
-				return 1;
-			} else if (t1 < t2) {
-				return -1;
-			} else {
-				return 1;
+		targets.sort();
+
+		const lastTarget: string | undefined = globalContext.globalState.get(LAST_TARGET_KEY);
+		if (lastTarget !== undefined) {
+			const idx = targets.indexOf(lastTarget);
+			if (idx !== -1) {
+				targets.splice(idx, 1);
+				targets.unshift(lastTarget);
 			}
-		});
+		}
 
 		return targets;
 	}
