@@ -124,15 +124,19 @@ impl DebuggerPorts {
 
     /// Return whether the given [SocketAddr] is used by the debugger.
     pub fn contains(&self, addr: &SocketAddr) -> bool {
-        matches!(
+        let is_localhost = matches!(
             addr.ip(),
             IpAddr::V4(Ipv4Addr::LOCALHOST) | IpAddr::V6(Ipv6Addr::LOCALHOST)
-        ) && (self.detected == Some(addr.port())
-            || self
-                .fixed
-                .as_ref()
-                .map(|r| r.contains(&addr.port()))
-                .unwrap_or(false))
+        );
+
+        let is_detected = self.detected == Some(addr.port());
+        let is_fixed = self
+            .fixed
+            .as_ref()
+            .map(|r| r.contains(&addr.port()))
+            .unwrap_or(false);
+
+        is_localhost && (is_detected || is_fixed)
     }
 }
 
