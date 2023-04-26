@@ -104,20 +104,31 @@ impl DebuggerPorts {
             })
             .and_then(|d| d.get_port(&std::env::args().collect::<Vec<_>>()));
 
-        let fixed = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV).ok().and_then(|s| {
-            let chunks = s.split('-').map(u16::from_str).collect::<Result<Vec<_>, _>>().inspect_err(|e| error!("Failed to decode debugger ports from {} env variable: {}", MIRRORD_IGNORE_DEBUGGER_PORTS_ENV, e)).ok()?;
-            match *chunks.as_slice() {
-                [p] => Some(p..=p),
-                [p1, p2] if p1 <= p2 => Some(p1..=p2),
-                _ => {
-                    error!(
-                        "Failed to decode debugger ports from {} env variable: expected a port or a range of ports",
+        let fixed = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV)
+            .ok()
+            .and_then(|s| {
+                let chunks = s
+                    .split('-')
+                    .map(u16::from_str)
+                    .collect::<Result<Vec<_>, _>>()
+                    .inspect_err(|e| error!(
+                        "Failed to decode debugger ports from {} env variable: {}",
                         MIRRORD_IGNORE_DEBUGGER_PORTS_ENV,
-                    );
-                    None
-                },
-            }
-        });
+                        e
+                    ))
+                    .ok()?;
+                match *chunks.as_slice() {
+                    [p] => Some(p..=p),
+                    [p1, p2] if p1 <= p2 => Some(p1..=p2),
+                    _ => {
+                        error!(
+                            "Failed to decode debugger ports from {} env variable: expected a port or a range of ports",
+                            MIRRORD_IGNORE_DEBUGGER_PORTS_ENV,
+                        );
+                        None
+                    },
+                }
+            });
 
         Self { detected, fixed }
     }
