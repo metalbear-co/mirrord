@@ -13,8 +13,9 @@ use tracing::{error, warn};
 /// dynamically.
 pub const MIRRORD_DETECT_DEBUGGER_PORT_ENV: &str = "MIRRORD_DETECT_DEBUGGER_PORT";
 
-/// Environment variable used to tell the layer that it should ignore certain local ports used by
-/// the debugger. Used when injecting the layer through IDE.
+/// Environment variable used to tell the layer that it should ignore certain local ports that may
+/// be used by the debugger. Used when injecting the layer through IDE. This setting will be ignored
+/// if the layer successfully detects the port at runtime, see [`MIRRORD_DETECT_DEBUGGER_PORT_ENV`].
 ///
 /// Value passed through this variable can represent a single port like '12233' or a range of ports
 /// like `12233-13000`.
@@ -78,13 +79,14 @@ impl DebuggerType {
 /// Local ports used by the debugger running the process.
 /// These should be ignored by the layer.
 #[derive(Debug)]
-pub struct DebuggerPorts {
-    detected: Option<u16>,
-    fixed: Option<RangeInclusive<u16>>,
+pub enum DebuggerPorts {
+    Detected(u16),
+    FixedRange(RangeInclusive<u16>),
+    None,
 }
 
 impl DebuggerPorts {
-    /// Create a new instance of this struct based on the environment variables
+    /// Create a new instance of this enum based on the environment variables
     /// ([`MIRRORD_DETECT_DEBUGGER_PORT_ENV`] and [`MIRRORD_IGNORE_DEBUGGER_PORTS_ENV`]) and command
     /// line arguments.
     ///
@@ -103,8 +105,11 @@ impl DebuggerPorts {
                     .ok()
             })
             .and_then(|d| d.get_port(&std::env::args().collect::<Vec<_>>()));
+        if let Some(port) = detected {
+            return Self::Detected(port);
+        }
 
-        let fixed = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV)
+        let fixed_range = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV)
             .ok()
             .and_then(|s| {
                 let chunks = s
@@ -129,8 +134,11 @@ impl DebuggerPorts {
                     },
                 }
             });
+        if let Some(range) = fixed_range {
+            return Self::FixedRange(range);
+        }
 
-        Self { detected, fixed }
+        Self::None
     }
 
     /// Return whether the given [SocketAddr] is used by the debugger.
@@ -139,15 +147,15 @@ impl DebuggerPorts {
             addr.ip(),
             IpAddr::V4(Ipv4Addr::LOCALHOST) | IpAddr::V6(Ipv6Addr::LOCALHOST)
         );
+        if !is_localhost {
+            return false;
+        }
 
-        let is_detected = self.detected == Some(addr.port());
-        let is_fixed = self
-            .fixed
-            .as_ref()
-            .map(|r| r.contains(&addr.port()))
-            .unwrap_or(false);
-
-        is_localhost && (is_detected || is_fixed)
+        match self {
+            Self::Detected(port) => *port == addr.port(),
+            Self::FixedRange(range) => range.contains(&addr.port()),
+            Self::None => false,
+        }
     }
 }
 
@@ -169,5 +177,24 @@ mod test {
             ),
             Some(57141),
         )
+    }
+
+    #[test]
+    fn debugger_ports_contain() {
+        assert!(DebuggerPorts::Detected(1337).contains(&"127.0.0.1:1337".parse().unwrap()));
+        assert!(!DebuggerPorts::Detected(1337).contains(&"127.0.0.1:1338".parse().unwrap()));
+        assert!(!DebuggerPorts::Detected(1337).contains(&"8.8.8.8:1337".parse().unwrap()));
+
+        assert!(
+            DebuggerPorts::FixedRange(45000..=50000).contains(&"127.0.0.1:47888".parse().unwrap())
+        );
+        assert!(
+            !DebuggerPorts::FixedRange(45000..=50000).contains(&"127.0.0.1:80".parse().unwrap())
+        );
+        assert!(
+            !DebuggerPorts::FixedRange(45000..=50000).contains(&"8.8.8.8:47888".parse().unwrap())
+        );
+
+        assert!(!DebuggerPorts::None.contains(&"127.0.0.1:1337".parse().unwrap()));
     }
 }
