@@ -270,7 +270,7 @@ fn is_nix_or_devbox() -> bool {
 }
 
 /// Prevent mirrord from connecting to ports used by the IDE debugger
-pub(crate) fn port_debug_patch(addr: &SocketAddr) -> bool {
+pub(crate) fn is_debugger_port(addr: &SocketAddr) -> bool {
     DEBUGGER_IGNORED_PORTS
         .get()
         .expect("DEBUGGER_IGNORED_PORTS not initialized")
