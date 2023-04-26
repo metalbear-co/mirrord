@@ -7,7 +7,7 @@ use std::{
 
 use tracing::{error, warn};
 
-/// Environment variable used to tell the layer that it should dynamically detect the local port
+/// Environment variable used to tell the layer that it should dynamically detect the local
 /// port used by the given debugger. Value passed through this variable should parse into
 /// [`DebuggerType`]. Used when injecting the layer through IDE, because the debugger port is chosen
 /// dynamically.
