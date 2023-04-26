@@ -44,6 +44,9 @@ impl DebuggerType {
     /// `/path/to/python /path/to/vscode/extensions/debugpy --connect 127.0.0.1:57141 --configure-qt
     /// none --adapter-access-token c2d745556a5a571d09dbf9c14af2898b3d6c174597d6b7198d9d30c105d5ab24
     /// /path/to/script.py`
+    /// Port would not be extracted from a command like `/path/to/python /path/to/script.py
+    /// --connect 127.0.0.1:57141` (debugger name missing) or `/path/to/python
+    /// /path/to/vscode/extensions/debugpy /path/to/script.py` (socket missing).
     fn get_port(self, args: &[String]) -> Option<u16> {
         match self {
             Self::DebugPy => {
