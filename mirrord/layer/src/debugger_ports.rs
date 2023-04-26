@@ -137,7 +137,12 @@ mod test {
         let command = "/home/user/path/to/venv/bin/python /home/user/.vscode/extensions/ms-python.python-2023.6.1/pythonFiles/lib/python/debugpy/adapter/../../debugpy/launcher/../../debugpy --connect 127.0.0.1:57141 --configure-qt none --adapter-access-token c2d745556a5a571d09dbf9c14af2898b3d6c174597d6b7198d9d30c105d5ab24 /home/user/path/to/script.py";
 
         assert_eq!(
-            debugger.get_port(&command.split_ascii_whitespace().map(ToString::to_string).collect::<Vec<_>>()),
+            debugger.get_port(
+                &command
+                    .split_ascii_whitespace()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+            ),
             Some(57141),
         )
     }
