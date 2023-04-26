@@ -38,10 +38,16 @@ impl FromStr for DebuggerType {
 }
 
 impl DebuggerType {
+    /// Retrieves the port used by debugger of this type from the command.
+    /// Logic of processing the command is based on examples taken from the IDEs.
+    /// For example, command used by VS Code to invoke the Python debugger looked like
+    /// `/path/to/python /path/to/vscode/extensions/debugpy --connect 127.0.0.1:57141 --configure-qt
+    /// none --adapter-access-token c2d745556a5a571d09dbf9c14af2898b3d6c174597d6b7198d9d30c105d5ab24
+    /// /path/to/script.py`
     fn get_port(self, args: &[String]) -> Option<u16> {
         match self {
             Self::DebugPy => {
-                let is_python = args.first()?.rsplit('/').next().unwrap().contains("python");
+                let is_python = args.first()?.rsplit('/').next()?.starts_with("py");
                 let runs_debugpy = args.get(1)?.ends_with("debugpy");
                 if is_python && runs_debugpy {
                     args.windows(2).find_map(|window| match window {
