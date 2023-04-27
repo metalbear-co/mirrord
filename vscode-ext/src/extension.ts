@@ -40,6 +40,9 @@ const MIRRORD_DIR = function () {
 const versionCheckEndpoint = 'https://version.mirrord.dev/get-latest-version';
 const versionCheckInterval = 1000 * 60 * 3;
 
+/// Key used to store the last selected target in the persistent state.
+const LAST_TARGET_KEY = "mirrord-last-target";
+
 let buttons: { toggle: vscode.StatusBarItem, settings: vscode.StatusBarItem };
 let globalContext: vscode.ExtensionContext;
 
@@ -139,6 +142,7 @@ class MirrordAPI {
 
 
 	/// Uses `mirrord ls` to get a list of all targets.
+	/// Targets are sorted, with an exception of the last used target being the first on the list.
 	async listTargets(configPath: string | null | undefined): Promise<string[]> {
 		const args = ['ls'];
 
@@ -153,7 +157,21 @@ class MirrordAPI {
 			throw new Error("error occured listing targets: " + stderr);
 		}
 
-		return JSON.parse(stdout);
+		const targets: string[] = JSON.parse(stdout);
+		targets.sort();
+
+		let lastTarget: string | undefined = globalContext.workspaceState.get(LAST_TARGET_KEY)
+			|| globalContext.globalState.get(LAST_TARGET_KEY);
+
+		if (lastTarget !== undefined) {
+			const idx = targets.indexOf(lastTarget);
+			if (idx !== -1) {
+				targets.splice(idx, 1);
+				targets.unshift(lastTarget);
+			}
+		}
+
+		return targets;
 	}
 
 	// Run the extension execute sequence
@@ -179,7 +197,7 @@ class MirrordAPI {
 					args.push("-f", configFile);
 				}
 				if (executable) {
-					args.push("-e", executable)
+					args.push("-e", executable);
 				}
 				let child = this.spawn(args);
 
@@ -410,6 +428,8 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 
 			if (targetName) {
 				target = targetName;
+				globalContext.globalState.update(LAST_TARGET_KEY, targetName);
+				globalContext.workspaceState.update(LAST_TARGET_KEY, targetName);
 			}
 		}
 
@@ -420,11 +440,13 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 			if (process.platform === "darwin") {
 				config.dlvToolPath = path.join(globalContext.extensionPath, "bin", "darwin", "dlv-" + process.arch);
 			}
+		} else if (config.type === "python") {
+			config.env["MIRRORD_DETECT_DEBUGGER_PORT"] = "debugpy";
 		}
-		
-		// add range of ports that vs code uses for debugging (mostly Python)
-		// todo: find better way to resolve the exact ports.
-		config.env["DEBUGGER_IGNORE_PORTS_PATCH"] = "45000-65535";
+
+		// Add a fixed range of ports that VS Code uses for debugging.
+		// TODO: find a way to use MIRRORD_DETECT_DEBUGGER_PORT for other debuggers.
+		config.env["MIRRORD_IGNORE_DEBUGGER_PORTS"] = "45000-65535";
 
 		let executableFieldName = getExecutableFieldName(config);
 

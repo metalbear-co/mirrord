@@ -1,3 +1,5 @@
+#![warn(clippy::indexing_slicing)]
+
 use std::{
     env,
     io::{Read, Write},
@@ -7,11 +9,7 @@ use std::{
 const MESSAGE: &[u8] = "FOO BAR HAM".as_bytes();
 
 fn parse_args() -> Option<(bool, SocketAddr, Vec<SocketAddr>)> {
-    let args = env::args().collect::<Vec<_>>();
-
-    if args.len() != 4 {
-        None?
-    }
+    let args: [String; 4] = env::args().collect::<Vec<_>>().try_into().ok()?;
 
     let tcp = match args[1].as_str() {
         "--tcp" => true,
@@ -74,7 +72,12 @@ fn test_udp(socket: SocketAddr, peer: SocketAddr) {
     let mut response = [0; MESSAGE.len()];
     let (res_len, remote) = udp_socket.recv_from(&mut response).unwrap();
     if res_len != MESSAGE.len() || response != MESSAGE {
-        panic!("Invalid response received: {:?}.", &response[..res_len]);
+        panic!(
+            "Invalid response received: {:?}.",
+            response
+                .get(..res_len)
+                .expect("returned response length out of bounds")
+        );
     }
     if remote != peer {
         panic!("Invalid peer address from recv: {remote}.");

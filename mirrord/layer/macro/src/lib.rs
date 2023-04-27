@@ -1,3 +1,5 @@
+#![warn(clippy::indexing_slicing)]
+
 use proc_macro2::Span;
 use quote::quote;
 use syn::{parse::Parser, punctuated::Punctuated, token::Comma, Block, Ident, ItemFn};
@@ -34,7 +36,8 @@ pub fn hook_fn(
 
         let ident_string = signature.ident.to_string();
         let type_name = ident_string.split("_detour").next().map(|fn_name| {
-            let name = format!("Fn{}", fn_name[0..1].to_uppercase() + &fn_name[1..]);
+            let (uppercase, lowercase) = fn_name.split_at(1);
+            let name = format!("Fn{}{}", uppercase.to_uppercase(), lowercase);
             Ident::new(&name, Span::call_site())
         });
 
@@ -104,7 +107,8 @@ pub fn hook_guard_fn(
 
         let ident_string = signature.ident.to_string();
         let type_name = ident_string.split("_detour").next().map(|fn_name| {
-            let name = format!("Fn{}", fn_name[0..1].to_uppercase() + &fn_name[1..]);
+            let (uppercase, lowercase) = fn_name.split_at(1);
+            let name = format!("Fn{}{}", uppercase.to_uppercase(), lowercase);
             Ident::new(&name, Span::call_site())
         });
 

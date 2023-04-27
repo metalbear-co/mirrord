@@ -24,6 +24,8 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 */
 
+#![allow(clippy::indexing_slicing)]
+
 // source: https://github.com/dtolnay/syn/blob/master/src/whitespace.rs
 
 pub fn skip(mut s: &str) -> &str {

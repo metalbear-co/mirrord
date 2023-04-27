@@ -7,6 +7,7 @@
 #![feature(tcp_quickack)]
 #![feature(async_fn_in_trait)]
 #![allow(incomplete_features)]
+#![warn(clippy::indexing_slicing)]
 
 use std::{
     collections::{HashMap, HashSet},
@@ -660,10 +661,11 @@ async fn clear_iptable_chain() -> Result<()> {
 
 fn spawn_child_agent() -> Result<()> {
     let command_args = std::env::args().collect::<Vec<_>>();
+    let (command, args) = command_args
+        .split_first()
+        .expect("cannot spawn child agent: command missing from program arguments");
 
-    let mut child_agent = std::process::Command::new(&command_args[0])
-        .args(&command_args[1..])
-        .spawn()?;
+    let mut child_agent = std::process::Command::new(command).args(args).spawn()?;
 
     let _ = child_agent.wait();
 

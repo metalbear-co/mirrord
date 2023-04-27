@@ -25,8 +25,8 @@ use crate::{
     dns::GetAddrInfo,
     error::HookError,
     file::{self, OPEN_FILES},
+    is_debugger_port,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
-    port_debug_patch,
     tcp::{Listen, TcpIncoming},
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_LOCALHOST,
     OUTGOING_IGNORE_LOCALHOST, REMOTE_UNIX_STREAMS,
@@ -142,7 +142,7 @@ pub(super) fn bind(
     }
 
     if is_ignored_port(&requested_address)
-        || port_debug_patch(&requested_address)
+        || is_debugger_port(&requested_address)
         || INCOMING_IGNORE_PORTS
             .get()
             .expect("`INCOMING_IGNORE_PORTS` not set. Please report a bug")
@@ -388,7 +388,7 @@ pub(super) fn connect(
             }
         }
 
-        if is_ignored_port(ip_address) || port_debug_patch(ip_address) {
+        if is_ignored_port(ip_address) || is_debugger_port(ip_address) {
             return Detour::Bypass(Bypass::Port(ip_address.port()));
         }
     } else if remote_address.is_unix() {

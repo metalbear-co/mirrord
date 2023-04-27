@@ -1,4 +1,5 @@
 #![feature(assert_matches)]
+#![warn(clippy::indexing_slicing)]
 
 #[cfg(target_os = "linux")]
 use std::assert_matches::assert_matches;

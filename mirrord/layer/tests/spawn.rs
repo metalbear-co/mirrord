@@ -1,4 +1,5 @@
 #![feature(assert_matches)]
+#![warn(clippy::indexing_slicing)]
 
 use std::{path::PathBuf, time::Duration};
 
