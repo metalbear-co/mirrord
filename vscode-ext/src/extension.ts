@@ -440,11 +440,13 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 			if (process.platform === "darwin") {
 				config.dlvToolPath = path.join(globalContext.extensionPath, "bin", "darwin", "dlv-" + process.arch);
 			}
+		} else if (config.type === "python") {
+			config.env["MIRRORD_DETECT_DEBUGGER_PORT"] = "debugpy";
 		}
-		
-		// add range of ports that vs code uses for debugging (mostly Python)
-		// todo: find better way to resolve the exact ports.
-		config.env["DEBUGGER_IGNORE_PORTS_PATCH"] = "45000-65535";
+
+		// Add a fixed range of ports that VS Code uses for debugging.
+		// TODO: find a way to use MIRRORD_DETECT_DEBUGGER_PORT for other debuggers.
+		config.env["MIRRORD_IGNORE_DEBUGGER_PORTS"] = "45000-65535";
 
 		let executableFieldName = getExecutableFieldName(config);
 
