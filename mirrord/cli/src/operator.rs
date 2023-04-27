@@ -131,7 +131,7 @@ Operator License
     if let Some(status) = mirrord_status.status {
         for session in &status.sessions {
             sessions.add_row(row![
-                session.id.clone().unwrap_or_default(),
+                session.id.as_deref().unwrap_or(""),
                 &session.target,
                 &session.user,
                 humantime::format_duration(Duration::from_secs(session.duration_secs)),
