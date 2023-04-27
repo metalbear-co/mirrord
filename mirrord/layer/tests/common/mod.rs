@@ -124,6 +124,7 @@ impl TestProcess {
     }
 
     pub fn assert_stdout_contains(&self, string: &str) {
+        println!("{:#?}", self.stdout.lock().unwrap().as_str());
         assert!(self.stdout.lock().unwrap().contains(string));
     }
 
@@ -738,6 +739,7 @@ pub enum Application {
     Go19SelfOpen,
     RustOutgoingUdp,
     RustOutgoingTcp,
+    NodeIssue1123,
 }
 
 impl Application {
@@ -804,6 +806,7 @@ impl Application {
             Application::Go19FAccessAt => String::from("tests/apps/faccessat_go/19"),
             Application::Go20FAccessAt => String::from("tests/apps/faccessat_go/20"),
             Application::Go19SelfOpen => String::from("tests/apps/self_open/19"),
+            Application::NodeIssue1123 => String::from("node"),
             Application::RustOutgoingUdp | Application::RustOutgoingTcp => format!(
                 "{}/{}",
                 env!("CARGO_MANIFEST_DIR"),
@@ -888,6 +891,10 @@ impl Application {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
+            Application::NodeIssue1123 => {
+                app_path.push("issue1123.mjs");
+                vec![app_path.to_string_lossy().to_string()]
+            }
         }
     }
 
@@ -898,6 +905,7 @@ impl Application {
             | Application::Go19FileOps
             | Application::Go20FileOps
             | Application::NodeHTTP
+            | Application::NodeIssue1123
             | Application::PythonFlaskHTTP => 80,
             Application::PythonFastApiHTTP => 1234,
             Application::PythonListen => 21232,
@@ -979,8 +987,6 @@ impl Application {
     }
 
     /// Like `start_process_with_layer`, but also verify a port subscribe.
-    ///
-    /// - `resolve_hostname`: indicates if this test will start with the `gethostname` messages.
     pub async fn start_process_with_layer_and_port(
         &self,
         dylib_path: &PathBuf,
