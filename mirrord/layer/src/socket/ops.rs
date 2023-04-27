@@ -165,6 +165,21 @@ pub(super) fn bind(
 
     trace!("bind -> unbound_address {:#?}", unbound_address);
 
+    // Check if the user's requested address isn't already in use, even though it's not actually
+    // bound, as we bind to a different address, but if we don't check for this then we're
+    // changing normal socket behavior (see issue #1123).
+    if SOCKETS.iter().any(|socket| match &socket.state {
+        SocketState::Initialized => false,
+        SocketState::Bound(bound) | SocketState::Listening(bound) => {
+            bound.requested_address == requested_address
+        }
+        SocketState::Connected(connected) => SocketAddr::try_from(connected.local_address.clone())
+            .map(|connected_address| connected_address == requested_address)
+            .unwrap_or_default(),
+    }) {
+        Err(HookError::AddressAlreadyBound(requested_address))?;
+    }
+
     let bind_result = unsafe { FN_BIND(sockfd, unbound_address.as_ptr(), unbound_address.len()) };
     if bind_result != 0 {
         error!(
