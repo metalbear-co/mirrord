@@ -51,23 +51,23 @@ impl OperatorApi {
         config: &LayerConfig,
     ) -> Result<Option<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)>> {
         let operator_api = OperatorApi::new(config).await?;
-        let operator_version = Version::parse(&operator_api.get_version().await?).unwrap();
-
-        // This is printed multiple times when the local process forks. Can be solved by e.g.
-        // propagating an env var, don't think it's worth the extra complexity though
-        let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
-        if operator_version != mirrord_version {
-            eprintln!("Your mirrord version {} does not match the operator version {}. This can lead to unforeseen issues.", mirrord_version, operator_version);
-            if operator_version > mirrord_version {
-                eprintln!("Consider updating your mirrord version to match the operator version.");
-            } else {
-                eprintln!("Consider either updating your operator version to match your mirrord version, or downgrading your mirrord version.");
-            }
-        }
 
         if let Some(target) = operator_api.fetch_target().await? {
+            let operator_version = Version::parse(&operator_api.get_version().await?).unwrap();
+
+            // This is printed multiple times when the local process forks. Can be solved by e.g.
+            // propagating an env var, don't think it's worth the extra complexity though
+            let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+            if operator_version != mirrord_version {
+                eprintln!("Your mirrord version {} does not match the operator version {}. This can lead to unforeseen issues.", mirrord_version, operator_version);
+                if operator_version > mirrord_version {
+                    eprintln!("Consider updating your mirrord version to match the operator version.");
+                } else {
+                    eprintln!("Consider either updating your operator version to match your mirrord version, or downgrading your mirrord version.");
+                }
+            }
             operator_api.connect_target(target).await.map(Some)
-        } else {
+        } else { // No operator found
             Ok(None)
         }
     }
@@ -82,7 +82,7 @@ impl OperatorApi {
         .await?;
 
         let target_api: Api<TargetCrd> =
-            get_k8s_resource_api(&client.clone(), target_config.namespace.as_deref());
+            get_k8s_resource_api(&client, target_config.namespace.as_deref());
 
         let version_api: Api<MirrordOperatorCrd> = Api::all(client.clone());
 
