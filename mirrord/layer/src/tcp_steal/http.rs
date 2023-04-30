@@ -13,6 +13,7 @@ use tokio::{
     net::TcpStream,
     sync::mpsc::{Receiver, Sender},
 };
+use tracing::trace;
 
 use super::handle_response;
 use crate::{detour::DetourGuard, tcp_steal::HttpForwarderError};
@@ -84,6 +85,7 @@ pub(super) trait HttpV: Sized {
 
     /// Sends the [`HttpRequest`] through `Self::sender`, converting the response into a
     /// [`HttpResponse`].
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn send_http_request_to_application(
         &mut self,
         request: HttpRequest,
@@ -101,6 +103,8 @@ pub(super) trait HttpV: Sized {
 
         // Retry once if the connection was closed.
         if let Err(HttpForwarderError::ConnectionClosedTooSoon(request)) = response {
+            trace!("Request {request:#?} connection was closed too soon, retrying once!");
+
             // Create a new `HttpVersion` handler for this second attempt.
             let http_version = ConnectionTask::<Self>::connect_to_application(destination).await?;
 
@@ -126,6 +130,7 @@ where
     ///
     /// Has a side-effect of connecting to the application with the (aptly named)
     /// `connect_to_application`.
+    #[tracing::instrument(level = "trace", skip(request_receiver, response_sender))]
     pub(super) async fn new(
         connect_to: SocketAddr,
         request_receiver: Receiver<HttpRequest>,
@@ -147,6 +152,7 @@ where
 
     /// Starts the communication handling of `matched request -> user application -> response` by
     /// "listening" on the `request_receiver`.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(super) async fn start(self) -> Result<(), HttpForwarderError> {
         let Self {
             mut request_receiver,
@@ -172,6 +178,7 @@ where
     ///
     /// Requests that match the user specified filter will be sent through this connection to the
     /// user.
+    #[tracing::instrument(level = "trace")]
     async fn connect_to_application(connect_to: SocketAddr) -> Result<V, HttpForwarderError> {
         let target_stream = {
             let _ = DetourGuard::new();

@@ -71,6 +71,12 @@ where
             AgentConnection { sender, receiver },
         ))
     } else {
+        if matches!(config.target.path, Some(mirrord_config::target::Target::Deployment{..})) {
+            // progress.subtask("text").done_with("text");
+            eprintln!("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.\n \
+                      Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.\n \
+                      To try it out, join the waitlist with `mirrord waitlist <email address>`, or at this link: https://metalbear.co/#waitlist-form");
+        }
         let k8s_api = KubernetesAPI::create(config)
             .await
             .map_err(CliError::KubernetesApiFailed)?;

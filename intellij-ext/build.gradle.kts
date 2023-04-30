@@ -27,6 +27,7 @@ dependencies {
     implementation(project(":mirrord-products-pycharm"))
     implementation(project(":mirrord-products-rubymine"))
     implementation(project(":mirrord-products-goland"))
+    implementation(project(":mirrord-products-nodejs"))
 
 }
 

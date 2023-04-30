@@ -4,7 +4,7 @@
 
 </div>
 
-[![Discord](https://img.shields.io/discord/933706914808889356?color=5865F2&label=Discord&logo=discord&logoColor=white)](https://discord.gg/J5YSrStDKD)
+[![Discord](https://img.shields.io/discord/933706914808889356?color=5865F2&label=Discord&logo=discord&logoColor=white)](https://discord.gg/metalbear)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/metalbear-co/mirrord)
 [![Twitter Follow](https://img.shields.io/twitter/follow/metalbearco?style=social)](https://twitter.com/metalbearco)
@@ -80,7 +80,7 @@ Get the plugin [here](https://plugins.jetbrains.com/plugin/19772-mirrord).
 - The debugged process will be plugged into the selected pod by mirrord
 
 <p align="center">
-  <img src="./images/intellij.gif">
+  <img src="./intellij-ext/src/main/resources/META-INF/usage.gif">
 </p>
 
 ---
@@ -132,7 +132,7 @@ You can read more about it [here](https://mirrord.dev/docs/overview/introduction
 
 Our FAQ is available [here](https://mirrord.dev/docs/overview/faq/).
 If you have a question that's not on there, feel free to ask in our [Discussions](https://github.com/metalbear-co/mirrord/discussions)
-or on [Discord](https://discord.gg/J5YSrStDKD).
+or on [Discord](https://discord.gg/metalbear).
 
 ## Contributing
 
@@ -146,7 +146,7 @@ If you wish to work an issue, please comment so you can be assigned.
 
 ## Help and Community
 
-Join our [Discord Server](https://discord.gg/J5YSrStDKD) for questions, support and fun.
+Join our [Discord Server](https://discord.gg/metalbear) for questions, support and fun.
 
 ## Code of Conduct
 

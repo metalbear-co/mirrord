@@ -1,4 +1,5 @@
 #![feature(let_chains)]
+#![warn(clippy::indexing_slicing)]
 
 use std::{collections::HashMap, time::Duration};
 

@@ -113,7 +113,7 @@ pub enum LayerTcpSteal {
 }
 
 /// (De-)Serializable HTTP request.
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct InternalHttpRequest {
     #[serde(with = "http_serde::method")]
     pub method: Method,
@@ -128,6 +128,18 @@ pub struct InternalHttpRequest {
     pub version: Version,
 
     pub body: Vec<u8>,
+}
+
+impl fmt::Debug for InternalHttpRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InternalHttpRequest")
+            .field("method", &self.method)
+            .field("uri", &self.uri)
+            .field("headers", &self.headers)
+            .field("version", &self.version)
+            .field("body (length)", &self.body.len())
+            .finish()
+    }
 }
 
 impl From<InternalHttpRequest> for Request<Full<Bytes>> {

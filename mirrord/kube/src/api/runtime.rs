@@ -13,6 +13,7 @@ use crate::{
 pub enum ContainerRuntime {
     Docker,
     Containerd,
+    CriO,
 }
 
 impl Display for ContainerRuntime {
@@ -20,6 +21,7 @@ impl Display for ContainerRuntime {
         match self {
             ContainerRuntime::Docker => write!(f, "docker"),
             ContainerRuntime::Containerd => write!(f, "containerd"),
+            ContainerRuntime::CriO => write!(f, "cri-o"),
         }
     }
 }
@@ -75,6 +77,7 @@ impl RuntimeData {
         let container_runtime = match split.next() {
             Some("docker") => ContainerRuntime::Docker,
             Some("containerd") => ContainerRuntime::Containerd,
+            Some("cri-o") => ContainerRuntime::CriO,
             _ => {
                 return Err(KubeApiError::ContainerRuntimeParseError(
                     container_id_full.to_string(),

@@ -113,11 +113,10 @@ impl<const HEADER_SIZE: usize> AsyncRead for ReversibleStream<HEADER_SIZE> {
         if this.num_forwarded < this.header_len {
             let leftover = &this.header[*this.num_forwarded..*this.header_len];
 
-            let num_forward_now = leftover.len().min(buf.remaining());
-            let forward = &leftover[..num_forward_now];
+            let forward = leftover.get(..buf.remaining()).unwrap_or(leftover);
             buf.put_slice(forward);
 
-            *this.num_forwarded += num_forward_now;
+            *this.num_forwarded += forward.len();
 
             std::task::Poll::Ready(Ok(()))
         } else {

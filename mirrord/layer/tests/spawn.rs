@@ -1,4 +1,5 @@
 #![feature(assert_matches)]
+#![warn(clippy::indexing_slicing)]
 
 use std::{path::PathBuf, time::Duration};
 
@@ -17,7 +18,7 @@ pub use common::*;
 /// The app starts the process `["/bin/sh", "-c", "echo \"Hello over shell\""]`.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[timeout(Duration::from_secs(20))]
+#[timeout(Duration::from_secs(60))]
 async fn node_spawn(dylib_path: &PathBuf) {
     let application = Application::NodeSpawn;
     let (mut test_process, listener) = application
@@ -26,10 +27,28 @@ async fn node_spawn(dylib_path: &PathBuf) {
 
     // Accept the connection from the layer and verify initial messages.
     let _node_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    // Accept the connection from the layer and verify initial messages.
-    let _shell_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    println!("NODE LAYER CONNECTION HANDLED");
 
-    test_process.wait().await;
+    // Accept the connection from the layer and verify initial messages.
+    let mut sh_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    println!("SH LAYER CONNECTION HANDLED");
+
+    // There is a 3rd layer connection that happens on macos, where `/bin/sh` starts `bash`, and
+    // thus we have to handle the `gethostname` messasges after it.
+    let _last_layer_connection = if cfg!(target_os = "macos") {
+        let mut bash_layer_connection =
+            LayerConnection::get_initialized_connection(&listener).await;
+        println!("BASH LAYER CONNECTION HANDLED");
+        bash_layer_connection.handle_gethostname::<true>(None).await;
+
+        bash_layer_connection
+    } else {
+        // Meanwhile on linux, we handle it after the 2nd connection, in the `/bin/sh` handler.
+        sh_layer_connection.handle_gethostname::<true>(None).await;
+        sh_layer_connection
+    };
+
+    test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stdout();
     test_process.assert_no_error_in_stderr();
 }

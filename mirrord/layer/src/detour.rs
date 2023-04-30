@@ -41,14 +41,22 @@ thread_local!(
 ///
 /// Prefer using `DetourGuard::new` instead.
 pub(super) fn detour_bypass_on() {
-    DETOUR_BYPASS.with(|enabled| *enabled.borrow_mut() = true);
+    DETOUR_BYPASS.with(|enabled| {
+        if let Ok(mut bypass) = enabled.try_borrow_mut() {
+            *bypass = true
+        }
+    });
 }
 
 /// Sets [`DETOUR_BYPASS`] to `false`.
 ///
 /// Prefer relying on the [`Drop`] implementation of [`DetourGuard`] instead.
 pub(super) fn detour_bypass_off() {
-    DETOUR_BYPASS.with(|enabled| *enabled.borrow_mut() = false);
+    DETOUR_BYPASS.with(|enabled| {
+        if let Ok(mut bypass) = enabled.try_borrow_mut() {
+            *bypass = false
+        }
+    });
 }
 
 /// Handler for the layer's [`DETOUR_BYPASS`].
@@ -65,11 +73,13 @@ impl DetourGuard {
     /// Create a new DetourGuard if it's not already enabled.
     pub(crate) fn new() -> Option<Self> {
         DETOUR_BYPASS.with(|enabled| {
-            if *enabled.borrow() {
+            if let Ok(bypass) = enabled.try_borrow() && *bypass {
                 None
-            } else {
-                *enabled.borrow_mut() = true;
+            } else if let Ok(mut bypass) = enabled.try_borrow_mut(){
+                *bypass = true;
                 Some(Self)
+             } else {
+                None
             }
         })
     }

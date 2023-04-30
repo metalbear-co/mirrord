@@ -1,4 +1,6 @@
+#![warn(clippy::indexing_slicing)]
 #![cfg(target_os = "macos")]
+
 mod codesign;
 mod error;
 mod whitespace;
@@ -13,7 +15,7 @@ mod main {
     };
 
     use object::{
-        macho::{FatHeader, MachHeader32, MachHeader64, CPU_TYPE_X86_64},
+        macho::{self, FatHeader, MachHeader64},
         read::macho::{FatArch, MachHeader},
         Architecture, Endianness, FileKind,
     };
@@ -30,6 +32,28 @@ mod main {
     /// Where patched files are stored, relative to the temp dir (`/tmp/mirrord-bin/...`).
     pub const MIRRORD_PATCH_DIR: &str = "mirrord-bin";
 
+    /// Check if a cpu subtype (already parsed with the correct endianness) is arm64e, given its
+    /// main cpu type is arm64. We only consider the lowest byte in the check.
+    #[cfg(target_arch = "aarch64")]
+    fn is_cpu_subtype_arm64e(subtype: u32) -> bool {
+        // We only compare the lowest 8 bit since the higher bits may contain "capability bits".
+        // For example, usually arm64e would be
+        // `macho::CPU_SUBTYPE_ARM64E | macho::CPU_SUBTYPE_PTRAUTH_ABI`.
+        // Maybe we could also use arm64e binaries without pointer authentication, but we don't
+        // know if that exists in the wild so it was decided not to work with any arm64e
+        // binaries for now.
+        subtype as u8 == macho::CPU_SUBTYPE_ARM64E as u8
+    }
+
+    /// Return whether a binary that is a member of a fat binary is arm64 (not arm64e).
+    /// We don't include arm64e because the SIP patching trick does not work with arm64e binaries.
+    #[cfg(target_arch = "aarch64")]
+    fn is_fat_arm64_arch(arch: &&impl FatArch) -> bool {
+        matches!(arch.architecture(), Architecture::Aarch64)
+            && !is_cpu_subtype_arm64e(arch.cpusubtype())
+    }
+
+    /// Return whether a binary that is a member of a fat binary is x64.
     fn is_fat_x64_arch(arch: &&impl FatArch) -> bool {
         matches!(arch.architecture(), Architecture::X86_64)
     }
@@ -44,22 +68,47 @@ mod main {
             Self { offset, size }
         }
 
-        /// Gets x64 binary offset from a Mach-O fat binary or returns 0 if is x64 macho binary.
+        /// Takes the cpu type and subtype and the bytes of a file that is a non-fat Mach-O, and
+        /// returns either an Ok BinaryInfo (which points to the whole file, as it is not
+        /// part of a fat file) if it is of a supported CPU architecture, or a
+        /// `SipError::NoSupportedArchitecture` otherwise.
+        fn from_thin_mach_o(
+            cpu_type: u32,
+            #[cfg(target_arch = "aarch64")] cpu_subtype: u32,
+            bytes: &[u8],
+        ) -> Result<Self> {
+            // When running with apple chips both arm64 and x64 can run.
+            #[cfg(target_arch = "aarch64")]
+            let is_supported = (cpu_type == macho::CPU_TYPE_X86_64
+                || cpu_type == macho::CPU_TYPE_ARM64)
+                && !is_cpu_subtype_arm64e(cpu_subtype);
+
+            // When running with intel chips, only x86_64 can run.
+            #[cfg(target_arch = "x86_64")]
+            let is_supported = cpu_type == macho::CPU_TYPE_X86_64;
+
+            if is_supported {
+                Ok(Self::new(0, bytes.len()))
+            } else {
+                Err(SipError::NoSupportedArchitecture)
+            }
+        }
+
+        /// Return the `BinaryInfo` of a supported binary from the file: if the file is a "thin"
+        /// binary of a supported architecture then the offset is 0 and the length is the length
+        /// of the file.
+        ///
+        /// If the file is a fat binary, then if it contains an arm64 binary (not arm64e) the info
+        /// of that binary is returned. If there is no arm64 but there is an x64 binary, then the
+        /// info of that binary is returned.
+        ///
+        /// # Errors
+        ///
+        /// - [`SipError::UnsupportedFileFormat`] if the file is not a valid Mach-O file.
+        /// - [`SipError::NoSupportedArchitecture`] if the file does not contain any binary from a
+        ///   supported architecture (arm64, x64).
         fn from_object_bytes(bytes: &[u8]) -> Result<Self> {
             match FileKind::parse(bytes)? {
-                FileKind::MachO32 => {
-                    let header: &MachHeader32<Endianness> =
-                        MachHeader::parse(bytes, 0).map_err(|_| {
-                            SipError::UnsupportedFileFormat(
-                                "MachO 32 file parsing failed".to_string(),
-                            )
-                        })?;
-                    if header.cputype(Endianness::default()) == CPU_TYPE_X86_64 {
-                        Ok(Self::new(0, bytes.len()))
-                    } else {
-                        Err(SipError::NoX64Arch)
-                    }
-                }
                 FileKind::MachO64 => {
                     let header: &MachHeader64<Endianness> =
                         MachHeader::parse(bytes, 0).map_err(|_| {
@@ -67,24 +116,55 @@ mod main {
                                 "MachO 64 file parsing failed".to_string(),
                             )
                         })?;
-                    if header.cputype(Endianness::default()) == CPU_TYPE_X86_64 {
-                        Ok(Self::new(0, bytes.len()))
-                    } else {
-                        Err(SipError::NoX64Arch)
-                    }
+                    Self::from_thin_mach_o(
+                        header.cputype(Endianness::default()),
+                        #[cfg(target_arch = "aarch64")]
+                        header.cpusubtype(Endianness::default()),
+                        bytes,
+                    )
                 }
-                FileKind::MachOFat32 => FatHeader::parse_arch32(bytes)
-                    .map_err(|_| SipError::UnsupportedFileFormat("FatMach-O 32-bit".to_string()))?
-                    .iter()
-                    .find(is_fat_x64_arch)
-                    .map(|arch| Self::new(arch.offset() as usize, arch.size() as usize))
-                    .ok_or(SipError::NoX64Arch),
-                FileKind::MachOFat64 => FatHeader::parse_arch64(bytes)
-                    .map_err(|_| SipError::UnsupportedFileFormat("Mach-O 32-bit".to_string()))?
-                    .iter()
-                    .find(is_fat_x64_arch)
-                    .map(|arch| Self::new(arch.offset() as usize, arch.size() as usize))
-                    .ok_or(SipError::NoX64Arch),
+
+                // This is probably where most fat binaries are handled (see comment above
+                // `MachOFat64`). A 32 bit archive (fat Mach-O) can contain 64 bit binaries.
+                FileKind::MachOFat32 => {
+                    let fat_slice = FatHeader::parse_arch32(bytes).map_err(|_| {
+                        SipError::UnsupportedFileFormat("FatMach-O 32-bit".to_string())
+                    })?;
+                    #[cfg(target_arch = "aarch64")]
+                    let found_arch = fat_slice
+                        .iter()
+                        .find(is_fat_arm64_arch)
+                        .or_else(|| fat_slice.iter().find(is_fat_x64_arch));
+
+                    #[cfg(target_arch = "x86_64")]
+                    let found_arch = fat_slice.iter().find(is_fat_x64_arch);
+
+                    found_arch
+                        .map(|arch| Self::new(arch.offset() as usize, arch.size() as usize))
+                        .ok_or(SipError::NoSupportedArchitecture)
+                }
+
+                // It seems like 64 bit fat Mach-Os are only used (if at all) when one of the
+                // binaries has 2^32 bytes or more (around 4 GB).
+                // See https://github.com/Homebrew/ruby-macho/issues/101#issuecomment-403202114
+                FileKind::MachOFat64 => {
+                    let fat_slice = FatHeader::parse_arch64(bytes).map_err(|_| {
+                        SipError::UnsupportedFileFormat("Mach-O 32-bit".to_string())
+                    })?;
+
+                    #[cfg(target_arch = "aarch64")]
+                    let found_arch = fat_slice
+                        .iter()
+                        .find(is_fat_arm64_arch)
+                        .or_else(|| fat_slice.iter().find(is_fat_x64_arch));
+
+                    #[cfg(target_arch = "x86_64")]
+                    let found_arch = fat_slice.iter().find(is_fat_x64_arch);
+
+                    found_arch
+                        .map(|arch| Self::new(arch.offset() as usize, arch.size() as usize))
+                        .ok_or(SipError::NoSupportedArchitecture)
+                }
                 other => Err(SipError::UnsupportedFileFormat(format!("{other:?}"))),
             }
         }
@@ -94,10 +174,16 @@ mod main {
     /// `path`, write it into `output`, give it the same permissions, and sign the new binary.
     fn patch_binary<P: AsRef<Path>, K: AsRef<Path>>(path: P, output: K) -> Result<()> {
         let data = std::fs::read(path.as_ref())?;
+
+        // Propagate Err if the binary does not contain any supported architecture (x64/arm64).
         let binary_info = BinaryInfo::from_object_bytes(&data)?;
 
-        let x64_binary = &data[binary_info.offset..binary_info.offset + binary_info.size];
-        std::fs::write(output.as_ref(), x64_binary)?;
+        // Just the thin binary - if the file was a thin binary of a supported architecture to
+        // begin with then it's the whole file, if its a fat binary then it's just a part of it.
+        let binary = data
+            .get(binary_info.offset..binary_info.offset + binary_info.size)
+            .expect("invalid SIP binary");
+        std::fs::write(output.as_ref(), binary)?;
         // Give the new file the same permissions as the old file.
         std::fs::set_permissions(
             output.as_ref(),
@@ -116,7 +202,9 @@ mod main {
         read_shebang_from_file(original_path.as_ref())?
             .map(|original_shebang| -> Result<()> {
                 let data = std::fs::read(original_path.as_ref())?;
-                let contents = &data[original_shebang.len()..];
+                let contents = data
+                    .get(original_shebang.len()..)
+                    .expect("original shebang size exceeds file size");
                 let mut new_contents = String::from("#!") + new_shebang;
                 new_contents.push_str(std::str::from_utf8(contents).map_err(|_utf| {
                     UnlikelyError("Can't read script contents as utf8".to_string())
@@ -142,27 +230,20 @@ mod main {
     /// "#!/usr/bin/env bash\n..." -> Some("#!/usr/bin/env")
     fn get_shebang_from_string(file_contents: &str) -> Option<String> {
         const BOM: &str = "\u{feff}";
-        let mut content: &str = file_contents;
-        if content.starts_with(BOM) {
-            content = &content[BOM.len()..];
-        }
+        let content = file_contents.strip_prefix(BOM).unwrap_or(file_contents);
+        let rest = content.strip_prefix("#!")?;
 
-        let mut shebang = None;
-        if let Some(rest) = content.strip_prefix("#!") {
-            let rest = whitespace::skip(rest);
-            if !rest.starts_with('[') {
-                let full_shebang = if let Some(idx) = content.find('\n') {
-                    &content[..idx]
-                } else {
-                    content
-                };
-                shebang = full_shebang
-                    .split_whitespace()
-                    .next()
-                    .map(|s| s.to_string());
-            }
+        if whitespace::skip(rest).starts_with('[') {
+            None
+        } else {
+            content
+                .split_once('\n')
+                .map(|(line, _)| line)
+                .unwrap_or(content)
+                .split_whitespace()
+                .next()
+                .map(ToString::to_string)
         }
-        shebang
     }
 
     /// Including '#!', just until whitespace, no arguments.
@@ -223,7 +304,8 @@ mod main {
         }
         if let Some(shebang) = read_shebang_from_file(&complete_path)? {
             // Start from index 2 of shebang to get only the path.
-            return match get_sip_status_rec(&shebang[2..], seen_paths, patch_binaries)? {
+            let path = shebang.strip_prefix("#!").unwrap_or(&shebang);
+            return match get_sip_status_rec(path, seen_paths, patch_binaries)? {
                 // The file at the end of the shebang chain is not protected.
                 SipStatus::NoSIP => Ok(SipStatus::NoSIP),
                 some_sip => Ok(SipStatus::SomeSIP(complete_path, Some(Box::new(some_sip)))),
@@ -402,6 +484,38 @@ mod main {
                 .output()
                 .unwrap();
             assert!(String::from_utf8_lossy(&output.stderr).contains("libsystem_kernel.dylib"));
+        }
+
+        /// Test that when a fat binary contains an arm64 binary, that binary is used and patching
+        /// works.
+        ///
+        /// This assumes `/usr/bin/file` is present and contains an arm64 binary.
+        #[test]
+        fn patch_binary_fat_with_arm64() {
+            let path = "/usr/bin/file";
+            let patched_path = "/tmp/ls_mirrord_test_arm64";
+            patch_binary(path, patched_path).unwrap();
+            assert!(matches!(
+                get_sip_status(patched_path, &vec![]).unwrap(),
+                SipStatus::NoSIP
+            ));
+            // Check DYLD_* features work on it:
+            let output = std::process::Command::new(patched_path)
+                .env("DYLD_PRINT_LIBRARIES", "1")
+                .output()
+                .unwrap();
+            assert!(String::from_utf8_lossy(&output.stderr).contains("libsystem_kernel.dylib"));
+
+            // Check that the binary was chosen according to the architecture.
+            let data = std::fs::read(patched_path).unwrap();
+            let file_kind = FileKind::parse(&data[..]).unwrap();
+            assert_eq!(file_kind, FileKind::MachO64);
+            let header: &MachHeader64<Endianness> = MachHeader::parse(&data[..], 0).unwrap();
+            let cpu_type = header.cputype(Endianness::default());
+            #[cfg(target_arch = "aarch64")]
+            assert_eq!(cpu_type, macho::CPU_TYPE_ARM64);
+            #[cfg(target_arch = "x86_64")]
+            assert_eq!(cpu_type, macho::CPU_TYPE_X86_64);
         }
 
         #[test]

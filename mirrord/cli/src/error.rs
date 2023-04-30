@@ -10,11 +10,13 @@ pub(crate) type Result<T, E = CliError> = miette::Result<T, E>;
 
 const GENERAL_HELP: &str = r#"
 
-- If you're still stuck and everything looks fine:
+- If you're still stuck:
 
 >> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
 
->> Or join our discord https://discord.gg/pSKEdmNZcK and request help in #mirrord-help.
+>> Or join our Discord https://discord.gg/metalbear and request help in #mirrord-help
+
+>> Or email us at hi@metalbear.co
 
 "#;
 

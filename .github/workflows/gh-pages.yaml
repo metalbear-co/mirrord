@@ -24,6 +24,7 @@ jobs:
   # Generates rust docs with `RUSTDOCFLAGS` flags, and push it to `gh-pages` branch.
   deploy-rust-docs:
     runs-on: ubuntu-latest
+    container: ghcr.io/metalbear-co/ci-docs-build:latest
     env:
       # enables the creation of a workspace index.html page.
       RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"

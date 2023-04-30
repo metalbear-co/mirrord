@@ -8,6 +8,109 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.39.1](https://github.com/metalbear-co/mirrord/tree/3.39.1) - 2023-04-21
+
+
+### Changed
+
+- Updated IntelliJ usage gif.
+
+
+### Fixed
+
+- Add magic fix (by polling send_request) to (connection was not ready) hyper
+  error. Also adds some more logs around HTTP stealer.
+  [#1302](https://github.com/metalbear-co/mirrord/issues/1302)
+
+
+### Internal
+
+- Fix arduino/setup-protoc rate limiting error.
+
+
+## [3.39.0](https://github.com/metalbear-co/mirrord/tree/3.39.0) - 2023-04-19
+
+
+### Added
+
+- Support for Node.js on IntelliJ - run/debug JavaScript scripts on IntelliJ
+  with mirrord. [#1284](https://github.com/metalbear-co/mirrord/issues/1284)
+
+
+### Fixed
+
+- Use RemoteFile ops in gethostname to not have a local fd.
+  [#1202](https://github.com/metalbear-co/mirrord/issues/1202)
+
+
+### Internal
+
+- Fix latest tag
+- Project build instructions in the testing guide now include the protoc
+  dependency.
+
+
+## [3.38.1](https://github.com/metalbear-co/mirrord/tree/3.38.1) - 2023-04-19
+
+
+### Fixed
+
+- Release action should work now.
+
+### Internal
+
+- Add protobuf-compiler to rust docs action
+
+## [3.38.0](https://github.com/metalbear-co/mirrord/tree/3.38.0) - 2023-04-18
+
+
+### Added
+
+- Add support for cri-o container runtime.
+  [#1258](https://github.com/metalbear-co/mirrord/issues/1258)
+- A descriptive message is now presented in the IntelliJ extension when no
+  target is available. Listing targets failure is now handled and an error
+  notification is presented.
+  [#1267](https://github.com/metalbear-co/mirrord/issues/1267)
+- Added waitlist registration via cli.
+  Join the waitlist to try out first mirrord for Teams which is invite only at
+  the moment. [#1303](https://github.com/metalbear-co/mirrord/issues/1303)
+- Add email option to help messages.
+  [#1318](https://github.com/metalbear-co/mirrord/issues/1318)
+
+
+### Changed
+
+- When patching for SIP, use arm64 if possible (running on aarch64 and an arm64
+  binary is available).
+  [#1155](https://github.com/metalbear-co/mirrord/issues/1155)
+- Changed our Discord invite link to https://discord.gg/metalbear
+
+
+### Fixed
+
+- Change detour bypass to be more robust, not crashing in case it can't update
+  the bypass [#1320](https://github.com/metalbear-co/mirrord/issues/1320)
+
+
+### Internal
+
+- Added integration tests for outgoing UDP and TCP.
+  [#1051](https://github.com/metalbear-co/mirrord/issues/1051)
+- All Kubernetes resources are now deleted after E2E tests. Use
+  `MIRRORD_E2E_PRESERVE_FAILED` environment variable to preserve resources from
+  failed tests. All resources created for E2E tests now share a constant label
+  `mirrord-e2e-test-resource=true`.
+  [#1256](https://github.com/metalbear-co/mirrord/issues/1256)
+- Added a debugging guide for the IntelliJ extension.
+  [#1278](https://github.com/metalbear-co/mirrord/issues/1278)
+- Add `impersonate` permission on `userextras/accesskeyid`, `userextras/arn`,
+  `userextras/canonicalarn` and `userextras/sessionname` resources to operator
+  setup.
+- Sometimes when using console logger mirrord crashes since tokio runtime isn't
+  initialized, changed to just use a thread
+
+
 ## [3.37.0](https://github.com/metalbear-co/mirrord/tree/3.37.0) - 2023-04-14
 
 

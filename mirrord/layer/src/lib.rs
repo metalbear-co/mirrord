@@ -16,6 +16,7 @@
 #![feature(async_fn_in_trait)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![allow(incomplete_features)]
+#![warn(clippy::indexing_slicing)]
 
 //! Loaded dynamically with your local process.
 //!
@@ -74,7 +75,7 @@ extern crate core;
 
 use std::{
     collections::{HashSet, VecDeque},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::SocketAddr,
     panic,
     sync::{LazyLock, OnceLock},
 };
@@ -118,6 +119,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
     common::HookMessage,
+    debugger_ports::DebuggerPorts,
     file::{filter::FILE_FILTER, FileHandler},
     load::LoadType,
     socket::CONNECTION_QUEUE,
@@ -125,6 +127,7 @@ use crate::{
 
 mod common;
 mod connection;
+mod debugger_ports;
 mod detour;
 mod dns;
 mod error;
@@ -233,6 +236,9 @@ pub(crate) static INCOMING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
 /// Ports to ignore on listening for mirroring/stealing.
 pub(crate) static INCOMING_IGNORE_PORTS: OnceLock<HashSet<u16>> = OnceLock::new();
 
+/// Ports to ignore because they are used by the IDE debugger
+pub(crate) static DEBUGGER_IGNORED_PORTS: OnceLock<DebuggerPorts> = OnceLock::new();
+
 /// Check if we're running in NixOS or Devbox.
 ///
 /// - If so, add `sh` to the skip list because of
@@ -263,28 +269,12 @@ fn is_nix_or_devbox() -> bool {
     }
 }
 
-/// Prevent mirrord from connecting to ports used by the intelliJ debugger
-pub(crate) fn port_debug_patch(addr: &SocketAddr) -> bool {
-    if let Ok(ports) = std::env::var("DEBUGGER_IGNORE_PORTS_PATCH") {
-        let (ip, port) = (addr.ip(), addr.port());
-        let ignored_ip =
-            ip == IpAddr::V4(Ipv4Addr::LOCALHOST) || ip == IpAddr::V6(Ipv6Addr::LOCALHOST);
-        // port range can be specified as "45000-65000" or just "45893"
-        let ports: Vec<u16> = ports
-            .split('-')
-            .map(|p| {
-                p.parse()
-                    .expect("Failed to parse the given port - not a number!")
-            })
-            .collect();
-        match ports.len() {
-            2 => ignored_ip && (port >= ports[0] && port <= ports[1]),
-            1 => ignored_ip && port == ports[0],
-            _ => false,
-        }
-    } else {
-        false
-    }
+/// Prevent mirrord from connecting to ports used by the IDE debugger
+pub(crate) fn is_debugger_port(addr: &SocketAddr) -> bool {
+    DEBUGGER_IGNORED_PORTS
+        .get()
+        .expect("DEBUGGER_IGNORED_PORTS not initialized")
+        .contains(addr)
 }
 
 /// Loads mirrord configuration and applies [`nix_devbox_patch`] patches.
@@ -440,7 +430,12 @@ fn layer_start(config: LayerConfig) {
     INCOMING_IGNORE_PORTS
         .set(config.feature.network.incoming.ignore_ports.clone())
         .expect("Setting INCOMING_IGNORE_PORTS failed");
+
     FILE_FILTER.get_or_init(|| FileFilter::new(config.feature.fs.clone()));
+
+    DEBUGGER_IGNORED_PORTS
+        .set(DebuggerPorts::from_env())
+        .expect("Setting DEBUGGER_IGNORED_PORTS failed");
 
     enable_hooks(
         file_mode.is_active(),

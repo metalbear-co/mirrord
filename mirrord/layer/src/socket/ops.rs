@@ -10,21 +10,23 @@ use std::{
 };
 
 use libc::{c_int, sockaddr, socklen_t};
-use mirrord_protocol::{dns::LookupRecord, file::OpenOptionsInternal};
+use mirrord_protocol::{
+    dns::LookupRecord,
+    file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
+};
 use socket2::SockAddr;
 use tokio::sync::oneshot;
 use tracing::{debug, error, trace};
 
 use super::{hooks::*, *};
 use crate::{
-    close_layer_fd,
     common::{blocking_send_hook_message, HookMessage},
     detour::{Detour, OnceLockExt, OptionExt},
     dns::GetAddrInfo,
     error::HookError,
     file::{self, OPEN_FILES},
+    is_debugger_port,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
-    port_debug_patch,
     tcp::{Listen, TcpIncoming},
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_LOCALHOST,
     OUTGOING_IGNORE_LOCALHOST, REMOTE_UNIX_STREAMS,
@@ -140,7 +142,7 @@ pub(super) fn bind(
     }
 
     if is_ignored_port(&requested_address)
-        || port_debug_patch(&requested_address)
+        || is_debugger_port(&requested_address)
         || INCOMING_IGNORE_PORTS
             .get()
             .expect("`INCOMING_IGNORE_PORTS` not set. Please report a bug")
@@ -386,7 +388,7 @@ pub(super) fn connect(
             }
         }
 
-        if is_ignored_port(ip_address) || port_debug_patch(ip_address) {
+        if is_ignored_port(ip_address) || is_debugger_port(ip_address) {
             return Detour::Bypass(Bypass::Port(ip_address.port()));
         }
     } else if remote_address.is_unix() {
@@ -708,23 +710,24 @@ pub(super) fn getaddrinfo(
 fn remote_hostname_string() -> Detour<CString> {
     let hostname_path = PathBuf::from("/etc/hostname");
 
-    let hostname_fd = file::ops::open(
-        Detour::Success(hostname_path),
+    let OpenFileResponse { fd } = file::ops::RemoteFile::remote_open(
+        hostname_path,
         OpenOptionsInternal {
             read: true,
             ..Default::default()
         },
     )?;
 
-    let hostname_file = file::ops::read(hostname_fd, 256)?;
+    let ReadFileResponse { bytes, read_amount } = file::ops::RemoteFile::remote_read(fd, 256)?;
 
-    close_layer_fd(hostname_fd);
+    let _ = file::ops::RemoteFile::remote_close(fd).inspect_err(|fail| {
+        trace!("Leaking remote file fd (should be harmless) due to {fail:#?}!")
+    });
 
     CString::new(
-        hostname_file
-            .bytes
+        bytes
             .into_iter()
-            .take(hostname_file.read_amount as usize - 1)
+            .take(read_amount as usize - 1)
             .collect::<Vec<_>>(),
     )
     .map(Detour::Success)?

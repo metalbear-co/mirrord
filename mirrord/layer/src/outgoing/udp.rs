@@ -140,11 +140,17 @@ impl UdpOutgoingHandler {
                             break;
                         },
                         Ok((read_amount, from)) => {
-                            trace!("interceptor_task -> Received data from {:#?}", from);
+                            trace!("interceptor_task -> Received data from user socket {:#?}", from);
                             user_address = Some(from);
                             // Sends the message that the user wrote to our interceptor socket to
                             // be handled on the `agent`, where it'll be forwarded to the remote.
-                            let write = LayerWrite { connection_id, bytes: recv_from_buffer[..read_amount].to_vec() };
+                            let write = LayerWrite {
+                                connection_id,
+                                bytes: recv_from_buffer
+                                    .get(..read_amount)
+                                    .expect("recv_from returned more bytes than the buffer can hold")
+                                    .to_vec(),
+                            };
                             let outgoing_write = LayerUdpOutgoing::Write(write);
 
                             if let Err(fail) = layer_tx.send(outgoing_write).await {
@@ -158,6 +164,7 @@ impl UdpOutgoingHandler {
                 bytes = remote_stream.next() => {
                     match bytes {
                         Some(bytes) => {
+                            trace!("interceptor_task -> Received data from remote socket");
                             // Writes the data sent by `agent` (that came from the actual remote
                             // stream) to our interceptor socket. When the user tries to read the
                             // remote data, this'll be what they receive.

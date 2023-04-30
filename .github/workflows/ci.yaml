@@ -13,6 +13,9 @@ concurrency:
   group: ${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+
 jobs:
   towncrier_check:
     runs-on: ubuntu-latest
@@ -78,6 +81,9 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
+      - uses: arduino/setup-protoc@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       # Otherwise the arguments to the setup-rust-toolchain action are ignored.
       - run: rm rust-toolchain.toml
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -85,11 +91,12 @@ jobs:
           toolchain: nightly-2023-03-29
           components: rustfmt, clippy
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
+      - run: python3 -m pip install cargo-zigbuild
       # Needed for agent
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --lib --bins --all-features -- -D warnings
+      - run: cargo-zigbuild clippy --lib --bins --all-features -- -Wclippy::indexing_slicing -D warnings
       # Check that agent compiles for the supported targets (aarch64)
-      - run: cargo clippy -p mirrord-agent --target aarch64-unknown-linux-gnu -- -D warnings
+      - run: cargo-zigbuild clippy -p mirrord-agent --target aarch64-unknown-linux-gnu -- -Wclippy::indexing_slicing -D warnings
 
   check-rust-docs:
     runs-on: ubuntu-latest
@@ -100,6 +107,9 @@ jobs:
       RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
     steps:
       - uses: actions/checkout@v3
+      - uses: arduino/setup-protoc@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           # TODO(alex): update this when https://github.com/rust-lang/rust/issues/109631 is fixed 
@@ -120,8 +130,8 @@ jobs:
           target: aarch64-apple-darwin
           toolchain: nightly-2023-03-29
       # only mirrord, mirrord-sip contain macOS specific, so run clippy on that.
-      - run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -D warnings
-      - run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -D warnings
+      - run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
+      - run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
 
   test_mirrord_protocol:
     runs-on: ubuntu-latest
@@ -171,8 +181,11 @@ jobs:
       image: ghcr.io/metalbear-co/ci-agent-build:latest
     steps:
       - uses: actions/checkout@v3
+      - uses: arduino/setup-protoc@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: test
-        run: CARGO_NET_GIT_FETCH_WITH_CLI=true cargo test -p mirrord-agent
+        run: cargo test -p mirrord-agent
 
   test_agent_image:
     runs-on: ubuntu-latest
@@ -235,6 +248,9 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
+      - uses: arduino/setup-protoc@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
@@ -347,6 +363,9 @@ jobs:
           go build -o 18
       - run: |
           cd mirrord/layer/tests/apps/fileops
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/outgoing
           cargo build
       - name: download layer # Download layer lib built in the `build_mirrord` job.
         uses: actions/download-artifact@v3

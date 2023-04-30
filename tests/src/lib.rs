@@ -1,4 +1,5 @@
 #![feature(stmt_expr_attributes)]
+#![warn(clippy::indexing_slicing)]
 
 mod env;
 mod file_ops;
@@ -104,7 +105,9 @@ mod utils {
 
     #[derive(Debug)]
     pub enum FileOps {
+        #[cfg(target_os = "linux")]
         Python,
+        #[cfg(target_os = "linux")]
         Rust,
         GoDir18,
         GoDir19,
@@ -272,9 +275,11 @@ mod utils {
     impl FileOps {
         pub fn command(&self) -> Vec<&str> {
             match self {
+                #[cfg(target_os = "linux")]
                 FileOps::Python => {
                     vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"]
                 }
+                #[cfg(target_os = "linux")]
                 FileOps::Rust => vec!["../target/debug/rust-e2e-fileops"],
                 FileOps::GoDir18 => vec!["go-e2e-dir/18"],
                 FileOps::GoDir19 => vec!["go-e2e-dir/19"],
@@ -282,6 +287,7 @@ mod utils {
             }
         }
 
+        #[cfg(target_os = "linux")]
         pub fn assert(&self, process: TestProcess) {
             match self {
                 FileOps::Python => process.assert_python_fileops_stderr(),

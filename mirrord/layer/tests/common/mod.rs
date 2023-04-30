@@ -14,8 +14,8 @@ use fancy_regex::Regex;
 use futures::{SinkExt, StreamExt};
 use mirrord_protocol::{
     file::{
-        AccessFileRequest, AccessFileResponse, OpenOptionsInternal, SeekFromInternal, XstatRequest,
-        XstatResponse,
+        AccessFileRequest, AccessFileResponse, OpenFileRequest, OpenOptionsInternal,
+        ReadFileRequest, SeekFromInternal, XstatRequest, XstatResponse,
     },
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse,
@@ -26,6 +26,11 @@ use tokio::{
     net::{TcpListener, TcpStream},
     process::{Child, Command},
 };
+
+/// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
+pub const RUST_OUTGOING_PEERS: &str = "1.1.1.1:1111,2.2.2.2:2222,3.3.3.3:3333";
+/// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
+pub const RUST_OUTGOING_LOCAL: &str = "4.4.4.4:4444";
 
 pub struct TestProcess {
     pub child: Option<Child>,
@@ -175,8 +180,9 @@ impl LayerConnection {
         }
     }
 
-    /// Accept the library's connection and verify initial ENV message and PortSubscribe message
-    /// caused by the listen hook.
+    /// Accept the library's connection and verify initial ENV message, `FileRequest` message
+    /// (depends on tested program), and PortSubscribe message caused by the listen hook.
+    ///
     /// Handle flask's 2 process behaviour.
     pub async fn get_initialized_connection_with_port(
         listener: &TcpListener,
@@ -196,11 +202,129 @@ impl LayerConnection {
                 codec.next().await.unwrap().unwrap()
             }
         };
-        assert_eq!(msg, ClientMessage::Tcp(LayerTcp::PortSubscribe(app_port)));
-        LayerConnection {
-            codec,
-            num_connections: 0,
+
+        match msg {
+            ClientMessage::Tcp(LayerTcp::PortSubscribe(port)) => {
+                assert_eq!(app_port, port);
+                Self {
+                    codec,
+                    num_connections: 0,
+                }
+            }
+            ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
+                path,
+                open_options:
+                    OpenOptionsInternal {
+                        read: true,
+                        write: false,
+                        append: false,
+                        truncate: false,
+                        create: false,
+                        create_new: false,
+                    },
+            })) => {
+                assert_eq!(path, PathBuf::from("/etc/hostname"));
+                let mut layer_connection = Self {
+                    codec,
+                    num_connections: 0,
+                };
+
+                layer_connection
+                    .handle_gethostname::<false>(Some(app_port))
+                    .await;
+                layer_connection
+            }
+            unexpected => panic!("Initialized connection with unexpected message {unexpected:#?}"),
         }
+    }
+
+    /// Handles the `gethostname` hook that fiddles with the agent's file system by opening
+    /// `/etc/hostname` remotely.
+    ///
+    /// This hook leverages our ability of opening a file on the agent's `FileManager` to `open`,
+    /// `read`, and `close` the `/etc/hostname` file, and thus some of the integration tests that
+    /// rely on hostname resolving must handle these messages before we resume the normal flow for
+    /// mirroring/stealing/outgoing traffic.
+    ///
+    /// ## Args
+    ///
+    /// - `FIRST_CALL`: some tests will consume the first message from [`Self::codec`], so we use
+    ///   this `const` to check if we should call `codec.next` or if it was already called for us.
+    ///   If you're using [`LayerConnection::get_initialized_connection_with_port`], you should set
+    ///   this to `false`.
+    pub async fn handle_gethostname<const FIRST_CALL: bool>(
+        &mut self,
+        app_port: Option<u16>,
+    ) -> Option<()> {
+        // Should we call `codec.next` or was it called outside already?
+        if FIRST_CALL {
+            // open file
+            let open_file_request = self.codec.next().await?.unwrap();
+
+            assert_eq!(
+                open_file_request,
+                ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
+                    path: PathBuf::from("/etc/hostname"),
+                    open_options: OpenOptionsInternal {
+                        read: true,
+                        write: false,
+                        append: false,
+                        truncate: false,
+                        create: false,
+                        create_new: false
+                    }
+                }))
+            );
+        }
+        self.answer_file_open().await;
+
+        // read file
+        let read_request = self
+            .codec
+            .next()
+            .await
+            .expect("Read request success!")
+            .expect("Read request exists!");
+        assert_eq!(
+            read_request,
+            ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
+                remote_fd: 0xb16,
+                buffer_size: 256,
+            }))
+        );
+
+        self.answer_file_read(b"metalbear-hostname".to_vec()).await;
+
+        // TODO(alex): Add a wait time here, we can end up in the "Close request success" error.
+        // close file (very rarely?).
+        let close_request = self
+            .codec
+            .next()
+            .await
+            .expect("Close request success!")
+            .expect("Close request exists!");
+
+        println!("Should be a close file request: {read_request:#?}");
+        assert_eq!(
+            close_request,
+            ClientMessage::FileRequest(FileRequest::Close(
+                mirrord_protocol::file::CloseFileRequest { fd: 0xb16 }
+            ))
+        );
+
+        let port = app_port?;
+        let port_subscribe = self
+            .codec
+            .next()
+            .await
+            .expect("PortSubscribe request success!")
+            .expect("PortSubscribe request exists!");
+        assert_eq!(
+            port_subscribe,
+            ClientMessage::Tcp(LayerTcp::PortSubscribe(port))
+        );
+
+        Some(())
     }
 
     pub async fn is_ended(&mut self) -> bool {
@@ -391,6 +515,15 @@ impl LayerConnection {
         Self::expect_message_file_read(self.codec.next().await.unwrap().unwrap(), expected_fd).await
     }
 
+    pub async fn answer_file_open(&mut self) {
+        self.codec
+            .send(DaemonMessage::File(FileResponse::Open(Ok(
+                mirrord_protocol::file::OpenFileResponse { fd: 0xb16 },
+            ))))
+            .await
+            .unwrap();
+    }
+
     /// Send file read response with given `contents`.
     pub async fn answer_file_read(&mut self, contents: Vec<u8>) {
         let read_amount = contents.len();
@@ -565,6 +698,7 @@ impl LayerConnection {
     }
 }
 
+/// Various applications used by integration tests.
 #[derive(Debug)]
 pub enum Application {
     Go19HTTP,
@@ -602,6 +736,8 @@ pub enum Application {
     Go19FAccessAt,
     Go20FAccessAt,
     Go19SelfOpen,
+    RustOutgoingUdp,
+    RustOutgoingTcp,
 }
 
 impl Application {
@@ -668,6 +804,11 @@ impl Application {
             Application::Go19FAccessAt => String::from("tests/apps/faccessat_go/19"),
             Application::Go20FAccessAt => String::from("tests/apps/faccessat_go/20"),
             Application::Go19SelfOpen => String::from("tests/apps/self_open/19"),
+            Application::RustOutgoingUdp | Application::RustOutgoingTcp => format!(
+                "{}/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                "../../target/debug/outgoing",
+            ),
         }
     }
 
@@ -705,7 +846,7 @@ impl Application {
                 vec![app_path.to_string_lossy().to_string()]
             }
             Application::NodeSpawn => {
-                app_path.push("node_spawn.js");
+                app_path.push("node_spawn.mjs");
                 vec![app_path.to_string_lossy().to_string()]
             }
             Application::PythonSelfConnect => {
@@ -739,6 +880,14 @@ impl Application {
             | Application::Go19SelfOpen
             | Application::Go19DirBypass
             | Application::Go20DirBypass => vec![],
+            Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            Application::RustOutgoingTcp => ["--tcp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         }
     }
 
@@ -777,9 +926,9 @@ impl Application {
             | Application::Go20DirBypass
             | Application::Go19SelfOpen
             | Application::Go19Dir
-            | Application::Go20Dir => {
-                unimplemented!("shouldn't get here")
-            }
+            | Application::Go20Dir
+            | Application::RustOutgoingUdp
+            | Application::RustOutgoingTcp => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
         }
     }
@@ -830,6 +979,8 @@ impl Application {
     }
 
     /// Like `start_process_with_layer`, but also verify a port subscribe.
+    ///
+    /// - `resolve_hostname`: indicates if this test will start with the `gethostname` messages.
     pub async fn start_process_with_layer_and_port(
         &self,
         dylib_path: &PathBuf,
@@ -839,9 +990,11 @@ impl Application {
         let (test_process, listener) = self
             .get_test_process_and_listener(dylib_path, extra_env_vars, configuration_file)
             .await;
+
         let layer_connection =
             LayerConnection::get_initialized_connection_with_port(&listener, self.get_app_port())
                 .await;
+
         (test_process, layer_connection)
     }
 }
