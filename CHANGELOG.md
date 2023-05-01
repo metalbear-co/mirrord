@@ -8,6 +8,38 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.40.0](https://github.com/metalbear-co/mirrord/tree/3.40.0) - 2023-05-01
+
+
+### Added
+
+- Add a message informing users of the operator when they impersonate
+  deployments with mirrord.
+  [#add-operator-message](https://github.com/metalbear-co/mirrord/issues/add-operator-message)
+- Last selected target is now remembered in VS Code and shown first in the
+  quick pick widget.
+  [#1348](https://github.com/metalbear-co/mirrord/issues/1348)
+
+
+### Fixed
+
+- PyCharm plugin now detects `pydevd` debugger and properly excludes its port.
+  [#1020](https://github.com/metalbear-co/mirrord/issues/1020)
+- VS Code extension now detects `debugpy` debugger and properly excludes its
+  port. [#1145](https://github.com/metalbear-co/mirrord/issues/1145)
+- Fixed delve patch not working on GoLand macOS when running go tests
+  [#1364](https://github.com/metalbear-co/mirrord/issues/1364)
+- Fixed issues when importing some packages in Python caused by PYTHONPATH to
+  be used from the remote pod (add it to exclude)
+
+
+### Internal
+
+- Added Clippy lint for slicing and indexing.
+  [#1049](https://github.com/metalbear-co/mirrord/issues/1049)
+- Eliminate unused variable warnings for E2E tests on macOS.
+
+
 ## [3.39.1](https://github.com/metalbear-co/mirrord/tree/3.39.1) - 2023-04-21
 
 
