@@ -101,7 +101,7 @@ object MirrordExecManager {
 
         val env = MirrordApi.exec(target, getConfigPath(project), project, wslDistribution)
 
-        env["DEBUGGER_IGNORE_PORTS_PATCH"] = "45000-65535"
+        env["MIRRORD_IGNORE_DEBUGGER_PORTS"] = "45000-65535"
         return env.toImmutableMap()
     }
 }
