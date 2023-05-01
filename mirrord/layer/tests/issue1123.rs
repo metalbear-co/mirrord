@@ -16,8 +16,9 @@ async fn test_issue1123(
     #[values(Application::RustIssue1123)] application: Application,
     dylib_path: &PathBuf,
 ) {
-    let (mut test_process, _) = application
-        .start_process_with_layer_and_port(
+    // `_layer_connection` has to be kept alive, otherwise we crash before the app is done.
+    let (mut test_process, _layer_connection) = application
+        .start_process_with_layer(
             dylib_path,
             vec![
                 ("MIRRORD_FILE_MODE", "local"),
