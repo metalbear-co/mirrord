@@ -32,6 +32,13 @@ pub enum ProgressMode {
     Off,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageKind {
+    Success,
+    Failure,
+    Warning,
+}
+
 /// Initialize progress reporting based on the [`MIRRORD_PROGRESS_ENV`]
 /// environment variable.
 ///
@@ -103,10 +110,18 @@ struct FinishedTaskMessage {
     message: Option<String>,
 }
 
+/// Message sent when a task is finished.
+#[derive(Serialize, Debug, Clone, Default)]
+struct WarningMessage {
+    /// Warning message
+    message: String,
+}
+
 #[derive(Serialize, Debug, Clone)]
 #[serde(tag = "type")]
 enum ProgressMessage {
     NewTask(NewTaskMessage),
+    Warning(WarningMessage),
     FinishedTask(FinishedTaskMessage),
 }
 
@@ -140,6 +155,7 @@ pub trait Progress: Sized {
     }
 
     fn set_done(&mut self, msg: Option<&str>, failure: bool);
+    fn print_message(&self, kind: MessageKind, msg: Option<&str>);
 }
 
 pub struct NoProgress;
@@ -150,6 +166,7 @@ impl Progress for NoProgress {
     }
 
     fn set_done(&mut self, _: Option<&str>, _: bool) {}
+    fn print_message(&self, _: MessageKind, _: Option<&str>) {}
 }
 
 /// Progress report for a single task.
@@ -261,7 +278,14 @@ impl Progress for TaskProgress {
 
     fn set_done(&mut self, msg: Option<&str>, failure: bool) {
         self.done = true;
-
+        let kind = if failure {
+            MessageKind::Failure
+        } else {
+            MessageKind::Success
+        };
+        self.print_message(kind, msg);
+    }
+    fn print_message(&self, kind: MessageKind, msg: Option<&str>) {
         let report = get_report();
 
         match report.mode {
@@ -270,7 +294,11 @@ impl Progress for TaskProgress {
 
                 line.set_spinner_visible(false);
 
-                let marker = if failure { 'x' } else { '✓' };
+                let marker = match kind {
+                    MessageKind::Success => '✓',
+                    MessageKind::Failure => 'x',
+                    MessageKind::Warning => '!',
+                };
 
                 if let Some(msg) = msg {
                     line.set_text(&format!("{marker} {msg}"));
@@ -285,11 +313,17 @@ impl Progress for TaskProgress {
                 }
             }
             ProgressMode::Json => {
-                let message = ProgressMessage::FinishedTask(FinishedTaskMessage {
-                    name: self.name.clone(),
-                    success: !failure,
-                    message: msg.map(|s| s.to_string()),
-                });
+                let message = if kind == MessageKind::Warning {
+                    ProgressMessage::Warning(WarningMessage {
+                        message: msg.unwrap().to_string(),
+                    })
+                } else {
+                    ProgressMessage::FinishedTask(FinishedTaskMessage {
+                        name: self.name.clone(),
+                        success: kind == MessageKind::Success,
+                        message: msg.map(|s| s.to_string()),
+                    })
+                };
                 message.print();
             }
             ProgressMode::Off => {}

@@ -6,6 +6,7 @@ use mirrord_kube::{
     api::{get_k8s_resource_api, kubernetes::create_kube_api},
     error::KubeApiError,
 };
+use mirrord_progress::{MessageKind, Progress};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use semver::Version;
 use thiserror::Error;
@@ -47,27 +48,37 @@ pub struct OperatorApi {
 }
 
 impl OperatorApi {
-    pub async fn discover(
+    pub async fn discover<P>(
         config: &LayerConfig,
-    ) -> Result<Option<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)>> {
+        progress: &P,
+    ) -> Result<Option<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)>>
+    where
+        P: Progress + Send + Sync,
+    {
         let operator_api = OperatorApi::new(config).await?;
 
         if let Some(target) = operator_api.fetch_target().await? {
-            let operator_version = Version::parse(&operator_api.get_version().await?).unwrap();
+            let operator_version = Version::parse(&operator_api.get_version().await?).unwrap(); // TODO: Remove unwrap
 
             // This is printed multiple times when the local process forks. Can be solved by e.g.
             // propagating an env var, don't think it's worth the extra complexity though
-            let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+            let mirrord_version = Version::parse("3.38.0").unwrap();
             if operator_version != mirrord_version {
-                eprintln!("Your mirrord version {} does not match the operator version {}. This can lead to unforeseen issues.", mirrord_version, operator_version);
+                progress.subtask("Comparing versions").print_message(MessageKind::Warning, Some(&format!("Your mirrord version {} does not match the operator version {}. This can lead to unforeseen issues.", mirrord_version, operator_version)));
                 if operator_version > mirrord_version {
-                    eprintln!("Consider updating your mirrord version to match the operator version.");
+                    progress.subtask("Comparing versions").print_message(
+                        MessageKind::Warning,
+                        Some(
+                            "Consider updating your mirrord version to match the operator version.",
+                        ),
+                    );
                 } else {
-                    eprintln!("Consider either updating your operator version to match your mirrord version, or downgrading your mirrord version.");
+                    progress.subtask("Comparing versions").print_message(MessageKind::Warning, Some("Consider either updating your operator version to match your mirrord version, or downgrading your mirrord version."));
                 }
             }
             operator_api.connect_target(target).await.map(Some)
-        } else { // No operator found
+        } else {
+            // No operator found
             Ok(None)
         }
     }
