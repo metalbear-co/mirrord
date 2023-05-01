@@ -44,6 +44,8 @@ class PythonRunConfigurationExtension: PythonRunConfigurationExtension() {
                 currentEnv[entry.key] =  entry.value
             }
         }
+
+        currentEnv["MIRRORD_DETECT_DEBUGGER_PORT"] = "pydevd"
     }
 
 }
