@@ -1,5 +1,6 @@
 import { createServer } from 'net';
 
+console.log("Testing that double binding on same address fails!");
 const server = createServer();
 server.listen(
   {
@@ -16,11 +17,13 @@ server.listen(
         port: 80,
       },
       function () {
+        console.log("Second bind???");
         console.error("Second bind success, but it should fail!");
         exit(-1);
       });
 
     server.on("error", (fail) => {
+      console.log("Second bind???");
       console.error(`First bind failed ${fail}`);
       throw fail;
     });
@@ -28,11 +31,6 @@ server.listen(
     failServer.on("error", (_) => {
       console.log(`Second bind failed successfully!`);
       process.exit();
-    });
-
-    failServer.on('listening', () => {
-      console.error(`Second bind success, but it should fail!`);
-      exit(-1);
     });
   }
 );

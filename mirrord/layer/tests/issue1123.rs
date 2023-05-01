@@ -6,14 +6,14 @@ use rstest::rstest;
 
 mod common;
 
-use common::*;
+pub use common::*;
 
 /// Verify that issue [#1123](https://github.com/metalbear-co/mirrord/issues/1123) is fixed.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
 async fn test_issue1123(
-    #[values(crate::Application::NodeIssue1123)] application: Application,
+    #[values(Application::RustIssue1123)] application: Application,
     dylib_path: &PathBuf,
 ) {
     let (mut test_process, _) = application
@@ -31,8 +31,6 @@ async fn test_issue1123(
     println!("Application subscribed to port, sending tcp messages.");
 
     test_process.wait().await;
-    test_process.assert_stdout_contains("First bind success!");
-    // test_process.assert_stdout_contains("Second bind failed successfully!");
-    // test_process.assert_no_error_in_stdout();
-    // test_process.assert_no_error_in_stderr();
+    test_process.assert_stdout_contains("test issue 1123: START");
+    test_process.assert_stdout_contains("test issue 1123: SUCCESS");
 }
