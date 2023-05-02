@@ -5,23 +5,77 @@ use schemars::JsonSchema;
 
 use crate::config::source::MirrordConfigSource;
 
+/// # `agent`
+///
 /// Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.
+///
+/// ## Sample
+///
+/// ```json
+/// {
+///   "agent": {
+////    "log_level": String | "trace" | "debug" | "info" | "warn" | "error",
+////    "namespace": null | String,
+////    "image": null | String,
+////    "image_pull_policy": String,
+////    "image_pull_secrets": null | [] | [ { String: String } ],
+////    "ttl": Number,
+////    "ephemeral": bool,
+////    "communication_timeout": null | Number,
+////    "startup_timeout": Number,
+////    "network_interface": null | String,
+////    "pause": bool,
+////    "flush_connections": bool,
+///   }
+/// }
+/// ```
+/// 
+/// ## Examples
+///
+/// - Basic mirrord-agent configuration:
+/// ```json
+/// {
+///   "agent": {
+////    "log_level": "error",
+///   }
+/// }
+/// ```
+/// 
+/// - Using a custom image:
+/// ```json
+/// {
+///   "agent": {
+////    "log_level": "debug",
+////    "image": "user-repo/mirrord-agent:latest",
+////    "image_pull_policy": "Always",
+////    "ttl": 60,
+////    "flush_connections": bool,
+///   }
+/// }
+/// ```
+///
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "AgentFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct AgentConfig {
+    /// # log_level
+    ///
     /// Log level for the agent.
     ///
     /// Supports anything that would work with `RUST_LOG`.
     #[config(env = "MIRRORD_AGENT_RUST_LOG", default = "info")]
     pub log_level: String,
 
+    /// # namespace
+    ///
     /// Namespace where the agent shall live.
     ///
     /// Defaults to the current kubernetes namespace.
     #[config(env = "MIRRORD_AGENT_NAMESPACE")]
     pub namespace: Option<String>,
 
+    /// # image
+    ///
     /// Name of the agent's docker image.
     ///
     /// Useful when a custom build of mirrord-agent is required, or when using an internal
@@ -31,6 +85,8 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_IMAGE")]
     pub image: Option<String>,
 
+    /// # image_pull_policy
+    ///
     /// Controls when a new agent image is downloaded.
     ///
     /// Supports any valid kubernetes [image pull
@@ -38,22 +94,30 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_IMAGE_PULL_POLICY", default = "IfNotPresent")]
     pub image_pull_policy: String,
 
+    /// # image_pull_secrets
+    ///
     /// List of secrets the agent pod has access to.
     ///
     /// Takes an array of hash with the format `{ name: <secret-name> }`. Read more [here](https://kubernetes.io/docs/concepts/containers/images/).
     pub image_pull_secrets: Option<Vec<HashMap<String, String>>>,
 
+    /// # ttl
+    ///
     /// Controls how long the agent pod persists for after the agent exits (in seconds).
     ///
     /// Can be useful for collecting logs.
     #[config(env = "MIRRORD_AGENT_TTL", default = 1)]
     pub ttl: u16,
 
+    /// # ephemeral
+    ///
     /// Runs the agent as an [ephemeral
     /// container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)
     #[config(env = "MIRRORD_EPHEMERAL_CONTAINER", default = false)]
     pub ephemeral: bool,
 
+    /// # communication_timeout
+    ///
     /// Controls how long the agent lives when there are no connections.
     ///
     /// Each connection has its own heartbeat mechanism, so even if the local application has no
@@ -61,12 +125,16 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_COMMUNICATION_TIMEOUT")]
     pub communication_timeout: Option<u16>,
 
+    /// # startup_timeout
+    ///
     /// Controls how long to wait for the agent to finish initialization.
     ///
     /// If initialization takes longer than this value, mirrord exits.
     #[config(env = "MIRRORD_AGENT_STARTUP_TIMEOUT", default = 60)]
     pub startup_timeout: u64,
 
+    /// # network_interface
+    ///
     /// Which network interface to use for mirroring.
     ///
     /// The default behavior is try to access the internet and use that interface
@@ -74,6 +142,8 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_NETWORK_INTERFACE")]
     pub network_interface: Option<String>,
 
+    /// # pause
+    ///
     /// Controls target pause feature. Unstable.
     ///
     /// With this feature enabled, the remote container is paused while clients are connected to
@@ -81,6 +151,8 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_PAUSE", default = false, unstable)]
     pub pause: bool,
 
+    /// # flush_connections
+    ///
     /// Flushes existing connections when starting to steal, might fix issues where connections
     /// aren't stolen (due to being already established)
     ///
