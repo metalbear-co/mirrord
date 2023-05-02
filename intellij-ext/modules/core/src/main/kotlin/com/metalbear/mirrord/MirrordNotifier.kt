@@ -5,6 +5,10 @@ import com.intellij.notification.*
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.NlsContexts
+import com.intellij.openapi.wm.ToolWindowManager
+import java.util.concurrent.atomic.AtomicReference
+import java.util.function.Consumer
 
 /**
  * Mirrord notification handler
@@ -29,6 +33,7 @@ object MirrordNotifier {
             progressNotificationManager.notify("mirrord", message, project) {}
         }
     }
+
     fun notifier(message: String, type: NotificationType): Notification {
         return notificationManager.createNotification("mirrord", message, type)
     }
@@ -52,5 +57,48 @@ object MirrordNotifier {
                 }
             }).notify(project)
         }
+    }
+}
+
+
+class SingletonNotificationManager(groupId: String, private val type: NotificationType) {
+    private val group = NotificationGroupManager.getInstance().getNotificationGroup(groupId)
+    private val notification = AtomicReference<Notification>()
+    fun notify(@NlsContexts.NotificationTitle title: String,
+               @NlsContexts.NotificationContent content: String,
+               project: Project?,
+               customizer: Consumer<Notification>
+    ) {
+        val oldNotification = notification.get()
+        if (oldNotification != null) {
+            if (isVisible(oldNotification, project)) {
+                Thread.sleep(1000)
+            }
+            oldNotification.expire()
+        }
+
+        val newNotification = object : Notification(group.displayId, title, content, type) {
+            override fun expire() {
+                super.expire()
+                notification.compareAndSet(this, null)
+            }
+        }
+        customizer.accept(newNotification)
+
+        if (notification.compareAndSet(oldNotification, newNotification)) {
+            newNotification.notify(project)
+        }
+        else {
+            newNotification.expire()
+        }
+    }
+
+    private fun isVisible(notification: Notification, project: Project?): Boolean {
+        val balloon = when {
+            group.displayType != NotificationDisplayType.TOOL_WINDOW -> notification.balloon
+            project != null -> ToolWindowManager.getInstance(project).getToolWindowBalloon(group.toolWindowId!!)
+            else -> null
+        }
+        return balloon != null && !balloon.isDisposed
     }
 }
