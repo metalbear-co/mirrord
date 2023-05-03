@@ -12,18 +12,40 @@ use crate::{
     util::string_or_struct_option,
 };
 
-/// Specifies the target to mirror. See [`Target`].
+/// # target
 ///
-/// ## Examples
+/// Specifies the target and namespace to mirror, see [`Target`](#path).
 ///
-/// - Mirror pod `hello-world-abcd-1234` in the `hello` namespace:
+/// ## Types
 ///
-/// ```toml
-/// # mirrord-config.toml
+/// ```json
+/// {
+///   "path": null | Target,
+///   "namespace": null | String,
+/// }
+/// ```
 ///
-/// [target]
-/// path = "pod/hello-world-abcd-1234"
-/// namespace = "hello"
+/// ## Sample
+///
+/// - Simple `config.json`:
+///
+/// ```json
+/// {
+///   "target": "pod/impersonate-me"
+/// }
+/// ```
+///
+/// - Advanced `config.json`:
+///
+/// ```json
+/// {
+///   "target": {
+///     "path": {
+///       "pod": "impersonate-me"
+///     },
+///     "namespace": "default"
+///   }
+/// }
 /// ```
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase")]
@@ -40,7 +62,14 @@ pub enum TargetFileConfig {
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TargetConfig {
+    /// ### path
+    ///
+    /// Path of the target to impersonate, see [`Path`](#path).
     pub path: Option<Target>,
+
+    /// ### namespace
+    ///
+    /// Namespace where the target lives.
     pub namespace: Option<String>,
 }
 
@@ -108,6 +137,8 @@ mirrord-layer failed to parse the provided target!
     >> check if the provided target is in the correct namespace.
 "#;
 
+/// # path
+///
 /// Specifies the running pod (or deployment) to mirror.
 ///
 /// Supports:
@@ -117,14 +148,24 @@ mirrord-layer failed to parse the provided target!
 /// - `container/{sample-container}`;
 /// - `containername/{sample-container}`.
 ///
-/// ## Examples
+/// ## Types
 ///
-/// - Mirror pod `hello-world-abcd-1234`:
+/// ```json
+/// {
+///   "path": { "pod" | "podname" | "deployment" | "container" | "containername": String },
+/// }
+/// ```
 ///
-/// ```toml
-/// # mirrord-config.toml
+/// ## Sample
 ///
-/// target = "pod/hello-world-abcd-1234"
+/// - `config.json`:
+///
+/// ```json
+/// {
+///   "path": {
+///     "pod": "impersonate-me"
+///   }
+/// }
 /// ```
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged)]

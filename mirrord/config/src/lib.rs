@@ -170,11 +170,15 @@ use crate::{
 #[config(map_to = "LayerFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct LayerConfig {
+    /// ### accept_invalid_certificates
+    ///
     /// Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed
     /// certificates).
     #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", default = false)]
     pub accept_invalid_certificates: bool,
 
+    /// ### skip_processes
+    ///
     /// Allows mirrord to skip unwanted processes.
     ///
     /// Useful when process A spawns process B, and the user wants mirrord to operate only on
@@ -182,7 +186,9 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_SKIP_PROCESSES")]
     pub skip_processes: Option<VecOrSingle<String>>,
 
-    /// Specifies the running pod to mirror.
+    /// ### target
+    ///
+    /// Specifies the running pod to mirror, see [`TargetConfig`](#target).
     ///
     /// Supports:
     ///
@@ -192,35 +198,51 @@ pub struct LayerConfig {
     #[config(nested)]
     pub target: TargetConfig,
 
+    /// ### connect_tcp
+    ///
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.
     #[config(env = "MIRRORD_CONNECT_TCP")]
     pub connect_tcp: Option<String>,
 
+    /// ### connect_agent_name
+    ///
     /// Agent name that already exists that we can connect to.
     #[config(env = "MIRRORD_CONNECT_AGENT")]
     pub connect_agent_name: Option<String>,
 
+    /// ### connect_agent_port
+    ///
     /// Agent listen port that already exists that we can connect to.
     #[config(env = "MIRRORD_CONNECT_PORT")]
     pub connect_agent_port: Option<u16>,
 
-    /// Agent configuration, see [`agent::AgentFileConfig`].
+    /// ### agent
+    ///
+    /// Agent configuration, see [`AgentConfig`](#agent).
     #[config(nested)]
     pub agent: AgentConfig,
 
-    /// Controls mirrord features, see [`feature::FeatureFileConfig`].
+    /// ### feature
+    ///
+    /// Controls mirrord features, see [`FeatureConfig`](#feature).
     #[config(nested)]
     pub feature: FeatureConfig,
 
+    /// ### operator
+    ///
     /// Allow to lookup if operator is installed on cluster and use it
     #[config(env = "MIRRORD_OPERATOR_ENABLE", default = true)]
     pub operator: bool,
 
+    /// ### kubeconfig
+    ///
     /// Path to a kubeconfig file, if not specified, will use KUBECONFIG or ~/.kube/config or the
     /// in-cluster config.
     #[config(env = "MIRRORD_KUBECONFIG")]
     pub kubeconfig: Option<String>,
 
+    /// ### sip_binaries
+    ///
     /// Binaries to patch (macOS SIP).
     ///
     /// Use this when mirrord isn't loaded to protected binaries that weren't automatically
