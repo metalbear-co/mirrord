@@ -3,6 +3,7 @@ package com.metalbear.mirrord.products.goland
 import com.goide.execution.GoRunConfigurationBase
 import com.goide.execution.GoRunningState
 import com.goide.execution.extension.GoRunConfigurationExtension
+import com.goide.util.GoCommandLineParameter.PathParameter
 import com.goide.util.GoExecutor
 import com.intellij.execution.configurations.RunnerSettings
 import com.intellij.execution.target.TargetedCommandLineBuilder
@@ -76,8 +77,19 @@ class GolandRunConfigurationExtension : GoRunConfigurationExtension() {
                 if (!delveExecutable.canExecute()) {
                     delveExecutable.setExecutable(true)
                 }
-                executor.withExePath(delvePath)
+                // parameters returns a copy, and we can't modify it so need to reset it.
+                val patchedParameters = executor.parameters
+                for (i in 0 until patchedParameters.size) {
+                    // no way to reset the whole commandline, so we just remove each entry.
+                    executor.withoutParameter(0)
+                    val value = patchedParameters[i]
+                    if (value.toPresentableString().endsWith("/dlv", true)) {
+                        patchedParameters[i] = PathParameter(delveExecutable.toString())
+                    }
+                }
+                executor.withParameters(*patchedParameters.toTypedArray())
             }
+
         }
         super.patchExecutor(configuration, runnerSettings, executor, runnerId, state, commandLineType)
     }
