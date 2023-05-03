@@ -25,7 +25,7 @@ object MirrordNotifier {
     }
 
     fun progress(message: String) {
-        ProgressManager.getInstance().progressIndicator.text = message
+        ProgressManager.getInstance().progressIndicator.text = "mirrord: $message"
     }
 
     fun notifier(message: String, type: NotificationType): Notification {
