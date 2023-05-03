@@ -4,11 +4,7 @@ import com.google.gson.Gson
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.wsl.WSLCommandLineOptions
 import com.intellij.execution.wsl.WSLDistribution
-import com.intellij.openapi.progress.ProgressIndicator
-import com.intellij.openapi.progress.ProgressManager
-import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
-import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 
@@ -73,7 +69,7 @@ object MirrordApi {
         process.waitFor(60, TimeUnit.SECONDS)
 
         if (process.exitValue() != 0) {
-            MirrordNotifier.errorNotification("mirrord failed to list available targets", project);
+            MirrordNotifier.errorNotification("mirrord failed to list available targets", project)
             val data = process.errorStream.bufferedReader().readText()
             MirrordLogger.logger.debug("mirrord ls failed: %s".format(data))
             return null
