@@ -1,6 +1,6 @@
 use std::path::Path;
 #[cfg(feature = "incluster")]
-use std::time::Duration;
+use std::{net::SocketAddr, time::Duration};
 
 use k8s_openapi::api::core::v1::Pod;
 use kube::{
@@ -74,7 +74,7 @@ impl AgentManagment for KubernetesAPI {
             .and_then(|status| status.pod_ip)
             .unwrap_or(pod_agent_name);
 
-        let agent_addr = format!("{}:{}", pod_addr, agent_port);
+        let agent_addr: SocketAddr = format!("{}:{}", pod_addr, agent_port).parse()?;
 
         trace!("connecting to pod {}", &agent_addr);
 
