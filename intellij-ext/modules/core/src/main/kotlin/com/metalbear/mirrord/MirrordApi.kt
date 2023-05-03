@@ -4,7 +4,11 @@ import com.google.gson.Gson
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.wsl.WSLCommandLineOptions
 import com.intellij.execution.wsl.WSLDistribution
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 
@@ -113,34 +117,41 @@ object MirrordApi {
 
         val bufferedReader = process.inputStream.reader().buffered()
         val gson = Gson()
-        for (line in bufferedReader.lines()) {
-            val message = gson.fromJson(line, Message::class.java)
-            // See if it's the final message
-            if (message.name == "mirrord preparing to launch"
-                && message.type == MessageType.FinishedTask) {
-                val success = message.success ?: throw Error("Invalid message")
-                if (success) {
-                    val innerMessage = message.message ?: throw Error("Invalid inner message")
-                    val executionInfo = gson.fromJson(innerMessage, MirrordExecution::class.java)
-                    MirrordNotifier.progress("mirrord started!", project)
-                    return executionInfo.environment
-                } else {
-                    MirrordNotifier.errorNotification("mirrord failed to launch", project)
+
+        var environment = CompletableFuture<MutableMap<String, String>>()
+
+        val progressIndicator = ProgressManager.getInstance().progressIndicator
+
+
+        ProgressManager.getInstance().runProcess({
+            for (line in bufferedReader.lines()) {
+                val message = gson.fromJson(line, Message::class.java)
+                // See if it's the final message
+                if (message.name == "mirrord preparing to launch"
+                    && message.type == MessageType.FinishedTask) {
+                    val success = message.success ?: throw Error("Invalid message")
+                    if (success) {
+                        val innerMessage = message.message ?: throw Error("Invalid inner message")
+                        val executionInfo = gson.fromJson(innerMessage, MirrordExecution::class.java)
+                        progressIndicator.text = "mirrord started!"
+                        environment.complete(executionInfo.environment)
+                    } else {
+                        MirrordNotifier.errorNotification("mirrord failed to launch", project)
+                    }
                 }
+                var displayMessage = message.name
+                message.message?.let {
+                    displayMessage += ": $it"
+                }
+                progressIndicator.text = displayMessage
             }
+        }, progressIndicator)
 
-            var displayMessage = message.name
-            message.message?.let {
-                displayMessage += ": $it"
-            }
-
-            MirrordNotifier.progress(displayMessage, project)
+        environment?.let {
+            return it.get()
         }
-
-
         logger.error("mirrord stderr: %s".format(process.errorStream.reader().readText()))
         MirrordNotifier.errorNotification("mirrord failed to launch", project)
         throw Error("failed launch")
-
     }
 }
