@@ -18,7 +18,15 @@ object MirrordExecDialog {
     private const val targetLabel = "Select Target"
 
     fun selectTargetDialog(targets: List<String>): String? {
-        val jbTargets = targets.sorted().asJBList()
+        var targets = targets.sorted().toMutableList()
+        MirrordSettingsState.instance.mirrordState.lastChosenTarget?.let {
+            val idx = targets.indexOf(it)
+            if (idx != -1) {
+                targets.removeAt(idx)
+                targets.add(0, it)
+            }
+        }
+        val jbTargets = targets.asJBList()
         val searchField = JTextField()
         searchField.document.addDocumentListener(object : DocumentListener {
             override fun insertUpdate(e: DocumentEvent) = updateList()
@@ -35,7 +43,7 @@ object MirrordExecDialog {
 
         // Add focus logic then we can change back and forth from search field
         // to target selection using tab/shift+tab
-        searchField.addKeyListener(object: KeyListener {
+        searchField.addKeyListener(object : KeyListener {
             override fun keyTyped(p0: KeyEvent?) {
             }
 
@@ -60,7 +68,9 @@ object MirrordExecDialog {
             setTitle(dialogHeading)
         }.show()
         if (result == DialogWrapper.OK_EXIT_CODE && !jbTargets.isSelectionEmpty) {
-            return jbTargets.selectedValue
+            val selectedValue = jbTargets.selectedValue
+            MirrordSettingsState.instance.mirrordState.lastChosenTarget = selectedValue
+            return selectedValue
         }
         return null
     }
