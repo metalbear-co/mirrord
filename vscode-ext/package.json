@@ -13,7 +13,21 @@
 	},
 	"categories": [
 		"Testing",
-		"Debuggers"
+		"Debuggers",
+		"Other",
+		"Azure"
+	],
+	"keywords": [
+		"container",
+		"k8s",
+		"kubernetes",
+		"docker",
+		"connect",
+		"cluster",
+		"debug",
+		"microservice",
+		"cloud native",
+		"mirrord"
 	],
 	"icon": "images/icon.png",
 	"activationEvents": [
