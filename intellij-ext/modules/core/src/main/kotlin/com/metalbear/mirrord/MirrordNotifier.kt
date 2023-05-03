@@ -6,10 +6,6 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.NlsContexts
-import com.intellij.openapi.wm.ToolWindowManager
-import java.util.concurrent.atomic.AtomicReference
-import java.util.function.Consumer
 
 /**
  * Mirrord notification handler
