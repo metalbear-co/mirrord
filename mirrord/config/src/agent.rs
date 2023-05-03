@@ -5,55 +5,53 @@ use schemars::JsonSchema;
 
 use crate::config::source::MirrordConfigSource;
 
-/// # `agent`
+/// # agent
 ///
 /// Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.
 ///
+/// ## Types
+///
+/// ```json
+/// {
+///   "agent": {
+///     "log_level": String | "trace" | "debug" | "info" | "warn" | "error",
+///     "namespace": null | String,
+///     "image": null | String,
+///     "image_pull_policy": String,
+///     "image_pull_secrets": null | [] | [ { String: String } ],
+///     "ttl": Number,
+///     "ephemeral": bool,
+///     "communication_timeout": null | Number,
+///     "startup_timeout": Number,
+///     "network_interface": null | String,
+///     "pause": bool,
+///     "flush_connections": bool,
+///   }
+/// }
+/// ```
+///
 /// ## Sample
 ///
-/// ```json
-/// {
-///   "agent": {
-////    "log_level": String | "trace" | "debug" | "info" | "warn" | "error",
-////    "namespace": null | String,
-////    "image": null | String,
-////    "image_pull_policy": String,
-////    "image_pull_secrets": null | [] | [ { String: String } ],
-////    "ttl": Number,
-////    "ephemeral": bool,
-////    "communication_timeout": null | Number,
-////    "startup_timeout": Number,
-////    "network_interface": null | String,
-////    "pause": bool,
-////    "flush_connections": bool,
-///   }
-/// }
-/// ```
-/// 
-/// ## Examples
+/// - `config.json`:
 ///
-/// - Basic mirrord-agent configuration:
 /// ```json
 /// {
 ///   "agent": {
-////    "log_level": "error",
+///     "log_level": "info",
+///     "namespace": "default",
+///     "image": "ghcr.io/metalbear-co/mirrord:latest",
+///     "image_pull_policy": "IfNotPresent",
+///     "image_pull_secrets": [ { "secret-key": "secret" } ],
+///     "ttl": 30,
+///     "ephemeral": false,
+///     "communication_timeout": 30,
+///     "startup_timeout": 360,
+///     "network_interface": "eth0",
+///     "pause": false,
+///     "flush_connections": false,
 ///   }
 /// }
 /// ```
-/// 
-/// - Using a custom image:
-/// ```json
-/// {
-///   "agent": {
-////    "log_level": "debug",
-////    "image": "user-repo/mirrord-agent:latest",
-////    "image_pull_policy": "Always",
-////    "ttl": 60,
-////    "flush_connections": bool,
-///   }
-/// }
-/// ```
-///
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "AgentFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
@@ -62,7 +60,7 @@ pub struct AgentConfig {
     ///
     /// Log level for the agent.
     ///
-    /// Supports anything that would work with `RUST_LOG`.
+    /// Supports any string that would work with `RUST_LOG`.
     #[config(env = "MIRRORD_AGENT_RUST_LOG", default = "info")]
     pub log_level: String,
 
@@ -98,7 +96,9 @@ pub struct AgentConfig {
     ///
     /// List of secrets the agent pod has access to.
     ///
-    /// Takes an array of hash with the format `{ name: <secret-name> }`. Read more [here](https://kubernetes.io/docs/concepts/containers/images/).
+    /// Takes an array of hash with the format `{ name: <secret-name> }`.
+    ///
+    /// Read more [here](https://kubernetes.io/docs/concepts/containers/images/).
     pub image_pull_secrets: Option<Vec<HashMap<String, String>>>,
 
     /// # ttl
@@ -111,8 +111,8 @@ pub struct AgentConfig {
 
     /// # ephemeral
     ///
-    /// Runs the agent as an [ephemeral
-    /// container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)
+    /// Runs the agent as an
+    /// [ephemeral container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)
     #[config(env = "MIRRORD_EPHEMERAL_CONTAINER", default = false)]
     pub ephemeral: bool,
 
@@ -137,8 +137,8 @@ pub struct AgentConfig {
     ///
     /// Which network interface to use for mirroring.
     ///
-    /// The default behavior is try to access the internet and use that interface
-    /// and if that fails it uses eth0.
+    /// The default behavior is try to access the internet and use that interface. If that  fails
+    /// it uses eth0.
     #[config(env = "MIRRORD_AGENT_NETWORK_INTERFACE")]
     pub network_interface: Option<String>,
 
@@ -155,8 +155,7 @@ pub struct AgentConfig {
     ///
     /// Flushes existing connections when starting to steal, might fix issues where connections
     /// aren't stolen (due to being already established)
-    ///
-    /// Temporary fix for issue [#1029](https://github.com/metalbear-co/mirrord/issues/1029).
+    // Temporary fix for issue [#1029](https://github.com/metalbear-co/mirrord/issues/1029).
     #[config(
         env = "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS",
         default = true,

@@ -5,10 +5,24 @@ use crate::{
     config::source::MirrordConfigSource, env::EnvConfig, fs::FsConfig, network::NetworkConfig,
 };
 
+/// # feature
+///
 /// Configuration for mirrord features.
 ///
 /// For more information, check the [technical reference](https://mirrord.dev/docs/reference/)
 /// of the feature.
+///
+/// ## Types
+///
+/// ```json
+/// {
+///   "env": EnvConfig,
+///   "fs": FsConfig,
+///   "network": NetworkConfig,
+///   "capture_error_trace": bool,
+/// }
+/// ```
+///
 ///
 /// ## Examples
 ///

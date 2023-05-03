@@ -30,49 +30,71 @@ use crate::{
     target::TargetConfig, util::VecOrSingle,
 };
 
-/// Main struct for mirrord-layer's configuration
+/// # Mirrord configuration
 ///
-/// ## Examples
+/// Sets up mirrord.
 ///
-/// - Run mirrord with read-only file operations, mirroring traffic, skipping unwanted processes:
+/// ## Types
 ///
-/// ```toml
-/// # mirrord-config.toml
-///
-/// target = "pod/sample-pod-1234"
-/// skip_processes = ["ide-debugger", "ide-service"] # we don't want mirrord to hook into these
-///
-/// [agent]
-/// log_level = "debug"
-/// ttl = 1024 # seconds
-///
-/// [feature]
-/// fs = "read" # default
-///
-/// [feature.network]
-/// incoming = "mirror" # default
+/// ```json
+/// {
+///   "accept_invalid_certificates": bool,
+///   "skip_processes": null | String | [String],
+///   "target": TargetConfig,
+///   "connect_tcp": null | String,
+///   "connect_agent_name": null | String,
+///   "connect_agent_port": null | Number,
+///   "agent": AgentConfig,
+///   "feature": FeatureConfig,
+///   "operator": bool,
+///   "kubeconfig": null | String,
+///   "sip_binaries": null | String | [String],
+/// }
 /// ```
 ///
-/// - Run mirrord with read-write file operations, stealing traffic, accept local TLS certificates,
-///   use a custom mirrord-agent image:
+/// ## Sample
 ///
-/// ```toml
-/// # mirrord-config.toml
+/// - `config.json`
 ///
-/// target = "pod/sample-pod-1234"
-/// accept_invalid_certificates = true
-///
-/// [agent]
-/// log_level = "trace"
-/// ttl = 1024 # seconds
-/// image = "registry/mirrord-agent-custom:latest"
-/// image_pull_policy = "Always"
-///
-/// [feature]
-/// fs = "write"
-///
-/// [feature.network]
-/// incoming = "steal"
+/// ```json
+/// {
+///   "accept_invalid_certificates": false,
+///   "skip_processes": "ide-debugger",
+///   "target": {
+///     "path": "pod/hello-pod",
+///     "namespace": "default",
+///   },
+///   "connect_tcp": null,
+///   "connect_agent_name": "mirrord-agent-still-alive",
+///   "connect_agent_port": "7777",
+///   "agent": {
+///     "log_level": "info",
+///     "namespace": "default",
+///     "image": "ghcr.io/metalbear-co/mirrord:latest",
+///     "image_pull_policy": "IfNotPresent",
+///     "image_pull_secrets": [ { "secret-key": "secret" } ],
+///     "ttl": 30,
+///     "ephemeral": false,
+///     "communication_timeout": 30,
+///     "startup_timeout": 360,
+///     "network_interface": "eth0",
+///     "pause": false,
+///     "flush_connections": false,
+///   }
+///   "feature": {
+///     "env": {
+///       "include": "DATABASE_USER;PUBLIC_ENV",
+///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
+///       "overrides": {
+///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
+///         "LOCAL_BEAR": "panda"
+///       }
+///     }
+///   }
+///   "operator": true,
+///   "kubeconfig": "~/.kube/config",
+///   "sip_binaries": "bash",
+/// }
 /// ```
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "LayerFileConfig", derive = "JsonSchema")]
@@ -93,6 +115,7 @@ pub struct LayerConfig {
     /// Specifies the running pod to mirror.
     ///
     /// Supports:
+    ///
     /// - `pod/{sample-pod}/[container]/{sample-container}`;
     /// - `podname/{sample-pod}/[container]/{sample-container}`;
     /// - `deployment/{sample-deployment}/[container]/{sample-container}`;
@@ -129,10 +152,12 @@ pub struct LayerConfig {
     pub kubeconfig: Option<String>,
 
     /// Binaries to patch (macOS SIP).
-    /// Use this when mirrord isn't loaded to protected binaries
-    /// that weren't automatically patched.
-    /// Runs `endswith` on the binary path (so `bash` would apply to any binary
-    /// ending with `bash` while `/usr/bin/bash` would apply only for that binary).
+    ///
+    /// Use this when mirrord isn't loaded to protected binaries that weren't automatically
+    /// patched.
+    ///
+    /// Runs `endswith` on the binary path (so `bash` would apply to any binary ending with `bash`
+    /// while `/usr/bin/bash` would apply only for that binary).
     pub sip_binaries: Option<VecOrSingle<String>>,
 }
 

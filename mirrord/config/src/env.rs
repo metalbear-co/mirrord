@@ -8,6 +8,8 @@ use crate::{
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
+/// # env
+///
 /// Allows the user to set or override a local process' environment variables with the ones from a
 /// remote pod.
 ///
@@ -17,36 +19,33 @@ use crate::{
 /// See the environment variables [reference](https://mirrord.dev/docs/reference/env/)
 /// for more details.
 ///
-/// ## Examples
+/// ## Types
 ///
-/// - Include every environment variable from the remote pod (default):
-///
-/// ```toml
-/// # mirrord-config.toml
-///
-/// [feature.env]
-/// include = "*"
+/// ```json
+/// {
+///   "include": null | String,
+///   "exclude": null | String,
+///   "overrides": null | { String: String },
+/// }
 /// ```
 ///
-/// Some environment variables are excluded by default (`PATH` for example), including these
-/// requires specifying them with `include`, see `mirrord-agent::env::EnvFilter`.
+/// ## Sample
 ///
-/// - Include the remote pod's environment variables "PROJECT", "DATABASE":
+/// - `config.json`
 ///
-/// ```toml
-/// # mirrord-config.toml
-///
-/// [feature.env]
-/// include = "PROJECT;DATABASE"
-/// ```
-///
-/// - Exclude the remote pod's environment variables "USER", "SECRET", and include everything else:
-///
-/// ```toml
-/// # mirrord-config.toml
-///
-/// [feature.env]
-/// exclude = "USER;SECRET"
+/// ```json
+/// {
+///   "feature": {
+///     "env": {
+///       "include": "DATABASE_USER;PUBLIC_ENV",
+///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
+///       "overrides": {
+///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
+///         "LOCAL_BEAR": "panda"
+///       }
+///     }
+///   }
+/// }
 /// ```
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "EnvFileConfig", derive = "JsonSchema")]
@@ -55,6 +54,10 @@ pub struct EnvConfig {
     /// Include only these remote environment variables in the local process.
     ///
     /// Value is a list separated by ";".
+    ///
+    /// Some environment variables are excluded by default (`PATH` for example), including these
+    /// requires specifying them with `include`
+    // See `mirrord-agent::env::EnvFilter` for a list of what's excluded by default.
     #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE")]
     pub include: Option<VecOrSingle<String>>,
 
