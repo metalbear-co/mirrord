@@ -31,29 +31,6 @@ use http_filter::*;
 ///
 /// 2. Steal: Captures the TCP data from a port, and forwards it (depending on how it's configured,
 /// see [`IncomingMode::Steal`]);
-///
-/// ## Examples
-///
-/// - Mirror any incoming traffic:
-///
-/// ```toml
-/// # mirrord-config.toml
-///
-/// [feature.network]
-/// incoming = "mirror"    # for illustration purporses, it's the default
-/// ```
-///
-/// - Steal incoming HTTP traffic, if the HTTP header matches "Id: token.*" (supports regex):
-///
-/// ```yaml
-/// # mirrord-config.yaml
-///
-/// [feature.network.incoming]
-/// mode = "steal"
-///
-/// [feature.network.incoming.http_header_filter]
-/// filter = "Id: token.*"
-/// ```
 #[derive(Deserialize, Clone, Debug, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[serde(untagged, rename_all = "lowercase")]

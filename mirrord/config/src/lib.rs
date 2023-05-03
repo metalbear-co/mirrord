@@ -56,6 +56,7 @@ use crate::{
 ///
 /// - Simple `config.json`:
 ///
+/// ```json
 /// {
 ///   "accept_invalid_certificates": false,
 ///   "skip_processes": "ide-debugger",
@@ -97,8 +98,8 @@ use crate::{
 ///   "sip_binaries": "bash",
 /// }
 /// ```
-/// 
-/// - Advanced `config.json`
+///
+/// - Advanced `config.json`:
 /// ```json
 /// {
 ///   "accept_invalid_certificates": false,
@@ -138,7 +139,27 @@ use crate::{
 ///       "read_write": ".+\.json" ,
 ///       "read_only": [ ".+\.yaml", ".+important-file\.txt" ],
 ///       "local": [ ".+\.js", ".+\.mjs" ]
-///     }
+///     },
+///     "network": {
+///       "incoming": {
+///         "mode": "steal",
+///         "http_header_filter": {
+///           "filter": "host: api\..+",
+///           "ports": [80, 8080]
+///         },
+///         "port_mapping": [{ 7777: 8888 }],
+///         "ignore_localhost": false,
+///         "ignore_ports": [9999, 10000]
+///       },
+///       "outgoing": {
+///         "tcp": true,
+///         "udp": true,
+///         "ignore_localhost": false,
+///         "unix_streams": "bear.+"
+///       },
+///       "dns": false
+///     },
+///     "capture_error_trace": false
 ///   },
 ///   "operator": true,
 ///   "kubeconfig": "~/.kube/config",

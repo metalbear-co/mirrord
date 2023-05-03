@@ -12,6 +12,30 @@ use crate::{
 ///
 /// See the outgoing [reference](https://mirrord.dev/docs/reference/traffic/#outgoing) for more
 /// details.
+///
+/// ## Types
+///
+/// ```json
+/// {
+///   "tcp": bool,
+///   "udp": bool,
+///   "ignore_localhost": bool,
+///   "unix_streams": null | String | [String],
+/// }
+/// ```
+///
+/// ## Sample
+///
+/// - `config.json`
+///
+/// ```json
+/// {
+///   "tcp": true,
+///   "udp": true,,
+///   "ignore_localhost": false,
+///   "unix_streams": "bear.+",
+/// }
+/// ```
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
 #[config(map_to = "OutgoingFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
@@ -22,7 +46,7 @@ pub struct OutgoingConfig {
     #[config(env = "MIRRORD_UDP_OUTGOING", default = true)]
     pub udp: bool,
 
-    /// Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702
+    // Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702
     #[config(unstable, default = false)]
     pub ignore_localhost: bool,
 

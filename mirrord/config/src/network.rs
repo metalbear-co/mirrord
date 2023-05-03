@@ -32,7 +32,7 @@ use crate::{
 /// ```json
 /// {
 ///   "feature": {
-///     "network": "incoming"
+///     "network": "incoming",
 ///   }
 /// }
 /// ```
@@ -53,7 +53,12 @@ use crate::{
 ///         "ignore_localhost": false,
 ///         "ignore_ports": [9999, 10000],
 ///       },
-///       "outgoing": ".+\.json",
+///       "outgoing": {
+///         "tcp": true,
+///         "udp": true,
+///         "ignore_localhost": false,
+///         "unix_streams": "bear.+"
+///       },
 ///       "dns": false
 ///     }
 ///   }
