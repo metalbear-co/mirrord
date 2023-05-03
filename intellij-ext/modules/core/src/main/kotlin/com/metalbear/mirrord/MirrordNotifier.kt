@@ -19,7 +19,6 @@ object MirrordNotifier {
         .getInstance()
         .getNotificationGroup("mirrord Notification Handler")
 
-    private val progressIndicator = ProgressManager.getInstance().progressIndicator
 
     fun notify(message: String, type: NotificationType, project: Project?) {
         ApplicationManager.getApplication().invokeLater {
@@ -30,7 +29,7 @@ object MirrordNotifier {
     }
 
     fun progress(message: String) {
-        progressIndicator.text = message
+        ProgressManager.getInstance().progressIndicator.text = message
     }
 
     fun notifier(message: String, type: NotificationType): Notification {
@@ -56,48 +55,5 @@ object MirrordNotifier {
                 }
             }).notify(project)
         }
-    }
-}
-
-
-class SingletonNotificationManager(groupId: String, private val type: NotificationType) {
-    private val group = NotificationGroupManager.getInstance().getNotificationGroup(groupId)
-    private val notification = AtomicReference<Notification>()
-    fun notify(@NlsContexts.NotificationTitle title: String,
-               @NlsContexts.NotificationContent content: String,
-               project: Project?,
-               customizer: Consumer<Notification>
-    ) {
-        val oldNotification = notification.get()
-        if (oldNotification != null) {
-            if (isVisible(oldNotification, project)) {
-                Thread.sleep(1000)
-            }
-            oldNotification.expire()
-        }
-
-        val newNotification = object : Notification(group.displayId, title, content, type) {
-            override fun expire() {
-                super.expire()
-                notification.compareAndSet(this, null)
-            }
-        }
-        customizer.accept(newNotification)
-
-        if (notification.compareAndSet(oldNotification, newNotification)) {
-            newNotification.notify(project)
-        }
-        else {
-            newNotification.expire()
-        }
-    }
-
-    private fun isVisible(notification: Notification, project: Project?): Boolean {
-        val balloon = when {
-            group.displayType != NotificationDisplayType.TOOL_WINDOW -> notification.balloon
-            project != null -> ToolWindowManager.getInstance(project).getToolWindowBalloon(group.toolWindowId!!)
-            else -> null
-        }
-        return balloon != null && !balloon.isDisposed
     }
 }
