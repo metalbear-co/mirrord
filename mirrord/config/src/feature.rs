@@ -27,7 +27,7 @@ use crate::{
 ///
 /// - `config.json`:
 ///
-/// ```
+/// ```json
 /// {
 ///   "feature": {
 ///     "env": {
@@ -43,7 +43,14 @@ use crate::{
 ///       "read_write": ".+\.json" ,
 ///       "read_only": [ ".+\.yaml", ".+important-file\.txt" ],
 ///       "local": [ ".+\.js", ".+\.mjs" ]
-///     }
+///     },
+///     "network": {
+///       "mode": "write",
+///       "read_write": ".+\.json" ,
+///       "read_only": [ ".+\.yaml", ".+important-file\.txt" ],
+///       "local": [ ".+\.js", ".+\.mjs" ]
+///     },
+///     "capture_error_trace": false,
 ///   }
 /// }
 /// ```

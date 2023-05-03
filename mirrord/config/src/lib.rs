@@ -54,8 +54,51 @@ use crate::{
 ///
 /// ## Sample
 ///
-/// - `config.json`
+/// - Simple `config.json`:
 ///
+/// {
+///   "accept_invalid_certificates": false,
+///   "skip_processes": "ide-debugger",
+///   "target": {
+///     "path": "pod/hello-pod",
+///     "namespace": "default",
+///   },
+///   "connect_tcp": null,
+///   "connect_agent_name": "mirrord-agent-still-alive",
+///   "connect_agent_port": "7777",
+///   "agent": {
+///     "log_level": "info",
+///     "namespace": "default",
+///     "image": "ghcr.io/metalbear-co/mirrord:latest",
+///     "image_pull_policy": "IfNotPresent",
+///     "image_pull_secrets": [ { "secret-key": "secret" } ],
+///     "ttl": 30,
+///     "ephemeral": false,
+///     "communication_timeout": 30,
+///     "startup_timeout": 360,
+///     "network_interface": "eth0",
+///     "pause": false,
+///     "flush_connections": false,
+///   },
+///   "feature": {
+///     "env": {
+///       "include": "DATABASE_USER;PUBLIC_ENV",
+///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
+///       "overrides": {
+///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
+///         "LOCAL_BEAR": "panda"
+///       }
+///     },
+///     "fs": true,
+///     "network": true,
+///   },
+///   "operator": true,
+///   "kubeconfig": "~/.kube/config",
+///   "sip_binaries": "bash",
+/// }
+/// ```
+/// 
+/// - Advanced `config.json`
 /// ```json
 /// {
 ///   "accept_invalid_certificates": false,

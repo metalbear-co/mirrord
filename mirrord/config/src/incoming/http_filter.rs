@@ -9,6 +9,8 @@ use crate::{
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
+/// # http_header_filter
+///
 /// Filter configuration for the HTTP traffic stealer feature.
 ///
 /// Allows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic
@@ -17,6 +19,26 @@ use crate::{
 ///
 /// Only does something when [`IncomingConfig`](super::IncomingConfig) is set as
 /// [`IncomingMode::Steal`](super::IncomingMode::Steal), ignored otherwise.
+///
+/// ## Types
+///
+/// ```json
+/// {
+///   "filter": null | String,
+///   "ports": Number | [Number],
+/// }
+/// ```
+///
+/// ## Sample
+///
+/// - `config.json`:
+///
+/// ```json
+/// {
+///   "filter": "host: api\..+",
+///   "ports": [80, 8080]
+/// }
+/// ```
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
 #[config(map_to = "HttpHeaderFilterFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]

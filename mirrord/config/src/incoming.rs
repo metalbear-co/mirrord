@@ -17,6 +17,8 @@ pub mod http_filter;
 
 use http_filter::*;
 
+/// # incoming
+///
 /// Controls the incoming TCP traffic feature.
 ///
 /// See the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more
@@ -156,6 +158,36 @@ pub struct IncomingAdvancedFileConfig {
     pub ignore_ports: Option<Vec<u16>>,
 }
 
+/// # incoming
+///
+/// Sets up how mirrord handles incoming network packets.
+///
+/// ## Types
+///
+/// ```json
+/// {
+///   "mode": IncomingMode,
+///   "http_header_filter": HttpHeaderFilterConfig,
+///   "port_mapping": [{ Number: Number }],
+///   "ignore_localhost": bool,
+///   "ignore_ports": [Number],
+/// }
+/// ```
+///
+/// ## Sample
+///
+/// ```json
+/// {
+///   "mode": "steal",
+///   "http_header_filter": {
+///     "filter": "host: api\..+",
+///     "ports": [80, 8080]
+///   }
+///   "port_mapping": [{ 7777: 8888 }],
+///   "ignore_localhost": false,
+///   "ignore_ports": [9999, 10000],
+/// }
+/// ```
 #[derive(Default, PartialEq, Eq, Clone, Debug)]
 pub struct IncomingConfig {
     pub mode: IncomingMode,
@@ -178,9 +210,19 @@ impl IncomingConfig {
     }
 }
 
+/// # mode incoming
+///
 /// Mode of operation for the incoming TCP traffic feature.
 ///
 /// Defaults to [`IncomingMode::Mirror`].
+///
+/// ## Types
+///
+/// ```json
+/// {
+///   "mode": "mirror" | "steal",
+/// }
+/// ```
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum IncomingMode {

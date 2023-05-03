@@ -11,27 +11,29 @@ use crate::{
     util::MirrordToggleableConfig,
 };
 
+/// # mode
+///
 /// Configuration for enabling read-only and read-write file operations.
+///
 /// These options are overriden by user specified overrides and mirrord default overrides.
+///
 /// If you set LocalWithOverrides then somefiles can be read/write remotely based on our
 /// default/user specified. Default option for general file configuration.
 ///
-/// ## Examples
+/// ## Types
 ///
-/// - Disable mirrord file operations:
-///
-/// ```yaml
-/// # mirrord-config.yaml
-///
-/// fs = local
+/// ```json
+/// {
+///   "mode": "local" | "localwithoverrides" | "read" | "write"
+/// }
 /// ```
 ///
-/// - Enable mirrord read-write file operations:
+/// ## Sample
 ///
-/// ```yaml
-/// # mirrord-config.yaml
-///
-/// fs = write
+/// ```json
+/// {
+///   "mode": "read"
+/// }
 /// ```
 #[derive(Serialize, Deserialize, Default, PartialEq, Eq, Clone, Debug, Copy, JsonSchema)]
 #[serde(rename_all = "lowercase")]

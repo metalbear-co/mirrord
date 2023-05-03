@@ -6,6 +6,12 @@ use crate::{
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
+/// # outgoing
+///
+/// Controls the outgoing TCP traffic feature.
+///
+/// See the outgoing [reference](https://mirrord.dev/docs/reference/traffic/#outgoing) for more
+/// details.
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
 #[config(map_to = "OutgoingFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]

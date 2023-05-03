@@ -8,24 +8,56 @@ use crate::{
     util::MirrordToggleableConfig,
 };
 
+/// # network
+///
 /// Controls mirrord network operations.
 ///
 /// See the network traffic [reference](https://mirrord.dev/docs/reference/traffic/)
 /// for more details.
 ///
-/// ## Examples
+/// ## Types
 ///
-/// - Steal incoming traffic, enable TCP outgoing traffic and DNS resolution:
+/// ```json
+/// {
+///   "incoming": IncomingConfig,
+///   "outgoing": OutgoingConfig,
+///   "dns": bool,
+/// }
+/// ```
 ///
-/// ```toml
-/// # mirrord-config.toml
+/// ## Sample
 ///
-/// [feature.network]
-/// incoming = "steal"
-/// dns = true # not needed, as this is the default
+/// - Simple `config.json`:
 ///
-/// [feature.network.outgoing]
-/// tcp = true
+/// ```json
+/// {
+///   "feature": {
+///     "network": "incoming"
+///   }
+/// }
+/// ```
+///
+/// - Advanced `config.json`:
+///
+/// ```json
+/// {
+///   "feature": {
+///     "network": {
+///       "incoming": {
+///         "mode": "steal",
+///         "http_header_filter": {
+///           "filter": "host: api\..+",
+///           "ports": [80, 8080]
+///         },
+///         "port_mapping": [{ 7777: 8888 }],
+///         "ignore_localhost": false,
+///         "ignore_ports": [9999, 10000],
+///       },
+///       "outgoing": ".+\.json",
+///       "dns": false
+///     }
+///   }
+/// }
 /// ```
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
 #[config(map_to = "NetworkFileConfig", derive = "JsonSchema")]

@@ -40,9 +40,19 @@ pub mod mode;
 ///
 /// ## Sample
 ///
-/// - `config.json`:
+/// - Simple `config.json`:
 ///
+/// ```json
+/// {
+///   "feature": {
+///     "fs": true
+///   }
+/// }
 /// ```
+///
+/// - Advanced `config.json`:
+///
+/// ```json
 /// {
 ///   "feature": {
 ///     "fs": {
