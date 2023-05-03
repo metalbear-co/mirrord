@@ -16,12 +16,11 @@ import javax.swing.event.DocumentListener
 object MirrordExecDialog {
     private const val dialogHeading: String = "mirrord"
     private const val targetLabel = "Select Target"
-    private var lastSelectedTarget: String? = null
 
     fun selectTargetDialog(targets: List<String>): String? {
         var targets = targets.sorted().toMutableList()
-        (lastSelectedTarget ?: MirrordSettingsState.instance.mirrordState.lastChosenTarget)?.let {
-            val idx = targets.indexOf(lastSelectedTarget)
+        MirrordSettingsState.instance.mirrordState.lastChosenTarget?.let {
+            val idx = targets.indexOf(it)
             if (idx != -1) {
                 targets.removeAt(idx)
                 targets.add(0, it)
@@ -72,7 +71,6 @@ object MirrordExecDialog {
         if (result == DialogWrapper.OK_EXIT_CODE && !jbTargets.isSelectionEmpty) {
             val selectedValue = jbTargets.selectedValue
             MirrordSettingsState.instance.mirrordState.lastChosenTarget = selectedValue
-            lastSelectedTarget = selectedValue
             return selectedValue
         }
         return null
