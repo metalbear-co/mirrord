@@ -23,6 +23,30 @@ use crate::{
 /// }
 /// ```
 ///
+/// ## Sample
+///
+/// - `config.json`:
+///
+/// ```
+/// {
+///   "feature": {
+///     "env": {
+///       "include": "DATABASE_USER;PUBLIC_ENV",
+///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
+///       "overrides": {
+///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
+///         "LOCAL_BEAR": "panda"
+///       }
+///     },
+///     "fs": {
+///       "mode": "write",
+///       "read_write": ".+\.json" ,
+///       "read_only": [ ".+\.yaml", ".+important-file\.txt" ],
+///       "local": [ ".+\.js", ".+\.mjs" ]
+///     }
+///   }
+/// }
+/// ```
 ///
 /// ## Examples
 ///

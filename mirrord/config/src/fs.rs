@@ -18,6 +18,8 @@ use crate::{
 pub mod advanced;
 pub mod mode;
 
+/// # fs
+///
 /// Changes file operations behavior based on user configuration.
 ///
 /// Defaults to [`FsUserConfig::Simple`], with [`FsModeConfig::Read`].
@@ -25,26 +27,32 @@ pub mod mode;
 /// See the file operations [reference](https://mirrord.dev/docs/reference/fileops/)
 /// for more details.
 ///
-/// ## Examples
+/// ## Types
 ///
-/// - Read-write file operations:
-///
-/// ```toml
-/// # mirrord-config.toml
-///
-/// [feature]
-/// fs = "write"
+/// ```json
+/// {
+///   "mode": FsModeConfig,
+///   "read_write": null | String | [String],
+///   "read_only": null | String | [String],
+///   "local": null | String | [String],
+/// }
 /// ```
-/// - Read `/lib` locally, `/etc` remotely and `/var/run` read write remotely. Rest local
 ///
-/// ```yaml
-/// # mirrord-config.yaml
+/// ## Sample
 ///
-/// [fs]
-/// mode = read
-/// read_write = ["/var/run"]
-/// read_only = ["/etc"]
-/// local = ["/lib"]
+/// - `config.json`:
+///
+/// ```
+/// {
+///   "feature": {
+///     "fs": {
+///       "mode": "write",
+///       "read_write": ".+\.json" ,
+///       "read_only": [ ".+\.yaml", ".+important-file\.txt" ],
+///       "local": [ ".+\.js", ".+\.mjs" ]
+///     }
+///   }
+/// }
 /// ```
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase")]

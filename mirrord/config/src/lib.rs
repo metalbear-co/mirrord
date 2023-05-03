@@ -80,7 +80,7 @@ use crate::{
 ///     "network_interface": "eth0",
 ///     "pause": false,
 ///     "flush_connections": false,
-///   }
+///   },
 ///   "feature": {
 ///     "env": {
 ///       "include": "DATABASE_USER;PUBLIC_ENV",
@@ -89,8 +89,14 @@ use crate::{
 ///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
 ///         "LOCAL_BEAR": "panda"
 ///       }
+///     },
+///     "fs": {
+///       "mode": "write",
+///       "read_write": ".+\.json" ,
+///       "read_only": [ ".+\.yaml", ".+important-file\.txt" ],
+///       "local": [ ".+\.js", ".+\.mjs" ]
 ///     }
-///   }
+///   },
 ///   "operator": true,
 ///   "kubeconfig": "~/.kube/config",
 ///   "sip_binaries": "bash",
