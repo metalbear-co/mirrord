@@ -4,12 +4,12 @@
 use std::net::SocketAddr;
 
 use futures::{SinkExt, StreamExt};
-use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
+use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage, LogLevel};
 use tokio::{
     net::TcpStream,
     sync::mpsc::{self, Receiver, Sender},
 };
-use tracing::{error, info, trace};
+use tracing::{error, info, trace, warn};
 
 use crate::graceful_exit;
 
@@ -74,6 +74,16 @@ fn wrap_raw_connection(
                 }
                 daemon_message = codec.next() => {
                     match daemon_message {
+                        Some(Ok(DaemonMessage::LogMessage(log_message))) => {
+                            match log_message.level {
+                                LogLevel::Warn => {
+                                    warn!(message = log_message.message, "Daemon sent log message")
+                                }
+                                LogLevel::Error => {
+                                    error!(message = log_message.message, "Daemon sent log message")
+                                }
+                            }
+                        },
                         Some(Ok(msg)) => {
                             if let Err(fail) = daemon_out_tx.send(msg).await {
                                 error!("DaemonMessage dropped: {:#?}", fail);
