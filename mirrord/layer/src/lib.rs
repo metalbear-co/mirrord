@@ -97,7 +97,6 @@ use mirrord_config::{
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
-    codec::LogLevel,
     dns::{DnsLookup, GetAddrInfoRequest},
     tcp::{HttpResponse, LayerTcpSteal},
     ClientMessage, DaemonMessage,
@@ -679,16 +678,8 @@ impl Layer {
                 .send(get_addr_info.0)
                 .map_err(|_| LayerError::SendErrorGetAddrInfoResponse),
             DaemonMessage::Close(error_message) => Err(LayerError::AgentErrorClosed(error_message)),
-            DaemonMessage::LogMessage(log_message) => {
-                match log_message.level {
-                    LogLevel::Warn => {
-                        warn!(message = log_message.message, "Daemon sent log message")
-                    }
-                    LogLevel::Error => {
-                        error!(message = log_message.message, "Daemon sent log message")
-                    }
-                }
-
+            DaemonMessage::LogMessage(_) => {
+                // handled in protocol level `wrap_raw_connection`
                 Ok(())
             }
         }
