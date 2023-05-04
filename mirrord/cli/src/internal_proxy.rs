@@ -20,6 +20,7 @@ use futures::{stream::StreamExt, SinkExt};
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
 use mirrord_operator::client::OperatorApi;
+use mirrord_progress::NoProgress;
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage};
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -200,7 +201,7 @@ async fn connect(
             .await?;
         Ok(connection)
     } else {
-        let connection = OperatorApi::discover(config).await?;
+        let connection = OperatorApi::discover(config, &NoProgress).await?;
         Ok(connection.ok_or(InternalProxyError::OperatorConnectionError)?)
     }
 }

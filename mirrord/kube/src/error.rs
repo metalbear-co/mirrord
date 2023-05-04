@@ -1,3 +1,5 @@
+use std::net::AddrParseError;
+
 use thiserror::Error;
 
 pub type Result<T, E = KubeApiError> = std::result::Result<T, E>;
@@ -57,4 +59,7 @@ pub enum KubeApiError {
 
     #[error("Port not found in port forward")]
     PortForwardFailed,
+
+    #[error("Invaild Address Conversion: {0}")]
+    InvalidAddress(#[from] AddrParseError),
 }

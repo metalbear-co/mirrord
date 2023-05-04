@@ -26,6 +26,6 @@ open class MirrordSettingsState : PersistentStateComponent<MirrordSettingsState.
     class MirrordState {
         var telemetryEnabled: Boolean? = null
         var versionCheckEnabled: Boolean = false
-
+        var lastChosenTarget: String? = null
     }
 }

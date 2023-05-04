@@ -94,7 +94,7 @@ object MirrordExecManager {
             }
             if (target == null) {
                 MirrordLogger.logger.warn("mirrord loading canceled")
-                MirrordNotifier.progress("mirrord loading canceled.", project)
+                MirrordNotifier.notify("mirrord loading canceled.", NotificationType.WARNING, project)
                 return null
             }
         }

@@ -32,7 +32,7 @@ where
 {
     let sub_progress = progress.subtask("Checking Operator");
 
-    match OperatorApi::discover(config)
+    match OperatorApi::discover(config, progress)
         .await
         .map_err(CliError::OperatorConnectionFailed)
         .into_diagnostic()

@@ -6,13 +6,15 @@ use mirrord_kube::{
     api::{get_k8s_resource_api, kubernetes::create_kube_api},
     error::KubeApiError,
 };
+use mirrord_progress::{MessageKind, Progress};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
+use semver::Version;
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 use tracing::error;
 
-use crate::crd::TargetCrd;
+use crate::crd::{MirrordOperatorCrd, TargetCrd, OPERATOR_STATUS_NAME};
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
 static MIRRORD_OPERATOR_LAYER_SESSION: &str = "MIRRORD_OPERATOR_LAYER_SESSION";
@@ -42,18 +44,42 @@ type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
 pub struct OperatorApi {
     client: Client,
     target_api: Api<TargetCrd>,
+    version_api: Api<MirrordOperatorCrd>,
     target_config: TargetConfig,
 }
 
 impl OperatorApi {
-    pub async fn discover(
+    pub async fn discover<P>(
         config: &LayerConfig,
-    ) -> Result<Option<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)>> {
+        progress: &P,
+    ) -> Result<Option<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)>>
+    where
+        P: Progress + Send + Sync,
+    {
         let operator_api = OperatorApi::new(config).await?;
 
         if let Some(target) = operator_api.fetch_target().await? {
+            let operator_version = Version::parse(&operator_api.get_version().await?).unwrap(); // TODO: Remove unwrap
+
+            // This is printed multiple times when the local process forks. Can be solved by e.g.
+            // propagating an env var, don't think it's worth the extra complexity though
+            let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+            if operator_version != mirrord_version {
+                progress.subtask("Comparing versions").print_message(MessageKind::Warning, Some(&format!("Your mirrord version {} does not match the operator version {}. This can lead to unforeseen issues.", mirrord_version, operator_version)));
+                if operator_version > mirrord_version {
+                    progress.subtask("Comparing versions").print_message(
+                        MessageKind::Warning,
+                        Some(
+                            "Consider updating your mirrord version to match the operator version.",
+                        ),
+                    );
+                } else {
+                    progress.subtask("Comparing versions").print_message(MessageKind::Warning, Some("Consider either updating your operator version to match your mirrord version, or downgrading your mirrord version."));
+                }
+            }
             operator_api.connect_target(target).await.map(Some)
         } else {
+            // No operator found
             Ok(None)
         }
     }
@@ -70,11 +96,31 @@ impl OperatorApi {
         let target_api: Api<TargetCrd> =
             get_k8s_resource_api(&client, target_config.namespace.as_deref());
 
+        let version_api: Api<MirrordOperatorCrd> = Api::all(client.clone());
+
         Ok(OperatorApi {
             client,
             target_api,
+            version_api,
             target_config,
         })
+    }
+
+    async fn get_version(&self) -> Result<String> {
+        let version = match self
+            .version_api
+            .get(OPERATOR_STATUS_NAME)
+            .await
+            .map_err(KubeApiError::KubeError)
+            .map_err(OperatorApiError::KubeApiError)
+        {
+            Ok(status) => status.spec.operator_version,
+            Err(err) => {
+                error!("Unable to get operator version: {}", err);
+                return Err(err);
+            }
+        };
+        Ok(version)
     }
 
     async fn fetch_target(&self) -> Result<Option<TargetCrd>> {
