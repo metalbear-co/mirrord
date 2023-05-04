@@ -708,7 +708,7 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    debug!("main -> Initializing mirrord-agent.");
+    debug!("main -> Initializing mirrord-agent, version {}.", env!("CARGO_PKG_VERSION"));
 
     let agent_result = if std::env::var(IPTABLE_PREROUTING_ENV).is_ok()
         && std::env::var(IPTABLE_MESH_ENV).is_ok()
