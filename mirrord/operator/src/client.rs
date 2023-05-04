@@ -17,7 +17,7 @@ use tracing::error;
 use crate::crd::{MirrordOperatorCrd, TargetCrd, OPERATOR_STATUS_NAME};
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
-static MIRRORD_OPERATOR_LAYER_SESSION: &str = "MIRRORD_OPERATOR_LAYER_SESSION";
+static MIRRORD_OPERATOR_SESSION_ID: &str = "MIRRORD_OPERATOR_SESSION_ID";
 
 #[derive(Debug, Error)]
 pub enum OperatorApiError {
@@ -140,18 +140,18 @@ impl OperatorApi {
 
     /// Create websocket connection to operator
     ///
-    /// Note: Uses `MIRRORD_OPERATOR_LAYER_SESSION` to have a persistant session_id across child
+    /// Note: Uses `MIRRORD_OPERATOR_SESSION_ID` to have a persistant session_id across child
     /// processes
     async fn connect_target(
         &self,
         target: TargetCrd,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        let session_id: u64 = std::env::var(MIRRORD_OPERATOR_LAYER_SESSION)
+        let session_id: u64 = std::env::var(MIRRORD_OPERATOR_SESSION_ID)
             .ok()
             .and_then(|val| val.parse().ok())
             .unwrap_or_else(|| {
                 let id = rand::random();
-                std::env::set_var(MIRRORD_OPERATOR_LAYER_SESSION, format!("{id}"));
+                std::env::set_var(MIRRORD_OPERATOR_SESSION_ID, format!("{id}"));
                 id
             });
 
