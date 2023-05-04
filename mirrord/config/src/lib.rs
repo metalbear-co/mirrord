@@ -32,7 +32,11 @@ use crate::{
 
 /// # Mirrord configuration
 ///
-/// Sets up mirrord.
+/// Mirrord allows for a high degree of customization when it comes to which features you want to
+/// enable, and how they should function.
+///
+/// Most of mirrord features can be setup with the [`feature`](#feature) configuration, you'll also
+/// need to set up a [`target`](#target) for mirrord to impersonate.
 ///
 /// ## Types
 ///
@@ -100,6 +104,7 @@ use crate::{
 /// ```
 ///
 /// - Advanced `config.json`:
+///
 /// ```json
 /// {
 ///   "accept_invalid_certificates": false,
@@ -518,6 +523,7 @@ mod tests {
         assert_eq!(config, expect);
     }
 
+    // rustdoc-stripper-ignore-next
     /// Helper for printing the config schema.
     ///
     /// Run it with:
@@ -525,6 +531,7 @@ mod tests {
     /// ```sh
     /// cargo test -p mirrord-config print_schema -- --ignored --nocapture
     /// ```
+    // rustdoc-stripper-ignore-next-stop
     #[test]
     #[ignore]
     fn print_schema() {
@@ -534,7 +541,9 @@ mod tests {
 
     const SCHEMA_FILE_PATH: &str = "../../mirrord-schema.json";
 
+    // rustdoc-stripper-ignore-next
     /// Writes the config schema to a file (uploaded to the schema store).
+    // rustdoc-stripper-ignore-next-stop
     fn write_schema_to_file(schema: &RootSchema) -> File {
         println!("Writing schema to file.");
 
@@ -554,6 +563,7 @@ mod tests {
         file
     }
 
+    // rustdoc-stripper-ignore-next
     /// Checks if a schema file already exists, otherwise generates the schema and creates the file.
     ///
     /// It also checks and updates when the schema file is outdated.
@@ -563,6 +573,7 @@ mod tests {
     /// ```sh
     /// cargo test -p mirrord-config check_schema_file_exists_and_is_valid_or_create_it -- --ignored --nocapture
     /// ```
+    // rustdoc-stripper-ignore-next-stop
     #[test]
     #[ignore]
     fn check_schema_file_exists_and_is_valid_or_create_it() {

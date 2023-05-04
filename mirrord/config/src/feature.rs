@@ -109,30 +109,40 @@ use crate::{
 #[config(map_to = "FeatureFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct FeatureConfig {
-    /// Controls the environment variables feature, see [`EnvConfig`].
+    /// ### env
+    ///
+    /// Controls the environment variables feature, see [`EnvConfig`](#env).
     ///
     /// For more information, check the environment variables
     /// [technical reference](https://mirrord.dev/docs/reference/env/).
     #[config(nested, toggleable)]
     pub env: EnvConfig,
 
-    /// Controls the file operations feature, see [`FsConfig`].
+    /// ### fs
+    ///
+    /// Controls the file operations feature, see [`FsConfig`](#fs).
     ///
     /// For more information, check the file operations
     /// [technical reference](https://mirrord.dev/docs/reference/fileops/).
     #[config(nested, toggleable)]
     pub fs: FsConfig,
 
-    /// Controls the network feature, see [`NetworkConfig`].
+    /// ### network
+    ///
+    /// Controls the network feature, see [`NetworkConfig`](#network).
     ///
     /// For more information, check the network traffic
     /// [technical reference](https://mirrord.dev/docs/reference/traffic/).
     #[config(nested, toggleable)]
     pub network: NetworkConfig,
 
+    /// ### capture_error_trace
+    ///
     /// Controls the crash reporting feature.
     ///
     /// With this feature enabled, mirrord generates a nice crash report log.
+    ///
+    /// Defaults to `false`.
     #[config(env = "MIRRORD_CAPTURE_ERROR_TRACE", default = false)]
     pub capture_error_trace: bool,
 }

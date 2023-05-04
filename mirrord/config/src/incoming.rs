@@ -167,14 +167,23 @@ pub struct IncomingAdvancedFileConfig {
 /// ```
 #[derive(Default, PartialEq, Eq, Clone, Debug)]
 pub struct IncomingConfig {
+    /// ### mode
+    ///
+    /// See [`IncomingMode`](#mode incoming) for more details.
     pub mode: IncomingMode,
 
+    /// ### http_header_filter
+    ///
+    /// See [`HttpHeaderFilterConfig`](#http_header_filter) for more details.
     pub http_header_filter: http_filter::HttpHeaderFilterConfig,
 
+    /// ### port_mapping
     pub port_mapping: BiMap<u16, u16>,
 
+    /// ### ignore_localhost
     pub ignore_localhost: bool,
 
+    /// ### ignore_ports
     pub ignore_ports: HashSet<u16>,
 }
 
@@ -191,7 +200,7 @@ impl IncomingConfig {
 ///
 /// Mode of operation for the incoming TCP traffic feature.
 ///
-/// Defaults to [`IncomingMode::Mirror`].
+/// Defaults to `mirror`.
 ///
 /// ## Types
 ///
@@ -203,10 +212,14 @@ impl IncomingConfig {
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum IncomingMode {
+    /// ### mirror
+    ///
     /// Sniffs on TCP port, and send a copy of the data to listeners.
     #[default]
     Mirror,
 
+    /// ### steal
+    ///
     /// Stealer supports 2 modes of operation:
     ///
     /// 1. Port traffic stealing: Steals all TCP data from a port, which is selected whenever the

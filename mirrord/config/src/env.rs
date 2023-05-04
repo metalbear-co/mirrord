@@ -25,7 +25,7 @@ use crate::{
 /// {
 ///   "include": null | String,
 ///   "exclude": null | String,
-///   "overrides": null | { String: String },
+///   "override": null | { String: String },
 /// }
 /// ```
 ///
@@ -39,7 +39,7 @@ use crate::{
 ///     "env": {
 ///       "include": "DATABASE_USER;PUBLIC_ENV",
 ///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
-///       "overrides": {
+///       "override": {
 ///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
 ///         "LOCAL_BEAR": "panda"
 ///       }
@@ -51,6 +51,8 @@ use crate::{
 #[config(map_to = "EnvFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct EnvConfig {
+    /// ### include
+    ///
     /// Include only these remote environment variables in the local process.
     ///
     /// Value is a list separated by ";".
@@ -61,6 +63,8 @@ pub struct EnvConfig {
     #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE")]
     pub include: Option<VecOrSingle<String>>,
 
+    /// ### exclude
+    ///
     /// Include the remote environment variables in the local process that are **NOT** specified by
     /// this option.
     ///
@@ -68,6 +72,8 @@ pub struct EnvConfig {
     #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE")]
     pub exclude: Option<VecOrSingle<String>>,
 
+    /// ### override
+    ///
     /// Allows setting or overriding environment variables (locally) with a custom value.
     ///
     /// For example, if the remote pod has an environment variable `REGION=1`, but this is an

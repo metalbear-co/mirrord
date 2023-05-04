@@ -56,7 +56,7 @@ use crate::config::source::MirrordConfigSource;
 #[config(map_to = "AgentFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct AgentConfig {
-    /// # log_level
+    /// ### log_level
     ///
     /// Log level for the agent.
     ///
@@ -64,7 +64,7 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_RUST_LOG", default = "info")]
     pub log_level: String,
 
-    /// # namespace
+    /// ### namespace
     ///
     /// Namespace where the agent shall live.
     ///
@@ -72,7 +72,7 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_NAMESPACE")]
     pub namespace: Option<String>,
 
-    /// # image
+    /// ### image
     ///
     /// Name of the agent's docker image.
     ///
@@ -83,7 +83,7 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_IMAGE")]
     pub image: Option<String>,
 
-    /// # image_pull_policy
+    /// ### image_pull_policy
     ///
     /// Controls when a new agent image is downloaded.
     ///
@@ -92,7 +92,7 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_IMAGE_PULL_POLICY", default = "IfNotPresent")]
     pub image_pull_policy: String,
 
-    /// # image_pull_secrets
+    /// ### image_pull_secrets
     ///
     /// List of secrets the agent pod has access to.
     ///
@@ -101,22 +101,26 @@ pub struct AgentConfig {
     /// Read more [here](https://kubernetes.io/docs/concepts/containers/images/).
     pub image_pull_secrets: Option<Vec<HashMap<String, String>>>,
 
-    /// # ttl
+    /// ### ttl
     ///
     /// Controls how long the agent pod persists for after the agent exits (in seconds).
     ///
     /// Can be useful for collecting logs.
+    ///
+    /// Defaults to `1`.
     #[config(env = "MIRRORD_AGENT_TTL", default = 1)]
     pub ttl: u16,
 
-    /// # ephemeral
+    /// ### ephemeral
     ///
     /// Runs the agent as an
     /// [ephemeral container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)
+    ///
+    /// Defaults to `false`.
     #[config(env = "MIRRORD_EPHEMERAL_CONTAINER", default = false)]
     pub ephemeral: bool,
 
-    /// # communication_timeout
+    /// ### communication_timeout
     ///
     /// Controls how long the agent lives when there are no connections.
     ///
@@ -125,15 +129,17 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_COMMUNICATION_TIMEOUT")]
     pub communication_timeout: Option<u16>,
 
-    /// # startup_timeout
+    /// ### startup_timeout
     ///
     /// Controls how long to wait for the agent to finish initialization.
     ///
     /// If initialization takes longer than this value, mirrord exits.
+    ///
+    /// Defaults to `60`.
     #[config(env = "MIRRORD_AGENT_STARTUP_TIMEOUT", default = 60)]
     pub startup_timeout: u64,
 
-    /// # network_interface
+    /// ### network_interface
     ///
     /// Which network interface to use for mirroring.
     ///
@@ -142,20 +148,24 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_NETWORK_INTERFACE")]
     pub network_interface: Option<String>,
 
-    /// # pause
+    /// ### pause
     ///
     /// Controls target pause feature. Unstable.
     ///
     /// With this feature enabled, the remote container is paused while clients are connected to
     /// the agent.
+    ///
+    /// Defaults to `false`.
     #[config(env = "MIRRORD_PAUSE", default = false, unstable)]
     pub pause: bool,
 
-    /// # flush_connections
+    /// ### flush_connections
     ///
     /// Flushes existing connections when starting to steal, might fix issues where connections
     /// aren't stolen (due to being already established)
     // Temporary fix for issue [#1029](https://github.com/metalbear-co/mirrord/issues/1029).
+    ///
+    /// Defaults to `true`.
     #[config(
         env = "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS",
         default = true,
@@ -163,8 +173,10 @@ pub struct AgentConfig {
     )]
     pub flush_connections: bool,
 
+    // rustdoc-stripper-ignore-next
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).
+    // rustdoc-stripper-ignore-next-stop
     #[cfg(all(debug_assertions, not(test)))] // not(test) so that it's not included in the schema json.
     #[config(env = "MIRRORD_AGENT_TEST_ERROR", default = false, unstable)]
     pub test_error: bool,

@@ -43,23 +43,28 @@ use crate::{
 #[config(map_to = "HttpHeaderFilterFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct HttpHeaderFilterConfig {
+    /// ### filter
+    ///
     /// Used to match against the requests captured by the mirrord-agent pod.
     ///
     /// Supports regexes validated by the
     /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
     ///
-    /// ## Usage
+    /// #### Usage
     ///
     /// The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
     /// case-insensitive.
     #[config(env = "MIRRORD_HTTP_HEADER_FILTER")]
     pub filter: Option<String>,
 
+    /// ### ports
+    ///
     /// Activate the HTTP traffic filter only for these ports.
     #[config(env = "MIRRORD_HTTP_HEADER_FILTER_PORTS", default)]
     pub ports: PortList,
 }
 
+// rustdoc-stripper-ignore-next
 /// Helper struct for setting up ports configuration (part of the HTTP traffic stealer feature).
 ///
 /// Defaults to a list of ports `[80, 8080]`.
@@ -68,6 +73,7 @@ pub struct HttpHeaderFilterConfig {
 ///
 /// We use this to allow implementing a custom [`Default`] initialization, as the [`MirrordConfig`]
 /// macro (currently) doesn't support more intricate expressions.
+// rustdoc-stripper-ignore-next-stop
 #[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
 pub struct PortList(VecOrSingle<u16>);
 

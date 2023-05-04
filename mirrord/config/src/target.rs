@@ -70,6 +70,8 @@ pub struct TargetConfig {
     /// ### namespace
     ///
     /// Namespace where the target lives.
+    ///
+    /// Defaults to `"default"`.
     pub namespace: Option<String>,
 }
 
@@ -152,7 +154,7 @@ mirrord-layer failed to parse the provided target!
 ///
 /// ```json
 /// {
-///   "path": { "pod" | "podname" | "deployment" | "container" | "containername": String },
+///   "path": { "pod" | "podname" | "deployment" | "container" | "containername" | String },
 /// }
 /// ```
 ///
@@ -170,9 +172,14 @@ mirrord-layer failed to parse the provided target!
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged)]
 pub enum Target {
+    // rustdoc-stripper-ignore-next
     /// Mirror a deployment.
+    // rustdoc-stripper-ignore-next-stop
     Deployment(DeploymentTarget),
+
+    // rustdoc-stripper-ignore-next
     /// Mirror a pod.
+    // rustdoc-stripper-ignore-next-stop
     Pod(PodTarget),
 }
 
@@ -193,10 +200,14 @@ impl FromStr for Target {
     }
 }
 
+// rustdoc-stripper-ignore-next
 /// Mirror the pod specified by [`PodTarget::pod`].
+// rustdoc-stripper-ignore-next-stop
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 pub struct PodTarget {
+    // rustdoc-stripper-ignore-next
     /// Pod to mirror.
+    // rustdoc-stripper-ignore-next-stop
     pub pod: String,
     pub container: Option<String>,
 }
@@ -222,10 +233,14 @@ impl FromSplit for PodTarget {
     }
 }
 
+// rustdoc-stripper-ignore-next
 /// Mirror the deployment specified by [`DeploymentTarget::deployment`].
+// rustdoc-stripper-ignore-next-stop
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 pub struct DeploymentTarget {
+    // rustdoc-stripper-ignore-next
     /// Deployment to mirror.
+    // rustdoc-stripper-ignore-next-stop
     pub deployment: String,
     pub container: Option<String>,
 }

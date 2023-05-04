@@ -21,11 +21,13 @@ pub mod mode;
 /// # fs
 ///
 /// Changes file operations behavior based on user configuration.
-///
+// rustdoc-stripper-ignore-next
 /// Defaults to [`FsUserConfig::Simple`], with [`FsModeConfig::Read`].
+// rustdoc-stripper-ignore-next-stop
 ///
 /// See the file operations [reference](https://mirrord.dev/docs/reference/fileops/)
-/// for more details.
+/// for more details, and [fs adnvaced](# fs advanced) for more information on how to fully setup
+/// mirrord file operations.
 ///
 /// ## Types
 ///
@@ -67,12 +69,16 @@ pub mod mode;
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase")]
 pub enum FsUserConfig {
+    // rustdoc-stripper-ignore-next
     /// Basic configuration that controls the env vars `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`
     /// (default).
+    // rustdoc-stripper-ignore-next-stop
     Simple(FsModeConfig),
 
+    // rustdoc-stripper-ignore-next
     /// Allows the user to specify both [`FsModeConfig`] (as above), and configuration for the
     /// overrides.
+    // rustdoc-stripper-ignore-next-stop
     Advanced(AdvancedFsUserConfig),
 }
 

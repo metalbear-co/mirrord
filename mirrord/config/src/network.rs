@@ -68,15 +68,24 @@ use crate::{
 #[config(map_to = "NetworkFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct NetworkConfig {
-    /// Handles incoming network traffic, see [`IncomingConfig`] for more details.
+    /// ### incoming
+    ///
+    /// Handles incoming network traffic, see [`IncomingConfig`](#incoming) for more details.
     #[config(toggleable, nested)]
     pub incoming: IncomingConfig,
 
-    /// Tunnel outgoing network operations through mirrord.
+    /// ### outgoing
+    ///
+    /// Tunnel outgoing network operations through mirrord, see [`OutgoingConfig`](#outgoing) for
+    /// more details.
     #[config(toggleable, nested)]
     pub outgoing: OutgoingConfig,
 
+    /// ### dns
+    ///
     /// Resolve DNS via the remote pod.
+    ///
+    /// Defaults to `true`.
     #[config(env = "MIRRORD_REMOTE_DNS", default = true)]
     pub dns: bool,
 }
