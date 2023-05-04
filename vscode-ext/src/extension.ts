@@ -245,13 +245,17 @@ class MirrordAPI {
 							}
 							return;
 						}
-						// If it is not last message, it is progress
-						let formattedMessage = message["name"];
-
-						if (message["message"]) {
-							formattedMessage += ": " + message["message"];
+						
+						if (message["type"] === "Warning") {
+							vscode.window.showWarningMessage(message["message"]);
+						} else {
+							// If it is not last message, it is progress
+							let formattedMessage = message["name"];
+							if (message["message"]) {
+								formattedMessage += ": " + message["message"];
+							}
+							progress.report({ message: formattedMessage });
 						}
-						progress.report({message: formattedMessage});
 					}
 				});
 

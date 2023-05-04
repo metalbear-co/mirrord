@@ -59,6 +59,7 @@ serde.workspace = true
 serde_json = { workspace = true, optional = true }
 serde_yaml = { version = "0.9", optional = true }
 thiserror.workspace = true
+semver.workspace = true
 tokio = { workspace = true, optional = true }
 tokio-tungstenite = { version = "0.18", optional = true }
 tracing = { workspace = true, optional = true }
