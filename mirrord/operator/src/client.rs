@@ -12,11 +12,12 @@ use semver::Version;
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
-use tracing::error;
+use tracing::{error, trace, warn};
 
 use crate::crd::{MirrordOperatorCrd, TargetCrd, OPERATOR_STATUS_NAME};
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
+static MIRRORD_OPERATOR_SESSION_ID: &str = "MIRRORD_OPERATOR_SESSION_ID";
 
 #[derive(Debug, Error)]
 pub enum OperatorApiError {
@@ -83,6 +84,26 @@ impl OperatorApi {
         }
     }
 
+    /// Uses `MIRRORD_OPERATOR_SESSION_ID` to have a persistant session_id across child processes,
+    /// if env var is empty or missing random id will be generated and saved in env
+    fn session_id() -> u64 {
+        std::env::var(MIRRORD_OPERATOR_SESSION_ID)
+            .inspect_err(|_| trace!("{MIRRORD_OPERATOR_SESSION_ID} empty, creating new session"))
+            .ok()
+            .and_then(|val| {
+                val.parse()
+                    .inspect_err(|err| {
+                        warn!("Error parsing {MIRRORD_OPERATOR_SESSION_ID}, creating new session. Err: {err}")
+                    })
+                    .ok()
+            })
+            .unwrap_or_else(|| {
+                let id = rand::random();
+                std::env::set_var(MIRRORD_OPERATOR_SESSION_ID, format!("{id}"));
+                id
+            })
+    }
+
     async fn new(config: &LayerConfig) -> Result<Self> {
         let target_config = config.target.clone();
 
@@ -137,6 +158,7 @@ impl OperatorApi {
         }
     }
 
+    /// Create websocket connection to operator
     async fn connect_target(
         &self,
         target: TargetCrd,
@@ -150,6 +172,7 @@ impl OperatorApi {
                         self.target_api.resource_url(),
                         target.name()
                     ))
+                    .header("x-session-id", Self::session_id())
                     .body(vec![])?,
             )
             .await

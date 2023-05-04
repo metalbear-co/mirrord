@@ -1,4 +1,5 @@
 #![feature(once_cell)]
+#![feature(result_option_inspect)]
 #![warn(clippy::indexing_slicing)]
 
 #[cfg(feature = "client")]
