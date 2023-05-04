@@ -72,6 +72,8 @@ impl AgentManagment for KubernetesAPI {
         let conn = if let Some(pod_ip) = pod.status.and_then(|status| status.pod_ip) {
             trace!("connecting to pod_ip {pod_ip}:{agent_port}");
 
+            // When pod_ip is available we directly create it as SocketAddr to prevent tokio from
+            // performing a DNS lookup
             tokio::time::timeout(
                 Duration::from_secs(self.agent.startup_timeout),
                 TcpStream::connect(SocketAddr::new(pod_ip.parse()?, agent_port)),
