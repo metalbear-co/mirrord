@@ -13,8 +13,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Added
 
-- Warn user when their mirrord version doesn't match the operator version.
-  [#warn-on-version-mismatch](https://github.com/metalbear-co/mirrord/issues/warn-on-version-mismatch)
+- Warn user when their mirrord version doesn't match the operator version.  
 - Last selected target is now remembered in IntelliJ extension and shown first
   in the target selection dialog.
   [#1347](https://github.com/metalbear-co/mirrord/issues/1347)
