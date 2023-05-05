@@ -3,7 +3,7 @@
 	"displayName": "mirrord",
 	"description": "Run your local process in the context of your cloud cluster",
 	"publisher": "MetalBear",
-	"version": "3.40.0",
+	"version": "3.41.0",
 	"engines": {
 		"vscode": "^1.63.0"
 	},
