@@ -35,82 +35,35 @@ use crate::{
 /// Mirrord allows for a high degree of customization when it comes to which features you want to
 /// enable, and how they should function.
 ///
-/// Most of mirrord features can be setup with the [`feature`](#feature) configuration, you'll also
+/// Mirrord features can be setup with the [`feature`](#feature) configuration, you'll also
 /// need to set up a [`target`](#target) for mirrord to impersonate.
-///
-/// ## Types
-///
-/// ```json
-/// {
-///   "accept_invalid_certificates": bool,
-///   "skip_processes": null | String | [String],
-///   "target": TargetConfig,
-///   "connect_tcp": null | String,
-///   "connect_agent_name": null | String,
-///   "connect_agent_port": null | Number,
-///   "agent": AgentConfig,
-///   "feature": FeatureConfig,
-///   "operator": bool,
-///   "kubeconfig": null | String,
-///   "sip_binaries": null | String | [String],
-/// }
-/// ```
 ///
 /// ## Sample
 ///
-/// - Simple `config.json`:
+/// ### Minimal `config.json`
+///
+/// Most of the configuration has a default value, so all you really need is to specify a
+/// [`target`](###target) to impersonate. This will start mirrord with [`network`](###network) in
+/// sniffer mode, with outgoing traffic enabled for both TCP and UDP, and [`fs`](###fs) set to
+/// read-only file operations.
 ///
 /// ```json
 /// {
-///   "accept_invalid_certificates": false,
-///   "skip_processes": "ide-debugger",
-///   "target": {
-///     "path": "pod/hello-pod",
-///     "namespace": "default",
-///   },
-///   "connect_tcp": null,
-///   "connect_agent_name": "mirrord-agent-still-alive",
-///   "connect_agent_port": "7777",
-///   "agent": {
-///     "log_level": "info",
-///     "namespace": "default",
-///     "image": "ghcr.io/metalbear-co/mirrord:latest",
-///     "image_pull_policy": "IfNotPresent",
-///     "image_pull_secrets": [ { "secret-key": "secret" } ],
-///     "ttl": 30,
-///     "ephemeral": false,
-///     "communication_timeout": 30,
-///     "startup_timeout": 360,
-///     "network_interface": "eth0",
-///     "pause": false,
-///     "flush_connections": false,
-///   },
-///   "feature": {
-///     "env": {
-///       "include": "DATABASE_USER;PUBLIC_ENV",
-///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
-///       "overrides": {
-///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
-///         "LOCAL_BEAR": "panda"
-///       }
-///     },
-///     "fs": true,
-///     "network": true,
-///   },
-///   "operator": true,
-///   "kubeconfig": "~/.kube/config",
-///   "sip_binaries": "bash",
+///   "target": "pod/bear-pod"
 /// }
 /// ```
 ///
-/// - Advanced `config.json`:
+/// ### Advanced `config.json`
+///
+/// Both [`fs`](#fs) and [`network`](#network) also support a simplified configuration, see their
+/// respective documentations to learn more.
 ///
 /// ```json
 /// {
 ///   "accept_invalid_certificates": false,
 ///   "skip_processes": "ide-debugger",
 ///   "target": {
-///     "path": "pod/hello-pod",
+///     "path": "pod/bear-pod",
 ///     "namespace": "default",
 ///   },
 ///   "connect_tcp": null,
@@ -128,7 +81,7 @@ use crate::{
 ///     "startup_timeout": 360,
 ///     "network_interface": "eth0",
 ///     "pause": false,
-///     "flush_connections": false,
+///     "flush_connections": true,
 ///   },
 ///   "feature": {
 ///     "env": {
@@ -179,6 +132,8 @@ pub struct LayerConfig {
     ///
     /// Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed
     /// certificates).
+    ///
+    /// Defaults to `false`.
     #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", default = false)]
     pub accept_invalid_certificates: bool,
 
@@ -188,61 +143,157 @@ pub struct LayerConfig {
     ///
     /// Useful when process A spawns process B, and the user wants mirrord to operate only on
     /// process B.
+    ///
+    /// Accepts a single value, or multiple values separated by `;`.
+    ///
+    /// #### Example
+    ///
+    /// ```json
+    /// {
+    ///   "skip_processes": "bash;node"
+    /// }
+    /// ```
     #[config(env = "MIRRORD_SKIP_PROCESSES")]
     pub skip_processes: Option<VecOrSingle<String>>,
 
     /// ### target
     ///
-    /// Specifies the running pod to mirror, see [`TargetConfig`](#target).
+    /// Specifies the running pod to mirror, see [`TargetConfig`](#target) for more details.
     ///
-    /// Supports:
+    /// The simplified configuration supports:
     ///
     /// - `pod/{sample-pod}/[container]/{sample-container}`;
     /// - `podname/{sample-pod}/[container]/{sample-container}`;
     /// - `deployment/{sample-deployment}/[container]/{sample-container}`;
+    ///
+    /// #### Example
+    ///
+    /// ```json
+    /// {
+    ///   "target": "pod/bear-pod"
+    /// }
+    /// ```
     #[config(nested)]
     pub target: TargetConfig,
 
     /// ### connect_tcp
     ///
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.
+    ///
+    /// #### Example
+    ///
+    /// ```json
+    /// {
+    ///   "connect_tcp": "10.10.0.100:7777"
+    /// }
+    /// ```
     #[config(env = "MIRRORD_CONNECT_TCP")]
     pub connect_tcp: Option<String>,
 
     /// ### connect_agent_name
     ///
     /// Agent name that already exists that we can connect to.
+    ///
+    /// #### Example
+    ///
+    /// ```json
+    /// {
+    ///   "connect_agent_name": "mirrord-agent-still-alive"
+    /// }
+    /// ```
     #[config(env = "MIRRORD_CONNECT_AGENT")]
     pub connect_agent_name: Option<String>,
 
     /// ### connect_agent_port
     ///
     /// Agent listen port that already exists that we can connect to.
+    ///
+    /// #### Example
+    ///
+    /// ```json
+    /// {
+    ///   "connect_agent_port": "8888"
+    /// }
+    /// ```
     #[config(env = "MIRRORD_CONNECT_PORT")]
     pub connect_agent_port: Option<u16>,
 
     /// ### agent
     ///
-    /// Agent configuration, see [`AgentConfig`](#agent).
+    /// Agent configuration, see [`AgentConfig`](#agent) for more advanced usage.
+    ///
+    /// #### Example
+    ///
+    /// ```json
+    /// {
+    ///   "agent": {
+    ///     "log_level": "debug",
+    ///     "image": "custom-ghcr/images/mirrord:latest",
+    ///     "image_pull_policy": "Always",
+    ///     "ttl": 180,
+    ///   }
+    /// }
+    /// ```
     #[config(nested)]
     pub agent: AgentConfig,
 
     /// ### feature
     ///
-    /// Controls mirrord features, see [`FeatureConfig`](#feature).
+    /// Controls mirrord features, see [`FeatureConfig`](#feature) to learn how to set up mirrord
+    /// to do exactly what you want, and the
+    /// [technical reference, Technical Reference](https://mirrord.dev/docs/reference/)
+    /// to learn more about mirrord features.
+    ///
+    /// #### Example
+    ///
+    /// ```json
+    /// {
+    ///   "feature": {
+    ///     "env": {
+    ///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
+    ///     },
+    ///     "fs": {
+    ///       "mode": "write",
+    ///       "read_only": [ ".+\.yaml", ".+important-file\.txt" ],
+    ///       "local": [ ".+\.js", ".+\.mjs" ]
+    ///     },
+    ///     "network": {
+    ///       "incoming": {
+    ///         "mode": "steal",
+    ///         "http_header_filter": {
+    ///           "filter": "host: api\..+",
+    ///         }
+    ///       },
+    ///       "outgoing": {
+    ///         "udp": false,
+    ///       }
+    ///     }
+    ///   }
+    /// }
+    /// ```
     #[config(nested)]
     pub feature: FeatureConfig,
 
     /// ### operator
     ///
     /// Allow to lookup if operator is installed on cluster and use it
+    ///
+    /// Defaults to `true`.
     #[config(env = "MIRRORD_OPERATOR_ENABLE", default = true)]
     pub operator: bool,
 
     /// ### kubeconfig
     ///
-    /// Path to a kubeconfig file, if not specified, will use KUBECONFIG or ~/.kube/config or the
-    /// in-cluster config.
+    /// Path to a kubeconfig file, if not specified, will use `KUBECONFIG`, or `~/.kube/config`, or
+    /// the in-cluster config.
+    ///
+    /// #### Example
+    ///
+    /// ```json
+    /// {
+    ///   "kubeconfig": "~/bear/kube-config"
+    /// }
+    /// ```
     #[config(env = "MIRRORD_KUBECONFIG")]
     pub kubeconfig: Option<String>,
 
@@ -255,6 +306,14 @@ pub struct LayerConfig {
     ///
     /// Runs `endswith` on the binary path (so `bash` would apply to any binary ending with `bash`
     /// while `/usr/bin/bash` would apply only for that binary).
+    ///
+    /// #### Example
+    ///
+    /// ```json
+    /// {
+    ///   "sip_binaries": "bash;python"
+    /// }
+    /// ```
     pub sip_binaries: Option<VecOrSingle<String>>,
 }
 
