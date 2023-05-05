@@ -17,9 +17,7 @@ use crate::{
 /// Specifies the target and namespace to mirror, see [`path`](#path) for a list of accepted values
 /// for the `target` option.
 ///
-/// ## Sample
-///
-/// ### Minimal `config.json`
+/// ## Minimal `target` config
 ///
 /// ```json
 /// {
@@ -27,7 +25,7 @@ use crate::{
 /// }
 /// ```
 ///
-/// ### Advanced `config.json`
+/// ## Advanced `target` config
 ///
 /// ```json
 /// {

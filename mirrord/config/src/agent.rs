@@ -9,13 +9,11 @@ use crate::config::source::MirrordConfigSource;
 ///
 /// Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.
 ///
-/// ## Sample
-
-/// ### Minimal `config.json`
+/// ## Minimal `agent` config
 ///
 /// We provide sane defaults for this option, so you don't have to set up anything here.
 ///
-/// ### Advanced `config.json`
+/// ## Advanced `agent` config
 ///
 /// ```json
 /// {

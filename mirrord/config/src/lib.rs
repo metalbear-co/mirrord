@@ -38,9 +38,7 @@ use crate::{
 /// Mirrord features can be setup with the [`feature`](#feature) configuration, you'll also
 /// need to set up a [`target`](#target) for mirrord to impersonate.
 ///
-/// ## Sample
-///
-/// ### Minimal `config.json`
+/// ## Minimal `config.json`
 ///
 /// Most of the configuration fields have a default value, so all you really need is to specify a
 /// [`target`](###target) to impersonate. This will start mirrord with [`network`](##network) in
@@ -53,7 +51,7 @@ use crate::{
 /// }
 /// ```
 ///
-/// ### Advanced `config.json`
+/// ## Advanced `config.json`
 ///
 /// Both [`fs`](#fs) and [`network`](#network) also support a simplified configuration, see their
 /// respective documentations to learn more.

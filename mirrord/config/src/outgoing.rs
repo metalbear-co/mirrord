@@ -13,17 +13,6 @@ use crate::{
 /// See the outgoing [reference](https://mirrord.dev/docs/reference/traffic/#outgoing) for more
 /// details.
 ///
-/// ## Types
-///
-/// ```json
-/// {
-///   "tcp": bool,
-///   "udp": bool,
-///   "ignore_localhost": bool,
-///   "unix_streams": null | String | [String],
-/// }
-/// ```
-///
 /// ## Sample
 ///
 /// - `config.json`

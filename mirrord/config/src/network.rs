@@ -15,19 +15,7 @@ use crate::{
 /// See the network traffic [reference](https://mirrord.dev/docs/reference/traffic/)
 /// for more details.
 ///
-/// ## Types
-///
-/// ```json
-/// {
-///   "incoming": IncomingConfig,
-///   "outgoing": OutgoingConfig,
-///   "dns": bool,
-/// }
-/// ```
-///
-/// ## Sample
-///
-/// - Simple `config.json`:
+/// ## Minimal `network` config
 ///
 /// ```json
 /// {
