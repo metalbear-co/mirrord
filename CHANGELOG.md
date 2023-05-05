@@ -22,7 +22,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Changed
 
-- mirrord loading progress is displayed in the staus indicator on IntelliJ,
+- mirrord loading progress is displayed in the stauts indicator on IntelliJ,
   replacing the singleton notifier
   [#1337](https://github.com/metalbear-co/mirrord/issues/1337)
 
