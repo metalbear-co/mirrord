@@ -9,30 +9,13 @@ use crate::config::source::MirrordConfigSource;
 ///
 /// Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.
 ///
-/// ## Types
-///
-/// ```json
-/// {
-///   "agent": {
-///     "log_level": String | "trace" | "debug" | "info" | "warn" | "error",
-///     "namespace": null | String,
-///     "image": null | String,
-///     "image_pull_policy": String,
-///     "image_pull_secrets": null | [] | [ { String: String } ],
-///     "ttl": Number,
-///     "ephemeral": bool,
-///     "communication_timeout": null | Number,
-///     "startup_timeout": Number,
-///     "network_interface": null | String,
-///     "pause": bool,
-///     "flush_connections": bool,
-///   }
-/// }
-/// ```
-///
 /// ## Sample
+
+/// ### Minimal `config.json`
 ///
-/// - `config.json`:
+/// We provide sane defaults for this option, so you don't have to set up anything here.
+///
+/// ### Advanced `config.json`
 ///
 /// ```json
 /// {
@@ -56,15 +39,23 @@ use crate::config::source::MirrordConfigSource;
 #[config(map_to = "AgentFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct AgentConfig {
-    /// ### log_level
+    /// ## log_level
     ///
     /// Log level for the agent.
     ///
     /// Supports any string that would work with `RUST_LOG`.
+    ///
+    /// ```json
+    /// {
+    ///   "agent": {
+    ///     "log_level": "mirrord=debug,warn",
+    ///   }
+    /// }
+    /// ```
     #[config(env = "MIRRORD_AGENT_RUST_LOG", default = "info")]
     pub log_level: String,
 
-    /// ### namespace
+    /// ## namespace
     ///
     /// Namespace where the agent shall live.
     ///
@@ -72,36 +63,57 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_NAMESPACE")]
     pub namespace: Option<String>,
 
-    /// ### image
+    /// ## image
     ///
     /// Name of the agent's docker image.
     ///
     /// Useful when a custom build of mirrord-agent is required, or when using an internal
     /// registry.
     ///
-    /// Defaults to the latest stable image.
+    /// Defaults to the latest stable image `"ghcr.io/metalbear-co/mirrord:latest"`.
+    ///
+    /// ```json
+    /// {
+    ///   "agent": {
+    ///     "image": "internal.repo/images/mirrord:latest"
+    ///   }
+    /// }
+    /// ```
     #[config(env = "MIRRORD_AGENT_IMAGE")]
     pub image: Option<String>,
 
-    /// ### image_pull_policy
+    /// ## image_pull_policy
     ///
     /// Controls when a new agent image is downloaded.
     ///
-    /// Supports any valid kubernetes [image pull
-    /// policy](https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy)
+    /// Supports any valid kubernetes
+    /// [image pull policy](https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy)
+    ///
+    /// Defaults to `"IfNotPresent"`
     #[config(env = "MIRRORD_AGENT_IMAGE_PULL_POLICY", default = "IfNotPresent")]
     pub image_pull_policy: String,
 
-    /// ### image_pull_secrets
+    /// ## image_pull_secrets
     ///
     /// List of secrets the agent pod has access to.
     ///
     /// Takes an array of hash with the format `{ name: <secret-name> }`.
     ///
     /// Read more [here](https://kubernetes.io/docs/concepts/containers/images/).
+    ///
+    /// ```json
+    /// {
+    ///   "agent": {
+    ///     "image_pull_secrets": [
+    ///       "very-secret": "secret-key",
+    ///       "very-secret": "keep-your-secrets"
+    ///     ]
+    ///   }
+    /// }
+    /// ```
     pub image_pull_secrets: Option<Vec<HashMap<String, String>>>,
 
-    /// ### ttl
+    /// ## ttl
     ///
     /// Controls how long the agent pod persists for after the agent exits (in seconds).
     ///
@@ -111,7 +123,7 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_TTL", default = 1)]
     pub ttl: u16,
 
-    /// ### ephemeral
+    /// ## ephemeral
     ///
     /// Runs the agent as an
     /// [ephemeral container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)
@@ -120,7 +132,7 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_EPHEMERAL_CONTAINER", default = false)]
     pub ephemeral: bool,
 
-    /// ### communication_timeout
+    /// ## communication_timeout
     ///
     /// Controls how long the agent lives when there are no connections.
     ///
@@ -129,7 +141,7 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_COMMUNICATION_TIMEOUT")]
     pub communication_timeout: Option<u16>,
 
-    /// ### startup_timeout
+    /// ## startup_timeout
     ///
     /// Controls how long to wait for the agent to finish initialization.
     ///
@@ -139,16 +151,16 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_STARTUP_TIMEOUT", default = 60)]
     pub startup_timeout: u64,
 
-    /// ### network_interface
+    /// ## network_interface
     ///
     /// Which network interface to use for mirroring.
     ///
-    /// The default behavior is try to access the internet and use that interface. If that  fails
+    /// The default behavior is try to access the internet and use that interface. If that fails
     /// it uses eth0.
     #[config(env = "MIRRORD_AGENT_NETWORK_INTERFACE")]
     pub network_interface: Option<String>,
 
-    /// ### pause
+    /// ## pause
     ///
     /// Controls target pause feature. Unstable.
     ///
@@ -159,7 +171,7 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_PAUSE", default = false, unstable)]
     pub pause: bool,
 
-    /// ### flush_connections
+    /// ## flush_connections
     ///
     /// Flushes existing connections when starting to steal, might fix issues where connections
     /// aren't stolen (due to being already established)

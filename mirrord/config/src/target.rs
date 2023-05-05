@@ -14,34 +14,26 @@ use crate::{
 
 /// # target
 ///
-/// Specifies the target and namespace to mirror, see [`Target`](#path).
-///
-/// ## Types
-///
-/// ```json
-/// {
-///   "path": null | Target,
-///   "namespace": null | String,
-/// }
-/// ```
+/// Specifies the target and namespace to mirror, see [`path`](#path) for a list of accepted values
+/// for the `target` option.
 ///
 /// ## Sample
 ///
-/// - Simple `config.json`:
+/// ### Minimal `config.json`
 ///
 /// ```json
 /// {
-///   "target": "pod/impersonate-me"
+///   "target": "pod/bear-pod"
 /// }
 /// ```
 ///
-/// - Advanced `config.json`:
+/// ### Advanced `config.json`
 ///
 /// ```json
 /// {
 ///   "target": {
 ///     "path": {
-///       "pod": "impersonate-me"
+///       "pod": "bear-pod"
 ///     },
 ///     "namespace": "default"
 ///   }
@@ -62,12 +54,12 @@ pub enum TargetFileConfig {
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TargetConfig {
-    /// ### path
+    /// ## path
     ///
-    /// Path of the target to impersonate, see [`Path`](#path).
+    /// Path of the target to impersonate, see [`path`](#path) for details.
     pub path: Option<Target>,
 
-    /// ### namespace
+    /// ## namespace
     ///
     /// Namespace where the target lives.
     ///
@@ -149,26 +141,6 @@ mirrord-layer failed to parse the provided target!
 /// - `deployment/{sample-deployment}`;
 /// - `container/{sample-container}`;
 /// - `containername/{sample-container}`.
-///
-/// ## Types
-///
-/// ```json
-/// {
-///   "path": { "pod" | "podname" | "deployment" | "container" | "containername" | String },
-/// }
-/// ```
-///
-/// ## Sample
-///
-/// - `config.json`:
-///
-/// ```json
-/// {
-///   "path": {
-///     "pod": "impersonate-me"
-///   }
-/// }
-/// ```
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged)]
 pub enum Target {

@@ -42,9 +42,9 @@ use crate::{
 ///
 /// ### Minimal `config.json`
 ///
-/// Most of the configuration has a default value, so all you really need is to specify a
-/// [`target`](###target) to impersonate. This will start mirrord with [`network`](###network) in
-/// sniffer mode, with outgoing traffic enabled for both TCP and UDP, and [`fs`](###fs) set to
+/// Most of the configuration fields have a default value, so all you really need is to specify a
+/// [`target`](###target) to impersonate. This will start mirrord with [`network`](##network) in
+/// sniffer mode, with outgoing traffic enabled for both TCP and UDP, and [`fs`](##fs) set to
 /// read-only file operations.
 ///
 /// ```json
@@ -128,7 +128,7 @@ use crate::{
 #[config(map_to = "LayerFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct LayerConfig {
-    /// ### accept_invalid_certificates
+    /// ## accept_invalid_certificates
     ///
     /// Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed
     /// certificates).
@@ -137,7 +137,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", default = false)]
     pub accept_invalid_certificates: bool,
 
-    /// ### skip_processes
+    /// ## skip_processes
     ///
     /// Allows mirrord to skip unwanted processes.
     ///
@@ -145,8 +145,6 @@ pub struct LayerConfig {
     /// process B.
     ///
     /// Accepts a single value, or multiple values separated by `;`.
-    ///
-    /// #### Example
     ///
     /// ```json
     /// {
@@ -156,7 +154,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_SKIP_PROCESSES")]
     pub skip_processes: Option<VecOrSingle<String>>,
 
-    /// ### target
+    /// ## target
     ///
     /// Specifies the running pod to mirror, see [`TargetConfig`](#target) for more details.
     ///
@@ -166,8 +164,6 @@ pub struct LayerConfig {
     /// - `podname/{sample-pod}/[container]/{sample-container}`;
     /// - `deployment/{sample-deployment}/[container]/{sample-container}`;
     ///
-    /// #### Example
-    ///
     /// ```json
     /// {
     ///   "target": "pod/bear-pod"
@@ -176,11 +172,9 @@ pub struct LayerConfig {
     #[config(nested)]
     pub target: TargetConfig,
 
-    /// ### connect_tcp
+    /// ## connect_tcp
     ///
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.
-    ///
-    /// #### Example
     ///
     /// ```json
     /// {
@@ -190,11 +184,9 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_CONNECT_TCP")]
     pub connect_tcp: Option<String>,
 
-    /// ### connect_agent_name
+    /// ## connect_agent_name
     ///
     /// Agent name that already exists that we can connect to.
-    ///
-    /// #### Example
     ///
     /// ```json
     /// {
@@ -204,11 +196,9 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_CONNECT_AGENT")]
     pub connect_agent_name: Option<String>,
 
-    /// ### connect_agent_port
+    /// ## connect_agent_port
     ///
     /// Agent listen port that already exists that we can connect to.
-    ///
-    /// #### Example
     ///
     /// ```json
     /// {
@@ -218,11 +208,9 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_CONNECT_PORT")]
     pub connect_agent_port: Option<u16>,
 
-    /// ### agent
+    /// ## agent
     ///
     /// Agent configuration, see [`AgentConfig`](#agent) for more advanced usage.
-    ///
-    /// #### Example
     ///
     /// ```json
     /// {
@@ -237,14 +225,12 @@ pub struct LayerConfig {
     #[config(nested)]
     pub agent: AgentConfig,
 
-    /// ### feature
+    /// ## feature
     ///
     /// Controls mirrord features, see [`FeatureConfig`](#feature) to learn how to set up mirrord
     /// to do exactly what you want, and the
     /// [technical reference, Technical Reference](https://mirrord.dev/docs/reference/)
     /// to learn more about mirrord features.
-    ///
-    /// #### Example
     ///
     /// ```json
     /// {
@@ -274,7 +260,7 @@ pub struct LayerConfig {
     #[config(nested)]
     pub feature: FeatureConfig,
 
-    /// ### operator
+    /// ## operator
     ///
     /// Allow to lookup if operator is installed on cluster and use it
     ///
@@ -282,12 +268,10 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_OPERATOR_ENABLE", default = true)]
     pub operator: bool,
 
-    /// ### kubeconfig
+    /// ## kubeconfig
     ///
     /// Path to a kubeconfig file, if not specified, will use `KUBECONFIG`, or `~/.kube/config`, or
     /// the in-cluster config.
-    ///
-    /// #### Example
     ///
     /// ```json
     /// {
@@ -297,7 +281,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_KUBECONFIG")]
     pub kubeconfig: Option<String>,
 
-    /// ### sip_binaries
+    /// ## sip_binaries
     ///
     /// Binaries to patch (macOS SIP).
     ///
@@ -306,8 +290,6 @@ pub struct LayerConfig {
     ///
     /// Runs `endswith` on the binary path (so `bash` would apply to any binary ending with `bash`
     /// while `/usr/bin/bash` would apply only for that binary).
-    ///
-    /// #### Example
     ///
     /// ```json
     /// {
