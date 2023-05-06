@@ -8,6 +8,42 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.41.0](https://github.com/metalbear-co/mirrord/tree/3.41.0) - 2023-05-06
+
+
+### Added
+
+- Last selected target is now remembered in IntelliJ extension and shown first
+  in the target selection dialog.
+  [#1347](https://github.com/metalbear-co/mirrord/issues/1347)
+- Warn user when their mirrord version doesn't match the operator version.
+
+
+### Changed
+
+- mirrord loading progress is displayed in the staus indicator on IntelliJ,
+  replacing the singleton notifier
+  [#1337](https://github.com/metalbear-co/mirrord/issues/1337)
+
+
+### Fixed
+
+- Fix crash on unexpected LogMessage
+  [#1380](https://github.com/metalbear-co/mirrord/issues/1380)
+- Added hook for recvfrom to support cases where caller expects the messages to
+  be from address they were sent to.
+  [#1386](https://github.com/metalbear-co/mirrord/issues/1386)
+
+
+### Internal
+
+- Add x-session-id to operator request, that is persistent across child
+  processes in a single mirrord exec.
+- Improve metadata for VSCode extension
+- Remove unnecessary DNS resolve on agent addr when incluster feature is
+  enabled in mirrord-kube.
+
+
 ## [3.40.0](https://github.com/metalbear-co/mirrord/tree/3.40.0) - 2023-05-01
 
 
