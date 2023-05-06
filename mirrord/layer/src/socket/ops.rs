@@ -738,3 +738,14 @@ fn remote_hostname_string() -> Detour<CString> {
 pub(super) fn gethostname() -> Detour<&'static CString> {
     HOSTNAME.get_or_detour_init(remote_hostname_string)
 }
+
+/// libraries like `c-ares` expect messages to be from the address they were sent to.
+/// currently this function just fills in the address expected by the caller.
+#[tracing::instrument(level = "trace")]
+pub(super) fn recv_from(sockfd: i32, sockaddr: *mut sockaddr, addrlen: *mut u32) -> Detour<()> {
+    let socket_state = SOCKETS.get(&sockfd)?.clone();
+    if let SocketState::Connected(Connected { remote_address, .. }) = &socket_state.state {
+        fill_address(sockaddr, addrlen, (remote_address.clone()).try_into()?)?;
+    }
+    Detour::Success(())
+}
