@@ -6,15 +6,18 @@ use mirrord_kube::{
     api::{get_k8s_resource_api, kubernetes::create_kube_api},
     error::KubeApiError,
 };
+use mirrord_progress::{MessageKind, Progress};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
+use semver::Version;
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
-use tracing::error;
+use tracing::{error, trace, warn};
 
-use crate::crd::TargetCrd;
+use crate::crd::{MirrordOperatorCrd, TargetCrd, OPERATOR_STATUS_NAME};
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
+static MIRRORD_OPERATOR_SESSION_ID: &str = "MIRRORD_OPERATOR_SESSION_ID";
 
 #[derive(Debug, Error)]
 pub enum OperatorApiError {
@@ -41,20 +44,64 @@ type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
 pub struct OperatorApi {
     client: Client,
     target_api: Api<TargetCrd>,
+    version_api: Api<MirrordOperatorCrd>,
     target_config: TargetConfig,
 }
 
 impl OperatorApi {
-    pub async fn discover(
+    pub async fn discover<P>(
         config: &LayerConfig,
-    ) -> Result<Option<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)>> {
+        progress: &P,
+    ) -> Result<Option<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)>>
+    where
+        P: Progress + Send + Sync,
+    {
         let operator_api = OperatorApi::new(config).await?;
 
         if let Some(target) = operator_api.fetch_target().await? {
+            let operator_version = Version::parse(&operator_api.get_version().await?).unwrap(); // TODO: Remove unwrap
+
+            // This is printed multiple times when the local process forks. Can be solved by e.g.
+            // propagating an env var, don't think it's worth the extra complexity though
+            let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+            if operator_version != mirrord_version {
+                progress.subtask("Comparing versions").print_message(MessageKind::Warning, Some(&format!("Your mirrord version {} does not match the operator version {}. This can lead to unforeseen issues.", mirrord_version, operator_version)));
+                if operator_version > mirrord_version {
+                    progress.subtask("Comparing versions").print_message(
+                        MessageKind::Warning,
+                        Some(
+                            "Consider updating your mirrord version to match the operator version.",
+                        ),
+                    );
+                } else {
+                    progress.subtask("Comparing versions").print_message(MessageKind::Warning, Some("Consider either updating your operator version to match your mirrord version, or downgrading your mirrord version."));
+                }
+            }
             operator_api.connect_target(target).await.map(Some)
         } else {
+            // No operator found
             Ok(None)
         }
+    }
+
+    /// Uses `MIRRORD_OPERATOR_SESSION_ID` to have a persistant session_id across child processes,
+    /// if env var is empty or missing random id will be generated and saved in env
+    fn session_id() -> u64 {
+        std::env::var(MIRRORD_OPERATOR_SESSION_ID)
+            .inspect_err(|_| trace!("{MIRRORD_OPERATOR_SESSION_ID} empty, creating new session"))
+            .ok()
+            .and_then(|val| {
+                val.parse()
+                    .inspect_err(|err| {
+                        warn!("Error parsing {MIRRORD_OPERATOR_SESSION_ID}, creating new session. Err: {err}")
+                    })
+                    .ok()
+            })
+            .unwrap_or_else(|| {
+                let id = rand::random();
+                std::env::set_var(MIRRORD_OPERATOR_SESSION_ID, format!("{id}"));
+                id
+            })
     }
 
     async fn new(config: &LayerConfig) -> Result<Self> {
@@ -69,11 +116,31 @@ impl OperatorApi {
         let target_api: Api<TargetCrd> =
             get_k8s_resource_api(&client, target_config.namespace.as_deref());
 
+        let version_api: Api<MirrordOperatorCrd> = Api::all(client.clone());
+
         Ok(OperatorApi {
             client,
             target_api,
+            version_api,
             target_config,
         })
+    }
+
+    async fn get_version(&self) -> Result<String> {
+        let version = match self
+            .version_api
+            .get(OPERATOR_STATUS_NAME)
+            .await
+            .map_err(KubeApiError::KubeError)
+            .map_err(OperatorApiError::KubeApiError)
+        {
+            Ok(status) => status.spec.operator_version,
+            Err(err) => {
+                error!("Unable to get operator version: {}", err);
+                return Err(err);
+            }
+        };
+        Ok(version)
     }
 
     async fn fetch_target(&self) -> Result<Option<TargetCrd>> {
@@ -91,6 +158,7 @@ impl OperatorApi {
         }
     }
 
+    /// Create websocket connection to operator
     async fn connect_target(
         &self,
         target: TargetCrd,
@@ -104,6 +172,7 @@ impl OperatorApi {
                         self.target_api.resource_url(),
                         target.name()
                     ))
+                    .header("x-session-id", Self::session_id())
                     .body(vec![])?,
             )
             .await

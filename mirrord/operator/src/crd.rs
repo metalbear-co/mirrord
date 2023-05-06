@@ -77,6 +77,7 @@ pub struct MirrordOperatorStatus {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Session {
+    pub id: Option<String>,
     pub duration_secs: u64,
     pub user: String,
     pub target: String,
