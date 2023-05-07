@@ -8,6 +8,15 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.41.1](https://github.com/metalbear-co/mirrord/tree/3.41.1) - 2023-05-07
+
+
+### Fixed
+
+- Fixed regression in GoLand and NodeJS causing a crash
+  [#1389](https://github.com/metalbear-co/mirrord/issues/1389)
+
+
 ## [3.41.0](https://github.com/metalbear-co/mirrord/tree/3.41.0) - 2023-05-06
 
 
