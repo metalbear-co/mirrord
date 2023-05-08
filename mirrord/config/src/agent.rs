@@ -103,8 +103,8 @@ pub struct AgentConfig {
     /// {
     ///   "agent": {
     ///     "image_pull_secrets": [
-    ///       "very-secret": "secret-key",
-    ///       "very-secret": "keep-your-secrets"
+    ///       { "very-secret": "secret-key" },
+    ///       { "very-secret": "keep-your-secrets" }
     ///     ]
     ///   }
     /// }
