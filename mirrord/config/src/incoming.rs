@@ -29,8 +29,8 @@ use http_filter::*;
 /// 1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested
 /// listeners;
 ///
-/// 2. Steal: Captures the TCP data from a port, and forwards it (depending on how it's configured,
-/// see [`IncomingMode::Steal`]);
+/// 2. Steal: Captures the TCP data from a port, and forwards it to the local process,  see
+/// [`steal`](#steal);
 #[derive(Deserialize, Clone, Debug, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[serde(untagged, rename_all = "lowercase")]
@@ -110,28 +110,38 @@ impl MirrordToggleableConfig for IncomingFileConfig {
 #[derive(Deserialize, Clone, Debug, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct IncomingAdvancedFileConfig {
+    /// ## mode
+    ///
     /// Allows selecting between mirrorring or stealing traffic.
     ///
     /// See [`IncomingMode`] for details.
     pub mode: Option<IncomingMode>,
 
-    /// Sets up the HTTP traffic filter (currently, only for [`IncomingMode::Steal`]).
+    /// ## filter
     ///
-    /// See [`HttpHeaderFilterConfig`] for details.
+    /// Sets up the HTTP traffic filter (currently, only useful when `incoming: steal`).
+    ///
+    /// See [`filter`](#filter) for details.
     pub http_header_filter: Option<ToggleableConfig<http_filter::HttpHeaderFilterFileConfig>>,
 
+    /// ## port_mapping
+    ///
     /// Mapping for local ports to remote ports.
     ///
     /// This is useful when you want to mirror/steal a port to a different port on the remote
-    /// machine. For example, your local process listens on port 9333 and the container listens
-    /// on port 80. You'd use [[9333, 80]]
+    /// machine. For example, your local process listens on port `9333` and the container listens
+    /// on port `80`. You'd use `[[9333, 80]]`
     pub port_mapping: Option<Vec<(u16, u16)>>,
 
+    /// ## ignore_localhost
+    ///
     /// Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702
     pub ignore_localhost: Option<bool>,
 
-    /// Ports to ignore when mirroring/stealing traffic. Useful if you want
-    /// specific ports to be used locally only.
+    /// ## ignore_ports
+    ///
+    /// Ports to ignore when mirroring/stealing traffic. Useful if you want specific ports to be
+    /// used locally only.
     pub ignore_ports: Option<Vec<u16>>,
 }
 

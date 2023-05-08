@@ -9,7 +9,7 @@ use crate::{
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
-/// # http_header_filter
+/// # filter
 ///
 /// Filter configuration for the HTTP traffic stealer feature.
 ///
@@ -20,18 +20,7 @@ use crate::{
 /// Only does something when [`IncomingConfig`](super::IncomingConfig) is set as
 /// [`IncomingMode::Steal`](super::IncomingMode::Steal), ignored otherwise.
 ///
-/// ## Types
-///
-/// ```json
-/// {
-///   "filter": null | String,
-///   "ports": Number | [Number],
-/// }
-/// ```
-///
-/// ## Sample
-///
-/// - `config.json`:
+/// ## Example `http_header_filter` config
 ///
 /// ```json
 /// {
