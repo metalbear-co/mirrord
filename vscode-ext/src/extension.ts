@@ -28,6 +28,8 @@ const DEFAULT_CONFIG = `
 }
 `;
 
+const TARGETLESS_TARGET_NAME = "No Target (\"targetless\")";
+
 // Populate the path for the project's .mirrord folder
 const MIRRORD_DIR = function () {
 	let folders = vscode.workspace.workspaceFolders;
@@ -420,18 +422,20 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		if (!await isTargetInFile()) {
 			let targets = await mirrordApi.listTargets(configPath);
 			if (targets.length === 0) {
-				await vscode.window.showErrorMessage(
+				vscode.window.showInformationMessage(
 					"No mirrord target available in the configured namespace. " +
-					"Set a different target namespace or kubeconfig in the mirrord configuration file.",
+					"You can run targetless, or set a different target namespace or kubeconfig in the mirrord configuration file.",
 				);
-
-				return undefined;
 			}
-
+			targets.push(TARGETLESS_TARGET_NAME);
 			let targetName = await vscode.window.showQuickPick(targets, { placeHolder: 'Select a target path to mirror' });
 
 			if (targetName) {
-				target = targetName;
+				if (targetName != TARGETLESS_TARGET_NAME) {
+					target = targetName;
+				} else {
+					vscode.window.showInformationMessage("mirrord running targetless");
+				}
 				globalContext.globalState.update(LAST_TARGET_KEY, targetName);
 				globalContext.workspaceState.update(LAST_TARGET_KEY, targetName);
 			}
