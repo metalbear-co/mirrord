@@ -86,6 +86,17 @@ class MirrordConfigWatcher : AsyncFileListener {
                         removePaths.add(it.path)
                         addPaths.add(it.newPath)
                     }
+
+                    // case where it is a directory
+                    if (it.file.isDirectory) {
+                        val children = it.file.children
+                        children.forEach { child ->
+                            if (child.path.endsWith("mirrord.json")) {
+                                removePaths.add(child.path)
+                                addPaths.add(child.path)
+                            }
+                        }
+                    }
                 }
             }
         }
