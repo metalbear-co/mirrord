@@ -178,7 +178,7 @@ pub struct IncomingConfig {
 
     /// ## http_header_filter
     ///
-    /// See [`HttpHeaderFilterConfig`](#http_header_filter) for more details.
+    /// See [`http_header_filter`](#http_header_filter) for more details.
     pub http_header_filter: http_filter::HttpHeaderFilterConfig,
 
     /// ## port_mapping
@@ -192,9 +192,11 @@ pub struct IncomingConfig {
 }
 
 impl IncomingConfig {
+    // rustdoc-stripper-ignore-next
     /// Helper function.
     ///
     /// Used by mirrord-layer to identify the incoming network configuration as steal or not.
+    // rustdoc-stripper-ignore-next-stop
     pub fn is_steal(&self) -> bool {
         matches!(self.mode, IncomingMode::Steal)
     }
@@ -204,25 +206,17 @@ impl IncomingConfig {
 ///
 /// Mode of operation for the incoming TCP traffic feature.
 ///
-/// Defaults to `mirror`.
-///
-/// ## Types
-///
-/// ```json
-/// {
-///   "mode": "mirror" | "steal",
-/// }
-/// ```
+/// Can be set to either `"mirror"` (default) or `"steal"`.
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum IncomingMode {
-    /// ### mirror
+    /// ## mirror
     ///
     /// Sniffs on TCP port, and send a copy of the data to listeners.
     #[default]
     Mirror,
 
-    /// ### steal
+    /// ## steal
     ///
     /// Stealer supports 2 modes of operation:
     ///
