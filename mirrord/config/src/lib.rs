@@ -14,11 +14,13 @@ pub mod outgoing;
 pub mod target;
 pub mod util;
 
-/// To generate the `mirrord-schema.json` file see
-/// [`tests::check_schema_file_exists_and_is_valid_or_create_it`].
-///
-/// Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
-/// including if you only made documentation changes.
+// rustdoc-stripper-ignore-next
+//! To generate the `mirrord-schema.json` file see
+//! [`tests::check_schema_file_exists_and_is_valid_or_create_it`].
+//!
+//! Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
+//! including if you only made documentation changes.
+// rustdoc-stripper-ignore-next-stop
 use std::path::Path;
 
 use config::{ConfigError, MirrordConfig};
@@ -30,6 +32,9 @@ use crate::{
     target::TargetConfig, util::VecOrSingle,
 };
 
+// TODO(alex) [high] 2023-05-08: For some of the inner config structs, move the documentation
+// to the parent, example would be `IncomingFileConfig`, where we should move the docs to the 
+// `incoming` field, instead of linking to another struct.
 /// # Mirrord configuration
 ///
 /// Mirrord allows for a high degree of customization when it comes to which features you want to
@@ -41,9 +46,12 @@ use crate::{
 /// ## Minimal `config.json`
 ///
 /// Most of the configuration fields have a default value, so all you really need is to specify a
-/// [`target`](###target) to impersonate. This will start mirrord with [`network`](##network) in
-/// sniffer mode, with outgoing traffic enabled for both TCP and UDP, and [`fs`](##fs) set to
-/// read-only file operations.
+/// [`target`](##target) to impersonate.
+///
+/// The minimal configuration defaults to:
+/// - [`network`](##network) in `"mirror"` mode;
+/// - outgoing traffic enabled for both TCP and UDP
+/// - [`fs`](##fs) set to `"read"` (read-only file operations).
 ///
 /// ```json
 /// {
@@ -53,7 +61,7 @@ use crate::{
 ///
 /// ## Advanced `config.json`
 ///
-/// Both [`fs`](#fs) and [`network`](#network) also support a simplified configuration, see their
+/// Both [`fs`](##fs) and [`network`](##network) also support a simplified configuration, see their
 /// respective documentations to learn more.
 ///
 /// ```json
@@ -122,11 +130,13 @@ use crate::{
 ///   "sip_binaries": "bash",
 /// }
 /// ```
+///
+/// ## root configuration
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "LayerFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct LayerConfig {
-    /// ## accept_invalid_certificates
+    /// ### accept_invalid_certificates
     ///
     /// Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed
     /// certificates).
@@ -135,7 +145,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", default = false)]
     pub accept_invalid_certificates: bool,
 
-    /// ## skip_processes
+    /// ### skip_processes
     ///
     /// Allows mirrord to skip unwanted processes.
     ///
@@ -152,9 +162,9 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_SKIP_PROCESSES")]
     pub skip_processes: Option<VecOrSingle<String>>,
 
-    /// ## target
+    /// ### target
     ///
-    /// Specifies the running pod to mirror, see [`TargetConfig`](#target) for more details.
+    /// Specifies the running pod to mirror, see [`target`](##target) for more details.
     ///
     /// The simplified configuration supports:
     ///
@@ -170,7 +180,7 @@ pub struct LayerConfig {
     #[config(nested)]
     pub target: TargetConfig,
 
-    /// ## connect_tcp
+    /// ### connect_tcp
     ///
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.
     ///
@@ -182,7 +192,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_CONNECT_TCP")]
     pub connect_tcp: Option<String>,
 
-    /// ## connect_agent_name
+    /// ### connect_agent_name
     ///
     /// Agent name that already exists that we can connect to.
     ///
@@ -194,7 +204,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_CONNECT_AGENT")]
     pub connect_agent_name: Option<String>,
 
-    /// ## connect_agent_port
+    /// ### connect_agent_port
     ///
     /// Agent listen port that already exists that we can connect to.
     ///
@@ -206,7 +216,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_CONNECT_PORT")]
     pub connect_agent_port: Option<u16>,
 
-    /// ## agent
+    /// ### agent
     ///
     /// Agent configuration, see [`AgentConfig`](#agent) for more advanced usage.
     ///
@@ -223,12 +233,12 @@ pub struct LayerConfig {
     #[config(nested)]
     pub agent: AgentConfig,
 
-    /// ## feature
+    /// ### feature
     ///
-    /// Controls mirrord features, see [`FeatureConfig`](#feature) to learn how to set up mirrord
-    /// to do exactly what you want, and the
+    /// Controls mirrord features, see [`feature`](##feature) to learn how to set up mirrord
+    /// only the features you want, and the 
     /// [technical reference, Technical Reference](https://mirrord.dev/docs/reference/)
-    /// to learn more about mirrord features.
+    /// to learn more about what each feature does.
     ///
     /// ```json
     /// {
@@ -258,28 +268,28 @@ pub struct LayerConfig {
     #[config(nested)]
     pub feature: FeatureConfig,
 
-    /// ## operator
+    /// ### operator
     ///
-    /// Allow to lookup if operator is installed on cluster and use it
+    /// Allow to lookup if operator is installed on cluster and use it.
     ///
     /// Defaults to `true`.
     #[config(env = "MIRRORD_OPERATOR_ENABLE", default = true)]
     pub operator: bool,
 
-    /// ## kubeconfig
+    /// ### kubeconfig
     ///
     /// Path to a kubeconfig file, if not specified, will use `KUBECONFIG`, or `~/.kube/config`, or
     /// the in-cluster config.
     ///
     /// ```json
-    /// {
-    ///   "kubeconfig": "~/bear/kube-config"
-    /// }
+    ///{
+    ///  "kubeconfig": "~/bear/kube-config"
+    ///}
     /// ```
     #[config(env = "MIRRORD_KUBECONFIG")]
     pub kubeconfig: Option<String>,
 
-    /// ## sip_binaries
+    /// ### sip_binaries
     ///
     /// Binaries to patch (macOS SIP).
     ///
@@ -290,9 +300,9 @@ pub struct LayerConfig {
     /// while `/usr/bin/bash` would apply only for that binary).
     ///
     /// ```json
-    /// {
-    ///   "sip_binaries": "bash;python"
-    /// }
+    ///{
+    ///  "sip_binaries": "bash;python"
+    ///}
     /// ```
     pub sip_binaries: Option<VecOrSingle<String>>,
 }
