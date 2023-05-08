@@ -154,7 +154,7 @@ pub struct AgentConfig {
     /// Which network interface to use for mirroring.
     ///
     /// The default behavior is try to access the internet and use that interface. If that fails
-    /// it uses eth0.
+    /// it uses `eth0`.
     #[config(env = "MIRRORD_AGENT_NETWORK_INTERFACE")]
     pub network_interface: Option<String>,
 
@@ -173,9 +173,9 @@ pub struct AgentConfig {
     ///
     /// Flushes existing connections when starting to steal, might fix issues where connections
     /// aren't stolen (due to being already established)
-    // Temporary fix for issue [#1029](https://github.com/metalbear-co/mirrord/issues/1029).
     ///
     /// Defaults to `true`.
+    // Temporary fix for issue [#1029](https://github.com/metalbear-co/mirrord/issues/1029).
     #[config(
         env = "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS",
         default = true,
