@@ -13,42 +13,58 @@ use crate::{
 /// See the outgoing [reference](https://mirrord.dev/docs/reference/traffic/#outgoing) for more
 /// details.
 ///
-/// ## Sample
-///
-/// - `config.json`
+/// ## Minimal `outgoing` config
 ///
 /// ```json
 /// {
-///   "tcp": true,
-///   "udp": true,,
-///   "ignore_localhost": false,
-///   "unix_streams": "bear.+",
+///   "feature": {
+///     "network": {
+///       "outgoing": true,
+///     }
+///   }
+/// }
+/// ```
+///
+/// ## Advanced `outgoing` config
+///
+/// ```json
+/// {
+///   "feature": {
+///     "network": {
+///       "outgoing": {
+///         "tcp": true,
+///         "udp": true,
+///         "ignore_localhost": false,
+///         "unix_streams": "bear.+"
+///       }
+///     }
+///   }
 /// }
 /// ```
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
 #[config(map_to = "OutgoingFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct OutgoingConfig {
-    /// ### tcp
+    /// ## tcp
     ///
     /// Defaults to `true`.
     #[config(env = "MIRRORD_TCP_OUTGOING", default = true)]
     pub tcp: bool,
 
-    /// ### udp
+    /// ## udp
     ///
     /// Defaults to `true`.
     #[config(env = "MIRRORD_UDP_OUTGOING", default = true)]
     pub udp: bool,
 
-    /// ### ignore_localhost
+    /// ## ignore_localhost
     ///
     /// Defaults to `false`.
     // Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702
     #[config(unstable, default = false)]
     pub ignore_localhost: bool,
 
-    /// ### unix_streams
+    /// ## unix_streams
     ///
     /// Connect to these unix streams remotely (and to all other paths locally).
     ///

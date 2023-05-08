@@ -139,51 +139,55 @@ pub struct IncomingAdvancedFileConfig {
 ///
 /// Sets up how mirrord handles incoming network packets.
 ///
-/// ## Types
+/// ## Minimal `incoming` config
 ///
 /// ```json
 /// {
-///   "mode": IncomingMode,
-///   "http_header_filter": HttpHeaderFilterConfig,
-///   "port_mapping": [{ Number: Number }],
-///   "ignore_localhost": bool,
-///   "ignore_ports": [Number],
+///   "feature": {
+///     "network": {
+///       "incoming": "mirror",
+///       "outgoing": true
+///     }
+///   }
 /// }
 /// ```
 ///
-/// ## Sample
+/// ## Advanced `incoming` config
 ///
 /// ```json
 /// {
-///   "mode": "steal",
-///   "http_header_filter": {
-///     "filter": "host: api\..+",
-///     "ports": [80, 8080]
+///   "feature": {
+///     "network": {
+///       "incoming": {
+///         "mode": "steal",
+///         "http_header_filter": {
+///           "filter": "host: api\..+",
+///           "ports": [80, 8080]
+///         }
+///       }
+///     }
 ///   }
-///   "port_mapping": [{ 7777: 8888 }],
-///   "ignore_localhost": false,
-///   "ignore_ports": [9999, 10000],
 /// }
 /// ```
 #[derive(Default, PartialEq, Eq, Clone, Debug)]
 pub struct IncomingConfig {
-    /// ### mode
+    /// ## mode
     ///
-    /// See [`IncomingMode`](#mode incoming) for more details.
+    /// See incoming [`mode`](#mode incoming) for more details.
     pub mode: IncomingMode,
 
-    /// ### http_header_filter
+    /// ## http_header_filter
     ///
     /// See [`HttpHeaderFilterConfig`](#http_header_filter) for more details.
     pub http_header_filter: http_filter::HttpHeaderFilterConfig,
 
-    /// ### port_mapping
+    /// ## port_mapping
     pub port_mapping: BiMap<u16, u16>,
 
-    /// ### ignore_localhost
+    /// ## ignore_localhost
     pub ignore_localhost: bool,
 
-    /// ### ignore_ports
+    /// ## ignore_ports
     pub ignore_ports: HashSet<u16>,
 }
 

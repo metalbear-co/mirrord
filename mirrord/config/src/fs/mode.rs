@@ -20,41 +20,27 @@ use crate::{
 /// If you set LocalWithOverrides then some files can be read/write remotely based on our
 /// default/user specified. Default option for general file configuration.
 ///
-/// ## Types
-///
-/// ```json
-/// {
-///   "mode": "local" | "localwithoverrides" | "read" | "write"
-/// }
-/// ```
-///
-/// ## Sample
-///
-/// ```json
-/// {
-///   "mode": "read"
-/// }
-/// ```
+/// The accepted values are: `"local"`, `"localwithoverrides`, `"read"`, or `"write`.
 #[derive(Serialize, Deserialize, Default, PartialEq, Eq, Clone, Debug, Copy, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum FsModeConfig {
-    /// ### local
+    /// ## local
     ///
     /// mirrord won't do anything fs-related, all operations will be local.
     Local,
 
-    /// ### localwithoverrides
+    /// ## localwithoverrides
     ///
     /// mirrord will run overrides on some file operations, but most will be local.
     LocalWithOverrides,
 
-    /// ### read
+    /// ## read
     ///
     /// mirrord will read files from the remote, but won't write to them.
     #[default]
     Read,
 
-    /// ### write
+    /// ## write
     ///
     /// mirrord will read/write from the remote.
     Write,

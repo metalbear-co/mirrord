@@ -30,32 +30,20 @@ use crate::{
 /// 3. local - List of patterns that should be read locally.
 ///
 /// The logic for choosing the behavior is as follows:
+///
 /// 1. Check if one of the patterns match the file path, do the corresponding action. There's no
 /// specified order if two lists match the same path, we will use the first one (and we do not
 /// guarantee what is first).
 ///
-/// Note: Specifying the same path in two lists is unsupported and can lead to
-///         undefined behaviour.
+/// **Warning**: Specifying the same path in two lists is unsupported and can lead to undefined
+/// behaviour.
 ///
 /// 2. Check our "special list" - we have an internal at compile time list
 /// for different behavior based on patterns    to provide better UX.
 ///
 /// 3. If none of the above match, use the default behavior (mode).
 ///
-/// ## Types
-///
-/// ```json
-/// {
-///   "mode": FsModeConfig,
-///   "read_write": null | String | [String],
-///   "read_only": null | String | [String],
-///   "local": null | String | [String],
-/// }
-/// ```
-///
-/// ## Sample
-///
-/// - `config.json`:
+/// ## Example `fs` config
 ///
 /// ```json
 /// {
@@ -76,19 +64,27 @@ use crate::{
     generator = "FsUserConfig"
 )]
 pub struct FsConfig {
-    /// File operations mode, defaults to read-only, see [`FsModeConfig`].
+    /// ## mode
+    ///
+    /// File operations mode, defaults to read-only, see [`mode`](#mode).
     #[config(nested)]
     pub mode: FsModeConfig,
 
+    /// ## read_write
+    ///
     /// Specify file path patterns that if matched will be read and written to the remote.
     #[config(env = "MIRRORD_FILE_READ_WRITE_PATTERN")]
     pub read_write: Option<VecOrSingle<String>>,
 
+    /// ## read_only
+    ///
     /// Specify file path patterns that if matched will be read from the remote.
     /// if file matching the pattern is opened for writing or read/write it will be opened locally.
     #[config(env = "MIRRORD_FILE_READ_ONLY_PATTERN")]
     pub read_only: Option<VecOrSingle<String>>,
 
+    /// ## local
+    ///
     /// Specify file path patterns that if matched will be opened locally.
     #[config(env = "MIRRORD_FILE_LOCAL_PATTERN")]
     pub local: Option<VecOrSingle<String>>,

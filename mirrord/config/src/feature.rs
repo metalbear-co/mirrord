@@ -12,20 +12,29 @@ use crate::{
 /// For more information, check the [technical reference](https://mirrord.dev/docs/reference/)
 /// of the feature.
 ///
-/// ## Types
+/// ## Minimal `feature` config
+///
+/// The [`fs`](#fs) and [`network`](#network) options have support for a shortened version.
 ///
 /// ```json
 /// {
-///   "env": EnvConfig,
-///   "fs": FsConfig,
-///   "network": NetworkConfig,
-///   "capture_error_trace": bool,
+///   "feature": {
+///     "env": {
+///       "include": "DATABASE_USER;PUBLIC_ENV",
+///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
+///       "overrides": {
+///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
+///         "LOCAL_BEAR": "panda"
+///       }
+///     },
+///     "fs": "read",
+///     "network": "mirror",
+///     "capture_error_trace": false
+///   }
 /// }
 /// ```
 ///
-/// ## Sample
-///
-/// - `config.json`:
+/// ## Advanced `feature` config
 ///
 /// ```json
 /// {
@@ -67,49 +76,11 @@ use crate::{
 ///   }
 /// }
 /// ```
-///
-/// ## Examples
-///
-/// - Exclude "SECRET" environment variable, enable read-write file operations, mirror network
-///   traffic (default option), and generate a crash report (if there is any crash):
-///
-/// ```toml
-/// # mirrord-config.toml
-///
-/// [feature]
-/// fs = "write"
-/// capture_error_trace = true
-///
-/// [feature.env]
-/// exclude = "SECRET"
-/// ```
-///
-/// - Include only "DATABASE_URL", and "PORT" environment variables, enable read-write file
-///   operations (only for `.txt` files), and enable both incoming and outgoing network traffic
-///   (mirror):
-///
-/// ```toml
-/// # mirrord-config.toml
-///
-/// [feature.env]
-/// include = "DATABASE_URL;PORT"
-///
-/// [feature.fs]
-/// mode = "write"
-/// include = "^.*\.txt$"
-///
-/// [feature.network]
-/// incoming = "mirror" # default, included here for effect
-///
-/// [feature.network.outgoing]
-/// tcp = true
-/// udp = true
-/// ```
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "FeatureFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct FeatureConfig {
-    /// ### env
+    /// ## env
     ///
     /// Controls the environment variables feature, see [`EnvConfig`](#env).
     ///
@@ -118,7 +89,7 @@ pub struct FeatureConfig {
     #[config(nested, toggleable)]
     pub env: EnvConfig,
 
-    /// ### fs
+    /// ## fs
     ///
     /// Controls the file operations feature, see [`FsConfig`](#fs).
     ///
@@ -127,7 +98,7 @@ pub struct FeatureConfig {
     #[config(nested, toggleable)]
     pub fs: FsConfig,
 
-    /// ### network
+    /// ## network
     ///
     /// Controls the network feature, see [`NetworkConfig`](#network).
     ///
@@ -136,7 +107,7 @@ pub struct FeatureConfig {
     #[config(nested, toggleable)]
     pub network: NetworkConfig,
 
-    /// ### capture_error_trace
+    /// ## capture_error_trace
     ///
     /// Controls the crash reporting feature.
     ///

@@ -29,20 +29,7 @@ pub mod mode;
 /// for more details, and [fs adnvaced](# fs advanced) for more information on how to fully setup
 /// mirrord file operations.
 ///
-/// ## Types
-///
-/// ```json
-/// {
-///   "mode": FsModeConfig,
-///   "read_write": null | String | [String],
-///   "read_only": null | String | [String],
-///   "local": null | String | [String],
-/// }
-/// ```
-///
-/// ## Sample
-///
-/// - Simple `config.json`:
+/// ## Minimal `fs` config
 ///
 /// ```json
 /// {
@@ -52,7 +39,7 @@ pub mod mode;
 /// }
 /// ```
 ///
-/// - Advanced `config.json`:
+/// ## Advanced `fs` config
 ///
 /// ```json
 /// {

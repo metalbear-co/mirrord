@@ -14,7 +14,7 @@ use crate::{
 
 /// # target
 ///
-/// Specifies the target and namespace to mirror, see [`path`](#path) for a list of accepted values
+/// Specifies the target and namespace to mirror, see [`path`](##path) for a list of accepted values
 /// for the `target` option.
 ///
 /// ## Minimal `target` config
@@ -37,6 +37,21 @@ use crate::{
 ///   }
 /// }
 /// ```
+///
+/// ## path
+///
+/// Specifies the running pod (or deployment) to mirror.
+///
+/// Supports:
+/// - `pod/{sample-pod}`;
+/// - `podname/{sample-pod}`;
+/// - `deployment/{sample-deployment}`;
+/// - `container/{sample-container}`;
+/// - `containername/{sample-container}`.
+///
+/// ## namespace
+///
+/// The namespace of the remote pod.
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase")]
 pub enum TargetFileConfig {
@@ -129,7 +144,8 @@ mirrord-layer failed to parse the provided target!
     >> check if the provided target is in the correct namespace.
 "#;
 
-/// # path
+// rustdoc-stripper-ignore-next
+/// ## path
 ///
 /// Specifies the running pod (or deployment) to mirror.
 ///
@@ -139,6 +155,7 @@ mirrord-layer failed to parse the provided target!
 /// - `deployment/{sample-deployment}`;
 /// - `container/{sample-container}`;
 /// - `containername/{sample-container}`.
+// rustdoc-stripper-ignore-next-stop
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged)]
 pub enum Target {
