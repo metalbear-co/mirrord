@@ -31,6 +31,9 @@
                 instance="com.metalbear.mirrord.MirrordSettingsConfigurable"
                 id="com.metalbear.mirrord.MirrordSettingsConfigurable"
                 displayName="mirrord"/>
+
+        <vfs.asyncListener implementation="com.metalbear.mirrord.MirrordConfigWatcher"/>
+        <fileBasedIndex implementation="com.metalbear.mirrord.MirrordConfigIndex"/>
     </extensions>
     <actions>
         <group id="mirrord">
