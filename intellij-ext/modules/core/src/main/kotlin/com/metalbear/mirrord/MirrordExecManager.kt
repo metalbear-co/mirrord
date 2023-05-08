@@ -93,9 +93,8 @@ object MirrordExecManager {
                 }.get()
             }
             if (target == null) {
-                MirrordLogger.logger.warn("mirrord loading canceled")
-                MirrordNotifier.notify("mirrord loading canceled.", NotificationType.WARNING, project)
-                return null
+                MirrordLogger.logger.warn("No target specified - running targetless")
+                MirrordNotifier.notify("No target specified, mirrord running targetless.", NotificationType.INFORMATION, project)
             }
         }
 
