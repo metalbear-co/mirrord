@@ -42,7 +42,7 @@ intellij {
     }
 
     // Plugin Dependencies. Uses `platformPlugins` property from the gradle.properties file.
-    if (platformType != "PY" && platformType != "PC") {
+    if (platformType != "PY" && platformType != "PC" && platformType != "GO") {
         plugins.set(
                 properties("platformPlugins")
                         .split(',')
