@@ -4,6 +4,8 @@ import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.actionSystem.ex.ComboBoxAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.AsyncFileListener
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileDeleteEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
@@ -11,6 +13,7 @@ import com.intellij.openapi.vfs.newvfs.events.VFileMoveEvent
 import com.intellij.util.indexing.*
 import com.intellij.util.io.EnumeratorStringDescriptor
 import com.intellij.util.io.KeyDescriptor
+import java.nio.file.Path
 import java.util.*
 import javax.swing.JComponent
 import kotlin.collections.HashSet
@@ -34,7 +37,6 @@ class MirrordConfigDropDown : ComboBoxAction() {
                     chosenFile = null
                 }
             })
-
             actions?.let { addAll(it) }
         }
     }
@@ -58,31 +60,31 @@ class MirrordConfigDropDown : ComboBoxAction() {
     }
 }
 
-
+// Based on virtual file events, we update our configs since indexes are always not
 class MirrordConfigWatcher : AsyncFileListener {
     override fun prepareChange(events: MutableList<out VFileEvent>): AsyncFileListener.ChangeApplier {
-        var addPaths = HashSet<String>()
-        var removePaths = HashSet<String>()
+        val addPaths = HashSet<String>()
+        val removePaths = HashSet<String>()
         // TODO: handle the remaining events/check their relevance
-        events.forEach {
+        events.forEach { it ->
             when (it) {
                 is VFileCreateEvent -> {
                     if (it.path.endsWith("mirrord.json")) {
                         addPaths.add(it.path)
                     }
                 }
+
                 is VFileDeleteEvent -> {
-                    if (it.path.endsWith("mirrord.json")) {
-                        removePaths.add(it.path)
-                    }
                     // case where it is a directory
                     if (it.file.isDirectory) {
-                        // we need to check  for children
-                        val children = it.file.children
-                        children.forEach { child ->
-                            if (child.path.endsWith("mirrord.json")) {
-                                removePaths.add(child.path)
+                        it.file.children.forEach { child ->
+                            child.takeIf { it.path.endsWith("mirrord.json") }?.let {
+                                removePaths.add(it.path)
                             }
+                        }
+                    } else {
+                        it.takeIf { it.path.endsWith("mirrord.json") }?.let {
+                            removePaths.add(it.path)
                         }
                     }
                 }
@@ -99,7 +101,14 @@ class MirrordConfigWatcher : AsyncFileListener {
                         children.forEach { child ->
                             if (child.path.endsWith("mirrord.json")) {
                                 removePaths.add(child.path)
-                                addPaths.add(child.path)
+                            }
+                            // now since the event is a directory, we don't get the new paths for children
+                            // we need the VirtualFile for the new path
+                            val virtualFile = VirtualFileManager.getInstance().refreshAndFindFileByNioPath(Path.of(it.newPath))
+                            virtualFile?.children?.forEach { newChild ->
+                                if (newChild.path.endsWith("mirrord.json")) {
+                                    addPaths.add(newChild.path)
+                                }
                             }
                         }
                     }
@@ -116,6 +125,7 @@ class MirrordConfigWatcher : AsyncFileListener {
     }
 }
 
+// An index for mirrord config files, mapping filePath -> Void
 class MirrordConfigIndex : ScalarIndexExtension<String>() {
 
     companion object {
