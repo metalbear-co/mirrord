@@ -16,8 +16,6 @@ import javax.swing.JComponent
 import kotlin.collections.HashSet
 
 class MirrordConfigDropDown : ComboBoxAction() {
-    private var chosenFile: String? = null
-
     override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
     override fun createPopupActionGroup(button: JComponent, dataContext: DataContext): DefaultActionGroup {
@@ -31,6 +29,12 @@ class MirrordConfigDropDown : ComboBoxAction() {
             }
         }
         return DefaultActionGroup().apply {
+            add(object : AnAction("Select Configuration") {
+                override fun actionPerformed(e: AnActionEvent) {
+                    chosenFile = null
+                }
+            })
+
             actions?.let { addAll(it) }
         }
     }
@@ -49,6 +53,7 @@ class MirrordConfigDropDown : ComboBoxAction() {
     }
 
     companion object {
+        var chosenFile: String? = null
         var configFiles: HashSet<String>? = null
     }
 }
@@ -58,6 +63,7 @@ class MirrordConfigWatcher : AsyncFileListener {
     override fun prepareChange(events: MutableList<out VFileEvent>): AsyncFileListener.ChangeApplier {
         var addPaths = HashSet<String>()
         var removePaths = HashSet<String>()
+        // TODO: handle the remaining events/check their relevance
         events.forEach {
             when (it) {
                 is VFileCreateEvent -> {
