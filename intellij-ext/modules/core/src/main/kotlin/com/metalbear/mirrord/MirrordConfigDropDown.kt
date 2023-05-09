@@ -2,6 +2,7 @@ package com.metalbear.mirrord
 
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.actionSystem.ex.ComboBoxAction
+import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.AsyncFileListener
 import com.intellij.openapi.vfs.VirtualFile
@@ -22,8 +23,6 @@ class MirrordConfigDropDown : ComboBoxAction() {
     override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
     override fun createPopupActionGroup(button: JComponent, dataContext: DataContext): DefaultActionGroup {
-        val currentProject = CommonDataKeys.PROJECT.getData(dataContext) ?: throw Error("No project found")
-        initializeConfigFiles(currentProject)
         val actions = configFiles?.map { configPath ->
             object : AnAction(configPath) {
                 override fun actionPerformed(e: AnActionEvent) {
@@ -32,18 +31,29 @@ class MirrordConfigDropDown : ComboBoxAction() {
             }
         }
         return DefaultActionGroup().apply {
-            add(object : AnAction("Select Configuration") {
-                override fun actionPerformed(e: AnActionEvent) {
-                    chosenFile = null
-                }
-            })
             actions?.let { addAll(it) }
         }
     }
 
     override fun update(e: AnActionEvent) {
-        e.presentation.apply {
-            text = chosenFile ?: "Select Configuration"
+        e.project?.let {project ->
+            if (!DumbService.isDumb(project)) {
+                configFiles?.let { files ->
+                    if (files.size >= 2) {
+                        chosenFile?.let { file ->
+                            e.presentation.text = file
+                            return
+                        } ?: run {
+                            e.presentation.text = configFiles?.first()
+                        }
+                        e.presentation.isVisible = true
+                    } else {
+                        e.presentation.isVisible = false
+                    }
+                } ?: run {
+                    initializeConfigFiles(project)
+                }
+            }
         }
     }
 
