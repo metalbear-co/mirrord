@@ -59,8 +59,8 @@ fn generate_local_set() -> RegexSet {
         r"^/opt/.*$",
         r"^/home/.*$",
         r"^/tmp/.*$",
-        // macOS' temp
-        r"^/private/var/folders/.*$",
+        r"^/private/.*$",
+        r"^/var/folders/.*$",
         r"^/snap/.*$",
         // support for nixOS.
         r"^/nix/.*$",
