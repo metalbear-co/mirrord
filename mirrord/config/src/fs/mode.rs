@@ -11,7 +11,7 @@ use crate::{
     util::MirrordToggleableConfig,
 };
 
-/// ## mode
+/// ## mode (fs)
 ///
 /// Configuration for enabling read-only or read-write file operations.
 ///

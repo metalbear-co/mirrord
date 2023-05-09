@@ -9,7 +9,7 @@ use crate::{
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
-/// # filter
+/// ## filter (http)
 ///
 /// Filter configuration for the HTTP traffic stealer feature.
 ///
@@ -20,7 +20,7 @@ use crate::{
 /// Only does something when [`IncomingConfig`](super::IncomingConfig) is set as
 /// [`IncomingMode::Steal`](super::IncomingMode::Steal), ignored otherwise.
 ///
-/// ## Example `http_header_filter` config
+/// ### Example `filter` config
 ///
 /// ```json
 /// {
@@ -38,8 +38,6 @@ pub struct HttpHeaderFilterConfig {
     ///
     /// Supports regexes validated by the
     /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
-    ///
-    /// #### Usage
     ///
     /// The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
     /// case-insensitive.

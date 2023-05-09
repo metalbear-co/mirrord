@@ -17,7 +17,7 @@ pub mod http_filter;
 
 use http_filter::*;
 
-/// # incoming
+/// ## incoming (network)
 ///
 /// Controls the incoming TCP traffic feature.
 ///
@@ -29,8 +29,41 @@ use http_filter::*;
 /// 1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested
 /// listeners;
 ///
-/// 2. Steal: Captures the TCP data from a port, and forwards it to the local process,  see
-/// [`steal`](#steal);
+/// 2. Steal: Captures the TCP data from a port, and forwards it to the local process, see
+/// [`steal`](##steal);
+///
+/// ### Minimal `incoming` config
+///
+/// ```json
+/// {
+///   "feature": {
+///     "network": {
+///       "incoming": "steal"
+///     }
+///   }
+/// }
+/// ```
+///
+/// ### Advanced `incoming` config
+///
+/// ```json
+/// {
+///   "feature": {
+///     "network": {
+///       "incoming": {
+///         "mode": "steal",
+///         "http_header_filter": {
+///           "filter": "host: api\..+",
+///           "ports": [80, 8080]
+///         },
+///         "port_mapping": [{ 7777: 8888 }],
+///         "ignore_localhost": false,
+///         "ignore_ports": [9999, 10000]
+///       }
+///     }
+///   }
+/// }
+/// ```
 #[derive(Deserialize, Clone, Debug, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[serde(untagged, rename_all = "lowercase")]
@@ -107,24 +140,27 @@ impl MirrordToggleableConfig for IncomingFileConfig {
     }
 }
 
+/// ## incoming (advanced setup)
+///
+/// Advanced user configuration for network incoming traffic.
 #[derive(Deserialize, Clone, Debug, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct IncomingAdvancedFileConfig {
-    /// ## mode
+    /// ### mode
     ///
     /// Allows selecting between mirrorring or stealing traffic.
     ///
-    /// See [`IncomingMode`] for details.
+    /// See [`mode`](##mode (incoming)) for details.
     pub mode: Option<IncomingMode>,
 
-    /// ## filter
+    /// ### filter
     ///
     /// Sets up the HTTP traffic filter (currently, only useful when `incoming: steal`).
     ///
-    /// See [`filter`](#filter) for details.
+    /// See [`filter`](##filter) for details.
     pub http_header_filter: Option<ToggleableConfig<http_filter::HttpHeaderFilterFileConfig>>,
 
-    /// ## port_mapping
+    /// ### port_mapping
     ///
     /// Mapping for local ports to remote ports.
     ///
@@ -133,36 +169,35 @@ pub struct IncomingAdvancedFileConfig {
     /// on port `80`. You'd use `[[9333, 80]]`
     pub port_mapping: Option<Vec<(u16, u16)>>,
 
-    /// ## ignore_localhost
+    /// ### ignore_localhost
     ///
     /// Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702
     pub ignore_localhost: Option<bool>,
 
-    /// ## ignore_ports
+    /// ### ignore_ports
     ///
     /// Ports to ignore when mirroring/stealing traffic. Useful if you want specific ports to be
     /// used locally only.
     pub ignore_ports: Option<Vec<u16>>,
 }
 
-/// # incoming
+/// ## incoming
 ///
 /// Sets up how mirrord handles incoming network packets.
 ///
-/// ## Minimal `incoming` config
+/// ### Minimal `incoming` config
 ///
 /// ```json
 /// {
 ///   "feature": {
 ///     "network": {
-///       "incoming": "mirror",
-///       "outgoing": true
+///       "incoming": "steal"
 ///     }
 ///   }
 /// }
 /// ```
 ///
-/// ## Advanced `incoming` config
+/// ### Advanced `incoming` config
 ///
 /// ```json
 /// {
@@ -181,23 +216,23 @@ pub struct IncomingAdvancedFileConfig {
 /// ```
 #[derive(Default, PartialEq, Eq, Clone, Debug)]
 pub struct IncomingConfig {
-    /// ## mode
+    /// ### mode
     ///
-    /// See incoming [`mode`](#mode incoming) for more details.
+    /// See incoming [`mode`](##mode (network incoming)) for more details.
     pub mode: IncomingMode,
 
-    /// ## http_header_filter
+    /// ### filter
     ///
-    /// See [`http_header_filter`](#http_header_filter) for more details.
+    /// See [`filter`](##filter (http)) for more details.
     pub http_header_filter: http_filter::HttpHeaderFilterConfig,
 
-    /// ## port_mapping
+    /// ### port_mapping
     pub port_mapping: BiMap<u16, u16>,
 
-    /// ## ignore_localhost
+    /// ### ignore_localhost
     pub ignore_localhost: bool,
 
-    /// ## ignore_ports
+    /// ### ignore_ports
     pub ignore_ports: HashSet<u16>,
 }
 
@@ -212,7 +247,7 @@ impl IncomingConfig {
     }
 }
 
-/// # mode incoming
+/// ## mode (network incoming)
 ///
 /// Mode of operation for the incoming TCP traffic feature.
 ///
@@ -220,13 +255,13 @@ impl IncomingConfig {
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum IncomingMode {
-    /// ## mirror
+    /// ### mirror
     ///
     /// Sniffs on TCP port, and send a copy of the data to listeners.
     #[default]
     Mirror,
 
-    /// ## steal
+    /// ### steal
     ///
     /// Stealer supports 2 modes of operation:
     ///

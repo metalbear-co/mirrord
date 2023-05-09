@@ -63,13 +63,13 @@ pub mod outgoing;
 pub struct NetworkConfig {
     /// ### incoming
     ///
-    /// Handles incoming network traffic, see [`IncomingConfig`](#incoming) for more details.
+    /// Handles incoming network traffic, see [`incoming`](##incoming) for more details.
     #[config(toggleable, nested)]
     pub incoming: IncomingConfig,
 
     /// ### outgoing
     ///
-    /// Tunnel outgoing network operations through mirrord, see [`OutgoingConfig`](#outgoing) for
+    /// Tunnel outgoing network operations through mirrord, see [`outgoing`](##outgoing) for
     /// more details.
     #[config(toggleable, nested)]
     pub outgoing: OutgoingConfig,
