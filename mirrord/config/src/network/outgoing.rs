@@ -6,14 +6,14 @@ use crate::{
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
-/// # outgoing
+/// ## outgoing
 ///
 /// Controls the outgoing TCP traffic feature.
 ///
 /// See the outgoing [reference](https://mirrord.dev/docs/reference/traffic/#outgoing) for more
 /// details.
 ///
-/// ## Minimal `outgoing` config
+/// ### Minimal `outgoing` config
 ///
 /// ```json
 /// {
@@ -25,7 +25,7 @@ use crate::{
 /// }
 /// ```
 ///
-/// ## Advanced `outgoing` config
+/// ### Advanced `outgoing` config
 ///
 /// ```json
 /// {

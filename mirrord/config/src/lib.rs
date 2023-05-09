@@ -14,9 +14,7 @@ pub mod config;
 pub mod env;
 pub mod feature;
 pub mod fs;
-pub mod incoming;
 pub mod network;
-pub mod outgoing;
 pub mod target;
 pub mod util;
 

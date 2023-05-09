@@ -1,21 +1,23 @@
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
+use self::{incoming::*, outgoing::*};
 use crate::{
     config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
-    incoming::{IncomingConfig, IncomingFileConfig},
-    outgoing::{OutgoingConfig, OutgoingFileConfig},
     util::MirrordToggleableConfig,
 };
 
-/// # network
+pub mod incoming;
+pub mod outgoing;
+
+/// ## network
 ///
 /// Controls mirrord network operations.
 ///
 /// See the network traffic [reference](https://mirrord.dev/docs/reference/traffic/)
 /// for more details.
 ///
-/// ## Minimal `network` config
+/// ### Minimal `network` config
 ///
 /// ```json
 /// {
@@ -28,7 +30,7 @@ use crate::{
 /// }
 /// ```
 ///
-/// ## Advanced `network` config
+/// ### Advanced `network` config
 ///
 /// ```json
 /// {
@@ -59,20 +61,20 @@ use crate::{
 #[config(map_to = "NetworkFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct NetworkConfig {
-    /// ## incoming
+    /// ### incoming
     ///
     /// Handles incoming network traffic, see [`IncomingConfig`](#incoming) for more details.
     #[config(toggleable, nested)]
     pub incoming: IncomingConfig,
 
-    /// ## outgoing
+    /// ### outgoing
     ///
     /// Tunnel outgoing network operations through mirrord, see [`OutgoingConfig`](#outgoing) for
     /// more details.
     #[config(toggleable, nested)]
     pub outgoing: OutgoingConfig,
 
-    /// ## dns
+    /// ### dns
     ///
     /// Resolve DNS via the remote pod.
     ///
@@ -101,11 +103,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{
-        config::MirrordConfig,
-        incoming::{IncomingConfig, IncomingMode},
-        util::testing::with_env_vars,
-    };
+    use crate::{config::MirrordConfig, util::testing::with_env_vars};
 
     #[rstest]
     fn default(

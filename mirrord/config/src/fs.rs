@@ -28,7 +28,7 @@ pub mod mode;
 // rustdoc-stripper-ignore-next-stop
 ///
 /// See the file operations [reference](https://mirrord.dev/docs/reference/fileops/)
-/// for more details, and [fs adnvaced](#fs-advanced) for more information on how to fully setup
+/// for more details, and [fs adnvaced](##fs-advanced) for more information on how to fully setup
 /// mirrord file operations.
 ///
 /// ### Minimal `fs` config
