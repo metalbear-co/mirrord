@@ -18,6 +18,13 @@ import java.util.*
 import javax.swing.JComponent
 import kotlin.collections.HashSet
 
+
+// [`MirrordConfigIndex`] index is queried once in the update function to initialize the configFiles
+// Once initialized, we listen on file events to update the configFiles, using [`MirrordConfigWatcher`]
+// If no config files are present, the chosenFile is set to null, the action is hidden,
+// and on pressing the gear icon, a file will be created
+// If one file is present, the chosenFile is set to that file, and the action is hidden, it is set as default
+// If two or more files are present, the chosenFile is set to the first file, and the action is shown
 class MirrordConfigDropDown : ComboBoxAction() {
     override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
@@ -39,7 +46,10 @@ class MirrordConfigDropDown : ComboBoxAction() {
         e.project?.let { project ->
             // this check ensures that we don't query the index when it is being built
             // querying the index during the startup can give us 0
-            if (DumbService.isDumb(project)) return
+            if (DumbService.isDumb(project)) {
+                e.presentation.isVisible = false
+                return
+            }
 
             initializeConfigFiles(project)
 
@@ -91,6 +101,7 @@ class MirrordConfigWatcher : AsyncFileListener {
         events.forEach { it ->
             when (it) {
                 is VFileCreateEvent -> {
+                    // TODO: handle directory based events
                     // check if it is a directory
                     // this does not work at all, no virtual file is created here
                     // for example, if someone creates a directory
