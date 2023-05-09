@@ -108,7 +108,7 @@ use crate::{
 ///           "filter": "host: api\..+",
 ///           "ports": [80, 8080]
 ///         },
-///         "port_mapping": [{ 7777: 8888 }],
+///         "port_mapping": [[ 7777: 8888 ]],
 ///         "ignore_localhost": false,
 ///         "ignore_ports": [9999, 10000]
 ///       },
