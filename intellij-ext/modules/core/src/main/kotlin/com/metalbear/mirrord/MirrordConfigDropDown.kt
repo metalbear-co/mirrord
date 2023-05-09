@@ -5,7 +5,6 @@ import com.intellij.openapi.actionSystem.ex.ComboBoxAction
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.AsyncFileListener
-import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileDeleteEvent
@@ -36,26 +35,33 @@ class MirrordConfigDropDown : ComboBoxAction() {
     }
 
     override fun update(e: AnActionEvent) {
-        e.project?.let {project ->
-            if (!DumbService.isDumb(project)) {
-                configFiles?.let { files ->
-                    if (files.size >= 2) {
-                        chosenFile?.let { file ->
-                            e.presentation.text = file
-                            return
-                        } ?: run {
-                            e.presentation.text = configFiles?.first()
-                        }
-                        e.presentation.isVisible = true
-                    } else {
-                        e.presentation.isVisible = false
+        e.project?.let { project ->
+            // this check ensures that we don't query the index when it is being built
+            // querying the index during the startup can give us 0
+            if (DumbService.isDumb(project)) return
+
+            initializeConfigFiles(project)
+
+            when {
+                configFiles?.size!! < 2 -> e.presentation.isVisible = false
+                chosenFile != null -> {
+                    // sometimes the selected config file can be deleted, so we need to pick the first
+                    if (!configFiles!!.contains(chosenFile!!)) {
+                        chosenFile = configFiles?.first()
                     }
-                } ?: run {
-                    initializeConfigFiles(project)
+                    e.presentation.text = getReadablePath(chosenFile!!)
+                    e.presentation.isVisible = true
+                }
+
+                else -> {
+                    chosenFile = configFiles?.first()
+                    e.presentation.text = chosenFile?.let { getReadablePath(it) }
+                    e.presentation.isVisible = true
                 }
             }
         }
     }
+
 
     private fun initializeConfigFiles(project: Project) {
         configFiles ?: run {
@@ -63,6 +69,9 @@ class MirrordConfigDropDown : ComboBoxAction() {
         }
 
     }
+
+    private fun getReadablePath(path: String): String = path.split("/").takeLast(2).joinToString("/")
+
 
     companion object {
         var chosenFile: String? = null
@@ -114,7 +123,8 @@ class MirrordConfigWatcher : AsyncFileListener {
                             }
                             // now since the event is a directory, we don't get the new paths for children
                             // we need the VirtualFile for the new path
-                            val virtualFile = VirtualFileManager.getInstance().refreshAndFindFileByNioPath(Path.of(it.newPath))
+                            val virtualFile =
+                                VirtualFileManager.getInstance().refreshAndFindFileByNioPath(Path.of(it.newPath))
                             virtualFile?.children?.forEach { newChild ->
                                 if (newChild.path.endsWith("mirrord.json")) {
                                     addPaths.add(newChild.path)

@@ -38,8 +38,6 @@
     <actions>
         <group id="mirrord">
             <separator/>
-            <action id="MirrordConfigDropDown" class="com.metalbear.mirrord.MirrordConfigDropDown"
-                    description="Selects the configuration file for mirrord"/>
             <action id="com.metalbear.mirrord.MirrordEnabler"
                     class="com.metalbear.mirrord.MirrordEnabler" text="Enable/Disable mirrord"
                     description="Toggles the mirrord plugin"
@@ -48,6 +46,9 @@
                     text="Open mirrord configuration file"
                     description="Opens/creates the default mirrord configuration file"
                     icon="AllIcons.General.GearPlain"/>
+            <action id="MirrordConfigDropDown" class="com.metalbear.mirrord.MirrordConfigDropDown"
+                    description="Selects the configuration file for mirrord"
+            />
             <separator/>
 
             <add-to-group group-id="ToolbarRunGroup" anchor="first"/>
