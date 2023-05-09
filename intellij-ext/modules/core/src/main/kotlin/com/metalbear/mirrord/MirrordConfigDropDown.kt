@@ -22,8 +22,9 @@ class MirrordConfigDropDown : ComboBoxAction() {
     override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
     override fun createPopupActionGroup(button: JComponent, dataContext: DataContext): DefaultActionGroup {
+        val project = dataContext.getData(CommonDataKeys.PROJECT) ?: throw Error("couldn't resolve project")
         val actions = configFiles?.map { configPath ->
-            object : AnAction(configPath) {
+            object : AnAction(getReadablePath(configPath, project)) {
                 override fun actionPerformed(e: AnActionEvent) {
                     chosenFile = configPath
                 }
@@ -42,23 +43,21 @@ class MirrordConfigDropDown : ComboBoxAction() {
 
             initializeConfigFiles(project)
 
-            when {
-                configFiles?.size!! < 2 -> e.presentation.isVisible = false
-                chosenFile != null -> {
-                    // sometimes the selected config file can be deleted, so we need to pick the first
-                    if (!configFiles!!.contains(chosenFile!!)) {
-                        chosenFile = configFiles?.first()
-                    }
-                    e.presentation.text = getReadablePath(chosenFile!!)
-                    e.presentation.isVisible = true
-                }
-
-                else -> {
-                    chosenFile = configFiles?.first()
-                    e.presentation.text = chosenFile?.let { getReadablePath(it) }
-                    e.presentation.isVisible = true
-                }
+            val files = configFiles ?: return
+            if (files.size < 2) {
+                chosenFile = files.firstOrNull()
+                e.presentation.isVisible = false
+                return
             }
+
+            chosenFile = chosenFile ?: files.first()
+
+            if (chosenFile !in files) {
+                chosenFile = files.first()
+            }
+
+            e.presentation.text = getReadablePath(chosenFile!!, e.project!!)
+            e.presentation.isVisible = true
         }
     }
 
@@ -70,7 +69,11 @@ class MirrordConfigDropDown : ComboBoxAction() {
 
     }
 
-    private fun getReadablePath(path: String): String = path.split("/").takeLast(2).joinToString("/")
+    private fun getReadablePath(path: String, project: Project): String {
+        val basePath = project.basePath ?: throw Error("couldn't resolve project path")
+        val relativePath = Path.of(basePath).relativize(Path.of(path))
+        return relativePath.toString()
+    }
 
 
     companion object {
@@ -88,8 +91,19 @@ class MirrordConfigWatcher : AsyncFileListener {
         events.forEach { it ->
             when (it) {
                 is VFileCreateEvent -> {
-                    if (it.path.endsWith("mirrord.json")) {
-                        addPaths.add(it.path)
+                    // check if it is a directory
+                    // this does not work at all, no virtual file is created here
+                    // for example, if someone creates a directory
+                    if (it.file?.isDirectory == true) {
+                        it.file!!.children.forEach { child ->
+                            if (child.path.endsWith("mirrord.json")) {
+                                addPaths.add(child.path)
+                            }
+                        }
+                    } else {
+                        it.takeIf { it.path.endsWith("mirrord.json") }?.let {
+                            addPaths.add(it.path)
+                        }
                     }
                 }
 
