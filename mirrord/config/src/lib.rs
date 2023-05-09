@@ -2,7 +2,13 @@
 #![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![warn(clippy::indexing_slicing)]
-
+// rustdoc-stripper-ignore-next
+//! To generate the `mirrord-schema.json` file see
+//! [`tests::check_schema_file_exists_and_is_valid_or_create_it`].
+//!
+//! Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
+//! including if you only made documentation changes.
+// rustdoc-stripper-ignore-next-stop
 pub mod agent;
 pub mod config;
 pub mod env;
@@ -14,13 +20,6 @@ pub mod outgoing;
 pub mod target;
 pub mod util;
 
-// rustdoc-stripper-ignore-next
-//! To generate the `mirrord-schema.json` file see
-//! [`tests::check_schema_file_exists_and_is_valid_or_create_it`].
-//!
-//! Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
-//! including if you only made documentation changes.
-// rustdoc-stripper-ignore-next-stop
 use std::path::Path;
 
 use config::{ConfigError, MirrordConfig};
@@ -33,7 +32,7 @@ use crate::{
 };
 
 // TODO(alex) [high] 2023-05-08: For some of the inner config structs, move the documentation
-// to the parent, example would be `IncomingFileConfig`, where we should move the docs to the 
+// to the parent, example would be `IncomingFileConfig`, where we should move the docs to the
 // `incoming` field, instead of linking to another struct.
 /// # Mirrord configuration
 ///
@@ -236,7 +235,7 @@ pub struct LayerConfig {
     /// ### feature
     ///
     /// Controls mirrord features, see [`feature`](##feature) to learn how to set up mirrord
-    /// only the features you want, and the 
+    /// only the features you want, and the
     /// [technical reference, Technical Reference](https://mirrord.dev/docs/reference/)
     /// to learn more about what each feature does.
     ///
@@ -282,9 +281,9 @@ pub struct LayerConfig {
     /// the in-cluster config.
     ///
     /// ```json
-    ///{
+    /// {
     ///  "kubeconfig": "~/bear/kube-config"
-    ///}
+    /// }
     /// ```
     #[config(env = "MIRRORD_KUBECONFIG")]
     pub kubeconfig: Option<String>,
@@ -300,9 +299,9 @@ pub struct LayerConfig {
     /// while `/usr/bin/bash` would apply only for that binary).
     ///
     /// ```json
-    ///{
+    /// {
     ///  "sip_binaries": "bash;python"
-    ///}
+    /// }
     /// ```
     pub sip_binaries: Option<VecOrSingle<String>>,
 }
