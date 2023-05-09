@@ -6,6 +6,7 @@ import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.*
 import com.intellij.openapi.vfs.VfsUtilCore.visitChildrenRecursively
+import com.intellij.openapi.vfs.newvfs.events.VFileCopyEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileDeleteEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
@@ -30,6 +31,7 @@ import kotlin.collections.HashSet
 class MirrordConfigDropDown : ComboBoxAction() {
     override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
+    // this function is called on click of the dropdown, here we map configFiles -> AnAction
     override fun createPopupActionGroup(button: JComponent, dataContext: DataContext): DefaultActionGroup {
         val project = dataContext.getData(CommonDataKeys.PROJECT) ?: throw Error("couldn't resolve project")
         val actions = configFiles?.map { configPath ->
@@ -44,6 +46,8 @@ class MirrordConfigDropDown : ComboBoxAction() {
         }
     }
 
+    // mostly what is viewed by the user is done here, goal is to have minimal logic in the function
+    // because it is called every half a second
     override fun update(e: AnActionEvent) {
         e.project?.let { project ->
             // this check ensures that we don't query the index when it is being built
@@ -94,8 +98,9 @@ class MirrordConfigDropDown : ComboBoxAction() {
     }
 }
 
-// Based on virtual file events, we update our configs since indexes are always not
+// Based on virtual file events, we update our configs since indexes are always not up to date
 class MirrordConfigWatcher : AsyncFileListener {
+
 
     private val adderFileVisitor = object : VirtualFileVisitor<Any?>() {
         override fun visitFile(file: VirtualFile): Boolean {
@@ -125,6 +130,8 @@ class MirrordConfigWatcher : AsyncFileListener {
             override fun beforeVfsChange() {
                 events.forEach { event ->
                     when (event) {
+                        // In case of a file the fileVisitor will just check that file,
+                        // but for directories we need to check recursively
                         is VFileDeleteEvent, is VFileMoveEvent -> {
                             event.file?.let {
                                 visitChildrenRecursively(it, removerFileVisitor)
@@ -137,7 +144,7 @@ class MirrordConfigWatcher : AsyncFileListener {
             override fun afterVfsChange() {
                 events.forEach { event ->
                     when (event) {
-                        is VFileCreateEvent, is VFileMoveEvent -> {
+                        is VFileCreateEvent, is VFileMoveEvent, is VFileCopyEvent -> {
                             event.file?.let { file -> visitChildrenRecursively(file, adderFileVisitor) }
                         }
                     }
