@@ -137,15 +137,10 @@ class MirrordConfigWatcher : AsyncFileListener {
             }
 
             override fun afterVfsChange() {
-
                 events.forEach { event ->
                     when (event) {
-                        is VFileCreateEvent -> {
+                        is VFileCreateEvent, is VFileMoveEvent -> {
                             event.file?.let { file -> visitChildrenRecursively(file, adderFileVisitor) }
-                        }
-
-                        is VFileMoveEvent -> {
-                            visitChildrenRecursively(event.file, adderFileVisitor)
                         }
                     }
                 }
