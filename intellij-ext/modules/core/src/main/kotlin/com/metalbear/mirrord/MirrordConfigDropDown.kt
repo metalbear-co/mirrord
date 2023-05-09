@@ -4,8 +4,8 @@ import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.actionSystem.ex.ComboBoxAction
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vfs.AsyncFileListener
-import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.openapi.vfs.*
+import com.intellij.openapi.vfs.VfsUtilCore.visitChildrenRecursively
 import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileDeleteEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
@@ -25,6 +25,8 @@ import kotlin.collections.HashSet
 // and on pressing the gear icon, a file will be created
 // If one file is present, the chosenFile is set to that file, and the action is hidden, it is set as default
 // If two or more files are present, the chosenFile is set to the first file, and the action is shown
+// Startup -> MirrordConfigIndex -> (MirrordConfigWatcher -> Event -> Iterate VFS segment -> Update) -> MirrordConfigDropDown
+//                                    \<--------------------------------------------------------/
 class MirrordConfigDropDown : ComboBoxAction() {
     override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
@@ -94,77 +96,55 @@ class MirrordConfigDropDown : ComboBoxAction() {
 
 // Based on virtual file events, we update our configs since indexes are always not
 class MirrordConfigWatcher : AsyncFileListener {
+
+    private val adderFileVisitor = object : VirtualFileVisitor<Any?>() {
+        override fun visitFile(file: VirtualFile): Boolean {
+            if (!file.isDirectory && file.path.endsWith("mirrord.json")) {
+                MirrordConfigDropDown.configFiles?.add(file.path)
+            }
+            return true
+        }
+    }
+
+    private val removerFileVisitor = object : VirtualFileVisitor<Any?>() {
+        override fun visitFile(file: VirtualFile): Boolean {
+            if (!file.isDirectory && file.path.endsWith("mirrord.json")) {
+                MirrordConfigDropDown.configFiles?.remove(file.path)
+            }
+            return true
+        }
+    }
+
+
     override fun prepareChange(events: MutableList<out VFileEvent>): AsyncFileListener.ChangeApplier {
-        val addPaths = HashSet<String>()
-        val removePaths = HashSet<String>()
-        // TODO: handle the remaining events/check their relevance
-        events.forEach { it ->
-            when (it) {
-                is VFileCreateEvent -> {
-                    // TODO: handle directory based events
-                    // check if it is a directory
-                    // this does not work at all, no virtual file is created here
-                    // for example, if someone creates a directory
-                    if (it.file?.isDirectory == true) {
-                        it.file!!.children.forEach { child ->
-                            if (child.path.endsWith("mirrord.json")) {
-                                addPaths.add(child.path)
-                            }
-                        }
-                    } else {
-                        it.takeIf { it.path.endsWith("mirrord.json") }?.let {
-                            addPaths.add(it.path)
-                        }
-                    }
-                }
-
-                is VFileDeleteEvent -> {
-                    // case where it is a directory
-                    if (it.file.isDirectory) {
-                        it.file.children.forEach { child ->
-                            child.takeIf { it.path.endsWith("mirrord.json") }?.let {
-                                removePaths.add(it.path)
-                            }
-                        }
-                    } else {
-                        it.takeIf { it.path.endsWith("mirrord.json") }?.let {
-                            removePaths.add(it.path)
-                        }
-                    }
-                }
-
-                is VFileMoveEvent -> {
-                    if (it.path.endsWith("mirrord.json")) {
-                        removePaths.add(it.path)
-                        addPaths.add(it.newPath)
-                    }
-
-                    // case where it is a directory
-                    if (it.file.isDirectory) {
-                        val children = it.file.children
-                        children.forEach { child ->
-                            if (child.path.endsWith("mirrord.json")) {
-                                removePaths.add(child.path)
-                            }
-                            // now since the event is a directory, we don't get the new paths for children
-                            // we need the VirtualFile for the new path
-                            val virtualFile =
-                                VirtualFileManager.getInstance().refreshAndFindFileByNioPath(Path.of(it.newPath))
-                            virtualFile?.children?.forEach { newChild ->
-                                if (newChild.path.endsWith("mirrord.json")) {
-                                    addPaths.add(newChild.path)
+        return object : AsyncFileListener.ChangeApplier {
+            override fun beforeVfsChange() {
+                events.forEach { event ->
+                    synchronized(this) {
+                        when (event) {
+                            is VFileDeleteEvent, is VFileMoveEvent -> {
+                                event.file?.let {
+                                    visitChildrenRecursively(it, removerFileVisitor)
                                 }
                             }
                         }
                     }
                 }
             }
-        }
-        return object : AsyncFileListener.ChangeApplier {
-            override fun afterVfsChange() {
-                MirrordConfigDropDown.configFiles?.addAll(addPaths)
-                MirrordConfigDropDown.configFiles?.removeAll(removePaths)
 
+            override fun afterVfsChange() {
+
+                events.forEach { event ->
+                    when (event) {
+                        is VFileCreateEvent -> {
+                            event.file?.let { file -> visitChildrenRecursively(file, adderFileVisitor) }
+                        }
+
+                        is VFileMoveEvent -> {
+                            visitChildrenRecursively(event.file, adderFileVisitor)
+                        }
+                    }
+                }
             }
         }
     }
