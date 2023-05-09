@@ -100,7 +100,9 @@ class MirrordConfigWatcher : AsyncFileListener {
     private val adderFileVisitor = object : VirtualFileVisitor<Any?>() {
         override fun visitFile(file: VirtualFile): Boolean {
             if (!file.isDirectory && file.path.endsWith("mirrord.json")) {
-                MirrordConfigDropDown.configFiles?.add(file.path)
+                synchronized(this) {
+                    MirrordConfigDropDown.configFiles?.add(file.path)
+                }
             }
             return true
         }
@@ -109,7 +111,9 @@ class MirrordConfigWatcher : AsyncFileListener {
     private val removerFileVisitor = object : VirtualFileVisitor<Any?>() {
         override fun visitFile(file: VirtualFile): Boolean {
             if (!file.isDirectory && file.path.endsWith("mirrord.json")) {
-                MirrordConfigDropDown.configFiles?.remove(file.path)
+                synchronized(this) {
+                    MirrordConfigDropDown.configFiles?.remove(file.path)
+                }
             }
             return true
         }
