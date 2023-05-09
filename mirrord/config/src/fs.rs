@@ -1,12 +1,14 @@
+// rustdoc-stripper-ignore-next
+//! mirrord file operations support 2 modes of configuration:
+//!
+//! 1. [`FsUserConfig::Simple`]: controls only the option for enabling read-only, read-write,
+//! or disable file operations;
+//!
+//! 2. [`FsUserConfig::Advanced`]: All of the above, plus allows setting up
+//! [`mirrord_layer::file::filter::FileFilter`] to control which files should be opened
+//! locally or remotely.
+// rustdoc-stripper-ignore-next-stop
 use schemars::JsonSchema;
-/// mirrord file operations support 2 modes of configuration:
-///
-/// 1. [`FsUserConfig::Simple`]: controls only the option for enabling read-only, read-write,
-/// or disable file operations;
-///
-/// 2. [`FsUserConfig::Advanced`]: All of the above, plus allows setting up
-/// [`mirrord_layer::file::filter::FileFilter`] to control which files should be opened
-/// locally or remotely.
 use serde::Deserialize;
 
 pub use self::{advanced::*, mode::*};
@@ -18,7 +20,7 @@ use crate::{
 pub mod advanced;
 pub mod mode;
 
-/// # fs
+/// ## fs
 ///
 /// Changes file operations behavior based on user configuration.
 // rustdoc-stripper-ignore-next
@@ -26,20 +28,20 @@ pub mod mode;
 // rustdoc-stripper-ignore-next-stop
 ///
 /// See the file operations [reference](https://mirrord.dev/docs/reference/fileops/)
-/// for more details, and [fs adnvaced](# fs advanced) for more information on how to fully setup
+/// for more details, and [fs adnvaced](#fs-advanced) for more information on how to fully setup
 /// mirrord file operations.
 ///
-/// ## Minimal `fs` config
+/// ### Minimal `fs` config
 ///
 /// ```json
 /// {
 ///   "feature": {
-///     "fs": true
+///     "fs": "read"
 ///   }
 /// }
 /// ```
 ///
-/// ## Advanced `fs` config
+/// ### Advanced `fs` config
 ///
 /// ```json
 /// {
@@ -59,10 +61,8 @@ pub enum FsUserConfig {
     // rustdoc-stripper-ignore-next
     /// Basic configuration that controls the env vars `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`
     /// (default).
-    // rustdoc-stripper-ignore-next-stop
     Simple(FsModeConfig),
 
-    // rustdoc-stripper-ignore-next
     /// Allows the user to specify both [`FsModeConfig`] (as above), and configuration for the
     /// overrides.
     // rustdoc-stripper-ignore-next-stop

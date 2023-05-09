@@ -8,7 +8,7 @@ use crate::{
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
-/// # env
+/// ## env
 ///
 /// Allows the user to set or override the local process' environment variables with the ones from
 /// the remote pod.
@@ -19,7 +19,7 @@ use crate::{
 /// See the environment variables [reference](https://mirrord.dev/docs/reference/env/) for more
 /// details.
 ///
-/// ## Example `env` config
+/// ### Example `env` config
 ///
 /// ```json
 /// {
@@ -39,7 +39,7 @@ use crate::{
 #[config(map_to = "EnvFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct EnvConfig {
-    /// ## include
+    /// ### include
     ///
     /// Include only these remote environment variables in the local process.
     ///
@@ -51,7 +51,7 @@ pub struct EnvConfig {
     #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE")]
     pub include: Option<VecOrSingle<String>>,
 
-    /// ## exclude
+    /// ### exclude
     ///
     /// Include the remote environment variables in the local process that are **NOT** specified by
     /// this option.
@@ -60,7 +60,7 @@ pub struct EnvConfig {
     #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE")]
     pub exclude: Option<VecOrSingle<String>>,
 
-    /// ## override
+    /// ### override
     ///
     /// Allows setting or overriding environment variables (locally) with a custom value.
     ///

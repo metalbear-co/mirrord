@@ -39,8 +39,8 @@ use crate::{
 /// Mirrord allows for a high degree of customization when it comes to which features you want to
 /// enable, and how they should function.
 ///
-/// Mirrord features can be setup with the [`feature`](#feature) configuration, you'll also
-/// need to set up a [`target`](#target) for mirrord to impersonate.
+/// Mirrord features can be setup with the [`feature`](##feature) option, you'll also need to set
+/// up [`target`](##target) for mirrord to impersonate.
 ///
 /// ## Minimal `config.json`
 ///
@@ -130,7 +130,7 @@ use crate::{
 /// }
 /// ```
 ///
-/// ## root configuration
+/// ## Root configuration options
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "LayerFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
@@ -217,7 +217,7 @@ pub struct LayerConfig {
 
     /// ### agent
     ///
-    /// Agent configuration, see [`AgentConfig`](#agent) for more advanced usage.
+    /// Agent configuration, see [`agent`](##agent) for more advanced usage.
     ///
     /// ```json
     /// {
