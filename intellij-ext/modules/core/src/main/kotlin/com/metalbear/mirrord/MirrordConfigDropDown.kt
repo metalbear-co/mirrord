@@ -124,12 +124,10 @@ class MirrordConfigWatcher : AsyncFileListener {
         return object : AsyncFileListener.ChangeApplier {
             override fun beforeVfsChange() {
                 events.forEach { event ->
-                    synchronized(this) {
-                        when (event) {
-                            is VFileDeleteEvent, is VFileMoveEvent -> {
-                                event.file?.let {
-                                    visitChildrenRecursively(it, removerFileVisitor)
-                                }
+                    when (event) {
+                        is VFileDeleteEvent, is VFileMoveEvent -> {
+                            event.file?.let {
+                                visitChildrenRecursively(it, removerFileVisitor)
                             }
                         }
                     }
@@ -177,7 +175,7 @@ class MirrordConfigIndex : ScalarIndexExtension<String>() {
 
     override fun getInputFilter(): FileBasedIndex.InputFilter {
         return FileBasedIndex.InputFilter {
-            // TODO: replace with a proper regular expression
+            // TODO: replace with a proper regular/glob expression => "glob:?(*.)mirrord.+(toml|json|y?(a)ml)"
             it.isInLocalFileSystem && !it.isDirectory && it.path.endsWith("mirrord.json")
         }
     }
