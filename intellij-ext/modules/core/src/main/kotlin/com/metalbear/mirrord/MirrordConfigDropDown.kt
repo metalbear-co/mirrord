@@ -10,6 +10,7 @@ import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.util.indexing.*
 import com.intellij.util.io.EnumeratorStringDescriptor
 import com.intellij.util.io.KeyDescriptor
+import java.nio.file.FileSystems
 import java.nio.file.Path
 import java.util.*
 import javax.swing.JComponent
@@ -25,12 +26,15 @@ import kotlin.collections.HashSet
 // Startup -> MirrordConfigIndex -> (MirrordConfigWatcher -> Event -> Query Index -> Update Configs) -> MirrordConfigDropDown
 //                                    \<--------------------------------------------------------/
 class MirrordConfigDropDown : ComboBoxAction() {
+
+    private lateinit var configFiles: HashSet<String>
+
     override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
     // this function is called on click of the dropdown, here we map configFiles -> AnAction
     override fun createPopupActionGroup(button: JComponent, dataContext: DataContext): DefaultActionGroup {
         val project = dataContext.getData(CommonDataKeys.PROJECT) ?: throw Error("couldn't resolve project")
-        val actions = configFiles?.map { configPath ->
+        val actions = configFiles.map { configPath ->
             object : AnAction(getReadablePath(configPath, project)) {
                 override fun actionPerformed(e: AnActionEvent) {
                     chosenFile = configPath
@@ -38,7 +42,7 @@ class MirrordConfigDropDown : ComboBoxAction() {
             }
         }
         return DefaultActionGroup().apply {
-            actions?.let { addAll(it) }
+            addAll(actions)
         }
     }
 
@@ -53,14 +57,20 @@ class MirrordConfigDropDown : ComboBoxAction() {
                 return
             }
 
-            initializeConfigFiles(project)
+
+            if (!::configFiles.isInitialized) {
+                val basePath = project.basePath ?: throw Error("couldn't resolve project path")
+                FileBasedIndex.getInstance().getAllKeys(MirrordConfigIndex.key, project).filter {
+                    matches(basePath, it)
+                }.toHashSet()
+            }
 
             if (updateConfigs) {
                 updateConfigFiles(project)
                 updateConfigs = false
             }
 
-            val files = configFiles ?: return
+            val files = configFiles
             if (files.size < 2) {
                 chosenFile = files.firstOrNull()
                 e.presentation.isVisible = false
@@ -79,15 +89,6 @@ class MirrordConfigDropDown : ComboBoxAction() {
     }
 
 
-    private fun initializeConfigFiles(project: Project) {
-        configFiles ?: run {
-            configFiles = FileBasedIndex.getInstance().getAllKeys(MirrordConfigIndex.key, project).filter {
-                // we only want to index files that are in the project directory
-                it.startsWith(project.basePath ?: throw Error("couldn't resolve project path"))
-            }.toHashSet()
-        }
-    }
-
     private fun updateConfigFiles(project: Project) {
         val updatedConfigFiles = HashSet<String>()
         val basePath = project.basePath ?: throw Error("couldn't resolve project path")
@@ -99,9 +100,8 @@ class MirrordConfigDropDown : ComboBoxAction() {
             null,
             null
         ) {
-            // TODO: add glob here
             val filePath = it.path
-            if (filePath.startsWith(basePath) && filePath.endsWith("mirrord.json")) {
+            if (matches(filePath, basePath)) {
                 updatedConfigFiles.add(it.path)
             }
             true
@@ -118,7 +118,11 @@ class MirrordConfigDropDown : ComboBoxAction() {
     companion object {
         var chosenFile: String? = null
         var updateConfigs: Boolean = false
-        var configFiles: HashSet<String>? = null
+
+        fun matches(path: String, basePath: String?): Boolean {
+            return FileSystems.getDefault().getPathMatcher("glob:**/*mirrord.{toml,json,yaml,yml}")
+                .matches(Path.of(path)) && basePath?.let { path.startsWith(it) } ?: false
+        }
     }
 }
 
@@ -161,8 +165,7 @@ class MirrordConfigIndex : ScalarIndexExtension<String>() {
 
     override fun getInputFilter(): FileBasedIndex.InputFilter {
         return FileBasedIndex.InputFilter {
-            // TODO: replace with a proper regular/glob expression => "glob:?(*.)mirrord.+(toml|json|y?(a)ml)"
-            !it.isDirectory && it.path.endsWith("mirrord.json")
+            !it.isDirectory && MirrordConfigDropDown.matches(it.path, null)
         }
     }
 
