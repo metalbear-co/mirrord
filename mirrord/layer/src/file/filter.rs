@@ -58,9 +58,10 @@ fn generate_local_set() -> RegexSet {
         r"^/dev/.*$",
         r"^/opt/.*$",
         r"^/home/.*$",
-        r"^/tmp/.*$",
-        // macOS' temp
-        r"^/private/var/folders/.*$",
+        // don't use `/.*$` so lstat on the directory will also be local
+        r"^/private(/|$)",
+        r"^/var/folders(/|$)",
+        r"^/tmp(/|$)",
         r"^/snap/.*$",
         // support for nixOS.
         r"^/nix/.*$",

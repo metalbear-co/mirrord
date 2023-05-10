@@ -4,13 +4,15 @@ import com.google.gson.Gson
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.wsl.WSLCommandLineOptions
 import com.intellij.execution.wsl.WSLDistribution
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.project.Project
 import java.util.concurrent.TimeUnit
 
 
 enum class MessageType {
     NewTask,
-    FinishedTask
+    FinishedTask,
+    Warning
 }
 
 
@@ -129,17 +131,21 @@ object MirrordApi {
                 if (success) {
                     val innerMessage = message.message ?: throw Error("Invalid inner message")
                     val executionInfo = gson.fromJson(innerMessage, MirrordExecution::class.java)
-                    MirrordNotifier.progress("mirrord started!")
+                    MirrordNotifier.progress("mirrord started!", project)
                     return executionInfo.environment
                 } else {
                     MirrordNotifier.errorNotification("mirrord failed to launch", project)
                 }
             }
-            var displayMessage = message.name
-            message.message?.let {
-                displayMessage += ": $it"
+            if (message.type == MessageType.Warning) {
+                message.message?.let { MirrordNotifier.notify(it, NotificationType.WARNING, project) }
+            } else {
+                var displayMessage = message.name
+                message.message?.let {
+                    displayMessage += ": $it"
+                }
+                MirrordNotifier.progress(displayMessage, project)
             }
-            MirrordNotifier.progress(displayMessage)
         }
 
         logger.error("mirrord stderr: %s".format(process.errorStream.reader().readText()))
