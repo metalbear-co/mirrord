@@ -14,6 +14,7 @@ mod main {
         path::{Path, PathBuf},
     };
 
+    use apple_codesign::{CodeSignatureFlags, MachFile};
     use object::{
         macho::{self, FatHeader, MachHeader64},
         read::macho::{FatArch, MachHeader},
@@ -269,6 +270,30 @@ mod main {
         NoSIP,
     }
 
+    /// Checks if binary is signed with either `RUNTIME` or `RESTRICTED` flags.
+    /// The code ignores error to allow smoother fallbacks.
+    fn is_code_signed(path: &str) -> bool {
+        let data = match std::fs::read(path) {
+            Ok(data) => data,
+            Err(e) => return false,
+        };
+
+        MachFile::parse(data.as_ref())
+            .map(|mach| {
+                for macho in mach.into_iter() {
+                    if let Ok(Some(signature)) = macho.code_signature() {
+                        if let Ok(Some(blob)) = signature.code_directory() {
+                            if blob.flags.intersects(
+                                CodeSignatureFlags::RESTRICT | CodeSignatureFlags::RUNTIME,
+                            ) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            })
+            .unwrap_or(false)
+    }
     /// Determine status recursively, keep seen_paths, and return an error if there is a cyclical
     /// reference.
     fn get_sip_status_rec(
@@ -295,6 +320,10 @@ mod main {
         // Patch binary if it is in the list of binaries to patch.
         // See `ends_with` docs for understanding better when it returns true.
         if patch_binaries.iter().any(|x| complete_path.ends_with(x)) {
+            return Ok(SipStatus::SomeSIP(complete_path, None));
+        }
+
+        if is_code_signed(&complete_path) {
             return Ok(SipStatus::SomeSIP(complete_path, None));
         }
 
