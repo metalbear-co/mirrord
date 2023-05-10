@@ -80,7 +80,10 @@ class MirrordConfigDropDown : ComboBoxAction() {
 
     private fun initializeConfigFiles(project: Project) {
         configFiles ?: run {
-            configFiles = FileBasedIndex.getInstance().getAllKeys(MirrordConfigIndex.key, project).toHashSet()
+            configFiles = FileBasedIndex.getInstance().getAllKeys(MirrordConfigIndex.key, project).filter {
+                // we only want to index files that are in the project directory
+                it.startsWith(project.basePath ?: throw Error("couldn't resolve project path"))
+            }.toHashSet()
         }
 
     }
@@ -183,7 +186,7 @@ class MirrordConfigIndex : ScalarIndexExtension<String>() {
     override fun getInputFilter(): FileBasedIndex.InputFilter {
         return FileBasedIndex.InputFilter {
             // TODO: replace with a proper regular/glob expression => "glob:?(*.)mirrord.+(toml|json|y?(a)ml)"
-            it.isInLocalFileSystem && !it.isDirectory && it.path.endsWith("mirrord.json")
+            !it.isDirectory && it.path.endsWith("mirrord.json")
         }
     }
 
