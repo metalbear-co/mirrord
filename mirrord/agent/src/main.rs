@@ -70,29 +70,33 @@ mod watched_task;
 
 const CHANNEL_SIZE: usize = 1024;
 
+#[derive(Debug)]
+struct ContainerHandle {
+    container: Container,
+    /// Whether the agent should pause the target container when handling clients.00
+    should_pause: bool,
+}
+
 /// Keeps track of connected clients.
 /// If pausing target, also pauses and unpauses when number of clients changes from or to 0.
 #[derive(Debug)]
 struct State {
     clients: HashSet<ClientId>,
     index_allocator: IndexAllocator<ClientId>,
-    /// Was the pause argument passed? If true, will pause the container when no clients are
-    /// connected.
-    should_pause: bool,
     /// This is an option because it is acceptable not to pass a container runtime and id if not
     /// pausing. When those args are not passed, container is None.
-    container: Option<Container>,
+    container: Option<ContainerHandle>,
 }
 
 /// This is to make sure we don't leave the target container paused if the agent hits an error and
 /// exits early without removing all of its clients.
 impl Drop for State {
     fn drop(&mut self) {
-        if self.should_pause && !self.no_clients_left() {
+        if let Some(handle) = self.container.as_ref() && !self.no_clients_left() {
             info!(
                 "Agent exiting without having removed all the clients. Unpausing target container."
             );
-            if let Err(err) = executor::block_on(self.container.as_ref().unwrap().unpause()) {
+            if let Err(err) = executor::block_on(handle.container.unpause()) {
                 error!(
                     "Could not unpause target container while exiting early, got error: {err:?}"
                 );
@@ -105,26 +109,28 @@ impl State {
     /// Returns Err if container runtime operations failed or if the `pause` arg was passed, but
     /// the container info (runtime and id) was not.
     pub async fn new(args: &Args) -> Result<State> {
-        let container =
-            get_container(args.container_id.as_ref(), args.container_runtime.as_ref()).await?;
+        let container = get_container(args.container_id.as_ref(), args.container_runtime.as_ref())
+            .await?
+            .map(|container| ContainerHandle {
+                container,
+                should_pause: args.pause,
+            });
 
         if container.is_none() && args.pause {
-            Err(AgentError::MissingContainerInfo)?
+            Err(AgentError::MissingContainerInfo)?;
         }
+
         Ok(State {
             clients: HashSet::new(),
             index_allocator: Default::default(),
-            should_pause: args.pause,
             container,
         })
     }
 
     /// Get the external pid + env of the target container, if container info available.
     pub async fn get_container_info(&self) -> Result<Option<ContainerInfo>> {
-        if self.container.is_some() {
-            let container = self.container.as_ref().unwrap();
-            let info = container.get_info().await?;
-            Ok(Some(info))
+        if let Some(handle) = self.container.as_ref() {
+            handle.container.get_info().await.map(Into::into)
         } else {
             Ok(None)
         }
@@ -138,10 +144,10 @@ impl State {
             None => Err(AgentError::ConnectionLimitReached),
             Some(new_id) => {
                 self.clients.insert(new_id.to_owned());
-                if self.clients.len() == 1 {
+                if let Some(handle) = self.container.as_ref() && self.clients.len() == 1 {
                     // First client after no clients.
-                    if self.should_pause {
-                        self.container.as_ref().unwrap().pause().await?;
+                    if handle.should_pause {
+                        handle.container.pause().await?;
                         trace!("First client connected - pausing container.")
                     }
                 }
@@ -218,10 +224,10 @@ impl State {
     pub async fn remove_client(&mut self, client_id: ClientId) -> Result<()> {
         self.clients.remove(&client_id);
         self.index_allocator.free_index(client_id);
-        if self.no_clients_left() {
+        if let Some(handle) = self.container.as_ref() && self.no_clients_left() {
             // resume container (stop stopping).
-            if self.should_pause {
-                self.container.as_ref().unwrap().unpause().await?;
+            if handle.should_pause {
+                handle.container.unpause().await?;
                 trace!("Last client disconnected - resuming container.")
             }
         }
