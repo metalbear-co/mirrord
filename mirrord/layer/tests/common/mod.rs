@@ -740,6 +740,7 @@ pub enum Application {
     RustOutgoingUdp,
     RustOutgoingTcp,
     RustIssue1123,
+    RustIssue1054,
 }
 
 impl Application {
@@ -807,6 +808,7 @@ impl Application {
             Application::Go20FAccessAt => String::from("tests/apps/faccessat_go/20"),
             Application::Go19SelfOpen => String::from("tests/apps/self_open/19"),
             Application::RustIssue1123 => String::from("tests/apps/issue1123/target/issue1123"),
+            Application::RustIssue1054 => String::from("tests/apps/issue1054/target/issue1054"),
             Application::RustOutgoingUdp | Application::RustOutgoingTcp => format!(
                 "{}/{}",
                 env!("CARGO_MANIFEST_DIR"),
@@ -879,6 +881,7 @@ impl Application {
             | Application::Go18FAccessAt
             | Application::RustFileOps
             | Application::RustIssue1123
+            | Application::RustIssue1054
             | Application::EnvBashCat
             | Application::BashShebang
             | Application::Go19SelfOpen
@@ -903,6 +906,7 @@ impl Application {
             | Application::Go20FileOps
             | Application::NodeHTTP
             | Application::RustIssue1123
+            | Application::RustIssue1054
             | Application::PythonFlaskHTTP => 80,
             Application::PythonFastApiHTTP => 1234,
             Application::PythonListen => 21232,
