@@ -5,7 +5,11 @@ import com.intellij.openapi.actionSystem.ex.ComboBoxAction
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.*
+import com.intellij.openapi.vfs.newvfs.events.VFileCopyEvent
+import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent
+import com.intellij.openapi.vfs.newvfs.events.VFileDeleteEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
+import com.intellij.openapi.vfs.newvfs.events.VFileMoveEvent
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.util.indexing.*
 import com.intellij.util.io.EnumeratorStringDescriptor
@@ -18,7 +22,7 @@ import kotlin.collections.HashSet
 
 
 // [`MirrordConfigIndex`] index is queried once in the update function to initialize the configFiles
-// Once initialized, we listen on file events to update the configFiles by querying the index
+// Once initialized, we listen on file events to update the configFiles by querying the index again
 // If no config files are present, the chosenFile is set to null, the action is hidden,
 // and on pressing the gear icon, a file will be created
 // If one file is present, the chosenFile is set to that file, and the action is hidden, it is set as default
@@ -57,11 +61,10 @@ class MirrordConfigDropDown : ComboBoxAction() {
                 return
             }
 
-
             if (!::configFiles.isInitialized) {
                 val basePath = project.basePath ?: throw Error("couldn't resolve project path")
-                FileBasedIndex.getInstance().getAllKeys(MirrordConfigIndex.key, project).filter {
-                    matches(basePath, it)
+                configFiles = FileBasedIndex.getInstance().getAllKeys(MirrordConfigIndex.key, project).filter {
+                    matches(it, basePath)
                 }.toHashSet()
             }
 
@@ -87,7 +90,6 @@ class MirrordConfigDropDown : ComboBoxAction() {
             e.presentation.isVisible = true
         }
     }
-
 
     private fun updateConfigFiles(project: Project) {
         val updatedConfigFiles = HashSet<String>()
@@ -120,18 +122,26 @@ class MirrordConfigDropDown : ComboBoxAction() {
         var updateConfigs: Boolean = false
 
         fun matches(path: String, basePath: String?): Boolean {
-            return FileSystems.getDefault().getPathMatcher("glob:**/*mirrord.{toml,json,yaml,yml}")
-                .matches(Path.of(path)) && basePath?.let { path.startsWith(it) } ?: false
+            // TODO: we need to also parse toml and yaml
+            return FileSystems.getDefault().getPathMatcher("glob:**/*mirrord.json")
+                .matches(Path.of(path)) && basePath?.let { path.startsWith(it) } ?: true
         }
     }
 }
 
-// Based on virtual file events, we update our configs
+// `configFiles` are updated per VFS changes, this approach helps us avoid querying the index on click
+// and also updates the configFiles in case the selected file is deleted
 class MirrordConfigWatcher : AsyncFileListener {
     override fun prepareChange(events: MutableList<out VFileEvent>): AsyncFileListener.ChangeApplier {
         return object : AsyncFileListener.ChangeApplier {
             override fun afterVfsChange() {
-                MirrordConfigDropDown.updateConfigs = true
+                events.forEach { event ->
+                    when (event) {
+                        is VFileCreateEvent, is VFileDeleteEvent, is VFileMoveEvent, is VFileCopyEvent -> {
+                            MirrordConfigDropDown.updateConfigs = true
+                        }
+                    }
+                }
             }
         }
     }
@@ -165,7 +175,7 @@ class MirrordConfigIndex : ScalarIndexExtension<String>() {
 
     override fun getInputFilter(): FileBasedIndex.InputFilter {
         return FileBasedIndex.InputFilter {
-            !it.isDirectory && MirrordConfigDropDown.matches(it.path, null)
+            it.isInLocalFileSystem && !it.isDirectory && MirrordConfigDropDown.matches(it.path, null)
         }
     }
 
