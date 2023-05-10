@@ -8,24 +8,6 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
-## [3.42.0](https://github.com/metalbear-co/mirrord/tree/3.42.0) - 2023-05-10
-
-
-### Changed
-
-- Read paths under /private and /var/folders locally by default.
-
-
-### Fixed
-
-- Added better detection for protected binaries, fixes not loading into Go
-  binary [#1397#](https://github.com/metalbear-co/mirrord/issues/1397#)
-- Fixed `go run` failing because of reading remote files (tweaked local
-  overrides to have `/private` `/tmp` and removes `.*$` from the pattern to
-  include directory listing as well
-  [#1397](https://github.com/metalbear-co/mirrord/issues/1397)
-
-
 ## [3.41.1](https://github.com/metalbear-co/mirrord/tree/3.41.1) - 2023-05-07
 
 
