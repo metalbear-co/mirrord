@@ -272,28 +272,29 @@ mod main {
 
     /// Checks if binary is signed with either `RUNTIME` or `RESTRICTED` flags.
     /// The code ignores error to allow smoother fallbacks.
-    fn is_code_signed(path: &str) -> bool {
+    fn is_code_signed(path: &PathBuf) -> bool {
         let data = match std::fs::read(path) {
             Ok(data) => data,
-            Err(e) => return false,
+            Err(_) => return false,
         };
 
-        MachFile::parse(data.as_ref())
-            .map(|mach| {
-                for macho in mach.into_iter() {
-                    if let Ok(Some(signature)) = macho.code_signature() {
-                        if let Ok(Some(blob)) = signature.code_directory() {
-                            if blob.flags.intersects(
-                                CodeSignatureFlags::RESTRICT | CodeSignatureFlags::RUNTIME,
-                            ) {
-                                return true;
-                            }
+        if let Ok(mach) = MachFile::parse(data.as_ref()) {
+            for macho in mach.into_iter() {
+                if let Ok(Some(signature)) = macho.code_signature() {
+                    if let Ok(Some(blob)) = signature.code_directory() {
+                        if blob
+                            .flags
+                            .intersects(CodeSignatureFlags::RESTRICT | CodeSignatureFlags::RUNTIME)
+                        {
+                            return true;
                         }
                     }
                 }
-            })
-            .unwrap_or(false)
+            }
+        }
+        false
     }
+
     /// Determine status recursively, keep seen_paths, and return an error if there is a cyclical
     /// reference.
     fn get_sip_status_rec(
@@ -323,7 +324,7 @@ mod main {
             return Ok(SipStatus::SomeSIP(complete_path, None));
         }
 
-        if is_code_signed(&complete_path) {
+        if is_code_signed((&complete_path).into()) {
             return Ok(SipStatus::SomeSIP(complete_path, None));
         }
 
