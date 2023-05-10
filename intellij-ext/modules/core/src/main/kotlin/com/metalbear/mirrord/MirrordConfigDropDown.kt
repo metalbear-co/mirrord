@@ -70,7 +70,9 @@ class MirrordConfigDropDown : ComboBoxAction() {
 
             if (updateConfigs) {
                 updateConfigFiles(project)
-                updateConfigs = false
+                synchronized(this) {
+                    updateConfigs = false
+                }
             }
 
             val files = configFiles
@@ -138,7 +140,9 @@ class MirrordConfigWatcher : AsyncFileListener {
                 events.forEach { event ->
                     when (event) {
                         is VFileCreateEvent, is VFileDeleteEvent, is VFileMoveEvent, is VFileCopyEvent -> {
-                            MirrordConfigDropDown.updateConfigs = true
+                            synchronized(this) {
+                                MirrordConfigDropDown.updateConfigs = true
+                            }
                         }
                     }
                 }
