@@ -1,3 +1,4 @@
+#![feature(result_option_inspect)]
 use std::net::{SocketAddr, TcpListener};
 
 /// Test that double binding on the same address:port combination fails the second time around.
