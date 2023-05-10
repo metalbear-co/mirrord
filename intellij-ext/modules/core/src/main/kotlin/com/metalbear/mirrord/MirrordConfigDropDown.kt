@@ -5,12 +5,8 @@ import com.intellij.openapi.actionSystem.ex.ComboBoxAction
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.*
-import com.intellij.openapi.vfs.VfsUtilCore.visitChildrenRecursively
-import com.intellij.openapi.vfs.newvfs.events.VFileCopyEvent
-import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent
-import com.intellij.openapi.vfs.newvfs.events.VFileDeleteEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
-import com.intellij.openapi.vfs.newvfs.events.VFileMoveEvent
+import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.util.indexing.*
 import com.intellij.util.io.EnumeratorStringDescriptor
 import com.intellij.util.io.KeyDescriptor
@@ -21,12 +17,12 @@ import kotlin.collections.HashSet
 
 
 // [`MirrordConfigIndex`] index is queried once in the update function to initialize the configFiles
-// Once initialized, we listen on file events to update the configFiles, using [`MirrordConfigWatcher`]
+// Once initialized, we listen on file events to update the configFiles by querying the index
 // If no config files are present, the chosenFile is set to null, the action is hidden,
 // and on pressing the gear icon, a file will be created
 // If one file is present, the chosenFile is set to that file, and the action is hidden, it is set as default
 // If two or more files are present, the chosenFile is set to the first file, and the action is shown
-// Startup -> MirrordConfigIndex -> (MirrordConfigWatcher -> Event -> Iterate VFS segment -> Update) -> MirrordConfigDropDown
+// Startup -> MirrordConfigIndex -> (MirrordConfigWatcher -> Event -> Query Index -> Update Configs) -> MirrordConfigDropDown
 //                                    \<--------------------------------------------------------/
 class MirrordConfigDropDown : ComboBoxAction() {
     override fun getActionUpdateThread() = ActionUpdateThread.BGT
@@ -59,6 +55,11 @@ class MirrordConfigDropDown : ComboBoxAction() {
 
             initializeConfigFiles(project)
 
+            if (updateConfigs) {
+                updateConfigFiles(project)
+                updateConfigs = false
+            }
+
             val files = configFiles ?: return
             if (files.size < 2) {
                 chosenFile = files.firstOrNull()
@@ -85,7 +86,27 @@ class MirrordConfigDropDown : ComboBoxAction() {
                 it.startsWith(project.basePath ?: throw Error("couldn't resolve project path"))
             }.toHashSet()
         }
+    }
 
+    private fun updateConfigFiles(project: Project) {
+        val updatedConfigFiles = HashSet<String>()
+        val basePath = project.basePath ?: throw Error("couldn't resolve project path")
+        val allKeys = FileBasedIndex.getInstance().getAllKeys(MirrordConfigIndex.key, project)
+        FileBasedIndex.getInstance().processFilesContainingAnyKey(
+            MirrordConfigIndex.key,
+            allKeys,
+            GlobalSearchScope.projectScope(project),
+            null,
+            null
+        ) {
+            // TODO: add glob here
+            val filePath = it.path
+            if (filePath.startsWith(basePath) && filePath.endsWith("mirrord.json")) {
+                updatedConfigFiles.add(it.path)
+            }
+            true
+        }
+        configFiles = updatedConfigFiles
     }
 
     private fun getReadablePath(path: String, project: Project): String {
@@ -94,64 +115,19 @@ class MirrordConfigDropDown : ComboBoxAction() {
         return relativePath.toString()
     }
 
-
     companion object {
         var chosenFile: String? = null
+        var updateConfigs: Boolean = false
         var configFiles: HashSet<String>? = null
     }
 }
 
-// Based on virtual file events, we update our configs since indexes are always not up to date
+// Based on virtual file events, we update our configs
 class MirrordConfigWatcher : AsyncFileListener {
-
-
-    private val adderFileVisitor = object : VirtualFileVisitor<Any?>() {
-        override fun visitFile(file: VirtualFile): Boolean {
-            if (!file.isDirectory && file.path.endsWith("mirrord.json")) {
-                synchronized(this) {
-                    MirrordConfigDropDown.configFiles?.add(file.path)
-                }
-            }
-            return true
-        }
-    }
-
-    private val removerFileVisitor = object : VirtualFileVisitor<Any?>() {
-        override fun visitFile(file: VirtualFile): Boolean {
-            if (!file.isDirectory && file.path.endsWith("mirrord.json")) {
-                synchronized(this) {
-                    MirrordConfigDropDown.configFiles?.remove(file.path)
-                }
-            }
-            return true
-        }
-    }
-
-
     override fun prepareChange(events: MutableList<out VFileEvent>): AsyncFileListener.ChangeApplier {
         return object : AsyncFileListener.ChangeApplier {
-            override fun beforeVfsChange() {
-                events.forEach { event ->
-                    when (event) {
-                        // In case of a file the fileVisitor will just check that file,
-                        // but for directories we need to check recursively
-                        is VFileDeleteEvent, is VFileMoveEvent -> {
-                            event.file?.let {
-                                visitChildrenRecursively(it, removerFileVisitor)
-                            }
-                        }
-                    }
-                }
-            }
-
             override fun afterVfsChange() {
-                events.forEach { event ->
-                    when (event) {
-                        is VFileCreateEvent, is VFileMoveEvent, is VFileCopyEvent -> {
-                            event.file?.let { file -> visitChildrenRecursively(file, adderFileVisitor) }
-                        }
-                    }
-                }
+                MirrordConfigDropDown.updateConfigs = true
             }
         }
     }
