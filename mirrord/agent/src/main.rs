@@ -24,7 +24,10 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
 };
-use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest, LogMessage};
+use mirrord_protocol::{
+    pause::PauseTargetResponse, ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
+    LogMessage,
+};
 use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
 use sniffer::{SnifferCommand, TcpConnectionSniffer, TcpSnifferApi};
 use steal::api::TcpStealerApi;
@@ -436,7 +439,21 @@ impl ClientConnectionHandler {
             ClientMessage::Close => {
                 return Ok(false);
             }
+            ClientMessage::PauseTarget => {
+                if let Some(handle) = self.container_handle.as_ref() {
+                    let response = if handle.request_pause(self.id).await? {
+                        PauseTargetResponse::Paused
+                    } else {
+                        PauseTargetResponse::AlreadyPaused
+                    };
+                    self.respond(DaemonMessage::PauseTarget(response)).await?;
+                } else {
+                    self.respond(DaemonMessage::PauseTarget(PauseTargetResponse::NoTarget))
+                        .await?;
+                }
+            }
         }
+
         Ok(true)
     }
 }

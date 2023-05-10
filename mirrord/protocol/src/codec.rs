@@ -22,6 +22,7 @@ use crate::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
+    pause::PauseTargetResponse,
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     ResponseError,
 };
@@ -92,6 +93,7 @@ pub enum ClientMessage {
     GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
     GetAddrInfoRequest(GetAddrInfoRequest),
+    PauseTarget,
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
@@ -127,6 +129,7 @@ pub enum DaemonMessage {
     /// NOTE: can remove `RemoteResult` when we break protocol compatibility.
     GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
     GetAddrInfoResponse(GetAddrInfoResponse),
+    PauseTarget(PauseTargetResponse),
 }
 
 pub struct ClientCodec {
