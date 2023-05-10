@@ -324,7 +324,7 @@ mod main {
             return Ok(SipStatus::SomeSIP(complete_path, None));
         }
 
-        if is_code_signed((&complete_path).into()) {
+        if is_code_signed(&complete_path) {
             return Ok(SipStatus::SomeSIP(complete_path, None));
         }
 
