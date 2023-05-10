@@ -27,7 +27,6 @@ use futures::{
 };
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
-use runtime::ContainerInfo;
 use sniffer::{SnifferCommand, TcpConnectionSniffer, TcpSnifferApi};
 use steal::api::TcpStealerApi;
 use tokio::{
@@ -43,7 +42,8 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
     cli::Args,
-    runtime::{get_container, Container, ContainerRuntime},
+    container_handle::ContainerHandle,
+    runtime::get_container,
     steal::{
         connection::TcpConnectionStealer,
         ip_tables::{
@@ -57,6 +57,7 @@ use crate::{
 };
 
 mod cli;
+mod container_handle;
 mod dns;
 mod env;
 mod error;
@@ -70,13 +71,6 @@ mod watched_task;
 
 const CHANNEL_SIZE: usize = 1024;
 
-#[derive(Debug)]
-struct ContainerHandle {
-    container: Container,
-    /// Whether the agent should pause the target container when handling clients.00
-    should_pause: bool,
-}
-
 /// Keeps track of connected clients.
 /// If pausing target, also pauses and unpauses when number of clients changes from or to 0.
 #[derive(Debug)]
@@ -86,17 +80,19 @@ struct State {
     /// This is an option because it is acceptable not to pass a container runtime and id if not
     /// pausing. When those args are not passed, container is None.
     container: Option<ContainerHandle>,
+    env: HashMap<String, String>,
+    ephemeral: bool,
 }
 
 /// This is to make sure we don't leave the target container paused if the agent hits an error and
 /// exits early without removing all of its clients.
 impl Drop for State {
     fn drop(&mut self) {
-        if let Some(handle) = self.container.as_ref() && !self.no_clients_left() {
+        if let Some(handle) = self.container.as_ref() && handle.should_pause() && !self.no_clients_left() {
             info!(
                 "Agent exiting without having removed all the clients. Unpausing target container."
             );
-            if let Err(err) = executor::block_on(handle.container.unpause()) {
+            if let Err(err) = executor::block_on(handle.unpause()) {
                 error!(
                     "Could not unpause target container while exiting early, got error: {err:?}"
                 );
@@ -109,31 +105,48 @@ impl State {
     /// Returns Err if container runtime operations failed or if the `pause` arg was passed, but
     /// the container info (runtime and id) was not.
     pub async fn new(args: &Args) -> Result<State> {
-        let container = get_container(args.container_id.as_ref(), args.container_runtime.as_ref())
-            .await?
-            .map(|container| ContainerHandle {
-                container,
-                should_pause: args.pause,
-            });
+        let container =
+            get_container(args.container_id.as_ref(), args.container_runtime.as_ref()).await?;
 
-        if container.is_none() && args.pause {
-            Err(AgentError::MissingContainerInfo)?;
-        }
+        let handle = match container {
+            Some(container) => Some(ContainerHandle::new(container, args.pause).await?),
+            // TODO remove "pause" from args
+            None if args.pause => Err(AgentError::MissingContainerInfo)?,
+            None => None,
+        };
+
+        let environ_path = PathBuf::from("/proc")
+            .join(
+                handle
+                    .as_ref()
+                    .map(|h| h.pid().to_string())
+                    .unwrap_or_else(|| "self".to_string()),
+            )
+            .join("environ");
+
+        let mut env = handle
+            .as_ref()
+            .map(ContainerHandle::raw_env)
+            .cloned()
+            .unwrap_or_default();
+        match env::get_proc_environ(environ_path).await {
+            Ok(environ) => env.extend(environ.into_iter()),
+            Err(err) => {
+                error!("Failed to get process environment variables: {err:?}");
+            }
+        };
 
         Ok(State {
             clients: HashSet::new(),
             index_allocator: Default::default(),
-            container,
+            container: handle,
+            env,
+            ephemeral: args.ephemeral_container,
         })
     }
 
-    /// Get the external pid + env of the target container, if container info available.
-    pub async fn get_container_info(&self) -> Result<Option<ContainerInfo>> {
-        if let Some(handle) = self.container.as_ref() {
-            handle.container.get_info().await.map(Into::into)
-        } else {
-            Ok(None)
-        }
+    pub fn container_pid(&self) -> Option<u64> {
+        self.container.as_ref().map(ContainerHandle::pid)
     }
 
     /// If there are clientIDs left, insert new one and return it.
@@ -144,12 +157,9 @@ impl State {
             None => Err(AgentError::ConnectionLimitReached),
             Some(new_id) => {
                 self.clients.insert(new_id.to_owned());
-                if let Some(handle) = self.container.as_ref() && self.clients.len() == 1 {
-                    // First client after no clients.
-                    if handle.should_pause {
-                        handle.container.pause().await?;
-                        trace!("First client connected - pausing container.")
-                    }
+                if let Some(handle) = self.container.as_ref() && handle.should_pause() && self.clients.len() == 1 {
+                    handle.pause().await?;
+                    trace!("First client connected - pausing container.")
                 }
                 Ok(new_id)
             }
@@ -161,9 +171,6 @@ impl State {
         stream: TcpStream,
         tasks: BackgroundTasks,
         cancellation_token: CancellationToken,
-        ephemeral_container: bool,
-        pid: Option<u64>,
-        env: HashMap<String, String>,
     ) -> Result<Option<JoinHandle<u32>>> {
         let mut stream = Framed::new(stream, DaemonCodec::new());
 
@@ -181,6 +188,10 @@ impl State {
                 }
             }
         };
+
+        let pid = self.container_pid();
+        let ephemeral_container = self.ephemeral;
+        let env = self.env.clone();
 
         let task = tokio::spawn(async move {
             let result = ClientConnectionHandler::new(
@@ -224,12 +235,10 @@ impl State {
     pub async fn remove_client(&mut self, client_id: ClientId) -> Result<()> {
         self.clients.remove(&client_id);
         self.index_allocator.free_index(client_id);
-        if let Some(handle) = self.container.as_ref() && self.no_clients_left() {
+        if let Some(handle) = self.container.as_ref() && handle.should_pause() && self.no_clients_left() {
             // resume container (stop stopping).
-            if handle.should_pause {
-                handle.container.unpause().await?;
-                trace!("Last client disconnected - resuming container.")
-            }
+            handle.unpause().await?;
+            trace!("Last client disconnected - resuming container.")
         }
         Ok(())
     }
@@ -275,11 +284,7 @@ impl ClientConnectionHandler {
         bg_tasks: BackgroundTasks,
         env: HashMap<String, String>,
     ) -> Result<Self> {
-        let file_manager = match pid {
-            Some(_) => FileManager::new(pid),
-            None if ephemeral => FileManager::new(Some(1)),
-            None => FileManager::new(None),
-        };
+        let file_manager = FileManager::new(pid.or_else(|| ephemeral.then_some(1)));
 
         let tcp_sniffer_api = match TcpSnifferApi::new(
             id,
@@ -484,24 +489,6 @@ async fn start_agent() -> Result<()> {
     .await?;
 
     let mut state = State::new(&args).await?;
-    let (pid, mut env) = match state.get_container_info().await? {
-        Some(ContainerInfo { pid, env }) => (Some(pid), env),
-        None => (None, HashMap::new()),
-    };
-
-    let environ_path = PathBuf::from("/proc")
-        .join(
-            pid.map(|i| i.to_string())
-                .unwrap_or_else(|| "self".to_string()),
-        )
-        .join("environ");
-
-    match env::get_proc_environ(environ_path).await {
-        Ok(environ) => env.extend(environ.into_iter()),
-        Err(err) => {
-            error!("Failed to get process environment variables: {err:?}");
-        }
-    }
 
     let cancellation_token = CancellationToken::new();
     // Cancel all other tasks on exit
@@ -510,7 +497,7 @@ async fn start_agent() -> Result<()> {
     let (sniffer_command_tx, sniffer_command_rx) = mpsc::channel::<SnifferCommand>(1000);
     let (stealer_command_tx, stealer_command_rx) = mpsc::channel::<StealerCommand>(1000);
 
-    let dns_api = DnsApi::new(pid, 1000);
+    let dns_api = DnsApi::new(state.container_pid(), 1000);
 
     let (sniffer_task, sniffer_status) = {
         let cancellation_token = cancellation_token.clone();
@@ -530,7 +517,7 @@ async fn start_agent() -> Result<()> {
         let task = run_thread_in_namespace(
             watched_task.start(),
             TcpConnectionSniffer::TASK_NAME.to_string(),
-            pid,
+            state.container_pid(),
             "net",
         );
 
@@ -553,7 +540,7 @@ async fn start_agent() -> Result<()> {
         let task = run_thread_in_namespace(
             watched_task.start(),
             TcpConnectionStealer::TASK_NAME.to_string(),
-            pid,
+            state.container_pid(),
             "net",
         );
 
@@ -585,14 +572,7 @@ async fn start_agent() -> Result<()> {
         Ok(Ok((stream, addr))) => {
             trace!("start -> Connection accepted from {:?}", addr);
             if let Some(client) = state
-                .new_connection(
-                    stream,
-                    bg_tasks.clone(),
-                    cancellation_token.clone(),
-                    args.ephemeral_container,
-                    pid,
-                    env.clone(),
-                )
+                .new_connection(stream, bg_tasks.clone(), cancellation_token.clone())
                 .await?
             {
                 clients.push(client)
@@ -620,9 +600,6 @@ async fn start_agent() -> Result<()> {
                     stream,
                     bg_tasks.clone(),
                     cancellation_token.clone(),
-                    args.ephemeral_container,
-                    pid,
-                    env.clone()
                 ).await? {clients.push(client) };
             },
             client = clients.next() => {
@@ -683,7 +660,7 @@ async fn start_iptable_guard() -> Result<()> {
 
     let args = parse_args();
     let state = State::new(&args).await?;
-    let pid = state.get_container_info().await?.map(|c| c.pid);
+    let pid = state.container_pid();
 
     std::env::set_var(IPTABLE_PREROUTING_ENV, IPTABLE_PREROUTING.as_str());
     std::env::set_var(IPTABLE_MESH_ENV, IPTABLE_MESH.as_str());
