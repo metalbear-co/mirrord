@@ -21,7 +21,6 @@ use dns::DnsApi;
 use error::{AgentError, Result};
 use file::FileManager;
 use futures::{
-    executor,
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
 };
@@ -72,46 +71,23 @@ mod watched_task;
 const CHANNEL_SIZE: usize = 1024;
 
 /// Keeps track of connected clients.
-/// If pausing target, also pauses and unpauses when number of clients changes from or to 0.
 #[derive(Debug)]
 struct State {
     clients: HashSet<ClientId>,
     index_allocator: IndexAllocator<ClientId>,
-    /// This is an option because it is acceptable not to pass a container runtime and id if not
-    /// pausing. When those args are not passed, container is None.
     container: Option<ContainerHandle>,
     env: HashMap<String, String>,
     ephemeral: bool,
 }
 
-/// This is to make sure we don't leave the target container paused if the agent hits an error and
-/// exits early without removing all of its clients.
-impl Drop for State {
-    fn drop(&mut self) {
-        if let Some(handle) = self.container.as_ref() && handle.should_pause() && !self.no_clients_left() {
-            info!(
-                "Agent exiting without having removed all the clients. Unpausing target container."
-            );
-            if let Err(err) = executor::block_on(handle.unpause()) {
-                error!(
-                    "Could not unpause target container while exiting early, got error: {err:?}"
-                );
-            }
-        }
-    }
-}
-
 impl State {
-    /// Returns Err if container runtime operations failed or if the `pause` arg was passed, but
-    /// the container info (runtime and id) was not.
+    /// Returns [`Err`] if container runtime operations failed.
     pub async fn new(args: &Args) -> Result<State> {
         let container =
             get_container(args.container_id.as_ref(), args.container_runtime.as_ref()).await?;
 
         let handle = match container {
-            Some(container) => Some(ContainerHandle::new(container, args.pause).await?),
-            // TODO remove "pause" from args
-            None if args.pause => Err(AgentError::MissingContainerInfo)?,
+            Some(container) => Some(ContainerHandle::new(container).await?),
             None => None,
         };
 
@@ -149,21 +125,13 @@ impl State {
         self.container.as_ref().map(ContainerHandle::pid)
     }
 
-    /// If there are clientIDs left, insert new one and return it.
-    /// If there were no clients before, and there is a Pauser, start pausing.
-    /// Propagate container runtime errors.
+    /// If there are [`ClientId`]s left, insert new one and return it.
     pub async fn new_client(&mut self) -> Result<ClientId> {
-        match self.generate_id() {
-            None => Err(AgentError::ConnectionLimitReached),
-            Some(new_id) => {
-                self.clients.insert(new_id.to_owned());
-                if let Some(handle) = self.container.as_ref() && handle.should_pause() && self.clients.len() == 1 {
-                    handle.pause().await?;
-                    trace!("First client connected - pausing container.")
-                }
-                Ok(new_id)
-            }
-        }
+        let new_id = self
+            .generate_id()
+            .ok_or(AgentError::ConnectionLimitReached)?;
+        self.clients.insert(new_id);
+        Ok(new_id)
     }
 
     pub async fn new_connection(
@@ -189,7 +157,7 @@ impl State {
             }
         };
 
-        let pid = self.container_pid();
+        let container_handle = self.container.clone();
         let ephemeral_container = self.ephemeral;
         let env = self.env.clone();
 
@@ -197,7 +165,7 @@ impl State {
             let result = ClientConnectionHandler::new(
                 client_id,
                 stream,
-                pid,
+                container_handle,
                 ephemeral_container,
                 tasks,
                 env,
@@ -230,21 +198,17 @@ impl State {
         self.index_allocator.next_index()
     }
 
-    /// If that was the last client and we are pausing, stop pausing.
-    /// Propagate container runtime errors.
     pub async fn remove_client(&mut self, client_id: ClientId) -> Result<()> {
         self.clients.remove(&client_id);
         self.index_allocator.free_index(client_id);
-        if let Some(handle) = self.container.as_ref() && handle.should_pause() && self.no_clients_left() {
-            // resume container (stop stopping).
-            handle.unpause().await?;
-            trace!("Last client disconnected - resuming container.")
-        }
-        Ok(())
-    }
 
-    pub fn no_clients_left(&self) -> bool {
-        self.clients.is_empty()
+        if let Some(handle) = self.container.as_ref() {
+            if handle.client_disconnected(client_id).await? {
+                trace!("Last client requesting pause disconnected - resuming container.");
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -259,9 +223,6 @@ struct BackgroundTasks {
 }
 
 struct ClientConnectionHandler {
-    /// Used to prevent closing the main loop [`ClientConnectionHandler::start`] when any
-    /// request is done (tcp outgoing feature). Stays `true` until `agent` receives an
-    /// `ExitRequest`.
     id: ClientId,
     /// Handles mirrord's file operations, see [`FileManager`].
     file_manager: FileManager,
@@ -272,6 +233,7 @@ struct ClientConnectionHandler {
     udp_outgoing_api: UdpOutgoingApi,
     dns_api: DnsApi,
     env: HashMap<String, String>,
+    container_handle: Option<ContainerHandle>,
 }
 
 impl ClientConnectionHandler {
@@ -279,11 +241,13 @@ impl ClientConnectionHandler {
     pub async fn new(
         id: ClientId,
         mut stream: Framed<TcpStream, DaemonCodec>,
-        pid: Option<u64>,
+        container_handle: Option<ContainerHandle>,
         ephemeral: bool,
         bg_tasks: BackgroundTasks,
         env: HashMap<String, String>,
     ) -> Result<Self> {
+        let pid = container_handle.as_ref().map(ContainerHandle::pid);
+
         let file_manager = FileManager::new(pid.or_else(|| ephemeral.then_some(1)));
 
         let tcp_sniffer_api = match TcpSnifferApi::new(
@@ -341,6 +305,7 @@ impl ClientConnectionHandler {
             udp_outgoing_api,
             dns_api: bg_tasks.dns_api,
             env,
+            container_handle,
         };
 
         Ok(client_handler)
