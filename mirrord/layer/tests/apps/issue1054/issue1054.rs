@@ -1,5 +1,5 @@
 #![feature(result_option_inspect)]
-use std::net::{SocketAddr, TcpListener};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 
 /// Test that double binding on the same address:port combination fails the second time around.
 fn main() {
@@ -13,6 +13,11 @@ fn main() {
     assert_eq!(listener.local_addr().unwrap(), address);
     assert_eq!(listener.local_addr().unwrap(), cloned.local_addr().unwrap());
 
+    let connect_to = address.clone();
+    let task = std::thread::spawn(move || {
+        let _ = TcpStream::connect(connect_to).unwrap();
+    });
+
     let (connection, _) = cloned
         .accept()
         .inspect_err(|fail| {
@@ -21,6 +26,8 @@ fn main() {
         .expect("Accept on cloned {cloned:#?}!");
 
     assert_ne!(connection.local_addr().unwrap(), address);
+
+    task.join().unwrap();
 
     println!("test issue 1054: SUCCESS");
 }
