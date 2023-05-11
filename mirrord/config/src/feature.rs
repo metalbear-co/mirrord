@@ -1,9 +1,12 @@
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
-use crate::{
-    config::source::MirrordConfigSource, env::EnvConfig, fs::FsConfig, network::NetworkConfig,
-};
+use self::{env::EnvConfig, fs::FsConfig, network::NetworkConfig};
+use crate::config::source::MirrordConfigSource;
+
+pub mod env;
+pub mod fs;
+pub mod network;
 
 /// ## feature
 ///

@@ -9,7 +9,7 @@
 use std::{env, sync::OnceLock};
 
 use mirrord_config::{
-    fs::{FsConfig, FsModeConfig},
+    feature::fs::{FsConfig, FsModeConfig},
     util::VecOrSingle,
 };
 use regex::{RegexSet, RegexSetBuilder};
@@ -224,7 +224,7 @@ impl Default for FileFilter {
 
 #[cfg(test)]
 mod tests {
-    use mirrord_config::{fs::FsConfig, util::VecOrSingle};
+    use mirrord_config::{feature::fs::FsConfig, util::VecOrSingle};
     use rstest::*;
 
     use super::*;

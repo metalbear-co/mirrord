@@ -88,10 +88,14 @@ use file::{filter::FileFilter, OPEN_FILES};
 use hooks::HookManager;
 use libc::c_int;
 use mirrord_config::{
-    feature::FeatureConfig,
-    fs::FsConfig,
-    incoming::{http_filter::HttpHeaderFilterConfig, IncomingConfig},
-    network::NetworkConfig,
+    feature::{
+        fs::FsConfig,
+        network::{
+            incoming::{http_filter::HttpHeaderFilterConfig, IncomingConfig},
+            NetworkConfig,
+        },
+        FeatureConfig,
+    },
     util::VecOrSingle,
     LayerConfig,
 };

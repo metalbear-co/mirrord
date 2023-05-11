@@ -11,10 +11,7 @@
 // rustdoc-stripper-ignore-next-stop
 pub mod agent;
 pub mod config;
-pub mod env;
 pub mod feature;
-pub mod fs;
-pub mod network;
 pub mod target;
 pub mod util;
 
@@ -346,11 +343,15 @@ mod tests {
     use super::*;
     use crate::{
         agent::AgentFileConfig,
-        feature::FeatureFileConfig,
-        fs::{FsModeConfig, FsUserConfig},
-        incoming::{IncomingAdvancedFileConfig, IncomingFileConfig, IncomingMode},
-        network::NetworkFileConfig,
-        outgoing::OutgoingFileConfig,
+        feature::{
+            fs::{FsModeConfig, FsUserConfig},
+            network::{
+                incoming::{IncomingAdvancedFileConfig, IncomingFileConfig, IncomingMode},
+                outgoing::OutgoingFileConfig,
+                NetworkFileConfig,
+            },
+            FeatureFileConfig,
+        },
         target::{PodTarget, Target, TargetFileConfig},
         util::ToggleableConfig,
     };
