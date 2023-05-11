@@ -99,6 +99,13 @@ pub struct LayerConfig {
     #[config(nested)]
     pub target: TargetConfig,
 
+    /// Controls target pause feature. Unstable.
+    ///
+    /// With this feature enabled, the remote container is paused while this layer is connected to
+    /// the agent.
+    #[config(env = "MIRRORD_PAUSE", default = false, unstable)]
+    pub pause: bool,
+
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.
     #[config(env = "MIRRORD_CONNECT_TCP")]
     pub connect_tcp: Option<String>,

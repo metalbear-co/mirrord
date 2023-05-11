@@ -97,7 +97,7 @@ impl MirrordExecution {
             }
         }
 
-        if config.agent.pause {
+        if config.pause {
             tokio::time::timeout(
                 communication_timeout,
                 Self::setup_target_pause(&mut connection),

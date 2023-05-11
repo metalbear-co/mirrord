@@ -444,6 +444,7 @@ impl ClientConnectionHandler {
                     .container_handle
                     .as_ref()
                     .ok_or(AgentError::PauseAbsentTarget)?;
+                // TODO handle ephemeral agent
                 let response = if handle.request_pause(self.id).await? {
                     PauseTargetResponse::Paused
                 } else {
