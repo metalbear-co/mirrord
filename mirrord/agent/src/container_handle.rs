@@ -79,7 +79,7 @@ impl ContainerHandle {
     }
 
     /// Add the pause request to the set of active requests.
-    /// If the set became non-empty, pause the container.
+    /// If the set became non-empty, pause the container and return true. Otherwise, return false.
     pub(crate) async fn request_pause(&self, client_id: ClientId) -> Result<bool> {
         let mut guard = self.0.pause_requests.write().await;
         let do_pause = guard.is_empty();
@@ -94,7 +94,7 @@ impl ContainerHandle {
     }
 
     /// Remove pause request of the given client from the set of active requests.
-    /// If the set became empty, unpause the container.
+    /// If the set became empty, unpause the container and return true. Otherwise, return false.
     pub(crate) async fn client_disconnected(&self, client_id: ClientId) -> Result<bool> {
         let mut guard = self.0.pause_requests.write().await;
         let do_unpause = guard.contains(&client_id) && guard.len() == 1;
