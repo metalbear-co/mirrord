@@ -4,6 +4,7 @@ import com.intellij.ide.BrowserUtil
 import com.intellij.notification.*
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 
 /**
@@ -15,7 +16,6 @@ object MirrordNotifier {
         .getNotificationGroup("mirrord Notification Handler")
 
     private val progressNotificationManager = SingletonNotificationManager("mirrord Notification Handler", NotificationType.INFORMATION)
-
     fun notify(message: String, type: NotificationType, project: Project?) {
         ApplicationManager.getApplication().invokeLater {
             notificationManager
@@ -29,6 +29,7 @@ object MirrordNotifier {
             progressNotificationManager.notify("mirrord", message, project) {}
         }
     }
+
     fun notifier(message: String, type: NotificationType): Notification {
         return notificationManager.createNotification("mirrord", message, type)
     }

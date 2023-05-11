@@ -4,7 +4,7 @@ use std::{os::unix::io::RawFd, sync::LazyLock};
 
 use dashmap::DashSet;
 use errno::{set_errno, Errno};
-use libc::{c_char, c_int, sockaddr, socklen_t, EINVAL};
+use libc::{c_char, c_int, c_void, size_t, sockaddr, socklen_t, ssize_t, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 
 use super::ops::*;
@@ -302,9 +302,36 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
         })
 }
 
+/// Hook for [`libc::recvfrom`].
+/// This hook currently just helps some udp flows to go through by filling in
+/// original address for the caller.
+#[hook_guard_fn]
+unsafe extern "C" fn recv_from_detour(
+    sockfd: i32,
+    buf: *mut c_void,
+    len: size_t,
+    flags: c_int,
+    src_addr: *mut sockaddr,
+    addrlen: *mut socklen_t,
+) -> ssize_t {
+    let recv_from_result = FN_RECV_FROM(sockfd, buf, len, flags, src_addr, addrlen);
+    if recv_from_result == -1 {
+        recv_from_result
+    } else {
+        recv_from(sockfd, src_addr, addrlen);
+        recv_from_result
+    }
+}
+
 pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled_remote_dns: bool) {
     replace!(hook_manager, "socket", socket_detour, FnSocket, FN_SOCKET);
-
+    replace!(
+        hook_manager,
+        "recvfrom",
+        recv_from_detour,
+        FnRecv_from,
+        FN_RECV_FROM
+    );
     replace!(hook_manager, "bind", bind_detour, FnBind, FN_BIND);
     replace!(hook_manager, "listen", listen_detour, FnListen, FN_LISTEN);
 
