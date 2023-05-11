@@ -29,7 +29,7 @@ use crate::{
 // TODO(alex) [high] 2023-05-08: For some of the inner config structs, move the documentation
 // to the parent, example would be `IncomingFileConfig`, where we should move the docs to the
 // `incoming` field, instead of linking to another struct.
-/// # Mirrord configuration
+/// # Mirrord configuration {#root}
 ///
 /// Mirrord allows for a high degree of customization when it comes to which features you want to
 /// enable, and how they should function.
@@ -37,7 +37,7 @@ use crate::{
 /// Mirrord features can be setup with the [`feature`](##feature) option, you'll also need to set
 /// up [`target`](##target) for mirrord to impersonate.
 ///
-/// ## Minimal `config.json`
+/// ## Minimal `config.json` {#root-minimal}
 ///
 /// Most of the configuration fields have a default value, so all you really need is to specify a
 /// [`target`](##target) to impersonate.
@@ -53,7 +53,7 @@ use crate::{
 /// }
 /// ```
 ///
-/// ## Advanced `config.json`
+/// ## Advanced `config.json` {#root-advanced}
 ///
 /// Both [`fs`](##fs) and [`network`](##network) also support a simplified configuration, see their
 /// respective documentations to learn more.
@@ -130,7 +130,7 @@ use crate::{
 #[config(map_to = "LayerFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct LayerConfig {
-    /// ### accept_invalid_certificates
+    /// ### accept_invalid_certificates {#root-accept_invalid_certificates}
     ///
     /// Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed
     /// certificates).
@@ -139,7 +139,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", default = false)]
     pub accept_invalid_certificates: bool,
 
-    /// ### skip_processes
+    /// ### skip_processes {#root-skip_processes}
     ///
     /// Allows mirrord to skip unwanted processes.
     ///
@@ -156,7 +156,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_SKIP_PROCESSES")]
     pub skip_processes: Option<VecOrSingle<String>>,
 
-    /// ### target
+    /// ### target {#root-target}
     ///
     /// Specifies the running pod to mirror, see [`target`](##target) for more details.
     ///
@@ -174,7 +174,7 @@ pub struct LayerConfig {
     #[config(nested)]
     pub target: TargetConfig,
 
-    /// ### connect_tcp
+    /// ### connect_tcp {#root-connect_tcp}
     ///
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.
     ///
@@ -186,7 +186,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_CONNECT_TCP")]
     pub connect_tcp: Option<String>,
 
-    /// ### connect_agent_name
+    /// ### connect_agent_name {#root-connect_agent_name}
     ///
     /// Agent name that already exists that we can connect to.
     ///
@@ -198,7 +198,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_CONNECT_AGENT")]
     pub connect_agent_name: Option<String>,
 
-    /// ### connect_agent_port
+    /// ### connect_agent_port {#root-connect_agent_port}
     ///
     /// Agent listen port that already exists that we can connect to.
     ///
@@ -210,7 +210,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_CONNECT_PORT")]
     pub connect_agent_port: Option<u16>,
 
-    /// ### agent
+    /// ### agent {#root-agent}
     ///
     /// Agent configuration, see [`agent`](##agent) for more advanced usage.
     ///
@@ -227,7 +227,7 @@ pub struct LayerConfig {
     #[config(nested)]
     pub agent: AgentConfig,
 
-    /// ### feature
+    /// ### feature {#root-feature}
     ///
     /// Controls mirrord features, see [`feature`](##feature) to learn how to set up mirrord
     /// only the features you want, and the
@@ -262,7 +262,7 @@ pub struct LayerConfig {
     #[config(nested)]
     pub feature: FeatureConfig,
 
-    /// ### operator
+    /// ### operator {#root-operator}
     ///
     /// Allow to lookup if operator is installed on cluster and use it.
     ///
@@ -270,7 +270,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_OPERATOR_ENABLE", default = true)]
     pub operator: bool,
 
-    /// ### kubeconfig
+    /// ### kubeconfig {#root-kubeconfig}
     ///
     /// Path to a kubeconfig file, if not specified, will use `KUBECONFIG`, or `~/.kube/config`, or
     /// the in-cluster config.
@@ -283,7 +283,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_KUBECONFIG")]
     pub kubeconfig: Option<String>,
 
-    /// ### sip_binaries
+    /// ### sip_binaries {#root-sip_binaries}
     ///
     /// Binaries to patch (macOS SIP).
     ///

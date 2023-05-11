@@ -20,7 +20,7 @@ use crate::{
 pub mod advanced;
 pub mod mode;
 
-/// ## fs
+/// ## fs {#fs}
 ///
 /// Changes file operations behavior based on user configuration.
 // rustdoc-stripper-ignore-next
@@ -28,10 +28,10 @@ pub mod mode;
 // rustdoc-stripper-ignore-next-stop
 ///
 /// See the file operations [reference](https://mirrord.dev/docs/reference/fileops/)
-/// for more details, and [fs adnvaced](##fs-advanced) for more information on how to fully setup
+/// for more details, and [fs advanced](#fs-advanced) for more information on how to fully setup
 /// mirrord file operations.
 ///
-/// ### Minimal `fs` config
+/// ### Minimal `fs` config {#fs-minimal}
 ///
 /// ```json
 /// {
@@ -41,7 +41,7 @@ pub mod mode;
 /// }
 /// ```
 ///
-/// ### Advanced `fs` config
+/// ### Advanced `fs` config {#fs-advanced}
 ///
 /// ```json
 /// {

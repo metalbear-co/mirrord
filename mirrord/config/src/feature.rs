@@ -8,14 +8,14 @@ pub mod env;
 pub mod fs;
 pub mod network;
 
-/// ## feature
+/// ## feature {#feature}
 ///
 /// Configuration for mirrord features.
 ///
 /// For more information, check the [technical reference](https://mirrord.dev/docs/reference/)
 /// of the feature.
 ///
-/// ### Minimal `feature` config
+/// ### Minimal `feature` config {#feature-minimal}
 ///
 /// The [`fs`](#fs) and [`network`](#network) options have support for a shortened version.
 ///
@@ -37,7 +37,7 @@ pub mod network;
 /// }
 /// ```
 ///
-/// ### Advanced `feature` config
+/// ### Advanced `feature` config {#feature-advanced}
 ///
 /// ```json
 /// {
@@ -83,34 +83,34 @@ pub mod network;
 #[config(map_to = "FeatureFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct FeatureConfig {
-    /// ### env
+    /// ### feature.env {#feature-env}
     ///
-    /// Controls the environment variables feature, see [`EnvConfig`](##env).
+    /// Controls the environment variables feature, see [`env`](#env).
     ///
     /// For more information, check the environment variables
     /// [technical reference](https://mirrord.dev/docs/reference/env/).
     #[config(nested, toggleable)]
     pub env: EnvConfig,
 
-    /// ### fs
+    /// ### feature.fs {#feature-fs}
     ///
-    /// Controls the file operations feature, see [`FsConfig`](##fs).
+    /// Controls the file operations feature, see [`fs`](#fs).
     ///
     /// For more information, check the file operations
     /// [technical reference](https://mirrord.dev/docs/reference/fileops/).
     #[config(nested, toggleable)]
     pub fs: FsConfig,
 
-    /// ### network
+    /// ### feature.network {#feature-network}
     ///
-    /// Controls the network feature, see [`NetworkConfig`](##network).
+    /// Controls the network feature, see [`network`](#network).
     ///
     /// For more information, check the network traffic
     /// [technical reference](https://mirrord.dev/docs/reference/traffic/).
     #[config(nested, toggleable)]
     pub network: NetworkConfig,
 
-    /// ### capture_error_trace
+    /// ### feature.capture_error_trace {#feature-capture_error_trace}
     ///
     /// Controls the crash reporting feature.
     ///
