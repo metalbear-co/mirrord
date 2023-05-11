@@ -124,6 +124,17 @@ object MirrordApi {
             .redirectError(ProcessBuilder.Redirect.PIPE)
             .start()
 
+        ApplicationManager.getApplication().invokeLater {
+            ProgressManager.getInstance().run(
+                object : Task.Backgroundable(null, "Downloading") {
+                    override fun run(progress: ProgressIndicator) {
+                        while(true) {
+                            progress.text = "ok its working focus on l "
+                        }
+                    }
+                })
+        }
+
         val bufferedReader = process.inputStream.reader().buffered()
         val gson = Gson()
 
@@ -163,12 +174,12 @@ object MirrordApi {
 
         }
 
-        ApplicationManager.getApplication().invokeLater {
-            val statusBar = StatusBarProgress().apply {
-                text = "mirrord is starting..."
-            }
-            ProgressManager.getInstance().runProcessWithProgressAsynchronously(streamProgressTask, statusBar)
+
+        val statusBar = StatusBarProgress().apply {
+            text = "mirrord is starting..."
         }
+
+        ProgressManager.getInstance().runProcessWithProgressAsynchronously(streamProgressTask, statusBar)
 
         environment.get().let {
             return it
