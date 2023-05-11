@@ -78,13 +78,15 @@ const CHANNEL_SIZE: usize = 1024;
 struct State {
     clients: HashSet<ClientId>,
     index_allocator: IndexAllocator<ClientId>,
+    /// Handle to the target container if there is one.
     container: Option<ContainerHandle>,
     env: HashMap<String, String>,
+    /// Whether this agent is run in an ephemeral container.
     ephemeral: bool,
 }
 
 impl State {
-    /// Returns [`Err`] if container runtime operations failed.
+    /// Return [`Err`] if container runtime operations failed.
     pub async fn new(args: &Args) -> Result<State> {
         let container =
             get_container(args.container_id.as_ref(), args.container_runtime.as_ref()).await?;
@@ -124,6 +126,7 @@ impl State {
         })
     }
 
+    /// Return the process ID of the target container if there is one.
     pub fn container_pid(&self) -> Option<u64> {
         self.container.as_ref().map(ContainerHandle::pid)
     }
@@ -131,7 +134,8 @@ impl State {
     /// If there are [`ClientId`]s left, insert new one and return it.
     pub async fn new_client(&mut self) -> Result<ClientId> {
         let new_id = self
-            .generate_id()
+            .index_allocator
+            .next_index()
             .ok_or(AgentError::ConnectionLimitReached)?;
         self.clients.insert(new_id);
         Ok(new_id)
@@ -197,10 +201,8 @@ impl State {
         Ok(Some(task))
     }
 
-    fn generate_id(&mut self) -> Option<ClientId> {
-        self.index_allocator.next_index()
-    }
-
+    /// Free id of the given client.
+    /// Notify [`ContainerHandle`] that this client has disconnected.
     pub async fn remove_client(&mut self, client_id: ClientId) -> Result<()> {
         self.clients.remove(&client_id);
         self.index_allocator.free_index(client_id);
@@ -236,7 +238,12 @@ struct ClientConnectionHandler {
     udp_outgoing_api: UdpOutgoingApi,
     dns_api: DnsApi,
     env: HashMap<String, String>,
+    /// Handle to the target container if there is one.
+    /// Used for pausing the container.
     container_handle: Option<ContainerHandle>,
+    /// Whether this agent is run in an ephemeral container.
+    /// TODO this is used only to prevent pausing from an ephemeral container and should be removed
+    /// once this feature is supported
     ephemeral: bool,
 }
 

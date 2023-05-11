@@ -178,6 +178,7 @@ impl MirrordExecution {
         })
     }
 
+    /// Retrieve remote environment from the connected agent.
     async fn get_remote_env(
         connection: &mut AgentConnection,
         env_vars_filter: HashSet<String>,

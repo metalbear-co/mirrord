@@ -15,9 +15,16 @@ use crate::{
 
 #[derive(Debug)]
 struct Inner {
+    /// The managed container.
     container: Container,
+    /// Cached process ID of the container.
     pid: u64,
+    /// Cached environment of the container.
     raw_env: HashMap<String, String>,
+    /// Set of active pause requests from the clients.
+    /// Clients can dynamically request to pause the container and the request remains active until
+    /// the client disconnects. When there is at least one active request, the container should
+    /// be paused.
     pause_requests: RwLock<HashSet<ClientId>>,
 }
 
@@ -40,10 +47,14 @@ impl Drop for Inner {
     }
 }
 
+/// Handle to the container targeted by the agent.
+/// Exposes some cached info about the container and allows pausing it according to clients'
+/// requests.
 #[derive(Debug, Clone)]
 pub(crate) struct ContainerHandle(Arc<Inner>);
 
 impl ContainerHandle {
+    /// Retrieve info about the container and initialize this struct.
     pub(crate) async fn new(container: Container) -> Result<Self> {
         let ContainerInfo { pid, env: raw_env } = container.get_info().await?;
 
@@ -57,14 +68,18 @@ impl ContainerHandle {
         Ok(Self(inner.into()))
     }
 
+    /// Return the process ID of the container.
     pub(crate) fn pid(&self) -> u64 {
         self.0.pid
     }
 
+    /// Return environment variables from the container.
     pub(crate) fn raw_env(&self) -> &HashMap<String, String> {
         &self.0.raw_env
     }
 
+    /// Add the pause request to the set of active requests.
+    /// If the set became non-empty, pause the container.
     pub(crate) async fn request_pause(&self, client_id: ClientId) -> Result<bool> {
         let mut guard = self.0.pause_requests.write().await;
         let do_pause = guard.is_empty();
@@ -78,6 +93,8 @@ impl ContainerHandle {
         Ok(do_pause)
     }
 
+    /// Remove pause request of the given client from the set of active requests.
+    /// If the set became empty, unpause the container.
     pub(crate) async fn client_disconnected(&self, client_id: ClientId) -> Result<bool> {
         let mut guard = self.0.pause_requests.write().await;
         let do_unpause = guard.contains(&client_id) && guard.len() == 1;

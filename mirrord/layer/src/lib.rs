@@ -456,6 +456,7 @@ fn layer_start(config: LayerConfig) {
     RUNTIME.block_on(start_layer_thread(tx, rx, receiver, config));
 }
 
+/// Request target container pause from the connected agent.
 async fn request_pause(tx: &Sender<ClientMessage>, rx: &mut Receiver<DaemonMessage>) {
     trace!("Requesting target container pause from the agent");
     tx.send(ClientMessage::PauseTarget)
