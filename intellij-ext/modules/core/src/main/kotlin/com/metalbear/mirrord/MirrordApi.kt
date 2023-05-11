@@ -154,24 +154,45 @@ object MirrordApi {
         throw Error("failed launch")
     }
 
-class MirrordLogProcessor {
-    private val kubeError = Regex("Error: \\s+× Create agent failed. KubeError\\(")
 
-    fun processError(error: String) {
-        when {
-            kubeError.containsMatchIn(error) -> {
-                processKubeErrors(error)
-            }
-            else -> {
-                MirrordNotifier.errorNotification("mirrord failed to launch", null)
+    class MirrordLogProcessor {
+        private companion object {
+            const val KUBE_ERROR_PATTERN = "Create agent failed. KubeError"
+        }
+
+        fun processError(error: String) {
+            when {
+                error.contains(KUBE_ERROR_PATTERN) -> {
+                    processKubeErrors(error)
+                }
+
+                else -> {
+                    MirrordNotifier.errorNotification(error, null)
+                }
             }
         }
-    }
 
-    private fun processKubeErrors(error: String) {
-        val errorMessage = Regex("""message: "([^"]+)"""").find(error)
-        MirrordNotifier.errorNotification("%s".format(errorMessage?.groupValues?.get(1)), null)
+        private fun processKubeErrors(error: String) {
+            val errorMessage = when {
+                error.contains("HyperError") -> "Failed to connect to kubernetes:" + trimError(
+                    error,
+                    "HyperError(",
+                    ")"
+                )
+
+                error.contains("Api") && error.contains("ErrorResponse") -> "Kube API returned the following error:" + trimError(
+                    error,
+                    "Api(",
+                    ")"
+                )
+
+                else -> "mirrord failed to launch"
+            }
+            MirrordNotifier.errorNotification(errorMessage, null)
+        }
+
+        private fun trimError(error: String, start: String, end: String): String =
+            error.substringAfter(start).substringBeforeLast(end).trim()
     }
-}
 
 }
