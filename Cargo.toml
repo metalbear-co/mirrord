@@ -51,6 +51,7 @@ num-traits = "0.2"
 regex = "1"
 miette = "5"
 fancy-regex = { version = "0.10" }
+lazy_static = "1"
 
 # TODO(alex): Change when https://github.com/hyperium/http-body/issues/88 is solved.
 hyper = { git = "https://github.com/meowjesty/hyper", branch = "issue/922/http2", features = ["full"] }

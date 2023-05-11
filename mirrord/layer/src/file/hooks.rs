@@ -31,12 +31,24 @@ use super::{ops::*, OpenOptionsInternalExt};
 use crate::error::HookError::ResponseError;
 use crate::{
     common::CheckedInto,
-    detour::{Detour, DetourGuard},
+    detour::{Bypass, Detour, DetourGuard},
     error::HookError,
     file::ops::{access, lseek, open, read, write},
     hooks::HookManager,
     replace,
 };
+
+///
+fn update_ptr_from_bypass(ptr: *const c_char, bypass: Bypass) -> *const c_char {
+    match bypass {
+        // For some reason, the program is trying to carry out an operation on a path that is
+        // inside mirrord's temp bin dir. The detour has returned us the original path of the file
+        // (stripped mirrord's dir path), so now we carry out the operation locally, on the stripped
+        // path.
+        Bypass::FileOperationInMirrordBinTempDir(stripped_ptr) => stripped_ptr,
+        _ => ptr,
+    }
+}
 
 /// Implementation of open_detour, used in open_detour and openat_detour
 /// We ignore mode in case we don't bypass the call.
@@ -64,8 +76,10 @@ pub(super) unsafe extern "C" fn open_detour(
     if guard.is_none() {
         FN_OPEN(raw_path, open_flags, mode)
     } else {
-        open_logic(raw_path, open_flags, mode)
-            .unwrap_or_bypass_with(|_| FN_OPEN(raw_path, open_flags, mode))
+        open_logic(raw_path, open_flags, mode).unwrap_or_bypass_with(|bypass| {
+            let path_ptr = update_ptr_from_bypass(raw_path, bypass);
+            FN_OPEN(path_ptr, open_flags, mode)
+        })
     }
 }
 
@@ -83,8 +97,10 @@ pub(super) unsafe extern "C" fn _open_nocancel_detour(
     if guard.is_none() {
         FN__OPEN_NOCANCEL(raw_path, open_flags, mode)
     } else {
-        open_logic(raw_path, open_flags, mode)
-            .unwrap_or_bypass_with(|_| FN__OPEN_NOCANCEL(raw_path, open_flags, mode))
+        open_logic(raw_path, open_flags, mode).unwrap_or_bypass_with(|bypass| {
+            let path_ptr = update_ptr_from_bypass(raw_path, bypass);
+            FN__OPEN_NOCANCEL(path_ptr, open_flags, mode)
+        })
     }
 }
 
@@ -173,8 +189,10 @@ pub(crate) unsafe extern "C" fn openat_detour(
 ) -> RawFd {
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
-    openat(fd, raw_path.checked_into(), open_options)
-        .unwrap_or_bypass_with(|_| FN_OPENAT(fd, raw_path, open_flags))
+    openat(fd, raw_path.checked_into(), open_options).unwrap_or_bypass_with(|bypass| {
+        let path_ptr = update_ptr_from_bypass(raw_path, bypass);
+        FN_OPENAT(fd, path_ptr, open_flags)
+    })
 }
 
 #[hook_guard_fn]
@@ -185,8 +203,10 @@ pub(crate) unsafe extern "C" fn _openat_nocancel_detour(
 ) -> RawFd {
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
-    openat(fd, raw_path.checked_into(), open_options)
-        .unwrap_or_bypass_with(|_| FN__OPENAT_NOCANCEL(fd, raw_path, open_flags))
+    openat(fd, raw_path.checked_into(), open_options).unwrap_or_bypass_with(|bypass| {
+        let path_ptr = update_ptr_from_bypass(raw_path, bypass);
+        FN__OPENAT_NOCANCEL(fd, path_ptr, open_flags)
+    })
 }
 
 /// Hook for getdents64, for Go's `os.ReadDir` on Linux.
@@ -452,7 +472,10 @@ pub(crate) unsafe extern "C" fn _write_nocancel_detour(
 
 /// Implementation of access_detour, used in access_detour and faccessat_detour
 unsafe fn access_logic(raw_path: *const c_char, mode: c_int) -> c_int {
-    access(raw_path.checked_into(), mode as u8).unwrap_or_bypass_with(|_| FN_ACCESS(raw_path, mode))
+    access(raw_path.checked_into(), mode as u8).unwrap_or_bypass_with(|bypass| {
+        let path_ptr = update_ptr_from_bypass(raw_path, bypass);
+        FN_ACCESS(path_ptr, mode)
+    })
 }
 
 /// Hook for `libc::access`.
@@ -540,7 +563,10 @@ unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) 
             fill_stat(out_stat, &res);
             0
         })
-        .unwrap_or_bypass_with(|_| FN_LSTAT(raw_path, out_stat))
+        .unwrap_or_bypass_with(|bypass| {
+            let path_ptr = update_ptr_from_bypass(raw_path, bypass);
+            FN_LSTAT(path_ptr, out_stat)
+        })
 }
 
 /// Hook for `libc::fstat`.
@@ -572,7 +598,10 @@ unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -
             fill_stat(out_stat, &res);
             0
         })
-        .unwrap_or_bypass_with(|_| FN_STAT(raw_path, out_stat))
+        .unwrap_or_bypass_with(|bypass| {
+            let path_ptr = update_ptr_from_bypass(raw_path, bypass);
+            FN_STAT(path_ptr, out_stat)
+        })
 }
 
 /// Hook for libc's stat syscall wrapper.
@@ -587,6 +616,7 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
     }
 
     if ver != 1 {
+        // TODO: strip temp dir also here? What is this case?
         return FN___XSTAT(ver, raw_path, out_stat);
     }
     xstat(Some(raw_path.checked_into()), None, true)
@@ -595,7 +625,10 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
             fill_stat(out_stat, &res);
             0
         })
-        .unwrap_or_bypass_with(|_| FN___XSTAT(ver, raw_path, out_stat))
+        .unwrap_or_bypass_with(|bypass| {
+            let path_ptr = update_ptr_from_bypass(raw_path, bypass);
+            FN___XSTAT(ver, path_ptr, out_stat)
+        })
 }
 
 /// Separated out logic for `fstatat` so that it can be used by go to match on the xstat result.
@@ -625,8 +658,10 @@ unsafe extern "C" fn fstatat_detour(
     out_stat: *mut stat,
     flag: c_int,
 ) -> c_int {
-    fstatat_logic(fd, raw_path, out_stat, flag)
-        .unwrap_or_bypass_with(|_| FN_FSTATAT(fd, raw_path, out_stat, flag))
+    fstatat_logic(fd, raw_path, out_stat, flag).unwrap_or_bypass_with(|bypass| {
+        let path_ptr = update_ptr_from_bypass(raw_path, bypass);
+        FN_FSTATAT(fd, path_ptr, out_stat, flag)
+    })
 }
 
 #[hook_guard_fn]
@@ -689,7 +724,10 @@ unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs) -> c_int {
 //             out.stx_rdev_minor = libc::minor(metadata.rdevice_id);
 //             0
 //         })
-//         .unwrap_or_bypass_with(|_| FN_STATX(fd, raw_path, flag, out_stat))
+//         .unwrap_or_bypass_with(|bypass| {
+//              let path_ptr = update_ptr_from_bypass(raw_path, bypass);
+//              FN_STATX(fd, path_ptr, flag, out_stat)
+//          })
 //         .map_err(From::from);
 
 //     result
