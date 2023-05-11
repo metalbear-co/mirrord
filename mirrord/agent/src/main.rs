@@ -237,6 +237,7 @@ struct ClientConnectionHandler {
     dns_api: DnsApi,
     env: HashMap<String, String>,
     container_handle: Option<ContainerHandle>,
+    ephemeral: bool,
 }
 
 impl ClientConnectionHandler {
@@ -309,6 +310,7 @@ impl ClientConnectionHandler {
             dns_api: bg_tasks.dns_api,
             env,
             container_handle,
+            ephemeral,
         };
 
         Ok(client_handler)
@@ -440,16 +442,23 @@ impl ClientConnectionHandler {
                 return Ok(false);
             }
             ClientMessage::PauseTarget => {
-                let handle = self
+                if self.ephemeral {
+                    Err(AgentError::PauseEphemeralAgent)?;
+                }
+
+                let paused = self
                     .container_handle
                     .as_ref()
-                    .ok_or(AgentError::PauseAbsentTarget)?;
-                // TODO handle ephemeral agent
-                let response = if handle.request_pause(self.id).await? {
+                    .ok_or(AgentError::PauseAbsentTarget)?
+                    .request_pause(self.id)
+                    .await?;
+
+                let response = if paused {
                     PauseTargetResponse::Paused
                 } else {
                     PauseTargetResponse::AlreadyPaused
                 };
+
                 self.respond(DaemonMessage::PauseTarget(response)).await?;
             }
         }
