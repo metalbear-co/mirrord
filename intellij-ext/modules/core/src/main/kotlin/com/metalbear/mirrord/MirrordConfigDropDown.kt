@@ -103,7 +103,7 @@ class MirrordConfigDropDown : ComboBoxAction() {
                 chosenFile = files.first()
             }
 
-            e.presentation.text = getReadablePath(chosenFile!!, e.project!!)
+            e.presentation.text = getReadablePath(chosenFile!!, project)
             e.presentation.isVisible = true
         }
     }
