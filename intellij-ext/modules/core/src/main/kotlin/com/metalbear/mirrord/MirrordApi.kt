@@ -148,8 +148,30 @@ object MirrordApi {
             }
         }
 
-        logger.error("mirrord stderr: %s".format(process.errorStream.reader().readText()))
-        MirrordNotifier.errorNotification("mirrord failed to launch", project)
+        val capturedError = process.errorStream.reader().readText()
+        logger.error("mirrord stderr: %s".format(capturedError))
+        MirrordLogProcessor().processError(capturedError)
         throw Error("failed launch")
     }
+
+class MirrordLogProcessor {
+    private val kubeError = Regex("Error: \\s+× Create agent failed. KubeError\\(")
+
+    fun processError(error: String) {
+        when {
+            kubeError.containsMatchIn(error) -> {
+                processKubeErrors(error)
+            }
+            else -> {
+                MirrordNotifier.errorNotification("mirrord failed to launch", null)
+            }
+        }
+    }
+
+    private fun processKubeErrors(error: String) {
+        val errorMessage = Regex("""message: "([^"]+)"""").find(error)
+        MirrordNotifier.errorNotification("%s".format(errorMessage?.groupValues?.get(1)), null)
+    }
+}
+
 }
