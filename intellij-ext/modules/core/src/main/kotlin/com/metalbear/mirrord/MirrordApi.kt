@@ -5,9 +5,11 @@ import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.wsl.WSLCommandLineOptions
 import com.intellij.execution.wsl.WSLDistribution
 import com.intellij.notification.NotificationType
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
+import com.intellij.openapi.progress.util.StatusBarProgress
 import com.intellij.openapi.project.Project
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
@@ -139,7 +141,7 @@ object MirrordApi {
                         if (success) {
                             val innerMessage = message.message ?: throw Error("Invalid inner message")
                             val executionInfo = gson.fromJson(innerMessage, MirrordExecution::class.java)
-                            MirrordNotifier.progress("mirrord started!", project)
+                            indicator.text = "mirrord is running"
                             environment.complete(executionInfo.environment)
                             return
                         } else {
@@ -153,7 +155,7 @@ object MirrordApi {
                         message.message?.let {
                             displayMessage += ": $it"
                         }
-                        MirrordNotifier.progress(displayMessage, project)
+                        indicator.text = displayMessage
                     }
                 }
                 return
@@ -161,7 +163,17 @@ object MirrordApi {
 
         }
 
-        ProgressManager.getInstance().run(streamProgressTask)
+        ApplicationManager.getApplication().invokeLater {
+            val statusBar = StatusBarProgress().apply {
+                text = "mirrord is starting..."
+            }
+            ProgressManager.getInstance().runProcessWithProgressAsynchronously(streamProgressTask, statusBar)
+        }
+
+        if (environment.isDone) {
+            return environment.get()
+        }
+
         logger.error("mirrord stderr: %s".format(process.errorStream.reader().readText()))
         MirrordNotifier.errorNotification("mirrord failed to launch", project)
         throw Error("failed launch")
