@@ -3,11 +3,14 @@
 
 #[cfg(target_os = "linux")]
 use std::assert_matches::assert_matches;
-use std::{env, env::temp_dir, fs, path::PathBuf, time::Duration};
+#[cfg(target_os = "macos")]
+use std::{env, fs};
+use std::{env::temp_dir, path::PathBuf, time::Duration};
 
 use futures::{stream::StreamExt, SinkExt};
 use libc::{pid_t, O_RDWR};
 use mirrord_protocol::{file::*, *};
+#[cfg(target_os = "macos")]
 use mirrord_sip::{sip_patch, MIRRORD_PATCH_DIR};
 use nix::{
     sys::signal::{self, Signal},
@@ -47,6 +50,7 @@ async fn self_open(dylib_path: &PathBuf) {
 /// reason (actually shouldn't happen, this is a second line of defence), that we hook that and the
 /// file is read from the path outside of that dir,
 /// e.g.: app tries to read /tmp/mirrord-bin/usr/local/foo, then make it read from /usr/local/foo.
+#[cfg(target_os = "macos")]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(20))]

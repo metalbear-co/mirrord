@@ -20,7 +20,7 @@ default = []
 webbrowser = ["dep:rand", "dep:reqwest", "dep:webbrowser"]
 
 [dependencies]
-lazy_static = {workspace = true}
+lazy_static.workspace = true
 rand = { version = "0.8", optional = true }
 reqwest = { workspace = true, features=["json", "rustls-tls"], default-features = false, optional = true }
 serde.workspace = true

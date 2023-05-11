@@ -55,7 +55,6 @@ hyper = { workspace = true, features = ["client", "http1", "http2"] }
 http-body-util  = { workspace = true }
 bimap.workspace = true
 dashmap = "5.4"
-lazy_static = {workspace = true}
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

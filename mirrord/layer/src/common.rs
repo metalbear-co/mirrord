@@ -1,10 +1,10 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
 use std::{collections::VecDeque, ffi::CStr, path::PathBuf};
 
-use lazy_static::lazy_static;
 use libc::c_char;
 use mirrord_protocol::{file::OpenOptionsInternal, RemoteResult};
-use mirrord_sip::MIRRORD_PATCH_DIR;
+#[cfg(target_os = "macos")]
+use mirrord_sip::MIRRORD_TEMP_BIN_DIR;
 use tokio::sync::oneshot;
 use tracing::warn;
 
@@ -17,18 +17,6 @@ use crate::{
     tcp::TcpIncoming,
     HOOK_SENDER,
 };
-
-lazy_static! {
-    /// The path of mirrord's internal temp binary dir, where we put SIP-patched binaries and scripts.
-    static ref MIRRORD_TEMP_BIN_DIR: String =
-        std::env::temp_dir()
-        .join(MIRRORD_PATCH_DIR)
-        // lossy: we assume our temp dir path does not contain non-unicode chars.
-        .to_string_lossy()
-        .to_string()
-        .trim_end_matches('/')
-        .to_string();
-}
 
 /// Type alias for a queue of responses from the agent, where these responses are [`RemoteResult`]s.
 ///
@@ -138,22 +126,23 @@ impl CheckedInto<PathBuf> for *const c_char {
     /// Do the checked conversion to str, bypass if the str starts with temp dir's path, construct
     /// a `PathBuf` out of the str.
     fn checked_into(self) -> Detour<PathBuf> {
-        CheckedInto::<&str>::checked_into(self)
-            .and_then(|path_str| {
-                path_str.strip_prefix(MIRRORD_TEMP_BIN_DIR.as_str()).map_or(
-                    Detour::Success(path_str), // strip is None, path not in temp dir.
-                    |stripped_path| {
-                        // actually stripped, so bypass and provide a pointer to after the temp dir.
-                        // `stripped_path` is a reference to a later character in the same string as
-                        // `path_str`, `stripped_path.as_ptr()` returns a pointer to a later index
-                        // in the same string owned by the caller (the hooked program).
-                        Detour::Bypass(Bypass::FileOperationInMirrordBinTempDir(
-                            stripped_path.as_ptr() as _,
-                        ))
-                    },
-                )
-            })
-            .map(From::from)
+        let str_det = CheckedInto::<&str>::checked_into(self);
+        #[cfg(target_os = "macos")]
+        let str_det = str_det.and_then(|path_str| {
+            path_str.strip_prefix(MIRRORD_TEMP_BIN_DIR.as_str()).map_or(
+                Detour::Success(path_str), // strip is None, path not in temp dir.
+                |stripped_path| {
+                    // actually stripped, so bypass and provide a pointer to after the temp dir.
+                    // `stripped_path` is a reference to a later character in the same string as
+                    // `path_str`, `stripped_path.as_ptr()` returns a pointer to a later index
+                    // in the same string owned by the caller (the hooked program).
+                    Detour::Bypass(Bypass::FileOperationInMirrordBinTempDir(
+                        stripped_path.as_ptr() as _,
+                    ))
+                },
+            )
+        });
+        str_det.map(From::from)
     }
 }
 
