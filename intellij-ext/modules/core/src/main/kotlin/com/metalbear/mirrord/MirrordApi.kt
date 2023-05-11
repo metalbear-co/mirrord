@@ -124,21 +124,9 @@ object MirrordApi {
             .redirectError(ProcessBuilder.Redirect.PIPE)
             .start()
 
-        ApplicationManager.getApplication().invokeLater {
-            ProgressManager.getInstance().run(
-                object : Task.Backgroundable(null, "Downloading") {
-                    override fun run(progress: ProgressIndicator) {
-                        while(true) {
-                            progress.text = "ok its working focus on l "
-                        }
-                    }
-                })
-        }
-
         val bufferedReader = process.inputStream.reader().buffered()
         val gson = Gson()
-
-        var environment = CompletableFuture<MutableMap<String, String>>()
+        var environment = CompletableFuture<MutableMap<String, String>?>()
         val streamProgressTask = object : Task.Backgroundable(project, "mirrord", true) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.text = "mirrord is starting..."
@@ -169,21 +157,18 @@ object MirrordApi {
                         indicator.text = displayMessage
                     }
                 }
+                environment.complete(null)
                 return
             }
 
         }
 
+        ProgressManager.getInstance().run(streamProgressTask)
 
-        val statusBar = StatusBarProgress().apply {
-            text = "mirrord is starting..."
-        }
-
-        ProgressManager.getInstance().runProcessWithProgressAsynchronously(streamProgressTask, statusBar)
-
-        environment.get().let {
+        environment.get()?.let {
             return it
         }
+
 
         logger.error("mirrord stderr: %s".format(process.errorStream.reader().readText()))
         MirrordNotifier.errorNotification("mirrord failed to launch", project)
