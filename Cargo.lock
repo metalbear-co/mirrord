@@ -1227,8 +1227,7 @@ checksum = "6c2141d6d6c8512188a7891b4b01590a45f6dac67afb4f255c4124dbb86d4eaa"
 [[package]]
 name = "frida-build"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2b1525c98a66f38f333d17e56c24562425263a9e07a53e5f59d0857bc360257"
+source = "git+https://github.com/frida/frida-rust#7fddc2c660d9df404d596a25f75ec619c1d7341f"
 dependencies = [
  "reqwest",
  "tar",
@@ -1238,8 +1237,7 @@ dependencies = [
 [[package]]
 name = "frida-gum"
 version = "0.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c5f8d8d97ce6855e46d3e0c30bc3a1bf27b431ebebd395086dbe8908fe5dc8b"
+source = "git+https://github.com/frida/frida-rust#7fddc2c660d9df404d596a25f75ec619c1d7341f"
 dependencies = [
  "capstone",
  "capstone-sys",
@@ -1254,8 +1252,7 @@ dependencies = [
 [[package]]
 name = "frida-gum-sys"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77a7dd1488aff43d2773c11a1120c5a88d643c75fc8f1ad0f0f3eba6ba634543"
+source = "git+https://github.com/frida/frida-rust#7fddc2c660d9df404d596a25f75ec619c1d7341f"
 dependencies = [
  "bindgen",
  "frida-build",

@@ -26,7 +26,7 @@ nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender = { git = "https://github.com/metalbear-co/tracing", package = "tracing-appender", branch = "worker_options_non_blocking_v1" }
-frida-gum = {version = "0.11.2", features = ["auto-download"]}
+frida-gum = { git = "https://github.com/frida/frida-rust", version = "0.11.2", features = ["auto-download"]}
 futures.workspace = true
 
 tokio = { workspace = true, features = ["fs"] }
