@@ -14,9 +14,9 @@ import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.util.indexing.*
 import com.intellij.util.io.EnumeratorStringDescriptor
 import com.intellij.util.io.KeyDescriptor
-import java.nio.file.FileSystems
 import java.nio.file.Path
 import java.util.*
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.JComponent
 import kotlin.collections.HashSet
 
@@ -64,15 +64,12 @@ class MirrordConfigDropDown : ComboBoxAction() {
             if (!::configFiles.isInitialized) {
                 val basePath = project.basePath ?: throw Error("couldn't resolve project path")
                 configFiles = FileBasedIndex.getInstance().getAllKeys(MirrordConfigIndex.key, project).filter {
-                    matches(it, basePath)
+                    it.startsWith(basePath)
                 }.toHashSet()
             }
 
-            if (updateConfigs) {
+            if (updateConfigs.getAndSet(false)) {
                 updateConfigFiles(project)
-                synchronized(this) {
-                    updateConfigs = false
-                }
             }
 
             val files = configFiles
@@ -97,6 +94,8 @@ class MirrordConfigDropDown : ComboBoxAction() {
         val updatedConfigFiles = HashSet<String>()
         val basePath = project.basePath ?: throw Error("couldn't resolve project path")
         val allKeys = FileBasedIndex.getInstance().getAllKeys(MirrordConfigIndex.key, project)
+        // to get the updated keys, we need to use this particular method. no other methods such getAllKeys, processAllKeys
+        // give updated values
         FileBasedIndex.getInstance().processFilesContainingAnyKey(
             MirrordConfigIndex.key,
             allKeys,
@@ -104,8 +103,7 @@ class MirrordConfigDropDown : ComboBoxAction() {
             null,
             null
         ) {
-            val filePath = it.path
-            if (matches(filePath, basePath)) {
+            if (it.path.startsWith(basePath)) {
                 updatedConfigFiles.add(it.path)
             }
             true
@@ -121,13 +119,8 @@ class MirrordConfigDropDown : ComboBoxAction() {
 
     companion object {
         var chosenFile: String? = null
-        var updateConfigs: Boolean = false
+        var updateConfigs: AtomicBoolean = AtomicBoolean(false)
 
-        fun matches(path: String, basePath: String?): Boolean {
-            // TODO: we need to also parse toml and yaml
-            return FileSystems.getDefault().getPathMatcher("glob:**/*mirrord.json")
-                .matches(Path.of(path)) && basePath?.let { path.startsWith(it) } ?: true
-        }
     }
 }
 
@@ -140,9 +133,7 @@ class MirrordConfigWatcher : AsyncFileListener {
                 events.forEach { event ->
                     when (event) {
                         is VFileCreateEvent, is VFileDeleteEvent, is VFileMoveEvent, is VFileCopyEvent -> {
-                            synchronized(this) {
-                                MirrordConfigDropDown.updateConfigs = true
-                            }
+                            MirrordConfigDropDown.updateConfigs.set(true)
                         }
                     }
                 }
@@ -179,7 +170,7 @@ class MirrordConfigIndex : ScalarIndexExtension<String>() {
 
     override fun getInputFilter(): FileBasedIndex.InputFilter {
         return FileBasedIndex.InputFilter {
-            it.isInLocalFileSystem && !it.isDirectory && MirrordConfigDropDown.matches(it.path, null)
+            it.isInLocalFileSystem && !it.isDirectory && it.path.endsWith("mirrord.json")
         }
     }
 
