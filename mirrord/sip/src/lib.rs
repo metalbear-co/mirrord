@@ -298,6 +298,11 @@ mod main {
             return Ok(SipStatus::SomeSIP(complete_path, None));
         }
 
+        // Temporary patch until https://github.com/metalbear-co/mirrord/pull/1400 is merged
+        if complete_path.ends_with("go") {
+            return Ok(SipStatus::SomeSIP(complete_path, None));
+        }
+
         let metadata = std::fs::metadata(&complete_path)?;
         if (metadata.st_flags() & SF_RESTRICTED) > 0 {
             return Ok(SipStatus::SomeSIP(complete_path, None));
