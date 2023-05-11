@@ -216,6 +216,7 @@ mod tests {
                     r#"
                     {
                         "accept_invalid_certificates": false,
+                        "pause": false,
                         "target": {
                             "path": "pod/test-service-abcdefg-abcd",
                             "namespace": "default"
@@ -228,7 +229,6 @@ mod tests {
                             "image_pull_secrets": [{"name": "testsecret"}],
                             "ttl": 60,
                             "ephemeral": false,
-                            "pause": false,
                             "flush_connections": false
                         },
                         "feature": {
@@ -251,6 +251,7 @@ mod tests {
                 ConfigType::Toml => {
                     r#"
                     accept_invalid_certificates = false
+                    pause = false
 
                     [target]
                     path = "pod/test-service-abcdefg-abcd"
@@ -264,7 +265,6 @@ mod tests {
                     image_pull_secrets = [{name = "testsecret"}]
                     ttl = 60
                     ephemeral = false
-                    pause = false
                     flush_connections = false
 
                     [feature]
@@ -285,6 +285,7 @@ mod tests {
                 ConfigType::Yaml => {
                     r#"
                     accept_invalid_certificates: false
+                    pause: false
                     target:
                         path: "pod/test-service-abcdefg-abcd"
                         namespace: "default"
@@ -298,7 +299,6 @@ mod tests {
                             - name: "testsecret"
                         ttl: 60
                         ephemeral: false
-                        pause: false
                         flush_connections: false
 
                     feature:
@@ -350,6 +350,7 @@ mod tests {
 
         let expect = LayerFileConfig {
             accept_invalid_certificates: Some(false),
+            pause: Some(false),
             kubeconfig: None,
             connect_agent_name: None,
             connect_agent_port: None,
@@ -375,7 +376,6 @@ mod tests {
                 communication_timeout: None,
                 startup_timeout: None,
                 network_interface: None,
-                pause: Some(false),
                 flush_connections: Some(false),
             }),
             feature: Some(FeatureFileConfig {
