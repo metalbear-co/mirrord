@@ -102,11 +102,11 @@ pub(crate) enum CliError {
         "This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"
     ))]
     InvalidMessage(String),
-    #[error("Timeout waiting for remote environment variables.")]
+    #[error("Initial communication with the agent failed. {0:#?}")]
     #[diagnostic(help(
         "Please make sure the agent is running and the logs are not showing any errors.{GENERAL_HELP}"
     ))]
-    GetEnvironmentTimeout,
+    InitialCommFailed(&'static str),
     #[error("Failed to execute binary `{0:#?}` with args `{1:#?}`")]
     #[diagnostic(help(
         r#"

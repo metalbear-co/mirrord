@@ -440,17 +440,16 @@ impl ClientConnectionHandler {
                 return Ok(false);
             }
             ClientMessage::PauseTarget => {
-                if let Some(handle) = self.container_handle.as_ref() {
-                    let response = if handle.request_pause(self.id).await? {
-                        PauseTargetResponse::Paused
-                    } else {
-                        PauseTargetResponse::AlreadyPaused
-                    };
-                    self.respond(DaemonMessage::PauseTarget(response)).await?;
+                let handle = self
+                    .container_handle
+                    .as_ref()
+                    .ok_or(AgentError::PauseAbsentTarget)?;
+                let response = if handle.request_pause(self.id).await? {
+                    PauseTargetResponse::Paused
                 } else {
-                    self.respond(DaemonMessage::PauseTarget(PauseTargetResponse::NoTarget))
-                        .await?;
-                }
+                    PauseTargetResponse::AlreadyPaused
+                };
+                self.respond(DaemonMessage::PauseTarget(response)).await?;
             }
         }
 

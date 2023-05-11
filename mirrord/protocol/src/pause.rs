@@ -4,5 +4,4 @@ use bincode::{Decode, Encode};
 pub enum PauseTargetResponse {
     Paused,
     AlreadyPaused,
-    NoTarget,
 }
