@@ -170,8 +170,8 @@ object MirrordApi {
             ProgressManager.getInstance().runProcessWithProgressAsynchronously(streamProgressTask, statusBar)
         }
 
-        if (environment.isDone) {
-            return environment.get()
+        environment.get().let {
+            return it
         }
 
         logger.error("mirrord stderr: %s".format(process.errorStream.reader().readText()))
