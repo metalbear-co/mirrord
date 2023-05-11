@@ -5,9 +5,7 @@ use std::{
 
 use mirrord_config::LayerConfig;
 use mirrord_progress::Progress;
-use mirrord_protocol::{
-    pause::PauseTargetResponse, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
-};
+use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
 use serde::Serialize;
@@ -95,19 +93,6 @@ impl MirrordExecution {
             if let Some(overrides) = &config.feature.env.overrides {
                 env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
             }
-        }
-
-        if config.pause {
-            tokio::time::timeout(
-                communication_timeout,
-                Self::setup_target_pause(&mut connection),
-            )
-            .await
-            .map_err(|_| {
-                CliError::InitialCommFailed(
-                    "Timeout waiting for the agent to pause the target container.",
-                )
-            })??;
         }
 
         let lib_path: String = lib_path.to_string_lossy().into();
@@ -216,31 +201,6 @@ impl MirrordExecution {
             }
             msg => Err(CliError::InvalidMessage(format!("{msg:#?}"))),
         }
-    }
-
-    async fn setup_target_pause(connection: &mut AgentConnection) -> Result<()> {
-        connection
-            .sender
-            .send(ClientMessage::PauseTarget)
-            .await
-            .map_err(|_| {
-                CliError::InitialCommFailed(
-                    "Failed to request the agent to pause the target container.",
-                )
-            })?;
-        let response = match connection.receiver.recv().await {
-            Some(DaemonMessage::PauseTarget(response)) => response,
-            msg => Err(CliError::InvalidMessage(format!("{msg:#?}")))?,
-        };
-
-        match response {
-            PauseTargetResponse::AlreadyPaused => {
-                trace!("Target container already paused by another user.")
-            }
-            PauseTargetResponse::Paused => trace!("Target container paused."),
-        }
-
-        Ok(())
     }
 
     /// Wait for the internal proxy to exit.
