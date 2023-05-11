@@ -740,6 +740,8 @@ pub enum Application {
     RustOutgoingTcp,
     RustIssue1123,
     RustIssue1054,
+    // For running applications with the executable and arguments determined at runtime.
+    DynamicApp(String, Vec<String>),
 }
 
 impl Application {
@@ -813,6 +815,7 @@ impl Application {
                 env!("CARGO_MANIFEST_DIR"),
                 "../../target/debug/outgoing",
             ),
+            Application::DynamicApp(exe, _args) => exe.clone(),
         }
     }
 
@@ -894,6 +897,7 @@ impl Application {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
+            Application::DynamicApp(_exe, args) => args.to_owned(),
         }
     }
 
@@ -936,6 +940,7 @@ impl Application {
             | Application::Go19Dir
             | Application::Go20Dir
             | Application::RustOutgoingUdp
+            | Application::DynamicApp(_, _)
             | Application::RustOutgoingTcp => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
         }
