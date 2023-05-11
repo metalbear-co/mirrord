@@ -5,7 +5,11 @@ import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.wsl.WSLCommandLineOptions
 import com.intellij.execution.wsl.WSLDistribution
 import com.intellij.notification.NotificationType
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 
@@ -121,33 +125,43 @@ object MirrordApi {
         val bufferedReader = process.inputStream.reader().buffered()
         val gson = Gson()
 
-        for (line in bufferedReader.lines()) {
-            val message = gson.fromJson(line, Message::class.java)
-            // See if it's the final message
-            if (message.name == "mirrord preparing to launch"
-                && message.type == MessageType.FinishedTask
-            ) {
-                val success = message.success ?: throw Error("Invalid message")
-                if (success) {
-                    val innerMessage = message.message ?: throw Error("Invalid inner message")
-                    val executionInfo = gson.fromJson(innerMessage, MirrordExecution::class.java)
-                    MirrordNotifier.progress("mirrord started!", project)
-                    return executionInfo.environment
-                } else {
-                    MirrordNotifier.errorNotification("mirrord failed to launch", project)
+        var environment = CompletableFuture<MutableMap<String, String>>()
+        val streamProgressTask = object : Task.Backgroundable(project, "mirrord", true) {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.text = "mirrord is starting..."
+                for (line in bufferedReader.lines()) {
+                    val message = gson.fromJson(line, Message::class.java)
+                    // See if it's the final message
+                    if (message.name == "mirrord preparing to launch"
+                        && message.type == MessageType.FinishedTask
+                    ) {
+                        val success = message.success ?: throw Error("Invalid message")
+                        if (success) {
+                            val innerMessage = message.message ?: throw Error("Invalid inner message")
+                            val executionInfo = gson.fromJson(innerMessage, MirrordExecution::class.java)
+                            MirrordNotifier.progress("mirrord started!", project)
+                            environment.complete(executionInfo.environment)
+                            return
+                        } else {
+                            MirrordNotifier.errorNotification("mirrord failed to launch", project)
+                        }
+                    }
+                    if (message.type == MessageType.Warning) {
+                        message.message?.let { MirrordNotifier.notify(it, NotificationType.WARNING, project) }
+                    } else {
+                        var displayMessage = message.name
+                        message.message?.let {
+                            displayMessage += ": $it"
+                        }
+                        MirrordNotifier.progress(displayMessage, project)
+                    }
                 }
+                return
             }
-            if (message.type == MessageType.Warning) {
-                message.message?.let { MirrordNotifier.notify(it, NotificationType.WARNING, project) }
-            } else {
-                var displayMessage = message.name
-                message.message?.let {
-                    displayMessage += ": $it"
-                }
-                MirrordNotifier.progress(displayMessage, project)
-            }
+
         }
 
+        ProgressManager.getInstance().run(streamProgressTask)
         logger.error("mirrord stderr: %s".format(process.errorStream.reader().readText()))
         MirrordNotifier.errorNotification("mirrord failed to launch", project)
         throw Error("failed launch")
