@@ -336,7 +336,7 @@ impl LayerConnection {
     /// There is no such actual connection, because there is no target, but the layer should start
     /// a mirror connection with the application.
     /// Return the id of the new connection.
-    async fn send_new_connection(&mut self, port: u16) -> u64 {
+    pub async fn send_new_connection(&mut self, port: u16) -> u64 {
         let new_connection_id = self.num_connections;
         self.codec
             .send(DaemonMessage::Tcp(DaemonTcp::NewConnection(
@@ -368,7 +368,7 @@ impl LayerConnection {
     /// There is no such actual connection, because there is no target, but the layer should start
     /// a mirror connection with the application.
     /// Return the id of the new connection.
-    async fn send_close(&mut self, connection_id: u64) {
+    pub async fn send_close(&mut self, connection_id: u64) {
         self.codec
             .send(DaemonMessage::Tcp(DaemonTcp::Close(TcpClose {
                 connection_id,
