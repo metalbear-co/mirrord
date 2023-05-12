@@ -50,44 +50,24 @@ class MirrordConfigDropDown : ComboBoxAction() {
         }
     }
 
-    private fun initializeConfigs(project: Project) {
-        val basePath = project.basePath ?: throw Error("couldn't resolve project path")
-        configFiles = FileBasedIndex.getInstance().getAllKeys(MirrordConfigIndex.key, project).filter {
-            it.startsWith(basePath)
-        }.toHashSet()
-    }
-
     // mostly what is viewed by the user is done here, goal is to have minimal logic in the function
     // because it is called every half a second
     override fun update(e: AnActionEvent) {
         e.project?.let { project ->
             // this check ensures that we don't query the index when it is being built
             // querying the index during the startup can give us 0
-            if (DumbService.isDumb(project)) {
-                e.presentation.isVisible = false
-                return
-            }
-
             if (!::configFiles.isInitialized) {
                 // there is a possibility of a race condition in case index is accessed while being built
                 // so all index queries need to be done in smart mode
-                if (DumbService.isDumb(project)) {
-                    DumbService.getInstance(project).runReadActionInSmartMode {
-                        initializeConfigs(project)
-                    }
-                } else {
+                runInSmartModeOrDirectly({
                     initializeConfigs(project)
-                }
+                }, project)
             }
 
             if (updateConfigs.getAndSet(false)) {
-                if (DumbService.isDumb(project)) {
-                    DumbService.getInstance(project).runReadActionInSmartMode {
-                        updateConfigFiles(project)
-                    }
-                } else {
+                runInSmartModeOrDirectly({
                     updateConfigFiles(project)
-                }
+                }, project)
             }
 
             val files = configFiles
@@ -105,6 +85,21 @@ class MirrordConfigDropDown : ComboBoxAction() {
 
             e.presentation.text = getReadablePath(chosenFile!!, project)
             e.presentation.isVisible = true
+        }
+    }
+
+    private fun initializeConfigs(project: Project) {
+        val basePath = project.basePath ?: throw Error("couldn't resolve project path")
+        configFiles = FileBasedIndex.getInstance().getAllKeys(MirrordConfigIndex.key, project).filter {
+            it.startsWith(basePath)
+        }.toHashSet()
+    }
+
+    private fun runInSmartModeOrDirectly(action: () -> Unit, project: Project) {
+        if (DumbService.isDumb(project)) {
+            DumbService.getInstance(project).runReadActionInSmartMode(action)
+        } else {
+            action()
         }
     }
 
