@@ -1,6 +1,8 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
 use std::{collections::VecDeque, ffi::CStr, path::PathBuf};
 
+#[cfg(target_os = "macos")]
+use lazy_static::lazy_static;
 use libc::c_char;
 use mirrord_protocol::{file::OpenOptionsInternal, RemoteResult};
 #[cfg(target_os = "macos")]
@@ -17,6 +19,12 @@ use crate::{
     tcp::TcpIncoming,
     HOOK_SENDER,
 };
+
+#[cfg(target_os = "macos")]
+lazy_static! {
+    /// Path of current executable, None if fetching failed.
+    pub static ref CURRENT_EXE: Option<String> = std::env::current_exe().ok().map(|path_buf| path_buf.to_string_lossy().to_string());
+}
 
 /// Type alias for a queue of responses from the agent, where these responses are [`RemoteResult`]s.
 ///
@@ -122,6 +130,17 @@ impl CheckedInto<String> for *const c_char {
     }
 }
 
+/// For a given str, return whether it's the path of the current running executable.
+///
+/// Also returns false if determining the current executable failed, or if its path is non-unicode.
+#[cfg(target_os = "macos")]
+fn is_current_exe(path: &str) -> bool {
+    CURRENT_EXE
+        .as_deref()
+        .map(|exe_string| exe_string == path)
+        .unwrap_or_default()
+}
+
 impl CheckedInto<PathBuf> for *const c_char {
     /// Do the checked conversion to str, bypass if the str starts with temp dir's path, construct
     /// a `PathBuf` out of the str.
@@ -129,18 +148,18 @@ impl CheckedInto<PathBuf> for *const c_char {
         let str_det = CheckedInto::<&str>::checked_into(self);
         #[cfg(target_os = "macos")]
         let str_det = str_det.and_then(|path_str| {
-            path_str.strip_prefix(MIRRORD_TEMP_BIN_DIR.as_str()).map_or(
-                Detour::Success(path_str), // strip is None, path not in temp dir.
-                |stripped_path| {
-                    // actually stripped, so bypass and provide a pointer to after the temp dir.
-                    // `stripped_path` is a reference to a later character in the same string as
-                    // `path_str`, `stripped_path.as_ptr()` returns a pointer to a later index
-                    // in the same string owned by the caller (the hooked program).
-                    Detour::Bypass(Bypass::FileOperationInMirrordBinTempDir(
-                        stripped_path.as_ptr() as _,
-                    ))
-                },
-            )
+            if let Some(stripped_path) = path_str.strip_prefix(MIRRORD_TEMP_BIN_DIR.as_str())
+                && !is_current_exe(path_str) {
+                // actually stripped, so bypass and provide a pointer to after the temp dir.
+                // `stripped_path` is a reference to a later character in the same string as
+                // `path_str`, `stripped_path.as_ptr()` returns a pointer to a later index
+                // in the same string owned by the caller (the hooked program).
+                Detour::Bypass(Bypass::FileOperationInMirrordBinTempDir(
+                    stripped_path.as_ptr() as _,
+                ))
+            } else {
+                Detour::Success(path_str) // strip is None, path not in temp dir.
+            }
         });
         str_det.map(From::from)
     }

@@ -2358,6 +2358,7 @@ dependencies = [
  "hyper 1.0.0-rc.3",
  "itertools",
  "k8s-openapi",
+ "lazy_static",
  "libc",
  "mirrord-config",
  "mirrord-console",
