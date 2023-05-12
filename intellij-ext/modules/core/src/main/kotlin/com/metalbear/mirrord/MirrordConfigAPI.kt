@@ -40,15 +40,19 @@ object MirrordConfigAPI {
     """
 
     fun getConfigPath(project: Project): Path {
-        val basePath = project.basePath ?: throw Error("couldn't resolve project path");
-        return Path.of(basePath, ".mirrord", "mirrord.json")
+        MirrordConfigDropDown.chosenFile?.let {
+            return Path.of(it)
+        } ?: run {
+            val basePath = project.basePath ?: throw Error("couldn't resolve project path")
+            return Path.of(basePath, ".mirrord", "mirrord.json")
+        }
     }
 
     /**
      * Opens the config file in the editor, creating it if didn't exist before
      */
     fun openConfig(project: Project) {
-        val configPath = getConfigPath(project);
+        val configPath = getConfigPath(project)
         if (!configPath.exists()) {
             configPath.write(defaultConfig, createParentDirs = true)
         }
@@ -65,7 +69,7 @@ object MirrordConfigAPI {
             return null
         }
         val data = configPath.readText()
-        val gson = Gson();
+        val gson = Gson()
         return gson.fromJson(data, ConfigData::class.java)
     }
 
