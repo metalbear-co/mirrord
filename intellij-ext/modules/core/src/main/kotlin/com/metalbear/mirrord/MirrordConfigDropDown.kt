@@ -32,6 +32,7 @@ import kotlin.collections.HashSet
 class MirrordConfigDropDown : ComboBoxAction() {
 
     private lateinit var configFiles: HashSet<String>
+    private var blockQueries = AtomicBoolean(false)
 
     override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
@@ -56,7 +57,7 @@ class MirrordConfigDropDown : ComboBoxAction() {
         e.project?.let { project ->
             // this check ensures that we don't query the index when it is being built
             // querying the index during the startup can give us 0
-            if (!::configFiles.isInitialized) {
+            if (!::configFiles.isInitialized && !blockQueries.getAndSet(true)) {
                 // there is a possibility of a race condition in case index is accessed while being built
                 // so all index queries need to be done in smart mode
                 runInSmartModeOrDirectly({
