@@ -145,7 +145,9 @@ object MirrordApi {
                             environment.complete(executionInfo.environment)
                             return
                         } else {
+                            environment.complete(null)
                             MirrordNotifier.errorNotification("mirrord failed to launch", project)
+                            return
                         }
                     }
                     if (message.type == MessageType.Warning) {
