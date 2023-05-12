@@ -163,7 +163,7 @@ object MirrordApi {
             }
 
             override fun onSuccess() {
-                MirrordNotifier.notify("mirrord was loaded", NotificationType.INFORMATION, project)
+                MirrordNotifier.notify("mirrord started!", NotificationType.INFORMATION, project)
                 super.onSuccess()
             }
 
