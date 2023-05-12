@@ -125,7 +125,7 @@ use crate::{
 /// }
 /// ```
 ///
-/// ## Root configuration options
+/// ## Options {#root-options}
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "LayerFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]

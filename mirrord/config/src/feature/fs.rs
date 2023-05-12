@@ -20,7 +20,7 @@ use crate::{
 pub mod advanced;
 pub mod mode;
 
-/// ## fs {#fs}
+/// ## feature.fs {#fs}
 ///
 /// Changes file operations behavior based on user configuration.
 // rustdoc-stripper-ignore-next

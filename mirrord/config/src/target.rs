@@ -12,12 +12,12 @@ use crate::{
     util::string_or_struct_option,
 };
 
-/// # target
+/// ## target {#target}
 ///
 /// Specifies the target and namespace to mirror, see [`path`](##path) for a list of accepted values
 /// for the `target` option.
 ///
-/// ## Minimal `target` config
+/// ### Minimal `target` config {#target-minimal}
 ///
 /// ```json
 /// {
@@ -25,7 +25,7 @@ use crate::{
 /// }
 /// ```
 ///
-/// ## Advanced `target` config
+/// ### Advanced `target` config {#target-advanced}
 ///
 /// ```json
 /// {
@@ -38,7 +38,7 @@ use crate::{
 /// }
 /// ```
 ///
-/// ## path
+/// ### target.path {#target-path}
 ///
 /// Specifies the running pod (or deployment) to mirror.
 ///
@@ -49,9 +49,11 @@ use crate::{
 /// - `container/{sample-container}`;
 /// - `containername/{sample-container}`.
 ///
-/// ## namespace
+/// ### target.namespace {#target-namespace}
 ///
 /// The namespace of the remote pod.
+///
+/// Defaults to `"default"`.
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase")]
 pub enum TargetFileConfig {
@@ -67,16 +69,18 @@ pub enum TargetFileConfig {
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TargetConfig {
-    /// ## path
+    // rustdoc-stripper-ignore-next
+    /// ### target.path
     ///
-    /// Path of the target to impersonate, see [`path`](#path) for details.
+    /// Path of the target to impersonate.
     pub path: Option<Target>,
 
-    /// ## namespace
+    /// ### target.namespace
     ///
     /// Namespace where the target lives.
     ///
     /// Defaults to `"default"`.
+    // rustdoc-stripper-ignore-next-stop
     pub namespace: Option<String>,
 }
 
