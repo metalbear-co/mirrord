@@ -1,3 +1,5 @@
+@file:Suppress("DialogTitleCapitalization")
+
 package com.metalbear.mirrord
 
 import com.google.gson.Gson
@@ -5,11 +7,9 @@ import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.wsl.WSLCommandLineOptions
 import com.intellij.execution.wsl.WSLDistribution
 import com.intellij.notification.NotificationType
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
-import com.intellij.openapi.progress.util.StatusBarProgress
 import com.intellij.openapi.project.Project
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
@@ -126,7 +126,8 @@ object MirrordApi {
 
         val bufferedReader = process.inputStream.reader().buffered()
         val gson = Gson()
-        var environment = CompletableFuture<MutableMap<String, String>?>()
+        val environment = CompletableFuture<MutableMap<String, String>?>()
+
         val streamProgressTask = object : Task.Backgroundable(project, "mirrord", true) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.text = "mirrord is starting..."
@@ -161,6 +162,16 @@ object MirrordApi {
                 return
             }
 
+            override fun onSuccess() {
+                MirrordNotifier.notify("mirrord was loaded", NotificationType.INFORMATION, project)
+                super.onSuccess()
+            }
+
+            override fun onCancel() {
+                process.destroy()
+                MirrordNotifier.notify("mirrord was cancelled", NotificationType.WARNING, project)
+                super.onCancel()
+            }
         }
 
         ProgressManager.getInstance().run(streamProgressTask)
@@ -168,7 +179,6 @@ object MirrordApi {
         environment.get()?.let {
             return it
         }
-
 
         logger.error("mirrord stderr: %s".format(process.errorStream.reader().readText()))
         MirrordNotifier.errorNotification("mirrord failed to launch", project)
