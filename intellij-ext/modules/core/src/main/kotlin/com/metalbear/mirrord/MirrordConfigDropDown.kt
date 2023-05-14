@@ -17,6 +17,7 @@ import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.util.indexing.*
 import com.intellij.util.io.EnumeratorStringDescriptor
 import com.intellij.util.io.KeyDescriptor
+import com.intellij.util.io.exists
 import java.nio.file.Path
 import java.util.*
 import java.util.concurrent.atomic.AtomicBoolean
@@ -36,7 +37,7 @@ class MirrordConfigDropDown : ComboBoxAction() {
     private lateinit var configFiles: HashSet<String>
     private var blockQueries = AtomicBoolean(false)
 
-    override fun getActionUpdateThread() = ActionUpdateThread.EDT
+    override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
     // this function is called on click of the dropdown, here we map configFiles -> AnAction
     override fun createPopupActionGroup(button: JComponent, dataContext: DataContext): DefaultActionGroup {
@@ -53,34 +54,21 @@ class MirrordConfigDropDown : ComboBoxAction() {
         }
     }
 
+    private fun getReadablePath(path: String, project: Project): String {
+        val basePath = project.basePath ?: throw Error("couldn't resolve project path")
+        val relativePath = Path.of(basePath).relativize(Path.of(path))
+        return relativePath.toString()
+    }
+
     // mostly what is viewed by the user is done here, goal is to have minimal logic in the function
     // because it is called every half a second
     override fun update(e: AnActionEvent) {
         e.project?.let { project ->
             // this check ensures that we don't query the index when it is being built
-            // querying the index during the startup can give us 0
-            if (!::configFiles.isInitialized) {
-                if (!blockQueries.getAndSet(true)) {
-                    object : Task.Backgroundable(project, "mirrord") {
-                        override fun run(indicator: ProgressIndicator) {
-                            indicator.text = "searching for mirrord config files"
-                            initializeConfigFiles(project)
-                            blockQueries.set(false)
-                        }
-                    }.queue()
-                }
-                return
-            }
-
-            if (updateConfigs.getAndSet(false)) {
-                if (!blockQueries.getAndSet(true)) {
-                    object : Task.Backgroundable(project, "mirrord") {
-                        override fun run(indicator: ProgressIndicator) {
-                            indicator.text = "updating mirrord config files"
-                            updateConfigFiles(project)
-                            blockQueries.set(false)
-                        }
-                    }.queue()
+            // querying the index during the startup/Dumb Mode can give us 0 or stale data
+            if (!::configFiles.isInitialized || updateConfigs.getAndSet(false)) {
+                queryIndexInSmartMode(project) {
+                    updateConfigFiles(project)
                 }
                 return
             }
@@ -103,79 +91,61 @@ class MirrordConfigDropDown : ComboBoxAction() {
         }
     }
 
-    private fun initializeConfigFiles(project: Project) {
-        val basePath = project.basePath ?: throw Error("couldn't resolve project path")
-        val dumbService = DumbService.getInstance(project)
-        while (true) {
-            dumbService.waitForSmartMode()
-            val success = ReadAction.compute<Boolean, RuntimeException> {
-                if (project.isDisposed) {
-                    throw ProcessCanceledException()
-                }
-                if (dumbService.isDumb) {
-                    return@compute false
-                }
-                try {
-                    configFiles = FileBasedIndex.getInstance().getAllKeys(MirrordConfigIndex.key, project).filter {
-                        it.startsWith(basePath)
-                    }.toHashSet()
-                } catch (e: IndexNotReadyException) {
-                    return@compute false
-                }
-                true
-            }
-            if (success) {
-                break
-            }
-        }
-    }
-
     private fun updateConfigFiles(project: Project) {
         val updatedConfigFiles = HashSet<String>()
         val basePath = project.basePath ?: throw Error("couldn't resolve project path")
-        val dumbService = DumbService.getInstance(project)
-        while (true) {
-            dumbService.waitForSmartMode()
-            val success = ReadAction.compute<Boolean, RuntimeException> {
-                if (project.isDisposed) {
-                    throw ProcessCanceledException()
-                }
-                if (dumbService.isDumb) {
-                    return@compute false
-                }
-                try {
-                    val allKeys = FileBasedIndex.getInstance().getAllKeys(MirrordConfigIndex.key, project)
-                    // to get the updated keys, we need to use this particular method. no other methods such getAllKeys, processAllKeys
-                    // give updated values
-                    FileBasedIndex.getInstance().processFilesContainingAnyKey(
-                        MirrordConfigIndex.key,
-                        allKeys,
-                        GlobalSearchScope.projectScope(project),
-                        null,
-                        null
-                    ) {
-                        if (it.path.startsWith(basePath)) {
-                            updatedConfigFiles.add(it.path)
+        val allKeys = FileBasedIndex.getInstance().getAllKeys(MirrordConfigIndex.key, project)
+        // to get the updated keys, we need to use this particular method. no other methods such getAllKeys, processAllKeys
+        // give updated values
+        FileBasedIndex.getInstance().processFilesContainingAnyKey(
+            MirrordConfigIndex.key,
+            allKeys,
+            GlobalSearchScope.projectScope(project),
+            null,
+            null
+        ) {
+            if (it.path.startsWith(basePath)) {
+                updatedConfigFiles.add(it.path)
+            }
+            true
+        }
+        configFiles = updatedConfigFiles
+    }
+
+    // this function spawns a background task to query the index, not blocking the current thread
+    // it maintains a single task to do so, using the `blockQueries` flag
+    private fun queryIndexInSmartMode(project: Project, query: (project: Project) -> Unit) {
+        if (!blockQueries.getAndSet(true)) {
+            object : Task.Backgroundable(project, "mirrord") {
+                override fun run(indicator: ProgressIndicator) {
+                    val dumbService = DumbService.getInstance(project)
+                    while (true) {
+                        dumbService.waitForSmartMode()
+                        val success = ReadAction.compute<Boolean, RuntimeException> {
+                            if (project.isDisposed) {
+                                throw ProcessCanceledException()
+                            }
+                            if (dumbService.isDumb) {
+                                return@compute false
+                            }
+                            try {
+                                indicator.text = "mirrord: updating config files"
+                                query(project)
+                                blockQueries.set(false)
+                            } catch (e: IndexNotReadyException) {
+                                return@compute false
+                            }
+                            true
                         }
-                        true
+                        if (success) {
+                            break
+                        }
                     }
-                    configFiles = updatedConfigFiles
-                } catch (e: IndexNotReadyException) {
-                    return@compute false
                 }
-                true
-            }
-            if (success) {
-                break
-            }
+            }.queue()
         }
     }
 
-    private fun getReadablePath(path: String, project: Project): String {
-        val basePath = project.basePath ?: throw Error("couldn't resolve project path")
-        val relativePath = Path.of(basePath).relativize(Path.of(path))
-        return relativePath.toString()
-    }
 
     companion object {
         var chosenFile: String? = null
@@ -229,7 +199,7 @@ class MirrordConfigIndex : ScalarIndexExtension<String>() {
 
     override fun getInputFilter(): FileBasedIndex.InputFilter {
         return FileBasedIndex.InputFilter {
-            it.isInLocalFileSystem && !it.isDirectory && it.path.endsWith("mirrord.json")
+            it.isInLocalFileSystem && !it.isDirectory && it.path.endsWith("mirrord.json") && Path.of(it.path).exists()
         }
     }
 
