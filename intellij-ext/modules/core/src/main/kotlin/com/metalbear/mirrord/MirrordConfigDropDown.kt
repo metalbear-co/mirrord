@@ -17,7 +17,6 @@ import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.util.indexing.*
 import com.intellij.util.io.EnumeratorStringDescriptor
 import com.intellij.util.io.KeyDescriptor
-import com.intellij.util.io.exists
 import java.nio.file.Path
 import java.util.*
 import java.util.concurrent.atomic.AtomicBoolean
@@ -119,6 +118,8 @@ class MirrordConfigDropDown : ComboBoxAction() {
             object : Task.Backgroundable(project, "mirrord") {
                 override fun run(indicator: ProgressIndicator) {
                     val dumbService = DumbService.getInstance(project)
+                    // refer to `DumbService`, there is no "guarantee" still, but we stay in a loop
+                    // todo: should probably look into using the message bus to listen for indexing to finish
                     while (true) {
                         dumbService.waitForSmartMode()
                         val success = ReadAction.compute<Boolean, RuntimeException> {
@@ -199,7 +200,7 @@ class MirrordConfigIndex : ScalarIndexExtension<String>() {
 
     override fun getInputFilter(): FileBasedIndex.InputFilter {
         return FileBasedIndex.InputFilter {
-            it.isInLocalFileSystem && !it.isDirectory && it.path.endsWith("mirrord.json") && Path.of(it.path).exists()
+            it.isInLocalFileSystem && !it.isDirectory && it.path.endsWith("mirrord.json")
         }
     }
 
