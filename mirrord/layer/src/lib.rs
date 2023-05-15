@@ -432,7 +432,7 @@ fn layer_start(config: LayerConfig) {
 
     TARGETLESS
         .set(config.target.is_none())
-        .expect("Setting INCOMING_IGNORE_LOCALHOST singleton");
+        .expect("Setting TARGETLESS singleton");
 
     INCOMING_IGNORE_PORTS
         .set(config.feature.network.incoming.ignore_ports.clone())
