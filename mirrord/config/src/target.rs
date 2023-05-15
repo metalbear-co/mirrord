@@ -146,7 +146,7 @@ impl FromStr for Target {
             }
             Some("pod") => PodTarget::from_split(&mut split).map(Target::Pod),
             _ => Err(ConfigError::InvalidTarget(format!(
-                "Provided target: {target:?} is neither a pod or a deployment. Did you mean pod/{target:?} or deployment/{target:?}\n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
+                "Provided target: {target} is neither a pod or a deployment. Did you mean pod/{target} or deployment/{target}\n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
             ))),
         }
     }
