@@ -273,6 +273,12 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install rust.
         with:
           target: x86_64-unknown-linux-gnu
+      - run: |
+          cd mirrord/layer/tests/apps/issue1123
+          rustc issue1123.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue1054
+          rustc issue1054.rs --out-dir target
       - uses: actions/setup-node@v3 # For http mirroring test.
         with:
           node-version: 14
@@ -385,6 +391,12 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install Rust.
         with:
           target: x86_64-apple-darwin
+      - run: |
+          cd mirrord/layer/tests/apps/issue1123
+          rustc issue1123.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue1054
+          rustc issue1054.rs --out-dir target
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
           go-version: "1.18"
