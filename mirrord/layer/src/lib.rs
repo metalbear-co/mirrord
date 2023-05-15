@@ -98,7 +98,6 @@ use mirrord_config::{
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
-    pause::PauseTargetResponse,
     tcp::{HttpResponse, LayerTcpSteal},
     ClientMessage, DaemonMessage,
 };
@@ -390,13 +389,7 @@ fn layer_start(config: LayerConfig) {
         .parse()
         .expect("couldn't parse proxy address");
 
-    let (tx, rx) = RUNTIME.block_on(async {
-        let (tx, mut rx) = connection::connect_to_proxy(address).await;
-        if config.pause {
-            request_pause(&tx, &mut rx).await;
-        }
-        (tx, rx)
-    });
+    let (tx, rx) = RUNTIME.block_on(connection::connect_to_proxy(address));
 
     let (sender, receiver) = channel::<HookMessage>(1000);
     HOOK_SENDER
@@ -454,27 +447,6 @@ fn layer_start(config: LayerConfig) {
     );
 
     RUNTIME.block_on(start_layer_thread(tx, rx, receiver, config));
-}
-
-/// Request target container pause from the connected agent.
-#[tracing::instrument(level = "trace", skip(tx, rx))]
-async fn request_pause(tx: &Sender<ClientMessage>, rx: &mut Receiver<DaemonMessage>) {
-    trace!("Requesting target container pause from the agent");
-    tx.send(ClientMessage::PauseTarget)
-        .await
-        .expect("Failed to request target container pause.");
-
-    let res = match rx.recv().await {
-        Some(DaemonMessage::PauseTarget(res)) => res,
-        other => panic!("Failed to pause the target container. Invalid agent response: {other:#?}"),
-    };
-
-    match res {
-        PauseTargetResponse::Paused => trace!("Target container paused."),
-        PauseTargetResponse::AlreadyPaused => {
-            trace!("Target container already paused by another user.")
-        }
-    }
 }
 
 /// We need to hook execve syscall to allow mirrord-layer to be loaded with sip patch when loading

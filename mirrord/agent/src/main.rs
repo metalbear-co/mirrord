@@ -25,7 +25,7 @@ use futures::{
     SinkExt, TryFutureExt,
 };
 use mirrord_protocol::{
-    pause::PauseTargetResponse, ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
+    pause::DaemonPauseTarget, ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
     LogMessage,
 };
 use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
@@ -202,16 +202,9 @@ impl State {
     }
 
     /// Free id of the given client.
-    /// Notify [`ContainerHandle`] that this client has disconnected.
     pub async fn remove_client(&mut self, client_id: ClientId) -> Result<()> {
         self.clients.remove(&client_id);
         self.index_allocator.free_index(client_id);
-
-        if let Some(handle) = self.container.as_ref() {
-            if handle.client_disconnected(client_id).await? {
-                trace!("Last client requesting pause disconnected - resuming container.");
-            }
-        }
 
         Ok(())
     }
@@ -448,25 +441,25 @@ impl ClientConnectionHandler {
             ClientMessage::Close => {
                 return Ok(false);
             }
-            ClientMessage::PauseTarget => {
+            ClientMessage::PauseTargetRequest(pause) => {
                 if self.ephemeral {
                     Err(AgentError::PauseEphemeralAgent)?;
                 }
 
-                let paused = self
+                let changed = self
                     .container_handle
                     .as_ref()
                     .ok_or(AgentError::PauseAbsentTarget)?
-                    .request_pause(self.id)
+                    .set_paused(pause)
                     .await?;
 
-                let response = if paused {
-                    PauseTargetResponse::Paused
-                } else {
-                    PauseTargetResponse::AlreadyPaused
-                };
-
-                self.respond(DaemonMessage::PauseTarget(response)).await?;
+                self.respond(DaemonMessage::PauseTarget(
+                    DaemonPauseTarget::PauseResponse {
+                        changed,
+                        container_paused: pause,
+                    },
+                ))
+                .await?;
             }
         }
 

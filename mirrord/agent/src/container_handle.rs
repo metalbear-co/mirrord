@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use futures::executor;
 use tokio::sync::RwLock;
@@ -10,7 +7,6 @@ use tracing::{error, info};
 use crate::{
     error::Result,
     runtime::{Container, ContainerInfo, ContainerRuntime},
-    util::ClientId,
 };
 
 #[derive(Debug)]
@@ -21,28 +17,24 @@ struct Inner {
     pid: u64,
     /// Cached environment of the container.
     raw_env: HashMap<String, String>,
-    /// Set of active pause requests from the clients.
-    /// Clients can dynamically request to pause the container and the request remains active until
-    /// the client disconnects. When there is at least one active request, the container should
-    /// be paused.
-    pause_requests: RwLock<HashSet<ClientId>>,
+    /// Whether the container is paused.
+    paused: RwLock<bool>,
 }
 
-/// This is to make sure we don't leave the target container paused if the agent hits an error and
-/// exits early without removing all of its clients.
+/// This is to make sure we don't leave the target container paused when the agent exits.
 impl Drop for Inner {
     fn drop(&mut self) {
         let result = executor::block_on(async {
-            if self.pause_requests.read().await.is_empty() {
+            if *self.paused.read().await {
                 Ok(())
             } else {
-                info!("Agent exiting without having removed all of the clients. Unpausing target container.");
+                info!("Agent exiting with target container paused. Unpausing target container.");
                 self.container.unpause().await
             }
         });
 
         if let Err(err) = result {
-            error!("Could not unpause target container while exiting early, got error: {err:?}");
+            error!("Could not unpause target container while exiting, got error: {err:?}");
         }
     }
 }
@@ -63,7 +55,7 @@ impl ContainerHandle {
             container,
             pid,
             raw_env,
-            pause_requests: Default::default(),
+            paused: Default::default(),
         };
 
         Ok(Self(inner.into()))
@@ -79,35 +71,21 @@ impl ContainerHandle {
         &self.0.raw_env
     }
 
-    /// Add the pause request to the set of active requests.
-    /// If the set became non-empty, pause the container and return true. Otherwise, return false.
+    /// Pause or unpause the container.
+    /// If the container changed its state, return true.
+    /// Otherwise, return false.
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) async fn request_pause(&self, client_id: ClientId) -> Result<bool> {
-        let mut guard = self.0.pause_requests.write().await;
-        let do_pause = guard.is_empty();
+    pub(crate) async fn set_paused(&self, paused: bool) -> Result<bool> {
+        let mut guard = self.0.paused.write().await;
 
-        if do_pause {
-            self.0.container.pause().await?;
+        match (*guard, paused) {
+            (false, true) => self.0.container.pause().await?,
+            (true, false) => self.0.container.unpause().await?,
+            _ => return Ok(false),
         }
 
-        guard.insert(client_id);
+        *guard = paused;
 
-        Ok(do_pause)
-    }
-
-    /// Remove pause request of the given client from the set of active requests.
-    /// If the set became empty, unpause the container and return true. Otherwise, return false.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) async fn client_disconnected(&self, client_id: ClientId) -> Result<bool> {
-        let mut guard = self.0.pause_requests.write().await;
-        let do_unpause = guard.contains(&client_id) && guard.len() == 1;
-
-        if do_unpause {
-            self.0.container.unpause().await?;
-        }
-
-        guard.remove(&client_id);
-
-        Ok(do_unpause)
+        Ok(true)
     }
 }

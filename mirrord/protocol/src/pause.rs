@@ -1,10 +1,14 @@
 use bincode::{Decode, Encode};
 
-/// Agent responses for target container pause request.
+/// `-agent` --> `-layer` messages regarding the pause feature.
+/// TODO add asynchronous notifications when the target container has changed its state
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub enum PauseTargetResponse {
-    /// The target container was paused according to the request.
-    Paused,
-    /// The target container was already paused when the agent received the request.
-    AlreadyPaused,
+pub enum DaemonPauseTarget {
+    /// Response for the client's request to pause or unpause the container.
+    PauseResponse {
+        /// The container changed its state.
+        changed: bool,
+        /// Current state of the container.
+        container_paused: bool,
+    },
 }

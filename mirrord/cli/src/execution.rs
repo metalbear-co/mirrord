@@ -5,7 +5,9 @@ use std::{
 
 use mirrord_config::LayerConfig;
 use mirrord_progress::Progress;
-use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
+use mirrord_protocol::{
+    pause::DaemonPauseTarget, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
+};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
 use serde::Serialize;
@@ -13,7 +15,7 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::{Child, Command},
 };
-use tracing::trace;
+use tracing::{info, trace};
 
 use crate::{
     connection::{create_and_connect, AgentConnectInfo, AgentConnection},
@@ -93,6 +95,14 @@ impl MirrordExecution {
             if let Some(overrides) = &config.feature.env.overrides {
                 env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
             }
+        }
+
+        if config.pause {
+            tokio::time::timeout(communication_timeout, Self::request_pause(&mut connection))
+                .await
+                .map_err(|_| {
+                    CliError::InitialCommFailed("Timeout requesting for target container pause.")
+                })??;
         }
 
         let lib_path: String = lib_path.to_string_lossy().into();
@@ -199,6 +209,33 @@ impl MirrordExecution {
             Some(DaemonMessage::GetEnvVarsResponse(Ok(remote_env))) => {
                 trace!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env.len());
                 Ok(remote_env)
+            }
+            msg => Err(CliError::InvalidMessage(format!("{msg:#?}"))),
+        }
+    }
+
+    /// Request target container pause from the connected agent.
+    async fn request_pause(connection: &mut AgentConnection) -> Result<()> {
+        info!("Requesting target container pause from the agent");
+        connection
+            .sender
+            .send(ClientMessage::PauseTargetRequest(true))
+            .await
+            .map_err(|_| {
+                CliError::InitialCommFailed("Failed to request target container pause.")
+            })?;
+
+        match connection.receiver.recv().await {
+            Some(DaemonMessage::PauseTarget(DaemonPauseTarget::PauseResponse {
+                changed,
+                container_paused: true,
+            })) => {
+                if changed {
+                    info!("Target container is now paused.");
+                } else {
+                    info!("Target container was already paused.");
+                }
+                Ok(())
             }
             msg => Err(CliError::InvalidMessage(format!("{msg:#?}"))),
         }
