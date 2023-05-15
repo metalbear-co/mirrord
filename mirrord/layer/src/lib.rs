@@ -457,6 +457,7 @@ fn layer_start(config: LayerConfig) {
 }
 
 /// Request target container pause from the connected agent.
+#[tracing::instrument(level = "trace", skip(tx, rx))]
 async fn request_pause(tx: &Sender<ClientMessage>, rx: &mut Receiver<DaemonMessage>) {
     trace!("Requesting target container pause from the agent");
     tx.send(ClientMessage::PauseTarget)

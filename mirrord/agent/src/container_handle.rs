@@ -55,6 +55,7 @@ pub(crate) struct ContainerHandle(Arc<Inner>);
 
 impl ContainerHandle {
     /// Retrieve info about the container and initialize this struct.
+    #[tracing::instrument(level = "trace")]
     pub(crate) async fn new(container: Container) -> Result<Self> {
         let ContainerInfo { pid, env: raw_env } = container.get_info().await?;
 
@@ -80,6 +81,7 @@ impl ContainerHandle {
 
     /// Add the pause request to the set of active requests.
     /// If the set became non-empty, pause the container and return true. Otherwise, return false.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn request_pause(&self, client_id: ClientId) -> Result<bool> {
         let mut guard = self.0.pause_requests.write().await;
         let do_pause = guard.is_empty();
@@ -95,6 +97,7 @@ impl ContainerHandle {
 
     /// Remove pause request of the given client from the set of active requests.
     /// If the set became empty, unpause the container and return true. Otherwise, return false.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn client_disconnected(&self, client_id: ClientId) -> Result<bool> {
         let mut guard = self.0.pause_requests.write().await;
         let do_unpause = guard.contains(&client_id) && guard.len() == 1;
