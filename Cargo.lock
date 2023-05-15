@@ -2358,7 +2358,6 @@ dependencies = [
  "hyper 1.0.0-rc.3",
  "itertools",
  "k8s-openapi",
- "lazy_static",
  "libc",
  "mirrord-config",
  "mirrord-console",
@@ -2462,9 +2461,9 @@ dependencies = [
 name = "mirrord-sip"
 version = "3.42.0"
 dependencies = [
- "lazy_static",
  "memchr",
  "object 0.29.0",
+ "once_cell",
  "tempfile",
  "thiserror",
  "tracing",

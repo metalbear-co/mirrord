@@ -31,7 +31,6 @@ futures.workspace = true
 
 tokio = { workspace = true, features = ["fs"] }
 serde_json.workspace = true
-lazy_static.workspace = true
 
 actix-codec.workspace = true
 bytes.workspace = true

@@ -16,11 +16,11 @@ edition.workspace = true
 [dependencies]
 object = "0.29"
 memchr = "2"
+once_cell = "1"
 
 tracing.workspace = true
 thiserror.workspace = true
 which.workspace = true
-lazy_static.workspace = true
 
 
 [dev-dependencies]

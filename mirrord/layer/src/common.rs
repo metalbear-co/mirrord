@@ -1,12 +1,10 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
 use std::{collections::VecDeque, ffi::CStr, path::PathBuf};
 
-#[cfg(target_os = "macos")]
-use lazy_static::lazy_static;
 use libc::c_char;
 use mirrord_protocol::{file::OpenOptionsInternal, RemoteResult};
 #[cfg(target_os = "macos")]
-use mirrord_sip::MIRRORD_TEMP_BIN_DIR;
+use mirrord_sip::{CURRENT_EXE, MIRRORD_TEMP_BIN_DIR};
 use tokio::sync::oneshot;
 use tracing::warn;
 
@@ -19,12 +17,6 @@ use crate::{
     tcp::TcpIncoming,
     HOOK_SENDER,
 };
-
-#[cfg(target_os = "macos")]
-lazy_static! {
-    /// Path of current executable, None if fetching failed.
-    pub static ref CURRENT_EXE: Option<String> = std::env::current_exe().ok().map(|path_buf| path_buf.to_string_lossy().to_string());
-}
 
 /// Type alias for a queue of responses from the agent, where these responses are [`RemoteResult`]s.
 ///
