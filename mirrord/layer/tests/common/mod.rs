@@ -124,7 +124,6 @@ impl TestProcess {
     }
 
     pub fn assert_stdout_contains(&self, string: &str) {
-        println!("{:#?}", self.stdout.lock().unwrap().as_str());
         assert!(self.stdout.lock().unwrap().contains(string));
     }
 
