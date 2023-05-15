@@ -113,7 +113,7 @@ class MirrordConfigDropDown : ComboBoxAction() {
 
     // this function spawns a background task to query the index, not blocking the current thread
     // it maintains a single task to do so, using the `blockQueries` flag
-    private fun queryIndexInSmartMode(project: Project, query: (project: Project) -> Unit) {
+    private fun queryIndexInSmartMode(project: Project, query: (Project) -> Unit) {
         if (!blockQueries.getAndSet(true)) {
             object : Task.Backgroundable(project, "mirrord") {
                 override fun run(indicator: ProgressIndicator) {
@@ -146,7 +146,6 @@ class MirrordConfigDropDown : ComboBoxAction() {
             }.queue()
         }
     }
-
 
     companion object {
         var chosenFile: String? = null
