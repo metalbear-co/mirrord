@@ -190,8 +190,8 @@ impl MirrordExecution {
         })
     }
 
-    /// Some features don't make a lot of sense together with targetless agents, so if needed,
-    /// warn the user, if possible, disable unnecessary features.
+    /// Some features are incompatible with targetless agents, return error if they are set and
+    /// there is no target.
     ///
     /// # Errors
     ///
