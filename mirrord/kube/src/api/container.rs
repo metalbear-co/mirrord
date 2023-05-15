@@ -122,6 +122,34 @@ async fn wait_for_agent_startup(
 #[derive(Debug)]
 pub struct JobContainer;
 
+// impl JobContainer {
+//     /// Some fields of are only added if `runtime_data` is not `None` (the agent is not
+// targetless).     ///
+//     /// Add those fields according to `runtime_data`
+//     fn add_conditional_fields(
+//         job_spec: Option<&mut JobSpec>,
+//         runtime_data: Option<&RuntimeData>,
+//         agent_gid: u16,
+//     ) {
+//         // We will always go into the first two `if let`s, as we just create the specs in the
+//         // calling function.
+//         if let Some(job_spec) = job_spec {
+//             if let Some(pod_spec) = job_spec.template.spec.as_mut() {
+//                 if let Some(runtime_data) = runtime_data {
+//                     // targetless
+//                     pod_spec.node_name = Some(runtime_data.node_name.clone());
+//                     pod_spec.host_pid = Some(true);
+//                     pod_spec.security_context = Some(SecurityContext {
+//                         run_as_group: Some(agent_gid as _),
+//                         privileged: Some(true),
+//                         ..Default::default()
+//                     })
+//                 }
+//             }
+//         }
+//     }
+// }
+
 impl ContainerApi for JobContainer {
     /// runtime_data is `None` when targetless.
     async fn create_agent<P>(
@@ -164,75 +192,76 @@ impl ContainerApi for JobContainer {
             agent_command_line.push("--test-error".to_owned());
         }
 
-        let targetless = runtime_data.is_none();
+        let targeted = runtime_data.is_some();
 
-        let mut agent_pod: Job = serde_json::from_value(
-            json!({ // Only Jobs support self deletion after completion
+        let json_value = json!({ // Only Jobs support self deletion after completion
+            "metadata": {
+                "name": mirrord_agent_job_name,
+                "labels": {
+                    "app": "mirrord"
+                },
+                "annotations":
+                {
+                    "sidecar.istio.io/inject": "false",
+                    "linkerd.io/inject": "disabled"
+                }
+            },
+            "spec": {
+                "ttlSecondsAfterFinished": agent.ttl,
+                "template": {
                     "metadata": {
-                        "name": mirrord_agent_job_name,
-                        "labels": {
-                            "app": "mirrord"
-                        },
-                        "annotations":
-                        {
+                        "annotations": {
                             "sidecar.istio.io/inject": "false",
                             "linkerd.io/inject": "disabled"
+                        },
+                        "labels": {
+                            "app": "mirrord"
                         }
                     },
-                    "spec": {
-                    "ttlSecondsAfterFinished": agent.ttl,
-
-                        "template": {
-                            "metadata": {
-                                "annotations":
-                                {
-                                    "sidecar.istio.io/inject": "false",
-                                    "linkerd.io/inject": "disabled"
-                                },
-                                "labels": {
-                                    "app": "mirrord"
-                                }
-                            },
 
                     "spec": {
-                        "hostPID": !targetless,
+                        "hostPID": targeted,
+                        "nodeName": runtime_data.map(|rd| rd.node_name),
                         "restartPolicy": "Never",
-                        "volumes": [
-                            {
-                                "name": "hostrun",
-                                "hostPath": {
-                                    "path": "/run"
+                        "volumes": targeted.then(|| json!(
+                            [
+                                {
+                                    "name": "hostrun",
+                                    "hostPath": {
+                                        "path": "/run"
+                                    }
+                                },
+                                {
+                                    "name": "hostvar",
+                                    "hostPath": {
+                                        "path": "/var"
+                                    }
                                 }
-                            },
-                            {
-                                "name": "hostvar",
-                                "hostPath": {
-                                    "path": "/var"
-                                }
-                            }
-                        ],
+                            ]
+                        )),
                         "imagePullSecrets": agent.image_pull_secrets,
                         "containers": [
                             {
                                 "name": "mirrord-agent",
                                 "image": Self::agent_image(agent),
                                 "imagePullPolicy": agent.image_pull_policy,
-                                "securityContext": {
-                                    "runAsGroup": agent_gid,
-                                    // If runtime_data is None then the agent is targetless and does
-                                    // not need to be privileged.
-                                    "privileged": runtime_data.is_some(),
-                                },
-                                "volumeMounts": [
-                                    {
-                                        "mountPath": "/host/run",
-                                        "name": "hostrun"
-                                    },
-                                    {
-                                        "mountPath": "/host/var",
-                                        "name": "hostvar"
-                                    }
-                                ],
+                                "securityContext": targeted.then(||
+                                    json!({
+                                        "runAsGroup": agent_gid,
+                                        "privileged": true,
+                                    })
+                                ),
+                                "volumeMounts": targeted.then(||
+                                    json!([
+                                        {
+                                            "mountPath": "/host/run",
+                                            "name": "hostrun"
+                                        },
+                                        {
+                                            "mountPath": "/host/var",
+                                            "name": "hostvar"
+                                        }
+                                    ])),
                                 "command": agent_command_line,
                                 "env": [
                                     { "name": "RUST_LOG", "value": agent.log_level },
@@ -251,19 +280,11 @@ impl ContainerApi for JobContainer {
                     }
                 }
             }
-                }
-            ),
-        )?;
+        });
 
-        // Set node_name here and not as part of the json, because it is omitted for targetless mode
-        // in which case we set it here to `None`. With the `json!` macro I don't know how to
-        // conditionally omit a field.
-        // We will always go into both those `if let`s, as we just created the specs above.
-        if let Some(job_spec) = agent_pod.spec.as_mut() {
-            if let Some(pod_spec) = job_spec.template.spec.as_mut() {
-                pod_spec.node_name = runtime_data.map(|rd| rd.node_name);
-            }
-        }
+        let agent_pod: Job = serde_json::from_value(json_value)?;
+
+        // Self::add_conditional_fields(agent_pod.spec.as_mut(), runtime_data.as_ref(), agent_gid);
 
         let job_api = get_k8s_resource_api(client, agent.namespace.as_deref());
 
