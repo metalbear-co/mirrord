@@ -164,6 +164,8 @@ impl ContainerApi for JobContainer {
             agent_command_line.push("--test-error".to_owned());
         }
 
+        let targetless = runtime_data.is_none();
+
         let mut agent_pod: Job = serde_json::from_value(
             json!({ // Only Jobs support self deletion after completion
                     "metadata": {
@@ -193,7 +195,7 @@ impl ContainerApi for JobContainer {
                             },
 
                     "spec": {
-                        "hostPID": true,
+                        "hostPID": !targetless,
                         "restartPolicy": "Never",
                         "volumes": [
                             {
