@@ -54,7 +54,6 @@ class MirrordConfigDropDown : ComboBoxAction() {
         }
     }
 
-
     @Deprecated(
         "Deprecated in Java", ReplaceWith(
             "createPopupActionGroup(button, DataManager.getInstance().getDataContext(button))",
