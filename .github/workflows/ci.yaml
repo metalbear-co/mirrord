@@ -570,6 +570,7 @@ jobs:
           cd intellij-ext
           chmod +x ./gradlew
           ./gradlew buildPlugin
+          ./gradlew runPluginVerifier
 
   lint_markdown:
     runs-on: ubuntu-latest

@@ -1,6 +1,8 @@
 import org.jetbrains.changelog.markdownToHTML
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import org.jetbrains.intellij.tasks.RunPluginVerifierTask.FailureLevel
 import java.nio.file.Paths
+import java.util.EnumSet
 
 fun properties(key: String) = project.findProperty(key).toString()
 
@@ -178,5 +180,10 @@ tasks {
         // https://plugins.jetbrains.com/docs/intellij/deployment.html#specifying-a-release-channel
         channels.set(listOf("beta"))
         channels.set(listOf(properties("pluginVersion").split('-').getOrElse(1) { "default" }.split('.').first()))
+    }
+
+    runPluginVerifier {
+        ideVersions.set(listOf("IU-232.5150.116", "IU-231.9011.14", "IU-231.8770.65", "IU-223.8836.41", "IU-222.4554.10"))
+        failureLevel.set(EnumSet.of(FailureLevel.COMPATIBILITY_PROBLEMS, FailureLevel.MISSING_DEPENDENCIES, FailureLevel.INVALID_PLUGIN))
     }
 }
