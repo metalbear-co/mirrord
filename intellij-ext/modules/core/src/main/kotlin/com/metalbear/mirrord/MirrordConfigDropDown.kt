@@ -167,9 +167,7 @@ class MirrordConfigDropDown : ComboBoxAction() {
         // causing a deadlock because also queryIndexInSmartMode "synchronizes" querying and setting
         // the flag
         if (shouldQuery) {
-            queryIndexInSmartMode(project) {
-                updateConfigFiles(project)
-            }
+            queryIndexInSmartMode(project, ::updateConfigFiles)
         }
     }
 
