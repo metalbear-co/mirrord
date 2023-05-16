@@ -570,6 +570,11 @@ jobs:
           cd intellij-ext
           chmod +x ./gradlew
           ./gradlew buildPlugin
+      - name: Run plugin verifier
+        env:
+          CI_BUILD_PLUGIN: true
+        run: |
+          cd intellij-ext
           ./gradlew runPluginVerifier
 
   lint_markdown:
