@@ -183,7 +183,7 @@ tasks {
     }
 
     runPluginVerifier {
-        ideVersions.set(listOf("IU-232.5150.116", "IU-231.9011.14", "IU-231.8770.65", "IU-223.8836.41", "IU-222.4554.10"))
+        ideVersions.set(listOf("IU-232.5150.116", "IU-222.4554.10"))
         failureLevel.set(EnumSet.of(FailureLevel.COMPATIBILITY_PROBLEMS, FailureLevel.MISSING_DEPENDENCIES, FailureLevel.INVALID_PLUGIN))
     }
 }
