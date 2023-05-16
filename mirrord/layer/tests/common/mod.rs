@@ -335,7 +335,7 @@ impl LayerConnection {
     /// There is no such actual connection, because there is no target, but the layer should start
     /// a mirror connection with the application.
     /// Return the id of the new connection.
-    async fn send_new_connection(&mut self, port: u16) -> u64 {
+    pub async fn send_new_connection(&mut self, port: u16) -> u64 {
         let new_connection_id = self.num_connections;
         self.codec
             .send(DaemonMessage::Tcp(DaemonTcp::NewConnection(
@@ -367,7 +367,7 @@ impl LayerConnection {
     /// There is no such actual connection, because there is no target, but the layer should start
     /// a mirror connection with the application.
     /// Return the id of the new connection.
-    async fn send_close(&mut self, connection_id: u64) {
+    pub async fn send_close(&mut self, connection_id: u64) {
         self.codec
             .send(DaemonMessage::Tcp(DaemonTcp::Close(TcpClose {
                 connection_id,
@@ -738,6 +738,8 @@ pub enum Application {
     Go19SelfOpen,
     RustOutgoingUdp,
     RustOutgoingTcp,
+    RustIssue1123,
+    RustIssue1054,
 }
 
 impl Application {
@@ -804,6 +806,8 @@ impl Application {
             Application::Go19FAccessAt => String::from("tests/apps/faccessat_go/19"),
             Application::Go20FAccessAt => String::from("tests/apps/faccessat_go/20"),
             Application::Go19SelfOpen => String::from("tests/apps/self_open/19"),
+            Application::RustIssue1123 => String::from("tests/apps/issue1123/target/issue1123"),
+            Application::RustIssue1054 => String::from("tests/apps/issue1054/target/issue1054"),
             Application::RustOutgoingUdp | Application::RustOutgoingTcp => format!(
                 "{}/{}",
                 env!("CARGO_MANIFEST_DIR"),
@@ -875,6 +879,8 @@ impl Application {
             | Application::Go19FAccessAt
             | Application::Go18FAccessAt
             | Application::RustFileOps
+            | Application::RustIssue1123
+            | Application::RustIssue1054
             | Application::EnvBashCat
             | Application::BashShebang
             | Application::Go19SelfOpen
@@ -898,6 +904,8 @@ impl Application {
             | Application::Go19FileOps
             | Application::Go20FileOps
             | Application::NodeHTTP
+            | Application::RustIssue1123
+            | Application::RustIssue1054
             | Application::PythonFlaskHTTP => 80,
             Application::PythonFastApiHTTP => 1234,
             Application::PythonListen => 21232,
@@ -979,8 +987,6 @@ impl Application {
     }
 
     /// Like `start_process_with_layer`, but also verify a port subscribe.
-    ///
-    /// - `resolve_hostname`: indicates if this test will start with the `gethostname` messages.
     pub async fn start_process_with_layer_and_port(
         &self,
         dylib_path: &PathBuf,
