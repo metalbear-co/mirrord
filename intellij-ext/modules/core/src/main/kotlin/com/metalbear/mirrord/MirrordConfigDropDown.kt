@@ -2,6 +2,7 @@
 
 package com.metalbear.mirrord
 
+import com.intellij.ide.DataManager
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.actionSystem.ex.ComboBoxAction
 import com.intellij.openapi.application.ReadAction
@@ -52,6 +53,16 @@ class MirrordConfigDropDown : ComboBoxAction() {
         return DefaultActionGroup().apply {
             addAll(actions)
         }
+    }
+
+    @Deprecated(
+        "Deprecated in Java", ReplaceWith(
+            "createPopupActionGroup(button, DataManager.getInstance().getDataContext(button))",
+            "com.intellij.ide.DataManager"
+        )
+    )
+    override fun createPopupActionGroup(button: JComponent): DefaultActionGroup {
+        return createPopupActionGroup(button, DataManager.getInstance().getDataContext(button))
     }
 
     private fun getReadablePath(path: String, project: Project): String {
