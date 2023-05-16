@@ -19,7 +19,6 @@ import com.intellij.util.io.EnumeratorStringDescriptor
 import com.intellij.util.io.KeyDescriptor
 import java.nio.file.Path
 import java.util.*
-import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.JComponent
 
 
@@ -35,7 +34,6 @@ class MirrordConfigDropDown : ComboBoxAction() {
 
     private lateinit var configFiles: HashSet<String>
     private var blockQueries: Boolean = false
-    private val updateLock = Any()
 
     override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
@@ -72,9 +70,7 @@ class MirrordConfigDropDown : ComboBoxAction() {
                 return
             }
 
-            if (updateConfigs.getAndSet(false)) {
-                blockAndQueryIndex(project)
-            }
+            blockAndQueryIndex(project)
 
             if (configFiles.size > 1) {
                 if (chosenFile !in configFiles) {
@@ -115,6 +111,7 @@ class MirrordConfigDropDown : ComboBoxAction() {
     private fun queryIndexInSmartMode(project: Project, query: (Project) -> Unit) {
         object : Task.Backgroundable(project, "mirrord") {
             override fun run(indicator: ProgressIndicator) {
+                updateConfigs = false
                 val dumbService = DumbService.getInstance(project)
                 // refer to `DumbService`, there is no "guarantee" still, but we stay in a loop
                 // todo: should probably look into using the message bus to listen for indexing to finish
@@ -130,12 +127,8 @@ class MirrordConfigDropDown : ComboBoxAction() {
                         }
                         try {
                             indicator.text = "mirrord: updating config files"
-                            synchronized(updateLock) {
-                                query(project)
-                                // exceptions in synchronized blocks == lock is guaranteed to be terminated
-                                // https://stackoverflow.com/a/2019350/14497841
-                                blockQueries = false
-                            }
+                            query(project)
+                            blockQueries = false
                         } catch (e: IndexNotReadyException) {
                             return@compute false
                         }
@@ -152,21 +145,8 @@ class MirrordConfigDropDown : ComboBoxAction() {
     // this function checks the `blockQueries` flag in a synchronized block
     // and executes the update accordingly
     private fun blockAndQueryIndex(project: Project) {
-        var shouldQuery = false
-        // (query index -> flag) == critical section
-        // reads and writes need to be synchronized
-
-        // separate lock does not hinder synchronization anywhere else in the class
-        synchronized(updateLock) {
-            if (!blockQueries) {
-                blockQueries = true
-                shouldQuery = blockQueries
-            }
-        }
-        // shouldQuery gives us the locked value of blockQueries without
-        // causing a deadlock because also queryIndexInSmartMode "synchronizes" querying and setting
-        // the flag
-        if (shouldQuery) {
+        if (updateConfigs && !blockQueries) {
+            blockQueries = true
             queryIndexInSmartMode(project, ::updateConfigFiles)
         }
     }
@@ -174,7 +154,7 @@ class MirrordConfigDropDown : ComboBoxAction() {
 
     companion object {
         var chosenFile: String? = null
-        var updateConfigs: AtomicBoolean = AtomicBoolean(false)
+        var updateConfigs: Boolean = true
     }
 }
 
@@ -187,7 +167,7 @@ class MirrordConfigWatcher : AsyncFileListener {
                 events.forEach { event ->
                     when (event) {
                         is VFileCreateEvent, is VFileDeleteEvent, is VFileMoveEvent, is VFileCopyEvent -> {
-                            MirrordConfigDropDown.updateConfigs.set(true)
+                            MirrordConfigDropDown.updateConfigs = true
                         }
                     }
                 }
