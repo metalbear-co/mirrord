@@ -12,7 +12,7 @@ import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.IndexNotReadyException
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vfs.*
+import com.intellij.openapi.vfs.AsyncFileListener
 import com.intellij.openapi.vfs.newvfs.events.*
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.util.indexing.*
@@ -36,6 +36,7 @@ class MirrordConfigDropDown : ComboBoxAction() {
 
     private lateinit var configFiles: HashSet<String>
     private var blockQueries: Boolean = false
+    private val updateLock = Any()
 
     override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
@@ -66,40 +67,14 @@ class MirrordConfigDropDown : ComboBoxAction() {
         e.project?.let { project ->
             // this check ensures that we don't query the index when it is being built
             // querying the index during the startup/Dumb Mode can give us 0 or stale data
-            var shouldQuery = false
             if (!::configFiles.isInitialized) {
                 e.presentation.isVisible = false
-                // (query index -> flag) == critical section
-                // reads and writes need to be synchronized
-                synchronized(this) {
-                    if (!blockQueries) {
-                        blockQueries = true
-                        shouldQuery = true
-                    }
-                }
-                // shouldQuery gives us the locked value of blockQueries without
-                // causing a deadlock because queryIndexInSmartMode "synchronizes" querying and setting
-                // the flag
-                if (shouldQuery) {
-                    queryIndexInSmartMode(project) {
-                        updateConfigFiles(project)
-                    }
-                }
+                blockAndQueryIndex(project)
                 return
             }
 
             if (updateConfigs.getAndSet(false)) {
-                synchronized(this) {
-                    if (!blockQueries) {
-                        blockQueries = true
-                        shouldQuery = true
-                    }
-                }
-                if (shouldQuery) {
-                    queryIndexInSmartMode(project) {
-                        updateConfigFiles(project)
-                    }
-                }
+                blockAndQueryIndex(project)
             }
 
             if (configFiles.size > 1) {
@@ -156,6 +131,7 @@ class MirrordConfigDropDown : ComboBoxAction() {
                 // refer to `DumbService`, there is no "guarantee" still, but we stay in a loop
                 // todo: should probably look into using the message bus to listen for indexing to finish
                 while (true) {
+                    indicator.text = "mirrord: waiting for smart mode"
                     dumbService.waitForSmartMode()
                     val success = ReadAction.compute<Boolean, RuntimeException> {
                         if (project.isDisposed) {
@@ -167,7 +143,7 @@ class MirrordConfigDropDown : ComboBoxAction() {
                         try {
                             indicator.text = "mirrord: updating config files"
                             // todo: investigate what to pass here
-                            synchronized(this) {
+                            synchronized(updateLock) {
                                 query(project)
                                 // exceptions in synchronized blocks == lock is guaranteed to be terminated
                                 // https://stackoverflow.com/a/2019350/14497841
@@ -185,6 +161,29 @@ class MirrordConfigDropDown : ComboBoxAction() {
             }
         }.queue()
     }
+
+    private fun blockAndQueryIndex(project: Project) {
+        var shouldQuery = false
+        // (query index -> flag) == critical section
+        // reads and writes need to be synchronized
+
+        // separate lock does not hinder synchronization anywhere else in the class
+        synchronized(updateLock) {
+            if (!blockQueries) {
+                blockQueries = true
+                shouldQuery = blockQueries
+            }
+        }
+        // shouldQuery gives us the locked value of blockQueries without
+        // causing a deadlock because also queryIndexInSmartMode "synchronizes" querying and setting
+        // the flag
+        if (shouldQuery) {
+            queryIndexInSmartMode(project) {
+                updateConfigFiles(project)
+            }
+        }
+    }
+
 
     companion object {
         var chosenFile: String? = null
