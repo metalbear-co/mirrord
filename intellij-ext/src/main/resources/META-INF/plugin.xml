@@ -57,6 +57,10 @@
             </group>
     </actions>
 
+    <projectListeners>
+        <listener class="com.metalbear.mirrord.MirrordExecutionListener"
+                  topic="com.intellij.execution.ExecutionListener"/>
+    </projectListeners>
 
     <depends optional="true" config-file="mirrord-idea.xml">com.intellij.modules.java</depends>
     <depends optional="true" config-file="mirrord-pycharm.xml">com.intellij.modules.python</depends>
