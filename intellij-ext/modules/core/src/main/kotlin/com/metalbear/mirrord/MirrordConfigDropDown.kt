@@ -2,6 +2,7 @@
 
 package com.metalbear.mirrord
 
+import com.intellij.ide.DataManager
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.actionSystem.ex.ComboBoxAction
 import com.intellij.openapi.application.ReadAction
@@ -34,7 +35,7 @@ import javax.swing.JComponent
 class MirrordConfigDropDown : ComboBoxAction() {
 
     private lateinit var configFiles: HashSet<String>
-    private var blockQueries = AtomicBoolean(false)
+    private var blockQueries: Boolean = false
 
     override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
@@ -65,29 +66,64 @@ class MirrordConfigDropDown : ComboBoxAction() {
         e.project?.let { project ->
             // this check ensures that we don't query the index when it is being built
             // querying the index during the startup/Dumb Mode can give us 0 or stale data
-            if (!::configFiles.isInitialized || updateConfigs.getAndSet(false)) {
-                queryIndexInSmartMode(project) {
-                    updateConfigFiles(project)
+            var shouldQuery = false
+            if (!::configFiles.isInitialized) {
+                e.presentation.isVisible = false
+                // (query index -> flag) == critical section
+                // reads and writes need to be synchronized
+                synchronized(this) {
+                    if (!blockQueries) {
+                        blockQueries = true
+                        shouldQuery = true
+                    }
+                }
+                // shouldQuery gives us the locked value of blockQueries without
+                // causing a deadlock because queryIndexInSmartMode "synchronizes" querying and setting
+                // the flag
+                if (shouldQuery) {
+                    queryIndexInSmartMode(project) {
+                        updateConfigFiles(project)
+                    }
                 }
                 return
             }
 
-            val files = configFiles
-            if (files.size < 2) {
-                chosenFile = files.firstOrNull()
-                e.presentation.isVisible = false
-                return
+            if (updateConfigs.getAndSet(false)) {
+                synchronized(this) {
+                    if (!blockQueries) {
+                        blockQueries = true
+                        shouldQuery = true
+                    }
+                }
+                if (shouldQuery) {
+                    queryIndexInSmartMode(project) {
+                        updateConfigFiles(project)
+                    }
+                }
             }
 
-            chosenFile = chosenFile ?: files.first()
+            if (configFiles.size > 1) {
+                if (chosenFile !in configFiles) {
+                    chosenFile = configFiles.first()
+                }
 
-            if (chosenFile !in files) {
-                chosenFile = files.first()
+                e.presentation.text = chosenFile?.let { getReadablePath(it, project) }
+            } else {
+                chosenFile = configFiles.firstOrNull()
             }
-
-            e.presentation.text = getReadablePath(chosenFile!!, project)
-            e.presentation.isVisible = true
+            e.presentation.isVisible = configFiles.size > 1
         }
+    }
+
+    @Deprecated(
+        "Deprecated in Java", ReplaceWith(
+            "createPopupActionGroup(button, DataManager.getInstance().getDataContext(button))",
+            "com.intellij.ide.DataManager"
+        )
+    )
+
+    override fun createPopupActionGroup(button: JComponent): DefaultActionGroup {
+        return createPopupActionGroup(button, DataManager.getInstance().getDataContext(button))
     }
 
     private fun updateConfigFiles(project: Project) {
@@ -114,37 +150,40 @@ class MirrordConfigDropDown : ComboBoxAction() {
     // this function spawns a background task to query the index, not blocking the current thread
     // it maintains a single task to do so, using the `blockQueries` flag
     private fun queryIndexInSmartMode(project: Project, query: (Project) -> Unit) {
-        if (!blockQueries.getAndSet(true)) {
-            object : Task.Backgroundable(project, "mirrord") {
-                override fun run(indicator: ProgressIndicator) {
-                    val dumbService = DumbService.getInstance(project)
-                    // refer to `DumbService`, there is no "guarantee" still, but we stay in a loop
-                    // todo: should probably look into using the message bus to listen for indexing to finish
-                    while (true) {
-                        dumbService.waitForSmartMode()
-                        val success = ReadAction.compute<Boolean, RuntimeException> {
-                            if (project.isDisposed) {
-                                throw ProcessCanceledException()
-                            }
-                            if (dumbService.isDumb) {
-                                return@compute false
-                            }
-                            try {
-                                indicator.text = "mirrord: updating config files"
+        object : Task.Backgroundable(project, "mirrord") {
+            override fun run(indicator: ProgressIndicator) {
+                val dumbService = DumbService.getInstance(project)
+                // refer to `DumbService`, there is no "guarantee" still, but we stay in a loop
+                // todo: should probably look into using the message bus to listen for indexing to finish
+                while (true) {
+                    dumbService.waitForSmartMode()
+                    val success = ReadAction.compute<Boolean, RuntimeException> {
+                        if (project.isDisposed) {
+                            throw ProcessCanceledException()
+                        }
+                        if (dumbService.isDumb) {
+                            return@compute false
+                        }
+                        try {
+                            indicator.text = "mirrord: updating config files"
+                            // todo: investigate what to pass here
+                            synchronized(this) {
                                 query(project)
-                                blockQueries.set(false)
-                            } catch (e: IndexNotReadyException) {
-                                return@compute false
+                                // exceptions in synchronized blocks == lock is guaranteed to be terminated
+                                // https://stackoverflow.com/a/2019350/14497841
+                                blockQueries = false
                             }
-                            true
+                        } catch (e: IndexNotReadyException) {
+                            return@compute false
                         }
-                        if (success) {
-                            break
-                        }
+                        true
+                    }
+                    if (success) {
+                        break
                     }
                 }
-            }.queue()
-        }
+            }
+        }.queue()
     }
 
     companion object {
