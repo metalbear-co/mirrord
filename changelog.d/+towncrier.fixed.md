@@ -1,0 +1,1 @@
+Fix intelliJ compatability issue by implementing missing createPopupActionGroup
