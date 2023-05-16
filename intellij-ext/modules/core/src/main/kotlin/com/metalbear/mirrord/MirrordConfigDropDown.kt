@@ -153,8 +153,9 @@ class MirrordConfigDropDown : ComboBoxAction() {
         }.queue()
     }
 
-    // this function checks the `blockQueries` flag in a synchronized block
-    // and executes the update accordingly
+    // this function checks the `blockQueries` flag and the updateConfigs flag and blocks queries
+    // by laying down concurrent instructions in a manner that everytime updateConfigs is set
+    // a query will follow
     private fun blockAndQueryIndex(project: Project) {
         if (updateConfigs && !blockQueries) {
             blockQueries = true
