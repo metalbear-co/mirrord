@@ -2,7 +2,6 @@
 
 package com.metalbear.mirrord
 
-import com.intellij.ide.DataManager
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.actionSystem.ex.ComboBoxAction
 import com.intellij.openapi.application.ReadAction
@@ -90,17 +89,6 @@ class MirrordConfigDropDown : ComboBoxAction() {
         }
     }
 
-    @Deprecated(
-        "Deprecated in Java", ReplaceWith(
-            "createPopupActionGroup(button, DataManager.getInstance().getDataContext(button))",
-            "com.intellij.ide.DataManager"
-        )
-    )
-
-    override fun createPopupActionGroup(button: JComponent): DefaultActionGroup {
-        return createPopupActionGroup(button, DataManager.getInstance().getDataContext(button))
-    }
-
     private fun updateConfigFiles(project: Project) {
         val updatedConfigFiles = HashSet<String>()
         val basePath = project.basePath ?: throw Error("couldn't resolve project path")
@@ -142,7 +130,6 @@ class MirrordConfigDropDown : ComboBoxAction() {
                         }
                         try {
                             indicator.text = "mirrord: updating config files"
-                            // todo: investigate what to pass here
                             synchronized(updateLock) {
                                 query(project)
                                 // exceptions in synchronized blocks == lock is guaranteed to be terminated
@@ -162,6 +149,8 @@ class MirrordConfigDropDown : ComboBoxAction() {
         }.queue()
     }
 
+    // this function checks the `blockQueries` flag in a synchronized block
+    // and executes the update accordingly
     private fun blockAndQueryIndex(project: Project) {
         var shouldQuery = false
         // (query index -> flag) == critical section
