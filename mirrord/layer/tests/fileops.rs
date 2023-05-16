@@ -3,11 +3,15 @@
 
 #[cfg(target_os = "linux")]
 use std::assert_matches::assert_matches;
+#[cfg(target_os = "macos")]
+use std::{env, fs};
 use std::{env::temp_dir, path::PathBuf, time::Duration};
 
 use futures::{stream::StreamExt, SinkExt};
 use libc::{pid_t, O_RDWR};
 use mirrord_protocol::{file::*, *};
+#[cfg(target_os = "macos")]
+use mirrord_sip::{sip_patch, MIRRORD_PATCH_DIR};
 use nix::{
     sys::signal::{self, Signal},
     unistd::Pid,
@@ -40,6 +44,51 @@ async fn self_open(dylib_path: &PathBuf) {
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr();
     test_process.assert_no_error_in_stdout();
+}
+
+/// Verify that if the user's app is trying to read out of mirrord's temp bin dir for some messed up
+/// reason (actually shouldn't happen, this is a second line of defence), that we hook that and the
+/// file is read from the path outside of that dir,
+/// e.g.: app tries to read /tmp/mirrord-bin/usr/local/foo, then make it read from /usr/local/foo.
+#[cfg(target_os = "macos")]
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(20))]
+async fn read_from_mirrord_bin(dylib_path: &PathBuf) {
+    let contents = "please don't flake";
+    let temp_dir = env::temp_dir();
+    let file_path = temp_dir.join("mirrord-test-read-from-mirrord-bin");
+
+    // write contents to <TMPDIR>/mirrord-test-read-from-mirrord-bin.
+    fs::write(&file_path, contents).unwrap();
+
+    // <TMPDIR>/mirrord-bin
+    let mirrord_bin = temp_dir.join(MIRRORD_PATCH_DIR);
+
+    // <TMPDIR>/mirrord-bin/<TMPDIR>/mirrord-test-read-from-mirrord-bin.
+    let path_in_mirrord_bin = mirrord_bin.join(&file_path);
+
+    let executable = sip_patch("cat", &Vec::new()).unwrap().unwrap();
+
+    // <TMPDIR>/mirrord-bin/cat <TMPDIR>/mirrord-bin/<TMPDIR>/mirrord-test-read-from-mirrord-bin
+    let application = Application::DynamicApp(
+        executable,
+        vec![path_in_mirrord_bin.to_string_lossy().to_string()],
+    );
+
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(dylib_path, vec![], None)
+        .await;
+
+    assert!(layer_connection.is_ended().await);
+
+    test_process.wait_assert_success().await;
+    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stdout();
+
+    // We read the contents from <TMPDIR>/<OUR-FILE> even though the app tried to read from
+    // <TMPDIR>/mirrord-bin/<TMPDIR>/<OUR-FILE>.
+    test_process.assert_stdout_contains(contents);
 }
 
 /// Verifies `pwrite` - if opening a file in write mode and writing to it at an offset of zero

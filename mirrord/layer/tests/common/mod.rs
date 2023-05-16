@@ -740,6 +740,11 @@ pub enum Application {
     RustOutgoingTcp,
     RustIssue1123,
     RustIssue1054,
+    // For running applications with the executable and arguments determined at runtime.
+    // Compiled only on macos just because it's currently only used there, but could be used also
+    // on Linux.
+    #[cfg(target_os = "macos")]
+    DynamicApp(String, Vec<String>),
 }
 
 impl Application {
@@ -813,6 +818,8 @@ impl Application {
                 env!("CARGO_MANIFEST_DIR"),
                 "../../target/debug/outgoing",
             ),
+            #[cfg(target_os = "macos")]
+            Application::DynamicApp(exe, _args) => exe.clone(),
         }
     }
 
@@ -894,6 +901,8 @@ impl Application {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
+            #[cfg(target_os = "macos")]
+            Application::DynamicApp(_exe, args) => args.to_owned(),
         }
     }
 
@@ -937,6 +946,8 @@ impl Application {
             | Application::Go20Dir
             | Application::RustOutgoingUdp
             | Application::RustOutgoingTcp => unimplemented!("shouldn't get here"),
+            #[cfg(target_os = "macos")]
+            Application::DynamicApp(_, _) => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
         }
     }
