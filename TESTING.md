@@ -31,7 +31,10 @@ minikube start --driver=docker
 ### Prepare a cluster
 
  Build mirrord-agent Docker Image.
+ 
+Make sure you're [logged in to GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
 
+Then run:
 ```bash
 docker buildx build -t test . --file mirrord/agent/Dockerfile
 ```
