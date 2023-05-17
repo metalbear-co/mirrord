@@ -125,12 +125,12 @@ object MirrordApi {
             .redirectError(ProcessBuilder.Redirect.PIPE)
             .start()
 
+        val bufferedReader = process.inputStream.reader().buffered()
+        val gson = Gson()
         val environment = CompletableFuture<MutableMap<String, String>?>()
 
         val streamProgressTask = object : Task.Backgroundable(project, "mirrord", true) {
             override fun run(indicator: ProgressIndicator) {
-                val bufferedReader = process.inputStream.reader().buffered()
-                val gson = Gson()
                 indicator.text = "mirrord is starting..."
                 for (line in bufferedReader.lines()) {
                     val message = gson.fromJson(line, Message::class.java)
@@ -139,19 +139,21 @@ object MirrordApi {
                         && message.type == MessageType.FinishedTask
                     ) {
                         val success = message.success ?: throw Error("Invalid message")
-                        val innerMessage = message.message ?: throw Error("Invalid inner message")
                         if (success) {
+                            val innerMessage = message.message ?: throw Error("Invalid inner message")
                             val executionInfo = gson.fromJson(innerMessage, MirrordExecution::class.java)
                             indicator.text = "mirrord is running"
                             environment.complete(executionInfo.environment)
                             return
-                        } else {
-                            environment.complete(null)
+                        }
+                    } else if (message.name == "mirrord ext" && message.type == MessageType.FinishedTask) {
+                        val success = message.success ?: throw Error("Invalid message")
+                        if (!success) {
+                            val innerMessage = message.message ?: throw Error("Invalid inner message")
                             MirrordNotifier.errorNotification("$innerMessage", project)
                             return
                         }
-                    }
-                    if (message.type == MessageType.Warning) {
+                    } else if (message.type == MessageType.Warning) {
                         message.message?.let { MirrordNotifier.notify(it, NotificationType.WARNING, project) }
                     } else {
                         var displayMessage = message.name
