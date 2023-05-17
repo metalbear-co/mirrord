@@ -86,12 +86,7 @@ impl ToString for FsMode {
 }
 
 #[derive(Args, Debug)]
-#[command(group(
-    ArgGroup::new("exec")
-        .required(true)
-        .multiple(true)
-        .args(&["target", "config_file"]),
-))]
+#[command(group(ArgGroup::new("exec")))]
 pub(super) struct ExecArgs {
     /// Target name to mirror.    
     /// Target can either be a deployment or a pod.

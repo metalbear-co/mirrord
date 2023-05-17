@@ -198,4 +198,6 @@ pub(crate) enum CliError {
     #[error("Waitlist registration failed.")]
     #[diagnostic(help("Please check the email provided and internet connection.{GENERAL_HELP}"))]
     WaitlistError(reqwest::Error),
+    #[error("{0} is not compatible with a targetless agent, please either disable this option or specify a target.")]
+    IncompatibleWithTargetless(String),
 }

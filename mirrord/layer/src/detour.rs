@@ -201,6 +201,10 @@ pub(crate) enum Bypass {
     /// Socket is connecting to localhots and we're asked to ignore it.
     IgnoreLocalhost(u16),
 
+    /// Application is binding a port, while mirrord is running targetless. A targetless agent does
+    /// is not exposed by a service, so bind locally.
+    BindWhenTargetless,
+
     /// Hooked connect from a bound mirror socket.
     MirrorConnect,
 
