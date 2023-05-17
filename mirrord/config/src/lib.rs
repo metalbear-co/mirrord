@@ -97,7 +97,7 @@ pub struct LayerConfig {
     /// - `podname/{sample-pod}/[container]/{sample-container}`;
     /// - `deployment/{sample-deployment}/[container]/{sample-container}`;
     #[config(nested)]
-    pub target: TargetConfig,
+    pub target: Option<TargetConfig>,
 
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.
     #[config(env = "MIRRORD_CONNECT_TCP")]

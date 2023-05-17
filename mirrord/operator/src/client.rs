@@ -45,7 +45,7 @@ pub struct OperatorApi {
     client: Client,
     target_api: Api<TargetCrd>,
     version_api: Api<MirrordOperatorCrd>,
-    target_config: TargetConfig,
+    target_config: Option<TargetConfig>,
 }
 
 impl OperatorApi {
@@ -113,8 +113,15 @@ impl OperatorApi {
         )
         .await?;
 
-        let target_api: Api<TargetCrd> =
-            get_k8s_resource_api(&client, target_config.namespace.as_deref());
+        let target_namespace = if let Some(ref target_config) = target_config {
+            target_config.namespace.as_deref()
+        } else {
+            // When targetless, pass agent namespace to operator so that it knows where to create
+            // the agent (the operator does not get the agent config).
+            config.agent.namespace.as_deref()
+        };
+
+        let target_api: Api<TargetCrd> = get_k8s_resource_api(&client, target_namespace);
 
         let version_api: Api<MirrordOperatorCrd> = Api::all(client.clone());
 
@@ -136,14 +143,9 @@ impl OperatorApi {
     }
 
     async fn fetch_target(&self) -> Result<Option<TargetCrd>> {
-        let target = self
-            .target_config
-            .path
-            .as_ref()
-            .map(TargetCrd::target_name)
-            .ok_or(OperatorApiError::InvalidTarget)?;
+        let target_name = TargetCrd::target_name_by_optional_config(&self.target_config);
 
-        match self.target_api.get(&target).await {
+        match self.target_api.get(&target_name).await {
             Ok(target) => Ok(Some(target)),
             Err(kube::Error::Api(ErrorResponse { code: 404, .. })) => Ok(None),
             Err(err) => Err(OperatorApiError::from(KubeApiError::from(err))),
