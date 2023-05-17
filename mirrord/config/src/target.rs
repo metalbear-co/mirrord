@@ -12,57 +12,15 @@ use crate::{
     util::string_or_struct_option,
 };
 
-/// ## target {#target}
-///
-/// Specifies the target and namespace to mirror, see [`path`](##path) for a list of accepted values
-/// for the `target` option.
-///
-/// ### Minimal `target` config {#target-minimal}
-///
-/// ```json
-/// {
-///   "target": "pod/bear-pod"
-/// }
-/// ```
-///
-/// ### Advanced `target` config {#target-advanced}
-///
-/// ```json
-/// {
-///   "target": {
-///     "path": {
-///       "pod": "bear-pod"
-///     },
-///     "namespace": "default"
-///   }
-/// }
-/// ```
-///
-/// ### target.path {#target-path}
-///
-/// Specifies the running pod (or deployment) to mirror.
-///
-/// Supports:
-/// - `pod/{sample-pod}`;
-/// - `podname/{sample-pod}`;
-/// - `deployment/{sample-deployment}`;
-/// - `container/{sample-container}`;
-/// - `containername/{sample-container}`.
-///
-/// ### target.namespace {#target-namespace}
-///
-/// The namespace of the remote pod.
-///
-/// Defaults to `"default"`.
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase")]
 pub enum TargetFileConfig {
-    // we need default else target value will be required in some scenarios.
+    /// we need default else target value will be required in some scenarios.
     Simple(#[serde(default, deserialize_with = "string_or_struct_option")] Option<Target>),
     Advanced {
-        // Path is optional so that it can also be specified via env var instead of via conf file,
-        // but it is not optional in a resulting [`TargetConfig`] object - either there is a path,
-        // or the target configuration is `None`.
+        /// Path is optional so that it can also be specified via env var instead of via conf file,
+        /// but it is not optional in a resulting [`TargetConfig`] object - either there is a path,
+        /// or the target configuration is `None`.
         #[serde(default, deserialize_with = "string_or_struct_option")]
         path: Option<Target>,
         namespace: Option<String>,
@@ -72,7 +30,23 @@ pub enum TargetFileConfig {
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TargetConfig {
+    /// ### target.path {#target-path}
+    ///
+    /// Specifies the running pod (or deployment) to mirror.
+    ///
+    /// Supports:
+    /// - `pod/{sample-pod}`;
+    /// - `podname/{sample-pod}`;
+    /// - `deployment/{sample-deployment}`;
+    /// - `container/{sample-container}`;
+    /// - `containername/{sample-container}`.
     pub path: Target,
+
+    /// ### target.namespace {#target-namespace}
+    ///
+    /// Namespace where the target lives.
+    ///
+    /// Defaults to `"default"`.
     pub namespace: Option<String>,
 }
 

@@ -11,36 +11,26 @@ use crate::{
     util::MirrordToggleableConfig,
 };
 
-/// ## mode (fs)
-///
-/// Configuration for enabling read-only or read-write file operations.
-///
-/// These options are overriden by user specified overrides and mirrord default overrides.
-///
-/// If you set [`localwithoverrides`](###localwithoverrides) then some files can be read/write
-/// remotely based on our default/user specified. Default option for general file configuration.
-///
-/// The accepted values are: `"local"`, `"localwithoverrides`, `"read"`, or `"write`.
 #[derive(Serialize, Deserialize, Default, PartialEq, Eq, Clone, Debug, Copy, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum FsModeConfig {
-    /// ### local
+    /// #### feature.fs.mode.local {#feature-fs-mode-local}
     ///
     /// mirrord won't do anything fs-related, all operations will be local.
     Local,
 
-    /// ### localwithoverrides
+    /// #### feature.fs.mode.localwithoverrides {#feature-fs-mode-localwithoverrides}
     ///
     /// mirrord will run overrides on some file operations, but most will be local.
     LocalWithOverrides,
 
-    /// ### read
+    /// #### feature.fs.mode.read {#feature-fs-mode-read}
     ///
     /// mirrord will read files from the remote, but won't write to them.
     #[default]
     Read,
 
-    /// ### write
+    /// #### feature.fs.mode.write {#feature-fs-mode-write}
     ///
     /// mirrord will read/write from the remote.
     Write,
