@@ -13,6 +13,7 @@ import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 
 enum class MessageType {
@@ -124,12 +125,12 @@ object MirrordApi {
             .redirectError(ProcessBuilder.Redirect.PIPE)
             .start()
 
-        val bufferedReader = process.inputStream.reader().buffered()
-        val gson = Gson()
         val environment = CompletableFuture<MutableMap<String, String>?>()
 
         val streamProgressTask = object : Task.Backgroundable(project, "mirrord", true) {
             override fun run(indicator: ProgressIndicator) {
+                val bufferedReader = process.inputStream.reader().buffered()
+                val gson = Gson()
                 indicator.text = "mirrord is starting..."
                 for (line in bufferedReader.lines()) {
                     val message = gson.fromJson(line, Message::class.java)
@@ -138,15 +139,15 @@ object MirrordApi {
                         && message.type == MessageType.FinishedTask
                     ) {
                         val success = message.success ?: throw Error("Invalid message")
+                        val innerMessage = message.message ?: throw Error("Invalid inner message")
                         if (success) {
-                            val innerMessage = message.message ?: throw Error("Invalid inner message")
                             val executionInfo = gson.fromJson(innerMessage, MirrordExecution::class.java)
                             indicator.text = "mirrord is running"
                             environment.complete(executionInfo.environment)
                             return
                         } else {
                             environment.complete(null)
-                            MirrordNotifier.errorNotification("mirrord failed to launch", project)
+                            MirrordNotifier.errorNotification("$innerMessage", project)
                             return
                         }
                     }
@@ -178,55 +179,18 @@ object MirrordApi {
 
         ProgressManager.getInstance().run(streamProgressTask)
 
-        environment.get()?.let {
-            return it
+        // when an exception occurs in the task, the current process is still stuck waiting on env
+        // which is why an explicit timeout is needed
+        try {
+            environment.get(60, TimeUnit.SECONDS)?.let {
+                return it
+            }
+        } catch (e: TimeoutException) {
+            MirrordNotifier.errorNotification("mirrord failed to fetch the env", project)
         }
 
         val capturedError = process.errorStream.reader().readText()
         logger.error("mirrord stderr: %s".format(capturedError))
-        MirrordLogProcessor().processError(capturedError)
         throw Error("failed launch")
     }
-
-
-    class MirrordLogProcessor {
-        private companion object {
-            const val KUBE_ERROR_PATTERN = "Create agent failed. KubeError"
-        }
-
-        fun processError(error: String) {
-            when {
-                error.contains(KUBE_ERROR_PATTERN) -> {
-                    processKubeErrors(error)
-                }
-
-                else -> {
-                    MirrordNotifier.errorNotification(error, null)
-                }
-            }
-        }
-
-        private fun processKubeErrors(error: String) {
-            val errorMessage = when {
-                error.contains("HyperError") -> "Failed to connect to kubernetes:" + trimError(
-                    error,
-                    "HyperError(",
-                    ")"
-                )
-
-                error.contains("Api") && error.contains("ErrorResponse") -> "Kube API returned the following error:" + trimError(
-                    error,
-                    "Api(",
-                    ")"
-                )
-
-                else -> "mirrord failed to launch"
-            }
-            MirrordNotifier.errorNotification(errorMessage, null)
-        }
-
-        private fun trimError(error: String, start: String, end: String): String =
-            error.substringAfter(start).substringBeforeLast(end).trim()
-    }
-
 }
