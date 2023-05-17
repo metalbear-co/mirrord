@@ -26,10 +26,10 @@ impl Drop for Inner {
     fn drop(&mut self) {
         let result = executor::block_on(async {
             if *self.paused.read().await {
-                Ok(())
-            } else {
                 info!("Agent exiting with target container paused. Unpausing target container.");
                 self.container.unpause().await
+            } else {
+                Ok(())
             }
         });
 
