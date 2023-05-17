@@ -1076,7 +1076,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.41.1"
+version = "3.42.0"
 dependencies = [
  "libc",
 ]
@@ -2120,7 +2120,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.41.1"
+version = "3.42.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -2159,7 +2159,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.41.1"
+version = "3.42.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -2208,7 +2208,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.41.1"
+version = "3.42.0"
 dependencies = [
  "lazy_static",
  "rand",
@@ -2221,7 +2221,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.41.1"
+version = "3.42.0"
 dependencies = [
  "bimap",
  "mirrord-config-derive",
@@ -2237,7 +2237,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.41.1"
+version = "3.42.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -2247,7 +2247,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.41.1"
+version = "3.42.0"
 dependencies = [
  "axum",
  "futures",
@@ -2264,7 +2264,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.41.1"
+version = "3.42.0"
 dependencies = [
  "actix-codec",
  "base64 0.21.0",
@@ -2287,7 +2287,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.41.1"
+version = "3.42.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -2338,7 +2338,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.41.1"
+version = "3.42.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2347,7 +2347,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.41.1"
+version = "3.42.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -2378,7 +2378,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.41.1"
+version = "3.42.0"
 dependencies = [
  "atty",
  "serde",
@@ -2388,7 +2388,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "3.41.1"
+version = "3.42.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -2408,10 +2408,11 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.41.1"
+version = "3.42.0"
 dependencies = [
  "memchr",
  "object 0.29.0",
+ "once_cell",
  "tempfile",
  "thiserror",
  "tracing",
@@ -2731,7 +2732,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.41.1"
+version = "3.42.0"
 
 [[package]]
 name = "overload"
@@ -3330,21 +3331,21 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.41.1"
+version = "3.42.0"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.41.1"
+version = "3.42.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.41.1"
+version = "3.42.0"
 dependencies = [
  "tokio",
 ]

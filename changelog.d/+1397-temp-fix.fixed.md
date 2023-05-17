@@ -1,1 +1,0 @@
-Fix not loading into Go because of SIP by adding into default patched binaries

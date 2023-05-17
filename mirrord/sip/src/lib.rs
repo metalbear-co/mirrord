@@ -19,6 +19,7 @@ mod main {
         read::macho::{FatArch, MachHeader},
         Architecture, Endianness, FileKind,
     };
+    use once_cell::sync::Lazy;
     use tracing::trace;
     use which::which;
 
@@ -31,6 +32,25 @@ mod main {
 
     /// Where patched files are stored, relative to the temp dir (`/tmp/mirrord-bin/...`).
     pub const MIRRORD_PATCH_DIR: &str = "mirrord-bin";
+
+    /// The path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
+    /// scripts.
+    pub static MIRRORD_TEMP_BIN_DIR: Lazy<String> = Lazy::new(|| {
+        std::env::temp_dir()
+            .join(MIRRORD_PATCH_DIR)
+            // lossy: we assume our temp dir path does not contain non-unicode chars.
+            .to_string_lossy()
+            .to_string()
+            .trim_end_matches('/')
+            .to_string()
+    });
+
+    /// Path of current executable, None if fetching failed.
+    pub static CURRENT_EXE: Lazy<Option<String>> = Lazy::new(|| {
+        std::env::current_exe()
+            .ok()
+            .map(|path_buf| path_buf.to_string_lossy().to_string())
+    });
 
     /// Check if a cpu subtype (already parsed with the correct endianness) is arm64e, given its
     /// main cpu type is arm64. We only consider the lowest byte in the check.
