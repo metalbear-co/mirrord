@@ -1,17 +1,19 @@
 use std::collections::HashMap;
 
 use mirrord_config::LayerConfig;
-use mirrord_progress::Progress;
+use mirrord_progress::{Progress, ProgressMode, TaskProgress};
 
 use crate::{config::ExtensionExecArgs, error::CliError, execution::MirrordExecution, Result};
 
 /// Facilitate the execution of a process using mirrord by an IDE extension
-pub(crate) async fn extension_exec<P>(args: ExtensionExecArgs, progress: &P) -> Result<()>
+pub(crate) async fn extension_exec_with_progress<P>(
+    args: ExtensionExecArgs,
+    progress: &P,
+) -> Result<()>
 where
     P: Progress + Send + Sync,
 {
     let progress = progress.subtask("mirrord preparing to launch");
-
     let mut env: HashMap<String, String> = HashMap::new();
 
     if let Some(config_file) = args.config_file {
@@ -29,7 +31,6 @@ where
         std::env::set_var("MIRRORD_IMPERSONATED_TARGET", target.clone());
         env.insert("MIRRORD_IMPERSONATED_TARGET".into(), target);
     }
-
     let config = LayerConfig::from_env()?;
 
     // extension needs more timeout since it might need to build
@@ -47,4 +48,14 @@ where
     progress.done_with(&output);
     execution_info.wait().await?;
     Ok(())
+}
+
+pub(crate) async fn extension_exec(args: ExtensionExecArgs) {
+    mirrord_progress::init_from_env(ProgressMode::Json);
+    let progress = TaskProgress::new("mirrord ext");
+    let _ = extension_exec_with_progress(args, &progress)
+        .await
+        .inspect_err(|err| {
+            progress.fail_with(&format!("mirrord ext failed: {:?}", err));
+        });
 }

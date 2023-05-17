@@ -137,6 +137,9 @@ object MirrordApi {
                     } catch (e: Exception) {
                         return@forEach
                     }
+                    // "mirrord ext" -> "mirrord preparing to launch"
+                    // failures <- "mirrord ext"
+                    // success <- "mirrord preparing to launch"
                     when {
                         message.name == "mirrord preparing to launch" && message.type == MessageType.FinishedTask -> {
                             val success = message.success ?: throw Error("Invalid message")

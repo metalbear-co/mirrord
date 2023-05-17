@@ -19,7 +19,7 @@ use mirrord_kube::{
     api::{container::SKIP_NAMES, get_k8s_resource_api, kubernetes::create_kube_api},
     error::KubeApiError,
 };
-use mirrord_progress::{Progress, ProgressMode, TaskProgress};
+use mirrord_progress::{Progress, TaskProgress};
 use operator::operator_command;
 use semver::Version;
 use serde_json::json;
@@ -367,11 +367,7 @@ async fn main() -> miette::Result<()> {
         Commands::Login(args) => login(args)?,
         Commands::Operator(args) => operator_command(*args).await?,
         Commands::ExtensionExec(args) => {
-            mirrord_progress::init_from_env(ProgressMode::Json);
-            let progress = TaskProgress::new("mirrord ext");
-            let _ = extension_exec(*args, &progress).await.inspect_err(|err| {
-                progress.fail_with(&format!("mirrord ext failed: {:?}", err));
-            });
+            extension_exec(*args).await;
         }
         Commands::InternalProxy(args) => internal_proxy::proxy(*args).await?,
         Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
