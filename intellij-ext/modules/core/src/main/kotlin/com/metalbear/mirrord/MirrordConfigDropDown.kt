@@ -12,7 +12,7 @@ import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.IndexNotReadyException
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vfs.*
+import com.intellij.openapi.vfs.AsyncFileListener
 import com.intellij.openapi.vfs.newvfs.events.*
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.util.indexing.*
@@ -20,7 +20,6 @@ import com.intellij.util.io.EnumeratorStringDescriptor
 import com.intellij.util.io.KeyDescriptor
 import java.nio.file.Path
 import java.util.*
-import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.JComponent
 
 
@@ -35,7 +34,9 @@ import javax.swing.JComponent
 class MirrordConfigDropDown : ComboBoxAction() {
 
     private lateinit var configFiles: HashSet<String>
-    private var blockQueries = AtomicBoolean(false)
+
+    @Volatile
+    private var blockQueries: Boolean = false
 
     override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
@@ -76,28 +77,24 @@ class MirrordConfigDropDown : ComboBoxAction() {
         e.project?.let { project ->
             // this check ensures that we don't query the index when it is being built
             // querying the index during the startup/Dumb Mode can give us 0 or stale data
-            if (!::configFiles.isInitialized || updateConfigs.getAndSet(false)) {
-                queryIndexInSmartMode(project) {
-                    updateConfigFiles(project)
-                }
-                return
-            }
-
-            val files = configFiles
-            if (files.size < 2) {
-                chosenFile = files.firstOrNull()
+            if (!::configFiles.isInitialized) {
                 e.presentation.isVisible = false
+                blockAndQueryIndex(project)
                 return
             }
 
-            chosenFile = chosenFile ?: files.first()
+            blockAndQueryIndex(project)
 
-            if (chosenFile !in files) {
-                chosenFile = files.first()
+            if (configFiles.size > 1) {
+                if (chosenFile !in configFiles) {
+                    chosenFile = configFiles.first()
+                }
+
+                e.presentation.text = chosenFile?.let { getReadablePath(it, project) }
+            } else {
+                chosenFile = configFiles.firstOrNull()
             }
-
-            e.presentation.text = getReadablePath(chosenFile!!, project)
-            e.presentation.isVisible = true
+            e.presentation.isVisible = configFiles.size > 1
         }
     }
 
@@ -125,42 +122,55 @@ class MirrordConfigDropDown : ComboBoxAction() {
     // this function spawns a background task to query the index, not blocking the current thread
     // it maintains a single task to do so, using the `blockQueries` flag
     private fun queryIndexInSmartMode(project: Project, query: (Project) -> Unit) {
-        if (!blockQueries.getAndSet(true)) {
-            object : Task.Backgroundable(project, "mirrord") {
-                override fun run(indicator: ProgressIndicator) {
-                    val dumbService = DumbService.getInstance(project)
-                    // refer to `DumbService`, there is no "guarantee" still, but we stay in a loop
-                    // todo: should probably look into using the message bus to listen for indexing to finish
-                    while (true) {
-                        dumbService.waitForSmartMode()
-                        val success = ReadAction.compute<Boolean, RuntimeException> {
-                            if (project.isDisposed) {
-                                throw ProcessCanceledException()
-                            }
-                            if (dumbService.isDumb) {
-                                return@compute false
-                            }
-                            try {
-                                indicator.text = "mirrord: updating config files"
-                                query(project)
-                                blockQueries.set(false)
-                            } catch (e: IndexNotReadyException) {
-                                return@compute false
-                            }
-                            true
+        updateConfigs = false
+        object : Task.Backgroundable(project, "mirrord") {
+            override fun run(indicator: ProgressIndicator) {
+                val dumbService = DumbService.getInstance(project)
+                // refer to `DumbService`, there is no "guarantee" still, but we stay in a loop
+                // todo: should probably look into using the message bus to listen for indexing to finish
+                while (true) {
+                    indicator.text = "mirrord: waiting for smart mode"
+                    dumbService.waitForSmartMode()
+                    val success = ReadAction.compute<Boolean, RuntimeException> {
+                        if (project.isDisposed) {
+                            throw ProcessCanceledException()
                         }
-                        if (success) {
-                            break
+                        if (dumbService.isDumb) {
+                            return@compute false
                         }
+                        try {
+                            indicator.text = "mirrord: updating config files"
+                            query(project)
+                            blockQueries = false
+                        } catch (e: IndexNotReadyException) {
+                            return@compute false
+                        }
+                        true
+                    }
+                    if (success) {
+                        break
                     }
                 }
-            }.queue()
+            }
+        }.queue()
+    }
+
+    // this function checks the `blockQueries` and `updateConfigs` flag and blocks queries
+    // by laying down concurrent instructions in a manner that everytime updateConfigs is set
+    // a query will follow
+    private fun blockAndQueryIndex(project: Project) {
+        if (updateConfigs && !blockQueries) {
+            blockQueries = true
+            queryIndexInSmartMode(project, ::updateConfigFiles)
         }
     }
 
+
     companion object {
         var chosenFile: String? = null
-        var updateConfigs: AtomicBoolean = AtomicBoolean(false)
+
+        @Volatile
+        var updateConfigs: Boolean = true
     }
 }
 
@@ -173,7 +183,7 @@ class MirrordConfigWatcher : AsyncFileListener {
                 events.forEach { event ->
                     when (event) {
                         is VFileCreateEvent, is VFileDeleteEvent, is VFileMoveEvent, is VFileCopyEvent -> {
-                            MirrordConfigDropDown.updateConfigs.set(true)
+                            MirrordConfigDropDown.updateConfigs = true
                         }
                     }
                 }
