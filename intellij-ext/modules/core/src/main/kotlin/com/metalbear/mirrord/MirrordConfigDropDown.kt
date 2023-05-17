@@ -34,6 +34,8 @@ import javax.swing.JComponent
 class MirrordConfigDropDown : ComboBoxAction() {
 
     private lateinit var configFiles: HashSet<String>
+
+    @Volatile
     private var blockQueries: Boolean = false
 
     override fun getActionUpdateThread() = ActionUpdateThread.BGT
@@ -120,9 +122,9 @@ class MirrordConfigDropDown : ComboBoxAction() {
     // this function spawns a background task to query the index, not blocking the current thread
     // it maintains a single task to do so, using the `blockQueries` flag
     private fun queryIndexInSmartMode(project: Project, query: (Project) -> Unit) {
+        updateConfigs = false
         object : Task.Backgroundable(project, "mirrord") {
             override fun run(indicator: ProgressIndicator) {
-                updateConfigs = false
                 val dumbService = DumbService.getInstance(project)
                 // refer to `DumbService`, there is no "guarantee" still, but we stay in a loop
                 // todo: should probably look into using the message bus to listen for indexing to finish
@@ -166,6 +168,8 @@ class MirrordConfigDropDown : ComboBoxAction() {
 
     companion object {
         var chosenFile: String? = null
+
+        @Volatile
         var updateConfigs: Boolean = true
     }
 }
