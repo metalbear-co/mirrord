@@ -1,5 +1,4 @@
 #![feature(let_chains)]
-#![feature(result_option_inspect)]
 #![warn(clippy::indexing_slicing)]
 
 use std::{collections::HashMap, time::Duration};
@@ -364,11 +363,7 @@ async fn main() -> miette::Result<()> {
         Commands::ListTargets(args) => print_pod_targets(&args).await?,
         Commands::Login(args) => login(args)?,
         Commands::Operator(args) => operator_command(*args).await?,
-        Commands::ExtensionExec(args) =>{
-            let _ = extension_exec(*args).await.map_err(|e| {
-                TaskProgress::new("extension exec failed").fail_with(&e.to_string());
-            });
-        } ,
+        Commands::ExtensionExec(args) => extension_exec(*args).await?,
         Commands::InternalProxy(args) => internal_proxy::proxy(*args).await?,
         Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
     }
