@@ -16,6 +16,9 @@ import kotlinx.collections.immutable.toImmutableMap
 object MirrordExecManager {
     var enabled: Boolean = false
 
+    /** returns null if the user closed or cancelled target selection, otherwise the chosen target, which is either a
+     * pod or the targetless target
+     */
     private fun chooseTarget(wslDistribution: WSLDistribution?, project: Project): String? {
         MirrordLogger.logger.debug("choose target called")
         val path = MirrordConfigAPI.getConfigPath(project)
@@ -24,23 +27,13 @@ object MirrordExecManager {
             false -> null
         }
 
+        // includes targetless target.
         val pods =
             MirrordApi.listPods(
                 configPath,
                 project,
                 wslDistribution
             )
-        pods ?: return null
-
-        if (pods.isEmpty()) {
-            MirrordNotifier.notify(
-                    "No mirrord target available in the configured namespace. " +
-                            "Set a different target namespace or kubeconfig in the mirrord configuration file.",
-                    NotificationType.ERROR,
-                    project,
-            )
-            return null
-        }
 
         MirrordLogger.logger.debug("returning pods")
         return MirrordExecDialog.selectTargetDialog(pods)
@@ -93,8 +86,14 @@ object MirrordExecManager {
                 }.get()
             }
             if (target == null) {
+                MirrordLogger.logger.warn("mirrord loading canceled")
+                MirrordNotifier.notify("mirrord loading canceled.", NotificationType.WARNING, project)
+                return null
+            }
+            if (target == MirrordApi.targetlessTargetName) {
                 MirrordLogger.logger.warn("No target specified - running targetless")
                 MirrordNotifier.notify("No target specified, mirrord running targetless.", NotificationType.INFORMATION, project)
+                target = null
             }
         }
 
