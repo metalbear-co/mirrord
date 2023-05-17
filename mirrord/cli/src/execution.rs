@@ -202,3 +202,10 @@ impl MirrordExecution {
         Ok(())
     }
 }
+
+// if a proxy process has been created and there is an error, we need to terminate it
+impl Drop for MirrordExecution {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+    }
+}
