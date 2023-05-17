@@ -7,7 +7,7 @@ use mirrord_operator::client::OperatorApi;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
-use tracing::{trace};
+use tracing::trace;
 
 use crate::{CliError, Result};
 
