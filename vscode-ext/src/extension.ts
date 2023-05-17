@@ -433,11 +433,12 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 			if (targetName) {
 				if (targetName != TARGETLESS_TARGET_NAME) {
 					target = targetName;
-				} else {
-					vscode.window.showInformationMessage("mirrord running targetless");
 				}
 				globalContext.globalState.update(LAST_TARGET_KEY, targetName);
 				globalContext.workspaceState.update(LAST_TARGET_KEY, targetName);
+			}
+			if (!target) {
+				vscode.window.showInformationMessage("mirrord running targetless");
 			}
 		}
 
