@@ -127,20 +127,12 @@ impl OperatorApi {
     }
 
     async fn get_version(&self) -> Result<String> {
-        let version = match self
-            .version_api
+        self.version_api
             .get(OPERATOR_STATUS_NAME)
             .await
             .map_err(KubeApiError::KubeError)
             .map_err(OperatorApiError::KubeApiError)
-        {
-            Ok(status) => status.spec.operator_version,
-            Err(err) => {
-                error!("Unable to get operator version: {}", err);
-                return Err(err);
-            }
-        };
-        Ok(version)
+            .map(|status| status.spec.operator_version)
     }
 
     async fn fetch_target(&self) -> Result<Option<TargetCrd>> {
