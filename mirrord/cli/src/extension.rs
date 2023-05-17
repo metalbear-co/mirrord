@@ -1,15 +1,17 @@
 use std::collections::HashMap;
 
 use mirrord_config::LayerConfig;
-use mirrord_progress::{Progress, ProgressMode, TaskProgress};
+use mirrord_progress::Progress;
 
 use crate::{config::ExtensionExecArgs, error::CliError, execution::MirrordExecution, Result};
 
 /// Facilitate the execution of a process using mirrord by an IDE extension
-pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
-    mirrord_progress::init_from_env(ProgressMode::Json);
+pub(crate) async fn extension_exec<P>(args: ExtensionExecArgs, progress: &P) -> Result<()>
+where
+    P: Progress + Send + Sync,
+{
+    let progress = progress.subtask("mirrord preparing to launch");
 
-    let progress = TaskProgress::new("mirrord preparing to launch");
     let mut env: HashMap<String, String> = HashMap::new();
 
     if let Some(config_file) = args.config_file {
@@ -33,22 +35,16 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
     // extension needs more timeout since it might need to build
     // or run tasks before actually launching.
     #[cfg(target_os = "macos")]
-    let execution_info =
-        MirrordExecution::start(&config, args.executable.as_deref(), &progress, Some(60)).await;
+    let mut execution_info =
+        MirrordExecution::start(&config, args.executable.as_deref(), &progress, Some(60)).await?;
     #[cfg(not(target_os = "macos"))]
     let mut execution_info = MirrordExecution::start(&config, &progress, Some(60)).await?;
 
-    match execution_info {
-        Ok(mut execution_info) => {
-            execution_info.environment.extend(env);
-            let output = serde_json::to_string(&execution_info)?;
-            progress.done_with(&output);
-            let _ = execution_info.wait().await;
-        }
-        Err(err) => {
-            progress.fail_with(&err.to_string());
-        }
-    }
+    // We don't execute so set envs aren't passed, so we need to add config file and target to env.
+    execution_info.environment.extend(env);
 
+    let output = serde_json::to_string(&execution_info)?;
+    progress.done_with(&output);
+    execution_info.wait().await?;
     Ok(())
 }
