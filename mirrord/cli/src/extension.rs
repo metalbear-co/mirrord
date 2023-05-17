@@ -56,6 +56,6 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs) {
     let _ = extension_exec_with_progress(args, &progress)
         .await
         .inspect_err(|err| {
-            progress.fail_with(&format!("mirrord ext failed: {:?}", err));
+            progress.fail_with(&err.to_string());
         });
 }
