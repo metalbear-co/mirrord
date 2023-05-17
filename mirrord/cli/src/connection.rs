@@ -7,7 +7,7 @@ use mirrord_operator::client::OperatorApi;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::trace;
 
 use crate::{CliError, Result};
 
@@ -48,9 +48,9 @@ where
             None
         }
         Err(err) => {
-            sub_progress.fail_with("Unable to connect to Operator");
+            sub_progress.done_with("Unable to check if operator exists, probably due to RBAC");
 
-            warn!("{err}");
+            trace!("{err}");
 
             None
         }
