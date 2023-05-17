@@ -29,7 +29,7 @@ use crate::{
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
     tcp::{Listen, TcpIncoming},
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_LOCALHOST,
-    OUTGOING_IGNORE_LOCALHOST, REMOTE_UNIX_STREAMS,
+    OUTGOING_IGNORE_LOCALHOST, REMOTE_UNIX_STREAMS, TARGETLESS,
 };
 
 /// Hostname initialized from the agent with [`gethostname`].
@@ -151,6 +151,20 @@ pub(super) fn bind(
         Err(Bypass::Port(requested_address.port()))?;
     }
 
+    if TARGETLESS
+        .get()
+        .copied()
+        .expect("Should be set during initialization!")
+    {
+        warn!(
+            "Binding a port ({}) while running targetless. A targetless agent is not exposed by \
+            any service. Therefore, letting this port bind happen locally instead of on the \
+            cluster.",
+            requested_address.port()
+        );
+        return Detour::Bypass(Bypass::BindWhenTargetless);
+    }
+
     let unbound_address = match socket.domain {
         libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
             IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -164,6 +178,18 @@ pub(super) fn bind(
     }?;
 
     trace!("bind -> unbound_address {:#?}", unbound_address);
+
+    // Check if the user's requested address isn't already in use, even though it's not actually
+    // bound, as we bind to a different address, but if we don't check for this then we're
+    // changing normal socket behavior (see issue #1123).
+    if SOCKETS.iter().any(|socket| match &socket.state {
+        SocketState::Initialized | SocketState::Connected(_) => false,
+        SocketState::Bound(bound) | SocketState::Listening(bound) => {
+            bound.requested_address == requested_address
+        }
+    }) {
+        Err(HookError::AddressAlreadyBound(requested_address))?;
+    }
 
     let bind_result = unsafe { FN_BIND(sockfd, unbound_address.as_ptr(), unbound_address.len()) };
     if bind_result != 0 {

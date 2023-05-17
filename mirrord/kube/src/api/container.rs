@@ -33,7 +33,7 @@ pub trait ContainerApi {
     async fn create_agent<P>(
         client: &Client,
         agent: &AgentConfig,
-        runtime_data: RuntimeData,
+        runtime_data: Option<RuntimeData>,
         connection_port: u16,
         progress: &P,
         agent_gid: u16,
@@ -122,11 +122,40 @@ async fn wait_for_agent_startup(
 #[derive(Debug)]
 pub struct JobContainer;
 
+// impl JobContainer {
+//     /// Some fields of are only added if `runtime_data` is not `None` (the agent is not
+// targetless).     ///
+//     /// Add those fields according to `runtime_data`
+//     fn add_conditional_fields(
+//         job_spec: Option<&mut JobSpec>,
+//         runtime_data: Option<&RuntimeData>,
+//         agent_gid: u16,
+//     ) {
+//         // We will always go into the first two `if let`s, as we just create the specs in the
+//         // calling function.
+//         if let Some(job_spec) = job_spec {
+//             if let Some(pod_spec) = job_spec.template.spec.as_mut() {
+//                 if let Some(runtime_data) = runtime_data {
+//                     // targetless
+//                     pod_spec.node_name = Some(runtime_data.node_name.clone());
+//                     pod_spec.host_pid = Some(true);
+//                     pod_spec.security_context = Some(SecurityContext {
+//                         run_as_group: Some(agent_gid as _),
+//                         privileged: Some(true),
+//                         ..Default::default()
+//                     })
+//                 }
+//             }
+//         }
+//     }
+// }
+
 impl ContainerApi for JobContainer {
+    /// runtime_data is `None` when targetless.
     async fn create_agent<P>(
         client: &Client,
         agent: &AgentConfig,
-        runtime_data: RuntimeData,
+        runtime_data: Option<RuntimeData>,
         connection_port: u16,
         progress: &P,
         agent_gid: u16,
@@ -139,13 +168,17 @@ impl ContainerApi for JobContainer {
 
         let mut agent_command_line = vec![
             "./mirrord-agent".to_owned(),
-            "--container-id".to_owned(),
-            runtime_data.container_id,
-            "--container-runtime".to_owned(),
-            runtime_data.container_runtime.to_string(),
             "-l".to_owned(),
             connection_port.to_string(),
         ];
+
+        if let Some(runtime_data) = runtime_data.as_ref() {
+            agent_command_line.push("--container-id".to_owned());
+            agent_command_line.push(runtime_data.container_id.to_string());
+            agent_command_line.push("--container-runtime".to_owned());
+            agent_command_line.push(runtime_data.container_runtime.to_string());
+        }
+
         if let Some(timeout) = agent.communication_timeout {
             agent_command_line.push("-t".to_owned());
             agent_command_line.push(timeout.to_string());
@@ -159,72 +192,76 @@ impl ContainerApi for JobContainer {
             agent_command_line.push("--test-error".to_owned());
         }
 
-        let agent_pod: Job = serde_json::from_value(
-            json!({ // Only Jobs support self deletion after completion
+        let targeted = runtime_data.is_some();
+
+        let json_value = json!({ // Only Jobs support self deletion after completion
+            "metadata": {
+                "name": mirrord_agent_job_name,
+                "labels": {
+                    "app": "mirrord"
+                },
+                "annotations":
+                {
+                    "sidecar.istio.io/inject": "false",
+                    "linkerd.io/inject": "disabled"
+                }
+            },
+            "spec": {
+                "ttlSecondsAfterFinished": agent.ttl,
+                "template": {
                     "metadata": {
-                        "name": mirrord_agent_job_name,
-                        "labels": {
-                            "app": "mirrord"
-                        },
-                        "annotations":
-                        {
+                        "annotations": {
                             "sidecar.istio.io/inject": "false",
                             "linkerd.io/inject": "disabled"
+                        },
+                        "labels": {
+                            "app": "mirrord"
                         }
                     },
-                    "spec": {
-                    "ttlSecondsAfterFinished": agent.ttl,
-
-                        "template": {
-                            "metadata": {
-                                "annotations":
-                                {
-                                    "sidecar.istio.io/inject": "false",
-                                    "linkerd.io/inject": "disabled"
-                                },
-                                "labels": {
-                                    "app": "mirrord"
-                                }
-                            },
 
                     "spec": {
-                        "hostPID": true,
-                        "nodeName": runtime_data.node_name,
+                        "hostPID": targeted,
+                        "nodeName": runtime_data.map(|rd| rd.node_name),
                         "restartPolicy": "Never",
-                        "volumes": [
-                            {
-                                "name": "hostrun",
-                                "hostPath": {
-                                    "path": "/run"
+                        "volumes": targeted.then(|| json!(
+                            [
+                                {
+                                    "name": "hostrun",
+                                    "hostPath": {
+                                        "path": "/run"
+                                    }
+                                },
+                                {
+                                    "name": "hostvar",
+                                    "hostPath": {
+                                        "path": "/var"
+                                    }
                                 }
-                            },
-                            {
-                                "name": "hostvar",
-                                "hostPath": {
-                                    "path": "/var"
-                                }
-                            }
-                        ],
+                            ]
+                        )),
                         "imagePullSecrets": agent.image_pull_secrets,
                         "containers": [
                             {
                                 "name": "mirrord-agent",
                                 "image": Self::agent_image(agent),
                                 "imagePullPolicy": agent.image_pull_policy,
-                                "securityContext": {
-                                    "runAsGroup": agent_gid,
-                                    "privileged": true,
-                                },
-                                "volumeMounts": [
-                                    {
-                                        "mountPath": "/host/run",
-                                        "name": "hostrun"
-                                    },
-                                    {
-                                        "mountPath": "/host/var",
-                                        "name": "hostvar"
-                                    }
-                                ],
+                                "securityContext": targeted.then(||
+                                    json!({
+                                        "runAsGroup": agent_gid,
+                                        "privileged": true,
+                                    })
+                                ),
+                                "volumeMounts": targeted.then(||
+                                    json!([
+                                        {
+                                            "mountPath": "/host/run",
+                                            "name": "hostrun"
+                                        },
+                                        {
+                                            "mountPath": "/host/var",
+                                            "name": "hostvar"
+                                        }
+                                    ])),
                                 "command": agent_command_line,
                                 "env": [
                                     { "name": "RUST_LOG", "value": agent.log_level },
@@ -243,9 +280,12 @@ impl ContainerApi for JobContainer {
                     }
                 }
             }
-                }
-            ),
-        )?;
+        });
+
+        let agent_pod: Job = serde_json::from_value(json_value)?;
+
+        // Self::add_conditional_fields(agent_pod.spec.as_mut(), runtime_data.as_ref(), agent_gid);
+
         let job_api = get_k8s_resource_api(client, agent.namespace.as_deref());
 
         job_api
@@ -301,7 +341,7 @@ impl ContainerApi for EphemeralContainer {
     async fn create_agent<P>(
         client: &Client,
         agent: &AgentConfig,
-        runtime_data: RuntimeData,
+        runtime_data: Option<RuntimeData>,
         connection_port: u16,
         progress: &P,
         agent_gid: u16,
@@ -309,6 +349,8 @@ impl ContainerApi for EphemeralContainer {
     where
         P: Progress + Send + Sync,
     {
+        // Ephemeral should never be targetless, so there should be runtime data.
+        let runtime_data = runtime_data.ok_or(KubeApiError::MissingRuntimeData)?;
         let container_progress = progress.subtask("creating ephemeral container...");
 
         warn!("Ephemeral Containers is an experimental feature

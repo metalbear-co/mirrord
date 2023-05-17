@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::license::License;
 
+pub const TARGETLESS_TARGET_NAME: &str = "targetless";
+
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
@@ -14,7 +16,8 @@ use crate::license::License;
     namespaced
 )]
 pub struct TargetSpec {
-    pub target: Target,
+    /// None when targetless.
+    pub target: Option<Target>,
 }
 
 impl TargetCrd {
@@ -25,19 +28,34 @@ impl TargetCrd {
         }
     }
 
+    /// "targetless" ([`TARGETLESS_TARGET_NAME`]) if `None`,
+    /// else <resource_type>.<resource_name>...
+    pub fn target_name_by_optional_config(target_config: &Option<TargetConfig>) -> String {
+        target_config.as_ref().map_or_else(
+            || TARGETLESS_TARGET_NAME.to_string(),
+            |target_config| Self::target_name(&target_config.path),
+        )
+    }
+
     pub fn name(&self) -> String {
-        Self::target_name(&self.spec.target)
+        self.spec
+            .target
+            .as_ref()
+            .map(Self::target_name)
+            .unwrap_or(TARGETLESS_TARGET_NAME.to_string())
     }
 
     pub fn from_target(target_config: TargetConfig) -> Option<Self> {
-        let target = target_config.path?;
+        let target = target_config.path;
 
-        let target_name = match &target {
-            Target::Deployment(target) => format!("deploy.{}", target.deployment),
-            Target::Pod(target) => format!("pod.{}", target.pod),
-        };
+        let target_name = Self::target_name(&target);
 
-        let mut crd = TargetCrd::new(&target_name, TargetSpec { target });
+        let mut crd = TargetCrd::new(
+            &target_name,
+            TargetSpec {
+                target: Some(target),
+            },
+        );
 
         crd.metadata.namespace = target_config.namespace;
 
@@ -45,12 +63,12 @@ impl TargetCrd {
     }
 }
 
-impl From<TargetCrd> for TargetConfig {
+impl From<TargetCrd> for Option<TargetConfig> {
     fn from(crd: TargetCrd) -> Self {
-        TargetConfig {
-            path: Some(crd.spec.target),
+        crd.spec.target.map(|target| TargetConfig {
+            path: target,
             namespace: crd.metadata.namespace,
-        }
+        })
     }
 }
 

@@ -236,6 +236,10 @@ pub(crate) static OUTGOING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
 /// When true, localhost connections will stay local - wont mirror or steal.
 pub(crate) static INCOMING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
 
+/// Indicates this is a targetless run, so that users can be warned if their application is
+/// mirroring/stealing from a targetless agent.
+pub(crate) static TARGETLESS: OnceLock<bool> = OnceLock::new();
+
 /// Ports to ignore on listening for mirroring/stealing.
 pub(crate) static INCOMING_IGNORE_PORTS: OnceLock<HashSet<u16>> = OnceLock::new();
 
@@ -429,6 +433,10 @@ fn layer_start(config: LayerConfig) {
     INCOMING_IGNORE_LOCALHOST
         .set(config.feature.network.incoming.ignore_localhost)
         .expect("Setting INCOMING_IGNORE_LOCALHOST singleton");
+
+    TARGETLESS
+        .set(config.target.is_none())
+        .expect("Setting TARGETLESS singleton");
 
     INCOMING_IGNORE_PORTS
         .set(config.feature.network.incoming.ignore_ports.clone())

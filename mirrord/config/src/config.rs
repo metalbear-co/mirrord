@@ -12,6 +12,16 @@ pub enum ConfigError {
     #[error("invalid target provided `{0}`!")]
     InvalidTarget(String),
 
+    #[error(
+        "A target namespace was specified, but no target was specified. If you want to set the 
+        namespace in which the agent will be created, please set the agent namespace, not the 
+        target namespace. That value can be set with agent.namespace in the configuration file, 
+        the -a argument of the CLI, or the MIRRORD_AGENT_NAMESPACE environment variable.
+         
+        If you are not trying to run targetless, please specify a target instead."
+    )]
+    TargetNamespaceWithoutTarget,
+
     #[error("value for {1:?} not provided in {0:?} (env override {2:?})")]
     ValueNotProvided(&'static str, &'static str, Option<&'static str>),
 

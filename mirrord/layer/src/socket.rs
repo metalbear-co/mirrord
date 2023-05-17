@@ -46,6 +46,7 @@ pub static CONNECTION_QUEUE: LazyLock<ConnectionQueue> = LazyLock::new(Connectio
 pub struct SocketInformation {
     /// Address of the incoming peer
     pub remote_address: SocketAddr,
+
     /// Address of the local peer (our IP)
     pub local_address: SocketAddr,
 }
@@ -94,15 +95,43 @@ impl SocketInformation {
 
 #[derive(Debug)]
 pub struct Connected {
-    /// Remote address we're connected to
+    /// Remote address we're connected to.
     remote_address: SocketAddress,
+
     /// Local address (pod-wise)
+    ///
+    /// ## Example
+    ///
+    /// ```sh
+    /// $ kubectl get pod -o wide
+    ///
+    /// NAME             READY   STATUS    IP       
+    /// impersonated-pod 0/1     Running   1.2.3.4
+    /// ```
+    ///
+    /// We would set this ip as `1.2.3.4:{port}` in [`bind`], where `{port}` is the user requested
+    /// port.
     local_address: SocketAddress,
 }
 
+/// Represents a [`SocketState`] where the user made a [`libc::bind`] call, and we intercepted it.
+///
+/// ## Details
+///
+/// Our [`ops::bind`] hook doesn't bind the address that the user passed to us, instead we call
+/// [`hooks::FN_BIND`] with `localhost:0` (or `unspecified:0` for ipv6), and use
+/// [`hooks::FN_GETSOCKNAME`] to retrieve this bound address which we assign to `Bound::address`.
+///
+/// The original user requested address is assigned to `Bound::requested_address`, and used as an
+/// illusion for when the user calls [`libc::getsockname`], as if this address was the actual local
+/// bound address.
 #[derive(Debug, Clone, Copy)]
 pub struct Bound {
+    /// Address originally requested by the user for [`bind`].
     requested_address: SocketAddr,
+
+    /// Actual bound address that we use to communicate between the user's listener socket and our
+    /// interceptor socket.
     address: SocketAddr,
 }
 

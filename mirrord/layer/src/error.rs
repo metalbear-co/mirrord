@@ -1,4 +1,4 @@
-use std::{env::VarError, ptr, str::ParseBoolError};
+use std::{env::VarError, net::SocketAddr, ptr, str::ParseBoolError};
 
 use errno::set_errno;
 use ignore_codes::*;
@@ -93,6 +93,9 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: Pointer argument points to an invalid address")]
     BadPointer,
+
+    #[error("mirrord-layer: Socket address `{0}` is already bound!")]
+    AddressAlreadyBound(SocketAddr),
 }
 
 /// Errors internal to mirrord-layer.
@@ -280,6 +283,7 @@ impl From<HookError> for i64 {
             HookError::SocketUnsuportedIpv6 => libc::EAFNOSUPPORT,
             HookError::UnsupportedSocketType => libc::EAFNOSUPPORT,
             HookError::BadPointer => libc::EFAULT,
+            HookError::AddressAlreadyBound(_) => libc::EADDRINUSE,
         };
 
         set_errno(errno::Errno(libc_error));

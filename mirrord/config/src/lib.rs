@@ -172,7 +172,7 @@ pub struct LayerConfig {
     /// }
     /// ```
     #[config(nested)]
-    pub target: TargetConfig,
+    pub target: Option<TargetConfig>,
 
     /// ### connect_tcp {#root-connect_tcp}
     ///

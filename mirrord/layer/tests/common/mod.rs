@@ -335,7 +335,7 @@ impl LayerConnection {
     /// There is no such actual connection, because there is no target, but the layer should start
     /// a mirror connection with the application.
     /// Return the id of the new connection.
-    async fn send_new_connection(&mut self, port: u16) -> u64 {
+    pub async fn send_new_connection(&mut self, port: u16) -> u64 {
         let new_connection_id = self.num_connections;
         self.codec
             .send(DaemonMessage::Tcp(DaemonTcp::NewConnection(
@@ -367,7 +367,7 @@ impl LayerConnection {
     /// There is no such actual connection, because there is no target, but the layer should start
     /// a mirror connection with the application.
     /// Return the id of the new connection.
-    async fn send_close(&mut self, connection_id: u64) {
+    pub async fn send_close(&mut self, connection_id: u64) {
         self.codec
             .send(DaemonMessage::Tcp(DaemonTcp::Close(TcpClose {
                 connection_id,
@@ -738,6 +738,13 @@ pub enum Application {
     Go19SelfOpen,
     RustOutgoingUdp,
     RustOutgoingTcp,
+    RustIssue1123,
+    RustIssue1054,
+    // For running applications with the executable and arguments determined at runtime.
+    // Compiled only on macos just because it's currently only used there, but could be used also
+    // on Linux.
+    #[cfg(target_os = "macos")]
+    DynamicApp(String, Vec<String>),
 }
 
 impl Application {
@@ -804,11 +811,15 @@ impl Application {
             Application::Go19FAccessAt => String::from("tests/apps/faccessat_go/19"),
             Application::Go20FAccessAt => String::from("tests/apps/faccessat_go/20"),
             Application::Go19SelfOpen => String::from("tests/apps/self_open/19"),
+            Application::RustIssue1123 => String::from("tests/apps/issue1123/target/issue1123"),
+            Application::RustIssue1054 => String::from("tests/apps/issue1054/target/issue1054"),
             Application::RustOutgoingUdp | Application::RustOutgoingTcp => format!(
                 "{}/{}",
                 env!("CARGO_MANIFEST_DIR"),
                 "../../target/debug/outgoing",
             ),
+            #[cfg(target_os = "macos")]
+            Application::DynamicApp(exe, _args) => exe.clone(),
         }
     }
 
@@ -875,6 +886,8 @@ impl Application {
             | Application::Go19FAccessAt
             | Application::Go18FAccessAt
             | Application::RustFileOps
+            | Application::RustIssue1123
+            | Application::RustIssue1054
             | Application::EnvBashCat
             | Application::BashShebang
             | Application::Go19SelfOpen
@@ -888,6 +901,8 @@ impl Application {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
+            #[cfg(target_os = "macos")]
+            Application::DynamicApp(_exe, args) => args.to_owned(),
         }
     }
 
@@ -898,6 +913,8 @@ impl Application {
             | Application::Go19FileOps
             | Application::Go20FileOps
             | Application::NodeHTTP
+            | Application::RustIssue1123
+            | Application::RustIssue1054
             | Application::PythonFlaskHTTP => 80,
             Application::PythonFastApiHTTP => 1234,
             Application::PythonListen => 21232,
@@ -929,6 +946,8 @@ impl Application {
             | Application::Go20Dir
             | Application::RustOutgoingUdp
             | Application::RustOutgoingTcp => unimplemented!("shouldn't get here"),
+            #[cfg(target_os = "macos")]
+            Application::DynamicApp(_, _) => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
         }
     }
@@ -979,8 +998,6 @@ impl Application {
     }
 
     /// Like `start_process_with_layer`, but also verify a port subscribe.
-    ///
-    /// - `resolve_hostname`: indicates if this test will start with the `gethostname` messages.
     pub async fn start_process_with_layer_and_port(
         &self,
         dylib_path: &PathBuf,
