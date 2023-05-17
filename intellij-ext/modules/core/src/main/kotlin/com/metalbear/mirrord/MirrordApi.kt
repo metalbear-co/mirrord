@@ -13,7 +13,6 @@ import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 
 
 enum class MessageType {
@@ -98,27 +97,27 @@ object MirrordApi {
         project: Project?,
         wslDistribution: WSLDistribution?
     ): MutableMap<String, String> {
-        val commandLine = GeneralCommandLine(cliPath(wslDistribution), "ext")
+        val commandLine = GeneralCommandLine(cliPath(wslDistribution), "ext").apply {
+            target?.let {
+                addParameter("-t")
+                addParameter(it)
+            }
 
-        target?.let {
-            commandLine.addParameter("-t")
-            commandLine.addParameter(target)
+            configFile?.let {
+                val formattedPath = wslDistribution?.getWslPath(it) ?: it
+                addParameter("-f")
+                addParameter(formattedPath)
+            }
+
+            wslDistribution?.let {
+                val wslOptions = WSLCommandLineOptions().apply {
+                    isLaunchWithWslExe = true
+                }
+                it.patchCommandLine(this, project, wslOptions)
+            }
         }
 
-        configFile?.let {
-            // Format according to wslDistribution if exists
-            val formattedPath = wslDistribution?.getWslPath(it) ?: it
-            commandLine.addParameter("-f")
-            commandLine.addParameter(formattedPath)
-        }
-
-        wslDistribution?.let {
-            val wslOptions = WSLCommandLineOptions()
-            wslOptions.isLaunchWithWslExe = true
-            it.patchCommandLine(commandLine, project, wslOptions)
-        }
-
-        logger.info("running mirrord with following commandline: %s".format(commandLine.commandLineString))
+        logger.info("running mirrord with following command line: ${commandLine.commandLineString}")
 
         val process = commandLine.toProcessBuilder()
             .redirectOutput(ProcessBuilder.Redirect.PIPE)
@@ -127,48 +126,56 @@ object MirrordApi {
 
         val bufferedReader = process.inputStream.reader().buffered()
         val gson = Gson()
-        val environment = CompletableFuture<MutableMap<String, String>?>()
+        val environment = CompletableFuture<MutableMap<String, String>>()
 
         val streamProgressTask = object : Task.Backgroundable(project, "mirrord", true) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.text = "mirrord is starting..."
-                for (line in bufferedReader.lines()) {
-                    val message = gson.fromJson(line, Message::class.java)
-                    // See if it's the final message
-                    if (message.name == "mirrord preparing to launch"
-                        && message.type == MessageType.FinishedTask
-                    ) {
-                        val success = message.success ?: throw Error("Invalid message")
-                        if (success) {
-                            val innerMessage = message.message ?: throw Error("Invalid inner message")
-                            val executionInfo = gson.fromJson(innerMessage, MirrordExecution::class.java)
-                            indicator.text = "mirrord is running"
-                            environment.complete(executionInfo.environment)
-                            return
+                bufferedReader.lines().forEach { line ->
+                    val message = try {
+                        gson.fromJson(line, Message::class.java)
+                    } catch (e: Exception) {
+                        return@forEach
+                    }
+                    when {
+                        message.name == "mirrord preparing to launch" && message.type == MessageType.FinishedTask -> {
+                            val success = message.success ?: throw Error("Invalid message")
+                            if (success) {
+                                val innerMessage = message.message ?: throw Error("Invalid inner message")
+                                val executionInfo = gson.fromJson(innerMessage, MirrordExecution::class.java)
+                                indicator.text = "mirrord is running"
+                                environment.complete(executionInfo.environment)
+                                return@forEach
+                            }
                         }
-                    } else if (message.name == "mirrord ext" && message.type == MessageType.FinishedTask) {
-                        val success = message.success ?: throw Error("Invalid message")
-                        if (!success) {
-                            val innerMessage = message.message ?: throw Error("Invalid inner message")
-                            MirrordNotifier.errorNotification("$innerMessage", project)
-                            return
+                        message.name == "mirrord ext" && message.type == MessageType.FinishedTask -> {
+                            val success = message.success ?: throw Error("Invalid message")
+                            if (!success) {
+                                val innerMessage = message.message ?: throw Error("Invalid inner message")
+                                MirrordNotifier.errorNotification(innerMessage, project)
+                                environment.cancel(true)
+                                return@forEach
+                            }
                         }
-                    } else if (message.type == MessageType.Warning) {
-                        message.message?.let { MirrordNotifier.notify(it, NotificationType.WARNING, project) }
-                    } else {
-                        var displayMessage = message.name
-                        message.message?.let {
-                            displayMessage += ": $it"
+                        message.type == MessageType.Warning -> {
+                            message.message?.let { MirrordNotifier.notify(it, NotificationType.WARNING, project) }
                         }
-                        indicator.text = displayMessage
+                        else -> {
+                            var displayMessage = message.name
+                            message.message?.let {
+                                displayMessage += ": $it"
+                            }
+                            indicator.text = displayMessage
+                        }
                     }
                 }
-                environment.complete(null)
-                return
+                environment.cancel(true)
             }
 
             override fun onSuccess() {
-                MirrordNotifier.notify("mirrord started!", NotificationType.INFORMATION, project)
+                if (!environment.isCancelled) {
+                    MirrordNotifier.notify("mirrord started!", NotificationType.INFORMATION, project)
+                }
                 super.onSuccess()
             }
 
@@ -181,18 +188,14 @@ object MirrordApi {
 
         ProgressManager.getInstance().run(streamProgressTask)
 
-        // when an exception occurs in the task, the current process is still stuck waiting on env
-        // which is why an explicit timeout is needed
         try {
-            environment.get(60, TimeUnit.SECONDS)?.let {
-                return it
-            }
-        } catch (e: TimeoutException) {
+            return environment.get(30, TimeUnit.SECONDS)
+        } catch (e: Exception) {
             MirrordNotifier.errorNotification("mirrord failed to fetch the env", project)
         }
 
-        val capturedError = process.errorStream.reader().readText()
-        logger.error("mirrord stderr: %s".format(capturedError))
+        logger.error("mirrord stderr: ${process.errorStream.reader().readText()}")
         throw Error("failed launch")
     }
+
 }
