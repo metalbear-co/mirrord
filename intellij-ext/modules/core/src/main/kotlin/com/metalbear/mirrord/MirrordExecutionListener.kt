@@ -17,6 +17,7 @@ class MirrordExecutionListener : ExecutionListener {
 
 	companion object {
 		var mirrordEnv: LinkedHashMap<String, String> = LinkedHashMap()
+		var originEnv: LinkedHashMap<String, String> = LinkedHashMap()
 		var originInterpreterRef: Any? = null
 		var originPackageManagerPackageRef: Any? = null
 	}
@@ -46,6 +47,10 @@ class MirrordExecutionListener : ExecutionListener {
 	}
 
 	private fun patchNpmEnv(env: ExecutionEnvironment, wslDistribution: WSLDistribution?) {
+		if (mirrordEnv.isEmpty()) {
+			return
+		}
+
 		val project = env.project
 		val runProfile = env.runProfile
 
@@ -57,6 +62,9 @@ class MirrordExecutionListener : ExecutionListener {
 			myEnvData.isAccessible = true
 
 			val envData = myEnvData.get(runSettings) as EnvironmentVariablesData
+
+			originEnv = LinkedHashMap(envData.envs)
+
 			val newEnvData = envData.with(envData.envs + mirrordEnv)
 
 			myEnvData.set(runSettings, newEnvData)
@@ -110,6 +118,10 @@ class MirrordExecutionListener : ExecutionListener {
 	}
 
 	private fun clearNpmEnv(env: ExecutionEnvironment) {
+		if (originInterpreterRef == null && originPackageManagerPackageRef == null && mirrordEnv.isEmpty()) {
+			return
+		}
+
 		val runProfile = env.runProfile
 
 		try {
@@ -119,15 +131,8 @@ class MirrordExecutionListener : ExecutionListener {
 			val getEnvData = runSettings.javaClass.getMethod("getEnvData")
 			val envData = getEnvData.invoke(runSettings) as EnvironmentVariablesData
 
-			val envMap = LinkedHashMap(envData.envs)
-
-			for (key in mirrordEnv.keys) {
-				if (envMap.containsKey(key)) {
-					envMap.remove(key)
-				}
-			}
-
-			val newEnvData = envData.with(envMap)
+			val newEnvData = envData.with(originEnv)
+			originEnv.clear()
 
 			val toBuilder = runSettings.javaClass.getMethod("toBuilder")
 			val builder = toBuilder.invoke(runSettings)
@@ -136,6 +141,9 @@ class MirrordExecutionListener : ExecutionListener {
 			setEnvData.invoke(builder, newEnvData)
 
 			if (SystemInfo.isMac) {
+				builder.javaClass.getMethod("setInterpreterRef", originInterpreterRef!!.javaClass).invoke(builder, originInterpreterRef)
+				originInterpreterRef = null
+
 				builder.javaClass.getMethod("setPackageManagerPackageRef", originPackageManagerPackageRef!!.javaClass).invoke(builder, originPackageManagerPackageRef)
 				originPackageManagerPackageRef = null
 			}
@@ -173,12 +181,6 @@ class MirrordExecutionListener : ExecutionListener {
 				mirrordEnv[entry.key] = entry.value
 			}
 		}
-
-		MirrordNotifier.notify(
-				"${runProfile::class.qualifiedName}: $mirrordEnv",
-				NotificationType.INFORMATION,
-				env.project
-		)
 
 		patchNpmEnv(env, wsl)
 
