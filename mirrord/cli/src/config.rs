@@ -59,6 +59,9 @@ pub(super) enum Commands {
     /// Internal proxy - used to aggregate connections from multiple layers
     #[command(hide = true, name = "intproxy")]
     InternalProxy(Box<InternalProxyArgs>),
+
+    #[command(hide = true, name = "sip-patch")]
+    SipPatch(Box<SipPatchArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -308,4 +311,9 @@ fn email_parse(email: &str) -> Result<EmailAddress, String> {
     email
         .parse()
         .map_err(|e: email_address::Error| format!("invalid email address provided: {e:?}"))
+}
+
+#[derive(Args, Debug)]
+pub(super) struct SipPatchArgs {
+    pub binary: String,
 }
