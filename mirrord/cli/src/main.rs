@@ -4,9 +4,10 @@
 
 use std::{collections::HashMap, time::Duration};
 
-use clap::Parser;
+use clap::{Parser, __derive_refs::once_cell::sync::Lazy};
 use config::*;
 use email_address::EmailAddress;
+use error::MirrordErrorHandler;
 use exec::execvp;
 use execution::MirrordExecution;
 use extension::extension_exec;
@@ -19,7 +20,7 @@ use mirrord_kube::{
     api::{container::SKIP_NAMES, get_k8s_resource_api, kubernetes::create_kube_api},
     error::KubeApiError,
 };
-use mirrord_progress::{Progress, TaskProgress};
+use mirrord_progress::{Progress, TaskProgress, ProgressMode};
 use operator::operator_command;
 use semver::Version;
 use serde_json::json;
@@ -339,10 +340,6 @@ async fn register_to_waitlist(email: EmailAddress) -> Result<()> {
     Ok(())
 }
 
-fn cli_progress() -> TaskProgress {
-    TaskProgress::new("mirrord cli starting")
-}
-
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[tokio::main]
@@ -358,17 +355,28 @@ async fn main() -> miette::Result<()> {
 
     let cli = Cli::parse();
 
+    if let Commands::ExtensionExec(_) = cli.commands {
+        mirrord_progress::init_from_env(ProgressMode::Json);
+    }
+
+    static MAIN_TASK: Lazy<TaskProgress> =
+        Lazy::new(|| {            
+            TaskProgress::new("mirrord cli starting...")
+        });
+
+    let _ = miette::set_hook(Box::new(|_| {
+        Box::new(MirrordErrorHandler::build(&MAIN_TASK))
+    }));
+
     match cli.commands {
-        Commands::Exec(args) => exec(&args, &cli_progress()).await?,
+        Commands::Exec(args) => exec(&args, &MAIN_TASK.subtask("exec")).await?,
         Commands::Extract { path } => {
-            extract_library(Some(path), &cli_progress(), false)?;
+            extract_library(Some(path), &MAIN_TASK.subtask("extract"), false)?;
         }
         Commands::ListTargets(args) => print_pod_targets(&args).await?,
         Commands::Login(args) => login(args)?,
         Commands::Operator(args) => operator_command(*args).await?,
-        Commands::ExtensionExec(args) => {
-            extension_exec(*args).await;
-        }
+        Commands::ExtensionExec(args) => extension_exec(*args, &MAIN_TASK.subtask("ext")).await?,
         Commands::InternalProxy(args) => internal_proxy::proxy(*args).await?,
         Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
     }

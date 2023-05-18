@@ -1,9 +1,10 @@
-use std::path::PathBuf;
+use std::{fmt, path::PathBuf};
 
-use miette::Diagnostic;
+use miette::{Diagnostic, MietteHandler, MietteHandlerOpts, ReportHandler};
 use mirrord_console::error::ConsoleError;
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::OperatorApiError;
+use mirrord_progress::{Progress, TaskProgress};
 use thiserror::Error;
 
 pub(crate) type Result<T, E = CliError> = miette::Result<T, E>;
@@ -200,4 +201,29 @@ pub(crate) enum CliError {
     WaitlistError(reqwest::Error),
     #[error("{0} is not compatible with a targetless agent, please either disable this option or specify a target.")]
     IncompatibleWithTargetless(String),
+}
+
+pub struct MirrordErrorHandler {
+    inner: MietteHandler,
+    progress: &'static TaskProgress,
+}
+
+impl MirrordErrorHandler {
+    pub fn build(task: &'static TaskProgress) -> MirrordErrorHandler {
+        let handler = MietteHandlerOpts::new().build();
+        MirrordErrorHandler {
+            inner: handler,
+            progress: task,
+        }
+    }
+}
+
+impl ReportHandler for MirrordErrorHandler {
+    fn debug(&self, diagnostic: &(dyn Diagnostic), _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.progress
+            .subtask("mirrord failed")
+            .fail_with(&format!("{:?}", diagnostic));
+
+        Ok(())
+    }
 }
