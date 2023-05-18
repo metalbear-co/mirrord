@@ -92,9 +92,11 @@ class MirrordExecutionListener : ExecutionListener {
 
 					val patchedPath = patchSip(wslDistribution, packageManagerPath)
 
+					val patchedPackageManager = packageManager.javaClass.getConstructor(Class.forName("java.lang.String")).newInstance(patchedPath)
+
 					val createPackageManagerPackageRef = originPackageManagerPackageRef!!.javaClass.methods.find { m -> m.name == "create" && m.parameterTypes[0].name != "java.lang.String" }
 
-					val packageManagerPackageRef = createPackageManagerPackageRef!!.invoke(null, createPackageManagerPackageRef!!.parameterTypes[0].getConstructor(Class.forName("java.lang.String")).newInstance(patchedPath))
+					val packageManagerPackageRef = createPackageManagerPackageRef!!.invoke(null, patchedPackageManager)
 					myPackageManagerPackageRef.set(runSettings, packageManagerPackageRef)
 				}
 			}
