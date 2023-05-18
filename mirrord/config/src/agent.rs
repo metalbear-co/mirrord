@@ -5,6 +5,29 @@ use schemars::JsonSchema;
 
 use crate::config::source::MirrordConfigSource;
 
+///
+/// Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.
+///
+/// We provide sane defaults for this option, so you don't have to set up anything here.
+///
+/// ```json
+/// {
+///   "agent": {
+///     "log_level": "info",
+///     "namespace": "default",
+///     "image": "ghcr.io/metalbear-co/mirrord:latest",
+///     "image_pull_policy": "IfNotPresent",
+///     "image_pull_secrets": [ { "secret-key": "secret" } ],
+///     "ttl": 30,
+///     "ephemeral": false,
+///     "communication_timeout": 30,
+///     "startup_timeout": 360,
+///     "network_interface": "eth0",
+///     "pause": false,
+///     "flush_connections": false,
+///   }
+/// }
+/// ```
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "AgentFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]

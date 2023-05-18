@@ -10,27 +10,10 @@ use crate::{
 pub mod incoming;
 pub mod outgoing;
 
-/// ## network
-///
 /// Controls mirrord network operations.
 ///
 /// See the network traffic [reference](https://mirrord.dev/docs/reference/traffic/)
 /// for more details.
-///
-/// ### Minimal `network` config
-///
-/// ```json
-/// {
-///   "feature": {
-///     "network": {
-///       "incoming": "mirror",
-///       "outgoing": true
-///     }
-///   }
-/// }
-/// ```
-///
-/// ### Advanced `network` config
 ///
 /// ```json
 /// {
@@ -42,9 +25,9 @@ pub mod outgoing;
 ///           "filter": "host: api\..+",
 ///           "ports": [80, 8080]
 ///         },
-///         "port_mapping": [[ 7777: 8888 ]],
+///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
-///         "ignore_ports": [9999, 10000],
+///         "ignore_ports": [9999, 10000]
 ///       },
 ///       "outgoing": {
 ///         "tcp": true,
@@ -61,9 +44,7 @@ pub mod outgoing;
 #[config(map_to = "NetworkFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct NetworkConfig {
-    /// ### incoming
-    ///
-    /// Handles incoming network traffic, see [`incoming`](##incoming) for more details.
+    /// ### feature.network.incoming {#feature-network-incoming}
     #[config(toggleable, nested)]
     pub incoming: IncomingConfig,
 

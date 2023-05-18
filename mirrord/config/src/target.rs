@@ -27,6 +27,35 @@ pub enum TargetFileConfig {
     },
 }
 
+/// Specifies the target and namespace to mirror, see [`path`](#target-path) for a list of
+/// accepted values for the `target` option.
+///
+/// The simplified configuration supports:
+///
+/// - `pod/{sample-pod}/[container]/{sample-container}`;
+/// - `podname/{sample-pod}/[container]/{sample-container}`;
+/// - `deployment/{sample-deployment}/[container]/{sample-container}`;
+///
+/// Shortened setup:
+///
+///```json
+/// {
+///  "target": "pod/bear-pod"
+/// }
+/// ```
+///
+/// Complete setup:
+///
+/// ```json
+/// {
+///  "target": {
+///    "path": {
+///      "pod": "bear-pod"
+///    },
+///    "namespace": "default"
+///  }
+/// }
+/// ```
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TargetConfig {

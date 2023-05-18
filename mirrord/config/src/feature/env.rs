@@ -8,6 +8,28 @@ use crate::{
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
+/// Allows the user to set or override the local process' environment variables with the ones
+/// from the remote pod.
+///
+/// Which environment variables to load from the remote pod are controlled by setting either
+/// [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).
+///
+/// See the environment variables [reference](https://mirrord.dev/docs/reference/env/) for more details.
+///
+/// ```json
+/// {
+///   "feature": {
+///     "env": {
+///       "include": "DATABASE_USER;PUBLIC_ENV",
+///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
+///       "override": {
+///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
+///         "LOCAL_BEAR": "panda"
+///       }
+///     }
+///   }
+/// }
+/// ```
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "EnvFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]

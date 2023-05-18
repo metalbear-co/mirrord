@@ -29,22 +29,66 @@ use crate::{
 // TODO(alex) [high] 2023-05-08: For some of the inner config structs, move the documentation
 // to the parent, example would be `IncomingFileConfig`, where we should move the docs to the
 // `incoming` field, instead of linking to another struct.
-
-/// # Setting up mirrord {#root}
+//
+// ADD(alex) [high] 2023-05-17: Better idea, we could have a tool that "inlines" the documentation
+// of a sub-config. Example:
+/*
+/// # `a`
 ///
-/// Mirrord allows for a high degree of customization when it comes to which features you want to
+/// The outer thing.
+struct A {
+    /// ## `a.b`
+    ///
+    /// This is a short description, that is supposed to be consumed by us and by json-schema.
+    b: B,
+}
+
+/// Check out these cool examples on how to use this cool struct:
+///
+/// (cool examples)
+struct B {
+    /// ### `a.b.x`
+    ///
+    /// Float thingy.
+    x: f32,
+
+    /// ### `a.b.y`
+    ///
+    /// Other float thingy.
+    y: f32,
+}
+
+procudes:
+
+# `a`
+
+The outer thing.
+
+## `a.b`
+
+Check out these cool examples on how to use this cool struct:
+
+(cool examples)
+
+### `a.b.x`
+
+Float thingy.
+
+### `a.b.y`
+
+Other float thingy.
+*/
+
+/// mirrord allows for a high degree of customization when it comes to which features you want to
 /// enable, and how they should function.
 ///
-/// Mirrord features can be setup with the [`feature`](#root-feature) option.
+/// All of the configuration fields have a default value, so a minimal configuration would be no
+/// configuration at all.
 ///
-/// All of the configuration fields have a default value (or accept _nothing_), so a minimal
-/// configuration would be no configuration at all.
+/// To help you get started, here are examples of a basic configuration file, and a complete
+/// configuration file containing all fields.
 ///
-/// Some fields support a shortened (basic) setup.
-///
-/// ### Shortened `config.json` {#root-shortened}
-///
-/// - Showing only fields that have a shortened version.
+/// ### Basic `config.json` {#root-basic}
 ///
 /// ```json
 /// {
@@ -68,8 +112,6 @@ use crate::{
 ///     "namespace": "default"
 ///   },
 ///   "connect_tcp": null,
-///   "connect_agent_name": "mirrord-agent-still-alive",
-///   "connect_agent_port": "7777",
 ///   "agent": {
 ///     "log_level": "info",
 ///     "namespace": "default",
@@ -156,40 +198,6 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_SKIP_PROCESSES")]
     pub skip_processes: Option<VecOrSingle<String>>,
 
-    /// ## target {#root-target}
-    ///
-    /// Specifies the target and namespace to mirror, see [`path`](#target-path) for a list of
-    /// accepted values for the `target` option.
-    ///
-    /// The simplified configuration supports:
-    ///
-    /// - `pod/{sample-pod}/[container]/{sample-container}`;
-    /// - `podname/{sample-pod}/[container]/{sample-container}`;
-    /// - `deployment/{sample-deployment}/[container]/{sample-container}`;
-    ///
-    /// Shortened setup:
-    ///
-    ///```json
-    /// {
-    ///  "target": "pod/bear-pod"
-    /// }
-    /// ```
-    ///
-    /// Complete setup:
-    ///
-    /// ```json
-    /// {
-    ///  "target": {
-    ///    "path": {
-    ///      "pod": "bear-pod"
-    ///    },
-    ///    "namespace": "default"
-    ///  }
-    /// }
-    /// ```
-    #[config(nested)]
-    pub target: Option<TargetConfig>,
-
     /// ## connect_tcp {#root-connect_tcp}
     ///
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.
@@ -202,6 +210,8 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_CONNECT_TCP")]
     pub connect_tcp: Option<String>,
 
+    /// <!--{internal}-->
+    ///
     /// ## connect_agent_name {#root-connect_agent_name}
     ///
     /// Agent name that already exists that we can connect to.
@@ -219,6 +229,8 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_CONNECT_AGENT")]
     pub connect_agent_name: Option<String>,
 
+    /// <!--{internal}-->
+    ///
     /// ## connect_agent_port {#root-connect_agent_port}
     ///
     /// Agent listen port that already exists that we can connect to.
@@ -230,87 +242,6 @@ pub struct LayerConfig {
     /// ```
     #[config(env = "MIRRORD_CONNECT_PORT")]
     pub connect_agent_port: Option<u16>,
-
-    /// ## agent {#root-agent}
-    ///
-    /// Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.
-    ///
-    /// We provide sane defaults for this option, so you don't have to set up anything here.
-    ///
-    /// ```json
-    /// {
-    ///   "agent": {
-    ///     "log_level": "info",
-    ///     "namespace": "default",
-    ///     "image": "ghcr.io/metalbear-co/mirrord:latest",
-    ///     "image_pull_policy": "IfNotPresent",
-    ///     "image_pull_secrets": [ { "secret-key": "secret" } ],
-    ///     "ttl": 30,
-    ///     "ephemeral": false,
-    ///     "communication_timeout": 30,
-    ///     "startup_timeout": 360,
-    ///     "network_interface": "eth0",
-    ///     "pause": false,
-    ///     "flush_connections": false,
-    ///   }
-    /// }
-    /// ```
-    #[config(nested)]
-    pub agent: AgentConfig,
-
-    /// # feature {#root-feature}
-    ///
-    /// Controls mirrord features.
-    ///
-    /// See the
-    /// [technical reference, Technical Reference](https://mirrord.dev/docs/reference/)
-    /// to learn more about what each feature does.
-    ///
-    /// The [`env`](#feature-env), [`fs`](#feature-fs) and [`network`](#feature-network) options
-    /// have support for a shortened version, that you can see [here](#root-shortened).
-    ///
-    /// ```json
-    /// {
-    ///   "feature": {
-    ///     "env": {
-    ///       "include": "DATABASE_USER;PUBLIC_ENV",
-    ///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
-    ///       "overrides": {
-    ///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
-    ///         "LOCAL_BEAR": "panda"
-    ///       }
-    ///     },
-    ///     "fs": {
-    ///       "mode": "write",
-    ///       "read_write": ".+\.json" ,
-    ///       "read_only": [ ".+\.yaml", ".+important-file\.txt" ],
-    ///       "local": [ ".+\.js", ".+\.mjs" ]
-    ///     },
-    ///     "network": {
-    ///       "incoming": {
-    ///         "mode": "steal",
-    ///         "http_header_filter": {
-    ///           "filter": "host: api\..+",
-    ///           "ports": [80, 8080]
-    ///         },
-    ///         "port_mapping": [[ 7777, 8888 ]],
-    ///         "ignore_localhost": false,
-    ///         "ignore_ports": [9999, 10000]
-    ///       },
-    ///       "outgoing": {
-    ///         "tcp": true,
-    ///         "udp": true,
-    ///         "ignore_localhost": false,
-    ///         "unix_streams": "bear.+"
-    ///       },
-    ///       "dns": false
-    ///     },
-    ///     "capture_error_trace": false
-    ///   }
-    /// }
-    /// ```
-    #[config(nested)]
-    pub feature: FeatureConfig,
 
     /// ## operator {#root-operator}
     ///
@@ -349,6 +280,19 @@ pub struct LayerConfig {
     /// }
     /// ```
     pub sip_binaries: Option<VecOrSingle<String>>,
+
+    /// ## target {#root-target}
+    #[config(nested)]
+    pub target: Option<TargetConfig>,
+
+    /// ## agent {#root-agent}
+
+    #[config(nested)]
+    pub agent: AgentConfig,
+
+    /// # feature {#root-feature}
+    #[config(nested)]
+    pub feature: FeatureConfig,
 }
 
 impl LayerConfig {
