@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use mirrord_config::LayerConfig;
-use mirrord_progress::{Progress, ProgressMode, TaskProgress};
+use mirrord_progress::Progress;
 
 use crate::{config::ExtensionExecArgs, error::CliError, execution::MirrordExecution, Result};
 
@@ -9,7 +9,7 @@ use crate::{config::ExtensionExecArgs, error::CliError, execution::MirrordExecut
 pub(crate) async fn extension_exec<P>(args: ExtensionExecArgs, progress: &P) -> Result<()>
 where
     P: Progress + Send + Sync,
-{    
+{
     let progress = progress.subtask("mirrord preparing to launch");
     let mut env: HashMap<String, String> = HashMap::new();
 
@@ -46,10 +46,3 @@ where
     execution_info.wait().await?;
     Ok(())
 }
-
-// pub(crate) async fn extension_exec(args: ExtensionExecArgs) {
-//     mirrord_progress::init_from_env(ProgressMode::Json);
-//     let progress = TaskProgress::new("mirrord ext");
-//     let _ = extension_exec_with_progress(args, &progress)
-//         .await?;
-// }

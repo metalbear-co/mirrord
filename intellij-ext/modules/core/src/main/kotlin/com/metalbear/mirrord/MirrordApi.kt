@@ -31,6 +31,15 @@ data class Message(
     val message: String?
 )
 
+data class Error(
+    val message: String,
+    val severity: String,
+    val causes: List<String>,
+    val help: String,
+    val labels: List<String>,
+    val related: List<String>
+)
+
 data class MirrordExecution(
     val environment: MutableMap<String, String>
 )
@@ -124,6 +133,8 @@ object MirrordApi {
             .redirectError(ProcessBuilder.Redirect.PIPE)
             .start()
 
+        process.waitFor()
+
         val bufferedReader = process.inputStream.reader().buffered()
         val gson = Gson()
         val environment = CompletableFuture<MutableMap<String, String>>()
@@ -131,15 +142,8 @@ object MirrordApi {
         val streamProgressTask = object : Task.Backgroundable(project, "mirrord", true) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.text = "mirrord is starting..."
-                bufferedReader.lines().forEach { line ->
-                    val message = try {
-                        gson.fromJson(line, Message::class.java)
-                    } catch (e: Exception) {
-                        return@forEach
-                    }
-                    // "mirrord ext" -> "mirrord preparing to launch"
-                    // failures <- "mirrord ext"
-                    // success <- "mirrord preparing to launch"
+                for (line in bufferedReader.lines()) {
+                    val message = gson.fromJson(line, Message::class.java)
                     when {
                         message.name == "mirrord preparing to launch" && message.type == MessageType.FinishedTask -> {
                             val success = message.success ?: throw Error("Invalid message")
@@ -148,16 +152,7 @@ object MirrordApi {
                                 val executionInfo = gson.fromJson(innerMessage, MirrordExecution::class.java)
                                 indicator.text = "mirrord is running"
                                 environment.complete(executionInfo.environment)
-                                return@forEach
-                            }
-                        }
-                        message.name == "mirrord ext" && message.type == MessageType.FinishedTask -> {
-                            val success = message.success ?: throw Error("Invalid message")
-                            if (!success) {
-                                val innerMessage = message.message ?: throw Error("Invalid inner message")
-                                MirrordNotifier.errorNotification(innerMessage, project)
-                                environment.cancel(true)
-                                return@forEach
+                                return
                             }
                         }
                         message.type == MessageType.Warning -> {
@@ -172,6 +167,13 @@ object MirrordApi {
                         }
                     }
                 }
+                val processStdError = process.errorStream.reader().readText()
+                if (processStdError.startsWith("Error: ")) {
+                    val trimmedError = processStdError.removePrefix("Error: ")
+                    val error = gson.fromJson(trimmedError, Error::class.java)
+                    MirrordNotifier.errorNotification(error.message, project)
+                }
+
                 environment.cancel(true)
             }
 
