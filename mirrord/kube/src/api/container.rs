@@ -293,7 +293,7 @@ impl ContainerApi for JobContainer {
             .await
             .map_err(KubeApiError::KubeError)?;
 
-        let params = ListParams::default()
+        let watcher_config = watcher::Config::default()
             .labels(&format!("job-name={mirrord_agent_job_name}"))
             .timeout(60);
 
@@ -303,7 +303,7 @@ impl ContainerApi for JobContainer {
 
         let pod_api: Api<Pod> = get_k8s_resource_api(client, agent.namespace.as_deref());
 
-        let stream = watcher(pod_api.clone(), params).applied_objects();
+        let stream = watcher(pod_api.clone(), watcher_config).applied_objects();
         pin!(stream);
 
         while let Some(Ok(pod)) = stream.next().await {
@@ -419,7 +419,7 @@ impl ContainerApi for EphemeralContainer {
             .await
             .map_err(KubeApiError::KubeError)?;
 
-        let params = ListParams::default()
+        let watcher_config = watcher::Config::default()
             .fields(&format!("metadata.name={}", &runtime_data.pod_name))
             .timeout(60);
 
@@ -427,7 +427,7 @@ impl ContainerApi for EphemeralContainer {
 
         let container_progress = progress.subtask("waiting for container to be ready...");
 
-        let stream = watcher(pod_api.clone(), params).applied_objects();
+        let stream = watcher(pod_api.clone(), watcher_config).applied_objects();
         pin!(stream);
 
         while let Some(Ok(pod)) = stream.next().await {

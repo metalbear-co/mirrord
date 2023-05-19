@@ -40,9 +40,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 futures = "0.3"
 thiserror = "1"
-k8s-openapi = { version = "0.16", features = ["v1_24"] }
+k8s-openapi = { version = "0.18", features = ["v1_24"] }
 reqwest = { version = "0.11", default-features = false, features = ["blocking", "rustls-tls"]}
-kube = { version = "0.77", default-features = false, features = ["runtime", "derive", "client", "ws", "rustls-tls"] }
+kube = { version = "0.82", default-features = false, features = ["runtime", "derive", "client", "ws", "rustls-tls"] }
 trust-dns-resolver = { version = "0.22", features = ["serde-config", "tokio-runtime"] }
 tokio-util = { version = "0.7", features = ["net", "codec"] }
 rand = "0.8"
@@ -63,17 +63,10 @@ which = "4"
 semver = "1"
 
 
-# latest commits on rustls suppress certificate verification
-# https://github.com/rustls/rustls/pull/1032
-# so we patch crates.io to use the latest commits from rustls
-# this should be changed once a newer version of rustls is ou
 [patch.crates-io]
-rustls = { git = "https://github.com/metalbear-co/rustls", branch = "feat-ip-address" }
 tracing = { git = "https://github.com/metalbear-co/tracing", package = "tracing", branch = "worker_options_non_blocking_v1" }
 tracing-subscriber = { git = "https://github.com/metalbear-co/tracing", package = "tracing-subscriber", branch = "worker_options_non_blocking_v1" }
 
-[patch."https://github.com/ctz/webpki"]
-webpki = { git = "https://github.com/metalbear-co/webpki", branch = "feat-ip-address" }
 
 [profile.release]
 strip = "debuginfo"
