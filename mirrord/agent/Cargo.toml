@@ -53,7 +53,7 @@ async-trait = "0.1"
 tonic = "0.9"
 tower = "0.4"
 http = "0.2"
-
+k8s-cri = {git = "https://github.com/metalbear-co/k8s-cri", rev="a4edb19e7923c040f0429295c63d0c37d74650ca"}
 [target.'cfg(target_os = "linux")'.dependencies]
 iptables = "0.5"
 rawsocket = {git = "https://github.com/metalbear-co/rawsocket.git"}
