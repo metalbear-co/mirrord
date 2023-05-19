@@ -60,8 +60,9 @@ object MirrordApi {
     }
 
     /** run mirrord ls, return list of pods + targetless target. */
-    fun listPods(configFile: String?, project: Project?, wslDistribution: WSLDistribution?): List<String> {
-        MirrordLogger.logger.debug("listing pods")
+    fun listPods(configFile: String?, project: Project?, wslDistribution: WSLDistribution?): List<String>? {
+        logger.debug("listing pods")
+
         val commandLine = GeneralCommandLine(cliPath(wslDistribution), "ls", "-o", "json")
         configFile?.let {
             logger.debug("adding configFile to command line")
@@ -87,23 +88,26 @@ object MirrordApi {
         logger.debug("waiting for process to finish")
         process.waitFor(60, TimeUnit.SECONDS)
 
+        logger.debug("process wait finished, reading output")
+
+        // failure -> null
+        // success -> empty -> targetless, else -> list of pods
         val gson = Gson()
-        val pods: MutableList<String> = if (process.exitValue() != 0) {
+        if (process.exitValue() != 0) {
             val processStdError = process.errorStream.bufferedReader().readText()
             if (processStdError.startsWith("Error: ")) {
                 val trimmedError = processStdError.removePrefix("Error: ")
                 val error = gson.fromJson(trimmedError, Error::class.java)
                 MirrordNotifier.errorNotification(error.message, project)
                 MirrordNotifier.notify(error.help, NotificationType.INFORMATION, project)
+                return null
             }
             logger.debug("mirrord ls failed: $processStdError")
-            mutableListOf()
-        } else {
-            logger.debug("process wait finished, reading output")
-            val data = process.inputStream.bufferedReader().readText()
-            MirrordLogger.logger.debug("parsing %s".format(data))
-            gson.fromJson(data, Array<String>::class.java).toMutableList()
         }
+
+        val data = process.inputStream.bufferedReader().readText()
+        logger.debug("parsing %s".format(data))
+        val pods = gson.fromJson(data, Array<String>::class.java).toMutableList()
 
         if (pods.isEmpty()) {
             MirrordNotifier.notify(

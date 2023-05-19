@@ -35,6 +35,8 @@ object MirrordExecManager {
                 wslDistribution
             )
 
+        pods ?: return null
+
         MirrordLogger.logger.debug("returning pods")
         return MirrordExecDialog.selectTargetDialog(pods)
     }

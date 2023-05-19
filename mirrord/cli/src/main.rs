@@ -351,10 +351,10 @@ async fn main() -> miette::Result<()> {
     } else {
         if !init_ext_error_handler(&cli.commands) {
             registry()
-            .with(fmt::layer().with_writer(std::io::stderr))
-            .with(EnvFilter::from_default_env())
-            .init();
-        }        
+                .with(fmt::layer().with_writer(std::io::stderr))
+                .with(EnvFilter::from_default_env())
+                .init();
+        }
     }
 
     static MAIN_PROGRESS_TASK: Lazy<TaskProgress> =
@@ -386,7 +386,7 @@ fn init_ext_error_handler(commands: &Commands) -> bool {
         let _ = miette::set_hook(Box::new(|_| Box::new(JSONReportHandler::new())));
         true
     } else {
-        false        
+        false
     }
 }
 
