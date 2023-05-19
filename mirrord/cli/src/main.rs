@@ -180,9 +180,9 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     let execution_info = MirrordExecution::start(&config, progress, None).await?;
 
     #[cfg(target_os = "macos")]
-    let (_did_sip_patch, binary) = match &execution_info.patched_path {
+    let (_did_sip_patch, binary) = match execution_info.patched_path {
         None => (false, args.binary.clone()),
-        Some(sip_result) => (true, sip_result.clone()),
+        Some(sip_result) => (true, sip_result),
     };
 
     #[cfg(not(target_os = "macos"))]
