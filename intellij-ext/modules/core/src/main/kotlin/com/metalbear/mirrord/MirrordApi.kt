@@ -49,6 +49,7 @@ data class MirrordExecution(
  */
 object MirrordApi {
     private const val cliBinary = "mirrord"
+    const val targetlessTargetName = "No Target (\"targetless\")"
     private val logger = MirrordLogger.logger
     private fun cliPath(wslDistribution: WSLDistribution?): String {
         val path = MirrordPathManager.getBinary(cliBinary, true)!!
@@ -58,8 +59,9 @@ object MirrordApi {
         return path
     }
 
-    fun listPods(configFile: String?, project: Project?, wslDistribution: WSLDistribution?): List<String>? {
-        logger.debug("listing pods")
+    /** run mirrord ls, return list of pods + targetless target. */
+    fun listPods(configFile: String?, project: Project?, wslDistribution: WSLDistribution?): List<String> {
+        MirrordLogger.logger.debug("listing pods")
         val commandLine = GeneralCommandLine(cliPath(wslDistribution), "ls", "-o", "json")
         configFile?.let {
             logger.debug("adding configFile to command line")
@@ -86,23 +88,34 @@ object MirrordApi {
         process.waitFor(60, TimeUnit.SECONDS)
 
         val gson = Gson()
-        if (process.exitValue() != 0) {
+        val pods: MutableList<String> = if (process.exitValue() != 0) {
             val processStdError = process.errorStream.bufferedReader().readText()
             if (processStdError.startsWith("Error: ")) {
                 val trimmedError = processStdError.removePrefix("Error: ")
                 val error = gson.fromJson(trimmedError, Error::class.java)
                 MirrordNotifier.errorNotification(error.message, project)
                 MirrordNotifier.notify(error.help, NotificationType.INFORMATION, project)
-                return null
             }
             logger.debug("mirrord ls failed: $processStdError")
-            return null
+            mutableListOf()
+        } else {
+            logger.debug("process wait finished, reading output")
+            val data = process.inputStream.bufferedReader().readText()
+            MirrordLogger.logger.debug("parsing %s".format(data))
+            gson.fromJson(data, Array<String>::class.java).toMutableList()
         }
 
-        logger.debug("process wait finished, reading output")
-        val data = process.inputStream.bufferedReader().readText()
-        logger.debug("parsing $data")
-        return gson.fromJson(data, Array<String>::class.java).asList()
+        if (pods.isEmpty()) {
+            MirrordNotifier.notify(
+                "No mirrord target available in the configured namespace. " +
+                        "You can run targetless, or set a different target namespace or kubeconfig in the mirrord configuration file.",
+                NotificationType.INFORMATION,
+                project,
+            )
+        }
+
+        pods.add(targetlessTargetName)
+        return pods
     }
 
     fun exec(

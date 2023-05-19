@@ -17,6 +17,7 @@ object MirrordExecDialog {
     private const val dialogHeading: String = "mirrord"
     private const val targetLabel = "Select Target"
 
+    /** returns null if dialog cancelled or closed */
     fun selectTargetDialog(targets: List<String>): String? {
         var targets = targets.sorted().toMutableList()
         MirrordSettingsState.instance.mirrordState.lastChosenTarget?.let {
@@ -68,11 +69,16 @@ object MirrordExecDialog {
             })
             setTitle(dialogHeading)
         }.show()
-        if (result == DialogWrapper.OK_EXIT_CODE && !jbTargets.isSelectionEmpty) {
+        if (result == DialogWrapper.OK_EXIT_CODE) {
+            if (jbTargets.isSelectionEmpty) {
+                // The user did not select any target, and clicked ok.
+                return MirrordApi.targetlessTargetName
+            }
             val selectedValue = jbTargets.selectedValue
             MirrordSettingsState.instance.mirrordState.lastChosenTarget = selectedValue
             return selectedValue
         }
+        // The user clicked cancel, or closed the dialog.
         return null
     }
 
