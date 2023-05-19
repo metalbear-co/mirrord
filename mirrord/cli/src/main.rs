@@ -349,13 +349,11 @@ async fn main() -> miette::Result<()> {
 
     if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
         mirrord_console::init_logger(&console_addr)?;
-    } else {
-        if !init_ext_error_handler(&cli.commands) {
-            registry()
-                .with(fmt::layer().with_writer(std::io::stderr))
-                .with(EnvFilter::from_default_env())
-                .init();
-        }
+    } else if !init_ext_error_handler(&cli.commands) {
+        registry()
+            .with(fmt::layer().with_writer(std::io::stderr))
+            .with(EnvFilter::from_default_env())
+            .init();
     }
 
     static MAIN_PROGRESS_TASK: LazyLock<TaskProgress> =
