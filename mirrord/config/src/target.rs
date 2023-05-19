@@ -102,12 +102,10 @@ impl TargetFileConfig {
     ) -> Result<Option<TargetConfig>> {
         if let Some(path) = path {
             Ok(Some(TargetConfig { path, namespace }))
+        } else if namespace.is_some() {
+            Err(ConfigError::TargetNamespaceWithoutTarget)
         } else {
-            if namespace.is_some() {
-                Err(ConfigError::TargetNamespaceWithoutTarget)
-            } else {
-                Ok(None)
-            }
+            Ok(None)
         }
     }
 }
