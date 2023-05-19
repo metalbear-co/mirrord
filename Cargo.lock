@@ -1742,8 +1742,9 @@ dependencies = [
 
 [[package]]
 name = "k8s-cri"
-version = "0.6.0"
-source = "git+https://github.com/metalbear-co/k8s-cri?rev=a4edb19e7923c040f0429295c63d0c37d74650ca#a4edb19e7923c040f0429295c63d0c37d74650ca"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f1ac03a0ee89d53fc350989682a56915a4f93fe7b51801a1066cb3caeb2a23f"
 dependencies = [
  "prost",
  "serde",
