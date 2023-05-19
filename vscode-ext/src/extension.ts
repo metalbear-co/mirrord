@@ -160,26 +160,26 @@ class MirrordAPI {
 	/// Targets are sorted, with an exception of the last used target being the first on the list.
 	async listTargets(configPath: string | null | undefined): Promise<string[]> {
 		const args = ['ls'];
-	
+
 		if (configPath) {
 			args.push('-f', configPath);
 		}
-	
+
 		const [stdout, stderr] = await this.exec(args);
-	
+
 		if (stderr) {
-			const match = stderr.match(/Error: (.*)/)?.[1];			
+			const match = stderr.match(/Error: (.*)/)?.[1];
 			const notificationError = match ? JSON.parse(match)["message"] : stderr;
-			mirrordFailure(stderr);			
+			mirrordFailure(stderr);
 			throw new Error(`mirrord failed to 'ls' targets\n${notificationError}`);
 		}
-	
+
 		const targets: string[] = JSON.parse(stdout);
 		targets.sort();
-	
+
 		let lastTarget: string | undefined = globalContext.workspaceState.get(LAST_TARGET_KEY)
 			|| globalContext.globalState.get(LAST_TARGET_KEY);
-	
+
 		if (lastTarget !== undefined) {
 			const idx = targets.indexOf(lastTarget);
 			if (idx !== -1) {
@@ -187,7 +187,7 @@ class MirrordAPI {
 				targets.unshift(lastTarget);
 			}
 		}
-	
+
 		return targets;
 	}
 
@@ -225,22 +225,23 @@ class MirrordAPI {
 				});
 
 				let stderrData = '';
-				child.stderr?.on('data', (data) => {					
+				child.stderr?.on('data', (data) => {
 					stderrData += data.toString();
 				});
 
-				child.stderr?.on('end', () => {
-					const match = stderrData.match(/Error: (.*)/)?.[1];					
+				child.stderr?.on('close', () => {
+					const match = stderrData.match(/Error: (.*)/)?.[1];
 					if (match) {
 						const error = JSON.parse(match);
-						mirrordFailure(stderrData);						
-						vscode.window.showErrorMessage(error["message"])
-						vscode.window.showInformationMessage(error["help"])
+						mirrordFailure(stderrData);
+						vscode.window.showErrorMessage(error["message"]).then(() => {
+							vscode.window.showInformationMessage(error["help"])
+						});						
 					} else {
 						mirrordFailure(stderrData);
 						vscode.window.showErrorMessage(stderrData)
 					}
-					console.error(`mirrord stderr: ${stderrData}`);								
+					console.error(`mirrord stderr: ${stderrData}`);
 				});
 
 
