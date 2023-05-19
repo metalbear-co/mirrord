@@ -1,10 +1,11 @@
 #![feature(let_chains)]
+#![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, sync::LazyLock, time::Duration};
 
-use clap::{Parser, __derive_refs::once_cell::sync::Lazy};
+use clap::Parser;
 use config::*;
 use email_address::EmailAddress;
 use exec::execvp;
@@ -357,8 +358,8 @@ async fn main() -> miette::Result<()> {
         }
     }
 
-    static MAIN_PROGRESS_TASK: Lazy<TaskProgress> =
-        Lazy::new(|| TaskProgress::new("mirrord cli starting..."));
+    static MAIN_PROGRESS_TASK: LazyLock<TaskProgress> =
+        LazyLock::new(|| TaskProgress::new("mirrord cli starting..."));
 
     match cli.commands {
         Commands::Exec(args) => exec(&args, &MAIN_PROGRESS_TASK.subtask("exec")).await?,
