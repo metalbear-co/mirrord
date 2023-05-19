@@ -59,45 +59,50 @@ object MirrordApi {
     }
 
     fun listPods(configFile: String?, project: Project?, wslDistribution: WSLDistribution?): List<String>? {
-        MirrordLogger.logger.debug("listing pods")
+        logger.debug("listing pods")
         val commandLine = GeneralCommandLine(cliPath(wslDistribution), "ls", "-o", "json")
         configFile?.let {
-            MirrordLogger.logger.debug("adding configFile to command line")
+            logger.debug("adding configFile to command line")
             commandLine.addParameter("-f")
             val formattedPath = wslDistribution?.getWslPath(it) ?: it
             commandLine.addParameter(formattedPath)
         }
 
-
         wslDistribution?.let {
-            MirrordLogger.logger.debug("patching to use WSL")
+            logger.debug("patching to use WSL")
             val wslOptions = WSLCommandLineOptions()
             wslOptions.isLaunchWithWslExe = true
             it.patchCommandLine(commandLine, project, wslOptions)
         }
 
-        MirrordLogger.logger.debug("creating command line and executing %s".format(commandLine.toString()))
+        logger.debug("creating command line and executing $commandLine")
+
         val process = commandLine.toProcessBuilder()
             .redirectOutput(ProcessBuilder.Redirect.PIPE)
             .redirectError(ProcessBuilder.Redirect.PIPE)
             .start()
 
-        MirrordLogger.logger.debug("waiting for process to finish")
+        logger.debug("waiting for process to finish")
         process.waitFor(60, TimeUnit.SECONDS)
 
+        val gson = Gson()
         if (process.exitValue() != 0) {
-            MirrordNotifier.errorNotification("mirrord failed to list available targets", project)
-            val data = process.errorStream.bufferedReader().readText()
-            MirrordLogger.logger.debug("mirrord ls failed: %s".format(data))
+            val processStdError = process.errorStream.bufferedReader().readText()
+            if (processStdError.startsWith("Error: ")) {
+                val trimmedError = processStdError.removePrefix("Error: ")
+                val error = gson.fromJson(trimmedError, Error::class.java)
+                MirrordNotifier.errorNotification(error.message, project)
+                MirrordNotifier.notify(error.help, NotificationType.INFORMATION, project)
+                return null
+            }
+            logger.debug("mirrord ls failed: $processStdError")
             return null
         }
 
-        MirrordLogger.logger.debug("process wait finished, reading output")
+        logger.debug("process wait finished, reading output")
         val data = process.inputStream.bufferedReader().readText()
-        val gson = Gson()
-        MirrordLogger.logger.debug("parsing %s".format(data))
+        logger.debug("parsing $data")
         return gson.fromJson(data, Array<String>::class.java).asList()
-
     }
 
     fun exec(
@@ -105,7 +110,7 @@ object MirrordApi {
         configFile: String?,
         project: Project?,
         wslDistribution: WSLDistribution?
-    ): MutableMap<String, String> {
+    ): MutableMap<String, String>? {
         val commandLine = GeneralCommandLine(cliPath(wslDistribution), "ext").apply {
             target?.let {
                 addParameter("-t")
@@ -133,13 +138,19 @@ object MirrordApi {
             .redirectError(ProcessBuilder.Redirect.PIPE)
             .start()
 
-        process.waitFor()
+        logger.debug("waiting for process to finish")
+        val exitStatus = process.waitFor(15, TimeUnit.SECONDS)
+
+        if (!exitStatus) {
+            MirrordNotifier.errorNotification("mirrord failed to start", project)
+            throw Error("mirrord failed to start")
+        }
 
         val bufferedReader = process.inputStream.reader().buffered()
         val gson = Gson()
         val environment = CompletableFuture<MutableMap<String, String>>()
 
-        val streamProgressTask = object : Task.Backgroundable(project, "mirrord", true) {
+        val mirrordProgressTask = object : Task.Backgroundable(project, "mirrord", true) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.text = "mirrord is starting..."
                 for (line in bufferedReader.lines()) {
@@ -155,9 +166,11 @@ object MirrordApi {
                                 return
                             }
                         }
+
                         message.type == MessageType.Warning -> {
                             message.message?.let { MirrordNotifier.notify(it, NotificationType.WARNING, project) }
                         }
+
                         else -> {
                             var displayMessage = message.name
                             message.message?.let {
@@ -167,13 +180,6 @@ object MirrordApi {
                         }
                     }
                 }
-                val processStdError = process.errorStream.reader().readText()
-                if (processStdError.startsWith("Error: ")) {
-                    val trimmedError = processStdError.removePrefix("Error: ")
-                    val error = gson.fromJson(trimmedError, Error::class.java)
-                    MirrordNotifier.errorNotification(error.message, project)
-                }
-
                 environment.cancel(true)
             }
 
@@ -191,7 +197,7 @@ object MirrordApi {
             }
         }
 
-        ProgressManager.getInstance().run(streamProgressTask)
+        ProgressManager.getInstance().run(mirrordProgressTask)
 
         try {
             return environment.get(30, TimeUnit.SECONDS)
@@ -199,8 +205,16 @@ object MirrordApi {
             MirrordNotifier.errorNotification("mirrord failed to fetch the env", project)
         }
 
-        logger.error("mirrord stderr: ${process.errorStream.reader().readText()}")
-        throw Error("failed launch")
+        val processStdError = process.errorStream.reader().readText()
+        if (processStdError.startsWith("Error: ")) {
+            val trimmedError = processStdError.removePrefix("Error: ")
+            val error = gson.fromJson(trimmedError, Error::class.java)
+            MirrordNotifier.errorNotification(error.message, project)
+            MirrordNotifier.notify(error.help, NotificationType.INFORMATION, project)
+            return null
+        }
+        logger.error("mirrord stderr: $processStdError")
+        throw Error("mirrord failed to start")
     }
 
 }
