@@ -122,34 +122,6 @@ async fn wait_for_agent_startup(
 #[derive(Debug)]
 pub struct JobContainer;
 
-// impl JobContainer {
-//     /// Some fields of are only added if `runtime_data` is not `None` (the agent is not
-// targetless).     ///
-//     /// Add those fields according to `runtime_data`
-//     fn add_conditional_fields(
-//         job_spec: Option<&mut JobSpec>,
-//         runtime_data: Option<&RuntimeData>,
-//         agent_gid: u16,
-//     ) {
-//         // We will always go into the first two `if let`s, as we just create the specs in the
-//         // calling function.
-//         if let Some(job_spec) = job_spec {
-//             if let Some(pod_spec) = job_spec.template.spec.as_mut() {
-//                 if let Some(runtime_data) = runtime_data {
-//                     // targetless
-//                     pod_spec.node_name = Some(runtime_data.node_name.clone());
-//                     pod_spec.host_pid = Some(true);
-//                     pod_spec.security_context = Some(SecurityContext {
-//                         run_as_group: Some(agent_gid as _),
-//                         privileged: Some(true),
-//                         ..Default::default()
-//                     })
-//                 }
-//             }
-//         }
-//     }
-// }
-
 impl ContainerApi for JobContainer {
     /// runtime_data is `None` when targetless.
     async fn create_agent<P>(
@@ -283,8 +255,6 @@ impl ContainerApi for JobContainer {
         });
 
         let agent_pod: Job = serde_json::from_value(json_value)?;
-
-        // Self::add_conditional_fields(agent_pod.spec.as_mut(), runtime_data.as_ref(), agent_gid);
 
         let job_api = get_k8s_resource_api(client, agent.namespace.as_deref());
 
