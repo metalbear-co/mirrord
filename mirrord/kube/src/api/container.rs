@@ -33,7 +33,7 @@ pub trait ContainerApi {
     async fn create_agent<P>(
         client: &Client,
         agent: &AgentConfig,
-        runtime_data: RuntimeData,
+        runtime_data: Option<RuntimeData>,
         connection_port: u16,
         progress: &P,
         agent_gid: u16,
@@ -123,10 +123,11 @@ async fn wait_for_agent_startup(
 pub struct JobContainer;
 
 impl ContainerApi for JobContainer {
+    /// runtime_data is `None` when targetless.
     async fn create_agent<P>(
         client: &Client,
         agent: &AgentConfig,
-        runtime_data: RuntimeData,
+        runtime_data: Option<RuntimeData>,
         connection_port: u16,
         progress: &P,
         agent_gid: u16,
@@ -139,13 +140,17 @@ impl ContainerApi for JobContainer {
 
         let mut agent_command_line = vec![
             "./mirrord-agent".to_owned(),
-            "--container-id".to_owned(),
-            runtime_data.container_id,
-            "--container-runtime".to_owned(),
-            runtime_data.container_runtime.to_string(),
             "-l".to_owned(),
             connection_port.to_string(),
         ];
+
+        if let Some(runtime_data) = runtime_data.as_ref() {
+            agent_command_line.push("--container-id".to_owned());
+            agent_command_line.push(runtime_data.container_id.to_string());
+            agent_command_line.push("--container-runtime".to_owned());
+            agent_command_line.push(runtime_data.container_runtime.to_string());
+        }
+
         if let Some(timeout) = agent.communication_timeout {
             agent_command_line.push("-t".to_owned());
             agent_command_line.push(timeout.to_string());
@@ -159,72 +164,76 @@ impl ContainerApi for JobContainer {
             agent_command_line.push("--test-error".to_owned());
         }
 
-        let agent_pod: Job = serde_json::from_value(
-            json!({ // Only Jobs support self deletion after completion
+        let targeted = runtime_data.is_some();
+
+        let json_value = json!({ // Only Jobs support self deletion after completion
+            "metadata": {
+                "name": mirrord_agent_job_name,
+                "labels": {
+                    "app": "mirrord"
+                },
+                "annotations":
+                {
+                    "sidecar.istio.io/inject": "false",
+                    "linkerd.io/inject": "disabled"
+                }
+            },
+            "spec": {
+                "ttlSecondsAfterFinished": agent.ttl,
+                "template": {
                     "metadata": {
-                        "name": mirrord_agent_job_name,
-                        "labels": {
-                            "app": "mirrord"
-                        },
-                        "annotations":
-                        {
+                        "annotations": {
                             "sidecar.istio.io/inject": "false",
                             "linkerd.io/inject": "disabled"
+                        },
+                        "labels": {
+                            "app": "mirrord"
                         }
                     },
-                    "spec": {
-                    "ttlSecondsAfterFinished": agent.ttl,
-
-                        "template": {
-                            "metadata": {
-                                "annotations":
-                                {
-                                    "sidecar.istio.io/inject": "false",
-                                    "linkerd.io/inject": "disabled"
-                                },
-                                "labels": {
-                                    "app": "mirrord"
-                                }
-                            },
 
                     "spec": {
-                        "hostPID": true,
-                        "nodeName": runtime_data.node_name,
+                        "hostPID": targeted,
+                        "nodeName": runtime_data.map(|rd| rd.node_name),
                         "restartPolicy": "Never",
-                        "volumes": [
-                            {
-                                "name": "hostrun",
-                                "hostPath": {
-                                    "path": "/run"
+                        "volumes": targeted.then(|| json!(
+                            [
+                                {
+                                    "name": "hostrun",
+                                    "hostPath": {
+                                        "path": "/run"
+                                    }
+                                },
+                                {
+                                    "name": "hostvar",
+                                    "hostPath": {
+                                        "path": "/var"
+                                    }
                                 }
-                            },
-                            {
-                                "name": "hostvar",
-                                "hostPath": {
-                                    "path": "/var"
-                                }
-                            }
-                        ],
+                            ]
+                        )),
                         "imagePullSecrets": agent.image_pull_secrets,
                         "containers": [
                             {
                                 "name": "mirrord-agent",
                                 "image": Self::agent_image(agent),
                                 "imagePullPolicy": agent.image_pull_policy,
-                                "securityContext": {
-                                    "runAsGroup": agent_gid,
-                                    "privileged": true,
-                                },
-                                "volumeMounts": [
-                                    {
-                                        "mountPath": "/host/run",
-                                        "name": "hostrun"
-                                    },
-                                    {
-                                        "mountPath": "/host/var",
-                                        "name": "hostvar"
-                                    }
-                                ],
+                                "securityContext": targeted.then(||
+                                    json!({
+                                        "runAsGroup": agent_gid,
+                                        "privileged": true,
+                                    })
+                                ),
+                                "volumeMounts": targeted.then(||
+                                    json!([
+                                        {
+                                            "mountPath": "/host/run",
+                                            "name": "hostrun"
+                                        },
+                                        {
+                                            "mountPath": "/host/var",
+                                            "name": "hostvar"
+                                        }
+                                    ])),
                                 "command": agent_command_line,
                                 "env": [
                                     { "name": "RUST_LOG", "value": agent.log_level },
@@ -243,9 +252,10 @@ impl ContainerApi for JobContainer {
                     }
                 }
             }
-                }
-            ),
-        )?;
+        });
+
+        let agent_pod: Job = serde_json::from_value(json_value)?;
+
         let job_api = get_k8s_resource_api(client, agent.namespace.as_deref());
 
         job_api
@@ -253,7 +263,7 @@ impl ContainerApi for JobContainer {
             .await
             .map_err(KubeApiError::KubeError)?;
 
-        let params = ListParams::default()
+        let watcher_config = watcher::Config::default()
             .labels(&format!("job-name={mirrord_agent_job_name}"))
             .timeout(60);
 
@@ -263,7 +273,7 @@ impl ContainerApi for JobContainer {
 
         let pod_api: Api<Pod> = get_k8s_resource_api(client, agent.namespace.as_deref());
 
-        let stream = watcher(pod_api.clone(), params).applied_objects();
+        let stream = watcher(pod_api.clone(), watcher_config).applied_objects();
         pin!(stream);
 
         while let Some(Ok(pod)) = stream.next().await {
@@ -301,7 +311,7 @@ impl ContainerApi for EphemeralContainer {
     async fn create_agent<P>(
         client: &Client,
         agent: &AgentConfig,
-        runtime_data: RuntimeData,
+        runtime_data: Option<RuntimeData>,
         connection_port: u16,
         progress: &P,
         agent_gid: u16,
@@ -309,6 +319,8 @@ impl ContainerApi for EphemeralContainer {
     where
         P: Progress + Send + Sync,
     {
+        // Ephemeral should never be targetless, so there should be runtime data.
+        let runtime_data = runtime_data.ok_or(KubeApiError::MissingRuntimeData)?;
         let container_progress = progress.subtask("creating ephemeral container...");
 
         warn!("Ephemeral Containers is an experimental feature
@@ -377,7 +389,7 @@ impl ContainerApi for EphemeralContainer {
             .await
             .map_err(KubeApiError::KubeError)?;
 
-        let params = ListParams::default()
+        let watcher_config = watcher::Config::default()
             .fields(&format!("metadata.name={}", &runtime_data.pod_name))
             .timeout(60);
 
@@ -385,7 +397,7 @@ impl ContainerApi for EphemeralContainer {
 
         let container_progress = progress.subtask("waiting for container to be ready...");
 
-        let stream = watcher(pod_api.clone(), params).applied_objects();
+        let stream = watcher(pod_api.clone(), watcher_config).applied_objects();
         pin!(stream);
 
         while let Some(Ok(pod)) = stream.next().await {

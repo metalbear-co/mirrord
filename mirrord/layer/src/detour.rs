@@ -11,6 +11,9 @@ use core::{
 };
 use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf, sync::OnceLock};
 
+#[cfg(target_os = "macos")]
+use libc::c_char;
+
 use crate::error::HookError;
 
 thread_local!(
@@ -151,6 +154,11 @@ pub(crate) enum Bypass {
     /// We got an `Utf8Error` while trying to convert a `CStr` into a safer string type.
     CStrConversion,
 
+    /// We hooked a file operation on a path in mirrord's bin directory. So do the operation
+    /// locally, but on the original path, not the one in mirrord's dir.
+    #[cfg(target_os = "macos")]
+    FileOperationInMirrordBinTempDir(*const c_char),
+
     /// File [`PathBuf`] should be ignored (used for tests).
     IgnoredFile(PathBuf),
 
@@ -192,6 +200,10 @@ pub(crate) enum Bypass {
 
     /// Socket is connecting to localhots and we're asked to ignore it.
     IgnoreLocalhost(u16),
+
+    /// Application is binding a port, while mirrord is running targetless. A targetless agent does
+    /// is not exposed by a service, so bind locally.
+    BindWhenTargetless,
 
     /// Hooked connect from a bound mirror socket.
     MirrorConnect,

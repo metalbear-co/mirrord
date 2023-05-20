@@ -29,7 +29,7 @@ use crate::{
 pub struct KubernetesAPI {
     client: Client,
     agent: AgentConfig,
-    target: TargetConfig,
+    target: Option<TargetConfig>,
 }
 
 impl KubernetesAPI {
@@ -47,7 +47,7 @@ impl KubernetesAPI {
         ))
     }
 
-    pub fn new(client: Client, agent: AgentConfig, target: TargetConfig) -> Self {
+    pub fn new(client: Client, agent: AgentConfig, target: Option<TargetConfig>) -> Self {
         KubernetesAPI {
             client,
             agent,
@@ -113,15 +113,25 @@ impl AgentManagment for KubernetesAPI {
     where
         P: Progress + Send + Sync,
     {
-        let runtime_data = self
-            .target
-            .path.as_ref().ok_or_else(|| KubeApiError::InvalidTarget(
-                "No target specified. Please set the `MIRRORD_IMPERSONATED_TARGET` environment variable.".to_owned(),
-            ))?
-            .runtime_data(&self.client, self.target.namespace.as_deref())
-            .await?;
+        let runtime_data = if let Some(ref target_config) = self.target {
+            Some(
+                target_config
+                    .path
+                    .runtime_data(&self.client, target_config.namespace.as_deref())
+                    .await?,
+            )
+        } else {
+            // Most users won't see this, since the default log level is error, and also progress
+            // reporting overrides logs in this stage of the run.
+            info!(
+                "No target specified. Spawning a targetless agent - not specifying a node, not \
+                impersonating any existing resource. \
+                To spawn a targeted agent, please specify a target in the configuration.",
+            );
+            None
+        };
 
-        info!("No existing agent, spawning new one.");
+        info!("Spawning new agent.");
         let agent_port: u16 = rand::thread_rng().gen_range(30000..=65535);
         info!("Using port `{agent_port:?}` for communication");
 

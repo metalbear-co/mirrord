@@ -1,3 +1,5 @@
+@file:Suppress("DialogTitleCapitalization")
+
 package com.metalbear.mirrord
 
 import com.google.gson.Gson
@@ -5,7 +7,11 @@ import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.wsl.WSLCommandLineOptions
 import com.intellij.execution.wsl.WSLDistribution
 import com.intellij.notification.NotificationType
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 
@@ -34,6 +40,7 @@ data class MirrordExecution(
  */
 object MirrordApi {
     private const val cliBinary = "mirrord"
+    const val targetlessTargetName = "No Target (\"targetless\")"
     private val logger = MirrordLogger.logger
     private fun cliPath(wslDistribution: WSLDistribution?): String {
         val path = MirrordPathManager.getBinary(cliBinary, true)!!
@@ -43,7 +50,8 @@ object MirrordApi {
         return path
     }
 
-    fun listPods(configFile: String?, project: Project?, wslDistribution: WSLDistribution?): List<String>? {
+    /** run mirrord ls, return list of pods + targetless target. */
+    fun listPods(configFile: String?, project: Project?, wslDistribution: WSLDistribution?): List<String> {
         MirrordLogger.logger.debug("listing pods")
         val commandLine = GeneralCommandLine(cliPath(wslDistribution), "ls", "-o", "json")
         configFile?.let {
@@ -70,19 +78,30 @@ object MirrordApi {
         MirrordLogger.logger.debug("waiting for process to finish")
         process.waitFor(60, TimeUnit.SECONDS)
 
-        if (process.exitValue() != 0) {
+        val pods: MutableList<String> = if (process.exitValue() != 0) {
             MirrordNotifier.errorNotification("mirrord failed to list available targets", project)
             val data = process.errorStream.bufferedReader().readText()
             MirrordLogger.logger.debug("mirrord ls failed: %s".format(data))
-            return null
+            mutableListOf()
+        } else {
+            MirrordLogger.logger.debug("process wait finished, reading output")
+            val data = process.inputStream.bufferedReader().readText()
+            val gson = Gson()
+            MirrordLogger.logger.debug("parsing %s".format(data))
+            gson.fromJson(data, Array<String>::class.java).toMutableList()
         }
 
-        MirrordLogger.logger.debug("process wait finished, reading output")
-        val data = process.inputStream.bufferedReader().readText()
-        val gson = Gson()
-        MirrordLogger.logger.debug("parsing %s".format(data))
-        return gson.fromJson(data, Array<String>::class.java).asList()
+        if (pods.isEmpty()) {
+            MirrordNotifier.notify(
+                "No mirrord target available in the configured namespace. " +
+                        "You can run targetless, or set a different target namespace or kubeconfig in the mirrord configuration file.",
+                NotificationType.INFORMATION,
+                project,
+            )
+        }
 
+        pods.add(targetlessTargetName)
+        return pods
     }
 
     fun exec(
@@ -120,32 +139,60 @@ object MirrordApi {
 
         val bufferedReader = process.inputStream.reader().buffered()
         val gson = Gson()
+        val environment = CompletableFuture<MutableMap<String, String>?>()
 
-        for (line in bufferedReader.lines()) {
-            val message = gson.fromJson(line, Message::class.java)
-            // See if it's the final message
-            if (message.name == "mirrord preparing to launch"
-                && message.type == MessageType.FinishedTask
-            ) {
-                val success = message.success ?: throw Error("Invalid message")
-                if (success) {
-                    val innerMessage = message.message ?: throw Error("Invalid inner message")
-                    val executionInfo = gson.fromJson(innerMessage, MirrordExecution::class.java)
-                    MirrordNotifier.progress("mirrord started!", project)
-                    return executionInfo.environment
-                } else {
-                    MirrordNotifier.errorNotification("mirrord failed to launch", project)
+        val streamProgressTask = object : Task.Backgroundable(project, "mirrord", true) {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.text = "mirrord is starting..."
+                for (line in bufferedReader.lines()) {
+                    val message = gson.fromJson(line, Message::class.java)
+                    // See if it's the final message
+                    if (message.name == "mirrord preparing to launch"
+                        && message.type == MessageType.FinishedTask
+                    ) {
+                        val success = message.success ?: throw Error("Invalid message")
+                        if (success) {
+                            val innerMessage = message.message ?: throw Error("Invalid inner message")
+                            val executionInfo = gson.fromJson(innerMessage, MirrordExecution::class.java)
+                            indicator.text = "mirrord is running"
+                            environment.complete(executionInfo.environment)
+                            return
+                        } else {
+                            environment.complete(null)
+                            MirrordNotifier.errorNotification("mirrord failed to launch", project)
+                            return
+                        }
+                    }
+                    if (message.type == MessageType.Warning) {
+                        message.message?.let { MirrordNotifier.notify(it, NotificationType.WARNING, project) }
+                    } else {
+                        var displayMessage = message.name
+                        message.message?.let {
+                            displayMessage += ": $it"
+                        }
+                        indicator.text = displayMessage
+                    }
                 }
+                environment.complete(null)
+                return
             }
-            if (message.type == MessageType.Warning) {
-                message.message?.let { MirrordNotifier.notify(it, NotificationType.WARNING, project) }
-            } else {
-                var displayMessage = message.name
-                message.message?.let {
-                    displayMessage += ": $it"
-                }
-                MirrordNotifier.progress(displayMessage, project)
+
+            override fun onSuccess() {
+                MirrordNotifier.notify("mirrord started!", NotificationType.INFORMATION, project)
+                super.onSuccess()
             }
+
+            override fun onCancel() {
+                process.destroy()
+                MirrordNotifier.notify("mirrord was cancelled", NotificationType.WARNING, project)
+                super.onCancel()
+            }
+        }
+
+        ProgressManager.getInstance().run(streamProgressTask)
+
+        environment.get()?.let {
+            return it
         }
 
         logger.error("mirrord stderr: %s".format(process.errorStream.reader().readText()))

@@ -7,7 +7,7 @@ use mirrord_operator::client::OperatorApi;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::trace;
 
 use crate::{CliError, Result};
 
@@ -48,9 +48,9 @@ where
             None
         }
         Err(err) => {
-            sub_progress.fail_with("Unable to connect to Operator");
+            sub_progress.done_with("Unable to check if operator exists, probably due to RBAC");
 
-            warn!("{err}");
+            trace!("{err}");
 
             None
         }
@@ -71,7 +71,7 @@ where
             AgentConnection { sender, receiver },
         ))
     } else {
-        if matches!(config.target.path, Some(mirrord_config::target::Target::Deployment{..})) {
+        if matches!(config.target, Some(mirrord_config::target::TargetConfig{ path: mirrord_config::target::Target::Deployment{..}, ..})) {
             // progress.subtask("text").done_with("text");
             eprintln!("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.\n \
                       Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.\n \

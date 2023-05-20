@@ -17,6 +17,7 @@ edition.workspace = true
 object = "0.29"
 memchr = "2"
 apple-codesign = "0.22"
+once_cell = "1"
 
 tracing.workspace = true
 thiserror.workspace = true

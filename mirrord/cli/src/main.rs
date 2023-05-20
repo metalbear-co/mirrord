@@ -267,7 +267,9 @@ async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
             (
                 layer_config.accept_invalid_certificates,
                 layer_config.kubeconfig,
-                layer_config.target.namespace,
+                layer_config
+                    .target
+                    .and_then(|target_conf| target_conf.namespace),
             )
         } else {
             (false, None, None)

@@ -8,6 +8,32 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.42.0](https://github.com/metalbear-co/mirrord/tree/3.42.0) - 2023-05-15
+
+
+### Added
+
+- mirrord config dropdown for intelliJ.
+  [#1030](https://github.com/metalbear-co/mirrord/issues/1030)
+- Log agent version when initializing the agent.
+
+
+### Changed
+
+- Remove quotes in InvalidTarget' target error message
+
+
+### Fixed
+
+- Use ProgressManager for mirrord progress on intelliJ
+  [#1337](https://github.com/metalbear-co/mirrord/issues/1337)
+- Fixed `go run` failing because of reading remote files by maing paths under
+  /private and /var/folders read locally by default.
+  [#1397](https://github.com/metalbear-co/mirrord/issues/1397)
+- Fix not loading into Go because of SIP by adding into default patched
+  binaries
+
+
 ## [3.41.1](https://github.com/metalbear-co/mirrord/tree/3.41.1) - 2023-05-07
 
 
