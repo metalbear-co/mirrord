@@ -367,15 +367,6 @@ async fn main() -> miette::Result<()> {
         Commands::Operator(args) => operator_command(*args).await?,
         Commands::ExtensionExec(args) => extension_exec(*args).await?,
         Commands::InternalProxy(args) => internal_proxy::proxy(*args).await?,
-        Commands::SipPatch(args) => {
-            println!(
-                "{}",
-                mirrord_sip::sip_patch(&args.binary, &vec![])
-                    .ok()
-                    .flatten()
-                    .unwrap_or(args.binary)
-            );
-        }
         Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
     }
 

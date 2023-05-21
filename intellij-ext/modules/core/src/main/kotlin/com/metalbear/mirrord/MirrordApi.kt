@@ -3,6 +3,7 @@
 package com.metalbear.mirrord
 
 import com.google.gson.Gson
+import com.google.gson.annotations.SerializedName
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.wsl.WSLCommandLineOptions
 import com.intellij.execution.wsl.WSLDistribution
@@ -30,9 +31,10 @@ data class Message(
     val success: Boolean?,
     val message: String?
 )
-
 data class MirrordExecution(
-    val environment: MutableMap<String, String>
+    val environment: MutableMap<String, String>,
+    @SerializedName("patched_path")
+    val patchedPath: String?
 )
 
 /**
@@ -107,9 +109,10 @@ object MirrordApi {
     fun exec(
         target: String?,
         configFile: String?,
+        executable: String?,
         project: Project?,
         wslDistribution: WSLDistribution?
-    ): MutableMap<String, String> {
+    ): MirrordExecution {
         val commandLine = GeneralCommandLine(cliPath(wslDistribution), "ext")
 
         target?.let {
@@ -122,6 +125,11 @@ object MirrordApi {
             val formattedPath = wslDistribution?.getWslPath(it) ?: it
             commandLine.addParameter("-f")
             commandLine.addParameter(formattedPath)
+        }
+
+        executable?.let {
+            commandLine.addParameter("-e")
+            commandLine.addParameter(executable)
         }
 
         wslDistribution?.let {
@@ -139,7 +147,7 @@ object MirrordApi {
 
         val bufferedReader = process.inputStream.reader().buffered()
         val gson = Gson()
-        val environment = CompletableFuture<MutableMap<String, String>?>()
+        val environment = CompletableFuture<MirrordExecution?>()
 
         val streamProgressTask = object : Task.Backgroundable(project, "mirrord", true) {
             override fun run(indicator: ProgressIndicator) {
@@ -155,7 +163,7 @@ object MirrordApi {
                             val innerMessage = message.message ?: throw Error("Invalid inner message")
                             val executionInfo = gson.fromJson(innerMessage, MirrordExecution::class.java)
                             indicator.text = "mirrord is running"
-                            environment.complete(executionInfo.environment)
+                            environment.complete(executionInfo)
                             return
                         } else {
                             environment.complete(null)

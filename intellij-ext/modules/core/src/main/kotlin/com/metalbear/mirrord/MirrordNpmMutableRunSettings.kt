@@ -1,18 +1,36 @@
 package com.metalbear.mirrord
 
 import com.intellij.execution.configuration.EnvironmentVariablesData
-import com.intellij.openapi.project.Project
+import com.intellij.execution.configurations.RunProfile
 
-class MirrordNpmMutableRunSettings(private val project: Project, private val runSettings: Any) {
+class MirrordNpmMutableRunSettings(private val runSettings: Any) {
     private val myEnvData = runSettings.javaClass.getDeclaredField("myEnvData")
     private val myInterpreterRef = runSettings.javaClass.getDeclaredField("myInterpreterRef")
     private val myPackageManagerPackageRef = runSettings.javaClass.getDeclaredField("myPackageManagerPackageRef")
+
+    private val NpmNodePackage = Class.forName(runSettings.javaClass.module, "com.intellij.javascript.nodejs.npm.NpmNodePackage")
+    private val NodePackageRef = Class.forName(runSettings.javaClass.module, "com.intellij.javascript.nodejs.util.NodePackageRef")
 
     init {
         myEnvData.isAccessible = true
         myInterpreterRef.isAccessible = true
         myPackageManagerPackageRef.isAccessible = true
     }
+
+    companion object {
+        fun fromRunProfile(runProfile: RunProfile): MirrordNpmMutableRunSettings {
+            val getRunSettings = runProfile.javaClass.getMethod("getRunSettings")
+            val runSettings = getRunSettings.invoke(runProfile)
+
+            return MirrordNpmMutableRunSettings(runSettings)
+        }
+    }
+
+    private val packageManagerPackage: Any?
+        get() {
+            val getConstantPackage = NodePackageRef.getMethod("getConstantPackage")
+            return getConstantPackage.invoke(packageManagerPackageRef)
+        }
 
     var envs: Map<String, String>
         get() {
@@ -26,25 +44,26 @@ class MirrordNpmMutableRunSettings(private val project: Project, private val run
             myEnvData.set(runSettings, newEnvData)
         }
 
-    var interpreterRef: Any
-        get() = myInterpreterRef.get(runSettings)
-        set(value) = myInterpreterRef.set(runSettings, value)
-
     var packageManagerPackageRef: Any
         get() = myPackageManagerPackageRef.get(runSettings)
         set(value) = myPackageManagerPackageRef.set(runSettings, value)
 
-    val interpreter: Any
-        get() {
-            val interpreterRef = interpreterRef
-            val resolveInterpreter = interpreterRef.javaClass.methods.find { k -> k.name == "resolve" }
-            return resolveInterpreter!!.invoke(interpreterRef, project)
-        }
 
-    val packageManager: Any?
+    var packageManagerPackagePath: String?
         get() {
-            val packageManagerPackageRef = packageManagerPackageRef
-            val getConstantPackage = packageManagerPackageRef.javaClass.getMethod("getConstantPackage")
-            return getConstantPackage.invoke(packageManagerPackageRef)
+            val getSystemIndependentPath = NpmNodePackage.getMethod("getSystemIndependentPath")
+            return packageManagerPackage?.let {
+                getSystemIndependentPath.invoke(it) as String
+            }
+        }
+        set(value) {
+            value?.let {
+                val patchedPackageManager = NpmNodePackage.getConstructor(Class.forName("java.lang.String"))?.newInstance(it)
+                val createPackageManagerPackageRef = NodePackageRef.methods.find { m -> m.name == "create" && m.parameterTypes[0].name != "java.lang.String" }
+
+                if (createPackageManagerPackageRef != null && patchedPackageManager != null) {
+                    packageManagerPackageRef = createPackageManagerPackageRef.invoke(null, patchedPackageManager)
+                }
+            }
         }
 }

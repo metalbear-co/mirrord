@@ -1,25 +1,19 @@
 package com.metalbear.mirrord
 
 import com.intellij.execution.ExecutionListener
-import com.intellij.execution.configuration.EnvironmentVariablesData
-import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.ProcessHandler
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.execution.target.createEnvironmentRequest
 import com.intellij.execution.wsl.WSLDistribution
 import com.intellij.execution.wsl.target.WslTargetEnvironmentRequest
-import com.intellij.notification.*
 import com.intellij.openapi.util.SystemInfo
-import java.util.concurrent.TimeUnit
 
 
 class MirrordNpmExecutionListener : ExecutionListener {
 
 	companion object {
-		var currentExecutorId: String = ""
-		var mirrordEnv: LinkedHashMap<String, String> = LinkedHashMap()
+		var currentExecutorId: Long = 0
 		var originEnv: LinkedHashMap<String, String> = LinkedHashMap()
-		var originInterpreterRef: Any? = null
 		var originPackageManagerPackageRef: Any? = null
 	}
 
@@ -27,159 +21,80 @@ class MirrordNpmExecutionListener : ExecutionListener {
 		return env.runProfile::class.qualifiedName == "com.intellij.lang.javascript.buildTools.npm.rc.NpmRunConfiguration"
 	}
 
-	private fun patchSip(wslDistribution: WSLDistribution?, executablePath: String): String {
-		val commandLine = GeneralCommandLine(MirrordApi.cliPath(wslDistribution), "sip-patch", executablePath)
-
-		val process = commandLine.toProcessBuilder()
-				.redirectOutput(ProcessBuilder.Redirect.PIPE)
-				.redirectError(ProcessBuilder.Redirect.PIPE)
-				.start()
-
-		process.waitFor(5, TimeUnit.SECONDS)
-
-		if (process.exitValue() != 0) {
-			val data = process.errorStream.bufferedReader().readText()
-			MirrordLogger.logger.debug("mirrord sip-patch failed: %s".format(data))
-
-			return executablePath
-		}
-
-		return process.inputStream.bufferedReader().readText().trim()
-	}
-
-	private fun patchNpmEnv(env: ExecutionEnvironment, wslDistribution: WSLDistribution?) {
-		if (mirrordEnv.isEmpty()) {
-			return
-		}
-
-		val project = env.project
-		val runProfile = env.runProfile
-
+	private fun patchNpmEnv(wslDistribution: WSLDistribution?, env: ExecutionEnvironment) {
 		try {
-			val getRunSettings = runProfile.javaClass.getMethod("getRunSettings")
-			val runSettings = getRunSettings.invoke(runProfile)
+			val runSettings = MirrordNpmMutableRunSettings.fromRunProfile(env.runProfile)
 
-			val mutRunSettings = MirrordNpmMutableRunSettings(project, runSettings)
+			val executablePath = if (SystemInfo.isMac) { runSettings.packageManagerPackagePath } else { null }
 
-			originEnv = LinkedHashMap(mutRunSettings.envs)
+			originEnv = LinkedHashMap(runSettings.envs)
 
-			mutRunSettings.envs = originEnv + mirrordEnv
+			MirrordExecManager.start(wslDistribution, env.project, executablePath)?.let {
+				(newEnv, patchedPath) ->
 
-			if (SystemInfo.isMac) {
-				originInterpreterRef = mutRunSettings.interpreterRef
-				val interpreter = mutRunSettings.interpreter
+				runSettings.envs = originEnv + newEnv
 
-				val patchedInterpreterPath = patchSip(wslDistribution, interpreter.toString())
-
-				val patchedInterpreter = interpreter.javaClass.getConstructor(Class.forName("java.lang.String")).newInstance(patchedInterpreterPath)
-
-				val toInterpreterRef =  patchedInterpreter.javaClass.getMethod("toRef")
-				mutRunSettings.interpreterRef = toInterpreterRef.invoke(patchedInterpreter)
-
-				originPackageManagerPackageRef = mutRunSettings.packageManagerPackageRef
-				val packageManager = mutRunSettings.packageManager
-
-				if (packageManager != null) {
-					val getSystemIndependentPath = packageManager.javaClass.getMethod("getSystemIndependentPath")
-					val packageManagerPath = getSystemIndependentPath.invoke(packageManager) as String
-
-					val patchedPath = patchSip(wslDistribution, packageManagerPath)
-
-					val patchedPackageManager = packageManager.javaClass.getConstructor(Class.forName("java.lang.String")).newInstance(patchedPath)
-
-					val createPackageManagerPackageRef = originPackageManagerPackageRef!!.javaClass.methods.find { m -> m.name == "create" && m.parameterTypes[0].name != "java.lang.String" }
-
-					mutRunSettings.packageManagerPackageRef = createPackageManagerPackageRef!!.invoke(null, patchedPackageManager)
+				patchedPath?.let {
+					originPackageManagerPackageRef = runSettings.packageManagerPackageRef
+					runSettings.packageManagerPackagePath = it
 				}
 			}
 		} catch (e: Exception) {
-			MirrordNotifier.notify(
-					"${runProfile::class.qualifiedName}: $e",
-					NotificationType.ERROR,
-					env.project
-			)
+			MirrordNotifier.errorNotification("mirrord failed to patch npm run",env.project)
 		}
 	}
 
 	private fun clearNpmEnv(env: ExecutionEnvironment) {
-		if (originInterpreterRef == null && originPackageManagerPackageRef == null && mirrordEnv.isEmpty()) {
-			return
-		}
-
-		val runProfile = env.runProfile
+		val runSettings = MirrordNpmMutableRunSettings.fromRunProfile(env.runProfile)
 
 		try {
-			val getRunSettings = runProfile.javaClass.getMethod("getRunSettings")
-			val runSettings = getRunSettings.invoke(runProfile)
-
-			val getEnvData = runSettings.javaClass.getMethod("getEnvData")
-			val envData = getEnvData.invoke(runSettings) as EnvironmentVariablesData
-
-			val newEnvData = envData.with(originEnv)
-
-			val toBuilder = runSettings.javaClass.getMethod("toBuilder")
-			val builder = toBuilder.invoke(runSettings)
-
-			val setEnvData = builder.javaClass.getMethod("setEnvData", newEnvData.javaClass)
-			setEnvData.invoke(builder, newEnvData)
+			runSettings.envs = originEnv
+			originEnv.clear()
 
 			if (SystemInfo.isMac) {
-				builder.javaClass.getMethod("setInterpreterRef", originInterpreterRef!!.javaClass).invoke(builder, originInterpreterRef)
-				originInterpreterRef = null
-
-				builder.javaClass.getMethod("setPackageManagerPackageRef", originPackageManagerPackageRef!!.javaClass).invoke(builder, originPackageManagerPackageRef)
-				originPackageManagerPackageRef = null
+				originPackageManagerPackageRef?.let {
+					runSettings.packageManagerPackageRef = it
+					originPackageManagerPackageRef = null
+				}
 			}
-
-			val build = builder.javaClass.getMethod("build")
-			val newRunSettings = build.invoke(builder)
-
-			val setRunSettings = runProfile.javaClass.getMethod("setRunSettings", newRunSettings.javaClass)
-			setRunSettings.invoke(runProfile, newRunSettings)
-
-			originEnv.clear()
-			mirrordEnv.clear()
 		} catch (e: Exception) {
-			MirrordNotifier.notify(
-					"${runProfile::class.qualifiedName}: $e",
-					NotificationType.ERROR,
-					env.project
-			)
+			MirrordNotifier.errorNotification("mirrord failed to clear npm run patch",env.project)
 		}
 	}
 
 	override fun processStarting(executorId: String, env: ExecutionEnvironment) {
-		if (!MirrordExecManager.enabled || !this.detectNpmRunConfiguration(env) || currentExecutorId.isNotEmpty()) {
+		if (!MirrordExecManager.enabled || !this.detectNpmRunConfiguration(env) || currentExecutorId != 0.toLong()) {
 			return super.processStarting(executorId, env)
 		}
 
-		currentExecutorId = executorId
+		currentExecutorId = env.executionId
 
-		val runProfile = env.runProfile
-		val project = env.project
-
-		val wsl = when (val request = createEnvironmentRequest(runProfile, project)) {
+		val wsl = when (val request = createEnvironmentRequest(env.runProfile, env.project)) {
 			is WslTargetEnvironmentRequest -> request.configuration.distribution!!
 			else -> null
 		}
 
-		MirrordExecManager.start(wsl, env.project)?.let {
-			newEnv ->
-			for (entry in newEnv.entries.iterator()) {
-				mirrordEnv[entry.key] = entry.value
-			}
-		}
-
-		patchNpmEnv(env, wsl)
+		patchNpmEnv(wsl, env)
 
 		super.processStartScheduled(executorId, env)
 	}
 
-	override fun processNotStarted(executorId: String, env: ExecutionEnvironment) {
-		if (currentExecutorId == executorId && this.detectNpmRunConfiguration(env)) {
+	override fun processStarted(executorId: String, env: ExecutionEnvironment, handler: ProcessHandler) {
+		if (currentExecutorId == env.executionId && this.detectNpmRunConfiguration(env)) {
 			clearNpmEnv(env)
 
-			currentExecutorId = ""
+			currentExecutorId = 0
+		}
+
+		super.processStarted(executorId, env, handler)
+	}
+
+
+	override fun processNotStarted(executorId: String, env: ExecutionEnvironment) {
+		if (currentExecutorId == env.executionId && this.detectNpmRunConfiguration(env)) {
+			clearNpmEnv(env)
+
+			currentExecutorId = 0
 		}
 
 		super.processNotStarted(executorId, env)
@@ -187,10 +102,10 @@ class MirrordNpmExecutionListener : ExecutionListener {
 
 
 	override fun processTerminating(executorId: String, env: ExecutionEnvironment, handler: ProcessHandler) {
-		if (currentExecutorId == executorId && this.detectNpmRunConfiguration(env)) {
+		if (currentExecutorId == env.executionId && this.detectNpmRunConfiguration(env)) {
 			clearNpmEnv(env)
 
-			currentExecutorId = ""
+			currentExecutorId = 0
 		}
 
 		return super.processTerminating(executorId, env, handler)
