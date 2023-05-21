@@ -77,19 +77,19 @@ class MirrordNpmExecutionListener : ExecutionListener {
 
 				originPackageManagerPackageRef = mutRunSettings.packageManagerPackageRef
 
-				val packageManager = mutRunSettings.packageManager
+				mutRunSettings.packageManager?.let {
+					packageManager -> {
+						val getSystemIndependentPath = packageManager.javaClass.getMethod("getSystemIndependentPath")
+						val packageManagerPath = getSystemIndependentPath.invoke(packageManager) as String
 
-				if (packageManager != null) {
-					val getSystemIndependentPath = packageManager.javaClass.getMethod("getSystemIndependentPath")
-					val packageManagerPath = getSystemIndependentPath.invoke(packageManager) as String
+						val patchedPath = patchSip(wslDistribution, packageManagerPath)
 
-					val patchedPath = patchSip(wslDistribution, packageManagerPath)
+						val patchedPackageManager = packageManager.javaClass.getConstructor(Class.forName("java.lang.String")).newInstance(patchedPath)
 
-					val patchedPackageManager = packageManager.javaClass.getConstructor(Class.forName("java.lang.String")).newInstance(patchedPath)
+						val createPackageManagerPackageRef = originPackageManagerPackageRef!!.javaClass.methods.find { m -> m.name == "create" && m.parameterTypes[0].name != "java.lang.String" }
 
-					val createPackageManagerPackageRef = originPackageManagerPackageRef!!.javaClass.methods.find { m -> m.name == "create" && m.parameterTypes[0].name != "java.lang.String" }
-
-					mutRunSettings.packageManagerPackageRef = createPackageManagerPackageRef!!.invoke(null, patchedPackageManager)
+						mutRunSettings.packageManagerPackageRef = createPackageManagerPackageRef!!.invoke(null, patchedPackageManager)
+					}
 				}
 			}
 		} catch (e: Exception) {
