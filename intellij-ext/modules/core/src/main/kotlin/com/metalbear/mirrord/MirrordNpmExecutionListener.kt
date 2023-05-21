@@ -58,41 +58,26 @@ class MirrordNpmExecutionListener : ExecutionListener {
 			val getRunSettings = runProfile.javaClass.getMethod("getRunSettings")
 			val runSettings = getRunSettings.invoke(runProfile)
 
-			val myEnvData = runSettings.javaClass.getDeclaredField("myEnvData")
-			myEnvData.isAccessible = true
+			val mutRunSettings = MirrordNpmMutableRunSettings(project, runSettings)
 
-			val envData = myEnvData.get(runSettings) as EnvironmentVariablesData
+			originEnv = LinkedHashMap(mutRunSettings.envs)
 
-			originEnv = LinkedHashMap(envData.envs)
-
-			val newEnvData = envData.with(envData.envs + mirrordEnv)
-
-			myEnvData.set(runSettings, newEnvData)
+			mutRunSettings.envs = originEnv + mirrordEnv
 
 			if (SystemInfo.isMac) {
-				val myInterpreterRef = runSettings.javaClass.getDeclaredField("myInterpreterRef")
-				myInterpreterRef.isAccessible = true
-
-				originInterpreterRef = myInterpreterRef.get(runSettings)
-
-				val resolveInterpreter = originInterpreterRef!!.javaClass.methods.find { k -> k.name == "resolve" }
-				val interpreter = resolveInterpreter!!.invoke(originInterpreterRef, project)
+				originInterpreterRef = mutRunSettings.interpreterRef
+				val interpreter = mutRunSettings.interpreter
 
 				val patchedInterpreterPath = patchSip(wslDistribution, interpreter.toString())
 
 				val patchedInterpreter = interpreter.javaClass.getConstructor(Class.forName("java.lang.String")).newInstance(patchedInterpreterPath)
 
 				val toInterpreterRef =  patchedInterpreter.javaClass.getMethod("toRef")
-				val patchedInterpreterRef = toInterpreterRef.invoke(patchedInterpreter)
+				mutRunSettings.interpreterRef = toInterpreterRef.invoke(patchedInterpreter)
 
-				myInterpreterRef.set(runSettings, patchedInterpreterRef)
+				originPackageManagerPackageRef = mutRunSettings.packageManagerPackageRef
 
-				val myPackageManagerPackageRef = runSettings.javaClass.getDeclaredField("myPackageManagerPackageRef")
-				myPackageManagerPackageRef.isAccessible = true
-
-				originPackageManagerPackageRef = myPackageManagerPackageRef.get(runSettings)
-
-				val packageManager = originPackageManagerPackageRef!!.javaClass.getMethod("getConstantPackage").invoke(originPackageManagerPackageRef)
+				val packageManager = mutRunSettings.packageManager
 
 				if (packageManager != null) {
 					val getSystemIndependentPath = packageManager.javaClass.getMethod("getSystemIndependentPath")
@@ -104,8 +89,7 @@ class MirrordNpmExecutionListener : ExecutionListener {
 
 					val createPackageManagerPackageRef = originPackageManagerPackageRef!!.javaClass.methods.find { m -> m.name == "create" && m.parameterTypes[0].name != "java.lang.String" }
 
-					val packageManagerPackageRef = createPackageManagerPackageRef!!.invoke(null, patchedPackageManager)
-					myPackageManagerPackageRef.set(runSettings, packageManagerPackageRef)
+					mutRunSettings.packageManagerPackageRef = createPackageManagerPackageRef!!.invoke(null, patchedPackageManager)
 				}
 			}
 		} catch (e: Exception) {
