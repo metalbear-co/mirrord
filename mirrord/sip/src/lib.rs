@@ -14,11 +14,13 @@ mod main {
         path::{Path, PathBuf},
     };
 
+    use apple_codesign::{CodeSignatureFlags, MachFile};
     use object::{
         macho::{self, FatHeader, MachHeader64},
         read::macho::{FatArch, MachHeader},
         Architecture, Endianness, FileKind,
     };
+    use once_cell::sync::Lazy;
     use tracing::trace;
     use which::which;
 
@@ -31,6 +33,25 @@ mod main {
 
     /// Where patched files are stored, relative to the temp dir (`/tmp/mirrord-bin/...`).
     pub const MIRRORD_PATCH_DIR: &str = "mirrord-bin";
+
+    /// The path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
+    /// scripts.
+    pub static MIRRORD_TEMP_BIN_DIR: Lazy<String> = Lazy::new(|| {
+        std::env::temp_dir()
+            .join(MIRRORD_PATCH_DIR)
+            // lossy: we assume our temp dir path does not contain non-unicode chars.
+            .to_string_lossy()
+            .to_string()
+            .trim_end_matches('/')
+            .to_string()
+    });
+
+    /// Path of current executable, None if fetching failed.
+    pub static CURRENT_EXE: Lazy<Option<String>> = Lazy::new(|| {
+        std::env::current_exe()
+            .ok()
+            .map(|path_buf| path_buf.to_string_lossy().to_string())
+    });
 
     /// Check if a cpu subtype (already parsed with the correct endianness) is arm64e, given its
     /// main cpu type is arm64. We only consider the lowest byte in the check.
@@ -269,6 +290,31 @@ mod main {
         NoSIP,
     }
 
+    /// Checks if binary is signed with either `RUNTIME` or `RESTRICTED` flags.
+    /// The code ignores error to allow smoother fallbacks.
+    fn is_code_signed(path: &PathBuf) -> bool {
+        let data = match std::fs::read(path) {
+            Ok(data) => data,
+            Err(_) => return false,
+        };
+
+        if let Ok(mach) = MachFile::parse(data.as_ref()) {
+            for macho in mach.into_iter() {
+                if let Ok(Some(signature)) = macho.code_signature() {
+                    if let Ok(Some(blob)) = signature.code_directory() {
+                        if blob
+                            .flags
+                            .intersects(CodeSignatureFlags::RESTRICT | CodeSignatureFlags::RUNTIME)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
     /// Determine status recursively, keep seen_paths, and return an error if there is a cyclical
     /// reference.
     fn get_sip_status_rec(
@@ -298,8 +344,7 @@ mod main {
             return Ok(SipStatus::SomeSIP(complete_path, None));
         }
 
-        // Temporary patch until https://github.com/metalbear-co/mirrord/pull/1400 is merged
-        if complete_path.ends_with("go") {
+        if is_code_signed(&complete_path) {
             return Ok(SipStatus::SomeSIP(complete_path, None));
         }
 

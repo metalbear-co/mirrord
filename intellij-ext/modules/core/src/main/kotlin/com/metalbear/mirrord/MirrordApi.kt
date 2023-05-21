@@ -40,6 +40,7 @@ data class MirrordExecution(
  */
 object MirrordApi {
     private const val cliBinary = "mirrord"
+    const val targetlessTargetName = "No Target (\"targetless\")"
     private val logger = MirrordLogger.logger
     fun cliPath(wslDistribution: WSLDistribution?): String {
         val path = MirrordPathManager.getBinary(cliBinary, true)!!
@@ -49,7 +50,8 @@ object MirrordApi {
         return path
     }
 
-    fun listPods(configFile: String?, project: Project?, wslDistribution: WSLDistribution?): List<String>? {
+    /** run mirrord ls, return list of pods + targetless target. */
+    fun listPods(configFile: String?, project: Project?, wslDistribution: WSLDistribution?): List<String> {
         MirrordLogger.logger.debug("listing pods")
         val commandLine = GeneralCommandLine(cliPath(wslDistribution), "ls", "-o", "json")
         configFile?.let {
@@ -76,19 +78,30 @@ object MirrordApi {
         MirrordLogger.logger.debug("waiting for process to finish")
         process.waitFor(60, TimeUnit.SECONDS)
 
-        if (process.exitValue() != 0) {
+        val pods: MutableList<String> = if (process.exitValue() != 0) {
             MirrordNotifier.errorNotification("mirrord failed to list available targets", project)
             val data = process.errorStream.bufferedReader().readText()
             MirrordLogger.logger.debug("mirrord ls failed: %s".format(data))
-            return null
+            mutableListOf()
+        } else {
+            MirrordLogger.logger.debug("process wait finished, reading output")
+            val data = process.inputStream.bufferedReader().readText()
+            val gson = Gson()
+            MirrordLogger.logger.debug("parsing %s".format(data))
+            gson.fromJson(data, Array<String>::class.java).toMutableList()
         }
 
-        MirrordLogger.logger.debug("process wait finished, reading output")
-        val data = process.inputStream.bufferedReader().readText()
-        val gson = Gson()
-        MirrordLogger.logger.debug("parsing %s".format(data))
-        return gson.fromJson(data, Array<String>::class.java).asList()
+        if (pods.isEmpty()) {
+            MirrordNotifier.notify(
+                "No mirrord target available in the configured namespace. " +
+                        "You can run targetless, or set a different target namespace or kubeconfig in the mirrord configuration file.",
+                NotificationType.INFORMATION,
+                project,
+            )
+        }
 
+        pods.add(targetlessTargetName)
+        return pods
     }
 
     fun exec(

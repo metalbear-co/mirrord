@@ -5,7 +5,7 @@ mod env {
 
     use rstest::*;
 
-    use crate::utils::{run_exec, service, EnvApp, KubeService};
+    use crate::utils::{run_exec_with_target, service, EnvApp, KubeService};
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -32,7 +32,7 @@ mod env {
         application: EnvApp,
     ) {
         let service = service.await;
-        let mut process = run_exec(
+        let mut process = run_exec_with_target(
             application.command(),
             &service.target,
             None,

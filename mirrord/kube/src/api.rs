@@ -1,7 +1,7 @@
 use actix_codec::{AsyncRead, AsyncWrite};
 use futures::{SinkExt, StreamExt};
-use k8s_openapi::NamespaceResourceScope;
-use kube::{Api, Client};
+use k8s_openapi::{api::core::v1::Namespace, NamespaceResourceScope};
+use kube::{api::ListParams, Api, Client};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage, LogLevel};
 use tokio::{
@@ -28,6 +28,28 @@ where
     } else {
         Api::default_namespaced(client.clone())
     }
+}
+
+/// Get a vector of namespaces from an optional namespace. If the given namespace is Some, then
+/// fetch its Namespace object, and return a vector only with that.
+/// If the namespace is None - return all namespaces.
+pub async fn get_namespaces(
+    client: &Client,
+    namespace: Option<&str>,
+    lp: &ListParams,
+) -> Result<Vec<Namespace>> {
+    let api: Api<Namespace> = Api::all(client.clone());
+    Ok(if let Some(namespace) = namespace {
+        vec![api.get(namespace).await?]
+    } else {
+        api.list(lp).await?.items
+    })
+}
+
+/// Check if the client can see a given namespace.
+pub async fn namespace_exists_for_client(namespace: &str, client: &Client) -> bool {
+    let api: Api<Namespace> = Api::all(client.clone());
+    api.get(namespace).await.is_ok()
 }
 
 /// Creates the task that handles the messaging between layer/agent.

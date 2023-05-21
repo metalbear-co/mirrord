@@ -5,7 +5,7 @@ mod file_ops {
 
     use rstest::*;
 
-    use crate::utils::{run_exec, service, Agent, FileOps, KubeService};
+    use crate::utils::{run_exec_with_target, service, Agent, FileOps, KubeService};
 
     #[cfg(target_os = "linux")]
     #[rstest]
@@ -30,7 +30,7 @@ mod file_ops {
         }
 
         let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/**")];
-        let mut process = run_exec(
+        let mut process = run_exec_with_target(
             command,
             &service.target,
             Some(&service.namespace),
@@ -59,7 +59,7 @@ mod file_ops {
         let args = vec!["--fs-mode", "read"];
         let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp**")];
 
-        let mut process = run_exec(
+        let mut process = run_exec_with_target(
             python_command,
             &service.target,
             Some(&service.namespace),
@@ -92,7 +92,7 @@ mod file_ops {
             "python-e2e/files_ro.py",
         ];
 
-        let mut process = run_exec(
+        let mut process = run_exec_with_target(
             python_command,
             &service.target,
             Some(&service.namespace),
@@ -124,7 +124,7 @@ mod file_ops {
             "python-e2e/statfs.py",
         ];
 
-        let mut process = run_exec(
+        let mut process = run_exec_with_target(
             python_command,
             &service.target,
             Some(&service.namespace),
@@ -147,7 +147,8 @@ mod file_ops {
     pub async fn bash_file_exists(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "exists"];
-        let mut process = run_exec(bash_command, &service.target, None, None, None).await;
+        let mut process =
+            run_exec_with_target(bash_command, &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -164,7 +165,8 @@ mod file_ops {
     pub async fn bash_file_read(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "read"];
-        let mut process = run_exec(bash_command, &service.target, None, None, None).await;
+        let mut process =
+            run_exec_with_target(bash_command, &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -179,7 +181,8 @@ mod file_ops {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "write"];
         let args = vec!["--rw"];
-        let mut process = run_exec(bash_command, &service.target, None, Some(args), None).await;
+        let mut process =
+            run_exec_with_target(bash_command, &service.target, None, Some(args), None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -208,7 +211,7 @@ mod file_ops {
             args.extend(ephemeral_flag);
         }
 
-        let mut process = run_exec(
+        let mut process = run_exec_with_target(
             command,
             &service.target,
             Some(&service.namespace),
