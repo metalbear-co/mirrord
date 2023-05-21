@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit
 class MirrordNpmExecutionListener : ExecutionListener {
 
 	companion object {
+		var currentExecutorId: String = ""
 		var mirrordEnv: LinkedHashMap<String, String> = LinkedHashMap()
 		var originEnv: LinkedHashMap<String, String> = LinkedHashMap()
 		var originInterpreterRef: Any? = null
@@ -76,20 +77,19 @@ class MirrordNpmExecutionListener : ExecutionListener {
 				mutRunSettings.interpreterRef = toInterpreterRef.invoke(patchedInterpreter)
 
 				originPackageManagerPackageRef = mutRunSettings.packageManagerPackageRef
+				val packageManager = mutRunSettings.packageManager
 
-				mutRunSettings.packageManager?.let {
-					packageManager -> {
-						val getSystemIndependentPath = packageManager.javaClass.getMethod("getSystemIndependentPath")
-						val packageManagerPath = getSystemIndependentPath.invoke(packageManager) as String
+				if (packageManager != null) {
+					val getSystemIndependentPath = packageManager.javaClass.getMethod("getSystemIndependentPath")
+					val packageManagerPath = getSystemIndependentPath.invoke(packageManager) as String
 
-						val patchedPath = patchSip(wslDistribution, packageManagerPath)
+					val patchedPath = patchSip(wslDistribution, packageManagerPath)
 
-						val patchedPackageManager = packageManager.javaClass.getConstructor(Class.forName("java.lang.String")).newInstance(patchedPath)
+					val patchedPackageManager = packageManager.javaClass.getConstructor(Class.forName("java.lang.String")).newInstance(patchedPath)
 
-						val createPackageManagerPackageRef = originPackageManagerPackageRef!!.javaClass.methods.find { m -> m.name == "create" && m.parameterTypes[0].name != "java.lang.String" }
+					val createPackageManagerPackageRef = originPackageManagerPackageRef!!.javaClass.methods.find { m -> m.name == "create" && m.parameterTypes[0].name != "java.lang.String" }
 
-						mutRunSettings.packageManagerPackageRef = createPackageManagerPackageRef!!.invoke(null, patchedPackageManager)
-					}
+					mutRunSettings.packageManagerPackageRef = createPackageManagerPackageRef!!.invoke(null, patchedPackageManager)
 				}
 			}
 		} catch (e: Exception) {
@@ -116,7 +116,6 @@ class MirrordNpmExecutionListener : ExecutionListener {
 			val envData = getEnvData.invoke(runSettings) as EnvironmentVariablesData
 
 			val newEnvData = envData.with(originEnv)
-			originEnv.clear()
 
 			val toBuilder = runSettings.javaClass.getMethod("toBuilder")
 			val builder = toBuilder.invoke(runSettings)
@@ -137,6 +136,9 @@ class MirrordNpmExecutionListener : ExecutionListener {
 
 			val setRunSettings = runProfile.javaClass.getMethod("setRunSettings", newRunSettings.javaClass)
 			setRunSettings.invoke(runProfile, newRunSettings)
+
+			originEnv.clear()
+			mirrordEnv.clear()
 		} catch (e: Exception) {
 			MirrordNotifier.notify(
 					"${runProfile::class.qualifiedName}: $e",
@@ -147,9 +149,11 @@ class MirrordNpmExecutionListener : ExecutionListener {
 	}
 
 	override fun processStarting(executorId: String, env: ExecutionEnvironment) {
-		if (!MirrordExecManager.enabled || !this.detectNpmRunConfiguration(env)) {
+		if (!MirrordExecManager.enabled || !this.detectNpmRunConfiguration(env) || currentExecutorId.isNotEmpty()) {
 			return super.processStarting(executorId, env)
 		}
+
+		currentExecutorId = executorId
 
 		val runProfile = env.runProfile
 		val project = env.project
@@ -171,10 +175,24 @@ class MirrordNpmExecutionListener : ExecutionListener {
 		super.processStartScheduled(executorId, env)
 	}
 
+	override fun processNotStarted(executorId: String, env: ExecutionEnvironment) {
+		if (currentExecutorId == executorId && this.detectNpmRunConfiguration(env)) {
+			clearNpmEnv(env)
+
+			currentExecutorId = ""
+		}
+
+		super.processNotStarted(executorId, env)
+	}
+
 
 	override fun processTerminating(executorId: String, env: ExecutionEnvironment, handler: ProcessHandler) {
-		if (this.detectNpmRunConfiguration(env)) {
+		if (currentExecutorId == executorId && this.detectNpmRunConfiguration(env)) {
 			clearNpmEnv(env)
+
+			currentExecutorId = ""
 		}
+
+		return super.processTerminating(executorId, env, handler)
 	}
 }

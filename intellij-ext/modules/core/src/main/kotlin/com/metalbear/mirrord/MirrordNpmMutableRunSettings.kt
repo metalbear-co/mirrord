@@ -36,12 +36,14 @@ class MirrordNpmMutableRunSettings(private val project: Project, private val run
 
     val interpreter: Any
         get() {
+            val interpreterRef = interpreterRef
             val resolveInterpreter = interpreterRef.javaClass.methods.find { k -> k.name == "resolve" }
             return resolveInterpreter!!.invoke(interpreterRef, project)
         }
 
     val packageManager: Any?
         get() {
+            val packageManagerPackageRef = packageManagerPackageRef
             val getConstantPackage = packageManagerPackageRef.javaClass.getMethod("getConstantPackage")
             return getConstantPackage.invoke(packageManagerPackageRef)
         }
