@@ -13,7 +13,7 @@ import com.intellij.openapi.util.SystemInfo
 import java.util.concurrent.TimeUnit
 
 
-class MirrordExecutionListener : ExecutionListener {
+class MirrordNpmExecutionListener : ExecutionListener {
 
 	companion object {
 		var mirrordEnv: LinkedHashMap<String, String> = LinkedHashMap()

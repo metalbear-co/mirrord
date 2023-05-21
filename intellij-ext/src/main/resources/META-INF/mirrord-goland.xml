@@ -2,4 +2,9 @@
     <extensions defaultExtensionNs="com.goide">
         <runConfigurationExtension implementation="com.metalbear.mirrord.products.goland.GolandRunConfigurationExtension" id="mirrordGoland"/>
     </extensions>
+
+    <projectListeners>
+        <listener class="com.metalbear.mirrord.MirrordNpmExecutionListener"
+                  topic="com.intellij.execution.ExecutionListener"/>
+    </projectListeners>
 </idea-plugin>
