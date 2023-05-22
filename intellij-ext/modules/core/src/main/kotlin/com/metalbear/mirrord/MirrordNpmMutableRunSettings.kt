@@ -4,7 +4,7 @@ import com.intellij.execution.configuration.EnvironmentVariablesData
 import com.intellij.execution.configurations.RunProfile
 import com.intellij.openapi.project.Project
 
-class MirrordNpmMutableRunSettings(private val project: Project, private val runSettings: Any) {
+class MirrordNpmMutableRunSettings(project: Project, private val runSettings: Any) {
     private val myEnvData = runSettings.javaClass.getDeclaredField("myEnvData")
     private val myPackageManagerPackageRef = runSettings.javaClass.getDeclaredField("myPackageManagerPackageRef")
 
@@ -12,14 +12,11 @@ class MirrordNpmMutableRunSettings(private val project: Project, private val run
     private val NpmNodePackage = Class.forName(runSettings.javaClass.module, "com.intellij.javascript.nodejs.npm.NpmNodePackage")
     private val NodePackageRef = Class.forName(runSettings.javaClass.module, "com.intellij.javascript.nodejs.util.NodePackageRef")
 
-    private val npmMananger = NpmManager.getMethod("getInstance", Project::class.java).invoke(null, project)
+    private val npmMananger = NpmManager.getConstructor(Project::class.java).newInstance(project)
 
     init {
         myEnvData.isAccessible = true
         myPackageManagerPackageRef.isAccessible = true
-
-        val setPackageRef = NpmManager.getMethod("setPackageRef", NodePackageRef)
-        setPackageRef.invoke(npmMananger, packageManagerPackageRef)
     }
 
     companion object {
@@ -33,9 +30,28 @@ class MirrordNpmMutableRunSettings(private val project: Project, private val run
 
     private val packageManagerPackage: Any?
         get() {
+            val getPackageRef = NpmManager.getMethod("getPackageRef")
+            val setPackageRef = NpmManager.getMethod("setPackageRef", NodePackageRef)
+
+            var originalRef: Any? = null
+
+            if (packageManagerPackageRefIdentifier != "Project") {
+                originalRef = getPackageRef.invoke(npmMananger)
+                setPackageRef.invoke(npmMananger, packageManagerPackageRef)
+            }
+
             val getPackage = NpmManager.getMethod("getPackage")
-            return getPackage.invoke(npmMananger)
+            val packageManager = getPackage.invoke(npmMananger)
+
+            originalRef?.let {
+                setPackageRef.invoke(npmMananger, it)
+            }
+
+            return packageManager
         }
+
+    private val packageManagerPackageRefIdentifier: String
+        get() = NodePackageRef.getMethod("getIdentifier").invoke(packageManagerPackageRef) as String
 
     var envs: Map<String, String>
         get() {
@@ -52,7 +68,6 @@ class MirrordNpmMutableRunSettings(private val project: Project, private val run
     var packageManagerPackageRef: Any
         get() = myPackageManagerPackageRef.get(runSettings)
         set(value) = myPackageManagerPackageRef.set(runSettings, value)
-
 
     var packageManagerPackagePath: String?
         get() {
