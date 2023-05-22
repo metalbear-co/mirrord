@@ -9,12 +9,15 @@ import com.intellij.execution.wsl.target.WslTargetEnvironmentRequest
 import com.intellij.openapi.util.SystemInfo
 
 
+data class RunConfigGuard(val executionId: Long) {
+	var originEnv: Map<String, String> = LinkedHashMap()
+	var originPackageManagerPackageRef: Any? = null
+}
+
 class MirrordNpmExecutionListener : ExecutionListener {
 
 	companion object {
-		var currentExecutorId: Long = 0
-		var originEnv: LinkedHashMap<String, String> = LinkedHashMap()
-		var originPackageManagerPackageRef: Any? = null
+		val executions: MutableMap<Long, RunConfigGuard> = LinkedHashMap()
 	}
 
 	private fun detectNpmRunConfiguration(env: ExecutionEnvironment): Boolean {
@@ -22,20 +25,22 @@ class MirrordNpmExecutionListener : ExecutionListener {
 	}
 
 	private fun patchNpmEnv(wslDistribution: WSLDistribution?, env: ExecutionEnvironment) {
+		val executionGuard = executions[env.executionId]!!
+
 		try {
 			val runSettings = MirrordNpmMutableRunSettings.fromRunProfile(env.runProfile)
 
 			val executablePath = if (SystemInfo.isMac) { runSettings.packageManagerPackagePath } else { null }
 
-			originEnv = LinkedHashMap(runSettings.envs)
+			executionGuard.originEnv = LinkedHashMap(runSettings.envs)
 
 			MirrordExecManager.start(wslDistribution, env.project, executablePath)?.let {
 				(newEnv, patchedPath) ->
 
-				runSettings.envs = originEnv + newEnv
+				runSettings.envs = executionGuard.originEnv + newEnv
 
 				patchedPath?.let {
-					originPackageManagerPackageRef = runSettings.packageManagerPackageRef
+					executionGuard.originPackageManagerPackageRef = runSettings.packageManagerPackageRef
 					runSettings.packageManagerPackagePath = it
 				}
 			}
@@ -45,29 +50,30 @@ class MirrordNpmExecutionListener : ExecutionListener {
 	}
 
 	private fun clearNpmEnv(env: ExecutionEnvironment) {
+		val executionGuard = executions[env.executionId]!!
 		val runSettings = MirrordNpmMutableRunSettings.fromRunProfile(env.runProfile)
 
 		try {
-			runSettings.envs = originEnv
-			originEnv.clear()
+			runSettings.envs = executionGuard.originEnv
 
 			if (SystemInfo.isMac) {
-				originPackageManagerPackageRef?.let {
+				executionGuard.originPackageManagerPackageRef?.let {
 					runSettings.packageManagerPackageRef = it
-					originPackageManagerPackageRef = null
 				}
 			}
 		} catch (e: Exception) {
 			MirrordNotifier.errorNotification("mirrord failed to clear npm run patch",env.project)
+		} finally {
+			executions.remove(env.executionId)
 		}
 	}
 
 	override fun processStarting(executorId: String, env: ExecutionEnvironment) {
-		if (!MirrordExecManager.enabled || !this.detectNpmRunConfiguration(env) || currentExecutorId != 0.toLong()) {
+		if (!MirrordExecManager.enabled || !this.detectNpmRunConfiguration(env)) {
 			return super.processStarting(executorId, env)
 		}
 
-		currentExecutorId = env.executionId
+		executions[env.executionId] = RunConfigGuard(env.executionId)
 
 		val wsl = when (val request = createEnvironmentRequest(env.runProfile, env.project)) {
 			is WslTargetEnvironmentRequest -> request.configuration.distribution!!
@@ -80,10 +86,8 @@ class MirrordNpmExecutionListener : ExecutionListener {
 	}
 
 	override fun processStarted(executorId: String, env: ExecutionEnvironment, handler: ProcessHandler) {
-		if (currentExecutorId == env.executionId && this.detectNpmRunConfiguration(env)) {
+		if (this.detectNpmRunConfiguration(env) && executions.containsKey(env.executionId)) {
 			clearNpmEnv(env)
-
-			currentExecutorId = 0
 		}
 
 		super.processStarted(executorId, env, handler)
@@ -91,10 +95,8 @@ class MirrordNpmExecutionListener : ExecutionListener {
 
 
 	override fun processNotStarted(executorId: String, env: ExecutionEnvironment) {
-		if (currentExecutorId == env.executionId && this.detectNpmRunConfiguration(env)) {
+		if (this.detectNpmRunConfiguration(env) && executions.containsKey(env.executionId)) {
 			clearNpmEnv(env)
-
-			currentExecutorId = 0
 		}
 
 		super.processNotStarted(executorId, env)
@@ -102,10 +104,8 @@ class MirrordNpmExecutionListener : ExecutionListener {
 
 
 	override fun processTerminating(executorId: String, env: ExecutionEnvironment, handler: ProcessHandler) {
-		if (currentExecutorId == env.executionId && this.detectNpmRunConfiguration(env)) {
+		if (this.detectNpmRunConfiguration(env) && executions.containsKey(env.executionId)) {
 			clearNpmEnv(env)
-
-			currentExecutorId = 0
 		}
 
 		return super.processTerminating(executorId, env, handler)
