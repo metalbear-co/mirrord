@@ -45,6 +45,7 @@ class MirrordNpmExecutionListener : ExecutionListener {
 				}
 			}
 		} catch (e: Exception) {
+			MirrordLogger.logger.error("mirrord failed to patch npm run: $e")
 			MirrordNotifier.errorNotification("mirrord failed to patch npm run",env.project)
 		}
 	}
@@ -62,6 +63,7 @@ class MirrordNpmExecutionListener : ExecutionListener {
 				}
 			}
 		} catch (e: Exception) {
+			MirrordLogger.logger.error("mirrord failed to clear npm run patch: $e")
 			MirrordNotifier.errorNotification("mirrord failed to clear npm run patch",env.project)
 		} finally {
 			executions.remove(env.executionId)
