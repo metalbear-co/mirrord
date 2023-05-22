@@ -79,6 +79,8 @@ struct State {
     clients: HashSet<ClientId>,
     index_allocator: IndexAllocator<ClientId>,
     /// Handle to the target container if there is one.
+    /// This is optional because it is acceptable not to pass the container runtime and id if not
+    /// pausing. When those args are not passed, container is [`None`].
     container: Option<ContainerHandle>,
     env: HashMap<String, String>,
     /// Whether this agent is run in an ephemeral container.
@@ -91,21 +93,21 @@ impl State {
         let container =
             get_container(args.container_id.as_ref(), args.container_runtime.as_ref()).await?;
 
-        let handle = match container {
+        let container = match container {
             Some(container) => Some(ContainerHandle::new(container).await?),
             None => None,
         };
 
         let environ_path = PathBuf::from("/proc")
             .join(
-                handle
+                container
                     .as_ref()
                     .map(|h| h.pid().to_string())
                     .unwrap_or_else(|| "self".to_string()),
             )
             .join("environ");
 
-        let mut env = handle
+        let mut env = container
             .as_ref()
             .map(ContainerHandle::raw_env)
             .cloned()
@@ -120,7 +122,7 @@ impl State {
         Ok(State {
             clients: HashSet::new(),
             index_allocator: Default::default(),
-            container: handle,
+            container,
             env,
             ephemeral: args.ephemeral_container,
         })
