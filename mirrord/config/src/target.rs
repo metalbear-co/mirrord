@@ -28,6 +28,7 @@ use crate::{
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase")]
 pub enum TargetFileConfig {
+    // Generated when the value of the `target` field is a string, or when there is no target.
     // we need default else target value will be required in some scenarios.
     Simple(#[serde(default, deserialize_with = "string_or_struct_option")] Option<Target>),
     Advanced {
@@ -58,11 +59,54 @@ impl FromMirrordConfig for TargetConfig {
 }
 
 impl TargetFileConfig {
+    /// Get the final path.
+    /// Will return the environment variable's value if set, if not the value from the
+    /// configuration (passed argument), and if that is not set as well, `None`.
+    ///
+    /// # Arguments
+    ///
+    /// * `path_from_config_file` - The optional value read from the config file.
     fn get_optional_path(path_from_config_file: Option<Target>) -> Result<Option<Target>> {
         FromEnvWithError::new("MIRRORD_IMPERSONATED_TARGET")
             .or(path_from_config_file)
             .source_value()
             .transpose()
+    }
+
+    /// Get the final namespace.
+    /// Will return the environment variable's value if set, if not the value from the
+    /// configuration (passed argument), and if that is not set as well, `None`.
+    ///
+    /// # Arguments
+    ///
+    /// * `namespace_from_config_file` - The optional value read from the config file.
+    fn get_optional_namespace(
+        namespace_from_config_file: Option<String>,
+    ) -> Result<Option<String>> {
+        FromEnv::new("MIRRORD_TARGET_NAMESPACE")
+            .or(namespace_from_config_file)
+            .source_value()
+            .transpose()
+    }
+
+    /// Take the final values (after taking into account the values from the file and from env), and
+    /// return the optional `TargetConfig` (`None` if targetless).
+    ///
+    /// # Errors
+    /// * `ConfigError::TargetNamespaceWithoutTarget` - if namespace is some but path is `None`,
+    ///   because the target namespace does not mean anything without a target path. The user might
+    ///   have meant the agent namespace.
+    fn from_final_path_and_namespace(
+        path: Option<Target>,
+        namespace: Option<String>,
+    ) -> Result<Option<TargetConfig>> {
+        if let Some(path) = path {
+            Ok(Some(TargetConfig { path, namespace }))
+        } else if namespace.is_some() {
+            Err(ConfigError::TargetNamespaceWithoutTarget)
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -76,52 +120,23 @@ impl MirrordConfig for TargetFileConfig {
     /// Specifying target namespace without target is not allowed and results in an error that
     /// explains to the user what to do instead.
     fn generate_config(self) -> Result<Self::Generated> {
-        let config = match self {
+        match self {
             TargetFileConfig::Simple(path) => {
                 // Namespace was not specified via file, get it from env var if set.
                 let namespace: Option<String> = FromEnv::new("MIRRORD_TARGET_NAMESPACE")
                     .source_value()
                     .transpose()?;
-
-                let path = if let Some(path) = Self::get_optional_path(path)? {
-                    path
-                } else {
-                    // No path specified, neither via file, nor via env. So no `TargetConfig`,
-                    // running targetless.
-
-                    if let Some(namespace_from_env) = namespace {
-                        // env var (or CLI flag) was set.
-
-                        if !namespace_from_env.is_empty() {
-                            // And the value is not the empty string.
-
-                            return Err(ConfigError::TargetNamespaceWithoutTarget);
-                        }
-                    }
-                    return Ok(None); // Run targetless.
-                };
-                TargetConfig { path, namespace }
+                let path = Self::get_optional_path(path)?;
+                Self::from_final_path_and_namespace(path, namespace)
             }
             TargetFileConfig::Advanced { path, namespace } => {
-                // this assertion panics when running in ext/ls mode
-                // debug_assert!(namespace.is_some()); // Should only be advanced if namespace
+                debug_assert!(namespace.is_some()); // Should only be advanced if namespace
                 // there.
-                let path = if let Some(path) = Self::get_optional_path(path)? {
-                    path
-                } else {
-                    return Err(ConfigError::TargetNamespaceWithoutTarget);
-                };
-                TargetConfig {
-                    path,
-                    namespace: FromEnv::new("MIRRORD_TARGET_NAMESPACE")
-                        .or(namespace)
-                        .source_value()
-                        .transpose()?,
-                }
+                let path = Self::get_optional_path(path)?;
+                let namespace = Self::get_optional_namespace(namespace)?;
+                Self::from_final_path_and_namespace(path, namespace)
             }
-        };
-
-        Ok(Some(config))
+        }
     }
 }
 
