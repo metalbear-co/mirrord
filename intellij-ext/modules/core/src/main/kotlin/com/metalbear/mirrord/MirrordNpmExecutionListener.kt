@@ -28,7 +28,7 @@ class MirrordNpmExecutionListener : ExecutionListener {
 		val executionGuard = executions[env.executionId]!!
 
 		try {
-			val runSettings = MirrordNpmMutableRunSettings.fromRunProfile(env.runProfile)
+			val runSettings = MirrordNpmMutableRunSettings.fromRunProfile(env.project, env.runProfile)
 
 			val executablePath = if (SystemInfo.isMac) { runSettings.packageManagerPackagePath } else { null }
 
@@ -52,7 +52,7 @@ class MirrordNpmExecutionListener : ExecutionListener {
 
 	private fun clearNpmEnv(env: ExecutionEnvironment) {
 		val executionGuard = executions[env.executionId]!!
-		val runSettings = MirrordNpmMutableRunSettings.fromRunProfile(env.runProfile)
+		val runSettings = MirrordNpmMutableRunSettings.fromRunProfile(env.project, env.runProfile)
 
 		try {
 			runSettings.envs = executionGuard.originEnv

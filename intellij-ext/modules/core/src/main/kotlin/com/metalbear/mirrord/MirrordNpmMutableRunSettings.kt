@@ -2,32 +2,39 @@ package com.metalbear.mirrord
 
 import com.intellij.execution.configuration.EnvironmentVariablesData
 import com.intellij.execution.configurations.RunProfile
+import com.intellij.openapi.project.Project
 
-class MirrordNpmMutableRunSettings(private val runSettings: Any) {
+class MirrordNpmMutableRunSettings(private val project: Project, private val runSettings: Any) {
     private val myEnvData = runSettings.javaClass.getDeclaredField("myEnvData")
     private val myPackageManagerPackageRef = runSettings.javaClass.getDeclaredField("myPackageManagerPackageRef")
 
+    private val NpmManager = Class.forName(runSettings.javaClass.module, "com.intellij.javascript.nodejs.npm.NpmManager")
     private val NpmNodePackage = Class.forName(runSettings.javaClass.module, "com.intellij.javascript.nodejs.npm.NpmNodePackage")
     private val NodePackageRef = Class.forName(runSettings.javaClass.module, "com.intellij.javascript.nodejs.util.NodePackageRef")
+
+    private val npmMananger = NpmManager.getMethod("getInstance", Project::class.java).invoke(null, project)
 
     init {
         myEnvData.isAccessible = true
         myPackageManagerPackageRef.isAccessible = true
+
+        val setPackageRef = NpmManager.getMethod("setPackageRef", NodePackageRef)
+        setPackageRef.invoke(npmMananger, packageManagerPackageRef)
     }
 
     companion object {
-        fun fromRunProfile(runProfile: RunProfile): MirrordNpmMutableRunSettings {
+        fun fromRunProfile(project: Project, runProfile: RunProfile): MirrordNpmMutableRunSettings {
             val getRunSettings = runProfile.javaClass.getMethod("getRunSettings")
             val runSettings = getRunSettings.invoke(runProfile)
 
-            return MirrordNpmMutableRunSettings(runSettings)
+            return MirrordNpmMutableRunSettings(project, runSettings)
         }
     }
 
     private val packageManagerPackage: Any?
         get() {
-            val getConstantPackage = NodePackageRef.getMethod("getConstantPackage")
-            return getConstantPackage.invoke(packageManagerPackageRef)
+            val getPackage = NpmManager.getMethod("getPackage")
+            return getPackage.invoke(npmMananger)
         }
 
     var envs: Map<String, String>
