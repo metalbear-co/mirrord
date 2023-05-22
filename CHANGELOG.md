@@ -8,6 +8,51 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.43.0](https://github.com/metalbear-co/mirrord/tree/3.43.0) - 2023-05-22
+
+
+### Added
+
+- Support for targetless execution: when not specifying any target for the
+  agent, mirrord now spins up an independent agent. This can be useful e.g. if
+  you are just interested in getting the cluster's DNS resolution and outgoing
+  connectivity but don't want any pod's incoming traffic or FS.
+  [#574](https://github.com/metalbear-co/mirrord/issues/574)
+- Support for targetless mode in IntelliJ based IDEs.
+  [#1375](https://github.com/metalbear-co/mirrord/issues/1375)
+- Support for targetless mode in vscode.
+  [#1376](https://github.com/metalbear-co/mirrord/issues/1376)
+
+
+### Changed
+
+- If a user application tries to read paths inside mirrord's temp dir, we hook
+  that and read the path outside instead.
+  [#1403](https://github.com/metalbear-co/mirrord/issues/1403)
+- Don't print error if we fail checking for operator
+
+
+### Fixed
+
+- Added better detection for protected binaries, fixes not loading into Go
+  binary [#1397](https://github.com/metalbear-co/mirrord/issues/1397)
+- Disallow binding on the same address:port twice. Solves part of issue 1123.
+  [#1123](https://github.com/metalbear-co/mirrord/issues/1123)
+- Fix the lost update bug with config dropdown for intelliJ
+  Fix the lost update bug with config dropdown for intelliJ.
+  [#1420](https://github.com/metalbear-co/mirrord/issues/1420)
+- Fix intelliJ compatability issue by implementing missing
+  createPopupActionGroup
+
+
+### Internal
+
+- Run IntelliJ Plugin Verifier on CI
+  [#1417](https://github.com/metalbear-co/mirrord/issues/1417)
+- Remove bors.toml since we use GH merge queue now
+- Upgrade k8s dependencies and rustls, remove ugly feature ip patch
+
+
 ## [3.42.0](https://github.com/metalbear-co/mirrord/tree/3.42.0) - 2023-05-15
 
 
