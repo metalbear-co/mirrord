@@ -1,1 +1,0 @@
-Remove bors.toml since we use GH merge queue now

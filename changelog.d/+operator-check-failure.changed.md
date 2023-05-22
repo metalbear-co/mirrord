@@ -1,1 +1,0 @@
-Don't print error if we fail checking for operator
