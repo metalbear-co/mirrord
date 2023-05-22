@@ -5,7 +5,6 @@ import com.intellij.execution.configurations.RunProfile
 
 class MirrordNpmMutableRunSettings(private val runSettings: Any) {
     private val myEnvData = runSettings.javaClass.getDeclaredField("myEnvData")
-    private val myInterpreterRef = runSettings.javaClass.getDeclaredField("myInterpreterRef")
     private val myPackageManagerPackageRef = runSettings.javaClass.getDeclaredField("myPackageManagerPackageRef")
 
     private val NpmNodePackage = Class.forName(runSettings.javaClass.module, "com.intellij.javascript.nodejs.npm.NpmNodePackage")
@@ -13,7 +12,6 @@ class MirrordNpmMutableRunSettings(private val runSettings: Any) {
 
     init {
         myEnvData.isAccessible = true
-        myInterpreterRef.isAccessible = true
         myPackageManagerPackageRef.isAccessible = true
     }
 
