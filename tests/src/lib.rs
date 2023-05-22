@@ -27,7 +27,7 @@ mod utils {
         core::v1::{Namespace, Pod, Service},
     };
     use kube::{
-        api::{DeleteParams, ListParams, PostParams},
+        api::{DeleteParams, ListParams, PostParams, WatchParams},
         core::WatchEvent,
         runtime::wait::{await_condition, conditions::is_pod_running},
         Api, Client, Config, Error,
@@ -60,7 +60,7 @@ mod utils {
         api: &Api<K>,
         name: &str,
     ) {
-        let params = ListParams::default()
+        let params = WatchParams::default()
             .fields(&format!("metadata.name={name}"))
             .timeout(10);
         let stream = api.watch(&params, "0").await.unwrap();
