@@ -35,7 +35,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 ### Fixed
 
 - Added better detection for protected binaries, fixes not loading into Go
-  binary [#1397#](https://github.com/metalbear-co/mirrord/issues/1397#)
+  binary [#1397](https://github.com/metalbear-co/mirrord/issues/1397)
 - Disallow binding on the same address:port twice. Solves part of issue 1123.
   [#1123](https://github.com/metalbear-co/mirrord/issues/1123)
 - Fix the lost update bug with config dropdown for intelliJ
