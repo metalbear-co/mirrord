@@ -141,6 +141,12 @@ pub enum AgentError {
 
     #[error("Container Runtime Error while trying to pause: {0}")]
     PauseRuntimeError(String),
+
+    #[error("Requested pause, but there is no target container.")]
+    PauseAbsentTarget,
+
+    #[error("Pause feature is not supported with ephemeral agent.")]
+    PauseEphemeralAgent,
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;

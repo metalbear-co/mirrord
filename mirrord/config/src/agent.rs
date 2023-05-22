@@ -74,13 +74,6 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_NETWORK_INTERFACE")]
     pub network_interface: Option<String>,
 
-    /// Controls target pause feature. Unstable.
-    ///
-    /// With this feature enabled, the remote container is paused while clients are connected to
-    /// the agent.
-    #[config(env = "MIRRORD_PAUSE", default = false, unstable)]
-    pub pause: bool,
-
     /// Flushes existing connections when starting to steal, might fix issues where connections
     /// aren't stolen (due to being already established)
     ///
