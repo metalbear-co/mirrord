@@ -65,16 +65,16 @@ impl OperatorApi {
             // propagating an env var, don't think it's worth the extra complexity though
             let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
             if operator_version != mirrord_version {
-                progress.subtask("Comparing versions").print_message(MessageKind::Warning, Some(&format!("Your mirrord version {} does not match the operator version {}. This can lead to unforeseen issues.", mirrord_version, operator_version)));
+                progress.subtask("comparing versions").print_message(MessageKind::Warning, Some(&format!("Your mirrord version {} does not match the operator version {}. This can lead to unforeseen issues.", mirrord_version, operator_version)));
                 if operator_version > mirrord_version {
-                    progress.subtask("Comparing versions").print_message(
+                    progress.subtask("comparing versions").print_message(
                         MessageKind::Warning,
                         Some(
                             "Consider updating your mirrord version to match the operator version.",
                         ),
                     );
                 } else {
-                    progress.subtask("Comparing versions").print_message(MessageKind::Warning, Some("Consider either updating your operator version to match your mirrord version, or downgrading your mirrord version."));
+                    progress.subtask("comparing versions").print_message(MessageKind::Warning, Some("Consider either updating your operator version to match your mirrord version, or downgrading your mirrord version."));
                 }
             }
             operator_api.connect_target(target).await.map(Some)
