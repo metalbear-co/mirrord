@@ -24,6 +24,10 @@
                 serviceImplementation="com.metalbear.mirrord.MirrordSettingsState"/>
     </extensions>
 
+    <projectListeners>
+        <listener class="com.metalbear.mirrord.MirrordNpmExecutionListener"
+                  topic="com.intellij.execution.ExecutionListener"/>
+    </projectListeners>
 
     <extensions defaultExtensionNs="com.intellij">
         <applicationConfigurable
