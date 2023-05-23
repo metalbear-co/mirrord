@@ -234,5 +234,4 @@ object MirrordApi {
         logger.error("mirrord stderr: $processStdError")
         throw Error("mirrord failed to start")
     }
-
 }
