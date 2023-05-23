@@ -55,7 +55,7 @@ object MirrordApi {
     const val targetlessTargetName = "No Target (\"targetless\")"
     private val logger = MirrordLogger.logger
 
-    fun cliPath(wslDistribution: WSLDistribution?): String {
+    private fun cliPath(wslDistribution: WSLDistribution?): String {
         val path = MirrordPathManager.getBinary(cliBinary, true)!!
         wslDistribution?.let {
             return it.getWslPath(path)!!
@@ -132,7 +132,7 @@ object MirrordApi {
         executable: String?,
         project: Project?,
         wslDistribution: WSLDistribution?
-    ): MutableMap<String, String>? {
+    ): MirrordExecution? {
         val commandLine = GeneralCommandLine(cliPath(wslDistribution), "ext").apply {
             target?.let {
                 addParameter("-t")
@@ -145,10 +145,10 @@ object MirrordApi {
                 addParameter(formattedPath)
             }
             executable?.let {
-              commandLine.addParameter("-e")
-              commandLine.addParameter(executable)
+                addParameter("-e")
+                addParameter(executable)
             }
-            
+
             wslDistribution?.let {
                 val wslOptions = WSLCommandLineOptions().apply {
                     isLaunchWithWslExe = true
@@ -165,16 +165,8 @@ object MirrordApi {
             .redirectError(ProcessBuilder.Redirect.PIPE)
             .start()
 
-        logger.debug("waiting for process to finish")
-        val exitStatus = process.waitFor(15, TimeUnit.SECONDS)
-
-        if (!exitStatus) {
-            MirrordNotifier.errorNotification("mirrord failed to start", project)
-            throw Error("mirrord failed to start")
-        }
-
-        val bufferedReader = process.inputStream.reader().buffered()
         val gson = Gson()
+        val bufferedReader = process.inputStream.reader().buffered()
 
         val environment = CompletableFuture<MirrordExecution?>()
 
@@ -213,15 +205,13 @@ object MirrordApi {
 
             override fun onSuccess() {
                 if (!environment.isCancelled) {
-                    MirrordNotifier.notify("mirrord started!", NotificationType.INFORMATION, project)
+                    MirrordNotifier.notify("mirrord starting...", NotificationType.INFORMATION, project)
                 }
-                super.onSuccess()
             }
 
             override fun onCancel() {
                 process.destroy()
                 MirrordNotifier.notify("mirrord was cancelled", NotificationType.WARNING, project)
-                super.onCancel()
             }
         }
 
