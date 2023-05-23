@@ -3,6 +3,7 @@
 package com.metalbear.mirrord
 
 import com.google.gson.Gson
+import com.google.gson.annotations.SerializedName
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.wsl.WSLCommandLineOptions
 import com.intellij.execution.wsl.WSLDistribution
@@ -41,7 +42,9 @@ data class Error(
 )
 
 data class MirrordExecution(
-    val environment: MutableMap<String, String>
+    val environment: MutableMap<String, String>,
+    @SerializedName("patched_path")
+    val patchedPath: String?
 )
 
 /**
@@ -51,7 +54,8 @@ object MirrordApi {
     private const val cliBinary = "mirrord"
     const val targetlessTargetName = "No Target (\"targetless\")"
     private val logger = MirrordLogger.logger
-    private fun cliPath(wslDistribution: WSLDistribution?): String {
+
+    fun cliPath(wslDistribution: WSLDistribution?): String {
         val path = MirrordPathManager.getBinary(cliBinary, true)!!
         wslDistribution?.let {
             return it.getWslPath(path)!!
@@ -125,6 +129,7 @@ object MirrordApi {
     fun exec(
         target: String?,
         configFile: String?,
+        executable: String?,
         project: Project?,
         wslDistribution: WSLDistribution?
     ): MutableMap<String, String>? {
@@ -139,13 +144,18 @@ object MirrordApi {
                 addParameter("-f")
                 addParameter(formattedPath)
             }
-
+            executable?.let {
+              commandLine.addParameter("-e")
+              commandLine.addParameter(executable)
+            }
+            
             wslDistribution?.let {
                 val wslOptions = WSLCommandLineOptions().apply {
                     isLaunchWithWslExe = true
                 }
                 it.patchCommandLine(this, project, wslOptions)
             }
+
         }
 
         logger.info("running mirrord with following command line: ${commandLine.commandLineString}")
@@ -165,7 +175,8 @@ object MirrordApi {
 
         val bufferedReader = process.inputStream.reader().buffered()
         val gson = Gson()
-        val environment = CompletableFuture<MutableMap<String, String>>()
+
+        val environment = CompletableFuture<MirrordExecution?>()
 
         val mirrordProgressTask = object : Task.Backgroundable(project, "mirrord", true) {
             override fun run(indicator: ProgressIndicator) {
@@ -179,7 +190,7 @@ object MirrordApi {
                                 val innerMessage = message.message ?: throw Error("Invalid inner message")
                                 val executionInfo = gson.fromJson(innerMessage, MirrordExecution::class.java)
                                 indicator.text = "mirrord is running"
-                                environment.complete(executionInfo.environment)
+                                environment.complete(executionInfo)
                                 return
                             }
                         }

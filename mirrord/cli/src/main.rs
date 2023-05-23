@@ -163,7 +163,7 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 
     let config = LayerConfig::from_env()?;
 
-    if config.agent.pause {
+    if config.pause {
         if config.agent.ephemeral {
             error!("Pausing is not yet supported together with an ephemeral agent container.");
             panic!("Mutually exclusive arguments `--pause` and `--ephemeral-container` passed together.");

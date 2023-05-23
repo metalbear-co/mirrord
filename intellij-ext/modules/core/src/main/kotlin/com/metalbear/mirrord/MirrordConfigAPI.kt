@@ -10,10 +10,9 @@ import com.google.gson.Gson
 import com.intellij.util.io.readText
 import java.nio.file.Path
 
-
 data class Target (
     val namespace: String?,
-    val path: String?
+    val path: Any?
 )
 
 data class ConfigData (
@@ -76,19 +75,9 @@ object MirrordConfigAPI {
     /**
      * Gets target set in config file, if any.
      */
-    private fun getTarget(project: Project): String? {
+    private fun getTarget(project: Project): Any? {
         val configData = getConfigData(project)
         return configData?.target?.path
-    }
-
-    /**
-     * Gets namespace set in config file, if any.
-     */
-    fun getNamespace(project: Project): String? {
-        MirrordLogger.logger.debug("getting namespace from config data")
-        val configData = getConfigData(project)
-        MirrordLogger.logger.debug("returning from getconfigdata")
-        return configData?.target?.namespace
     }
 
 
