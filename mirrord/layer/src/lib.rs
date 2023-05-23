@@ -89,7 +89,7 @@ use hooks::HookManager;
 use libc::c_int;
 use mirrord_config::{
     feature::FeatureConfig,
-    fs::FsConfig,
+    fs::{FsConfig, FsModeConfig},
     incoming::{http_filter::HttpHeaderFilterConfig, IncomingConfig},
     network::NetworkConfig,
     util::VecOrSingle,
@@ -438,7 +438,13 @@ fn layer_start(config: LayerConfig) {
         .set(config.feature.network.incoming.ignore_ports.clone())
         .expect("Setting INCOMING_IGNORE_PORTS failed");
 
-    FILE_FILTER.get_or_init(|| FileFilter::new(config.feature.fs.clone()));
+    FILE_FILTER.get_or_init(|| {
+        let mut fs_config = config.feature.fs.clone();
+        if config.target.is_none() {
+            fs_config.mode = FsModeConfig::LocalWithOverrides;
+        }
+        FileFilter::new(fs_config)
+    });
 
     DEBUGGER_IGNORED_PORTS
         .set(DebuggerPorts::from_env())
