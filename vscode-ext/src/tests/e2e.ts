@@ -2,7 +2,7 @@ import { existsSync } from "fs";
 import { assert, expect } from "chai"
 import { join } from "path";
 import { VSBrowser, StatusBar, TextEditor, EditorView, ActivityBar, DebugView, InputBox, DebugToolbar } from "vscode-extension-tester";
-import  get  from "axios"
+import get from "axios"
 
 
 // This suite tests basic flow of mirroring traffic from remote pod
@@ -73,8 +73,13 @@ describe("mirrord sample flow test", function () {
     it("wait for breakpoint to be hit", async function () {
         const debugBar = await DebugToolbar.create();
         console.log("waiting for breakpoint");
-        await debugBar.waitForBreakPoint();
-        // todo: now need to figure how to wait on the breakpoint and send traffic      
+        debugBar.waitForBreakPoint().then(() => console.log("breakpoint hit"));
+    });
+
+    it("send traffic to pod", async function () {
+        const response = await get("http://localhost:30000");
+        expect(response.status).to.equal(200);
+        expect(response.data).to.equal("OK - GET: Request completed\n");
     });
 
 });
