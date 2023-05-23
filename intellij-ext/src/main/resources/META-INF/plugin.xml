@@ -24,6 +24,10 @@
                 serviceImplementation="com.metalbear.mirrord.MirrordSettingsState"/>
     </extensions>
 
+    <projectListeners>
+        <listener class="com.metalbear.mirrord.MirrordNpmExecutionListener"
+                  topic="com.intellij.execution.ExecutionListener"/>
+    </projectListeners>
 
     <extensions defaultExtensionNs="com.intellij">
         <applicationConfigurable
@@ -56,7 +60,6 @@
             <add-to-group group-id="MainToolbarRight" anchor="first"/>
             </group>
     </actions>
-
 
     <depends optional="true" config-file="mirrord-idea.xml">com.intellij.modules.java</depends>
     <depends optional="true" config-file="mirrord-pycharm.xml">com.intellij.modules.python</depends>
