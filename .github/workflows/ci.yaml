@@ -265,8 +265,10 @@ jobs:
       - name: upload layer
         uses: actions/upload-artifact@v3
         with:
-          name: layer-lib
-          path: target/debug/libmirrord_layer.so
+          name: mirrord-artifacts
+          path: |
+            target/debug/libmirrord_layer.so
+            target/debug/mirrord
           if-no-files-found: error
 
   integration_tests:
@@ -383,7 +385,7 @@ jobs:
       - name: download layer # Download layer lib built in the `build_mirrord` job.
         uses: actions/download-artifact@v3
         with:
-          name: layer-lib
+          name: mirrord-artifacts
           path: target/debug/
       - run: cargo test -p mirrord-layer
 
@@ -573,7 +575,7 @@ jobs:
           node-version: 18
       - run: |
           cd vscode-ext 
-          npm init @eslint/config
+          npm install --no-package-lock --no-save eslint
           npm run lint
 
   vscode_e2e:
@@ -588,7 +590,7 @@ jobs:
       - name: download layer
         uses: actions/download-artifact@v3
         with:
-          name: layer-lib
+          name: mirrord-artifacts
           path: target/debug/
       - name: move mirrord binary to bin/
         run: |
