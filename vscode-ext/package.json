@@ -76,13 +76,10 @@
 	"devDependencies": {
 		"@types/chai": "^4.3.5",
 		"@types/glob": "^7.2.0",
-		"@types/mocha": "^9.0.0",
 		"@types/node": "14.x",
-		"@types/request": "^2.48.0",
 		"@types/vscode": "^1.63.0",
 		"@typescript-eslint/eslint-plugin": "^5.9.1",
 		"@typescript-eslint/parser": "^5.9.1",
-		"@vscode/test-electron": "^2.0.3",
 		"chai": "^4.3.7",
 		"esbuild": "^0.14.23",
 		"eslint": "^8.6.0",
@@ -98,14 +95,6 @@
 	},
 	"dependencies": {
 		"axios": "^1.4.0",
-		"es5-ext": "<=0.10.53",
-		"ffi-napi": "^4.0.3",
-		"minipass": "^3.3.5",
-		"nan": "^2.15.0",
-		"node-go-require": "^2.0.0",
-		"ref-array-napi": "^1.2.2",
-		"ref-napi": "^3.0.3",
-		"ref-struct-napi": "^1.1.1",
 		"semver": "^7.3.7",
 		"toml": "^3.0.0",
 		"yaml": "^2.1.3"

@@ -1,29 +1,31 @@
-{    
+{
     "version": "0.2.0",
     "configurations": [
-        {            
+        {
             "args": [
                 "--extensionDevelopmentPath=${workspaceFolder}"
             ],
             "name": "Launch Extension",
             "outFiles": [
                 "${workspaceFolder}/out/**/*.js"
-            ],
-            "preLaunchTask": "npm",
+            ],            
             "request": "launch",
             "type": "extensionHost"
         },
         {
-			"name": "Debug UI Tests",
-			"type": "node",
-			"request": "launch",
-			"program": "${workspaceFolder}/node_modules/vscode-extension-tester/out/cli.js",
-			"args": [
-				"setup-and-run",
-				"${workspaceFolder}/out/tests/runTests.js",				
-			],
-			"console": "integratedTerminal",
-			"runtimeExecutable": "node",	
-		}
+            "name": "Debug UI Tests",
+            "type": "node",
+            "request": "launch",
+            "program": "${workspaceFolder}/node_modules/vscode-extension-tester/out/cli.js",
+            "args": [
+                "setup-and-run",
+                "${workspaceFolder}/out/tests/runTests.js",
+            ],
+            "console": "integratedTerminal",
+            "runtimeExecutable": "node",
+            "env": {
+                "POD_TO_SELECT" : "py-serv-deployment-ff89b5974-dhl2q"
+            }
+        }
     ]
 }
