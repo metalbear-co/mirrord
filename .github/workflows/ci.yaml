@@ -571,7 +571,10 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 18
-      - run: cd vscode-ext && npm run lint
+      - run: |
+          cd vscode-ext 
+          npm init @eslint/config
+          npm run lint
 
   vscode_e2e:
     runs-on: ubuntu-latest
@@ -586,12 +589,12 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: layer-lib
-          path: target/debug/          
+          path: target/debug/
       - name: move mirrord binary to bin/
         run: |
           cd vscode-ext
           mkdir -p bin
-          cp target/debug/mirrord bin/
+          cp ../target/debug/mirrord bin/
       - name: install dependencies
         run: |
           cd vscode-ext
@@ -600,7 +603,7 @@ jobs:
         uses: actions/download-artifact@v2
         with:
           name: test
-          path: /tmp          
+          path: /tmp
       - name: start minikube
         uses: medyagh/setup-minikube@master
         with:
