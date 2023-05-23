@@ -1,8 +1,8 @@
 import { existsSync } from "fs";
-import { assert, expect } from "chai"
+import { assert, expect } from "chai";
 import { join } from "path";
 import { VSBrowser, StatusBar, TextEditor, EditorView, ActivityBar, DebugView, InputBox, DebugToolbar, BottomBarPanel } from "vscode-extension-tester";
-import get from "axios"
+import get from "axios";
 
 
 // This suite tests basic flow of mirroring traffic from remote pod
@@ -13,8 +13,9 @@ import get from "axios"
 // - Select the pod from the QuickPick
 // - Send traffic to the pod
 // - Tests successfully exit if breakpoint is hit
+// - Assert text on terminal
 describe("mirrord sample flow test", function () {
-    this.timeout(10000000000);
+    this.timeout(1000000);
     let browser: VSBrowser;
     let statusBar: StatusBar;
     let debugToolbar: DebugToolbar;
@@ -43,7 +44,7 @@ describe("mirrord sample flow test", function () {
         const enableButton = await statusBar.getItem("Enable mirrord");
         expect(enableButton).to.not.be.undefined;
         await enableButton?.click();
-        assert(await enableButton?.getText() == "Disable mirrord", "`Disable mirrord` button not found");
+        assert(await enableButton?.getText() === "Disable mirrord", "`Disable mirrord` button not found");
     });
 
     it("create mirrord config", async function () {
@@ -66,7 +67,7 @@ describe("mirrord sample flow test", function () {
         await editorView.openEditor(fileName);
         const currentTab = await editorView.getActiveTab();
         expect(currentTab).to.not.be.undefined;
-        assert(await currentTab?.getTitle() == "app_flask.py", "app_flask.py not found");
+        assert(await currentTab?.getTitle() === "app_flask.py", "app_flask.py not found");
 
         const textEditor = new TextEditor();
         const result = await textEditor.toggleBreakpoint(9);
@@ -85,7 +86,7 @@ describe("mirrord sample flow test", function () {
     it("select pod from quickpick", async function () {
         const input = await InputBox.create();
         // assertion that podToSlect is not undefined is done in "before" block
-        await input.selectQuickPick(podToSlect!)
+        await input.selectQuickPick(podToSlect!);
         await sleep(10000);
     });
 
@@ -95,7 +96,7 @@ describe("mirrord sample flow test", function () {
 
         debugToolbar.waitForBreakPoint().then(() => {
             breakpointHit = true;
-            console.log("breakpoint hit")
+            console.log("breakpoint hit");
         });
     });
 
@@ -111,7 +112,7 @@ describe("mirrord sample flow test", function () {
     it("assert text on terminal", async function () {
         const terminalView = await new BottomBarPanel().openTerminalView();
         const text = await terminalView.getText();
-        assert(text.includes("GET: Request completed\n"))
+        assert(text.includes("GET: Request completed\n"));
     });
 
 });

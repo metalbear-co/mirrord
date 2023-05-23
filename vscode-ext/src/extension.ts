@@ -71,11 +71,11 @@ function mirrordFailure(err: any) {
 // Like the Rust MirrordExecution struct.
 class MirrordExecution {
 	env: Map<string, string>;
-	patched_path: string | null;
+	patchedPath: string | null;
 
-	constructor(env: Map<string, string>, patched_path: string | null) {
+	constructor(env: Map<string, string>, patchedPath: string | null) {
 		this.env = env;
-		this.patched_path = patched_path;
+		this.patchedPath = patchedPath;
 	}
 
 }
@@ -94,7 +94,7 @@ class MirrordAPI {
 		// for easier debugging, use the local mirrord cli if we're in development mode
 		if (context.extensionMode === vscode.ExtensionMode.Development) {
 			const universalApplePath = path.join(path.dirname(this.context.extensionPath), "target", "universal-apple-darwin", "debug", "mirrord");
-			if (process.platform == "darwin" && fs.existsSync(universalApplePath)) {
+			if (process.platform === "darwin" && fs.existsSync(universalApplePath)) {
 				this.cliPath = universalApplePath;
 			} else {
 				const debugPath = path.join(path.dirname(this.context.extensionPath), "target", "debug");
@@ -431,7 +431,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 			let targetName = await vscode.window.showQuickPick(targets, { placeHolder: 'Select a target path to mirror' });
 
 			if (targetName) {
-				if (targetName != TARGETLESS_TARGET_NAME) {
+				if (targetName !== TARGETLESS_TARGET_NAME) {
 					target = targetName;
 				}
 				globalContext.globalState.update(LAST_TARGET_KEY, targetName);
@@ -468,9 +468,9 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		}
 
 		// For sidestepping SIP on macOS. If we didn't patch, we don't change that config value.
-		let patched_path = executionInfo?.patched_path;
-		if (patched_path) {
-			config[executableFieldName] = patched_path;
+		let patchedPath = executionInfo?.patchedPath;
+		if (patchedPath) {
+			config[executableFieldName] = patchedPath;
 		}
 
 		let env = executionInfo?.env;
