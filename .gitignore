@@ -73,7 +73,7 @@ mirrord/layer/tests/apps/faccessat_go/20
 
 ### VSCode mirrord extension code ###
 # mirrord binary
-vscode-ext/mirrord
+vscode-ext/bin
 
 ### Intellij ###
 intellij-ext/.gradle
