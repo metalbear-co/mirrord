@@ -61,7 +61,7 @@
 	},
 	"main": "./dist/extension.js",
 	"scripts": {
-		"pretest": "npm run compile && npm run lint",
+		"pretest": "npm run test-compile && npm run lint",
 		"test": "npm run pretest && node out/tests/runTests.js",
 		"lint": "eslint src --ext ts",
 		"format": "eslint src --ext ts --fix",
