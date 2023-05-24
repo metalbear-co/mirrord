@@ -28,6 +28,7 @@ describe("mirrord sample flow test", function () {
 
     before(async function () {
         console.log("podToSelect: " + podToSelect);
+        console.log("kubeService: " + kubeService);
         expect(podToSelect).to.not.be.undefined;
         expect(kubeService).to.not.be.undefined;
         browser = VSBrowser.instance;
@@ -48,10 +49,10 @@ describe("mirrord sample flow test", function () {
         expect(enableButton).to.not.be.undefined;
         await enableButton?.click();
         await sleep(2000);
-        assert(await enableButton?.getText() === "Disable mirrord", "`Disable mirrord` button not found");        
+        assert(await enableButton?.getText() === "Disable mirrord", "`Disable mirrord` button not found");
     });
 
-    it("create mirrord config", async function () {        
+    it("create mirrord config", async function () {
         // gear -> $(gear) clicked to open mirrord config
         const mirrordSettingsButton = await statusBar.getItem("gear");
         expect(mirrordSettingsButton).to.not.be.undefined;
@@ -60,7 +61,7 @@ describe("mirrord sample flow test", function () {
             const mirrordConfigPath = join(__dirname, '../../test-workspace/.mirrord/mirrord.json');
             return await existsSync(mirrordConfigPath);
         }
-            , 10000, "Mirrord config not found");        
+            , 10000, "Mirrord config not found");
     });
 
 
@@ -75,7 +76,7 @@ describe("mirrord sample flow test", function () {
 
         const textEditor = new TextEditor();
         const result = await textEditor.toggleBreakpoint(9);
-        expect(result).to.be.true;        
+        expect(result).to.be.true;
     });
 
 
@@ -85,13 +86,13 @@ describe("mirrord sample flow test", function () {
         const debugView = await activityBar?.openView() as DebugView;
         await debugView.selectLaunchConfiguration("Python: Current File");
         debugView.start();
-        await sleep(10000);        
+        await sleep(10000);
     });
 
-    it("select pod from quickpick", async function () {    
-        const input = await InputBox.create();        
+    it("select pod from quickpick", async function () {
+        const input = await InputBox.create();
         // assertion that podToSelect is not undefined is done in "before" block        
-        await input.selectQuickPick(podToSelect!);        
+        await input.selectQuickPick(podToSelect!);
         await sleep(10000);
     });
 
@@ -102,12 +103,12 @@ describe("mirrord sample flow test", function () {
         debugToolbar.waitForBreakPoint().then(() => {
             breakpointHit = true;
             console.log("breakpoint hit");
-        });        
+        });
     });
 
     it("send traffic to pod", async function () {
         expect(breakpointHit).to.be.false;
-        console.log("sending traffic to pod" + breakpointHit);        
+        console.log("sending traffic to pod" + breakpointHit);
         const response = await get(kubeService!!);
         expect(response.status).to.equal(200);
         expect(response.data).to.equal("OK - GET: Request completed\n");
