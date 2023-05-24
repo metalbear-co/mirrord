@@ -41,6 +41,7 @@ const MIRRORD_DIR = function () {
 
 const versionCheckEndpoint = 'https://version.mirrord.dev/get-latest-version';
 const versionCheckInterval = 1000 * 60 * 3;
+const CI_BUILD_PLUGIN = process.env.CI_BUILD_PLUGIN === 'true';
 
 /// Key used to store the last selected target in the persistent state.
 const LAST_TARGET_KEY = "mirrord-last-target";
@@ -404,7 +405,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 			return config;
 		}
 
-		if (vscode.env.isTelemetryEnabled) {
+		if (vscode.env.isTelemetryEnabled && !CI_BUILD_PLUGIN) {
 			let lastChecked = globalContext.globalState.get('lastChecked', 0);
 			if (lastChecked < Date.now() - versionCheckInterval) {
 				checkVersion(globalContext.extension.packageJSON.version);

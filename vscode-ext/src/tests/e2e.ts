@@ -44,6 +44,7 @@ describe("mirrord sample flow test", function () {
         const enableButton = await statusBar.getItem("Enable mirrord");
         expect(enableButton).to.not.be.undefined;
         await enableButton?.click();
+        await sleep(2000);
         assert(await enableButton?.getText() === "Disable mirrord", "`Disable mirrord` button not found");
     });
 
