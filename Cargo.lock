@@ -2973,6 +2973,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "medschool"
+version = "0.1.0"
+dependencies = [
+ "glob",
+ "syn 2.0.16",
+ "thiserror",
+]
+
+[[package]]
 name = "memchr"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

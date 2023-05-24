@@ -233,8 +233,22 @@ fn main() -> Result<(), DocsError> {
 
     println!("{type_docs:#?}");
 
-    for type_ in type_docs.iter() {
-        // type_.fields.contains()
+    let run = true;
+    while run {
+        let mut previous_types_len = type_docs.len();
+
+        let type_docs = type_docs
+            .into_iter()
+            .fold(HashSet::with_capacity(4), |types, partial| {
+                // TODO(alex) [high] 2023-05-24: Keep reducing until `types` (acc) is of length
+                // 1?
+                //
+                // Nope! Keep reducing until the last `types.len()` is equal to the new
+                // `types.len()`.
+                //
+                // This way we're sure that all inner types have been consumed, and we don't
+                // fail if there are multiple outer mega types.
+            });
     }
 
     // for (_, partial_type) in type_docs.iter() {}
