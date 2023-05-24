@@ -613,14 +613,12 @@ jobs:
       - run: |
           minikube image load /tmp/test.tar                    
           kubectl apply -f sample/kubernetes/app.yaml
-          kubectl get pods -o=name | head -n 1
-          echo "POD_TO_SELECT=$(kubectl get pods -o=name | head -n 1)" >> $GITHUB_ENV
-          echo "${{ env.POD_TO_SELECT }}"
-          kubectl wait --for=condition=ready --timeout=30s ${{ env.POD_TO_SELECT }}
+          kubectl get pods -o=name | head -n 1          
+          kubectl wait --for=condition=ready --timeout=30s $(kubectl get pods -o=name | head -n 1)
       - name: Run headless test
         uses: coactions/setup-xvfb@v1
         env:
-          POD_TO_SELECT: ${{ env.POD_TO_SELECT }}
+          POD_TO_SELECT: $(kubectl get pods -o=name | head -n 1)
         with:
           run: npm run test
           working-directory: vscode-ext
