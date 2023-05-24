@@ -1,8 +1,5 @@
-use std::{
-    collections::{HashMap, HashSet},
-    fs::File,
-    io::Read,
-};
+#![feature(const_trait_impl)]
+use std::{collections::HashSet, fs::File, hash::Hash, io::Read};
 
 use syn::{spanned::Spanned, Attribute, Expr, Ident, Type, TypePath};
 use thiserror::Error;
@@ -14,11 +11,39 @@ struct PartialType {
     fields: HashSet<PartialField>,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialOrd, Ord)]
 struct PartialField {
     ident: Ident,
     ty: Ident,
     docs: Vec<String>,
+}
+
+impl PartialEq for PartialType {
+    fn eq(&self, other: &Self) -> bool {
+        self.ident.eq(&other.ident)
+    }
+}
+
+impl PartialEq for PartialField {
+    fn eq(&self, other: &Self) -> bool {
+        self.ident.eq(&other.ident) && self.ty.eq(&other.ty)
+    }
+}
+
+impl Eq for PartialType {}
+
+impl Eq for PartialField {}
+
+impl Hash for PartialType {
+    fn hash<H: ~const std::hash::Hasher>(&self, state: &mut H) {
+        self.ident.hash(state)
+    }
+}
+
+impl Hash for PartialField {
+    fn hash<H: ~const std::hash::Hasher>(&self, state: &mut H) {
+        self.ident.hash(state)
+    }
 }
 
 fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> {
@@ -199,13 +224,45 @@ fn main() -> Result<(), DocsError> {
                         None
                     }
                 })
-                // use the `PartialType::ident` as a key
-                .map(|partial_type| (partial_type.ident.clone(), partial_type))
+            // use the `PartialType::ident` as a key
+            // .map(|partial_type| (partial_type.ident.clone(), partial_type))
         })
         // `PartialType`s keyed by the `PartialType::ident`
-        .collect::<HashMap<_, _>>();
+        // .collect::<HashMap<_, _>>();
+        .collect::<HashSet<_>>();
 
     println!("{type_docs:#?}");
+
+    for field in type_docs.iter().flat_map(|partial| &partial.fields) {
+        if let Some(partial_type) = type_docs.get(&PartialType {
+            ident: field.ty.clone(),
+            docs: Vec::new(),
+            fields: HashSet::new(),
+        }) {
+            println!(
+                "\n\nfield {field:#?} is of type {:#?}!!!\n\n",
+                partial_type.ident
+            );
+
+            // TODO(alex) [high] 2023-05-24: Now we have access to the field docs + the inner type
+            // docs.
+            //
+            // It's possible to start building the mega type from this? Are we deep enough though?
+            //
+            // For `LayerConfig->AgentConfig` this seems fine, but what about for fields that have
+            // multiple inner types `LayerConfig->Feature->Network->Incoming`?
+            //
+            // We probably need to keep looping this until we have reduced everything into one final
+            // type.
+        }
+    }
+
+    // for (_, partial_type) in type_docs.iter() {}
+
+    // let fields = type_docs
+    //     .values()
+    //     .flat_map(|partial_type| &partial_type.fields)
+    //     .collect::<HashSet<_>>();
 
     // TODO(alex) [high] 2023-05-23: What's the best way to represent the hierarchy here?
     //
@@ -214,21 +271,51 @@ fn main() -> Result<(), DocsError> {
     Ok(())
 }
 
-// TODO(alex) [high] 2023-05-19: Each comment lives in it's own `Attribute`, so need a handler that
-// goes through each attribute merging the comments.
-
+/// # A
+///
 /// Very nice comments!
 ///
-/// But can it handle multiple comments?
+/// This is another line for `A`.
 ///
-/// What about multiline comments, that go really far, how does it handle stuff
-/// like this?
+/// ```json
+/// {
+///   "a": 10,
+///   "b": "B"
+/// }
+struct A {
+    /// ## a
+    ///
+    /// a Field .
+    a: i32,
+
+    /// ## b
+    b: B,
+}
+
+/// These are the comments for struct B.
+///
+/// And it has a second line.
 ///
 /// ```json
 /// {
 ///   "field": "value"
 /// }
-struct Foo {
-    /// Commented field.
-    a: i32,
+struct B {
+    /// ### c
+    ///
+    /// It's just a field.
+    c: i32,
+
+    /// ### d
+    d: D,
+}
+
+/// Finally, the comments for D.
+///
+/// Line!
+struct D {
+    /// #### e
+    ///
+    /// It's a field.
+    e: i32,
 }
