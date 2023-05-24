@@ -43,7 +43,8 @@ async fn node_spawn(dylib_path: &PathBuf) {
         println!("BASH LAYER CONNECTION HANDLED");
         // flow isn't deterministic, so just handle everything until it ends.
         loop {
-            match bash_layer_connection.codec.next().await {
+            let msg = bash_layer_connection.codec.next().await;
+            match msg {
                 Some(Ok(ClientMessage::FileRequest(FileRequest::Open(_)))) => {
                     bash_layer_connection.answer_file_open().await
                 }
@@ -54,7 +55,7 @@ async fn node_spawn(dylib_path: &PathBuf) {
                 }
                 None => break,
                 _ => {
-                    panic!("Unexpected message from bash layer connection")
+                    panic!("Unexpected message from bash layer connection {msg:?}")
                 }
             }
         }
