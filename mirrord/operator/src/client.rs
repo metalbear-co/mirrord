@@ -64,7 +64,7 @@ impl OperatorApi {
             // This is printed multiple times when the local process forks. Can be solved by e.g.
             // propagating an env var, don't think it's worth the extra complexity though
             let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
-            if operator_version != mirrord_version {
+            if true {
                 progress.subtask("Comparing versions").print_message(MessageKind::Warning, Some(&format!("Your mirrord version {} does not match the operator version {}. This can lead to unforeseen issues.", mirrord_version, operator_version)));
                 if operator_version > mirrord_version {
                     progress.subtask("Comparing versions").print_message(

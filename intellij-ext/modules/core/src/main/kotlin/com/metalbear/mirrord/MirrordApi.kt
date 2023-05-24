@@ -107,10 +107,11 @@ object MirrordApi {
                 return null
             }
             logger.debug("mirrord ls failed: $processStdError")
+            throw Error("mirrord ls failed")
         }
 
         val data = process.inputStream.bufferedReader().readText()
-        logger.debug("parsing %s".format(data))
+        logger.debug("parsing $data")
         val pods = gson.fromJson(data, Array<String>::class.java).toMutableList()
 
         if (pods.isEmpty()) {
