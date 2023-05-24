@@ -53,6 +53,7 @@ async fn node_spawn(dylib_path: &PathBuf) {
                         .answer_file_read(b"metalbear-hostname".to_vec())
                         .await
                 }
+                Some(Ok(ClientMessage::FileRequest(FileRequest::Close(_)))) => {}
                 None => break,
                 _ => {
                     panic!("Unexpected message from bash layer connection {msg:?}")
