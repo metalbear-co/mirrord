@@ -595,8 +595,8 @@ jobs:
       - name: move mirrord binary to bin/
         run: |
           cd vscode-ext
-          mkdir -p bin
-          cp ../target/debug/mirrord bin/
+          mkdir -p bin/linux/x64
+          cp ../target/debug/mirrord bin/linux/x64
       - name: install dependencies
         run: |
           cd vscode-ext
