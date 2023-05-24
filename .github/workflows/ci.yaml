@@ -582,6 +582,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [changed_files, build_mirrord, test_agent_image]
     if: ${{needs.changed_files.outputs.vscode_changed == 'true'}}
+    env: 
+      CI_BUILD_PLUGIN: "true"
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-node@v3
@@ -615,6 +617,7 @@ jobs:
           kubectl apply -f sample/kubernetes/app.yaml          
           echo "POD_TO_SELECT=$(kubectl get pods -o=name | head -n 1)" >> "$GITHUB_ENV"
           kubectl wait --for=condition=ready --timeout=30s $(kubectl get pods -o=name | head -n 1)
+          minikube service list --output=json
       - name: Run headless test
         uses: coactions/setup-xvfb@v1
         env:

@@ -39,33 +39,36 @@ describe("mirrord sample flow test", function () {
         }
     });
 
-    it("enable mirrord", async function () {
+    it("enable mirrord", async function (done) {
         statusBar = new StatusBar();
         const enableButton = await statusBar.getItem("Enable mirrord");
         expect(enableButton).to.not.be.undefined;
         await enableButton?.click();
         await sleep(2000);
         assert(await enableButton?.getText() === "Disable mirrord", "`Disable mirrord` button not found");
+        done();
     });
 
-    it("create mirrord config", async function () {
-        this.timeout(100000);
+    it("create mirrord config", async function (done) {        
         // gear -> $(gear) clicked to open mirrord config
         const mirrordSettingsButton = await statusBar.getItem("gear");
         expect(mirrordSettingsButton).to.not.be.undefined;
-
         await mirrordSettingsButton?.click();
         await browser.driver.wait(async () => {
             const mirrordConfigPath = join(__dirname, '../../test-workspace/.mirrord/mirrord.json');
             return await existsSync(mirrordConfigPath);
         }
             , 10000, "Mirrord config not found");
+
+        done();
     });
 
 
-    it("set breakpoint", async function () {
+    it("set breakpoint", async function (done) {
+
         const editorView = new EditorView();
         await editorView.openEditor(fileName);
+        await sleep(2000);
         const currentTab = await editorView.getActiveTab();
         expect(currentTab).to.not.be.undefined;
         assert(await currentTab?.getTitle() === "app_flask.py", "app_flask.py not found");
@@ -73,33 +76,28 @@ describe("mirrord sample flow test", function () {
         const textEditor = new TextEditor();
         const result = await textEditor.toggleBreakpoint(9);
         expect(result).to.be.true;
+        done();
     });
 
 
-    it("start debugging", async function () {
+    it("start debugging", async function (done) {
         const activityBar = await new ActivityBar().getViewControl("Run and Debug");
         expect(activityBar).to.not.be.undefined;
         const debugView = await activityBar?.openView() as DebugView;
         await debugView.selectLaunchConfiguration("Python: Current File");
         debugView.start();
         await sleep(10000);
+        done();
     });
 
-    it("select pod from quickpick", async function () {
-        console.log("creating inputbox")
-        const input = await InputBox.create();
-        console.log("podToSlect: " + podToSlect)
-        // assertion that podToSlect is not undefined is done in "before" block
-        const picks = await input.getQuickPicks()
-        for (const i of picks) {
-            console.log("pick: " + await i.getLabel());
-        }
-        await input.selectQuickPick(podToSlect!);
-        console.log("pod selected");
+    it("select pod from quickpick", async function () {    
+        const input = await InputBox.create();        
+        // assertion that podToSlect is not undefined is done in "before" block        
+        await input.selectQuickPick(podToSlect!);        
         await sleep(10000);
     });
 
-    it("wait for breakpoint to be hit", async function () {
+    it("wait for breakpoint to be hit", async function (done) {
         debugToolbar = await DebugToolbar.create();
         console.log("waiting for breakpoint");
 
@@ -107,10 +105,12 @@ describe("mirrord sample flow test", function () {
             breakpointHit = true;
             console.log("breakpoint hit");
         });
+        done();
     });
 
     it("send traffic to pod", async function () {
         expect(breakpointHit).to.be.false;
+        console.log("sending traffic to pod" + breakpointHit);
         const response = await get("http://localhost:30000");
         expect(response.status).to.equal(200);
         expect(response.data).to.equal("OK - GET: Request completed\n");
@@ -121,6 +121,7 @@ describe("mirrord sample flow test", function () {
     it("assert text on terminal", async function () {
         const terminalView = await new BottomBarPanel().openTerminalView();
         const text = await terminalView.getText();
+        console.log(text);
         assert(text.includes("GET: Request completed\n"));
     });
 
