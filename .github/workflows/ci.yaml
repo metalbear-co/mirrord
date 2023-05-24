@@ -616,8 +616,8 @@ jobs:
           minikube image load /tmp/test.tar                    
           kubectl apply -f sample/kubernetes/app.yaml          
           echo "POD_TO_SELECT=$(kubectl get pods -o=name | head -n 1)" >> "$GITHUB_ENV"
-          kubectl wait --for=condition=ready --timeout=30s $(kubectl get pods -o=name | head -n 1)
-          echo "KUBE_SERVICE=$(minikube service list --output=json | jq -r '.[] | select(.Name == \"py-serv\") | .URLs[0])'" >> "$GITHUB_ENV"
+          kubectl wait --for=condition=ready --timeout=30s $(kubectl get pods -o=name | head -n 1)          
+          echo "KUBE_SERVICE=$(minikube service list --output=json | jq -r '.[] | select(.Name == \"py-serv\") | .URLs[0]'" >> "$GITHUB_ENV"
       - name: Run headless test
         uses: coactions/setup-xvfb@v1
         env:
