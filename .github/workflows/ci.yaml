@@ -613,7 +613,8 @@ jobs:
       - run: |
           minikube image load /tmp/test.tar                    
           kubectl apply -f sample/kubernetes/app.yaml
-          echo "POD_TO_SELECT=$(kubectl get pods -o=name | head)" >> $GITHUB_ENV
+          kubectl get pods -o=name | head -n 1
+          echo "POD_TO_SELECT=$(kubectl get pods -o=name | head -n 1)" >> $GITHUB_ENV
           echo "${{ env.POD_TO_SELECT }}"
           kubectl wait --for=condition=ready --timeout=30s ${{ env.POD_TO_SELECT }}
       - name: Run headless test
