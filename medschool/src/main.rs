@@ -180,7 +180,7 @@ fn main() -> Result<(), DocsError> {
     //
     // Now we inline the docs of Field { docs } in the outer Type Docs.
 
-    let type_docs = parse_files()?
+    let mut type_docs = parse_files()?
         .into_iter()
         // go through each `File` extracting the types into a map keyed by the type `Ident`
         .flat_map(|syntaxed_file| {
@@ -233,28 +233,8 @@ fn main() -> Result<(), DocsError> {
 
     println!("{type_docs:#?}");
 
-    for field in type_docs.iter().flat_map(|partial| &partial.fields) {
-        if let Some(partial_type) = type_docs.get(&PartialType {
-            ident: field.ty.clone(),
-            docs: Vec::new(),
-            fields: HashSet::new(),
-        }) {
-            println!(
-                "\n\nfield {field:#?} is of type {:#?}!!!\n\n",
-                partial_type.ident
-            );
-
-            // TODO(alex) [high] 2023-05-24: Now we have access to the field docs + the inner type
-            // docs.
-            //
-            // It's possible to start building the mega type from this? Are we deep enough though?
-            //
-            // For `LayerConfig->AgentConfig` this seems fine, but what about for fields that have
-            // multiple inner types `LayerConfig->Feature->Network->Incoming`?
-            //
-            // We probably need to keep looping this until we have reduced everything into one final
-            // type.
-        }
+    for type_ in type_docs.iter() {
+        // type_.fields.contains()
     }
 
     // for (_, partial_type) in type_docs.iter() {}
