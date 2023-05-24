@@ -3,6 +3,8 @@
 
 use std::{path::PathBuf, time::Duration};
 
+use futures::StreamExt;
+use mirrord_protocol::{ClientMessage, FileRequest};
 use rstest::rstest;
 
 mod common;
@@ -39,8 +41,23 @@ async fn node_spawn(dylib_path: &PathBuf) {
         let mut bash_layer_connection =
             LayerConnection::get_initialized_connection(&listener).await;
         println!("BASH LAYER CONNECTION HANDLED");
-        bash_layer_connection.handle_gethostname::<true>(None).await;
-
+        // flow isn't deterministic, so just handle everything until it ends.
+        loop {
+            match bash_layer_connection.codec.next().await {
+                Some(Ok(ClientMessage::FileRequest(FileRequest::Open(_)))) => {
+                    bash_layer_connection.answer_file_open().await
+                }
+                Some(Ok(ClientMessage::FileRequest(FileRequest::Read(_)))) => {
+                    bash_layer_connection
+                        .answer_file_read(b"metalbear-hostname".to_vec())
+                        .await
+                }
+                None => break,
+                _ => {
+                    panic!("Unexpected message from bash layer connection")
+                }
+            }
+        }
         bash_layer_connection
     } else {
         // Meanwhile on linux, we handle it after the 2nd connection, in the `/bin/sh` handler.
