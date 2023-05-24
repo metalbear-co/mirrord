@@ -3,6 +3,7 @@ import { assert, expect } from "chai";
 import { join } from "path";
 import { VSBrowser, StatusBar, TextEditor, EditorView, ActivityBar, DebugView, InputBox, DebugToolbar, BottomBarPanel } from "vscode-extension-tester";
 import get from "axios";
+import exp from "constants";
 
 
 // This suite tests basic flow of mirroring traffic from remote pod
@@ -20,13 +21,15 @@ describe("mirrord sample flow test", function () {
     let statusBar: StatusBar;
     let debugToolbar: DebugToolbar;
     let breakpointHit = false;
-    let podToSlect = process.env.POD_TO_SELECT;
+    let podToSelect = process.env.POD_TO_SELECT;
+    let kubeService = process.env.KUBE_SERVICE;
     const testWorkspace = join(__dirname, '../../test-workspace');
     const fileName = "app_flask.py";
 
     before(async function () {
-        console.log("podToSlect: " + podToSlect);
-        expect(podToSlect).to.not.be.undefined;
+        console.log("podToSelect: " + podToSelect);
+        expect(podToSelect).to.not.be.undefined;
+        expect(kubeService).to.not.be.undefined;
         browser = VSBrowser.instance;
         // need to bring the flask app in open editors
         await browser.openResources(testWorkspace, join(testWorkspace, fileName));
@@ -39,17 +42,16 @@ describe("mirrord sample flow test", function () {
         }
     });
 
-    it("enable mirrord", async function (done) {
+    it("enable mirrord", async function () {
         statusBar = new StatusBar();
         const enableButton = await statusBar.getItem("Enable mirrord");
         expect(enableButton).to.not.be.undefined;
         await enableButton?.click();
         await sleep(2000);
-        assert(await enableButton?.getText() === "Disable mirrord", "`Disable mirrord` button not found");
-        done();
+        assert(await enableButton?.getText() === "Disable mirrord", "`Disable mirrord` button not found");        
     });
 
-    it("create mirrord config", async function (done) {        
+    it("create mirrord config", async function () {        
         // gear -> $(gear) clicked to open mirrord config
         const mirrordSettingsButton = await statusBar.getItem("gear");
         expect(mirrordSettingsButton).to.not.be.undefined;
@@ -58,13 +60,11 @@ describe("mirrord sample flow test", function () {
             const mirrordConfigPath = join(__dirname, '../../test-workspace/.mirrord/mirrord.json');
             return await existsSync(mirrordConfigPath);
         }
-            , 10000, "Mirrord config not found");
-
-        done();
+            , 10000, "Mirrord config not found");        
     });
 
 
-    it("set breakpoint", async function (done) {
+    it("set breakpoint", async function () {
 
         const editorView = new EditorView();
         await editorView.openEditor(fileName);
@@ -75,43 +75,40 @@ describe("mirrord sample flow test", function () {
 
         const textEditor = new TextEditor();
         const result = await textEditor.toggleBreakpoint(9);
-        expect(result).to.be.true;
-        done();
+        expect(result).to.be.true;        
     });
 
 
-    it("start debugging", async function (done) {
+    it("start debugging", async function () {
         const activityBar = await new ActivityBar().getViewControl("Run and Debug");
         expect(activityBar).to.not.be.undefined;
         const debugView = await activityBar?.openView() as DebugView;
         await debugView.selectLaunchConfiguration("Python: Current File");
         debugView.start();
-        await sleep(10000);
-        done();
+        await sleep(10000);        
     });
 
     it("select pod from quickpick", async function () {    
         const input = await InputBox.create();        
-        // assertion that podToSlect is not undefined is done in "before" block        
-        await input.selectQuickPick(podToSlect!);        
+        // assertion that podToSelect is not undefined is done in "before" block        
+        await input.selectQuickPick(podToSelect!);        
         await sleep(10000);
     });
 
-    it("wait for breakpoint to be hit", async function (done) {
+    it("wait for breakpoint to be hit", async function () {
         debugToolbar = await DebugToolbar.create();
         console.log("waiting for breakpoint");
 
         debugToolbar.waitForBreakPoint().then(() => {
             breakpointHit = true;
             console.log("breakpoint hit");
-        });
-        done();
+        });        
     });
 
     it("send traffic to pod", async function () {
         expect(breakpointHit).to.be.false;
-        console.log("sending traffic to pod" + breakpointHit);
-        const response = await get("http://localhost:30000");
+        console.log("sending traffic to pod" + breakpointHit);        
+        const response = await get(kubeService!!);
         expect(response.status).to.equal(200);
         expect(response.data).to.equal("OK - GET: Request completed\n");
         await sleep(2000);
