@@ -79,7 +79,7 @@ async fn operator_status(config: Option<String>) -> Result<()> {
 
     let status_api: Api<MirrordOperatorCrd> = Api::all(kube_api);
 
-    let status_progress = progress.subtask("Fetching Status");
+    let status_progress = progress.subtask("fetching status");
 
     let mirrord_status = match status_api
         .get(OPERATOR_STATUS_NAME)
@@ -90,13 +90,13 @@ async fn operator_status(config: Option<String>) -> Result<()> {
     {
         Ok(status) => status,
         Err(err) => {
-            status_progress.fail_with("Unable to get Status");
+            status_progress.fail_with("unable to get status");
 
             return Err(err);
         }
     };
 
-    status_progress.done_with("Fetched Status");
+    status_progress.done_with("fetched status");
 
     progress.done();
 
