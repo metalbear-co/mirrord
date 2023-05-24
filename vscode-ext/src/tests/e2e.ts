@@ -84,9 +84,16 @@ describe("mirrord sample flow test", function () {
     });
 
     it("select pod from quickpick", async function () {
+        console.log("creating inputbox")
         const input = await InputBox.create();
+        console.log("podToSlect: " + podToSlect)
         // assertion that podToSlect is not undefined is done in "before" block
+        const picks = await input.getQuickPicks()
+        for (const i of picks) {
+            console.log("pick: " + await i.getLabel());
+        }
         await input.selectQuickPick(podToSlect!);
+        console.log("pod selected");
         await sleep(10000);
     });
 
