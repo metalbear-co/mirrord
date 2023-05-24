@@ -35,6 +35,8 @@ object MirrordExecManager {
                 wslDistribution
             )
 
+        pods ?: return null
+
         MirrordLogger.logger.debug("returning pods")
         return MirrordExecDialog.selectTargetDialog(pods)
     }
@@ -104,7 +106,10 @@ object MirrordExecManager {
 
         val executionInfo = MirrordApi.exec(target, getConfigPath(project), executable, project, wslDistribution)
 
-        executionInfo.environment["MIRRORD_IGNORE_DEBUGGER_PORTS"] = "45000-65535"
-        return Pair(executionInfo.environment.toImmutableMap(), executionInfo.patchedPath)
+        executionInfo?.let {
+            executionInfo.environment["MIRRORD_IGNORE_DEBUGGER_PORTS"] = "45000-65535"
+            return Pair(executionInfo.environment.toImmutableMap(), executionInfo.patchedPath)
+        }
+        return null
     }
 }

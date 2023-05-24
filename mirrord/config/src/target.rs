@@ -130,6 +130,7 @@ impl MirrordConfig for TargetFileConfig {
                 Self::from_final_path_and_namespace(path, namespace)
             }
             TargetFileConfig::Advanced { path, namespace } => {
+                debug_assert!(namespace.is_some()); // Should only be advanced if namespace there.
                 let path = Self::get_optional_path(path)?;
                 let namespace = Self::get_optional_namespace(namespace)?;
                 Self::from_final_path_and_namespace(path, namespace)

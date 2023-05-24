@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as vscode from 'vscode';
 import YAML from 'yaml';
-import { ChildProcess, spawn } from 'child_process';
+import { ChildProcess, ExecException, spawn } from 'child_process';
 
 const TOML = require('toml');
 const semver = require('semver');
@@ -101,7 +101,7 @@ class MirrordAPI {
 				this.cliPath = path.join(debugPath, "mirrord");
 			}
 		} else {
-			if(process.platform === "darwin") { // macos binary is universal for all architectures
+			if (process.platform === "darwin") { // macos binary is universal for all architectures
 				this.cliPath = path.join(context.extensionPath, 'bin', process.platform, 'mirrord');
 			} else if (process.platform === "linux") {
 				this.cliPath = path.join(context.extensionPath, 'bin', process.platform, process.arch, 'mirrord');
@@ -127,8 +127,21 @@ class MirrordAPI {
 			"MIRRORD_PROGRESS_MODE": "json",
 			...process.env,
 		};
-		let value = await exec(commandLine.join(' '), { "env": env });
-		return [value.stdout as string, value.stderr as string];
+		try {
+			const value = await new Promise((resolve, reject) => {
+				exec(commandLine.join(' '), { env }, (error: ExecException | null, stdout: string, stderr: string) => {
+					if (error) {
+						reject(error);
+					} else {
+						resolve([stdout, stderr]);
+					}
+				});
+			});
+
+			return value as [string, string];
+		} catch (error: any) {
+			return ['', error.message];
+		}
 	}
 
 	// Spawn the mirrord cli with the given arguments
@@ -152,11 +165,13 @@ class MirrordAPI {
 			args.push('-f', configPath);
 		}
 
-		let [stdout, stderr] = await this.exec(args);
+		const [stdout, stderr] = await this.exec(args);
 
 		if (stderr) {
+			const match = stderr.match(/Error: (.*)/)?.[1];
+			const notificationError = match ? JSON.parse(match)["message"] : stderr;
 			mirrordFailure(stderr);
-			throw new Error("error occured listing targets: " + stderr);
+			throw new Error(`mirrord failed to 'ls' targets\n${notificationError}`);
 		}
 
 		const targets: string[] = JSON.parse(stdout);
@@ -209,9 +224,26 @@ class MirrordAPI {
 					reject(err);
 				});
 
+				let stderrData = '';
 				child.stderr?.on('data', (data) => {
-					console.error(`mirrord stderr: ${data}`);
+					stderrData += data.toString();
 				});
+
+				child.stderr?.on('close', () => {
+					const match = stderrData.match(/Error: (.*)/)?.[1];
+					if (match) {
+						const error = JSON.parse(match);
+						mirrordFailure(stderrData);
+						vscode.window.showErrorMessage(error["message"]).then(() => {
+							vscode.window.showInformationMessage(error["help"])
+						});						
+					} else {
+						mirrordFailure(stderrData);
+						vscode.window.showErrorMessage(stderrData)
+					}
+					console.error(`mirrord stderr: ${stderrData}`);
+				});
+
 
 				let buffer = "";
 				child.stdout?.on('data', (data) => {
@@ -237,17 +269,16 @@ class MirrordAPI {
 						// First make sure it's not last message
 						if ((message["name"] === "mirrord preparing to launch") && (message["type"]) === "FinishedTask") {
 							if (message["success"]) {
-								progress.report({message: "mirrord started successfully, launching target."});
+								progress.report({ message: "mirrord started successfully, launching target." });
 								resolve(mirrordExecutionFromJson(message["message"]));
 								let res = JSON.parse(message["message"]);
 								resolve(res);
 							} else {
-								mirrordFailure(null);
 								reject(null);
 							}
 							return;
 						}
-						
+
 						if (message["type"] === "Warning") {
 							vscode.window.showWarningMessage(message["message"]);
 						} else {
@@ -370,7 +401,7 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 // Get the name of the field that holds the exectuable in a debug configuration of the given type.
-function getExecutableFieldName(config: vscode.DebugConfiguration): keyof vscode.DebugConfiguration{
+function getExecutableFieldName(config: vscode.DebugConfiguration): keyof vscode.DebugConfiguration {
 	switch (config.type) {
 		case "pwa-node":
 		case "node": {
@@ -445,7 +476,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		if (config.type === "go") {
 			config.env["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver;compile;go;asm;cgo;link;git";
 			// use our custom delve to fix being loaded into debugserver
-			
+
 			if (process.platform === "darwin") {
 				config.dlvToolPath = path.join(globalContext.extensionPath, "bin", "darwin", "dlv-" + process.arch);
 			}
