@@ -157,10 +157,12 @@ fn main() -> Result<(), DocsError> {
 
     let type_docs = parse_files()?
         .into_iter()
-        .map(|syntaxed_file| {
+        // go through each `File` extracting the types into a map keyed by the type `Ident`
+        .flat_map(|syntaxed_file| {
             syntaxed_file
                 .items
                 .into_iter()
+                // convert an `Item` into a `PartialType`
                 .filter_map(|item| match item {
                     syn::Item::Mod(item_mod) => {
                         docs_from_attributes(item_mod.attrs);
@@ -169,6 +171,7 @@ fn main() -> Result<(), DocsError> {
                     syn::Item::Enum(item) => {
                         let thing_docs_untreated = docs_from_attributes(item.attrs);
 
+                        // We only care about types that have docs.
                         (!thing_docs_untreated.is_empty()).then_some(PartialType {
                             ident: item.ident,
                             docs: thing_docs_untreated,
@@ -184,6 +187,7 @@ fn main() -> Result<(), DocsError> {
 
                         let thing_docs_untreated = docs_from_attributes(item.attrs);
 
+                        // We only care about types that have docs.
                         (!thing_docs_untreated.is_empty()).then_some(PartialType {
                             ident: item.ident,
                             docs: thing_docs_untreated,
@@ -195,32 +199,17 @@ fn main() -> Result<(), DocsError> {
                         None
                     }
                 })
+                // use the `PartialType::ident` as a key
                 .map(|partial_type| (partial_type.ident.clone(), partial_type))
-                .collect::<HashMap<_, _>>()
         })
-        .collect::<Vec<_>>();
+        // `PartialType`s keyed by the `PartialType::ident`
+        .collect::<HashMap<_, _>>();
 
     println!("{type_docs:#?}");
 
     // TODO(alex) [high] 2023-05-23: What's the best way to represent the hierarchy here?
     //
     // Need a way of saying "hey type, are you an inner field of some other type?".
-    let types = type_docs
-        .iter()
-        .map(|type_doc| type_doc.keys().cloned().collect::<Vec<_>>())
-        .collect::<Vec<_>>()
-        .concat();
-
-    for type_doc in type_docs.into_iter().peekable() {
-        for type_key in types.iter() {
-            if let Some(foo) = type_doc
-                .values()
-                .find_map(|partial| partial.fields.iter().find(|field| &field.ident == type_key))
-            {
-                println!("type {type_key:#?} is in {type_doc:#?} \n\n foo {foo:#?}");
-            }
-        }
-    }
 
     Ok(())
 }
