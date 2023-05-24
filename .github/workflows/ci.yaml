@@ -439,11 +439,10 @@ jobs:
       - run: pip3 install fastapi # For http mirroring test with FastAPI.
       - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
       - run: cargo build -p mirrord-layer # Build layer lib. The tests load it into the apps.
-      - run: cargo test -p mirrord-layer
       - uses: actions/setup-node@v3 # version 19 spawns processes with `posix_spawn`, so test that also.
         with:
           node-version: 19
-      - run: cargo test -p mirrord-layer --test spawn
+      - run: cargo test -p mirrord-layer
 
   e2e:
     runs-on: ubuntu-latest

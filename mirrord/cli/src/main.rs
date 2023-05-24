@@ -227,7 +227,11 @@ async fn get_kube_pods(
         .map_err(CliError::KubernetesApiFailed)?;
     let api: Api<Pod> = get_k8s_resource_api(&client, namespace.as_deref());
     let pods = api
-        .list(&ListParams::default().labels("app!=mirrord"))
+        .list(
+            &ListParams::default()
+                .labels("app!=mirrord")
+                .fields("status.phase=Running"),
+        )
         .await
         .map_err(KubeApiError::from)
         .map_err(CliError::KubernetesApiFailed)?;
