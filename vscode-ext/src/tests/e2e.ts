@@ -85,15 +85,13 @@ describe("mirrord sample flow test", function () {
         const debugView = await activityBar?.openView() as DebugView;
         await debugView.selectLaunchConfiguration("Python: Current File");
         debugView.start();
-        await sleep(10000);
-        const terminalView = await new BottomBarPanel().openTerminalView();
-        const text = await terminalView.getText();
-        console.log(text);
+        await sleep(10000);                
     });
 
     it("select pod from quickpick", async function () {
         const input = await InputBox.create();
-        // assertion that podToSelect is not undefined is done in "before" block        
+        // assertion that podToSelect is not undefined is done in "before" block   
+        await sleep(5000);     
         await input.selectQuickPick(podToSelect!);
         await sleep(10000);
     });
@@ -101,6 +99,9 @@ describe("mirrord sample flow test", function () {
     it("wait for breakpoint to be hit", async function () {
         debugToolbar = await DebugToolbar.create();
         console.log("waiting for breakpoint");
+        const terminalView = await new BottomBarPanel().openTerminalView();
+        const text = await terminalView.getText();
+        console.log(text);
         await Promise.all([debugToolbar.waitForBreakPoint(), sendTrafficToPod()])
     });
 
