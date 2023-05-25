@@ -63,8 +63,8 @@
 	"scripts": {
 		"pretest": "npm run test-compile && npm run lint",
 		"test": "npm run pretest && node out/tests/runTests.js",
-		"lint": "eslint src --ext ts  --fix ",
-		"lint-check": "eslint src --ext ts --max-warnings 0",
+		"lint": "eslint src --ext ts -c .eslintrc.json --fix",
+		"lint-check": "eslint src --ext ts -c .eslintrc.json",
 		"format": "prettier --single-quote --print-width 160 --write src",
 		"format-check": "prettier --single-quote --print-width 160 --check src",
 		"vscode:prepublish": "webpack --mode production",
