@@ -9,3 +9,6 @@ out/
 src/
 tsconfig.json
 webpack.config.json
+test-workspace/
+bin/
+src/tests
