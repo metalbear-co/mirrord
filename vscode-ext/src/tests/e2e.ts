@@ -3,6 +3,7 @@ import { assert, expect } from "chai";
 import { join } from "path";
 import { VSBrowser, StatusBar, TextEditor, EditorView, ActivityBar, DebugView, InputBox, DebugToolbar } from "vscode-extension-tester";
 import get from "axios";
+import { Breakpoint } from "vscode";
 
 
 // This suite tests basic flow of mirroring traffic from remote pod
@@ -27,6 +28,8 @@ describe("mirrord sample flow test", function () {
     const testWorkspace = join(__dirname, '../../test-workspace');
     const fileName = "app_flask.py";
     const mirrordConfigPath = join(testWorkspace, '.mirrord/mirrord.json');
+    const configurationFile = "Python: Current File";
+    const breakPoint = 9;
 
     before(async function () {
         console.log("podToSelect: " + podToSelect);
@@ -66,9 +69,9 @@ describe("mirrord sample flow test", function () {
     });
 
     it("select pod from quickpick", async function () {
-        await setBreakPoint(fileName);
-        await startDebugging();
-        
+        await setBreakPoint(fileName, breakPoint);
+        await startDebugging(configurationFile);
+
         const input = await InputBox.create();
         // assertion that podToSelect is not undefined is done in "before" block   
         await sleep(5000);
@@ -78,7 +81,10 @@ describe("mirrord sample flow test", function () {
     it("wait for breakpoint to be hit", async function () {
         await sleep(10000);
         debugToolbar = await DebugToolbar.create();
-        await Promise.all([debugToolbar.waitForBreakPoint(), sendTrafficToPod()])
+        // waiting for breakpoint and sending traffic to pod are run in parallel
+        // however, traffic is sent after 10 seconds that we are sure the IDE is listening
+        // for breakpoints
+        await Promise.all([debugToolbar.waitForBreakPoint(), sendTrafficToPod()]);
     });
 
 });
@@ -89,7 +95,7 @@ async function sleep(time: number) {
     await new Promise((resolve) => setTimeout(resolve, time));
 }
 
-// This promis is run in parallel to the promise waiting for the breakpoint to be hit
+// This promise is run in parallel to the promise waiting for the breakpoint to be hit
 // We wait for 10 seconds to make sure that we are in listening state
 async function sendTrafficToPod() {
     await sleep(10000);
@@ -98,7 +104,8 @@ async function sendTrafficToPod() {
     expect(response.data).to.equal("OK - GET: Request completed\n");
 }
 
-async function setBreakPoint(fileName: string) {        
+// opens and sets a breakpoint in the given file
+async function setBreakPoint(fileName: string, breakPoint: number) {
     const editorView = new EditorView();
     await editorView.openEditor(fileName);
     await sleep(5000);
@@ -107,15 +114,17 @@ async function setBreakPoint(fileName: string) {
     assert(await currentTab?.getTitle() === fileName, "${fileName} not found");
 
     const textEditor = new TextEditor();
-    const result = await textEditor.toggleBreakpoint(9);
-    expect(result).to.be.true;    
+    const result = await textEditor.toggleBreakpoint(breakPoint);
+    expect(result).to.be.true;
 }
 
-async function startDebugging() {
+// starts debugging the current file with the provided configuration
+// debugging starts from the "Run and Debug" button in the activity bar
+async function startDebugging(configurationFile: string) {
     const activityBar = await new ActivityBar().getViewControl("Run and Debug");
     expect(activityBar).to.not.be.undefined;
     const debugView = await activityBar?.openView() as DebugView;
-    await debugView.selectLaunchConfiguration("Python: Current File");
+    await debugView.selectLaunchConfiguration(configurationFile);
     debugView.start();
     await sleep(10000);
 }
