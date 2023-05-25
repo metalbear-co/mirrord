@@ -86,6 +86,9 @@ describe("mirrord sample flow test", function () {
         await debugView.selectLaunchConfiguration("Python: Current File");
         debugView.start();
         await sleep(10000);
+        const terminalView = await new BottomBarPanel().openTerminalView();
+        const text = await terminalView.getText();
+        console.log(text);
     });
 
     it("select pod from quickpick", async function () {
