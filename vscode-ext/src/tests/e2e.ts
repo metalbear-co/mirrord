@@ -68,10 +68,10 @@ describe("mirrord sample flow test", function () {
     it("select pod from quickpick", async function () {
         await setBreakPoint(fileName);
         await startDebugging();
-        
+        await sleep(10000);
         const input = await InputBox.create();
         // assertion that podToSelect is not undefined is done in "before" block   
-        await sleep(5000);
+        await sleep(10000);
         await input.selectQuickPick(podToSelect!);
     });
 
