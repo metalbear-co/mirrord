@@ -575,7 +575,8 @@ jobs:
       - run: |
           cd vscode-ext 
           npm install --no-package-lock --no-save eslint
-          npm run lint
+          npm run lint-check
+          npm run format-check
 
   vscode_e2e:
     runs-on: ubuntu-latest
@@ -588,7 +589,7 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 18
-      - name: download layer
+      - name: Download layer
         uses: actions/download-artifact@v3
         with:
           name: mirrord-artifacts
@@ -598,7 +599,7 @@ jobs:
           cd vscode-ext
           mkdir -p bin/linux/x64
           cp ../target/debug/mirrord bin/linux/x64
-      - name: install dependencies
+      - name: Install dependencies
         run: |
           cd vscode-ext
           npm install
@@ -607,7 +608,7 @@ jobs:
         with:
           name: test
           path: /tmp
-      - name: start minikube
+      - name: Start minikube
         uses: medyagh/setup-minikube@master
         with:
           container-runtime: docker
@@ -619,7 +620,9 @@ jobs:
           KUBE_SERVICE=$(minikube service list --output=json | jq -r '.[] | select(.Name == "py-serv") | .URLs[0]')
           echo "$KUBE_SERVICE"
           echo "KUBE_SERVICE=$KUBE_SERVICE" >> "$GITHUB_ENV"
-      - name: Run headless test
+      # we can't run chrome like apps in the CI, we use a virtual frame buffer:
+      # refer: http://elementalselenium.com/tips/38-headless
+      - name: Run vscode e2e in headless state
         uses: coactions/setup-xvfb@v1
         env:
           POD_TO_SELECT: ${{ env.POD_TO_SELECT }}
