@@ -291,4 +291,75 @@ mod tests {
             },
         );
     }
+
+    /// Parse a json string, generate a `TargetConfig` out of it, and compare to expected config.
+    fn verify_config(config_json_string: &str, expected_target_config: &TargetConfig) {
+        let target_file_config: TargetFileConfig =
+            serde_json::from_str(config_json_string).unwrap();
+        let target_config: TargetConfig = target_file_config.generate_config().unwrap();
+        assert_eq!(&target_config, expected_target_config);
+    }
+
+    /// Test parsing the configuration when the env vars are not set.
+    #[rstest]
+    // advanced variant, namespace only.
+    #[case(
+        r#"{ "namespace": "my-test-namespace" }"#,
+        TargetConfig {
+            path: None,
+            namespace: Some("my-test-namespace".to_string())
+        }
+    )]
+    // simple variant of file config - path string, not an object.
+    #[case(
+        r#""pod/my-cool-pod""#,
+        TargetConfig{
+            path: Some(Target::Pod(PodTarget {pod: "my-cool-pod".to_string(), container: None})),
+            namespace: None
+        }
+    )]
+    // advanced variant of file config.
+    #[case(
+        r#"{ "path": "pod/my-cool-pod" }"#,
+        TargetConfig{
+            path: Some(Target::Pod(PodTarget {pod: "my-cool-pod".to_string(), container: None})),
+            namespace: None
+        }
+    )]
+    // advanced variant of file config, with object as path.
+    #[case(
+        r#"{
+            "path": {
+                "pod": "my-cool-pod"
+            }
+        }"#,
+        TargetConfig{
+            path: Some(Target::Pod(PodTarget {pod: "my-cool-pod".to_string(), container: None})),
+            namespace: None
+        }
+    )]
+    fn parse_target_config_from_json(
+        #[case] config_json_string: &str,
+        #[case] mut expected_target_config: TargetConfig,
+    ) {
+        // First test without env vars.
+        with_env_vars(
+            vec![
+                ("MIRRORD_IMPERSONATED_TARGET", None),
+                ("MIRRORD_TARGET_NAMESPACE", None),
+            ],
+            || verify_config(config_json_string, &expected_target_config),
+        );
+
+        // Now test that the namespace is set (overridden) by the env var.
+        let namespace = "override-namespace";
+        expected_target_config.namespace = Some(namespace.to_string());
+        with_env_vars(
+            vec![
+                ("MIRRORD_IMPERSONATED_TARGET", None),
+                ("MIRRORD_TARGET_NAMESPACE", Some(namespace)),
+            ],
+            || verify_config(config_json_string, &expected_target_config),
+        );
+    }
 }
