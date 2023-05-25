@@ -94,7 +94,7 @@ object MirrordApi {
 
         logger.debug("process wait finished, reading output")
 
-        // failure -> null
+        // failure -> error
         // success -> empty -> targetless, else -> list of pods + targetless
         val gson = Gson()
         if (process.exitValue() != 0) {
