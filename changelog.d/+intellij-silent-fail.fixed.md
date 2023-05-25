@@ -1,0 +1,1 @@
+fixed IntelliJ failing silently when error happened on listing pods

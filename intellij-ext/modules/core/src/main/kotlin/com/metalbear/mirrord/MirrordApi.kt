@@ -104,7 +104,6 @@ object MirrordApi {
                 val error = gson.fromJson(trimmedError, Error::class.java)
                 MirrordNotifier.errorNotification(error.message, project)
                 MirrordNotifier.notify(error.help, NotificationType.INFORMATION, project)
-                return null
             }
             logger.debug("mirrord ls failed: $processStdError")
             throw Error("mirrord ls failed")
