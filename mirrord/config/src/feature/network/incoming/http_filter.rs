@@ -51,7 +51,7 @@ pub struct HttpHeaderFilterConfig {
     pub ports: PortList,
 }
 
-// rustdoc-stripper-ignore-next
+/// <!--${internal}-->
 /// Helper struct for setting up ports configuration (part of the HTTP traffic stealer feature).
 ///
 /// Defaults to a list of ports `[80, 8080]`.
@@ -60,7 +60,6 @@ pub struct HttpHeaderFilterConfig {
 ///
 /// We use this to allow implementing a custom [`Default`] initialization, as the [`MirrordConfig`]
 /// macro (currently) doesn't support more intricate expressions.
-// rustdoc-stripper-ignore-next-stop
 #[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
 pub struct PortList(VecOrSingle<u16>);
 

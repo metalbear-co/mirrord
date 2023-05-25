@@ -2,13 +2,12 @@
 #![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![warn(clippy::indexing_slicing)]
-// rustdoc-stripper-ignore-next
+//! <!--${internal}-->
 //! To generate the `mirrord-schema.json` file see
 //! [`tests::check_schema_file_exists_and_is_valid_or_create_it`].
 //!
 //! Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
 //! including if you only made documentation changes.
-// rustdoc-stripper-ignore-next-stop
 pub mod agent;
 pub mod config;
 pub mod feature;
@@ -25,59 +24,6 @@ use crate::{
     agent::AgentConfig, config::source::MirrordConfigSource, feature::FeatureConfig,
     target::TargetConfig, util::VecOrSingle,
 };
-
-// TODO(alex) [high] 2023-05-08: For some of the inner config structs, move the documentation
-// to the parent, example would be `IncomingFileConfig`, where we should move the docs to the
-// `incoming` field, instead of linking to another struct.
-//
-// ADD(alex) [high] 2023-05-17: Better idea, we could have a tool that "inlines" the documentation
-// of a sub-config. Example:
-/*
-/// # `a`
-///
-/// The outer thing.
-struct A {
-    /// ## `a.b`
-    ///
-    /// This is a short description, that is supposed to be consumed by us and by json-schema.
-    b: B,
-}
-
-/// Check out these cool examples on how to use this cool struct:
-///
-/// (cool examples)
-struct B {
-    /// ### `a.b.x`
-    ///
-    /// Float thingy.
-    x: f32,
-
-    /// ### `a.b.y`
-    ///
-    /// Other float thingy.
-    y: f32,
-}
-
-procudes:
-
-# `a`
-
-The outer thing.
-
-## `a.b`
-
-Check out these cool examples on how to use this cool struct:
-
-(cool examples)
-
-### `a.b.x`
-
-Float thingy.
-
-### `a.b.y`
-
-Other float thingy.
-*/
 
 /// mirrord allows for a high degree of customization when it comes to which features you want to
 /// enable, and how they should function.
@@ -574,7 +520,7 @@ mod tests {
         assert_eq!(config, expect);
     }
 
-    // rustdoc-stripper-ignore-next
+    /// <!--${internal}-->
     /// Helper for printing the config schema.
     ///
     /// Run it with:
@@ -582,7 +528,6 @@ mod tests {
     /// ```sh
     /// cargo test -p mirrord-config print_schema -- --ignored --nocapture
     /// ```
-    // rustdoc-stripper-ignore-next-stop
     #[test]
     #[ignore]
     fn print_schema() {
@@ -592,9 +537,8 @@ mod tests {
 
     const SCHEMA_FILE_PATH: &str = "../../mirrord-schema.json";
 
-    // rustdoc-stripper-ignore-next
+    /// <!--${internal}-->
     /// Writes the config schema to a file (uploaded to the schema store).
-    // rustdoc-stripper-ignore-next-stop
     fn write_schema_to_file(schema: &RootSchema) -> File {
         println!("Writing schema to file.");
 
@@ -614,7 +558,7 @@ mod tests {
         file
     }
 
-    // rustdoc-stripper-ignore-next
+    /// <!--${internal}-->
     /// Checks if a schema file already exists, otherwise generates the schema and creates the file.
     ///
     /// It also checks and updates when the schema file is outdated.
@@ -624,7 +568,6 @@ mod tests {
     /// ```sh
     /// cargo test -p mirrord-config check_schema_file_exists_and_is_valid_or_create_it -- --ignored --nocapture
     /// ```
-    // rustdoc-stripper-ignore-next-stop
     #[test]
     #[ignore]
     fn check_schema_file_exists_and_is_valid_or_create_it() {

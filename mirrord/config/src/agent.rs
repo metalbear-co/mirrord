@@ -169,7 +169,7 @@ pub struct AgentConfig {
     )]
     pub flush_connections: bool,
 
-    // rustdoc-stripper-ignore-next
+    /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).
     // rustdoc-stripper-ignore-next-stop

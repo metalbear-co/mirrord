@@ -19,6 +19,7 @@ pub enum TargetFileConfig {
     // we need default else target value will be required in some scenarios.
     Simple(#[serde(default, deserialize_with = "string_or_struct_option")] Option<Target>),
     Advanced {
+        /// <!--${internal}-->
         /// Path is optional so that it can also be specified via env var instead of via conf file,
         /// but it is not optional in a resulting [`TargetConfig`] object - either there is a path,
         /// or the target configuration is `None`.
@@ -194,7 +195,7 @@ mirrord-layer failed to parse the provided target!
     >> check if the provided target is in the correct namespace.
 "#;
 
-// rustdoc-stripper-ignore-next
+/// <!--${internal}-->
 /// ## path
 ///
 /// Specifies the running pod (or deployment) to mirror.
@@ -205,18 +206,15 @@ mirrord-layer failed to parse the provided target!
 /// - `deployment/{sample-deployment}`;
 /// - `container/{sample-container}`;
 /// - `containername/{sample-container}`.
-// rustdoc-stripper-ignore-next-stop
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged)]
 pub enum Target {
-    // rustdoc-stripper-ignore-next
+    /// <!--${internal}-->
     /// Mirror a deployment.
-    // rustdoc-stripper-ignore-next-stop
     Deployment(DeploymentTarget),
 
-    // rustdoc-stripper-ignore-next
+    /// <!--${internal}-->
     /// Mirror a pod.
-    // rustdoc-stripper-ignore-next-stop
     Pod(PodTarget),
 }
 
@@ -237,14 +235,12 @@ impl FromStr for Target {
     }
 }
 
-// rustdoc-stripper-ignore-next
+/// <!--${internal}-->
 /// Mirror the pod specified by [`PodTarget::pod`].
-// rustdoc-stripper-ignore-next-stop
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 pub struct PodTarget {
-    // rustdoc-stripper-ignore-next
+    /// <!--${internal}-->
     /// Pod to mirror.
-    // rustdoc-stripper-ignore-next-stop
     pub pod: String,
     pub container: Option<String>,
 }
@@ -270,14 +266,12 @@ impl FromSplit for PodTarget {
     }
 }
 
-// rustdoc-stripper-ignore-next
+/// <!--${internal}-->
 /// Mirror the deployment specified by [`DeploymentTarget::deployment`].
-// rustdoc-stripper-ignore-next-stop
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 pub struct DeploymentTarget {
-    // rustdoc-stripper-ignore-next
+    /// <!--${internal}-->
     /// Deployment to mirror.
-    // rustdoc-stripper-ignore-next-stop
     pub deployment: String,
     pub container: Option<String>,
 }

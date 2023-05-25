@@ -259,11 +259,10 @@ pub struct IncomingConfig {
 }
 
 impl IncomingConfig {
-    // rustdoc-stripper-ignore-next
+    /// <!--${internal}-->
     /// Helper function.
     ///
     /// Used by mirrord-layer to identify the incoming network configuration as steal or not.
-    // rustdoc-stripper-ignore-next-stop
     pub fn is_steal(&self) -> bool {
         matches!(self.mode, IncomingMode::Steal)
     }

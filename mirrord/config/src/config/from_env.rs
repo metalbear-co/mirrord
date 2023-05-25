@@ -25,12 +25,11 @@ where
     }
 }
 
-// rustdoc-stripper-ignore-next
+/// <!--${internal}-->
 /// This is the same as `FromEnv` but doesn't discard the error returned from parse.
 ///
 /// This is for parsing `Target`. I (A.H) couldn't find any better way to do this since you can't
 /// do specialization on associated types.
-// rustdoc-stripper-ignore-next-stop
 #[derive(Clone)]
 pub struct FromEnvWithError<T>(&'static str, PhantomData<T>);
 

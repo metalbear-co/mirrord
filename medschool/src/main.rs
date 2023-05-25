@@ -1,6 +1,12 @@
 #![feature(const_trait_impl)]
 use core::alloc;
-use std::{collections::HashSet, fs::File, hash::Hash, io::Read};
+use std::{
+    collections::HashSet,
+    fmt::Display,
+    fs::{write, File},
+    hash::Hash,
+    io::Read,
+};
 
 use syn::{spanned::Spanned, Attribute, Expr, Ident, Type, TypePath};
 use thiserror::Error;
@@ -53,6 +59,21 @@ impl std::borrow::Borrow<Ident> for PartialType {
     }
 }
 
+impl Display for PartialType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.docs.last().unwrap())?;
+
+        let fields: String = self.fields.iter().map(|field| format!("{field}")).collect();
+        f.write_str(&fields)
+    }
+}
+
+impl Display for PartialField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.docs.last().unwrap())
+    }
+}
+
 fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> {
     let span = type_path.span();
     let mut ignore_idents = HashSet::with_capacity(32);
@@ -74,6 +95,16 @@ fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> 
         .filter(|segment| segment.arguments.is_empty())
         .last()
         .map(|segment| segment.ident)
+}
+
+fn pretty_docs(docs: &mut Vec<String>) -> String {
+    for doc in docs.iter_mut() {
+        if doc.contains(r"<!--${internal}-->") {
+            return "".to_string();
+        }
+    }
+
+    docs.concat()
 }
 
 impl PartialField {
@@ -168,6 +199,15 @@ fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
             syn::Lit::Str(doc_lit) => Some(doc_lit.value()),
             _ => None,
         })
+        // convert empty lines into markdown newline, or add `\n` to end of lines
+        .map(|doc| {
+            if doc.trim().len() == 0 {
+                "\n".to_string()
+            } else {
+                format!("{}\n", doc)
+            }
+        })
+        // TODO(alex) [high] 2023-05-25: Ignore internal docs.
         .collect()
 }
 
@@ -245,7 +285,7 @@ fn main() -> Result<(), DocsError> {
     let run = true;
     let mut final_types: Vec<PartialType> = Default::default();
 
-    for _ in 0..50 {
+    for _ in 0..500 {
         for current_type in types_copy.iter_mut() {
             for (field, mut field_type) in current_type.fields.iter_mut().filter_map(|field| {
                 type_docs
@@ -258,13 +298,23 @@ fn main() -> Result<(), DocsError> {
     }
 
     println!("AFTER \n {type_docs:#?}\n");
-    // for (_, partial_type) in type_docs.iter() {}
 
-    // let fields = type_docs
-    //     .values()
-    //     .flat_map(|partial_type| &partial_type.fields)
-    //     .collect::<HashSet<_>>();
+    for type_ in types_copy.iter_mut() {
+        for field in type_.fields.iter_mut() {
+            field.docs = vec![pretty_docs(&mut field.docs)];
+        }
 
+        type_.docs = vec![pretty_docs(&mut type_.docs)];
+    }
+
+    println!("FINAL \n {types_copy:#?}\n");
+
+    let test_contents: String = types_copy
+        .into_iter()
+        .map(|type_| format!("{}", type_))
+        .collect();
+
+    write("./configuration.md", test_contents).unwrap();
     // TODO(alex) [high] 2023-05-23: What's the best way to represent the hierarchy here?
     //
     // Need a way of saying "hey type, are you an inner field of some other type?".

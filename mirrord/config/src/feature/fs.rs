@@ -1,4 +1,4 @@
-// rustdoc-stripper-ignore-next
+//! <!--${internal}-->
 //! mirrord file operations support 2 modes of configuration:
 //!
 //! 1. [`FsUserConfig::Simple`]: controls only the option for enabling read-only, read-write,
@@ -7,7 +7,6 @@
 //! 2. [`FsUserConfig::Advanced`]: All of the above, plus allows setting up
 //! [`mirrord_layer::file::filter::FileFilter`] to control which files should be opened
 //! locally or remotely.
-// rustdoc-stripper-ignore-next-stop
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -23,9 +22,6 @@ pub mod mode;
 /// ## feature.fs {#fs}
 ///
 /// Changes file operations behavior based on user configuration.
-// rustdoc-stripper-ignore-next
-/// Defaults to [`FsUserConfig::Simple`], with [`FsModeConfig::Read`].
-// rustdoc-stripper-ignore-next-stop
 ///
 /// See the file operations [reference](https://mirrord.dev/docs/reference/fileops/)
 /// for more details, and [fs advanced](#fs-advanced) for more information on how to fully setup
@@ -58,14 +54,14 @@ pub mod mode;
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase")]
 pub enum FsUserConfig {
-    // rustdoc-stripper-ignore-next
+    /// <!--${internal}-->
     /// Basic configuration that controls the env vars `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`
     /// (default).
     Simple(FsModeConfig),
 
+    /// <!--${internal}-->
     /// Allows the user to specify both [`FsModeConfig`] (as above), and configuration for the
     /// overrides.
-    // rustdoc-stripper-ignore-next-stop
     Advanced(AdvancedFsUserConfig),
 }
 
