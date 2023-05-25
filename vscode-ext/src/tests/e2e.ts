@@ -27,8 +27,6 @@ describe("mirrord sample flow test", function () {
     const testWorkspace = join(__dirname, '../../test-workspace');
     const fileName = "app_flask.py";
     const mirrordConfigPath = join(testWorkspace, '.mirrord/mirrord.json');
-    const configurationFile = "Python: Current File";
-    const breakpointLine = 9;
 
     before(async function () {
         console.log("podToSelect: " + podToSelect);
@@ -38,17 +36,16 @@ describe("mirrord sample flow test", function () {
         browser = VSBrowser.instance;
         // need to bring the flask app in open editors
         await browser.openResources(testWorkspace, join(testWorkspace, fileName));
-        await sleep(10000); // --> wait for the IDE to load
+        await sleep(10000);
     });
 
     after(async function () {
-        // stop debugging
         if (await debugToolbar.isDisplayed()) {
             await debugToolbar.stop();
         }
     });
 
-    it("Enable mirrord", async function () {
+    it("enable mirrord", async function () {
         statusBar = new StatusBar();
         const enableButton = await statusBar.getItem("Enable mirrord");
         expect(enableButton).to.not.be.undefined;
@@ -81,9 +78,6 @@ describe("mirrord sample flow test", function () {
     it("wait for breakpoint to be hit", async function () {
         await sleep(10000);
         debugToolbar = await DebugToolbar.create();
-        // waiting for breakpoint and sending traffic to pod are run in parallel
-        // however, traffic is sent after 10 seconds that we are sure the IDE is listening
-        // for breakpoints        
         await Promise.all([debugToolbar.waitForBreakPoint(), sendTrafficToPod()])
     });
 
