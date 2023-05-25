@@ -99,6 +99,13 @@ pub struct LayerConfig {
     #[config(nested)]
     pub target: Option<TargetConfig>,
 
+    /// Controls target pause feature. Unstable.
+    ///
+    /// With this feature enabled, the remote container is paused while this layer is connected to
+    /// the agent.
+    #[config(env = "MIRRORD_PAUSE", default = false, unstable)]
+    pub pause: bool,
+
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.
     #[config(env = "MIRRORD_CONNECT_TCP")]
     pub connect_tcp: Option<String>,
@@ -209,6 +216,7 @@ mod tests {
                     r#"
                     {
                         "accept_invalid_certificates": false,
+                        "pause": false,
                         "target": {
                             "path": "pod/test-service-abcdefg-abcd",
                             "namespace": "default"
@@ -221,7 +229,6 @@ mod tests {
                             "image_pull_secrets": [{"name": "testsecret"}],
                             "ttl": 60,
                             "ephemeral": false,
-                            "pause": false,
                             "flush_connections": false
                         },
                         "feature": {
@@ -244,6 +251,7 @@ mod tests {
                 ConfigType::Toml => {
                     r#"
                     accept_invalid_certificates = false
+                    pause = false
 
                     [target]
                     path = "pod/test-service-abcdefg-abcd"
@@ -257,7 +265,6 @@ mod tests {
                     image_pull_secrets = [{name = "testsecret"}]
                     ttl = 60
                     ephemeral = false
-                    pause = false
                     flush_connections = false
 
                     [feature]
@@ -278,6 +285,7 @@ mod tests {
                 ConfigType::Yaml => {
                     r#"
                     accept_invalid_certificates: false
+                    pause: false
                     target:
                         path: "pod/test-service-abcdefg-abcd"
                         namespace: "default"
@@ -291,7 +299,6 @@ mod tests {
                             - name: "testsecret"
                         ttl: 60
                         ephemeral: false
-                        pause: false
                         flush_connections: false
 
                     feature:
@@ -343,6 +350,7 @@ mod tests {
 
         let expect = LayerFileConfig {
             accept_invalid_certificates: Some(false),
+            pause: Some(false),
             kubeconfig: None,
             connect_agent_name: None,
             connect_agent_port: None,
@@ -368,7 +376,6 @@ mod tests {
                 communication_timeout: None,
                 startup_timeout: None,
                 network_interface: None,
-                pause: Some(false),
                 flush_connections: Some(false),
             }),
             feature: Some(FeatureFileConfig {
