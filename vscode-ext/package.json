@@ -63,8 +63,8 @@
 	"scripts": {
 		"pretest": "npm run test-compile && npm run lint",
 		"test": "npm run pretest && node out/tests/runTests.js",
-		"lint": "eslint src --ext ts",
-		"format": "eslint src --ext ts --fix",
+		"lint": "eslint src --ext ts -c .eslintrc.json --fix",
+		"lint-check": "eslint src --ext ts -c .eslintrc.json",
 		"vscode:prepublish": "webpack --mode production",
 		"compile": "webpack --mode none",
 		"watch": "webpack --mode none --watch",
@@ -87,7 +87,6 @@
 		"eslint": "^8.6.0",
 		"glob": "^7.2.3",
 		"mocha": "^9.1.3",
-		"prettier": "2.5.1",
 		"ts-loader": "^9.4.2",
 		"typescript": "^4.5.4",
 		"vsce": "^2.9.2",
