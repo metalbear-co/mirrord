@@ -71,7 +71,7 @@ where
             AgentConnection { sender, receiver },
         ))
     } else {
-        if matches!(config.target, Some(mirrord_config::target::TargetConfig{ path: mirrord_config::target::Target::Deployment{..}, ..})) {
+        if matches!(config.target, mirrord_config::target::TargetConfig{ path: Some(mirrord_config::target::Target::Deployment{..}), ..}) {
             // progress.subtask("text").done_with("text");
             eprintln!("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.\n \
                       Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.\n \

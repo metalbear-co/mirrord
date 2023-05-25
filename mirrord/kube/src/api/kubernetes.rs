@@ -29,7 +29,7 @@ use crate::{
 pub struct KubernetesAPI {
     client: Client,
     agent: AgentConfig,
-    target: Option<TargetConfig>,
+    target: TargetConfig,
 }
 
 impl KubernetesAPI {
@@ -47,7 +47,7 @@ impl KubernetesAPI {
         ))
     }
 
-    pub fn new(client: Client, agent: AgentConfig, target: Option<TargetConfig>) -> Self {
+    pub fn new(client: Client, agent: AgentConfig, target: TargetConfig) -> Self {
         KubernetesAPI {
             client,
             agent,
@@ -113,11 +113,9 @@ impl AgentManagment for KubernetesAPI {
     where
         P: Progress + Send + Sync,
     {
-        let runtime_data = if let Some(ref target_config) = self.target {
+        let runtime_data = if let Some(ref path) = self.target.path {
             Some(
-                target_config
-                    .path
-                    .runtime_data(&self.client, target_config.namespace.as_deref())
+                path.runtime_data(&self.client, self.target.namespace.as_deref())
                     .await?,
             )
         } else {

@@ -30,10 +30,10 @@ impl TargetCrd {
 
     /// "targetless" ([`TARGETLESS_TARGET_NAME`]) if `None`,
     /// else <resource_type>.<resource_name>...
-    pub fn target_name_by_optional_config(target_config: &Option<TargetConfig>) -> String {
-        target_config.as_ref().map_or_else(
+    pub fn target_name_by_config(target_config: &TargetConfig) -> String {
+        target_config.path.as_ref().map_or_else(
             || TARGETLESS_TARGET_NAME.to_string(),
-            |target_config| Self::target_name(&target_config.path),
+            |path| Self::target_name(&path),
         )
     }
 
@@ -44,31 +44,14 @@ impl TargetCrd {
             .map(Self::target_name)
             .unwrap_or(TARGETLESS_TARGET_NAME.to_string())
     }
-
-    pub fn from_target(target_config: TargetConfig) -> Option<Self> {
-        let target = target_config.path;
-
-        let target_name = Self::target_name(&target);
-
-        let mut crd = TargetCrd::new(
-            &target_name,
-            TargetSpec {
-                target: Some(target),
-            },
-        );
-
-        crd.metadata.namespace = target_config.namespace;
-
-        Some(crd)
-    }
 }
 
-impl From<TargetCrd> for Option<TargetConfig> {
+impl From<TargetCrd> for TargetConfig {
     fn from(crd: TargetCrd) -> Self {
-        crd.spec.target.map(|target| TargetConfig {
-            path: target,
+        TargetConfig {
+            path: crd.spec.target,
             namespace: crd.metadata.namespace,
-        })
+        }
     }
 }
 

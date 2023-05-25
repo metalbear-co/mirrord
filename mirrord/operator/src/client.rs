@@ -45,7 +45,7 @@ pub struct OperatorApi {
     client: Client,
     target_api: Api<TargetCrd>,
     version_api: Api<MirrordOperatorCrd>,
-    target_config: Option<TargetConfig>,
+    target_config: TargetConfig,
 }
 
 impl OperatorApi {
@@ -113,7 +113,7 @@ impl OperatorApi {
         )
         .await?;
 
-        let target_namespace = if let Some(ref target_config) = target_config {
+        let target_namespace = if target_config.path.is_some() {
             target_config.namespace.as_deref()
         } else {
             // When targetless, pass agent namespace to operator so that it knows where to create
@@ -143,7 +143,7 @@ impl OperatorApi {
     }
 
     async fn fetch_target(&self) -> Result<Option<TargetCrd>> {
-        let target_name = TargetCrd::target_name_by_optional_config(&self.target_config);
+        let target_name = TargetCrd::target_name_by_config(&self.target_config);
 
         match self.target_api.get(&target_name).await {
             Ok(target) => Ok(Some(target)),

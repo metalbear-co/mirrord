@@ -41,10 +41,16 @@ pub enum TargetFileConfig {
     },
 }
 
+// - Only path is `Some` -> use current namespace.
+// - Only namespace is `Some` -> this should only happen in `mirrord ls`. In `mirrord exec`
+//   namespace without a path does not mean anything and therefore should be prevented by returning
+//   an error. The error is not returned when parsing the configuration because it's not an error
+//   for `mirrord ls`.
+// - Both are `None` -> targetless.
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TargetConfig {
-    pub path: Target,
+    pub path: Option<Target>,
     pub namespace: Option<String>,
 }
 
@@ -59,83 +65,36 @@ impl FromMirrordConfig for TargetConfig {
 }
 
 impl TargetFileConfig {
-    /// Get the final path.
-    /// Will return the environment variable's value if set, if not the value from the
-    /// configuration (passed argument), and if that is not set as well, `None`.
-    ///
-    /// # Arguments
-    ///
-    /// * `path_from_config_file` - The optional value read from the config file.
-    fn get_optional_path(path_from_config_file: Option<Target>) -> Result<Option<Target>> {
+    /// Get the target path from the env var, `Ok(None)` if not set, `Err` if invalid value.
+    fn get_target_path_from_env() -> Result<Option<Target>> {
         FromEnvWithError::new("MIRRORD_IMPERSONATED_TARGET")
-            .or(path_from_config_file)
             .source_value()
             .transpose()
     }
 
-    /// Get the final namespace.
-    /// Will return the environment variable's value if set, if not the value from the
-    /// configuration (passed argument), and if that is not set as well, `None`.
-    ///
-    /// # Arguments
-    ///
-    /// * `namespace_from_config_file` - The optional value read from the config file.
-    fn get_optional_namespace(
-        namespace_from_config_file: Option<String>,
-    ) -> Result<Option<String>> {
+    /// Get the target namespace from the env var, `Ok(None)` if not set, `Err` if invalid value.
+    fn get_target_namespace_from_env() -> Result<Option<String>> {
         FromEnv::new("MIRRORD_TARGET_NAMESPACE")
-            .or(namespace_from_config_file)
             .source_value()
             .transpose()
-    }
-
-    /// Take the final values (after taking into account the values from the file and from env), and
-    /// return the optional `TargetConfig` (`None` if targetless).
-    ///
-    /// # Errors
-    /// * `ConfigError::TargetNamespaceWithoutTarget` - if namespace is some but path is `None`,
-    ///   because the target namespace does not mean anything without a target path. The user might
-    ///   have meant the agent namespace.
-    fn from_final_path_and_namespace(
-        path: Option<Target>,
-        namespace: Option<String>,
-    ) -> Result<Option<TargetConfig>> {
-        if let Some(path) = path {
-            Ok(Some(TargetConfig { path, namespace }))
-        } else if namespace.is_some() {
-            Err(ConfigError::TargetNamespaceWithoutTarget)
-        } else {
-            Ok(None)
-        }
     }
 }
 
 impl MirrordConfig for TargetFileConfig {
-    type Generated = Option<TargetConfig>;
+    type Generated = TargetConfig;
 
     /// Generate the final config object, out of the configuration parsed from a configuration file,
     /// factoring in environment variables (which are also set by the front end - CLI/IDE-plugin).
-    ///
-    /// `None` if no target specified.
-    /// Specifying target namespace without target is not allowed and results in an error that
-    /// explains to the user what to do instead.
     fn generate_config(self) -> Result<Self::Generated> {
-        match self {
-            TargetFileConfig::Simple(path) => {
-                // Namespace was not specified via file, get it from env var if set.
-                let namespace: Option<String> = FromEnv::new("MIRRORD_TARGET_NAMESPACE")
-                    .source_value()
-                    .transpose()?;
-                let path = Self::get_optional_path(path)?;
-                Self::from_final_path_and_namespace(path, namespace)
-            }
-            TargetFileConfig::Advanced { path, namespace } => {
-                debug_assert!(namespace.is_some()); // Should only be advanced if namespace there.
-                let path = Self::get_optional_path(path)?;
-                let namespace = Self::get_optional_namespace(namespace)?;
-                Self::from_final_path_and_namespace(path, namespace)
-            }
-        }
+        let (path_from_conf_file, namespace_from_conf_file) = match self {
+            TargetFileConfig::Simple(path) => (path, None),
+            TargetFileConfig::Advanced { path, namespace } => (path, namespace),
+        };
+
+        // Env overrides configuration if both there.
+        let path = Self::get_target_path_from_env()?.or(path_from_conf_file);
+        let namespace = Self::get_target_namespace_from_env()?.or(namespace_from_conf_file);
+        Ok(TargetConfig { path, namespace })
     }
 }
 
@@ -273,40 +232,51 @@ mod tests {
     use crate::{config::MirrordConfig, util::testing::with_env_vars};
 
     #[rstest]
-    #[case(None, None, None)] // Nothing specified - no target config (targetless mode).
-    #[should_panic]
-    #[case(None, Some("ns"), None)] // Namespace without target - error.
+    #[case(None, None,
+        TargetConfig {
+            path: None,
+            namespace: None
+        }
+    )] // Nothing specified - no target config (targetless mode).
+    #[case(
+        None,
+        Some("ns"),
+        TargetConfig{
+            path: None,
+            namespace: Some("ns".to_string())
+        }
+    )] // Namespace without target - error.
     #[case(
         Some("pod/foo"),
         None,
-        Some(TargetConfig{
-            path: Target::Pod(PodTarget {pod: "foo".to_string(), container: None}),
+        TargetConfig{
+            path: Some(Target::Pod(PodTarget {pod: "foo".to_string(), container: None})),
             namespace: None
-        })
+        }
     )] // Only pod specified
     #[case(
         Some("pod/foo/container/bar"),
         None,
-        Some(TargetConfig{
-            path: Target::Pod(PodTarget {
+        TargetConfig{
+            path: Some(Target::Pod(PodTarget {
                 pod: "foo".to_string(),
                 container: Some("bar".to_string())
-            }),
+            })),
             namespace: None
-        })
+        }
     )] // Pod and container specified.
     #[case(
         Some("pod/foo"),
         Some("baz"),
-        Some(TargetConfig{
-            path: Target::Pod(PodTarget {pod: "foo".to_string(), container: None}),
+        TargetConfig{
+            path: Some(Target::Pod(PodTarget {pod: "foo".to_string(), container: None})),
             namespace: Some("baz".to_string())
-        })
+        }
     )] // Pod and namespace specified.
     fn default(
         #[case] path_env: Option<&str>,
         #[case] namespace_env: Option<&str>,
-        #[case] expected_target_config: Option<TargetConfig>,
+        #[case] expected_target_config: TargetConfig,
     ) {
         with_env_vars(
             vec![
