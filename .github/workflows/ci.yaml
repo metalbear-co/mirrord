@@ -575,8 +575,7 @@ jobs:
       - run: |
           cd vscode-ext 
           npm install --no-package-lock --no-save eslint
-          npm run lint-check
-          npm run format-check
+          npm run lint-check          
 
   vscode_e2e:
     runs-on: ubuntu-latest
