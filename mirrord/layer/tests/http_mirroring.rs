@@ -20,7 +20,7 @@ async fn mirroring_with_http(
     #[values(
         Application::PythonFlaskHTTP,
         Application::PythonFastApiHTTP,
-        Application::NodeHTTP,
+        Application::NodeHTTP
     )]
     application: Application,
     dylib_path: &PathBuf,
