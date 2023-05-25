@@ -204,6 +204,8 @@ impl LayerConnection {
             }
         };
 
+        println!("Got first message from library: {:?}", msg);
+
         match msg.expect("failed to receive message from library") {
             ClientMessage::Tcp(LayerTcp::PortSubscribe(port)) => {
                 assert_eq!(app_port, port);
