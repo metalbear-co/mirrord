@@ -319,6 +319,9 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/faccessat_go
           go build -o 20
+      - run: |
+          cd mirrord/layer/tests/apps/app_go
+          go build -o 20
       - uses: actions/setup-go@v3
         with:
           go-version: "1.19.5"
@@ -348,6 +351,9 @@ jobs:
           go build -o 19
       - run: |
           cd mirrord/layer/tests/apps/faccessat_go
+          go build -o 19
+      - run: |
+          cd mirrord/layer/tests/apps/app_go
           go build -o 19
       - uses: actions/setup-go@v3
         with:
