@@ -105,8 +105,8 @@ object MirrordApi {
                 MirrordNotifier.errorNotification(error.message, project)
                 MirrordNotifier.notify(error.help, NotificationType.INFORMATION, project)
             }
-            logger.debug("mirrord ls failed: $processStdError")
-            throw Error("mirrord ls failed")
+            logger.error("mirrord ls failed: $processStdError")
+            return null
         }
 
         val data = process.inputStream.bufferedReader().readText()
