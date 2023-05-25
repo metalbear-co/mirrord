@@ -31,10 +31,10 @@ impl TargetCrd {
     /// "targetless" ([`TARGETLESS_TARGET_NAME`]) if `None`,
     /// else <resource_type>.<resource_name>...
     pub fn target_name_by_config(target_config: &TargetConfig) -> String {
-        target_config.path.as_ref().map_or_else(
-            || TARGETLESS_TARGET_NAME.to_string(),
-            |path| Self::target_name(&path),
-        )
+        target_config
+            .path
+            .as_ref()
+            .map_or_else(|| TARGETLESS_TARGET_NAME.to_string(), Self::target_name)
     }
 
     pub fn name(&self) -> String {
