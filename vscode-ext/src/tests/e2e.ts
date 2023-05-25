@@ -3,7 +3,6 @@ import { assert, expect } from "chai";
 import { join } from "path";
 import { VSBrowser, StatusBar, TextEditor, EditorView, ActivityBar, DebugView, InputBox, DebugToolbar, BottomBarPanel } from "vscode-extension-tester";
 import get from "axios";
-import exp from "constants";
 
 
 // This suite tests basic flow of mirroring traffic from remote pod
@@ -15,14 +14,14 @@ import exp from "constants";
 // - Send traffic to the pod
 // - Tests successfully exit if breakpoint is hit
 // - Assert text on terminal
+const kubeService = process.env.KUBE_SERVICE;
+const podToSelect = process.env.POD_TO_SELECT;
+
 describe("mirrord sample flow test", function () {
     this.timeout(1000000);
     let browser: VSBrowser;
     let statusBar: StatusBar;
     let debugToolbar: DebugToolbar;
-    let breakpointHit = false;
-    let podToSelect = process.env.POD_TO_SELECT;
-    let kubeService = process.env.KUBE_SERVICE;
     const testWorkspace = join(__dirname, '../../test-workspace');
     const fileName = "app_flask.py";
 
@@ -99,21 +98,7 @@ describe("mirrord sample flow test", function () {
     it("wait for breakpoint to be hit", async function () {
         debugToolbar = await DebugToolbar.create();
         console.log("waiting for breakpoint");
-
-        debugToolbar.waitForBreakPoint().then(() => {
-            breakpointHit = true;
-            console.log("breakpoint hit");
-        });
-    });
-
-    it("send traffic to pod", async function () {
-        expect(breakpointHit).to.be.false;
-        console.log("sending traffic to pod" + breakpointHit);
-        const response = await get(kubeService!!);
-        expect(response.status).to.equal(200);
-        expect(response.data).to.equal("OK - GET: Request completed\n");
-        await sleep(2000);
-        assert(breakpointHit, "Breakpoint not hit");
+        await Promise.all([debugToolbar.waitForBreakPoint(), sendTrafficToPod()])
     });
 
     it("assert text on terminal", async function () {
@@ -128,4 +113,12 @@ describe("mirrord sample flow test", function () {
 
 async function sleep(time: number) {
     await new Promise((resolve) => setTimeout(resolve, time));
+}
+
+async function sendTrafficToPod() {
+    await sleep(5000);
+    const response = await get(kubeService!!);
+    expect(response.status).to.equal(200);
+    expect(response.data).to.equal("OK - GET: Request completed\n");
+    await sleep(2000);
 }

@@ -618,6 +618,7 @@ jobs:
           echo "POD_TO_SELECT=$(kubectl get pods -o=name | head -n 1)" >> "$GITHUB_ENV"
           kubectl wait --for=condition=ready --timeout=30s $(kubectl get pods -o=name | head -n 1)          
           KUBE_SERVICE=$(minikube service list --output=json | jq -r '.[] | select(.Name == "py-serv") | .URLs[0]')
+          echo "$KUBE_SERVICE"
           echo "KUBE_SERVICE=$KUBE_SERVICE" >> "$GITHUB_ENV"
       - name: Run headless test
         uses: coactions/setup-xvfb@v1
