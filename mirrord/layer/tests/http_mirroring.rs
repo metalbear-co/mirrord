@@ -9,23 +9,6 @@ mod common;
 
 pub use common::*;
 
-/// For running locally, so that new developers don't have the extra step of building the go app
-/// before running the tests.
-#[cfg(target_os = "macos")]
-#[ctor::ctor]
-fn build_go_app() {
-    use std::{env, path::Path, process};
-    let original_dir = env::current_dir().unwrap();
-    let go_app_path = Path::new("tests/apps/app_go");
-    env::set_current_dir(go_app_path).unwrap();
-    let output = process::Command::new("go")
-        .args(vec!["build", "-o", "19"])
-        .output()
-        .expect("Failed to build Go test app.");
-    assert!(output.status.success(), "Building Go test app failed.");
-    env::set_current_dir(original_dir).unwrap();
-}
-
 /// Start an HTTP server injected with the layer, simulate the agent, verify expected messages from
 /// the layer, send HTTP requests and verify in the server output that the application received
 /// them. Tests the layer's communication with the agent, the bind hook, and the forwarding of
