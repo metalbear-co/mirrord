@@ -1,7 +1,7 @@
 import { existsSync } from "fs";
 import { assert, expect } from "chai";
 import { join } from "path";
-import { VSBrowser, StatusBar, TextEditor, EditorView, ActivityBar, DebugView, InputBox, DebugToolbar, BottomBarPanel } from "vscode-extension-tester";
+import { VSBrowser, StatusBar, TextEditor, EditorView, ActivityBar, DebugView, InputBox, DebugToolbar } from "vscode-extension-tester";
 import get from "axios";
 
 
@@ -13,17 +13,20 @@ import get from "axios";
 // - Select the pod from the QuickPick
 // - Send traffic to the pod
 // - Tests successfully exit if breakpoint is hit
-// - Assert text on terminal
 const kubeService = process.env.KUBE_SERVICE;
 const podToSelect = process.env.POD_TO_SELECT;
 
 describe("mirrord sample flow test", function () {
-    this.timeout(1000000);
+
+    this.timeout(1000000); // --> mocha tests timeout
+
     let browser: VSBrowser;
     let statusBar: StatusBar;
     let debugToolbar: DebugToolbar;
+
     const testWorkspace = join(__dirname, '../../test-workspace');
     const fileName = "app_flask.py";
+    const mirrordConfigPath = join(testWorkspace, '.mirrord/mirrord.json');
 
     before(async function () {
         console.log("podToSelect: " + podToSelect);
@@ -57,73 +60,62 @@ describe("mirrord sample flow test", function () {
         expect(mirrordSettingsButton).to.not.be.undefined;
         await mirrordSettingsButton?.click();
         await browser.driver.wait(async () => {
-            const mirrordConfigPath = join(__dirname, '../../test-workspace/.mirrord/mirrord.json');
             return await existsSync(mirrordConfigPath);
         }
             , 10000, "Mirrord config not found");
     });
 
-
-    it("set breakpoint", async function () {
-
-        const editorView = new EditorView();
-        await editorView.openEditor(fileName);
-        await sleep(2000);
-        const currentTab = await editorView.getActiveTab();
-        expect(currentTab).to.not.be.undefined;
-        assert(await currentTab?.getTitle() === "app_flask.py", "app_flask.py not found");
-
-        const textEditor = new TextEditor();
-        const result = await textEditor.toggleBreakpoint(9);
-        expect(result).to.be.true;
-    });
-
-
-    it("start debugging", async function () {
-        const activityBar = await new ActivityBar().getViewControl("Run and Debug");
-        expect(activityBar).to.not.be.undefined;
-        const debugView = await activityBar?.openView() as DebugView;
-        await debugView.selectLaunchConfiguration("Python: Current File");
-        debugView.start();
-        await sleep(10000);                
-    });
-
     it("select pod from quickpick", async function () {
+        await setBreakPoint(fileName);
+        await startDebugging();
+        
         const input = await InputBox.create();
         // assertion that podToSelect is not undefined is done in "before" block   
-        await sleep(5000);     
+        await sleep(5000);
         await input.selectQuickPick(podToSelect!);
-        await sleep(10000);
     });
 
     it("wait for breakpoint to be hit", async function () {
-        debugToolbar = await DebugToolbar.create();
-        console.log("waiting for breakpoint");
-        const terminalView = await new BottomBarPanel().openTerminalView();
-        const text = await terminalView.getText();
-        console.log(text);
-        await Promise.all([debugToolbar.waitForBreakPoint(), sendTrafficToPod()])
-    });
-
-    it("assert text on terminal", async function () {
         await sleep(10000);
-        const terminalView = await new BottomBarPanel().openTerminalView();
-        const text = await terminalView.getText();
-        console.log(text);
-        assert(text.includes("GET: Request completed\n"));
+        debugToolbar = await DebugToolbar.create();
+        await Promise.all([debugToolbar.waitForBreakPoint(), sendTrafficToPod()])
     });
 
 });
 
 
+// utility function to wait for a given time
 async function sleep(time: number) {
     await new Promise((resolve) => setTimeout(resolve, time));
 }
 
+// This promis is run in parallel to the promise waiting for the breakpoint to be hit
+// We wait for 10 seconds to make sure that we are in listening state
 async function sendTrafficToPod() {
-    await sleep(5000);
+    await sleep(10000);
     const response = await get(kubeService!!);
     expect(response.status).to.equal(200);
     expect(response.data).to.equal("OK - GET: Request completed\n");
-    await sleep(2000);
+}
+
+async function setBreakPoint(fileName: string) {        
+    const editorView = new EditorView();
+    await editorView.openEditor(fileName);
+    await sleep(5000);
+    const currentTab = await editorView.getActiveTab();
+    expect(currentTab).to.not.be.undefined;
+    assert(await currentTab?.getTitle() === fileName, "${fileName} not found");
+
+    const textEditor = new TextEditor();
+    const result = await textEditor.toggleBreakpoint(9);
+    expect(result).to.be.true;    
+}
+
+async function startDebugging() {
+    const activityBar = await new ActivityBar().getViewControl("Run and Debug");
+    expect(activityBar).to.not.be.undefined;
+    const debugView = await activityBar?.openView() as DebugView;
+    await debugView.selectLaunchConfiguration("Python: Current File");
+    debugView.start();
+    await sleep(10000);
 }
