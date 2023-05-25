@@ -94,7 +94,7 @@ object MirrordApi {
 
         logger.debug("process wait finished, reading output")
 
-        // failure -> null
+        // failure -> error
         // success -> empty -> targetless, else -> list of pods + targetless
         val gson = Gson()
         if (process.exitValue() != 0) {
@@ -104,10 +104,9 @@ object MirrordApi {
                 val error = gson.fromJson(trimmedError, Error::class.java)
                 MirrordNotifier.errorNotification(error.message, project)
                 MirrordNotifier.notify(error.help, NotificationType.INFORMATION, project)
-                return null
             }
-            logger.debug("mirrord ls failed: $processStdError")
-            throw Error("mirrord ls failed")
+            logger.error("mirrord ls failed: $processStdError")
+            return null
         }
 
         val data = process.inputStream.bufferedReader().readText()
