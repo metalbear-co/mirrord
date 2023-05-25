@@ -1,17 +1,18 @@
 #![feature(const_trait_impl)]
+use core::alloc;
 use std::{collections::HashSet, fs::File, hash::Hash, io::Read};
 
 use syn::{spanned::Spanned, Attribute, Expr, Ident, Type, TypePath};
 use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PartialType {
     ident: Ident,
     docs: Vec<String>,
-    fields: HashSet<PartialField>,
+    fields: Vec<PartialField>,
 }
 
-#[derive(Debug, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialOrd, Ord)]
 struct PartialField {
     ident: Ident,
     ty: Ident,
@@ -43,6 +44,12 @@ impl Hash for PartialType {
 impl Hash for PartialField {
     fn hash<H: ~const std::hash::Hasher>(&self, state: &mut H) {
         self.ident.hash(state)
+    }
+}
+
+impl std::borrow::Borrow<Ident> for PartialType {
+    fn borrow(&self) -> &Ident {
+        &self.ident
     }
 }
 
@@ -200,7 +207,7 @@ fn main() -> Result<(), DocsError> {
                         (!thing_docs_untreated.is_empty()).then_some(PartialType {
                             ident: item.ident,
                             docs: thing_docs_untreated,
-                            fields: HashSet::new(),
+                            fields: Default::default(),
                         })
                     }
                     syn::Item::Struct(item) => {
@@ -216,7 +223,7 @@ fn main() -> Result<(), DocsError> {
                         (!thing_docs_untreated.is_empty()).then_some(PartialType {
                             ident: item.ident,
                             docs: thing_docs_untreated,
-                            fields,
+                            fields: Vec::from_iter(fields.into_iter()),
                         })
                     }
                     _ => {
@@ -231,26 +238,26 @@ fn main() -> Result<(), DocsError> {
         // .collect::<HashMap<_, _>>();
         .collect::<HashSet<_>>();
 
-    println!("{type_docs:#?}");
+    println!("BEFORE \n {type_docs:#?}\n");
+
+    let mut types_copy: Vec<PartialType> = type_docs.iter().cloned().collect();
 
     let run = true;
-    while run {
-        let mut previous_types_len = type_docs.len();
+    let mut final_types: Vec<PartialType> = Default::default();
 
-        let type_docs = type_docs
-            .into_iter()
-            .fold(HashSet::with_capacity(4), |types, partial| {
-                // TODO(alex) [high] 2023-05-24: Keep reducing until `types` (acc) is of length
-                // 1?
-                //
-                // Nope! Keep reducing until the last `types.len()` is equal to the new
-                // `types.len()`.
-                //
-                // This way we're sure that all inner types have been consumed, and we don't
-                // fail if there are multiple outer mega types.
-            });
+    for _ in 0..50 {
+        for current_type in types_copy.iter_mut() {
+            for (field, mut field_type) in current_type.fields.iter_mut().filter_map(|field| {
+                type_docs
+                    .take(&field.ty)
+                    .and_then(|field_type| Some((field, field_type)))
+            }) {
+                field.docs.append(&mut field_type.docs);
+            }
+        }
     }
 
+    println!("AFTER \n {type_docs:#?}\n");
     // for (_, partial_type) in type_docs.iter() {}
 
     // let fields = type_docs
