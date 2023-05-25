@@ -66,7 +66,10 @@ async fn read_from_mirrord_bin(dylib_path: &PathBuf) {
     let mirrord_bin = temp_dir.join(MIRRORD_PATCH_DIR);
 
     // <TMPDIR>/mirrord-bin/<TMPDIR>/mirrord-test-read-from-mirrord-bin.
-    let path_in_mirrord_bin = mirrord_bin.join(&file_path);
+    let path_in_mirrord_bin = mirrord_bin.join(&file_path.strip_prefix("/").unwrap());
+
+    // Make sure we write and read from different paths (this is "meta check").
+    assert_ne!(file_path, path_in_mirrord_bin);
 
     let executable = sip_patch("cat", &Vec::new()).unwrap().unwrap();
 
