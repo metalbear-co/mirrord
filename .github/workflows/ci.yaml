@@ -582,7 +582,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [changed_files, build_mirrord, test_agent_image]
     if: ${{needs.changed_files.outputs.vscode_changed == 'true'}}
-    env: 
+    env:
       CI_BUILD_PLUGIN: "true"
     steps:
       - uses: actions/checkout@v3
@@ -624,7 +624,7 @@ jobs:
         uses: coactions/setup-xvfb@v1
         env:
           POD_TO_SELECT: ${{ env.POD_TO_SELECT }}
-          KUBE_SERVICE: ${{ env.KUBE_SERVICE }}"
+          KUBE_SERVICE: ${{ env.KUBE_SERVICE }}
         with:
           run: npm run test
           working-directory: vscode-ext

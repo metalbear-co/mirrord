@@ -102,6 +102,7 @@ describe("mirrord sample flow test", function () {
     });
 
     it("assert text on terminal", async function () {
+        await sleep(5000);
         const terminalView = await new BottomBarPanel().openTerminalView();
         const text = await terminalView.getText();
         console.log(text);
