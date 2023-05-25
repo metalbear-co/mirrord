@@ -1,7 +1,8 @@
 #![feature(let_chains)]
+#![feature(once_cell)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, sync::LazyLock, time::Duration};
 
 use clap::Parser;
 use config::*;
@@ -12,13 +13,14 @@ use extension::extension_exec;
 use extract::extract_library;
 use k8s_openapi::api::core::v1::Pod;
 use kube::{api::ListParams, Api};
+use miette::JSONReportHandler;
 use mirrord_auth::AuthConfig;
 use mirrord_config::{config::MirrordConfig, LayerConfig, LayerFileConfig};
 use mirrord_kube::{
     api::{container::SKIP_NAMES, get_k8s_resource_api, kubernetes::create_kube_api},
     error::KubeApiError,
 };
-use mirrord_progress::{Progress, TaskProgress};
+use mirrord_progress::{Progress, ProgressMode, TaskProgress};
 use operator::operator_command;
 use semver::Version;
 use serde_json::json;
@@ -160,7 +162,7 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 
     let config = LayerConfig::from_env()?;
 
-    if config.agent.pause {
+    if config.pause {
         if config.agent.ephemeral {
             error!("Pausing is not yet supported together with an ephemeral agent container.");
             panic!("Mutually exclusive arguments `--pause` and `--ephemeral-container` passed together.");
@@ -189,7 +191,7 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
 
     // Set environment variables from agent + layer settings.
-    for (key, value) in execution_info.environment {
+    for (key, value) in &execution_info.environment {
         std::env::set_var(key, value);
     }
 
@@ -225,7 +227,11 @@ async fn get_kube_pods(
         .map_err(CliError::KubernetesApiFailed)?;
     let api: Api<Pod> = get_k8s_resource_api(&client, namespace.as_deref());
     let pods = api
-        .list(&ListParams::default().labels("app!=mirrord"))
+        .list(
+            &ListParams::default()
+                .labels("app!=mirrord")
+                .fields("status.phase=Running"),
+        )
         .await
         .map_err(KubeApiError::from)
         .map_err(CliError::KubernetesApiFailed)?;
@@ -338,39 +344,52 @@ async fn register_to_waitlist(email: EmailAddress) -> Result<()> {
     Ok(())
 }
 
-fn cli_progress() -> TaskProgress {
-    TaskProgress::new("mirrord cli starting")
-}
-
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[tokio::main]
 async fn main() -> miette::Result<()> {
+    let cli = Cli::parse();
+
     if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
         mirrord_console::init_logger(&console_addr)?;
-    } else {
+    } else if !init_ext_error_handler(&cli.commands) {
         registry()
             .with(fmt::layer().with_writer(std::io::stderr))
             .with(EnvFilter::from_default_env())
             .init();
     }
 
-    let cli = Cli::parse();
+    static MAIN_PROGRESS_TASK: LazyLock<TaskProgress> =
+        LazyLock::new(|| TaskProgress::new("mirrord cli starting..."));
 
     match cli.commands {
-        Commands::Exec(args) => exec(&args, &cli_progress()).await?,
+        Commands::Exec(args) => exec(&args, &MAIN_PROGRESS_TASK.subtask("exec")).await?,
         Commands::Extract { path } => {
-            extract_library(Some(path), &cli_progress(), false)?;
+            extract_library(Some(path), &MAIN_PROGRESS_TASK.subtask("extract"), false)?;
         }
         Commands::ListTargets(args) => print_pod_targets(&args).await?,
         Commands::Login(args) => login(args)?,
         Commands::Operator(args) => operator_command(*args).await?,
-        Commands::ExtensionExec(args) => extension_exec(*args).await?,
+        Commands::ExtensionExec(args) => {
+            extension_exec(*args, &MAIN_PROGRESS_TASK.subtask("ext")).await?
+        }
         Commands::InternalProxy(args) => internal_proxy::proxy(*args).await?,
         Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
     }
 
     Ok(())
+}
+
+// only ls and ext commands need the errors in json format
+// error logs are disabled for extensions
+fn init_ext_error_handler(commands: &Commands) -> bool {
+    if let Commands::ListTargets(_) | Commands::ExtensionExec(_) = commands {
+        mirrord_progress::init_from_env(ProgressMode::Json);
+        let _ = miette::set_hook(Box::new(|_| Box::new(JSONReportHandler::new())));
+        true
+    } else {
+        false
+    }
 }
 
 async fn prompt_outdated_version() {

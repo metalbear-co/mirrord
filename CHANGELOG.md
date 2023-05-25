@@ -8,6 +8,41 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.44.0](https://github.com/metalbear-co/mirrord/tree/3.44.0) - 2023-05-24
+
+
+### Added
+
+- Changed agent's pause feature. Now the pause is requested dynamically by CLI
+  during setup and the agent keeps the target container paused until exit or
+  the unpause request was received.
+  [#1408](https://github.com/metalbear-co/mirrord/issues/1408)
+- Added support for NPM run configuration on JetBrains products.
+  [#1418](https://github.com/metalbear-co/mirrord/issues/1418)
+
+
+### Changed
+
+- Change mirrord ls to show only pods that are in running state (not
+  crashing,starting,etc)
+  [#1436](https://github.com/metalbear-co/mirrord/issues/1436)
+- Change fs mode to be local with overrides when targetless is used
+- Make progress text consitently lowercase.
+
+
+### Fixed
+
+- Fix misalignment on IntelliJ not accepting complex path in target
+  [#1441](https://github.com/metalbear-co/mirrord/issues/1441)
+- Add impersonate permissions for GCP specific RBAC in operator
+
+
+### Internal
+
+- Fix node spawn test flakiness on macOS
+  [#1431](https://github.com/metalbear-co/mirrord/issues/1431)
+
+
 ## [3.43.0](https://github.com/metalbear-co/mirrord/tree/3.43.0) - 2023-05-22
 
 

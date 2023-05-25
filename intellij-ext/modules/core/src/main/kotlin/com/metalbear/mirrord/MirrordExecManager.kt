@@ -35,6 +35,8 @@ object MirrordExecManager {
                 wslDistribution
             )
 
+        pods ?: return null
+
         MirrordLogger.logger.debug("returning pods")
         return MirrordExecDialog.selectTargetDialog(pods)
     }
@@ -48,8 +50,13 @@ object MirrordExecManager {
         }
     }
 
-    /** Starts mirrord, shows dialog for selecting pod if target not set and returns env to set. */
+
     fun start(wslDistribution: WSLDistribution?, project: Project): Map<String, String>? {
+        return start(wslDistribution, project, null)?.first
+    }
+
+    /** Starts mirrord, shows dialog for selecting pod if target not set and returns env to set. */
+    fun start(wslDistribution: WSLDistribution?, project: Project, executable: String?): Pair<Map<String, String>, String?>? {
         if (!enabled) {
             MirrordLogger.logger.debug("disabled, returning")
             return null
@@ -97,9 +104,12 @@ object MirrordExecManager {
             }
         }
 
-        val env = MirrordApi.exec(target, getConfigPath(project), project, wslDistribution)
+        val executionInfo = MirrordApi.exec(target, getConfigPath(project), executable, project, wslDistribution)
 
-        env["MIRRORD_IGNORE_DEBUGGER_PORTS"] = "45000-65535"
-        return env.toImmutableMap()
+        executionInfo?.let {
+            executionInfo.environment["MIRRORD_IGNORE_DEBUGGER_PORTS"] = "45000-65535"
+            return Pair(executionInfo.environment.toImmutableMap(), executionInfo.patchedPath)
+        }
+        return null
     }
 }

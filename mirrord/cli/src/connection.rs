@@ -30,7 +30,7 @@ pub(crate) async fn connect_operator<P>(
 where
     P: Progress + Send + Sync,
 {
-    let sub_progress = progress.subtask("Checking Operator");
+    let sub_progress = progress.subtask("checking operator");
 
     match OperatorApi::discover(config, progress)
         .await
@@ -38,17 +38,17 @@ where
         .into_diagnostic()
     {
         Ok(Some(connection)) => {
-            sub_progress.done_with("Connected to Operator");
+            sub_progress.done_with("connected to operator");
 
             Some(connection)
         }
         Ok(None) => {
-            sub_progress.done_with("No Operator Detected");
+            sub_progress.done_with("no operator detected");
 
             None
         }
         Err(err) => {
-            sub_progress.done_with("Unable to check if operator exists, probably due to RBAC");
+            sub_progress.done_with("unable to check if operator exists, probably due to RBAC");
 
             trace!("{err}");
 

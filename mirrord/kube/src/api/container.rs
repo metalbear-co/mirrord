@@ -155,9 +155,6 @@ impl ContainerApi for JobContainer {
             agent_command_line.push("-t".to_owned());
             agent_command_line.push(timeout.to_string());
         }
-        if agent.pause {
-            agent_command_line.push("--pause".to_owned());
-        }
 
         #[cfg(debug_assertions)]
         if agent.test_error {
