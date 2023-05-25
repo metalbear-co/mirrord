@@ -5,6 +5,7 @@ pub mod unstable;
 
 use thiserror::Error;
 
+// rustdoc-stripper-ignore-next
 /// Error that would be returned from [MirrordConfig::generate_config]
 #[derive(Error, Debug)]
 pub enum ConfigError {
@@ -69,6 +70,7 @@ where
 }
 
 /// Lookup trait for accessing type implementing [MirrordConfig] from [MirrordConfig::Generated]
+// rustdoc-stripper-ignore-next-stop
 pub trait FromMirrordConfig {
     type Generator: MirrordConfig;
 }

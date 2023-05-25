@@ -1,45 +1,65 @@
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
+use self::{incoming::*, outgoing::*};
 use crate::{
     config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
-    incoming::{IncomingConfig, IncomingFileConfig},
-    outgoing::{OutgoingConfig, OutgoingFileConfig},
     util::MirrordToggleableConfig,
 };
+
+pub mod incoming;
+pub mod outgoing;
 
 /// Controls mirrord network operations.
 ///
 /// See the network traffic [reference](https://mirrord.dev/docs/reference/traffic/)
 /// for more details.
 ///
-/// ## Examples
-///
-/// - Steal incoming traffic, enable TCP outgoing traffic and DNS resolution:
-///
-/// ```toml
-/// # mirrord-config.toml
-///
-/// [feature.network]
-/// incoming = "steal"
-/// dns = true # not needed, as this is the default
-///
-/// [feature.network.outgoing]
-/// tcp = true
+/// ```json
+/// {
+///   "feature": {
+///     "network": {
+///       "incoming": {
+///         "mode": "steal",
+///         "http_header_filter": {
+///           "filter": "host: api\..+",
+///           "ports": [80, 8080]
+///         },
+///         "port_mapping": [[ 7777, 8888 ]],
+///         "ignore_localhost": false,
+///         "ignore_ports": [9999, 10000]
+///       },
+///       "outgoing": {
+///         "tcp": true,
+///         "udp": true,
+///         "ignore_localhost": false,
+///         "unix_streams": "bear.+"
+///       },
+///       "dns": false
+///     }
+///   }
+/// }
 /// ```
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
 #[config(map_to = "NetworkFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct NetworkConfig {
-    /// Handles incoming network traffic, see [`IncomingConfig`] for more details.
+    /// ### feature.network.incoming {#feature-network-incoming}
     #[config(toggleable, nested)]
     pub incoming: IncomingConfig,
 
-    /// Tunnel outgoing network operations through mirrord.
+    /// ### outgoing
+    ///
+    /// Tunnel outgoing network operations through mirrord, see [`outgoing`](##outgoing) for
+    /// more details.
     #[config(toggleable, nested)]
     pub outgoing: OutgoingConfig,
 
+    /// ### dns
+    ///
     /// Resolve DNS via the remote pod.
+    ///
+    /// Defaults to `true`.
     #[config(env = "MIRRORD_REMOTE_DNS", default = true)]
     pub dns: bool,
 }
@@ -64,11 +84,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{
-        config::MirrordConfig,
-        incoming::{IncomingConfig, IncomingMode},
-        util::testing::with_env_vars,
-    };
+    use crate::{config::MirrordConfig, util::testing::with_env_vars};
 
     #[rstest]
     fn default(
