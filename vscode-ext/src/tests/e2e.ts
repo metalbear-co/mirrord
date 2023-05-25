@@ -27,8 +27,6 @@ describe("mirrord sample flow test", function () {
     const testWorkspace = join(__dirname, '../../test-workspace');
     const fileName = "app_flask.py";
     const mirrordConfigPath = join(testWorkspace, '.mirrord/mirrord.json');
-    const configurationFile = "Python: Current File";
-    const breakpointLine = 9;
 
     before(async function () {
         console.log("podToSelect: " + podToSelect);
@@ -38,7 +36,7 @@ describe("mirrord sample flow test", function () {
         browser = VSBrowser.instance;
         // need to bring the flask app in open editors
         await browser.openResources(testWorkspace, join(testWorkspace, fileName));
-        await sleep(10000); // --> wait for the IDE to load
+        await sleep(10000);
     });
 
     after(async function () {
@@ -47,7 +45,7 @@ describe("mirrord sample flow test", function () {
         }
     });
 
-    it("Enable mirrord", async function () {
+    it("enable mirrord", async function () {
         statusBar = new StatusBar();
         const enableButton = await statusBar.getItem("Enable mirrord");
         expect(enableButton).to.not.be.undefined;
@@ -56,7 +54,7 @@ describe("mirrord sample flow test", function () {
         assert(await enableButton?.getText() === "Disable mirrord", "`Disable mirrord` button not found");
     });
 
-    it("Create mirrord config", async function () {
+    it("create mirrord config", async function () {
         // gear -> $(gear) clicked to open mirrord config
         const mirrordSettingsButton = await statusBar.getItem("gear");
         expect(mirrordSettingsButton).to.not.be.undefined;
@@ -67,23 +65,20 @@ describe("mirrord sample flow test", function () {
             , 10000, "Mirrord config not found");
     });
 
-    it("Select pod from quickpick", async function () {
-        await setBreakPoint(fileName, breakpointLine);
-        await startDebugging(configurationFile);
-
+    it("select pod from quickpick", async function () {
+        await setBreakPoint(fileName);
+        await startDebugging();
+        
         const input = await InputBox.create();
         // assertion that podToSelect is not undefined is done in "before" block   
-        await sleep(5000); // --> wait for the quickpick dialog to load
+        await sleep(5000);
         await input.selectQuickPick(podToSelect!);
     });
 
-    it("Wait for breakpoint to be hit", async function () {        
+    it("wait for breakpoint to be hit", async function () {
+        await sleep(10000);
         debugToolbar = await DebugToolbar.create();
-        await sleep(5000);
-        // waiting for breakpoint and sending traffic to pod are run in parallel
-        // however, traffic is sent after 10 seconds that we are sure the IDE is listening
-        // for breakpoints
-        await Promise.all([debugToolbar.waitForBreakPoint(), sendTrafficToPod()]);
+        await Promise.all([debugToolbar.waitForBreakPoint(), sendTrafficToPod()])
     });
 
 });
@@ -94,7 +89,7 @@ async function sleep(time: number) {
     await new Promise((resolve) => setTimeout(resolve, time));
 }
 
-// This promise is run in parallel to the promise waiting for the breakpoint to be hit
+// This promis is run in parallel to the promise waiting for the breakpoint to be hit
 // We wait for 10 seconds to make sure that we are in listening state
 async function sendTrafficToPod() {
     await sleep(10000);
@@ -103,8 +98,7 @@ async function sendTrafficToPod() {
     expect(response.data).to.equal("OK - GET: Request completed\n");
 }
 
-// opens and sets a breakpoint in the given file
-async function setBreakPoint(fileName: string, breakpointLine: number) {
+async function setBreakPoint(fileName: string) {        
     const editorView = new EditorView();
     await editorView.openEditor(fileName);
     await sleep(5000);
@@ -113,17 +107,15 @@ async function setBreakPoint(fileName: string, breakpointLine: number) {
     assert(await currentTab?.getTitle() === fileName, "${fileName} not found");
 
     const textEditor = new TextEditor();
-    const result = await textEditor.toggleBreakpoint(breakpointLine);
-    expect(result).to.be.true;
+    const result = await textEditor.toggleBreakpoint(9);
+    expect(result).to.be.true;    
 }
 
-// starts debugging the current file with the provided configuration
-// debugging starts from the "Run and Debug" button in the activity bar
-async function startDebugging(configurationFile: string) {
+async function startDebugging() {
     const activityBar = await new ActivityBar().getViewControl("Run and Debug");
     expect(activityBar).to.not.be.undefined;
     const debugView = await activityBar?.openView() as DebugView;
-    await debugView.selectLaunchConfiguration(configurationFile);
+    await debugView.selectLaunchConfiguration("Python: Current File");
     debugView.start();
     await sleep(10000);
 }
