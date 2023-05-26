@@ -4,6 +4,7 @@ use std::{
     env,
     ffi::{c_void, CString},
     marker::PhantomData,
+    path::PathBuf,
     ptr,
     sync::OnceLock,
 };
@@ -19,7 +20,9 @@ use tracing::{trace, warn};
 use crate::{
     common::CheckedInto,
     detour::{
-        Bypass::{ExecOnNonExistingFile, NoSipDetected, TooManyArgs},
+        Bypass::{
+            ExecOnNonExistingFile, FileOperationInMirrordBinTempDir, NoSipDetected, TooManyArgs,
+        },
         Detour,
         Detour::{Bypass, Error, Success},
     },
@@ -49,6 +52,13 @@ pub(crate) unsafe fn enable_execve_hook(
         posix_spawn_detour,
         FnPosix_spawn,
         FN_POSIX_SPAWN
+    );
+    replace!(
+        hook_manager,
+        "_NSGetExecutablePath",
+        _nsget_executable_path_detour,
+        Fn_nsget_executable_path,
+        FN__NSGET_EXECUTABLE_PATH
     );
 }
 
@@ -244,4 +254,40 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
         }
         _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
     }
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
+    path: *mut c_char,
+    buflen: *mut u32,
+) -> c_int {
+    let res = FN__NSGET_EXECUTABLE_PATH(path, buflen);
+    eprintln!("_NSGetExecutable hook!");
+    if res == 0 {
+        let path_buf_detour = CheckedInto::<PathBuf>::checked_into(path as *const c_char);
+        if let Bypass(FileOperationInMirrordBinTempDir(later_ptr)) = path_buf_detour {
+            eprintln!("_NSGetExecutable got bypass!");
+            if let Success(stripped_path) = CheckedInto::<&str>::checked_into(later_ptr) {
+                let path_cstring = CString::new(stripped_path).unwrap(); // TODO unwrap
+
+                // TODO: do we need to copy the trailing null? (add +1 if yes)
+                let stripped_len = path_cstring.as_bytes().len();
+
+                // TODO: safety
+                path.copy_from(path_cstring.as_ptr(), stripped_len);
+                eprintln!("patched {path_cstring:?}");
+
+                // TODO: safety
+                *buflen = stripped_len as u32;
+
+                // If the buffer is long enough for the path, it is long enough for the stripped
+                // path.
+                return 0;
+            }
+        }
+        if let Success(path_buf) = path_buf_detour {
+            eprintln!("exe path not stripped: {:?}", path_buf)
+        }
+    }
+    res
 }

@@ -159,7 +159,9 @@ impl CheckedInto<PathBuf> for *const c_char {
                 .strip_prefix(MIRRORD_TEMP_BIN_DIR_STRING.as_str())
                 .or_else(|| path_str.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()));
             trace!("optional_stripped_path: {:?}", optional_stripped_path);
-            if let Some(stripped_path) = optional_stripped_path && !is_current_exe(path_str) {
+            // TODO
+            // if let Some(stripped_path) = optional_stripped_path && !is_current_exe(path_str) {
+            if let Some(stripped_path) = optional_stripped_path {
                 // actually stripped, so bypass and provide a pointer to after the temp dir.
                 // `stripped_path` is a reference to a later character in the same string as
                 // `path_str`, `stripped_path.as_ptr()` returns a pointer to a later index
