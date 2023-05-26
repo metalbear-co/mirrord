@@ -1,12 +1,17 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{collections::VecDeque, ffi::CStr, path::PathBuf};
+use std::{
+    collections::VecDeque,
+    ffi::CStr,
+    path::{Path, PathBuf},
+};
 
 use libc::c_char;
 use mirrord_protocol::{file::OpenOptionsInternal, RemoteResult};
+use mirrord_sip::MIRRORD_TEMP_BIN_DIR_CANONIC;
 #[cfg(target_os = "macos")]
 use mirrord_sip::{CURRENT_EXE, MIRRORD_TEMP_BIN_DIR};
 use tokio::sync::oneshot;
-use tracing::warn;
+use tracing::{trace, warn};
 
 use crate::{
     detour::{Bypass, Detour},
@@ -127,9 +132,14 @@ impl CheckedInto<String> for *const c_char {
 /// Also returns false if determining the current executable failed, or if its path is non-unicode.
 #[cfg(target_os = "macos")]
 fn is_current_exe(path: &str) -> bool {
+    let canonoical_path_buf = Path::new(path).canonicalize();
     CURRENT_EXE
         .as_deref()
-        .map(|exe_string| exe_string == path)
+        .map(|current_exe| {
+            canonoical_path_buf
+                .map(|path| current_exe == path)
+                .unwrap_or_default()
+        })
         .unwrap_or_default()
 }
 
@@ -140,8 +150,17 @@ impl CheckedInto<PathBuf> for *const c_char {
         let str_det = CheckedInto::<&str>::checked_into(self);
         #[cfg(target_os = "macos")]
         let str_det = str_det.and_then(|path_str| {
-            if let Some(stripped_path) = path_str.strip_prefix(MIRRORD_TEMP_BIN_DIR.as_str())
-                && !is_current_exe(path_str) {
+            trace!("path_str: {path_str}");
+            trace!("prefix: {}", MIRRORD_TEMP_BIN_DIR.as_str());
+            trace!(
+                "canonical prefix: {}",
+                MIRRORD_TEMP_BIN_DIR_CANONIC.as_str()
+            );
+            let optional_stripped_path = path_str
+                .strip_prefix(MIRRORD_TEMP_BIN_DIR.as_str())
+                .or_else(|| path_str.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC.as_str()));
+            trace!("optional_stripped_path: {:?}", optional_stripped_path);
+            if let Some(stripped_path) = optional_stripped_path && !is_current_exe(path_str) {
                 // actually stripped, so bypass and provide a pointer to after the temp dir.
                 // `stripped_path` is a reference to a later character in the same string as
                 // `path_str`, `stripped_path.as_ptr()` returns a pointer to a later index

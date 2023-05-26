@@ -36,21 +36,41 @@ mod main {
 
     /// The path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
     /// scripts.
-    pub static MIRRORD_TEMP_BIN_DIR: Lazy<String> = Lazy::new(|| {
-        std::env::temp_dir()
-            .join(MIRRORD_PATCH_DIR)
-            // lossy: we assume our temp dir path does not contain non-unicode chars.
+    pub static MIRRORD_TEMP_BIN_DIR_PATH_BUF: Lazy<PathBuf> =
+        Lazy::new(|| std::env::temp_dir().join(MIRRORD_PATCH_DIR));
+
+    /// Get the `PathBuf` of the `mirrord-bin` dir, and return a `String` prefix to remove, without
+    /// a trailing `/`, so that the stripped path starts with a `/`
+    fn get_temp_bin_str_prefix(path_buf: &PathBuf) -> String {
+        // lossy: we assume our temp dir path does not contain non-unicode chars.
+        path_buf
             .to_string_lossy()
             .to_string()
             .trim_end_matches('/')
             .to_string()
+    }
+
+    /// The string path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
+    /// scripts, without a trailing `/`.
+    pub static MIRRORD_TEMP_BIN_DIR: Lazy<String> =
+        Lazy::new(|| get_temp_bin_str_prefix(&MIRRORD_TEMP_BIN_DIR_PATH_BUF));
+
+    /// Canonicalized version of `MIRRORD_TEMP_BIN_DIR`.
+    pub static MIRRORD_TEMP_BIN_DIR_CANONIC: Lazy<String> = Lazy::new(|| {
+        MIRRORD_TEMP_BIN_DIR_PATH_BUF
+            // Resolve symbolic links! (specifically /var -> private/var).
+            .canonicalize()
+            .as_ref()
+            .map(get_temp_bin_str_prefix)
+            // If canonicalization fails, we use the uncanonicalized path string.
+            .unwrap_or(MIRRORD_TEMP_BIN_DIR.to_string())
     });
 
-    /// Path of current executable, None if fetching failed.
-    pub static CURRENT_EXE: Lazy<Option<String>> = Lazy::new(|| {
+    /// Path of current executable, canonicalized, None if fetching/canonicalization failed.
+    pub static CURRENT_EXE: Lazy<Option<PathBuf>> = Lazy::new(|| {
         std::env::current_exe()
+            .and_then(|path_buf| path_buf.canonicalize())
             .ok()
-            .map(|path_buf| path_buf.to_string_lossy().to_string())
     });
 
     /// Check if a cpu subtype (already parsed with the correct endianness) is arm64e, given its
