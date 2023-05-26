@@ -19,7 +19,10 @@ use tracing::{info, trace};
 
 use crate::{
     connection::{create_and_connect, AgentConnectInfo, AgentConnection},
-    error::{CliError, CliError::IncompatibleWithTargetless},
+    error::{
+        CliError,
+        CliError::{IncompatibleWithTargetless, TargetNamespaceWithoutTarget},
+    },
     extract::extract_library,
     Result,
 };
@@ -247,9 +250,13 @@ impl MirrordExecution {
     ///
     /// # Errors
     ///
-    /// [`IncompatibleWithTargetless`]
+    /// * [`IncompatibleWithTargetless`]
+    /// * [`TargetNamespaceWithoutTarget`]
     fn check_config_for_targetless_agent(config: &LayerConfig) -> Result<()> {
-        if config.target.is_none() {
+        if config.target.path.is_none() {
+            if config.target.namespace.is_some() {
+                Err(TargetNamespaceWithoutTarget)?
+            }
             if config.feature.network.incoming.is_steal() {
                 Err(IncompatibleWithTargetless("Steal mode".into()))?
             }
