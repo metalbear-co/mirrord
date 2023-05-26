@@ -1,27 +1,27 @@
 #![feature(const_trait_impl)]
 use core::alloc;
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fmt::Display,
     fs::{write, File},
     hash::Hash,
     io::Read,
 };
 
-use syn::{spanned::Spanned, Attribute, Expr, Ident, Type, TypePath};
+use syn::{spanned::Spanned, Attribute, Expr, Ident, PathSegment, Type, TypePath};
 use thiserror::Error;
 
 #[derive(Debug, Clone)]
 struct PartialType {
-    ident: Ident,
+    ident: String,
     docs: Vec<String>,
-    fields: Vec<PartialField>,
+    fields: HashMap<String, PartialField>,
 }
 
 #[derive(Debug, Clone, PartialOrd, Ord)]
 struct PartialField {
-    ident: Ident,
-    ty: Ident,
+    ident: String,
+    ty: String,
     docs: Vec<String>,
 }
 
@@ -53,17 +53,27 @@ impl Hash for PartialField {
     }
 }
 
-impl std::borrow::Borrow<Ident> for PartialType {
-    fn borrow(&self) -> &Ident {
-        &self.ident
-    }
-}
+// impl std::borrow::Borrow<String> for PartialType {
+//     fn borrow(&self) -> &String {
+//         &self.ident
+//     }
+// }
+
+// impl std::borrow::Borrow<String> for PartialField {
+//     fn borrow(&self) -> &String {
+//         &self.ty
+//     }
+// }
 
 impl Display for PartialType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.docs.last().unwrap())?;
 
-        let fields: String = self.fields.iter().map(|field| format!("{field}")).collect();
+        let fields: String = self
+            .fields
+            .iter()
+            .map(|(_, field)| format!("{field}"))
+            .collect();
         f.write_str(&fields)
     }
 }
@@ -71,6 +81,38 @@ impl Display for PartialType {
 impl Display for PartialField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.docs.last().unwrap())
+    }
+}
+
+fn extract_inner_type_from_generics(segment: PathSegment) -> Option<PathSegment> {
+    println!("extracting segment {segment:#?}");
+    match segment.arguments {
+        syn::PathArguments::None => Some(segment),
+        syn::PathArguments::AngleBracketed(bracket_generics) => {
+            println!("generics {bracket_generics:#?}");
+
+            bracket_generics
+                .args
+                .into_iter()
+                .last()
+                .and_then(|argument| match argument {
+                    syn::GenericArgument::Type(t) => {
+                        println!("type {t:#?}");
+
+                        match t {
+                            Type::Path(type_path) => type_path
+                                .path
+                                .segments
+                                .into_iter()
+                                .last()
+                                .and_then(extract_inner_type_from_generics),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                })
+        }
+        syn::PathArguments::Parenthesized(_) => None,
     }
 }
 
@@ -89,16 +131,23 @@ fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> 
         .path
         .segments
         .into_iter()
+        .inspect(|segment| println!("Segment pre \n{segment:#?}\n"))
         // eliminate outer types that we don't want in our docs
-        .filter(|segment| !ignore_idents.contains(&segment.ident))
+        // TODO(alex) [high] 2023-05-26: We don't want to filter the path itself, we want to
+        // recursively remove generics until we reach the inner type.
+        // .filter(|segment| !ignore_idents.contains(&segment.ident))
+        .filter_map(extract_inner_type_from_generics)
+        .inspect(|segment| println!("Segment filtered \n{segment:#?}\n"))
         // guarantee that we're done with generics
-        .filter(|segment| segment.arguments.is_empty())
+        // .filter(|segment| segment.arguments.is_empty())
+        // .inspect(|segment| println!("Segment no generics \n{segment:#?}\n"))
         .last()
         .map(|segment| segment.ident)
 }
 
 fn pretty_docs(docs: &mut Vec<String>) -> String {
     for doc in docs.iter_mut() {
+        // removes docs that we don't want in `configuration.md`
         if doc.contains(r"<!--${internal}-->") {
             return "".to_string();
         }
@@ -122,24 +171,13 @@ impl PartialField {
         }?;
 
         Some(Self {
-            ident: field.ident?,
-            ty: type_ident,
+            ident: field.ident?.to_string(),
+            ty: type_ident.to_string(),
             docs: docs_from_attributes(field.attrs),
         })
     }
 }
 
-/// Very nice comments!
-///
-/// But can it handle multiple comments?
-///
-/// What about multiline comments, that go really far, how does it handle stuff
-/// like this?
-///
-/// ```json
-/// {
-///   "field": "value"
-/// }
 #[derive(Debug, Error)]
 enum DocsError {
     #[error("Glob error {0}")]
@@ -199,7 +237,8 @@ fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
             syn::Lit::Str(doc_lit) => Some(doc_lit.value()),
             _ => None,
         })
-        // convert empty lines into markdown newline, or add `\n` to end of lines
+        // convert empty lines (spacer lines) into markdown newline, or add `\n` to end of lines
+        // (making paragraphs)
         .map(|doc| {
             if doc.trim().len() == 0 {
                 "\n".to_string()
@@ -207,7 +246,6 @@ fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
                 format!("{}\n", doc)
             }
         })
-        // TODO(alex) [high] 2023-05-25: Ignore internal docs.
         .collect()
 }
 
@@ -245,7 +283,7 @@ fn main() -> Result<(), DocsError> {
 
                         // We only care about types that have docs.
                         (!thing_docs_untreated.is_empty()).then_some(PartialType {
-                            ident: item.ident,
+                            ident: item.ident.to_string(),
                             docs: thing_docs_untreated,
                             fields: Default::default(),
                         })
@@ -255,66 +293,88 @@ fn main() -> Result<(), DocsError> {
                             .fields
                             .into_iter()
                             .filter_map(PartialField::new)
-                            .collect::<HashSet<_>>();
+                            .map(|field| (field.ty.clone(), field))
+                            .collect::<HashMap<_, _>>();
 
                         let thing_docs_untreated = docs_from_attributes(item.attrs);
 
                         // We only care about types that have docs.
                         (!thing_docs_untreated.is_empty()).then_some(PartialType {
-                            ident: item.ident,
+                            ident: item.ident.to_string(),
                             docs: thing_docs_untreated,
-                            fields: Vec::from_iter(fields.into_iter()),
+                            // fields: Vec::from_iter(fields.into_iter()),
+                            fields,
                         })
                     }
                     _ => {
-                        println!("other item");
+                        // println!("other item");
                         None
                     }
                 })
-            // use the `PartialType::ident` as a key
-            // .map(|partial_type| (partial_type.ident.clone(), partial_type))
+                // use the `PartialType::ident` as a key
+                .map(|partial_type| (partial_type.ident.clone(), partial_type))
         })
         // `PartialType`s keyed by the `PartialType::ident`
         // .collect::<HashMap<_, _>>();
-        .collect::<HashSet<_>>();
+        .collect::<HashMap<_, _>>();
 
-    println!("BEFORE \n {type_docs:#?}\n");
+    // println!("Untreated \n {type_docs:#?}\n");
 
-    let mut types_copy: Vec<PartialType> = type_docs.iter().cloned().collect();
+    // let mut types_copy: Vec<PartialType> = type_docs.iter().cloned().collect();
+    let mut types_copy2 = type_docs.clone();
 
-    let run = true;
-    let mut final_types: Vec<PartialType> = Default::default();
+    // let mut final_types = HashMap::with_capacity(4);
 
-    for _ in 0..500 {
-        for current_type in types_copy.iter_mut() {
-            for (field, mut field_type) in current_type.fields.iter_mut().filter_map(|field| {
-                type_docs
-                    .take(&field.ty)
-                    .and_then(|field_type| Some((field, field_type)))
-            }) {
-                field.docs.append(&mut field_type.docs);
+    for (key, type_) in type_docs.iter() {
+        for (key2, type2_) in types_copy2.iter_mut() {
+            println!("checking if {key:#?} is in {key2:#?}");
+
+            if let Some(type_in_field) = type2_.fields.remove(key) {
+                println!("\n\ntype {type_:#?} is in field {type_in_field:#?} of {type2_:#?}");
+
+                let mega_field = PartialField {
+                    ident: type_in_field.ident.clone(),
+                    ty: type_in_field.ty.clone(),
+                    docs: [type_in_field.docs.clone(), type_.docs.clone()].concat(),
+                };
+
+                type2_.fields.insert(mega_field.ty.clone(), mega_field);
             }
         }
     }
 
-    println!("AFTER \n {type_docs:#?}\n");
+    println!("TYPES {types_copy2:#?}");
 
-    for type_ in types_copy.iter_mut() {
-        for field in type_.fields.iter_mut() {
-            field.docs = vec![pretty_docs(&mut field.docs)];
-        }
+    // for _ in 0..500 {
+    //     for current_type in types_copy.iter_mut() {
+    //         for (field, mut field_type) in current_type.fields.iter_mut().filter_map(|field| {
+    //             type_docs
+    //                 .take(&field.ty)
+    //                 .and_then(|field_type| Some((field, field_type)))
+    //         }) {
+    //             field.docs.append(&mut field_type.docs);
+    //         }
+    //     }
+    // }
 
-        type_.docs = vec![pretty_docs(&mut type_.docs)];
-    }
+    // println!("Somewhat treated \n {types_copy:#?}\n");
 
-    println!("FINAL \n {types_copy:#?}\n");
+    // for type_ in types_copy.iter_mut() {
+    //     for field in type_.fields.iter_mut() {
+    //         field.docs = vec![pretty_docs(&mut field.docs)];
+    //     }
 
-    let test_contents: String = types_copy
-        .into_iter()
-        .map(|type_| format!("{}", type_))
-        .collect();
+    //     type_.docs = vec![pretty_docs(&mut type_.docs)];
+    // }
 
-    write("./configuration.md", test_contents).unwrap();
+    // println!("Final version \n {types_copy:#?}\n");
+
+    // let test_contents: String = types_copy
+    //     .into_iter()
+    //     .map(|type_| format!("{}", type_))
+    //     .collect();
+
+    // write("./configuration.md", test_contents).unwrap();
     // TODO(alex) [high] 2023-05-23: What's the best way to represent the hierarchy here?
     //
     // Need a way of saying "hey type, are you an inner field of some other type?".
@@ -324,49 +384,70 @@ fn main() -> Result<(), DocsError> {
 
 /// # A
 ///
-/// Very nice comments!
+/// A - 1 line
 ///
-/// This is another line for `A`.
+/// A - 2 line
 ///
 /// ```json
 /// {
 ///   "a": 10,
 ///   "b": "B"
 /// }
+/// ```
 struct A {
     /// ## a
     ///
-    /// a Field .
+    /// A - a field
     a: i32,
 
     /// ## b
     b: B,
+    // TODO(alex) [high] 2023-05-26: We're losing generic types, that's why some types end up
+    // in places where they shouldn't be (they're not being inlined, as they don't belong to any
+    // outer type).
+    // ## c
+    // c: Option<C>,
+
+    // ## d
+    // d: Option<Vec<D>>,
 }
 
-/// These are the comments for struct B.
+/// B - 1 line
 ///
-/// And it has a second line.
+/// B - 2 line
 ///
 /// ```json
 /// {
 ///   "field": "value"
 /// }
+/// ```
 struct B {
-    /// ### c
+    /// ### x
     ///
-    /// It's just a field.
-    c: i32,
-
-    /// ### d
-    d: D,
+    /// B - x field
+    x: i32,
+    // ### d
+    // d: D,
 }
 
-/// Finally, the comments for D.
+/*
+/// C - 1 line
 ///
-/// Line!
-struct D {
-    /// #### e
+/// C - 2 line
+struct C {
+    /// #### y
     ///
-    /// It's a field.
-    e: i32,
+    /// C - y field
+    y: i32,
 }
+
+/// D - 1 line
+///
+/// D - 2 line
+struct D {
+    /// #### z
+    ///
+    /// D - z field
+    z: i32,
+}
+*/
