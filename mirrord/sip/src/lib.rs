@@ -8,7 +8,7 @@ mod whitespace;
 mod main {
     use std::{
         collections::HashSet,
-        env::temp_dir,
+        env,
         io::{self, Read},
         os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
         path::{Path, PathBuf},
@@ -37,7 +37,7 @@ mod main {
     /// The path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
     /// scripts.
     pub static MIRRORD_TEMP_BIN_DIR_PATH_BUF: Lazy<PathBuf> =
-        Lazy::new(|| std::env::temp_dir().join(MIRRORD_PATCH_DIR));
+        Lazy::new(|| env::temp_dir().join(MIRRORD_PATCH_DIR));
 
     /// Get the `PathBuf` of the `mirrord-bin` dir, and return a `String` prefix to remove, without
     /// a trailing `/`, so that the stripped path starts with a `/`
@@ -52,18 +52,18 @@ mod main {
 
     /// The string path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
     /// scripts, without a trailing `/`.
-    pub static MIRRORD_TEMP_BIN_DIR: Lazy<String> =
+    pub static MIRRORD_TEMP_BIN_DIR_STRING: Lazy<String> =
         Lazy::new(|| get_temp_bin_str_prefix(&MIRRORD_TEMP_BIN_DIR_PATH_BUF));
 
     /// Canonicalized version of `MIRRORD_TEMP_BIN_DIR`.
-    pub static MIRRORD_TEMP_BIN_DIR_CANONIC: Lazy<String> = Lazy::new(|| {
+    pub static MIRRORD_TEMP_BIN_DIR_CANONIC_STRING: Lazy<String> = Lazy::new(|| {
         MIRRORD_TEMP_BIN_DIR_PATH_BUF
             // Resolve symbolic links! (specifically /var -> private/var).
             .canonicalize()
             .as_ref()
             .map(get_temp_bin_str_prefix)
             // If canonicalization fails, we use the uncanonicalized path string.
-            .unwrap_or(MIRRORD_TEMP_BIN_DIR.to_string())
+            .unwrap_or(MIRRORD_TEMP_BIN_DIR_STRING.to_string())
     });
 
     /// Path of current executable, canonicalized, None if fetching/canonicalization failed.
@@ -395,20 +395,21 @@ mod main {
 
     /// Only call this function on a file that is SomeSIP.
     /// Patch shebang scripts recursively and patch final binary.
-    fn patch_some_sip(
-        path: &PathBuf,
-        shebang_target: Option<Box<SipStatus>>,
-        tmp_dir: PathBuf,
-    ) -> Result<String> {
+    fn patch_some_sip(path: &PathBuf, shebang_target: Option<Box<SipStatus>>) -> Result<String> {
         // TODO: Change output to be with hash of the contents, so that old versions of changed
         //       files do not get used. (Also change back existing file logic to always use.)
+
+        trace!(
+            "Using temp dir: {} for sip patches",
+            MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()
+        );
 
         // if which does not work, just use the given path as is.
         let complete_path =
             which(path.to_string_lossy().to_string()).unwrap_or_else(|_| path.to_owned());
 
         // Strip root path from binary path, as when joined it will clear the previous.
-        let output = &tmp_dir.join(
+        let output = MIRRORD_TEMP_BIN_DIR_PATH_BUF.join(
             complete_path.strip_prefix("/").unwrap_or(&complete_path), // No prefix - no problem.
         );
 
@@ -463,7 +464,7 @@ mod main {
                         path,
                         patched_path_string,
                     );
-                    let new_target = patch_some_sip(&target_path, shebang_target, tmp_dir)?;
+                    let new_target = patch_some_sip(&target_path, shebang_target)?;
                     patch_script(path, output, &new_target)?;
                     Ok(patched_path_string)
                 } else {
@@ -484,9 +485,7 @@ mod main {
     pub fn sip_patch(binary_path: &str, patch_binaries: &Vec<String>) -> Result<Option<String>> {
         match get_sip_status(binary_path, patch_binaries) {
             Ok(SipStatus::SomeSIP(path, shebang_target)) => {
-                let tmp_dir = temp_dir().join(MIRRORD_PATCH_DIR);
-                trace!("Using temp dir: {:?} for sip patches", &tmp_dir);
-                Some(patch_some_sip(&path, shebang_target, tmp_dir)).transpose()
+                Some(patch_some_sip(&path, shebang_target)).transpose()
             }
             Ok(SipStatus::NoSIP) => {
                 trace!("No SIP detected on {:?}", binary_path);
@@ -591,7 +590,8 @@ mod main {
         #[test]
         fn patch_script_with_shebang() {
             let mut original_file = tempfile::NamedTempFile::new().unwrap();
-            let patched_path = temp_dir().join(original_file.path().strip_prefix("/").unwrap());
+            let patched_path =
+                env::temp_dir().join(original_file.path().strip_prefix("/").unwrap());
             original_file
                 .write_all("#!/usr/bin/env bash\n".as_ref())
                 .unwrap();

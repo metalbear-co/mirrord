@@ -10,7 +10,9 @@ use std::{
 
 use libc::{c_char, c_int, pid_t};
 use mirrord_layer_macro::hook_guard_fn;
-use mirrord_sip::{sip_patch, SipError, MIRRORD_PATCH_DIR};
+use mirrord_sip::{
+    sip_patch, SipError, MIRRORD_TEMP_BIN_DIR_CANONIC_STRING, MIRRORD_TEMP_BIN_DIR_STRING,
+};
 use null_terminated::Nul;
 use tracing::{trace, warn};
 
@@ -119,10 +121,6 @@ impl Argv {
 /// Check if the arguments to the new executable contain paths to mirrord's temp dir.
 /// If they do, create a new array with the original paths instead of the patched paths.
 fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
-    let tmp_dir = env::temp_dir()
-        .join(MIRRORD_PATCH_DIR)
-        .to_string_lossy()
-        .to_string();
     let mut c_string_vec = Argv::default();
 
     // Iterate through args, if an argument is a path inside our temp dir, save pointer to
@@ -140,23 +138,24 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
         let arg_str: &str = arg.checked_into()?;
         trace!("exec arg: {arg_str}");
 
-        c_string_vec.0.push(
-                CString::new(arg_str
-                    .strip_prefix(&tmp_dir)
-                    .inspect(|original_path| {
-                        trace!(
-                            "Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {}.",
-                            arg_str,
-                            original_path
-                        );
-                    })
-                    .unwrap_or(arg_str) // No temp-dir prefix found, use arg as is.
-                    // As the string slice we get here is a slice of memory allocated and managed by
-                    // the user app, we copy the data and create new CStrings out of the copy 
-                    // without consuming the original data.
-                    .to_owned()
-                )?
-            )
+        let stripped = arg_str
+            .strip_prefix(MIRRORD_TEMP_BIN_DIR_STRING.as_str())
+            // If /var/folders... not a prefix, check /private/var/folers...
+            .or(arg_str.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()))
+            .inspect(|original_path| {
+                trace!(
+                    "Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {}.",
+                    arg_str,
+                    original_path
+                );
+            })
+            .unwrap_or(arg_str) // No temp-dir prefix found, use arg as is.
+            // As the string slice we get here is a slice of memory allocated and managed by
+            // the user app, we copy the data and create new CStrings out of the copy
+            // without consuming the original data.
+            .to_owned();
+
+        c_string_vec.0.push(CString::new(stripped)?)
     }
     Success(c_string_vec)
 }

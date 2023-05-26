@@ -7,9 +7,8 @@ use std::{
 
 use libc::c_char;
 use mirrord_protocol::{file::OpenOptionsInternal, RemoteResult};
-use mirrord_sip::MIRRORD_TEMP_BIN_DIR_CANONIC;
 #[cfg(target_os = "macos")]
-use mirrord_sip::{CURRENT_EXE, MIRRORD_TEMP_BIN_DIR};
+use mirrord_sip::{CURRENT_EXE, MIRRORD_TEMP_BIN_DIR_CANONIC_STRING, MIRRORD_TEMP_BIN_DIR_STRING};
 use tokio::sync::oneshot;
 use tracing::{trace, warn};
 
@@ -151,14 +150,14 @@ impl CheckedInto<PathBuf> for *const c_char {
         #[cfg(target_os = "macos")]
         let str_det = str_det.and_then(|path_str| {
             trace!("path_str: {path_str}");
-            trace!("prefix: {}", MIRRORD_TEMP_BIN_DIR.as_str());
+            trace!("prefix: {}", MIRRORD_TEMP_BIN_DIR_STRING.as_str());
             trace!(
                 "canonical prefix: {}",
-                MIRRORD_TEMP_BIN_DIR_CANONIC.as_str()
+                MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()
             );
             let optional_stripped_path = path_str
-                .strip_prefix(MIRRORD_TEMP_BIN_DIR.as_str())
-                .or_else(|| path_str.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC.as_str()));
+                .strip_prefix(MIRRORD_TEMP_BIN_DIR_STRING.as_str())
+                .or_else(|| path_str.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()));
             trace!("optional_stripped_path: {:?}", optional_stripped_path);
             if let Some(stripped_path) = optional_stripped_path && !is_current_exe(path_str) {
                 // actually stripped, so bypass and provide a pointer to after the temp dir.
