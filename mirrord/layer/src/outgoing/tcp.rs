@@ -384,19 +384,28 @@ impl TcpOutgoingHandler {
                 let DaemonRead {
                     connection_id,
                     bytes,
-                } = read?;
+                } = read.clone()?;
 
-                let sender = self
-                    .mirrors
-                    .get_mut(&connection_id)
-                    .ok_or(LayerError::NoConnectionId(connection_id))?;
+                match read {
+                    Ok(_) => {
+                        let sender = self
+                        .mirrors
+                        .get_mut(&connection_id)
+                        .ok_or(LayerError::NoConnectionId(connection_id))?;
+    
+                    sender.send(bytes).await.unwrap_or_else(|_| {
+                        warn!(
+                            "Got new data from agent after application closed socket. connection_id: \
+                        connection_id: {connection_id}"
+                        );
+                    });
+                    }
+                    Err(_) => {
+                        self.mirrors.remove(&connection_id);
+                    }
+                }
 
-                sender.send(bytes).await.unwrap_or_else(|_| {
-                    warn!(
-                        "Got new data from agent after application closed socket. connection_id: \
-                    connection_id: {connection_id}"
-                    );
-                });
+              
                 Ok(())
             }
             DaemonTcpOutgoing::Close(connection_id) => {
