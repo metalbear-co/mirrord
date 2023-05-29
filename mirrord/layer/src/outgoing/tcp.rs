@@ -394,7 +394,7 @@ impl TcpOutgoingHandler {
                         );
                     });
                     }
-                    Err(_) => {
+                    Err(_) => { 
                         self.mirrors.remove(&read.unwrap().connection_id);
                     }
                 }
