@@ -67,6 +67,21 @@ mod traffic {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn outgoing_traffic_many_requests(#[future] service: KubeService) {
+        let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
+        ];
+        let mut process =
+            run_exec_with_target(node_command, &service.target, None, None, None).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[should_panic]
     pub async fn outgoing_traffic_single_request_ipv6(#[future] service: KubeService) {
         let service = service.await;

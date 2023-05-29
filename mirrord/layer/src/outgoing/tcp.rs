@@ -215,7 +215,9 @@ impl TcpOutgoingHandler {
                         },
                         None => {
                             warn!("interceptor_task -> exiting due to remote stream closed!");
-                            break;
+                            if let Err(err) = layer_to_user_stream.shutdown().await {
+                                warn!("Failed shutting down mirror_stream with {:#?}!", err);
+                            }
                         }
                     }
                 },
