@@ -1,21 +1,25 @@
 #![feature(const_trait_impl)]
 use core::alloc;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{
+        hash_map::{IntoIter, Values},
+        BTreeMap, HashMap, HashSet,
+    },
     fmt::Display,
     fs::{write, File},
     hash::Hash,
     io::Read,
+    slice::Iter,
 };
 
 use syn::{spanned::Spanned, Attribute, Expr, Ident, PathSegment, Type, TypePath};
 use thiserror::Error;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 struct PartialType {
     ident: String,
     docs: Vec<String>,
-    fields: HashMap<String, PartialField>,
+    fields: Vec<PartialField>,
 }
 
 #[derive(Debug, Clone, PartialOrd, Ord)]
@@ -23,6 +27,23 @@ struct PartialField {
     ident: String,
     ty: String,
     docs: Vec<String>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct MegaType {
+    ident: String,
+    docs: Vec<String>,
+    fields: Vec<MegaType>,
+}
+
+impl From<PartialField> for PartialType {
+    fn from(value: PartialField) -> Self {
+        Self {
+            ident: value.ident,
+            docs: value.docs,
+            fields: Default::default(),
+        }
+    }
 }
 
 impl PartialEq for PartialType {
@@ -69,11 +90,7 @@ impl Display for PartialType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.docs.last().unwrap())?;
 
-        let fields: String = self
-            .fields
-            .iter()
-            .map(|(_, field)| format!("{field}"))
-            .collect();
+        let fields: String = self.fields.iter().map(|field| format!("{field}")).collect();
         f.write_str(&fields)
     }
 }
@@ -145,8 +162,8 @@ fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> 
         .map(|segment| segment.ident)
 }
 
-fn pretty_docs(docs: &mut Vec<String>) -> String {
-    for doc in docs.iter_mut() {
+fn pretty_docs(docs: Vec<String>) -> String {
+    for doc in docs.iter() {
         // removes docs that we don't want in `configuration.md`
         if doc.contains(r"<!--${internal}-->") {
             return "".to_string();
@@ -155,6 +172,26 @@ fn pretty_docs(docs: &mut Vec<String>) -> String {
 
     docs.concat()
 }
+
+// fn dig_docs(mut types: Values<String, PartialType>, mut docs: String) -> Option<String> {
+//     println!("digging {types:#?} \ndocs {docs:#?}");
+//     if let Some(type_) = types.next() {
+//         if type_.fields.is_empty() {
+//             docs.push_str(&pretty_docs(type_.docs.clone()));
+
+//             println!("doced {docs:#?}");
+
+//             Some(docs)
+//         } else {
+//             let digged = dig_docs(type_.fields.iter(), docs.clone()).unwrap_or_default();
+//             docs.push_str(&digged);
+
+//             Some(docs)
+//         }
+//     } else {
+//         Some(docs)
+//     }
+// }
 
 impl PartialField {
     fn new(field: syn::Field) -> Option<Self> {
@@ -249,6 +286,64 @@ fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
         .collect()
 }
 
+// // TODO(alex) [high] 2023-05-26: This works-ish only if A comes before B ...
+// fn reduce_types(mut acc: PartialType, mut types: IntoIter<String, PartialType>) -> PartialType {
+//     if let Some((current_type, current)) = types.next() {
+//         println!("current {current:#?}");
+
+//         for (type_, mut field) in current.fields.into_iter() {
+//             if let Some((_, found_type)) = types.find(|(_, t)| t.ident == field.ident) {
+//                 field.docs.append(&mut found_type.docs.clone());
+//                 field.fields = found_type.fields;
+
+//                 acc.fields.insert(type_, field);
+//             } else {
+//                 acc.fields.insert(type_, field);
+//             }
+//         }
+
+//         reduce_types(acc, types)
+//     } else {
+//         println!("nothing left {acc:#?}");
+
+//         acc
+//     }
+// }
+
+// fn reduce_field(mut all_types: Iter<PartialType>, mut field: PartialField) -> PartialField {
+// }
+
+fn reduce_type(
+    mut all_types: Iter<PartialType>,
+    mut acc: Option<PartialType>,
+    mut type_: PartialType,
+) -> PartialType {
+    if let Some(field) = type_.fields.pop() {
+        if let Some(child_type) = all_types.find(|outer_types| outer_types.ident == field.ty) {
+            let new_field = PartialField {
+                ident: field.ident,
+                ty: child_type.ident.clone(),
+                docs: [field.docs, child_type.docs.clone()].concat(),
+            };
+            // TODO(alex) [high] 2023-05-29: I'm putting `B` in `A`, but not `C` yet, as we have to
+            // dig into `B.fields` to get `C`.
+            acc.as_mut().unwrap().fields.push(new_field);
+            reduce_type(all_types, acc, type_)
+        } else {
+            acc.as_mut().unwrap().fields.push(field);
+            reduce_type(all_types, acc, type_)
+        }
+    } else {
+        acc = Some(PartialType {
+            ident: type_.ident,
+            docs: type_.docs,
+            fields: Default::default(),
+        });
+
+        acc.clone().unwrap()
+    }
+}
+
 fn main() -> Result<(), DocsError> {
     // TODO(alex) [high] 2023-05-22: The plan is:
     //
@@ -293,8 +388,7 @@ fn main() -> Result<(), DocsError> {
                             .fields
                             .into_iter()
                             .filter_map(PartialField::new)
-                            .map(|field| (field.ty.clone(), field))
-                            .collect::<HashMap<_, _>>();
+                            .collect::<HashSet<_>>();
 
                         let thing_docs_untreated = docs_from_attributes(item.attrs);
 
@@ -302,8 +396,7 @@ fn main() -> Result<(), DocsError> {
                         (!thing_docs_untreated.is_empty()).then_some(PartialType {
                             ident: item.ident.to_string(),
                             docs: thing_docs_untreated,
-                            // fields: Vec::from_iter(fields.into_iter()),
-                            fields,
+                            fields: Vec::from_iter(fields.into_iter()),
                         })
                     }
                     _ => {
@@ -311,39 +404,136 @@ fn main() -> Result<(), DocsError> {
                         None
                     }
                 })
-                // use the `PartialType::ident` as a key
-                .map(|partial_type| (partial_type.ident.clone(), partial_type))
+            // use the `PartialType::ident` as a key
         })
+        .map(|type_| (type_.ident.clone(), type_))
         // `PartialType`s keyed by the `PartialType::ident`
-        // .collect::<HashMap<_, _>>();
         .collect::<HashMap<_, _>>();
+    // .collect::<Vec<_>>();
 
-    // println!("Untreated \n {type_docs:#?}\n");
+    let mut tree: BTreeMap<String, PartialType> = BTreeMap::default();
 
-    // let mut types_copy: Vec<PartialType> = type_docs.iter().cloned().collect();
-    let mut types_copy2 = type_docs.clone();
+    let type_ids = type_docs.keys();
 
-    // let mut final_types = HashMap::with_capacity(4);
+    let mut merged_types = Vec::new();
 
-    for (key, type_) in type_docs.iter() {
-        for (key2, type2_) in types_copy2.iter_mut() {
-            println!("checking if {key:#?} is in {key2:#?}");
+    // iterate once for each type
+    for _ in 0..type_ids.len() {
+        for type_ in type_docs.values() {
+            let mut merged_type = PartialType {
+                ident: type_.ident.clone(),
+                docs: type_.docs.clone(),
+                fields: Default::default(),
+            };
 
-            if let Some(type_in_field) = type2_.fields.remove(key) {
-                println!("\n\ntype {type_:#?} is in field {type_in_field:#?} of {type2_:#?}");
+            let cached_field_iter = type_.fields.iter().clone();
+            let mut digging_iter = type_.fields.iter();
+            while let Some(field) = digging_iter.next() {
+                let merged_field = if let Some(child_type) = type_docs.get(&field.ty) {
+                    digging_iter = child_type.fields.iter();
 
-                let mega_field = PartialField {
-                    ident: type_in_field.ident.clone(),
-                    ty: type_in_field.ty.clone(),
-                    docs: [type_in_field.docs.clone(), type_.docs.clone()].concat(),
+                    PartialField {
+                        ident: field.ident.clone(),
+                        ty: child_type.ident.clone(),
+                        docs: [field.docs.clone(), child_type.docs.clone()].concat(),
+                    }
+
+                    // we need to get the inner fields' types
+                } else {
+                    field.clone()
+                    // not child of any of our types (probably primitive type)
                 };
 
-                type2_.fields.insert(mega_field.ty.clone(), mega_field);
+                merged_type.fields.push(merged_field);
             }
+
+            merged_types.push(merged_type);
         }
     }
 
-    println!("TYPES {types_copy2:#?}");
+    merged_types.sort_by(|a, b| a.fields.len().cmp(&b.fields.len()));
+
+    println!("types \n{merged_types:#?}\n");
+
+    println!("mega type \n{:#?}\n", merged_types.last());
+
+    // println!("Untreated \n {type_docs:#?}\n");
+    // let types = type_docs.keys().cloned();
+
+    // We only need to loop until we have checked for all types.
+    // for _ in 0..len {
+    //     for current_type in docs_iter.clone() {
+    //         let mut new_type = PartialType {
+    //             ident: current_type.ident,
+    //             docs: current_type.docs,
+    //             fields: Default::default(),
+    //         };
+
+    //         for current_field in current_type.fields.into_iter() {
+    //             if let Some(child_type) = all_types
+    //                 .iter()
+    //                 .find(|type_| type_.ident == current_field.ty)
+    //             {
+    //                 let mut field_docs = [current_field.docs, child_type.docs.clone()].concat();
+    //                 let mut child_fields = child_type.fields.clone();
+
+    //                 new_type.docs.append(&mut field_docs);
+    //                 new_type.fields.append(&mut child_fields);
+    //                 // println!("{current_field:#?} is child {child_type:#?}");
+    //             } else {
+    //                 // not child
+    //                 new_type.fields.push(current_field);
+    //             }
+    //         }
+
+    //         mega_types.insert(new_type);
+    //     }
+    // }
+
+    // println!("final {mega_types:#?}");
+
+    // println!("types {type_docs:#?}");
+    // let the_mega_type = reduce_types(
+    //     PartialType {
+    //         ident: "MegaType".to_string(),
+    //         ..Default::default()
+    //     },
+    //     type_docs.into_iter(),
+    // );
+
+    // println!("mega {the_mega_type:#?}");
+
+    // for type_ in type_docs.into_iter() {}
+
+    // for type_id in types {}
+
+    // let mut types_copy: Vec<PartialType> = type_docs.iter().cloned().collect();
+    // let mut types_copy2 = type_docs.clone();
+
+    // let mut final_types = HashMap::with_capacity(4);
+
+    // for (key, type_) in type_docs.iter() {
+    //     for (key2, type2_) in types_copy2.iter_mut() {
+    //         println!("checking if {key:#?} is in {key2:#?}");
+
+    //         if let Some(type_in_field) = type2_.fields.remove(key) {
+    //             println!("\n\ntype {type_:#?} is in field {type_in_field:#?} of {type2_:#?}");
+
+    //             let mega_field = PartialType {
+    //                 ident: type_in_field.ident.clone(),
+    //                 docs: [type_in_field.docs.clone(), type_.docs.clone()].concat(),
+    //                 fields: type_.fields.clone(),
+    //             };
+
+    //             type2_.fields.insert(key.clone(), mega_field);
+    //         }
+    //     }
+    // }
+
+    // println!("TYPES {types_copy2:#?}");
+
+    // let final_docs = dig_docs(types_copy2.values(), String::with_capacity(128 * 1024));
+    // println!("FINAL {final_docs:#?}");
 
     // for _ in 0..500 {
     //     for current_type in types_copy.iter_mut() {
@@ -426,11 +616,11 @@ struct B {
     ///
     /// B - x field
     x: i32,
+
     // ### d
-    // d: D,
+    c: C,
 }
 
-/*
 /// C - 1 line
 ///
 /// C - 2 line
@@ -441,6 +631,7 @@ struct C {
     y: i32,
 }
 
+/*
 /// D - 1 line
 ///
 /// D - 2 line
