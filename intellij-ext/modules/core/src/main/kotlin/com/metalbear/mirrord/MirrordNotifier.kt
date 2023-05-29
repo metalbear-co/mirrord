@@ -16,8 +16,17 @@ object MirrordNotifier {
         .getInstance()
         .getNotificationGroup("mirrord Notification Handler")
 
+    private val warningNotificationManager: NotificationGroup = NotificationGroupManager
+        .getInstance()
+        .getNotificationGroup("mirrord Warning Notification Handler")
+
     fun notify(message: String, type: NotificationType, project: Project?) {
         ApplicationManager.getApplication().invokeLater {
+            val notificationManager = when (type) {
+                NotificationType.WARNING -> warningNotificationManager
+                else -> notificationManager
+            }
+
             notificationManager
                 .createNotification("mirrord", message, type)
                 .notify(project)
