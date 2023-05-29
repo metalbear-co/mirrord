@@ -7,9 +7,7 @@ use std::{
 
 use futures::TryFutureExt;
 use mirrord_protocol::{
-    outgoing::{
-        tcp::*, DaemonConnect, DaemonRead, LayerClose, LayerConnect, LayerWrite, SocketAddress,
-    },
+    outgoing::{tcp::*, DaemonConnect, LayerClose, LayerConnect, LayerWrite, SocketAddress},
     ClientMessage, ConnectionId,
 };
 use rand::{distributions::Alphanumeric, Rng};
@@ -381,31 +379,26 @@ impl TcpOutgoingHandler {
             DaemonTcpOutgoing::Read(read) => {
                 // (agent) read something from remote, so we write it to the user.
                 trace!("Read -> read {:?}", read);
-                let DaemonRead {
-                    connection_id,
-                    bytes,
-                } = read.clone()?;
 
                 match read {
-                    Ok(_) => {
+                    Ok(read) => {
                         let sender = self
-                        .mirrors
-                        .get_mut(&connection_id)
-                        .ok_or(LayerError::NoConnectionId(connection_id))?;
-    
-                    sender.send(bytes).await.unwrap_or_else(|_| {
+                            .mirrors
+                            .get_mut(&read.connection_id)
+                            .ok_or(LayerError::NoConnectionId(read.connection_id))?;
+
+                        sender.send(read.bytes).await.unwrap_or_else(|_| {
                         warn!(
                             "Got new data from agent after application closed socket. connection_id: \
-                        connection_id: {connection_id}"
+                        connection_id: {0}", read.connection_id
                         );
                     });
                     }
                     Err(_) => {
-                        self.mirrors.remove(&connection_id);
+                        self.mirrors.remove(&read.unwrap().connection_id);
                     }
                 }
 
-              
                 Ok(())
             }
             DaemonTcpOutgoing::Close(connection_id) => {
