@@ -29,13 +29,6 @@ struct PartialField {
     docs: Vec<String>,
 }
 
-#[derive(Debug, Default, Clone)]
-struct MegaType {
-    ident: String,
-    docs: Vec<String>,
-    fields: Vec<MegaType>,
-}
-
 impl From<PartialField> for PartialType {
     fn from(value: PartialField) -> Self {
         Self {
@@ -455,121 +448,59 @@ fn main() -> Result<(), DocsError> {
 
     println!("types \n{merged_types:#?}\n");
 
-    println!("mega type \n{:#?}\n", merged_types.last());
+    let the_mega_type = merged_types.pop().unwrap();
+    println!("mega type \n{the_mega_type:#?}\n");
 
-    // println!("Untreated \n {type_docs:#?}\n");
-    // let types = type_docs.keys().cloned();
+    let type_docs = pretty_docs(the_mega_type.docs);
+    let final_docs = [
+        type_docs,
+        the_mega_type
+            .fields
+            .into_iter()
+            .map(|field| pretty_docs(field.docs))
+            .collect::<Vec<_>>()
+            .concat(),
+    ]
+    .concat();
 
-    // We only need to loop until we have checked for all types.
-    // for _ in 0..len {
-    //     for current_type in docs_iter.clone() {
-    //         let mut new_type = PartialType {
-    //             ident: current_type.ident,
-    //             docs: current_type.docs,
-    //             fields: Default::default(),
-    //         };
+    println!("final docs \n{final_docs:#?}\n");
 
-    //         for current_field in current_type.fields.into_iter() {
-    //             if let Some(child_type) = all_types
-    //                 .iter()
-    //                 .find(|type_| type_.ident == current_field.ty)
-    //             {
-    //                 let mut field_docs = [current_field.docs, child_type.docs.clone()].concat();
-    //                 let mut child_fields = child_type.fields.clone();
+    write("./configuration.md", final_docs).unwrap();
 
-    //                 new_type.docs.append(&mut field_docs);
-    //                 new_type.fields.append(&mut child_fields);
-    //                 // println!("{current_field:#?} is child {child_type:#?}");
-    //             } else {
-    //                 // not child
-    //                 new_type.fields.push(current_field);
-    //             }
-    //         }
-
-    //         mega_types.insert(new_type);
-    //     }
-    // }
-
-    // println!("final {mega_types:#?}");
-
-    // println!("types {type_docs:#?}");
-    // let the_mega_type = reduce_types(
-    //     PartialType {
-    //         ident: "MegaType".to_string(),
-    //         ..Default::default()
-    //     },
-    //     type_docs.into_iter(),
-    // );
-
-    // println!("mega {the_mega_type:#?}");
-
-    // for type_ in type_docs.into_iter() {}
-
-    // for type_id in types {}
-
-    // let mut types_copy: Vec<PartialType> = type_docs.iter().cloned().collect();
-    // let mut types_copy2 = type_docs.clone();
-
-    // let mut final_types = HashMap::with_capacity(4);
-
-    // for (key, type_) in type_docs.iter() {
-    //     for (key2, type2_) in types_copy2.iter_mut() {
-    //         println!("checking if {key:#?} is in {key2:#?}");
-
-    //         if let Some(type_in_field) = type2_.fields.remove(key) {
-    //             println!("\n\ntype {type_:#?} is in field {type_in_field:#?} of {type2_:#?}");
-
-    //             let mega_field = PartialType {
-    //                 ident: type_in_field.ident.clone(),
-    //                 docs: [type_in_field.docs.clone(), type_.docs.clone()].concat(),
-    //                 fields: type_.fields.clone(),
-    //             };
-
-    //             type2_.fields.insert(key.clone(), mega_field);
-    //         }
-    //     }
-    // }
-
-    // println!("TYPES {types_copy2:#?}");
-
-    // let final_docs = dig_docs(types_copy2.values(), String::with_capacity(128 * 1024));
-    // println!("FINAL {final_docs:#?}");
-
-    // for _ in 0..500 {
-    //     for current_type in types_copy.iter_mut() {
-    //         for (field, mut field_type) in current_type.fields.iter_mut().filter_map(|field| {
-    //             type_docs
-    //                 .take(&field.ty)
-    //                 .and_then(|field_type| Some((field, field_type)))
-    //         }) {
-    //             field.docs.append(&mut field_type.docs);
-    //         }
-    //     }
-    // }
-
-    // println!("Somewhat treated \n {types_copy:#?}\n");
-
-    // for type_ in types_copy.iter_mut() {
-    //     for field in type_.fields.iter_mut() {
-    //         field.docs = vec![pretty_docs(&mut field.docs)];
-    //     }
-
-    //     type_.docs = vec![pretty_docs(&mut type_.docs)];
-    // }
-
-    // println!("Final version \n {types_copy:#?}\n");
-
-    // let test_contents: String = types_copy
-    //     .into_iter()
-    //     .map(|type_| format!("{}", type_))
-    //     .collect();
-
-    // write("./configuration.md", test_contents).unwrap();
     // TODO(alex) [high] 2023-05-23: What's the best way to represent the hierarchy here?
     //
     // Need a way of saying "hey type, are you an inner field of some other type?".
 
     Ok(())
+}
+
+/// B - 1 line
+///
+/// B - 2 line
+///
+/// ```json
+/// {
+///   "field": "value"
+/// }
+/// ```
+struct B {
+    /// ### x
+    ///
+    /// B - x field
+    x: i32,
+
+    // ### d
+    c: C,
+}
+
+/// C - 1 line
+///
+/// C - 2 line
+struct C {
+    /// #### y
+    ///
+    /// C - y field
+    y: i32,
 }
 
 /// # A
@@ -600,35 +531,6 @@ struct A {
 
     // ## d
     // d: Option<Vec<D>>,
-}
-
-/// B - 1 line
-///
-/// B - 2 line
-///
-/// ```json
-/// {
-///   "field": "value"
-/// }
-/// ```
-struct B {
-    /// ### x
-    ///
-    /// B - x field
-    x: i32,
-
-    // ### d
-    c: C,
-}
-
-/// C - 1 line
-///
-/// C - 2 line
-struct C {
-    /// #### y
-    ///
-    /// C - y field
-    y: i32,
 }
 
 /*
