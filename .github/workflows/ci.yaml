@@ -293,36 +293,21 @@ jobs:
       - run: |
           go version
       - run: | # Build Go test apps.
-          for go_mod in $(find . -name "go\.mod")
-          do
-          cd $(dirname $go_mod)
-          go build -o 20.go_test_app
-          cd - 1>/dev/null
-          done
+          ./scripts/build_go_apps.sh 20
       - uses: actions/setup-go@v3
         with:
           go-version: "1.19.5"
       - run: |
           go version
       - run: | # Build Go test apps.
-          for go_mod in $(find . -name "go\.mod")
-          do
-          cd $(dirname $go_mod)
-          go build -o 19.go_test_app
-          cd - 1>/dev/null
-          done
+          ./scripts/build_go_apps.sh 19
       - uses: actions/setup-go@v3
         with:
           go-version: "1.18.10"
       - run: |
           go version
       - run: | # Build Go test apps.
-          for go_mod in $(find . -name "go\.mod")
-          do
-          cd $(dirname $go_mod)
-          go build -o 18.go_test_app
-          cd - 1>/dev/null
-          done
+          ./scripts/build_go_apps.sh 18
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
@@ -359,36 +344,21 @@ jobs:
       - run: |
           go version
       - run: | # Build Go test apps.
-          for go_mod in $(find . -name "go\.mod")
-          do
-          cd $(dirname $go_mod)
-          go build -o 18.go_test_app
-          cd - 1>/dev/null
-          done
+          ./scripts/build_go_apps.sh 18
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
           go-version: "1.19"
       - run: |
           go version
       - run: | # Build Go test apps.
-          for go_mod in $(find . -name "go\.mod")
-          do
-          cd $(dirname $go_mod)
-          go build -o 19.go_test_app
-          cd - 1>/dev/null
-          done
+          ./scripts/build_go_apps.sh 19
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
           go-version: "1.20.0-rc.3"
       - run: |
           go version
       - run: | # Build Go test apps.
-          for go_mod in $(find . -name "go\.mod")
-          do
-          cd $(dirname $go_mod)
-          go build -o 20.go_test_app
-          cd - 1>/dev/null
-          done
+          ./scripts/build_go_apps.sh 20
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
@@ -436,36 +406,21 @@ jobs:
       - run: |
           go version
       - run: | # Build Go test apps.
-          for go_mod in $(find . -name "go\.mod")
-          do
-          cd $(dirname $go_mod)
-          go build -o 18.go_test_app
-          cd - 1>/dev/null
-          done
+          ./scripts/build_go_apps.sh 18
       - uses: actions/setup-go@v3
         with:
           go-version: "1.19.0"
       - run: |
           go version
       - run: | # Build Go test apps.
-          for go_mod in $(find . -name "go\.mod")
-          do
-          cd $(dirname $go_mod)
-          go build -o 19.go_test_app
-          cd - 1>/dev/null
-          done
+          ./scripts/build_go_apps.sh 19
       - uses: actions/setup-go@v3
         with:
           go-version: "1.20.0-rc.3"
       - run: |
           go version
       - run: | # Build Go test apps.
-          for go_mod in $(find . -name "go\.mod")
-          do
-          cd $(dirname $go_mod)
-          go build -o 20.go_test_app
-          cd - 1>/dev/null
-          done
+          ./scripts/build_go_apps.sh 20
       - run: |
           cd tests/rust-e2e-fileops
           cargo build
