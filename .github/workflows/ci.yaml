@@ -292,81 +292,22 @@ jobs:
           go-version: "1.20.0-rc.3"
       - run: |
           go version
-      - run: |
-          cd mirrord/layer/tests/apps/self_open
-          go build -o 20
-      - run: |
-          cd mirrord/layer/tests/apps/fileops/go
-          go build -o 20
-      - run: |
-          cd mirrord/layer/tests/apps/issue834
-          go build -o 20
-      - run: |
-          cd mirrord/layer/tests/apps/dir_go
-          go build -o 20
-      - run: |
-          cd mirrord/layer/tests/apps/dir_go_bypass
-          go build -o 20
-      - run: |
-          cd mirrord/layer/tests/apps/read_go
-          go build -o 20
-      - run: |
-          cd mirrord/layer/tests/apps/write_go
-          go build -o 20
-      - run: |
-          cd mirrord/layer/tests/apps/lseek_go
-          go build -o 20
-      - run: |
-          cd mirrord/layer/tests/apps/faccessat_go
-          go build -o 20
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 20
       - uses: actions/setup-go@v3
         with:
           go-version: "1.19.5"
       - run: |
-          cd mirrord/layer/tests/apps/self_open
-          go build -o 19
-      - run: |
-          cd mirrord/layer/tests/apps/fileops/go
-          go build -o 19
-      - run: |
-          cd mirrord/layer/tests/apps/issue834
-          go build -o 19
-      - run: |
-          cd mirrord/layer/tests/apps/dir_go
-          go build -o 19
-      - run: |
-          cd mirrord/layer/tests/apps/dir_go_bypass
-          go build -o 19
-      - run: |
-          cd mirrord/layer/tests/apps/read_go
-          go build -o 19
-      - run: |
-          cd mirrord/layer/tests/apps/write_go
-          go build -o 19
-      - run: |
-          cd mirrord/layer/tests/apps/lseek_go
-          go build -o 19
-      - run: |
-          cd mirrord/layer/tests/apps/faccessat_go
-          go build -o 19
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 19
       - uses: actions/setup-go@v3
         with:
           go-version: "1.18.10"
       - run: |
-          cd mirrord/layer/tests/apps/issue834
-          go build -o 18
-      - run: |
-          cd mirrord/layer/tests/apps/read_go
-          go build -o 18
-      - run: |
-          cd mirrord/layer/tests/apps/write_go
-          go build -o 18
-      - run: |
-          cd mirrord/layer/tests/apps/lseek_go
-          go build -o 18
-      - run: |
-          cd mirrord/layer/tests/apps/faccessat_go
-          go build -o 18
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 18
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
@@ -400,33 +341,24 @@ jobs:
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
           go-version: "1.18"
+      - run: |
+          go version
       - run: | # Build Go test apps.
-          cd mirrord/layer/tests/apps/read_go
-          for go_app in read_go write_go lseek_go faccessat_go
-          do
-          cd ../$go_app
-          go build -o 18
-          done
+          ./scripts/build_go_apps.sh 18
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
           go-version: "1.19"
+      - run: |
+          go version
       - run: | # Build Go test apps.
-          cd mirrord/layer/tests/apps/self_open
-          for go_app in self_open app_go dir_go dir_go_bypass read_go write_go lseek_go faccessat_go
-          do
-          cd ../$go_app
-          go build -o 19
-          done
+          ./scripts/build_go_apps.sh 19
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
           go-version: "1.20.0-rc.3"
-      - run: | # Build Go app to test http mirroring with.
-          cd mirrord/layer/tests/apps/self_open
-          for go_app in self_open app_go dir_go dir_go_bypass read_go write_go lseek_go faccessat_go
-          do
-          cd ../$go_app
-          go build -o 20
-          done
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 20
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
@@ -472,58 +404,23 @@ jobs:
         with:
           go-version: "1.18.0"
       - run: |
-          cd tests/go-e2e
-          go build -o 18
-      - run: |
-          cd tests/go-e2e-env
-          go build -o 18
-      - run: |
-          cd tests/go-e2e-outgoing
-          go build -o 18
-      - run: |
-          cd tests/go-e2e-dns
-          go build -o 18
-      - run: |
-          cd tests/go-e2e-dir
-          go build -o 18
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 18
       - uses: actions/setup-go@v3
         with:
           go-version: "1.19.0"
       - run: |
-          cd tests/go-e2e
-          go build -o 19
-      - run: |
-          cd tests/go-e2e-env
-          go build -o 19
-      - run: |
-          cd tests/go-e2e-outgoing
-          go build -o 19
-      - run: |
-          cd tests/go-e2e-dns
-          go build -o 19
-      - run: |
-          cd tests/go-e2e-dir
-          go build -o 19
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 19
       - uses: actions/setup-go@v3
         with:
           go-version: "1.20.0-rc.3"
       - run: |
           go version
-      - run: |
-          cd tests/go-e2e
-          go build -o 20
-      - run: |
-          cd tests/go-e2e-env
-          go build -o 20
-      - run: |
-          cd tests/go-e2e-outgoing
-          go build -o 20
-      - run: |
-          cd tests/go-e2e-dns
-          go build -o 20
-      - run: |
-          cd tests/go-e2e-dir
-          go build -o 20
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 20
       - run: |
           cd tests/rust-e2e-fileops
           cargo build

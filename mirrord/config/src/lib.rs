@@ -97,7 +97,7 @@ pub struct LayerConfig {
     /// - `podname/{sample-pod}/[container]/{sample-container}`;
     /// - `deployment/{sample-deployment}/[container]/{sample-container}`;
     #[config(nested)]
-    pub target: Option<TargetConfig>,
+    pub target: TargetConfig,
 
     /// Controls target pause feature. Unstable.
     ///

@@ -271,14 +271,14 @@ mod traffic {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn go18_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
-        let command = vec!["go-e2e-outgoing/18"];
+        let command = vec!["go-e2e-outgoing/18.go_test_app"];
         test_go(service, command).await;
     }
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn go19_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
-        let command = vec!["go-e2e-outgoing/19"];
+        let command = vec!["go-e2e-outgoing/19.go_test_app"];
         test_go(service, command).await;
     }
 
@@ -286,7 +286,7 @@ mod traffic {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
     pub async fn go20_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
-        let command = vec!["go-e2e-outgoing/20"];
+        let command = vec!["go-e2e-outgoing/20.go_test_app"];
         test_go(service, command).await;
     }
 
@@ -294,7 +294,7 @@ mod traffic {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
     pub async fn go18_dns_lookup(#[future] service: KubeService) {
-        let command = vec!["go-e2e-dns/18"];
+        let command = vec!["go-e2e-dns/18.go_test_app"];
         test_go(service, command).await;
     }
 
@@ -302,7 +302,7 @@ mod traffic {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
     pub async fn go19_dns_lookup(#[future] service: KubeService) {
-        let command = vec!["go-e2e-dns/19"];
+        let command = vec!["go-e2e-dns/19.go_test_app"];
         test_go(service, command).await;
     }
 
@@ -310,7 +310,7 @@ mod traffic {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
     pub async fn go20_dns_lookup(#[future] service: KubeService) {
-        let command = vec!["go-e2e-dns/20"];
+        let command = vec!["go-e2e-dns/20.go_test_app"];
         test_go(service, command).await;
     }
 
