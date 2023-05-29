@@ -158,6 +158,7 @@ impl TcpOutgoingHandler {
         };
 
         let mut buffer = vec![0; 1024];
+        let mut remote_stream_closed = false;
 
         loop {
             select! {
@@ -202,7 +203,7 @@ impl TcpOutgoingHandler {
                         }
                     }
                 },
-                bytes = remote_stream.next() => {
+                bytes = remote_stream.next(), if !remote_stream_closed  => {
                     match bytes {
                         Some(bytes) => {
                             // Writes the data sent by `agent` (that came from the actual remote
@@ -219,6 +220,7 @@ impl TcpOutgoingHandler {
                             if let Err(err) = layer_to_user_stream.shutdown().await {
                                 warn!("Failed shutting down mirror_stream with {:#?}!", err);
                             }
+                            remote_stream_closed = true;
                         }
                     }
                 },
