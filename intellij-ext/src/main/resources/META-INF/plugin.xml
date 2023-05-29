@@ -41,6 +41,7 @@
         <vfs.asyncListener implementation="com.metalbear.mirrord.MirrordConfigWatcher"/>
         <fileBasedIndex implementation="com.metalbear.mirrord.MirrordConfigIndex"/>
     </extensions>
+
     <actions>
         <group id="mirrord">
             <separator/>
@@ -68,5 +69,5 @@
     <depends optional="true" config-file="mirrord-rubymine.xml">com.intellij.modules.ruby</depends>
     <depends optional="true" config-file="mirrord-goland.xml">org.jetbrains.plugins.go</depends>
     <depends optional="true" config-file="mirrord-js.xml">NodeJS</depends>
-
+    <depends optional="true" config-file="mirrord-rider.xml">com.intellij.modules.rider</depends>
 </idea-plugin>

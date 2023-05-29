@@ -1,0 +1,5 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="com.intellij">
+        <rider.patchCommandLine implementation="com.metalbear.mirrord.products.rider.RiderPatchCommandLineExtension" />
+    </extensions>
+</idea-plugin>
