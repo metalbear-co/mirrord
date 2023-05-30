@@ -1,6 +1,6 @@
 use std::{
     clone::Clone,
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     future::Future,
     hash::Hash,
     path::PathBuf,
@@ -96,7 +96,7 @@ where
     T: Num,
 {
     index: T,
-    vacant_indices: Vec<T>,
+    vacant_indices: VecDeque<T>,
 }
 
 impl<T, const N: usize> IndexAllocator<T, N>
@@ -105,7 +105,7 @@ where
 {
     /// Returns the next available index, returns None if not available (reached max)
     pub fn next_index(&mut self) -> Option<T> {
-        if self.vacant_indices.len() > N && let Some(i) = self.vacant_indices.pop() {
+        if self.vacant_indices.len() > N && let Some(i) = self.vacant_indices.pop_front() {
             return Some(i);
         }
         match self.index.checked_add(&T::one()) {
@@ -119,7 +119,7 @@ where
     }
 
     pub fn free_index(&mut self, index: T) {
-        self.vacant_indices.push(index)
+        self.vacant_indices.push_back(index)
     }
 }
 
