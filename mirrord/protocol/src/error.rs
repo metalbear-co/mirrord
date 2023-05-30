@@ -165,41 +165,6 @@ pub enum ResolveErrorKindInternal {
     Unknown,
 }
 
-// #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq)]
-// pub enum DnsIOError {
-//     EaiBadflags,
-//     EaiNoname,
-//     EaiAgain,
-//     EaiFail,
-//     EaiNodata,
-//     EaiFamily,
-//     EaiSocktype,
-//     EaiService,
-//     EaiMemory,
-//     EaiSystem,
-//     EaiOverflow,
-
-// }
-
-// impl From<i32> for DnsIOError {
-//     fn from(value: i32) -> Self {
-//         match value {
-//             libc::EAI_BADFLAGS => DnsIOError::EaiBadflags,
-//             libc::EAI_NONAME => DnsIOError::EaiNoname,
-//             libc::EAI_AGAIN => DnsIOError::EaiAgain,
-//             libc::EAI_FAIL => DnsIOError::EaiFail,
-//             libc::EAI_NODATA => DnsIOError::EaiNodata,
-//             libc::EAI_FAMILY => DnsIOError::EaiFamily,
-//             libc::EAI_SOCKTYPE => DnsIOError::EaiSocktype,
-//             libc::EAI_SERVICE => DnsIOError::EaiService,
-//             libc::EAI_MEMORY => DnsIOError::EaiMemory,
-//             libc::EAI_SYSTEM => DnsIOError::EaiSystem,
-//             libc::EAI_OVERFLOW => DnsIOError::EaiOverflow,
-//             _ => panic!("Unknown error code for DnsIOError: {}", value),
-//         }
-//     }
-// }
-
 impl From<io::ErrorKind> for ErrorKindInternal {
     fn from(error_kind: io::ErrorKind) -> Self {
         match error_kind {
