@@ -415,6 +415,7 @@ impl TcpOutgoingHandler {
                         //   loop
                         // we don't know who failed so we'll iterate the list then remove closed
                         // sockets.
+                        debug!("Read error: {:?}", e);
                         warn!("Read error: {:?}", e);
                         self.mirrors = self
                             .mirrors
