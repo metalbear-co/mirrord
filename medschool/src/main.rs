@@ -1,7 +1,7 @@
 #![feature(const_trait_impl)]
 use core::alloc;
 use std::{
-    collections::{hash_map::Values, BTreeMap, HashMap, HashSet},
+    collections::{hash_map::Values, BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Display,
     fs::{write, File},
     hash::Hash,
@@ -108,39 +108,9 @@ impl Display for PartialField {
     }
 }
 
-fn extract_inner_type_from_generics(segment: PathSegment) -> Option<PathSegment> {
-    println!("extracting segment {segment:#?}");
-    match segment.arguments {
-        syn::PathArguments::None => Some(segment),
-        syn::PathArguments::AngleBracketed(bracket_generics) => {
-            println!("generics {bracket_generics:#?}");
-
-            bracket_generics
-                .args
-                .into_iter()
-                .last()
-                .and_then(|argument| match argument {
-                    syn::GenericArgument::Type(t) => {
-                        println!("type {t:#?}");
-
-                        match t {
-                            Type::Path(type_path) => type_path
-                                .path
-                                .segments
-                                .into_iter()
-                                .last()
-                                .and_then(extract_inner_type_from_generics),
-                            _ => None,
-                        }
-                    }
-                    _ => None,
-                })
-        }
-        syn::PathArguments::Parenthesized(_) => None,
-    }
-}
-
 fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> {
+    println!("Trying to delve into generics {type_path:#?}");
+
     let span = type_path.span();
     let mut ignore_idents = HashSet::with_capacity(32);
     ignore_idents.insert(Ident::new("Option", span));
@@ -151,22 +121,33 @@ fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> 
     ignore_idents.insert(Ident::new("HashSet", span));
 
     // welp, this path probably contains generics
-    type_path
-        .path
-        .segments
-        .into_iter()
-        .inspect(|segment| println!("Segment pre \n{segment:#?}\n"))
-        // eliminate outer types that we don't want in our docs
-        // TODO(alex) [high] 2023-05-26: We don't want to filter the path itself, we want to
-        // recursively remove generics until we reach the inner type.
-        // .filter(|segment| !ignore_idents.contains(&segment.ident))
-        .filter_map(extract_inner_type_from_generics)
-        .inspect(|segment| println!("Segment filtered \n{segment:#?}\n"))
-        // guarantee that we're done with generics
-        // .filter(|segment| segment.arguments.is_empty())
-        // .inspect(|segment| println!("Segment no generics \n{segment:#?}\n"))
-        .last()
-        .map(|segment| segment.ident)
+    let segment = type_path.path.segments.last()?;
+
+    let mut current_argument = segment.arguments.clone();
+    let mut inner_type = None;
+
+    loop {
+        match &current_argument {
+            syn::PathArguments::AngleBracketed(generics) => match generics.args.last()? {
+                syn::GenericArgument::Type(t) => match t {
+                    Type::Path(generic_path) => {
+                        inner_type = match generic_path.path.segments.last() {
+                            Some(t) => Some(t.ident.clone()),
+                            None => break,
+                        };
+                        println!("inner {inner_type:#?}");
+
+                        current_argument = generic_path.path.segments.last()?.arguments.clone();
+                    }
+                    _ => break,
+                },
+                _ => break,
+            },
+            _ => break,
+        }
+    }
+
+    inner_type
 }
 
 fn pretty_docs(docs: Vec<String>) -> String {
@@ -177,62 +158,8 @@ fn pretty_docs(docs: Vec<String>) -> String {
         }
     }
 
-    docs.concat()
+    [docs.concat(), "\n".to_string()].concat()
 }
-
-fn flatten(list: BTreeMap<PartialType, PartialType>) -> PartialType {
-    let mut list_iter = list.into_iter();
-    let (keys, root) = list_iter.next().unwrap();
-
-    PartialType {
-        ident: root.ident.clone(),
-        docs: root.docs.clone(),
-        fields: expand(list_iter, root.clone()),
-    }
-}
-
-fn expand(
-    mut all_types: std::collections::btree_map::IntoIter<PartialType, PartialType>,
-    type_: PartialType,
-) -> Vec<PartialField> {
-    let fields = type_.fields;
-    let mut expanded_fields = Vec::with_capacity(32);
-
-    for field in fields.iter() {
-        if let Some((_, child)) = all_types.find(|(k, _)| k.ident == field.ty) {
-            expanded_fields.push(expand(all_types, child.clone()));
-        } else {
-            let new_field = PartialField {
-                ident: field.ident.clone(),
-                ty: field.ty.clone(),
-                docs: [field.docs.clone(), type_.docs.clone()].concat(),
-            };
-            expanded_fields.push(vec![new_field]);
-        }
-    }
-
-    expanded_fields.into_iter().flatten().collect()
-}
-
-// fn dig_docs(mut types: Values<String, PartialType>, mut docs: String) -> Option<String> {
-//     println!("digging {types:#?} \ndocs {docs:#?}");
-//     if let Some(type_) = types.next() {
-//         if type_.fields.is_empty() {
-//             docs.push_str(&pretty_docs(type_.docs.clone()));
-
-//             println!("doced {docs:#?}");
-
-//             Some(docs)
-//         } else {
-//             let digged = dig_docs(type_.fields.iter(), docs.clone()).unwrap_or_default();
-//             docs.push_str(&digged);
-
-//             Some(docs)
-//         }
-//     } else {
-//         Some(docs)
-//     }
-// }
 
 impl PartialField {
     fn new(field: syn::Field) -> Option<Self> {
@@ -327,64 +254,6 @@ fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
         .collect()
 }
 
-// // TODO(alex) [high] 2023-05-26: This works-ish only if A comes before B ...
-// fn reduce_types(mut acc: PartialType, mut types: IntoIter<String, PartialType>) -> PartialType {
-//     if let Some((current_type, current)) = types.next() {
-//         println!("current {current:#?}");
-
-//         for (type_, mut field) in current.fields.into_iter() {
-//             if let Some((_, found_type)) = types.find(|(_, t)| t.ident == field.ident) {
-//                 field.docs.append(&mut found_type.docs.clone());
-//                 field.fields = found_type.fields;
-
-//                 acc.fields.insert(type_, field);
-//             } else {
-//                 acc.fields.insert(type_, field);
-//             }
-//         }
-
-//         reduce_types(acc, types)
-//     } else {
-//         println!("nothing left {acc:#?}");
-
-//         acc
-//     }
-// }
-
-// fn reduce_field(mut all_types: Iter<PartialType>, mut field: PartialField) -> PartialField {
-// }
-
-// fn reduce_type(
-//     mut all_types: Iter<PartialType>,
-//     mut acc: Option<PartialType>,
-//     mut type_: PartialType,
-// ) -> PartialType {
-//     if let Some(field) = type_.fields.pop() {
-//         if let Some(child_type) = all_types.find(|outer_types| outer_types.ident == field.ty) {
-//             let new_field = PartialField {
-//                 ident: field.ident,
-//                 ty: child_type.ident.clone(),
-//                 docs: [field.docs, child_type.docs.clone()].concat(),
-//             };
-//             // TODO(alex) [high] 2023-05-29: I'm putting `B` in `A`, but not `C` yet, as we have
-// to             // dig into `B.fields` to get `C`.
-//             acc.as_mut().unwrap().fields.push(new_field);
-//             reduce_type(all_types, acc, type_)
-//         } else {
-//             acc.as_mut().unwrap().fields.push(field);
-//             reduce_type(all_types, acc, type_)
-//         }
-//     } else {
-//         acc = Some(PartialType {
-//             ident: type_.ident,
-//             docs: type_.docs,
-//             fields: Default::default(),
-//         });
-
-//         acc.clone().unwrap()
-//     }
-// }
-
 fn main() -> Result<(), DocsError> {
     // TODO(alex) [high] 2023-05-22: The plan is:
     //
@@ -401,7 +270,7 @@ fn main() -> Result<(), DocsError> {
     //
     // Now we inline the docs of Field { docs } in the outer Type Docs.
 
-    let mut type_docs = parse_files()?
+    let type_docs = parse_files()?
         .into_iter()
         // go through each `File` extracting the types into a map keyed by the type `Ident`
         .flat_map(|syntaxed_file| {
@@ -447,89 +316,72 @@ fn main() -> Result<(), DocsError> {
                 })
             // use the `PartialType::ident` as a key
         })
-        .map(|type_| (type_.clone(), type_))
+        // .map(|type_| (type_.clone(), type_))
         // `PartialType`s keyed by the `PartialType::ident`
         // .collect::<HashMap<_, _>>();
-        .collect::<BTreeMap<_, _>>();
+        // .collect::<BTreeMap<_, _>>();
+        .collect::<BTreeSet<_>>();
     // .collect::<Vec<_>>();
 
-    println!("types {type_docs:#?}");
+    println!("types {type_docs:#?}\n");
 
-    // let final_docs = 0;
+    let mut new_types = Vec::with_capacity(8);
+    for type_ in type_docs.iter() {
+        let mut new_fields = Vec::with_capacity(8);
+        let mut current_fields_iter = type_.fields.iter();
 
-    // let type_ids = type_docs.keys();
+        let mut previous_position = Vec::new();
 
-    // let mut merged_types = Vec::new();
+        loop {
+            if let Some(field) = current_fields_iter.next() {
+                let new_field = if let Some(child_type) = type_docs.get(&field.ty) {
+                    previous_position.push(current_fields_iter.clone());
+                    current_fields_iter = child_type.fields.iter();
 
-    // // iterate once for each type
-    // for _ in 0..type_ids.len() {
-    //     for type_ in type_docs.values() {
-    //         let mut merged_type = PartialType {
-    //             ident: type_.ident.clone(),
-    //             docs: type_.docs.clone(),
-    //             fields: Default::default(),
-    //         };
+                    PartialField {
+                        ident: field.ident.clone(),
+                        ty: field.ty.clone(),
+                        docs: [field.docs.clone(), child_type.docs.clone()].concat(),
+                    }
+                } else {
+                    field.clone()
+                };
 
-    //         let mut digging_iter = type_.fields.iter().peekable();
+                new_fields.push(new_field);
+            } else if let Some(previous_iter) = previous_position.pop() {
+                current_fields_iter = previous_iter;
+            } else {
+                break;
+            }
+        }
 
-    //         loop {
-    //             while let Some(field) = digging_iter.next() {
-    //                 let merged_field = if let Some(child_type) = type_docs.get(&field.ty) {
-    //                     println!("digging {field:#?} of type {merged_type:#?}",);
+        let new_type = PartialType {
+            ident: type_.ident.clone(),
+            docs: type_.docs.clone(),
+            fields: new_fields,
+        };
+        new_types.push(new_type);
+    }
 
-    //                     // we need to get the inner fields' types
-    //                     digging_iter = child_type.fields.iter().peekable().clone();
+    println!("new_types \n{new_types:#?}");
 
-    //                     PartialField {
-    //                         ident: field.ident.clone(),
-    //                         ty: child_type.ident.clone(),
-    //                         docs: [field.docs.clone(), child_type.docs.clone()].concat(),
-    //                     }
-    //                 } else {
-    //                     // not child of any of our types (probably primitive type)
-    //                     field.clone()
-    //                 };
+    let the_mega_type = new_types.first().unwrap().clone();
 
-    //                 println!("merged {merged_field:#?}");
+    let type_docs = pretty_docs(the_mega_type.docs);
+    let final_docs = [
+        type_docs,
+        the_mega_type
+            .fields
+            .into_iter()
+            .map(|field| pretty_docs(field.docs))
+            .collect::<Vec<_>>()
+            .concat(),
+    ]
+    .concat();
 
-    //                 merged_type.fields.push(merged_field);
-    //             }
+    println!("final docs \n{final_docs:#?}\n");
 
-    //             if digging_iter.peek().is_none() {
-    //                 break;
-    //             }
-    //         }
-
-    //         merged_types.push(merged_type);
-    //     }
-    // }
-
-    // merged_types.sort_by(|a, b| a.fields.len().cmp(&b.fields.len()));
-
-    // println!("types \n{merged_types:#?}\n");
-
-    // let the_mega_type = merged_types.pop().unwrap();
-    // println!("mega type \n{the_mega_type:#?}\n");
-
-    // let type_docs = pretty_docs(the_mega_type.docs);
-    // let final_docs = [
-    //     type_docs,
-    //     the_mega_type
-    //         .fields
-    //         .into_iter()
-    //         .map(|field| pretty_docs(field.docs))
-    //         .collect::<Vec<_>>()
-    //         .concat(),
-    // ]
-    // .concat();
-
-    // println!("final docs \n{final_docs:#?}\n");
-
-    // write("./configuration.md", final_docs).unwrap();
-
-    // TODO(alex) [high] 2023-05-23: What's the best way to represent the hierarchy here?
-    //
-    // Need a way of saying "hey type, are you an inner field of some other type?".
+    write("./configuration.md", final_docs).unwrap();
 
     Ok(())
 }
@@ -553,6 +405,16 @@ struct B {
     c: C,
 }
 
+// E - 1 line
+//
+// E - 2 line
+// struct E {
+//     /// ### E - w
+//     ///
+//     /// E - w field
+//     w: i32,
+// }
+
 /// # A
 ///
 /// A - 1 line
@@ -572,18 +434,15 @@ struct A {
     a: i32,
 
     /// ## A - b
-    b: B,
+    b: Option<Vec<B>>,
 
     /// ## A - d
     d: D,
     // TODO(alex) [high] 2023-05-26: We're losing generic types, that's why some types end up
     // in places where they shouldn't be (they're not being inlined, as they don't belong to any
     // outer type).
-    // ## c
-    // c: Option<C>,
-
-    // ## d
-    // d: Option<Vec<D>>,
+    // ## E
+    // e: Option<E>,
 }
 
 /// C - 1 line
@@ -596,8 +455,6 @@ struct C {
     y: i32,
 
     /// #### C - d
-    ///
-    /// C - d field
     d: D,
 }
 
