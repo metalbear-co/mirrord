@@ -174,15 +174,18 @@ impl TcpOutgoingHandler {
                             continue;
                         },
                         Err(fail) => {
-                            info!("Failed reading mirror_stream with {:#?}", fail);
-                            close_remote_stream(layer_tx.clone()).await;
+                            trace!("Failed reading mirror_stream with {:#?}", fail);
+                            if !remote_stream_closed {
+                                close_remote_stream(layer_tx.clone()).await;
+                            }
 
                             break;
                         }
                         Ok(read_amount) if read_amount == 0 => {
                             trace!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
-                            close_remote_stream(layer_tx.clone()).await;
-
+                            if !remote_stream_closed {
+                                close_remote_stream(layer_tx.clone()).await;
+                            }
                             break;
                         },
                         Ok(read_amount) => {
@@ -217,7 +220,7 @@ impl TcpOutgoingHandler {
                             }
                         },
                         None => {
-                            warn!("interceptor_task -> exiting due to remote stream closed!");
+                            warn!("interceptor_task -> shutdown due to remote stream closed!");
                             // remote socket closed --> shutdown local socket
                             if let Err(err) = layer_to_user_stream.shutdown().await {
                                 warn!("Failed shutting down mirror_stream with {:#?}!", err);
@@ -225,11 +228,6 @@ impl TcpOutgoingHandler {
                             remote_stream_closed = true;
                         }
                     }
-                },
-
-                _ = sleep(Duration::from_secs(1)), if remote_stream_closed => {
-                    warn!("interceptor_task -> exiting due to remote stream closed!")
-                    break;
                 }
             }
         }
