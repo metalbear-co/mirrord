@@ -99,13 +99,6 @@ async fn outgoing_tcp(dylib_path: &PathBuf) {
         .collect::<Vec<_>>();
 
     for peer in peers {
-        #[cfg(target_os = "linux")]
-        {
-            let msg = conn.try_next().await.unwrap().unwrap();
-            let ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(LayerClose { connection_id: 0 })) = msg else {
-                panic!("Invalid message received from layer: {msg:?}");
-            };
-        }
         let msg = conn.try_next().await.unwrap().unwrap();
         let ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect { remote_address: SocketAddress::Ip(addr) })) = msg else {
             panic!("Invalid message received from layer: {msg:?}");
