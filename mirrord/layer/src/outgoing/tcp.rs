@@ -228,7 +228,7 @@ impl TcpOutgoingHandler {
                 },
 
                 _ = sleep(Duration::from_secs(1)), if remote_stream_closed => {
-                    warn!("interceptor_task -> exiting due to remote stream closed!")
+                    warn!("interceptor_task -> exiting due to remote stream closed!");
                     break;
                 }
             }
