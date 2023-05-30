@@ -273,21 +273,19 @@ impl From<HookError> for i64 {
                     }
                     ResolveErrorKindInternal::Io(err) => {
                         #[cfg(target_os = "macos")]
-                        {
-                            match err {
-                                -1 => libc::EAI_BADFLAGS,
-                                -2 => libc::EAI_NONAME,
-                                -3 => libc::EAI_AGAIN,
-                                -4 => libc::EAI_FAIL,
-                                -5 => libc::EAI_NODATA,
-                                -6 => libc::EAI_FAMILY,
-                                -7 => libc::EAI_SOCKTYPE,
-                                -8 => libc::EAI_SERVICE,
-                                -10 => libc::EAI_MEMORY,
-                                -11 => libc::EAI_SYSTEM,
-                                -12 => libc::EAI_OVERFLOW,
-                                _ => libc::EAI_FAIL,
-                            }
+                        match err {
+                            -1 => libc::EAI_BADFLAGS,
+                            -2 => libc::EAI_NONAME,
+                            -3 => libc::EAI_AGAIN,
+                            -4 => libc::EAI_FAIL,
+                            -5 => libc::EAI_NODATA,
+                            -6 => libc::EAI_FAMILY,
+                            -7 => libc::EAI_SOCKTYPE,
+                            -8 => libc::EAI_SERVICE,
+                            -10 => libc::EAI_MEMORY,
+                            -11 => libc::EAI_SYSTEM,
+                            -12 => libc::EAI_OVERFLOW,
+                            _ => libc::EAI_FAIL,
                         }
                         #[cfg(target_os = "linux")]
                         err
