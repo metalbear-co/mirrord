@@ -77,7 +77,7 @@ const CHANNEL_SIZE: usize = 1024;
 #[derive(Debug)]
 struct State {
     clients: HashSet<ClientId>,
-    index_allocator: IndexAllocator<ClientId>,
+    index_allocator: IndexAllocator<ClientId, 100>,
     /// Handle to the target container if there is one.
     /// This is optional because it is acceptable not to pass the container runtime and id if not
     /// pausing. When those args are not passed, container is [`None`].
