@@ -9,27 +9,10 @@ mod common;
 
 pub use common::*;
 
-/// For running locally, so that new developers don't have the extra step of building the go app
-/// before running the tests.
-#[cfg(target_os = "macos")]
-#[ctor::ctor]
-fn build_go_app() {
-    use std::{env, path::Path, process};
-    let original_dir = env::current_dir().unwrap();
-    let go_app_path = Path::new("tests/apps/app_go");
-    env::set_current_dir(go_app_path).unwrap();
-    let output = process::Command::new("go")
-        .args(vec!["build", "-o", "19"])
-        .output()
-        .expect("Failed to build Go test app.");
-    assert!(output.status.success(), "Building Go test app failed.");
-    env::set_current_dir(original_dir).unwrap();
-}
-
-/// Start a web server injected with the layer, simulate the agent, verify expected messages from
-/// the layer, send tcp messages and verify in the server output that the application received them.
-/// Tests the layer's communication with the agent, the bind hook, and the forwarding of mirrored
-/// traffic to the application.
+/// Start an HTTP server injected with the layer, simulate the agent, verify expected messages from
+/// the layer, send HTTP requests and verify in the server output that the application received
+/// them. Tests the layer's communication with the agent, the bind hook, and the forwarding of
+/// mirrored traffic to the application.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
@@ -43,8 +26,6 @@ async fn mirroring_with_http(
     dylib_path: &PathBuf,
     config_dir: &PathBuf,
 ) {
-    let mut config_path = config_dir.clone();
-    config_path.push("port_mapping.json");
     let (mut test_process, mut layer_connection) = application
         .start_process_with_layer_and_port(
             dylib_path,
@@ -52,11 +33,11 @@ async fn mirroring_with_http(
                 ("MIRRORD_FILE_MODE", "local"),
                 ("MIRRORD_UDP_OUTGOING", "false"),
             ],
-            Some(config_path.to_str().unwrap()),
+            Some(config_dir.join("port_mapping.json").to_str().unwrap()),
         )
         .await;
 
-    println!("Application subscribed to port, sending tcp messages.");
+    println!("Application subscribed to port, sending HTTP requests.");
 
     layer_connection
         .send_connection_then_data(

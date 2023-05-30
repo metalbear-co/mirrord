@@ -430,8 +430,9 @@ fn layer_start(config: LayerConfig) {
         .set(config.feature.network.incoming.ignore_localhost)
         .expect("Setting INCOMING_IGNORE_LOCALHOST singleton");
 
+    let targetless = config.target.path.is_none();
     TARGETLESS
-        .set(config.target.is_none())
+        .set(targetless)
         .expect("Setting TARGETLESS singleton");
 
     INCOMING_IGNORE_PORTS
@@ -440,7 +441,7 @@ fn layer_start(config: LayerConfig) {
 
     FILE_FILTER.get_or_init(|| {
         let mut fs_config = config.feature.fs.clone();
-        if config.target.is_none() {
+        if targetless {
             fs_config.mode = FsModeConfig::LocalWithOverrides;
         }
         FileFilter::new(fs_config)

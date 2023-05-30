@@ -316,7 +316,7 @@ pub struct TcpConnectionSniffer {
     sessions: TCPSessionMap,
     //todo: impl drop for index allocator and connection id..
     connection_id_to_tcp_identifier: HashMap<ConnectionId, TcpSessionIdentifier>,
-    index_allocator: IndexAllocator<ConnectionId>,
+    index_allocator: IndexAllocator<ConnectionId, 100>,
 }
 
 impl TcpConnectionSniffer {
