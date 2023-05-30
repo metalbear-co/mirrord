@@ -1,10 +1,7 @@
 #![feature(const_trait_impl)]
 use core::alloc;
 use std::{
-    collections::{
-        hash_map::{IntoIter, Values},
-        BTreeMap, HashMap, HashSet,
-    },
+    collections::{hash_map::Values, BTreeMap, HashMap, HashSet},
     fmt::Display,
     fs::{write, File},
     hash::Hash,
@@ -12,7 +9,7 @@ use std::{
     slice::Iter,
 };
 
-use syn::{spanned::Spanned, Attribute, Expr, Ident, PathSegment, Type, TypePath};
+use syn::{spanned::Spanned, Attribute, Expr, Ident, ItemUse, PathSegment, Type, TypePath};
 use thiserror::Error;
 
 #[derive(Debug, Default, Clone)]
@@ -22,11 +19,28 @@ struct PartialType {
     fields: Vec<PartialField>,
 }
 
-#[derive(Debug, Clone, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 struct PartialField {
     ident: String,
     ty: String,
     docs: Vec<String>,
+}
+
+impl PartialOrd for PartialType {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PartialType {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // `other` has a field that is of type `self`
+        if other.fields.iter().any(|field| field.ty == self.ident) {
+            std::cmp::Ordering::Greater
+        } else {
+            std::cmp::Ordering::Less
+        }
+    }
 }
 
 impl From<PartialField> for PartialType {
@@ -67,11 +81,11 @@ impl Hash for PartialField {
     }
 }
 
-// impl std::borrow::Borrow<String> for PartialType {
-//     fn borrow(&self) -> &String {
-//         &self.ident
-//     }
-// }
+impl std::borrow::Borrow<String> for PartialType {
+    fn borrow(&self) -> &String {
+        &self.ident
+    }
+}
 
 // impl std::borrow::Borrow<String> for PartialField {
 //     fn borrow(&self) -> &String {
@@ -164,6 +178,40 @@ fn pretty_docs(docs: Vec<String>) -> String {
     }
 
     docs.concat()
+}
+
+fn flatten(list: BTreeMap<PartialType, PartialType>) -> PartialType {
+    let mut list_iter = list.into_iter();
+    let (keys, root) = list_iter.next().unwrap();
+
+    PartialType {
+        ident: root.ident.clone(),
+        docs: root.docs.clone(),
+        fields: expand(list_iter, root.clone()),
+    }
+}
+
+fn expand(
+    mut all_types: std::collections::btree_map::IntoIter<PartialType, PartialType>,
+    type_: PartialType,
+) -> Vec<PartialField> {
+    let fields = type_.fields;
+    let mut expanded_fields = Vec::with_capacity(32);
+
+    for field in fields.iter() {
+        if let Some((_, child)) = all_types.find(|(k, _)| k.ident == field.ty) {
+            expanded_fields.push(expand(all_types, child.clone()));
+        } else {
+            let new_field = PartialField {
+                ident: field.ident.clone(),
+                ty: field.ty.clone(),
+                docs: [field.docs.clone(), type_.docs.clone()].concat(),
+            };
+            expanded_fields.push(vec![new_field]);
+        }
+    }
+
+    expanded_fields.into_iter().flatten().collect()
 }
 
 // fn dig_docs(mut types: Values<String, PartialType>, mut docs: String) -> Option<String> {
@@ -306,36 +354,36 @@ fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
 // fn reduce_field(mut all_types: Iter<PartialType>, mut field: PartialField) -> PartialField {
 // }
 
-fn reduce_type(
-    mut all_types: Iter<PartialType>,
-    mut acc: Option<PartialType>,
-    mut type_: PartialType,
-) -> PartialType {
-    if let Some(field) = type_.fields.pop() {
-        if let Some(child_type) = all_types.find(|outer_types| outer_types.ident == field.ty) {
-            let new_field = PartialField {
-                ident: field.ident,
-                ty: child_type.ident.clone(),
-                docs: [field.docs, child_type.docs.clone()].concat(),
-            };
-            // TODO(alex) [high] 2023-05-29: I'm putting `B` in `A`, but not `C` yet, as we have to
-            // dig into `B.fields` to get `C`.
-            acc.as_mut().unwrap().fields.push(new_field);
-            reduce_type(all_types, acc, type_)
-        } else {
-            acc.as_mut().unwrap().fields.push(field);
-            reduce_type(all_types, acc, type_)
-        }
-    } else {
-        acc = Some(PartialType {
-            ident: type_.ident,
-            docs: type_.docs,
-            fields: Default::default(),
-        });
+// fn reduce_type(
+//     mut all_types: Iter<PartialType>,
+//     mut acc: Option<PartialType>,
+//     mut type_: PartialType,
+// ) -> PartialType {
+//     if let Some(field) = type_.fields.pop() {
+//         if let Some(child_type) = all_types.find(|outer_types| outer_types.ident == field.ty) {
+//             let new_field = PartialField {
+//                 ident: field.ident,
+//                 ty: child_type.ident.clone(),
+//                 docs: [field.docs, child_type.docs.clone()].concat(),
+//             };
+//             // TODO(alex) [high] 2023-05-29: I'm putting `B` in `A`, but not `C` yet, as we have
+// to             // dig into `B.fields` to get `C`.
+//             acc.as_mut().unwrap().fields.push(new_field);
+//             reduce_type(all_types, acc, type_)
+//         } else {
+//             acc.as_mut().unwrap().fields.push(field);
+//             reduce_type(all_types, acc, type_)
+//         }
+//     } else {
+//         acc = Some(PartialType {
+//             ident: type_.ident,
+//             docs: type_.docs,
+//             fields: Default::default(),
+//         });
 
-        acc.clone().unwrap()
-    }
-}
+//         acc.clone().unwrap()
+//     }
+// }
 
 fn main() -> Result<(), DocsError> {
     // TODO(alex) [high] 2023-05-22: The plan is:
@@ -399,73 +447,85 @@ fn main() -> Result<(), DocsError> {
                 })
             // use the `PartialType::ident` as a key
         })
-        .map(|type_| (type_.ident.clone(), type_))
+        .map(|type_| (type_.clone(), type_))
         // `PartialType`s keyed by the `PartialType::ident`
-        .collect::<HashMap<_, _>>();
+        // .collect::<HashMap<_, _>>();
+        .collect::<BTreeMap<_, _>>();
     // .collect::<Vec<_>>();
 
-    let mut tree: BTreeMap<String, PartialType> = BTreeMap::default();
+    println!("types {type_docs:#?}");
 
-    let type_ids = type_docs.keys();
+    // let final_docs = 0;
 
-    let mut merged_types = Vec::new();
+    // let type_ids = type_docs.keys();
 
-    // iterate once for each type
-    for _ in 0..type_ids.len() {
-        for type_ in type_docs.values() {
-            let mut merged_type = PartialType {
-                ident: type_.ident.clone(),
-                docs: type_.docs.clone(),
-                fields: Default::default(),
-            };
+    // let mut merged_types = Vec::new();
 
-            let cached_field_iter = type_.fields.iter().clone();
-            let mut digging_iter = type_.fields.iter();
-            while let Some(field) = digging_iter.next() {
-                let merged_field = if let Some(child_type) = type_docs.get(&field.ty) {
-                    digging_iter = child_type.fields.iter();
+    // // iterate once for each type
+    // for _ in 0..type_ids.len() {
+    //     for type_ in type_docs.values() {
+    //         let mut merged_type = PartialType {
+    //             ident: type_.ident.clone(),
+    //             docs: type_.docs.clone(),
+    //             fields: Default::default(),
+    //         };
 
-                    PartialField {
-                        ident: field.ident.clone(),
-                        ty: child_type.ident.clone(),
-                        docs: [field.docs.clone(), child_type.docs.clone()].concat(),
-                    }
+    //         let mut digging_iter = type_.fields.iter().peekable();
 
-                    // we need to get the inner fields' types
-                } else {
-                    field.clone()
-                    // not child of any of our types (probably primitive type)
-                };
+    //         loop {
+    //             while let Some(field) = digging_iter.next() {
+    //                 let merged_field = if let Some(child_type) = type_docs.get(&field.ty) {
+    //                     println!("digging {field:#?} of type {merged_type:#?}",);
 
-                merged_type.fields.push(merged_field);
-            }
+    //                     // we need to get the inner fields' types
+    //                     digging_iter = child_type.fields.iter().peekable().clone();
 
-            merged_types.push(merged_type);
-        }
-    }
+    //                     PartialField {
+    //                         ident: field.ident.clone(),
+    //                         ty: child_type.ident.clone(),
+    //                         docs: [field.docs.clone(), child_type.docs.clone()].concat(),
+    //                     }
+    //                 } else {
+    //                     // not child of any of our types (probably primitive type)
+    //                     field.clone()
+    //                 };
 
-    merged_types.sort_by(|a, b| a.fields.len().cmp(&b.fields.len()));
+    //                 println!("merged {merged_field:#?}");
 
-    println!("types \n{merged_types:#?}\n");
+    //                 merged_type.fields.push(merged_field);
+    //             }
 
-    let the_mega_type = merged_types.pop().unwrap();
-    println!("mega type \n{the_mega_type:#?}\n");
+    //             if digging_iter.peek().is_none() {
+    //                 break;
+    //             }
+    //         }
 
-    let type_docs = pretty_docs(the_mega_type.docs);
-    let final_docs = [
-        type_docs,
-        the_mega_type
-            .fields
-            .into_iter()
-            .map(|field| pretty_docs(field.docs))
-            .collect::<Vec<_>>()
-            .concat(),
-    ]
-    .concat();
+    //         merged_types.push(merged_type);
+    //     }
+    // }
 
-    println!("final docs \n{final_docs:#?}\n");
+    // merged_types.sort_by(|a, b| a.fields.len().cmp(&b.fields.len()));
 
-    write("./configuration.md", final_docs).unwrap();
+    // println!("types \n{merged_types:#?}\n");
+
+    // let the_mega_type = merged_types.pop().unwrap();
+    // println!("mega type \n{the_mega_type:#?}\n");
+
+    // let type_docs = pretty_docs(the_mega_type.docs);
+    // let final_docs = [
+    //     type_docs,
+    //     the_mega_type
+    //         .fields
+    //         .into_iter()
+    //         .map(|field| pretty_docs(field.docs))
+    //         .collect::<Vec<_>>()
+    //         .concat(),
+    // ]
+    // .concat();
+
+    // println!("final docs \n{final_docs:#?}\n");
+
+    // write("./configuration.md", final_docs).unwrap();
 
     // TODO(alex) [high] 2023-05-23: What's the best way to represent the hierarchy here?
     //
@@ -484,23 +544,13 @@ fn main() -> Result<(), DocsError> {
 /// }
 /// ```
 struct B {
-    /// ### x
+    /// ### B - x
     ///
     /// B - x field
     x: i32,
 
-    // ### d
+    /// ### B - c
     c: C,
-}
-
-/// C - 1 line
-///
-/// C - 2 line
-struct C {
-    /// #### y
-    ///
-    /// C - y field
-    y: i32,
 }
 
 /// # A
@@ -516,13 +566,16 @@ struct C {
 /// }
 /// ```
 struct A {
-    /// ## a
+    /// ## A - a
     ///
     /// A - a field
     a: i32,
 
-    /// ## b
+    /// ## A - b
     b: B,
+
+    /// ## A - d
+    d: D,
     // TODO(alex) [high] 2023-05-26: We're losing generic types, that's why some types end up
     // in places where they shouldn't be (they're not being inlined, as they don't belong to any
     // outer type).
@@ -533,14 +586,27 @@ struct A {
     // d: Option<Vec<D>>,
 }
 
-/*
+/// C - 1 line
+///
+/// C - 2 line
+struct C {
+    /// #### C - y
+    ///
+    /// C - y field
+    y: i32,
+
+    /// #### C - d
+    ///
+    /// C - d field
+    d: D,
+}
+
 /// D - 1 line
 ///
 /// D - 2 line
 struct D {
-    /// #### z
+    /// #### D - z
     ///
     /// D - z field
     z: i32,
 }
-*/
