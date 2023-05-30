@@ -389,6 +389,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
+      NODE_DEBUG: "stream,tcp_wrap,https,http,net"
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
