@@ -38,8 +38,7 @@ describe("mirrord sample flow test", function () {
         expect(kubeService).to.not.be.undefined;
         browser = VSBrowser.instance;
         // need to bring the flask app in open editors
-        await browser.openResources(testWorkspace, join(testWorkspace, fileName));
-        await sleep(10000);
+        await browser.openResources(testWorkspace, join(testWorkspace, fileName));        
     });
 
     after(async function () {
