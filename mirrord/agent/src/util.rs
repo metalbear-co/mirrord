@@ -87,7 +87,7 @@ where
 }
 
 #[derive(Debug)]
-pub struct IndexAllocator<T>
+pub struct IndexAllocator<T, const N: usize>
 where
     T: Num,
 {
@@ -95,13 +95,13 @@ where
     vacant_indices: Vec<T>,
 }
 
-impl<T> IndexAllocator<T>
+impl<T, const N: usize> IndexAllocator<T, N>
 where
     T: Num + CheckedAdd + Clone,
 {
     /// Returns the next available index, returns None if not available (reached max)
     pub fn next_index(&mut self) -> Option<T> {
-        if self.vacant_indices.len() > 100 && let Some(i) = self.vacant_indices.pop() {
+        if self.vacant_indices.len() > N && let Some(i) = self.vacant_indices.pop() {
             return Some(i);
         }
         match self.index.checked_add(&T::one()) {
@@ -243,7 +243,7 @@ mod indexallocator_tests {
 
     #[test]
     fn sanity() {
-        let mut index_allocator: IndexAllocator<u32> = Default::default();
+        let mut index_allocator: IndexAllocator<u32, 0> = Default::default();
         let index = index_allocator.next_index().unwrap();
         assert_eq!(0, index);
         let index = index_allocator.next_index().unwrap();
@@ -255,7 +255,7 @@ mod indexallocator_tests {
 
     #[test]
     fn check_max() {
-        let mut index_allocator: IndexAllocator<u8> = Default::default();
+        let mut index_allocator: IndexAllocator<u8, 0> = Default::default();
         for _ in 0..=u8::MAX - 1 {
             index_allocator.next_index().unwrap();
         }
