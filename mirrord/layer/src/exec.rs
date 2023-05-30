@@ -262,20 +262,16 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
     buflen: *mut u32,
 ) -> c_int {
     let res = FN__NSGET_EXECUTABLE_PATH(path, buflen);
-    eprintln!("_NSGetExecutable hook!");
     if res == 0 {
         let path_buf_detour = CheckedInto::<PathBuf>::checked_into(path as *const c_char);
         if let Bypass(FileOperationInMirrordBinTempDir(later_ptr)) = path_buf_detour {
-            eprintln!("_NSGetExecutable got bypass!");
             if let Success(stripped_path) = CheckedInto::<&str>::checked_into(later_ptr) {
                 let path_cstring = CString::new(stripped_path).unwrap(); // TODO unwrap
 
                 let stripped_len = path_cstring.as_bytes().len() + 1;
-                eprintln!("Stripped len: {stripped_len}");
 
                 // TODO: safety
                 path.copy_from(path_cstring.as_ptr(), stripped_len);
-                eprintln!("patched {path_cstring:?}");
 
                 // TODO: safety
                 *buflen = stripped_len as u32;
@@ -284,9 +280,6 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
                 // path.
                 return 0;
             }
-        }
-        if let Success(path_buf) = path_buf_detour {
-            eprintln!("exe path not stripped: {:?}", path_buf)
         }
     }
     res
