@@ -62,3 +62,7 @@ function makeRequests() {
 for (let i = 0; i < 1; i++) {
   makeRequests();
 }
+
+process.on('exit', function (){
+  console.log('Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~!');
+});

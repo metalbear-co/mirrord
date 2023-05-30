@@ -162,8 +162,6 @@ impl TcpOutgoingHandler {
 
         loop {
             select! {
-                biased; // To allow local socket to be read before being closed
-
                 // Reads data that the user is sending from their socket to mirrord's interceptor
                 // socket.
                 read = layer_to_user_stream.read(&mut buffer) => {
