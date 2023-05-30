@@ -270,8 +270,8 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
             if let Success(stripped_path) = CheckedInto::<&str>::checked_into(later_ptr) {
                 let path_cstring = CString::new(stripped_path).unwrap(); // TODO unwrap
 
-                // TODO: do we need to copy the trailing null? (add +1 if yes)
-                let stripped_len = path_cstring.as_bytes().len();
+                let stripped_len = path_cstring.as_bytes().len() + 1;
+                eprintln!("Stripped len: {stripped_len}");
 
                 // TODO: safety
                 path.copy_from(path_cstring.as_ptr(), stripped_len);
