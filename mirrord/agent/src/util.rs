@@ -90,6 +90,8 @@ where
 /// It keeps tracked of the indices that were freed, and reuses them when possible.
 /// You can provide a buffer of indices using the second generic `N` to avoid re-using indices
 /// too fast.
+/// TODO: Consider just having a simple IndexAllocator that keeps track of last index and increases by 1 as
+/// it'd be hard to exhaust u64. (which is usually T)
 #[derive(Debug)]
 pub struct IndexAllocator<T, const N: usize>
 where
