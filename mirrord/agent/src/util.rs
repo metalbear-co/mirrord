@@ -123,7 +123,7 @@ where
     }
 }
 
-impl<T> Default for IndexAllocator<T>
+impl<T, const N: usize> IndexAllocator<T, N>
 where
     T: Num,
 {
@@ -253,6 +253,24 @@ mod indexallocator_tests {
         let index = index_allocator.next_index().unwrap();
         assert_eq!(1, index);
         index_allocator.free_index(0);
+        let index = index_allocator.next_index().unwrap();
+        assert_eq!(0, index);
+    }
+
+    #[test]
+    fn sanity_buffer() {
+        let mut index_allocator: IndexAllocator<u32, 2> = Default::default();
+        let index = index_allocator.next_index().unwrap();
+        assert_eq!(0, index);
+        let index = index_allocator.next_index().unwrap();
+        assert_eq!(1, index);
+        index_allocator.free_index(0);
+        let index = index_allocator.next_index().unwrap();
+        assert_eq!(2, index);
+        let index = index_allocator.next_index().unwrap();
+        assert_eq!(3, index);
+        index_allocator.free_index(1);
+        index_allocator.free_index(2);
         let index = index_allocator.next_index().unwrap();
         assert_eq!(0, index);
     }
