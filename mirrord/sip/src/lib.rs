@@ -34,6 +34,8 @@ mod main {
     /// Where patched files are stored, relative to the temp dir (`/tmp/mirrord-bin/...`).
     pub const MIRRORD_PATCH_DIR: &str = "mirrord-bin";
 
+    pub const FRAMEWORKS_ENV_VAR_NAME: &str = "DYLD_FALLBACK_FRAMEWORK_PATH";
+
     /// The path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
     /// scripts.
     pub static MIRRORD_TEMP_BIN_DIR_PATH_BUF: Lazy<PathBuf> =
@@ -404,13 +406,31 @@ mod main {
             MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()
         );
 
-        // if which does not work, just use the given path as is.
-        let complete_path =
-            which(path.to_string_lossy().to_string()).unwrap_or_else(|_| path.to_owned());
+        // For Mac Applications.
+        // TODO: move to separate function, document.
+        for ancestor in path.ancestors() {
+            if ancestor
+                .extension()
+                .map(|ext| ext == "app")
+                .unwrap_or_default()
+            {
+                let frameworks_dir = ancestor
+                    .join("Contents/Frameworks")
+                    .to_string_lossy()
+                    .to_string();
+                let new_value = if let Ok(existing_value) = env::var(FRAMEWORKS_ENV_VAR_NAME) {
+                    format!("{existing_value}:{frameworks_dir}")
+                } else {
+                    frameworks_dir
+                };
+                env::set_var(FRAMEWORKS_ENV_VAR_NAME, new_value);
+                break;
+            }
+        }
 
         // Strip root path from binary path, as when joined it will clear the previous.
         let output = MIRRORD_TEMP_BIN_DIR_PATH_BUF.join(
-            complete_path.strip_prefix("/").unwrap_or(&complete_path), // No prefix - no problem.
+            path.strip_prefix("/").unwrap_or(&path), // No prefix - no problem.
         );
 
         // A string of the path of new created file to run instead of the SIPed file.
