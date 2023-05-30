@@ -18,7 +18,7 @@ use tracing::warn;
 use self::ip_tables::SafeIpTables;
 use crate::{
     error::{AgentError, Result},
-    util::{ClientId},
+    util::ClientId,
 };
 
 pub(super) mod api;

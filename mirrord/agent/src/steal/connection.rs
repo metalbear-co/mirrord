@@ -31,7 +31,7 @@ use crate::{
         connection::StealSubscription::{HttpFiltered, Unfiltered},
         http::HttpFilterManager,
     },
-    AgentError::{AgentInvariantViolated, HttpRequestReceiverClosed},
+    AgentError::{AgentInvariantViolated, HttpRequestReceiverClosed}, util::IndexAllocator,
 };
 
 /// The subscriptions to steal traffic from a specific port.
