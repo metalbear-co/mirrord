@@ -3,7 +3,6 @@ use std::{
     env::temp_dir,
     future::Future,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    time::Duration,
 };
 
 use futures::TryFutureExt;
@@ -22,10 +21,9 @@ use tokio::{
     select,
     sync::mpsc::{channel, Receiver, Sender},
     task,
-    time::sleep,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{error, info, trace, warn};
+use tracing::{error, trace, warn};
 
 use super::*;
 use crate::{common::ResponseDeque, detour::DetourGuard, error::LayerError};
