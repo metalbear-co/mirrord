@@ -45,7 +45,7 @@ pub struct OperatorApi {
     client: Client,
     target_api: Api<TargetCrd>,
     version_api: Api<MirrordOperatorCrd>,
-    target_config: Option<TargetConfig>,
+    target_config: TargetConfig,
 }
 
 impl OperatorApi {
@@ -65,16 +65,16 @@ impl OperatorApi {
             // propagating an env var, don't think it's worth the extra complexity though
             let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
             if operator_version != mirrord_version {
-                progress.subtask("comparing versions").print_message(MessageKind::Warning, Some(&format!("Your mirrord version {} does not match the operator version {}. This can lead to unforeseen issues.", mirrord_version, operator_version)));
+                progress.subtask("comparing versions").print_message(MessageKind::Warning, Some(&format!("Your mirrord plugin/CLI version {} does not match the operator version {}. This can lead to unforeseen issues.", mirrord_version, operator_version)));
                 if operator_version > mirrord_version {
                     progress.subtask("comparing versions").print_message(
                         MessageKind::Warning,
                         Some(
-                            "Consider updating your mirrord version to match the operator version.",
+                            "Consider updating your mirrord plugin/CLI to match the operator version.",
                         ),
                     );
                 } else {
-                    progress.subtask("comparing versions").print_message(MessageKind::Warning, Some("Consider either updating your operator version to match your mirrord version, or downgrading your mirrord version."));
+                    progress.subtask("comparing versions").print_message(MessageKind::Warning, Some("Consider either updating your operator version to match your mirrord plugin/CLI version, or downgrading your mirrord plugin/CLI."));
                 }
             }
             operator_api.connect_target(target).await.map(Some)
@@ -113,7 +113,7 @@ impl OperatorApi {
         )
         .await?;
 
-        let target_namespace = if let Some(ref target_config) = target_config {
+        let target_namespace = if target_config.path.is_some() {
             target_config.namespace.as_deref()
         } else {
             // When targetless, pass agent namespace to operator so that it knows where to create
@@ -143,7 +143,7 @@ impl OperatorApi {
     }
 
     async fn fetch_target(&self) -> Result<Option<TargetCrd>> {
-        let target_name = TargetCrd::target_name_by_optional_config(&self.target_config);
+        let target_name = TargetCrd::target_name_by_config(&self.target_config);
 
         match self.target_api.get(&target_name).await {
             Ok(target) => Ok(Some(target)),

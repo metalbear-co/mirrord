@@ -8,6 +8,36 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.44.1](https://github.com/metalbear-co/mirrord/tree/3.44.1) - 2023-05-26
+
+
+### Changed
+
+- Never importing `RUST_LOG` environment variable from the cluster, regardless
+  of configuration.
+
+
+### Fixed
+
+- Provide helpful error messages on errors in IDEs.
+  [#1392](https://github.com/metalbear-co/mirrord/issues/1392)
+- Log level control when running targetless.
+  [#1446](https://github.com/metalbear-co/mirrord/issues/1446)
+- Change to sticky balloon on warnings in intelliJ
+  [#1456](https://github.com/metalbear-co/mirrord/issues/1456)
+- Setting the namespace via the configuration was not possible in the IDE
+  without also setting a target in the configuration file.
+  [#1461](https://github.com/metalbear-co/mirrord/issues/1461)
+- fixed IntelliJ failing silently when error happened on listing pods
+
+
+### Internal
+
+- Fix the test of reading from the SIP patch dir, that was not testing
+  anything.
+- Make the path field of `TargetConfig` an `Option`.
+
+
 ## [3.44.0](https://github.com/metalbear-co/mirrord/tree/3.44.0) - 2023-05-24
 
 
