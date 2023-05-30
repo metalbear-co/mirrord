@@ -1,6 +1,6 @@
 #![feature(const_trait_impl)]
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fmt::Display,
     fs::{write, File},
     hash::Hash,
@@ -14,7 +14,8 @@ use thiserror::Error;
 struct PartialType {
     ident: String,
     docs: Vec<String>,
-    fields: HashSet<PartialField>,
+    // fields: HashSet<PartialField>,
+    fields: Vec<PartialField>,
 }
 
 #[derive(Debug, Clone)]
@@ -30,6 +31,12 @@ impl PartialOrd for PartialType {
     }
 }
 
+impl PartialOrd for PartialField {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl Ord for PartialType {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // `other` has a field that is of type `self`
@@ -38,6 +45,12 @@ impl Ord for PartialType {
         } else {
             std::cmp::Ordering::Less
         }
+    }
+}
+
+impl Ord for PartialField {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.ty.cmp(&other.ty)
     }
 }
 
@@ -59,7 +72,8 @@ impl PartialEq for PartialType {
 
 impl PartialEq for PartialField {
     fn eq(&self, other: &Self) -> bool {
-        self.ident.eq(&other.ident) && self.ty.eq(&other.ty)
+        // self.ident.eq(&other.ident) && self.ty.eq(&other.ty)
+        self.ty.eq(&other.ty)
     }
 }
 
@@ -252,6 +266,42 @@ fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
         .collect()
 }
 
+/*
+fn flatten(list: BTreeSet<PartialType>) -> PartialType {
+    let mut list_iter = list.into_iter();
+    let root = list_iter.next().unwrap();
+
+    PartialType {
+        ident: root.ident.clone(),
+        docs: root.docs.clone(),
+        fields: expand(&mut list_iter, root.clone()),
+    }
+}
+
+fn expand(
+    all_types: &mut std::collections::btree_set::IntoIter<PartialType>,
+    type_: PartialType,
+) -> HashSet<PartialField> {
+    let fields = type_.fields;
+    let mut expanded_fields = HashSet::new();
+
+    for field in fields.iter() {
+        if let Some(child) = all_types.find(|type_| type_.ident == field.ty) {
+            expanded_fields.extend(expand(all_types, child.clone()));
+        } else {
+            let new_field = PartialField {
+                ident: field.ident.clone(),
+                ty: field.ty.clone(),
+                docs: [field.docs.clone(), type_.docs.clone()].concat(),
+            };
+            expanded_fields.insert(new_field);
+        }
+    }
+
+    expanded_fields
+}
+*/
+
 fn main() -> Result<(), DocsError> {
     // TODO(alex) [high] 2023-05-22: The plan is:
     //
@@ -304,8 +354,8 @@ fn main() -> Result<(), DocsError> {
                         (!thing_docs_untreated.is_empty()).then_some(PartialType {
                             ident: item.ident.to_string(),
                             docs: thing_docs_untreated,
-                            // fields: Vec::from_iter(fields.into_iter()),
-                            fields,
+                            fields: Vec::from_iter(fields.into_iter()),
+                            // fields,
                         })
                     }
                     _ => {
@@ -322,16 +372,21 @@ fn main() -> Result<(), DocsError> {
     let mut new_types = Vec::with_capacity(8);
     for type_ in type_docs.iter() {
         // let mut new_fields = Vec::with_capacity(8);
-        let mut new_fields = HashSet::with_capacity(8);
+        let mut new_fields = Vec::with_capacity(8);
         let mut current_fields_iter = type_.fields.iter();
 
         let mut previous_position = Vec::new();
 
         loop {
             if let Some(field) = current_fields_iter.next() {
-                let new_field = if let Some(child_type) = type_docs.get(&field.ty) {
+                let new_field = if let Some(child_type) =
+                    type_docs.iter().find(|type_| field.ty == type_.ident)
+                // .get(&field.ty)
+                {
                     previous_position.push(current_fields_iter.clone());
                     current_fields_iter = child_type.fields.iter();
+
+                    println!("field {field:?} | child_type {child_type:?}");
 
                     PartialField {
                         ident: field.ident.clone(),
@@ -342,9 +397,12 @@ fn main() -> Result<(), DocsError> {
                     field.clone()
                 };
 
-                // new_fields.push(new_field);
-                new_fields.insert(new_field);
+                println!("new_field {new_field:?}");
+
+                new_fields.push(new_field);
+                // new_fields.insert(new_field);
             } else if let Some(previous_iter) = previous_position.pop() {
+                println!("previous {previous_iter:?} \ncurrent {current_fields_iter:?}");
                 current_fields_iter = previous_iter;
             } else {
                 break;
@@ -358,6 +416,9 @@ fn main() -> Result<(), DocsError> {
         };
         new_types.push(new_type);
     }
+
+    // let the_mega_type = flatten(type_docs.clone());
+    // println!("mehul's type \n{the_mega_type:#?}");
 
     println!("new_types \n{new_types:#?}");
 
@@ -385,12 +446,6 @@ fn main() -> Result<(), DocsError> {
 /// B - 1 line
 ///
 /// B - 2 line
-///
-/// ```json
-/// {
-///   "field": "value"
-/// }
-/// ```
 struct B {
     /// ### B - x
     ///
@@ -399,9 +454,8 @@ struct B {
 
     /// ### B - c
     c: C,
-
-    /// ### B - f
-    f: F,
+    // ### B - f
+    // f: F,
 }
 
 /// E - 1 line
@@ -419,13 +473,6 @@ struct E {
 /// A - 1 line
 ///
 /// A - 2 line
-///
-/// ```json
-/// {
-///   "a": 10,
-///   "b": "B"
-/// }
-/// ```
 struct A {
     /// ## A - a
     ///
@@ -440,19 +487,19 @@ struct A {
     // TODO(alex) [high] 2023-05-26: We're losing generic types, that's why some types end up
     // in places where they shouldn't be (they're not being inlined, as they don't belong to any
     // outer type).
-    /// ## E
+    /// ## A - e
     e: Option<E>,
 }
 
-/// F - 1 line
-///
-/// F - 2 line
-struct F {
-    /// ### F - k
-    ///
-    /// F - k field
-    k: i32,
-}
+// F - 1 line
+//
+// F - 2 line
+// struct F {
+// ### F - k
+//
+// F - k field
+// k: i32,
+// }
 
 /// C - 1 line
 ///
