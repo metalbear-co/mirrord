@@ -130,7 +130,7 @@ impl UdpOutgoingApi {
         mut layer_rx: Receiver<Layer>,
         daemon_tx: Sender<Daemon>,
     ) -> Result<()> {
-        let mut allocator = IndexAllocator::<ConnectionId>::default();
+        let mut allocator = IndexAllocator::<ConnectionId, 100>::default();
 
         // TODO: Right now we're manually keeping these 2 maps in sync (aviram suggested using
         // `Weak` for `writers`).
