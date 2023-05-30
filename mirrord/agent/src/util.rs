@@ -123,7 +123,7 @@ where
     }
 }
 
-impl<T, const N: usize> IndexAllocator<T, N>
+impl<T, const N: usize> Default for IndexAllocator<T, N>
 where
     T: Num,
 {
