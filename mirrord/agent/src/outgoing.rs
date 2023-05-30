@@ -171,8 +171,6 @@ impl TcpOutgoingApi {
 
         loop {
             select! {
-                biased;
-
                 // [layer] -> [agent]
                 Some(layer_message) = layer_rx.recv() => {
                     layer_recv(layer_message, &mut allocator, &mut writers, &mut readers, daemon_tx.clone(), pid).await?
