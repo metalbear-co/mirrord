@@ -444,7 +444,7 @@ jobs:
       - name: Run targetless E2E test.
         run: cargo test -p tests targetless
       - name: Run all E2E test
-        run: cargo test -p tests
+        run: cargo test -p tests -- --test-threads=5
       - name: Collect logs
         if: ${{ failure() }}
         run: |
