@@ -23,7 +23,7 @@ use tokio::{
     task,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{error, trace, warn};
+use tracing::{debug, error, warn};
 
 use super::*;
 use crate::{common::ResponseDeque, detour::DetourGuard, error::LayerError};
@@ -151,7 +151,7 @@ impl TcpOutgoingHandler {
         let close_remote_stream = |layer_tx: Sender<_>| async move {
             let close = LayerClose { connection_id };
             let outgoing_close = LayerTcpOutgoing::Close(close);
-
+            debug!("sending close message to agent {connection_id:?}");
             if let Err(fail) = layer_tx.send(outgoing_close).await {
                 error!("Failed sending close message with {:#?}!", fail);
             }
@@ -167,10 +167,11 @@ impl TcpOutgoingHandler {
                 read = layer_to_user_stream.read(&mut buffer) => {
                     match read {
                         Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
+                            debug!("would block");
                             continue;
                         },
                         Err(fail) => {
-                            trace!("Failed reading mirror_stream with {:#?}", fail);
+                            debug!("Failed reading mirror_stream with {:#?}", fail);
                             if !remote_stream_closed {
                                 close_remote_stream(layer_tx.clone()).await;
                             }
@@ -178,7 +179,7 @@ impl TcpOutgoingHandler {
                             break;
                         }
                         Ok(read_amount) if read_amount == 0 => {
-                            trace!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
+                            debug!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
                             if !remote_stream_closed {
                                 close_remote_stream(layer_tx.clone()).await;
                             }
@@ -195,7 +196,7 @@ impl TcpOutgoingHandler {
                                     .to_vec(),
                             };
                             let outgoing_write = LayerTcpOutgoing::Write(write);
-
+                            debug!("writing to agent {connection_id:?}");
                             if let Err(fail) = layer_tx.send(outgoing_write).await {
                                 error!("Failed sending write message with {:#?}!", fail);
 
@@ -211,9 +212,10 @@ impl TcpOutgoingHandler {
                             // stream) to our interceptor socket. When the user tries to read the
                             // remote data, this'll be what they receive.
                             if let Err(fail) = layer_to_user_stream.write_all(&bytes).await {
-                                trace!("Failed writing to mirror_stream with {:#?}!", fail);
+                                debug!("Failed writing to mirror_stream with {:#?}!", fail);
                                 break;
                             }
+                            debug!("written data to remote_stream");
                         },
                         None => {
                             warn!("interceptor_task -> shutdown due to remote stream closed!");
@@ -227,6 +229,7 @@ impl TcpOutgoingHandler {
                 }
             }
         }
+        debug!("ended");
     }
 
     /// Handles the following hook messages:
@@ -247,14 +250,14 @@ impl TcpOutgoingHandler {
                 remote_address,
                 channel_tx,
             }) => {
-                trace!("Connect -> remote_address {:#?}", remote_address);
+                debug!("Connect -> remote_address {:#?}", remote_address);
 
                 // TODO: We could be losing track of the proper order to respond to these (aviram
                 // suggests using a `HashMap`).
                 self.connect_queue.push_back(channel_tx);
 
                 let remote_address = remote_address.try_into()?;
-                trace!("TCP Outgoing connection to {remote_address}.");
+                debug!("TCP Outgoing connection to {remote_address}.");
                 Ok(tx
                     .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(
                         LayerConnect { remote_address },
@@ -284,7 +287,7 @@ impl TcpOutgoingHandler {
     ) -> Result<(), LayerError> {
         match response {
             DaemonTcpOutgoing::Connect(connect) => {
-                trace!("Connect -> connect {:#?}", connect);
+                debug!("Connect -> connect {:#?}", connect);
 
                 let response = async move { connect }
                     .and_then(
@@ -381,7 +384,7 @@ impl TcpOutgoingHandler {
             }
             DaemonTcpOutgoing::Read(read) => {
                 // (agent) read something from remote, so we write it to the user.
-                trace!("Read -> read {:?}", read);
+                debug!("Read -> read {:?}", read);
 
                 match read {
                     Ok(DaemonRead {
@@ -417,7 +420,7 @@ impl TcpOutgoingHandler {
             }
             DaemonTcpOutgoing::Close(connection_id) => {
                 // (agent) failed to perform some operation.
-                trace!("Close -> connection_id {:?}", connection_id);
+                debug!("Close -> connection_id {:?}", connection_id);
                 self.mirrors.remove(&connection_id);
 
                 Ok(())
