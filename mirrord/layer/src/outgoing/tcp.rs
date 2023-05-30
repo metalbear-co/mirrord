@@ -413,9 +413,14 @@ impl TcpOutgoingHandler {
                         // - change `DaemonTcpOutgoing::Close` to `Close(Option<errno>)` and pass it
                         //   to the `interceptor_task` to know when to shutdown and when to break
                         //   loop
-                        // we don't know who failed so we'll iterate the list then remove closed sockets.
+                        // we don't know who failed so we'll iterate the list then remove closed
+                        // sockets.
                         warn!("Read error: {:?}", e);
-                        self.mirrors = self.mirrors.drain().filter(| (_k, v)| v.is_closed()).collect();
+                        self.mirrors = self
+                            .mirrors
+                            .drain()
+                            .filter(|(_k, v)| v.is_closed())
+                            .collect();
                     }
                 }
                 Ok(())
