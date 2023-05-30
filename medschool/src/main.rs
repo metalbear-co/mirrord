@@ -1,22 +1,20 @@
 #![feature(const_trait_impl)]
-use core::alloc;
 use std::{
-    collections::{hash_map::Values, BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashSet},
     fmt::Display,
     fs::{write, File},
     hash::Hash,
     io::Read,
-    slice::Iter,
 };
 
-use syn::{spanned::Spanned, Attribute, Expr, Ident, ItemUse, PathSegment, Type, TypePath};
+use syn::{spanned::Spanned, Attribute, Expr, Ident, Type, TypePath};
 use thiserror::Error;
 
 #[derive(Debug, Default, Clone)]
 struct PartialType {
     ident: String,
     docs: Vec<String>,
-    fields: Vec<PartialField>,
+    fields: HashSet<PartialField>,
 }
 
 #[derive(Debug, Clone)]
@@ -306,7 +304,8 @@ fn main() -> Result<(), DocsError> {
                         (!thing_docs_untreated.is_empty()).then_some(PartialType {
                             ident: item.ident.to_string(),
                             docs: thing_docs_untreated,
-                            fields: Vec::from_iter(fields.into_iter()),
+                            // fields: Vec::from_iter(fields.into_iter()),
+                            fields,
                         })
                     }
                     _ => {
@@ -316,18 +315,14 @@ fn main() -> Result<(), DocsError> {
                 })
             // use the `PartialType::ident` as a key
         })
-        // .map(|type_| (type_.clone(), type_))
-        // `PartialType`s keyed by the `PartialType::ident`
-        // .collect::<HashMap<_, _>>();
-        // .collect::<BTreeMap<_, _>>();
         .collect::<BTreeSet<_>>();
-    // .collect::<Vec<_>>();
 
     println!("types {type_docs:#?}\n");
 
     let mut new_types = Vec::with_capacity(8);
     for type_ in type_docs.iter() {
-        let mut new_fields = Vec::with_capacity(8);
+        // let mut new_fields = Vec::with_capacity(8);
+        let mut new_fields = HashSet::with_capacity(8);
         let mut current_fields_iter = type_.fields.iter();
 
         let mut previous_position = Vec::new();
@@ -347,7 +342,8 @@ fn main() -> Result<(), DocsError> {
                     field.clone()
                 };
 
-                new_fields.push(new_field);
+                // new_fields.push(new_field);
+                new_fields.insert(new_field);
             } else if let Some(previous_iter) = previous_position.pop() {
                 current_fields_iter = previous_iter;
             } else {
@@ -403,17 +399,20 @@ struct B {
 
     /// ### B - c
     c: C,
+
+    /// ### B - f
+    f: F,
 }
 
-// E - 1 line
-//
-// E - 2 line
-// struct E {
-//     /// ### E - w
-//     ///
-//     /// E - w field
-//     w: i32,
-// }
+/// E - 1 line
+///
+/// E - 2 line
+struct E {
+    /// ### E - w
+    ///
+    /// E - w field
+    w: i32,
+}
 
 /// # A
 ///
@@ -441,8 +440,18 @@ struct A {
     // TODO(alex) [high] 2023-05-26: We're losing generic types, that's why some types end up
     // in places where they shouldn't be (they're not being inlined, as they don't belong to any
     // outer type).
-    // ## E
-    // e: Option<E>,
+    /// ## E
+    e: Option<E>,
+}
+
+/// F - 1 line
+///
+/// F - 2 line
+struct F {
+    /// ### F - k
+    ///
+    /// F - k field
+    k: i32,
 }
 
 /// C - 1 line
