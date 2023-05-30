@@ -178,6 +178,26 @@ pub enum ResolveErrorKindInternal {
 //     EaiMemory,
 //     EaiSystem,
 //     EaiOverflow,
+
+// }
+
+// impl From<i32> for DnsIOError {
+//     fn from(value: i32) -> Self {
+//         match value {
+//             libc::EAI_BADFLAGS => DnsIOError::EaiBadflags,
+//             libc::EAI_NONAME => DnsIOError::EaiNoname,
+//             libc::EAI_AGAIN => DnsIOError::EaiAgain,
+//             libc::EAI_FAIL => DnsIOError::EaiFail,
+//             libc::EAI_NODATA => DnsIOError::EaiNodata,
+//             libc::EAI_FAMILY => DnsIOError::EaiFamily,
+//             libc::EAI_SOCKTYPE => DnsIOError::EaiSocktype,
+//             libc::EAI_SERVICE => DnsIOError::EaiService,
+//             libc::EAI_MEMORY => DnsIOError::EaiMemory,
+//             libc::EAI_SYSTEM => DnsIOError::EaiSystem,
+//             libc::EAI_OVERFLOW => DnsIOError::EaiOverflow,
+//             _ => panic!("Unknown error code for DnsIOError: {}", value),
+//         }
+//     }
 // }
 
 impl From<io::ErrorKind> for ErrorKindInternal {
@@ -241,7 +261,9 @@ impl From<ResolveErrorKind> for ResolveErrorKindInternal {
             }
             ResolveErrorKind::Proto(_) => ResolveErrorKindInternal::Proto,
             ResolveErrorKind::Timeout => ResolveErrorKindInternal::Timeout,
-            ResolveErrorKind::Io(error) => ResolveErrorKindInternal::Io(error.raw_os_error().unwrap()),
+            ResolveErrorKind::Io(error) => {
+                ResolveErrorKindInternal::Io(error.raw_os_error().unwrap())
+            }
             _ => {
                 warn!("unknown error kind: {:?}", error_kind);
                 ResolveErrorKindInternal::Unknown

@@ -5,7 +5,8 @@ use ignore_codes::*;
 use libc::{c_char, DIR, FILE};
 use mirrord_config::config::ConfigError;
 use mirrord_protocol::{
-    tcp::LayerTcp, ClientMessage, ConnectionId, ResponseError, SerializationError,
+    tcp::LayerTcp, ClientMessage, ConnectionId, ResolveErrorKindInternal, ResponseError,
+    SerializationError,
 };
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
@@ -264,24 +265,24 @@ impl From<HookError> for i64 {
                     _ => libc::EINVAL,
                 },
                 ResponseError::DnsLookup(dns_fail) => match dns_fail.kind {
-                    mirrord_protocol::ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
-                    mirrord_protocol::ResolveErrorKindInternal::NoConnections => libc::EAI_AGAIN,
-                    mirrord_protocol::ResolveErrorKindInternal::Message(msg) => {
+                    ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
+                    ResolveErrorKindInternal::NoConnections => libc::EAI_AGAIN,
+                    ResolveErrorKindInternal::Message(msg) => {
                         error!("DNS lookup failed with message: {}", msg);
                         libc::EAI_FAIL
                     }
-                    mirrord_protocol::ResolveErrorKindInternal::Io(err) => {
+                    ResolveErrorKindInternal::Io(err) => {
                         #[cfg(target_os = "macos")]
                         {
-                             match err {
+                            match err {
                                 -1 => libc::EAI_BADFLAGS,
                                 -2 => libc::EAI_NONAME,
                                 -3 => libc::EAI_AGAIN,
                                 -4 => libc::EAI_FAIL,
                                 -5 => libc::EAI_NODATA,
-                                -6  => libc::EAI_FAMILY,
+                                -6 => libc::EAI_FAMILY,
                                 -7 => libc::EAI_SOCKTYPE,
-                                -8 => libc::EAI_SERVICE,                                
+                                -8 => libc::EAI_SERVICE,
                                 -10 => libc::EAI_MEMORY,
                                 -11 => libc::EAI_SYSTEM,
                                 -12 => libc::EAI_OVERFLOW,
@@ -291,6 +292,7 @@ impl From<HookError> for i64 {
                         #[cfg(target_os = "linux")]
                         err
                     }
+                    ResolveErrorKindInternal::Proto => libc::EAI_FAIL,
                     _ => libc::EAI_FAIL,
                 },
                 // for listen, EINVAL means "socket is already connected."
