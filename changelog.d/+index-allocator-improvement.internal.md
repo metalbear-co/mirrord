@@ -1,0 +1,1 @@
+Provide buffer for `IndexAllocator` to avoid re-use of indices too fast

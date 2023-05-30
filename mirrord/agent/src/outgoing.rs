@@ -47,7 +47,7 @@ pub(crate) struct TcpOutgoingApi {
 #[tracing::instrument(level = "trace", skip(allocator, writers, readers, daemon_tx))]
 async fn layer_recv(
     layer_message: LayerTcpOutgoing,
-    allocator: &mut IndexAllocator<ConnectionId>,
+    allocator: &mut IndexAllocator<ConnectionId, 100>,
     writers: &mut HashMap<ConnectionId, WriteHalf<SocketStream>>,
     readers: &mut StreamMap<ConnectionId, ReaderStream<ReadHalf<SocketStream>>>,
     daemon_tx: Sender<DaemonTcpOutgoing>,
@@ -161,7 +161,7 @@ impl TcpOutgoingApi {
         daemon_tx: Sender<Daemon>,
         pid: Option<u64>,
     ) -> Result<()> {
-        let mut allocator: IndexAllocator<ConnectionId> = Default::default();
+        let mut allocator: IndexAllocator<ConnectionId, 100> = Default::default();
 
         // TODO: Right now we're manually keeping these 2 maps in sync (aviram suggested using
         // `Weak` for `writers`).
