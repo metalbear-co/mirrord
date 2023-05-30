@@ -3,6 +3,7 @@ use std::{
     env::temp_dir,
     future::Future,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    time::Duration,
 };
 
 use futures::TryFutureExt;
@@ -21,6 +22,7 @@ use tokio::{
     select,
     sync::mpsc::{channel, Receiver, Sender},
     task,
+    time::sleep,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::{error, info, trace, warn};
@@ -224,6 +226,11 @@ impl TcpOutgoingHandler {
                         }
                     }
                 },
+
+                _ = sleep(Duration::from_secs(1)), if remote_stream_closed => {
+                    warn!("interceptor_task -> exiting due to remote stream closed!")
+                    break;
+                }
             }
         }
     }
