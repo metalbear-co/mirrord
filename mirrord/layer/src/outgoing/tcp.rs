@@ -400,6 +400,15 @@ impl TcpOutgoingHandler {
                         });
                     }
                     Err(e) => {
+                        // on errors, we need to end the interceptor task, however this would
+                        // require introducing some breaking changes to the protocol
+                        // on hold because of: https://github.com/metalbear-co/mirrord/issues/1353
+                        // some solutions (AH):
+                        // - add `DaemonTcpOutgoing::Error(errno)` and then pass it to the
+                        //   `interceptor_task` to break.
+                        // - change `DaemonTcpOutgoing::Close` to `Close(Option<errno>)` and pass it
+                        //   to the `interceptor_task` to know when to shutdown and when to break
+                        //   loop
                         warn!("Read error: {:?}", e);
                     }
                 }
