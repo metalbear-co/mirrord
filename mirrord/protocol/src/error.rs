@@ -160,9 +160,25 @@ pub enum ResolveErrorKindInternal {
     NoRecordsFound(u16),
     Proto,
     Timeout,
+    Io(i32),
     // Unknown is for uncovered cases (enum is non-exhaustive)
     Unknown,
 }
+
+// #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq)]
+// pub enum DnsIOError {
+//     EaiBadflags,
+//     EaiNoname,
+//     EaiAgain,
+//     EaiFail,
+//     EaiNodata,
+//     EaiFamily,
+//     EaiSocktype,
+//     EaiService,
+//     EaiMemory,
+//     EaiSystem,
+//     EaiOverflow,
+// }
 
 impl From<io::ErrorKind> for ErrorKindInternal {
     fn from(error_kind: io::ErrorKind) -> Self {
@@ -225,6 +241,7 @@ impl From<ResolveErrorKind> for ResolveErrorKindInternal {
             }
             ResolveErrorKind::Proto(_) => ResolveErrorKindInternal::Proto,
             ResolveErrorKind::Timeout => ResolveErrorKindInternal::Timeout,
+            ResolveErrorKind::Io(error) => ResolveErrorKindInternal::Io(error.raw_os_error().unwrap()),
             _ => {
                 warn!("unknown error kind: {:?}", error_kind);
                 ResolveErrorKindInternal::Unknown
