@@ -1,6 +1,6 @@
 use std::{
     clone::Clone,
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     future::Future,
     hash::Hash,
     path::PathBuf,
@@ -86,22 +86,28 @@ where
     }
 }
 
+/// `IndexAllocator` is a helper struct that allocates unique indices for a given type.
+/// It keeps tracked of the indices that were freed, and reuses them when possible.
+/// You can provide a buffer of indices using the second generic `N` to avoid re-using indices
+/// too fast.
+/// TODO: Consider just having a simple IndexAllocator that keeps track of last index and increases
+/// by 1 as it'd be hard to exhaust u64. (which is usually T)
 #[derive(Debug)]
-pub struct IndexAllocator<T>
+pub struct IndexAllocator<T, const N: usize>
 where
     T: Num,
 {
     index: T,
-    vacant_indices: Vec<T>,
+    vacant_indices: VecDeque<T>,
 }
 
-impl<T> IndexAllocator<T>
+impl<T, const N: usize> IndexAllocator<T, N>
 where
     T: Num + CheckedAdd + Clone,
 {
     /// Returns the next available index, returns None if not available (reached max)
     pub fn next_index(&mut self) -> Option<T> {
-        if let Some(i) = self.vacant_indices.pop() {
+        if self.vacant_indices.len() > N && let Some(i) = self.vacant_indices.pop_front() {
             return Some(i);
         }
         match self.index.checked_add(&T::one()) {
@@ -115,11 +121,11 @@ where
     }
 
     pub fn free_index(&mut self, index: T) {
-        self.vacant_indices.push(index)
+        self.vacant_indices.push_back(index)
     }
 }
 
-impl<T> Default for IndexAllocator<T>
+impl<T, const N: usize> Default for IndexAllocator<T, N>
 where
     T: Num,
 {
@@ -243,7 +249,7 @@ mod indexallocator_tests {
 
     #[test]
     fn sanity() {
-        let mut index_allocator: IndexAllocator<u32> = Default::default();
+        let mut index_allocator: IndexAllocator<u32, 0> = Default::default();
         let index = index_allocator.next_index().unwrap();
         assert_eq!(0, index);
         let index = index_allocator.next_index().unwrap();
@@ -254,8 +260,26 @@ mod indexallocator_tests {
     }
 
     #[test]
+    fn sanity_buffer() {
+        let mut index_allocator: IndexAllocator<u32, 2> = Default::default();
+        let index = index_allocator.next_index().unwrap();
+        assert_eq!(0, index);
+        let index = index_allocator.next_index().unwrap();
+        assert_eq!(1, index);
+        index_allocator.free_index(0);
+        let index = index_allocator.next_index().unwrap();
+        assert_eq!(2, index);
+        let index = index_allocator.next_index().unwrap();
+        assert_eq!(3, index);
+        index_allocator.free_index(1);
+        index_allocator.free_index(2);
+        let index = index_allocator.next_index().unwrap();
+        assert_eq!(0, index);
+    }
+
+    #[test]
     fn check_max() {
-        let mut index_allocator: IndexAllocator<u8> = Default::default();
+        let mut index_allocator: IndexAllocator<u8, 0> = Default::default();
         for _ in 0..=u8::MAX - 1 {
             index_allocator.next_index().unwrap();
         }
