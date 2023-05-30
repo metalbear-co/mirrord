@@ -41,9 +41,6 @@ pub(super) enum Commands {
 
     #[command(hide = true)]
     Extract { path: String },
-    #[allow(dead_code)]
-    #[command(skip)]
-    Login(LoginArgs),
     /// Operator commands eg. setup
     #[command(hide = true)]
     Operator(Box<OperatorArgs>),

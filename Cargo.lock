@@ -143,14 +143,14 @@ dependencies = [
  "env_logger",
  "jsonwebtoken",
  "log",
- "pem",
+ "pem 1.1.1",
  "rand",
  "reqwest",
  "rsa",
  "serde",
  "serde_json",
  "thiserror",
- "x509-certificate",
+ "x509-certificate 0.16.0",
 ]
 
 [[package]]
@@ -186,7 +186,7 @@ dependencies = [
  "chrono",
  "clap",
  "cryptographic-message-syntax",
- "der",
+ "der 0.6.1",
  "dialoguer",
  "difference",
  "digest 0.10.7",
@@ -204,7 +204,7 @@ dependencies = [
  "once_cell",
  "p12",
  "p256",
- "pem",
+ "pem 1.1.1",
  "pkcs1",
  "pkcs8",
  "plist",
@@ -222,10 +222,10 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2",
- "signature",
+ "signature 1.6.4",
  "simple-file-manifest",
  "spake2",
- "spki",
+ "spki 0.6.0",
  "subtle",
  "tempfile",
  "thiserror",
@@ -233,7 +233,7 @@ dependencies = [
  "tungstenite",
  "uuid",
  "x509",
- "x509-certificate",
+ "x509-certificate 0.16.0",
  "xml-rs",
  "yasna",
  "zeroize",
@@ -278,10 +278,10 @@ dependencies = [
  "serde-xml-rs",
  "sha1",
  "sha2",
- "signature",
+ "signature 1.6.4",
  "thiserror",
  "url",
- "x509-certificate",
+ "x509-certificate 0.16.0",
  "xml-rs",
  "xz2",
 ]
@@ -1087,12 +1087,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "50d30906286121d95be3d479533b458f87493b30a4b5f79a607db8f5d11aa91f"
 
 [[package]]
-name = "cesu8"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
-
-[[package]]
 name = "cexpr"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1191,16 +1185,6 @@ name = "colorchoice"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
-
-[[package]]
-name = "combine"
-version = "4.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35ed6e9d84f0b51a7f52daf1c7d71dd136fd7a3f41a8462b8cdb8c78d920fad4"
-dependencies = [
- "bytes",
- "memchr",
-]
 
 [[package]]
 name = "console"
@@ -1399,11 +1383,11 @@ dependencies = [
  "bytes",
  "chrono",
  "hex",
- "pem",
+ "pem 1.1.1",
  "reqwest",
  "ring",
- "signature",
- "x509-certificate",
+ "signature 1.6.4",
+ "x509-certificate 0.16.0",
 ]
 
 [[package]]
@@ -1512,6 +1496,16 @@ checksum = "f1a467a65c5e759bce6e65eaf91cc29f466cdc57cb65777bd646872a8a1fd4de"
 dependencies = [
  "const-oid",
  "pem-rfc7468",
+ "zeroize",
+]
+
+[[package]]
+name = "der"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56acb310e15652100da43d130af8d97b509e95af61aab1c5a7939ef24337ee17"
+dependencies = [
+ "const-oid",
  "zeroize",
 ]
 
@@ -1701,9 +1695,9 @@ version = "0.14.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "413301934810f597c1d19ca71c8710e99a3f1ba28a0d2ebc01551a2daeea3c5c"
 dependencies = [
- "der",
+ "der 0.6.1",
  "elliptic-curve",
- "signature",
+ "signature 1.6.4",
 ]
 
 [[package]]
@@ -1720,7 +1714,7 @@ checksum = "e7bb888ab5300a19b8e5bceef25ac745ad065f3c9f7efc6de1b91958110891d3"
 dependencies = [
  "base16ct",
  "crypto-bigint",
- "der",
+ "der 0.6.1",
  "digest 0.10.7",
  "ff",
  "generic-array",
@@ -2611,28 +2605,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "453ad9f582a441959e5f0d088b02ce04cfe8d51a8eaf077f12ac6d3e94164ca6"
 
 [[package]]
-name = "jni"
-version = "0.21.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a87aa2bb7d2af34197c04845522473242e1aa17c12f4935d5856491a7fb8c97"
-dependencies = [
- "cesu8",
- "cfg-if",
- "combine",
- "jni-sys",
- "log",
- "thiserror",
- "walkdir",
- "windows-sys 0.45.0",
-]
-
-[[package]]
-name = "jni-sys"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8eaf4bc02d17cbdd7ff4c7438cafcdf7fb9a4613313ad11b4f8fefe7d3fa0130"
-
-[[package]]
 name = "js-sys"
 version = "0.3.63"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2671,7 +2643,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6971da4d9c3aa03c3d8f3ff0f4155b534aad021292003895a469716b2a230378"
 dependencies = [
  "base64 0.21.1",
- "pem",
+ "pem 1.1.1",
  "ring",
  "serde",
  "serde_json",
@@ -2755,7 +2727,7 @@ dependencies = [
  "jsonpath_lib",
  "k8s-openapi",
  "kube-core",
- "pem",
+ "pem 1.1.1",
  "pin-project",
  "rand",
  "rustls 0.21.1",
@@ -2925,15 +2897,6 @@ dependencies = [
  "cc",
  "libc",
  "pkg-config",
-]
-
-[[package]]
-name = "malloc_buf"
-version = "0.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62bb907fe88d54d8d9ce32a3cceab4218ed2f6b7d35617cafe9adf84e43919cb"
-dependencies = [
- "libc",
 ]
 
 [[package]]
@@ -3191,13 +3154,19 @@ dependencies = [
 name = "mirrord-auth"
 version = "3.44.1"
 dependencies = [
- "lazy_static",
- "rand",
- "reqwest",
+ "bcder",
+ "bytes",
+ "chrono",
+ "home",
+ "k8s-openapi",
+ "kube",
+ "pem 2.0.1",
+ "schemars",
  "serde",
- "serde_json",
+ "serde_yaml",
  "thiserror",
- "webbrowser",
+ "tokio",
+ "x509-certificate 0.19.0",
 ]
 
 [[package]]
@@ -3332,6 +3301,7 @@ version = "3.44.1"
 dependencies = [
  "actix-codec",
  "async-trait",
+ "base64 0.21.1",
  "bincode",
  "bytes",
  "chrono",
@@ -3339,6 +3309,7 @@ dependencies = [
  "http",
  "k8s-openapi",
  "kube",
+ "mirrord-auth",
  "mirrord-config",
  "mirrord-kube",
  "mirrord-progress",
@@ -3433,12 +3404,6 @@ name = "multimap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
-
-[[package]]
-name = "ndk-context"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
 
 [[package]]
 name = "nix"
@@ -3649,15 +3614,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "objc"
-version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "915b1b472bc21c53464d6c8461c9d3af805ba1ef837e1cac254428f4a77177b1"
-dependencies = [
- "malloc_buf",
-]
-
-[[package]]
 name = "object"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3824,6 +3780,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pem"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b13fe415cdf3c8e44518e18a7c95a13431d9bdf6d15367d82b23c377fdd441a"
+dependencies = [
+ "base64 0.21.1",
+ "serde",
+]
+
+[[package]]
 name = "pem-rfc7468"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3886,9 +3852,9 @@ version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eff33bdbdfc54cc98a2eca766ebdec3e1b8fb7387523d5c9c9a2891da856f719"
 dependencies = [
- "der",
+ "der 0.6.1",
  "pkcs8",
- "spki",
+ "spki 0.6.0",
  "zeroize",
 ]
 
@@ -3898,8 +3864,8 @@ version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9eca2c590a5f85da82668fa685c09ce2888b9430e83299debf1f34b65fd4a4ba"
 dependencies = [
- "der",
- "spki",
+ "der 0.6.1",
+ "spki 0.6.0",
 ]
 
 [[package]]
@@ -4284,12 +4250,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "raw-window-handle"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2ff9a1f06a88b01621b7ae906ef0211290d1c8a168a15542486a8f61c0833b9"
-
-[[package]]
 name = "rawsocket"
 version = "0.1.0"
 source = "git+https://github.com/metalbear-co/rawsocket.git#4d5a48f4e18e3b6c51ec50dae0ed19c79819e668"
@@ -4339,7 +4299,7 @@ version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffbe84efe2f38dea12e9bfc1f65377fdf03e53a18cb3b995faedf7934c7e785b"
 dependencies = [
- "pem",
+ "pem 1.1.1",
  "ring",
  "time 0.3.21",
  "x509-parser",
@@ -4486,7 +4446,7 @@ dependencies = [
  "pkcs1",
  "pkcs8",
  "rand_core 0.6.4",
- "signature",
+ "signature 1.6.4",
  "smallvec",
  "subtle",
  "zeroize",
@@ -4750,7 +4710,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3be24c1842290c45df0a7bf069e0c268a747ad05a192f2fd7dcfdbc1cba40928"
 dependencies = [
  "base16ct",
- "der",
+ "der 0.6.1",
  "generic-array",
  "pkcs8",
  "subtle",
@@ -5009,6 +4969,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "signature"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e1788eed21689f9cf370582dfc467ef36ed9c707f073528ddafa8d83e3b8500"
+
+[[package]]
 name = "simd-abstraction"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5132,7 +5098,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67cf02bbac7a337dc36e4f5a693db6c21e7863f45070f7064577eb4367a3212b"
 dependencies = [
  "base64ct",
- "der",
+ "der 0.6.1",
+]
+
+[[package]]
+name = "spki"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d1e996ef02c474957d681f1b05213dfb0abab947b446a62d37770b23500184a"
+dependencies = [
+ "base64ct",
+ "der 0.7.6",
 ]
 
 [[package]]
@@ -6117,23 +6093,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "webbrowser"
-version = "0.8.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd222aa310eb7532e3fd427a5d7db7e44bc0b0cf1c1e21139c345325511a85b6"
-dependencies = [
- "core-foundation",
- "home",
- "jni",
- "log",
- "ndk-context",
- "objc",
- "raw-window-handle",
- "url",
- "web-sys",
-]
-
-[[package]]
 name = "webpki"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6414,12 +6373,30 @@ dependencies = [
  "bcder",
  "bytes",
  "chrono",
- "der",
+ "der 0.6.1",
  "hex",
- "pem",
+ "pem 1.1.1",
  "ring",
- "signature",
- "spki",
+ "signature 1.6.4",
+ "spki 0.6.0",
+ "thiserror",
+]
+
+[[package]]
+name = "x509-certificate"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf14059fbc1dce14de1d08535c411ba0b18749c2550a12550300da90b7ba350b"
+dependencies = [
+ "bcder",
+ "bytes",
+ "chrono",
+ "der 0.7.6",
+ "hex",
+ "pem 1.1.1",
+ "ring",
+ "signature 2.1.0",
+ "spki 0.7.2",
  "thiserror",
 ]
 

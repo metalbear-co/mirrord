@@ -18,9 +18,11 @@ default = []
 license-fetch = ["dep:reqwest"]
 client = [
   "crd",
+  "dep:base64",
   "dep:bincode",
   "dep:http",
   "dep:futures",
+  "dep:mirrord-auth",
   "dep:mirrord-kube",
   "dep:mirrord-progress",
   "dep:mirrord-protocol",
@@ -39,6 +41,7 @@ setup = ["crd", "dep:rcgen", "dep:serde_yaml"]
 
 
 [dependencies]
+mirrord-auth = { path = "../auth", optional = true }
 mirrord-config = { path = "../config", optional = true }
 mirrord-kube = { path = "../kube", optional = true }
 mirrord-progress = { path = "../progress", optional = true }
@@ -46,6 +49,7 @@ mirrord-protocol = { path = "../protocol", optional = true }
 
 async-trait = "0.1"
 actix-codec = { workspace = true, optional = true }
+base64 = { version = "0.21", optional = true }
 bincode =  { version = "2.0.0-rc.2", features = ["serde"], optional = true }
 bytes = { workspace = true, optional = true }
 chrono = { version = "0.4", features = ["clock", "serde"] }

@@ -17,13 +17,18 @@ edition.workspace = true
 
 [features]
 default = []
-webbrowser = ["dep:rand", "dep:reqwest", "dep:webbrowser"]
 
 [dependencies]
-lazy_static = "1"
-rand = { version = "0.8", optional = true }
-reqwest = { workspace = true, features=["json", "rustls-tls"], default-features = false, optional = true }
-serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
-webbrowser = { version = "0.8", optional = true }
+bcder = "0.7"
+bytes = "1"
+chrono = "0.4"
+home = "0.5"
+pem = "2"
+k8s-openapi.workspace = true
+kube.workspace = true
+schemars = { version = "0.8", features = ["chrono"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+tokio = { workspace = true, features = ["fs"] }
+thiserror = "1"
+x509-certificate = "0.19"
