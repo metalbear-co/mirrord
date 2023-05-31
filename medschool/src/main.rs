@@ -11,6 +11,8 @@
 //! It'll look into `rust-project/src` and produce `rust-project/configuration.md`.
 
 #![feature(const_trait_impl)]
+#![deny(clippy::missing_docs_in_private_items)]
+#![deny(missing_docs)]
 use std::{
     collections::{BTreeSet, HashSet},
     fmt::Display,
@@ -25,13 +27,16 @@ use thiserror::Error;
 /// We just _eat_ some of these errors (turn them into `None`).
 #[derive(Debug, Error)]
 enum DocsError {
+    /// Error for glob iteration.
     #[error("Glob error {0}")]
     Glob(#[from] glob::GlobError),
 
-    #[error("Glob error {0}")]
+    /// Parsing glob pattern.
+    #[error("Glob pattern {0}")]
     Pattern(#[from] glob::PatternError),
 
-    #[error("Glob error {0}")]
+    /// IO issues we have when reading the source files or producing the `.md` file.
+    #[error("IO error {0}")]
     IO(#[from] std::io::Error),
 }
 
@@ -173,7 +178,7 @@ impl Hash for PartialField {
 impl Display for PartialType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Prevents crashing the tool if the type is not properly documented.
-        let docs = self.docs.last().cloned().unwrap_or_else(|| "".to_string());
+        let docs = self.docs.last().cloned().unwrap_or_default();
         f.write_str(&docs)?;
 
         let fields: String = self.fields.iter().map(|field| format!("{field}")).collect();
@@ -184,7 +189,7 @@ impl Display for PartialType {
 impl Display for PartialField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Prevents crashing the tool if the field is not properly documented.
-        let docs = self.docs.last().cloned().unwrap_or_else(|| "".to_string());
+        let docs = self.docs.last().cloned().unwrap_or_default();
         f.write_str(&docs)
     }
 }
@@ -299,7 +304,7 @@ fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
         // convert empty lines (spacer lines) into markdown newline, or add `\n` to end of lines,
         // making paragraphs
         .map(|doc| {
-            if doc.trim().len() == 0 {
+            if doc.trim().is_empty() {
                 "\n".to_string()
             } else {
                 format!("{}\n", doc)
@@ -327,7 +332,7 @@ fn main() -> Result<(), DocsError> {
                         let thing_docs_untreated = docs_from_attributes(item.attrs);
                         let is_internal = thing_docs_untreated
                             .iter()
-                            .any(|doc| doc.contains(&r"<!--${internal}-->"));
+                            .any(|doc| doc.contains(r"<!--${internal}-->"));
 
                         // We only care about types that have docs.
                         if !thing_docs_untreated.is_empty() && !is_internal {
@@ -353,7 +358,7 @@ fn main() -> Result<(), DocsError> {
                         let thing_docs_untreated = docs_from_attributes(item.attrs);
                         let is_internal = thing_docs_untreated
                             .iter()
-                            .any(|doc| doc.contains(&r"<!--${internal}-->"));
+                            .any(|doc| doc.contains(r"<!--${internal}-->"));
 
                         let public_fields = fields
                             .into_iter()
@@ -396,7 +401,7 @@ fn main() -> Result<(), DocsError> {
             if !type_
                 .fields
                 .iter()
-                .any(|f| type_docs.iter().find(|t| t.ident == f.ty).is_some())
+                .any(|f| type_docs.iter().any(|t| t.ident == f.ty))
             {
                 break;
             }
