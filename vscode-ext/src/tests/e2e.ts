@@ -48,13 +48,17 @@ describe("mirrord sample flow test", function () {
         }
     });
 
-    it("enable mirrord", async function () {
-        statusBar = new StatusBar();
+    it("enable mirrord", async function () {        
+        statusBar = await new StatusBar().wait(5000);
         const enableButton = await statusBar.getItem("Enable mirrord");
+        await browser.driver.wait(async () => {
+            return await enableButton?.isDisplayed();
+        });
         expect(enableButton).to.not.be.undefined;
         await enableButton?.click();
-        await sleep(2000);
-        assert(await enableButton?.getText() === "Disable mirrord", "`Disable mirrord` button not found");
+        await browser.driver.wait(async () => {
+            await enableButton?.getText() === "Disable mirrord"
+        }, 2000, "Mirrord not enabled -- timed out");
     });
 
     it("create mirrord config", async function () {
