@@ -210,27 +210,25 @@ fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> 
 
     // keep digging into the `PathArguments`
     loop {
-        match &current_argument {
+        while let syn::PathArguments::AngleBracketed(generics) = &current_argument {
             // go directly to the last piece of generics, skipping lifetimes
-            syn::PathArguments::AngleBracketed(generics) => match generics.args.last()? {
+            match generics.args.last()? {
                 // finally have something that resembles a type, but might be an `Option`, so
                 // we have to go deeper!
-                syn::GenericArgument::Type(t) => match t {
+                syn::GenericArgument::Type(Type::Path(generic_path)) => {
                     // that's it, we've reached the final type
-                    Type::Path(generic_path) => {
-                        inner_type = match generic_path.path.segments.last() {
-                            Some(t) => Some(t.ident.clone()),
-                            None => break,
-                        };
+                    inner_type = match generic_path.path.segments.last() {
+                        Some(t) => Some(t.ident.clone()),
+                        None => break,
+                    };
 
-                        current_argument = generic_path.path.segments.last()?.arguments.clone();
-                    }
-                    _ => break,
-                },
+                    current_argument = generic_path.path.segments.last()?.arguments.clone();
+                }
                 _ => break,
-            },
-            _ => break,
+            }
         }
+
+        break;
     }
 
     inner_type
@@ -239,11 +237,16 @@ fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> 
 /// Glues all the `Vec<String>` docs into one big `String`.
 ///
 /// It can also be used to filter out docs with meta comments, such as `${internal}`.
-fn pretty_docs(docs: Vec<String>) -> String {
-    for doc in docs.iter() {
+fn pretty_docs(mut docs: Vec<String>) -> String {
+    for doc in docs.iter_mut() {
         // removes docs that we don't want in `configuration.md`
         if doc.contains(r"<!--${internal}-->") {
             return "".to_string();
+        }
+
+        // `trim` is too aggressive, we just want to remove 1 whitespace
+        if doc.starts_with(' ') {
+            doc.remove(0);
         }
     }
 
