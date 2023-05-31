@@ -14,7 +14,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 use crate::{
     error::Result,
@@ -99,6 +99,10 @@ async fn layer_recv(
             connection_id,
             bytes,
         }) => {
+            debug!(
+                "connection_id {connection_id:?}, bytes_len {:?}",
+                bytes.len()
+            );
             let daemon_write = match writers
                 .get_mut(&connection_id)
                 .ok_or(ResponseError::NotFound(connection_id))
@@ -182,7 +186,7 @@ impl TcpOutgoingApi {
                 // Read the data from one of the connected remote hosts, and forward the result back
                 // to the `user`.
                 Some((connection_id, remote_read)) = readers.next() => {
-                    trace!("interceptor_task -> read connection_id {:#?}", connection_id);
+                    debug!("interceptor_task -> read connection_id {:#?}", connection_id);
 
                     match remote_read {
                         Some(read) => {
@@ -194,7 +198,7 @@ impl TcpOutgoingApi {
                             daemon_tx.send(daemon_message).await?
                         }
                         None => {
-                            trace!("interceptor_task -> close connection {:#?}", connection_id);
+                            debug!("interceptor_task -> close connection {:#?}", connection_id);
                             writers.remove(&connection_id);
 
                             let daemon_message = DaemonTcpOutgoing::Close(connection_id);

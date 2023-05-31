@@ -414,11 +414,7 @@ impl TcpOutgoingHandler {
                         // sockets.
                         debug!("Read error: {:?}", e);
                         warn!("Read error: {:?}", e);
-                        self.mirrors = self
-                            .mirrors
-                            .drain()
-                            .filter(|(_k, v)| !v.is_closed())
-                            .collect();
+                        self.mirrors.retain(|_k, v| !v.is_closed());
                     }
                 }
                 Ok(())
