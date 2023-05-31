@@ -342,11 +342,14 @@ fn main() -> Result<(), DocsError> {
                         })
                     }
                     syn::Item::Struct(item) => {
-                        let fields = item
+                        let mut fields = item
                             .fields
                             .into_iter()
                             .filter_map(PartialField::new)
-                            .collect::<HashSet<_>>();
+                            .collect::<HashSet<_>>()
+                            .into_iter()
+                            .collect::<Vec<_>>();
+                        fields.sort();
 
                         let thing_docs_untreated = docs_from_attributes(item.attrs);
 
@@ -354,16 +357,11 @@ fn main() -> Result<(), DocsError> {
                         (!thing_docs_untreated.is_empty()).then_some(PartialType {
                             ident: item.ident.to_string(),
                             docs: thing_docs_untreated,
-                            fields: Vec::from_iter(fields.into_iter()),
-                            // fields,
+                            fields,
                         })
                     }
-                    _ => {
-                        // println!("other item");
-                        None
-                    }
+                    _ => None,
                 })
-            // use the `PartialType::ident` as a key
         })
         .collect::<BTreeSet<_>>();
 
@@ -371,7 +369,6 @@ fn main() -> Result<(), DocsError> {
 
     let mut new_types = Vec::with_capacity(8);
     for type_ in type_docs.iter() {
-        // let mut new_fields = Vec::with_capacity(8);
         let mut new_fields = Vec::with_capacity(8);
         let mut current_fields_iter = type_.fields.iter();
 
@@ -400,7 +397,6 @@ fn main() -> Result<(), DocsError> {
                 println!("new_field {new_field:?}");
 
                 new_fields.push(new_field);
-                // new_fields.insert(new_field);
             } else if let Some(previous_iter) = previous_position.pop() {
                 println!("previous {previous_iter:?} \ncurrent {current_fields_iter:?}");
                 current_fields_iter = previous_iter;
@@ -416,9 +412,6 @@ fn main() -> Result<(), DocsError> {
         };
         new_types.push(new_type);
     }
-
-    // let the_mega_type = flatten(type_docs.clone());
-    // println!("mehul's type \n{the_mega_type:#?}");
 
     println!("new_types \n{new_types:#?}");
 
