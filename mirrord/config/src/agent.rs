@@ -5,7 +5,6 @@ use schemars::JsonSchema;
 
 use crate::config::source::MirrordConfigSource;
 
-///
 /// Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.
 ///
 /// We provide sane defaults for this option, so you don't have to set up anything here.
