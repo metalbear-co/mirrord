@@ -8,6 +8,71 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.44.1](https://github.com/metalbear-co/mirrord/tree/3.44.1) - 2023-05-26
+
+
+### Changed
+
+- Never importing `RUST_LOG` environment variable from the cluster, regardless
+  of configuration.
+
+
+### Fixed
+
+- Provide helpful error messages on errors in IDEs.
+  [#1392](https://github.com/metalbear-co/mirrord/issues/1392)
+- Log level control when running targetless.
+  [#1446](https://github.com/metalbear-co/mirrord/issues/1446)
+- Change to sticky balloon on warnings in intelliJ
+  [#1456](https://github.com/metalbear-co/mirrord/issues/1456)
+- Setting the namespace via the configuration was not possible in the IDE
+  without also setting a target in the configuration file.
+  [#1461](https://github.com/metalbear-co/mirrord/issues/1461)
+- fixed IntelliJ failing silently when error happened on listing pods
+
+
+### Internal
+
+- Fix the test of reading from the SIP patch dir, that was not testing
+  anything.
+- Make the path field of `TargetConfig` an `Option`.
+
+
+## [3.44.0](https://github.com/metalbear-co/mirrord/tree/3.44.0) - 2023-05-24
+
+
+### Added
+
+- Changed agent's pause feature. Now the pause is requested dynamically by CLI
+  during setup and the agent keeps the target container paused until exit or
+  the unpause request was received.
+  [#1408](https://github.com/metalbear-co/mirrord/issues/1408)
+- Added support for NPM run configuration on JetBrains products.
+  [#1418](https://github.com/metalbear-co/mirrord/issues/1418)
+
+
+### Changed
+
+- Change mirrord ls to show only pods that are in running state (not
+  crashing,starting,etc)
+  [#1436](https://github.com/metalbear-co/mirrord/issues/1436)
+- Change fs mode to be local with overrides when targetless is used
+- Make progress text consitently lowercase.
+
+
+### Fixed
+
+- Fix misalignment on IntelliJ not accepting complex path in target
+  [#1441](https://github.com/metalbear-co/mirrord/issues/1441)
+- Add impersonate permissions for GCP specific RBAC in operator
+
+
+### Internal
+
+- Fix node spawn test flakiness on macOS
+  [#1431](https://github.com/metalbear-co/mirrord/issues/1431)
+
+
 ## [3.43.0](https://github.com/metalbear-co/mirrord/tree/3.43.0) - 2023-05-22
 
 

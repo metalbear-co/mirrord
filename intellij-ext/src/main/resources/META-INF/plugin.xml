@@ -18,6 +18,8 @@
     <extensions defaultExtensionNs="com.intellij">
         <notificationGroup id="mirrord Notification Handler"
                            displayType="BALLOON"/>
+        <notificationGroup id="mirrord Warning Notification Handler"
+                           displayType="STICKY_BALLOON"/>
     </extensions>
     <extensions defaultExtensionNs="com.intellij">
         <applicationService

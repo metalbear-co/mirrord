@@ -1,6 +1,6 @@
 #![feature(const_trait_impl)]
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashSet},
     fmt::Display,
     fs::{self, File},
     hash::Hash,
@@ -14,7 +14,6 @@ use thiserror::Error;
 struct PartialType {
     ident: String,
     docs: Vec<String>,
-    // fields: HashSet<PartialField>,
     fields: Vec<PartialField>,
 }
 
@@ -72,7 +71,6 @@ impl PartialEq for PartialType {
 
 impl PartialEq for PartialField {
     fn eq(&self, other: &Self) -> bool {
-        // self.ident.eq(&other.ident) && self.ty.eq(&other.ty)
         self.ty.eq(&other.ty)
     }
 }
@@ -93,18 +91,6 @@ impl Hash for PartialField {
     }
 }
 
-impl std::borrow::Borrow<String> for PartialType {
-    fn borrow(&self) -> &String {
-        &self.ident
-    }
-}
-
-// impl std::borrow::Borrow<String> for PartialField {
-//     fn borrow(&self) -> &String {
-//         &self.ty
-//     }
-// }
-
 impl Display for PartialType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let docs = self.docs.last().cloned().unwrap_or_else(|| "".to_string());
@@ -123,8 +109,6 @@ impl Display for PartialField {
 }
 
 fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> {
-    // println!("Trying to delve into generics {type_path:#?}");
-
     let span = type_path.span();
     let mut ignore_idents = HashSet::with_capacity(32);
     ignore_idents.insert(Ident::new("Option", span));
@@ -149,7 +133,6 @@ fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> 
                             Some(t) => Some(t.ident.clone()),
                             None => break,
                         };
-                        // println!("inner {inner_type:#?}");
 
                         current_argument = generic_path.path.segments.last()?.arguments.clone();
                     }
@@ -268,58 +251,7 @@ fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
         .collect()
 }
 
-/*
-fn flatten(list: BTreeSet<PartialType>) -> PartialType {
-    let mut list_iter = list.into_iter();
-    let root = list_iter.next().unwrap();
-
-    PartialType {
-        ident: root.ident.clone(),
-        docs: root.docs.clone(),
-        fields: expand(&mut list_iter, root.clone()),
-    }
-}
-
-fn expand(
-    all_types: &mut std::collections::btree_set::IntoIter<PartialType>,
-    type_: PartialType,
-) -> HashSet<PartialField> {
-    let fields = type_.fields;
-    let mut expanded_fields = HashSet::new();
-
-    for field in fields.iter() {
-        if let Some(child) = all_types.find(|type_| type_.ident == field.ty) {
-            expanded_fields.extend(expand(all_types, child.clone()));
-        } else {
-            let new_field = PartialField {
-                ident: field.ident.clone(),
-                ty: field.ty.clone(),
-                docs: [field.docs.clone(), type_.docs.clone()].concat(),
-            };
-            expanded_fields.insert(new_field);
-        }
-    }
-
-    expanded_fields
-}
-*/
-
 fn main() -> Result<(), DocsError> {
-    // TODO(alex) [high] 2023-05-22: The plan is:
-    //
-    // 1. make a `HashMap<Type, (Field { type, docs }, Docs)>` with all the types;
-    //
-    // Start by making a map of all the types and their docs, we need to include the fields with
-    // their types as well, in order to inline the field-type docs later on.
-    //
-    // 2. search through each Type and check if their Fields belong to another Type;
-    //
-    // This is the pre-inline process, where we look if the Field { type } belongs in another Type.
-    //
-    // 3. insert the Field { docs } in the outer Type Docs;
-    //
-    // Now we inline the docs of Field { docs } in the outer Type Docs.
-
     let type_docs = parse_files()?
         .into_iter()
         // go through each `File` extracting the types into a map keyed by the type `Ident`
@@ -390,7 +322,6 @@ fn main() -> Result<(), DocsError> {
         .collect::<BTreeSet<_>>();
 
     fs::write("./type_docs.md", format!("{type_docs:#?}")).unwrap();
-    // println!("types {type_docs:#?}\n");
 
     let mut new_types = Vec::with_capacity(8);
     for type_ in type_docs.iter() {
@@ -416,8 +347,6 @@ fn main() -> Result<(), DocsError> {
                     previous_position.push(current_fields_iter.clone());
                     current_fields_iter = child_type.fields.iter();
 
-                    println!("field {field:?} | child_type {child_type:?}");
-
                     PartialField {
                         ident: field.ident.clone(),
                         ty: field.ty.clone(),
@@ -427,11 +356,8 @@ fn main() -> Result<(), DocsError> {
                     field.clone()
                 };
 
-                println!("new_field {new_field:?}");
-
                 new_fields.push(new_field);
             } else if let Some(previous_iter) = previous_position.pop() {
-                println!("previous {previous_iter:?} \ncurrent {current_fields_iter:?}");
                 current_fields_iter = previous_iter;
             } else {
                 break;
@@ -446,14 +372,7 @@ fn main() -> Result<(), DocsError> {
         new_types.push(new_type);
     }
 
-    new_types
-        .iter()
-        .enumerate()
-        .for_each(|(i, t)| println!("new_type {i:#?} {t}"));
-    // println!("new_types \n{new_types:#?}");
-
     let the_mega_type = new_types.first().unwrap().clone();
-    // println!("the_mega_type {the_mega_type:#?}");
 
     let type_docs = pretty_docs(the_mega_type.docs);
     let final_docs = [
@@ -467,13 +386,14 @@ fn main() -> Result<(), DocsError> {
     ]
     .concat();
 
-    println!("final docs \n{final_docs:#?}\n");
-
     fs::write("./configuration.md", final_docs).unwrap();
 
     Ok(())
 }
 
+// TODO(alex): Leaving this here as it can be useful for writing tests (and just verifying the
+// tool in general).
+/*
 /// B - 1 line
 ///
 /// B - 2 line
@@ -485,8 +405,6 @@ struct B {
 
     /// ### B - c
     c: C,
-    // ### B - f
-    // f: F,
 }
 
 /// E - 1 line
@@ -515,22 +433,11 @@ struct A {
 
     /// ## A - d
     d: D,
-    // TODO(alex) [high] 2023-05-26: We're losing generic types, that's why some types end up
-    // in places where they shouldn't be (they're not being inlined, as they don't belong to any
-    // outer type).
+
     /// ## A - e
     e: Option<E>,
 }
 
-// F - 1 line
-//
-// F - 2 line
-// struct F {
-// ### F - k
-//
-// F - k field
-// k: i32,
-// }
 
 /// C - 1 line
 ///
@@ -554,3 +461,4 @@ struct D {
     /// D - z field
     z: i32,
 }
+*/

@@ -53,6 +53,7 @@ use crate::{
 /// {
 ///   "accept_invalid_certificates": false,
 ///   "skip_processes": "ide-debugger",
+///   "pause": false,
 ///   "target": {
 ///     "path": "pod/bear-pod",
 ///     "namespace": "default"
@@ -69,7 +70,6 @@ use crate::{
 ///     "communication_timeout": 30,
 ///     "startup_timeout": 360,
 ///     "network_interface": "eth0",
-///     "pause": false,
 ///     "flush_connections": true
 ///   },
 ///   "feature": {
@@ -145,7 +145,6 @@ pub struct LayerConfig {
     pub skip_processes: Option<VecOrSingle<String>>,
 
     /// ## pause {#root-pause}
-    ///
     /// Controls target pause feature. Unstable.
     ///
     /// With this feature enabled, the remote container is paused while this layer is connected to
@@ -240,7 +239,7 @@ pub struct LayerConfig {
 
     /// ## target {#root-target}
     #[config(nested)]
-    pub target: Option<TargetConfig>,
+    pub target: TargetConfig,
 
     /// ## agent {#root-agent}
     #[config(nested)]

@@ -263,10 +263,13 @@ impl From<HookError> for i64 {
                     mirrord_protocol::RemoteError::ConnectTimedOut(_) => libc::ENETUNREACH,
                     _ => libc::EINVAL,
                 },
-                ResponseError::DnsLookup(dns_fail) => match dns_fail.kind {
-                    mirrord_protocol::ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
-                    _ => libc::EAI_FAIL,
-                },
+                ResponseError::DnsLookup(dns_fail) => {
+                    return match dns_fail.kind {
+                        mirrord_protocol::ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
+                        _ => libc::EAI_FAIL,
+                        // TODO: Add more error kinds, next time we break protocol compatibility.
+                    } as _;
+                }
                 // for listen, EINVAL means "socket is already connected."
                 // Will not happen, because this ResponseError is not return from any hook, so it
                 // never appears as HookError::ResponseError(PortAlreadyStolen(_)).

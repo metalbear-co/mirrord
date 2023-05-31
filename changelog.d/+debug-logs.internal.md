@@ -1,0 +1,1 @@
+Change CI log level to be debug instead of trace

@@ -359,7 +359,7 @@ impl OperatorRole {
                     ..Default::default()
                 },
                 PolicyRule {
-                    api_groups: Some(vec!["".to_owned()]),
+                    api_groups: Some(vec!["".to_owned(), "authentication.k8s.io".to_owned()]),
                     resources: Some(vec![
                         "groups".to_owned(),
                         "users".to_owned(),
@@ -367,6 +367,8 @@ impl OperatorRole {
                         "userextras/arn".to_owned(),
                         "userextras/canonicalarn".to_owned(),
                         "userextras/sessionname".to_owned(),
+                        "userextras/iam.gke.io/user-assertion".to_owned(),
+                        "userextras/user-assertion.cloud.google.com".to_owned(),
                     ]),
                     verbs: vec!["impersonate".to_owned()],
                     ..Default::default()
