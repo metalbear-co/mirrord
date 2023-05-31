@@ -301,11 +301,11 @@ mod tests {
     #[case(FsModeConfig::LocalWithOverrides, "/pain/write.a", true, true)]
     #[case(FsModeConfig::LocalWithOverrides, "/pain/local/test.a", true, true)]
     #[case(FsModeConfig::LocalWithOverrides, "/opt/test.a", true, true)]
-    #[case(FsModeConfig::Read, "/Users/a/.aws/cli/cache/121.json", true, true)]
-    #[case(FsModeConfig::Write, "/Users/a/.aws/cli/cache/121.json", true, true)]
+    #[case(FsModeConfig::Read, "/usr/a/.aws/cli/cache/121.json", true, true)]
+    #[case(FsModeConfig::Write, "/usr/a/.aws/cli/cache/121.json", true, true)]
     #[case(
         FsModeConfig::LocalWithOverrides,
-        "/Users/a/.aws/cli/cache/121.json",
+        "/usr/a/.aws/cli/cache/121.json",
         true,
         true
     )]
@@ -352,19 +352,19 @@ mod tests {
     }
 
     #[rstest]
-    #[case(FsModeConfig::Read, "/Users/a/.aws/cli/cache/121.json", true, true)]
-    #[case(FsModeConfig::Write, "/Users/a/.aws/cli/cache/121.json", true, true)]
+    #[case(FsModeConfig::Read, "/usr/a/.aws/cli/cache/121.json", true, true)]
+    #[case(FsModeConfig::Write, "/usr/a/.aws/cli/cache/121.json", true, true)]
     #[case(
         FsModeConfig::LocalWithOverrides,
-        "/Users/a/.aws/cli/cache/121.json",
+        "/usr/a/.aws/cli/cache/121.json",
         true,
         true
     )]
-    #[case(FsModeConfig::Read, "/Users/a/.aws/cli/cache/121.json", false, false)]
-    #[case(FsModeConfig::Write, "/Users/a/.aws/cli/cache/121.json", false, false)]
+    #[case(FsModeConfig::Read, "/usr/a/.aws/cli/cache/121.json", false, false)]
+    #[case(FsModeConfig::Write, "/usr/a/.aws/cli/cache/121.json", false, false)]
     #[case(
         FsModeConfig::LocalWithOverrides,
-        "/Users/a/.aws/cli/cache/1241.json",
+        "/usr/a/.aws/cli/cache/1241.json",
         false,
         false
     )]
