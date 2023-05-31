@@ -43,10 +43,9 @@ mod main {
 
     /// Get the `PathBuf` of the `mirrord-bin` dir, and return a `String` prefix to remove, without
     /// a trailing `/`, so that the stripped path starts with a `/`
-    fn get_temp_bin_str_prefix(path_buf: &PathBuf) -> String {
+    fn get_temp_bin_str_prefix(path: &Path) -> String {
         // lossy: we assume our temp dir path does not contain non-unicode chars.
-        path_buf
-            .to_string_lossy()
+        path.to_string_lossy()
             .to_string()
             .trim_end_matches('/')
             .to_string()
@@ -62,7 +61,7 @@ mod main {
         MIRRORD_TEMP_BIN_DIR_PATH_BUF
             // Resolve symbolic links! (specifically /var -> private/var).
             .canonicalize()
-            .as_ref()
+            .as_deref()
             .map(get_temp_bin_str_prefix)
             // If canonicalization fails, we use the uncanonicalized path string.
             .unwrap_or(MIRRORD_TEMP_BIN_DIR_STRING.to_string())
@@ -430,7 +429,7 @@ mod main {
 
         // Strip root path from binary path, as when joined it will clear the previous.
         let output = MIRRORD_TEMP_BIN_DIR_PATH_BUF.join(
-            path.strip_prefix("/").unwrap_or(&path), // No prefix - no problem.
+            path.strip_prefix("/").unwrap_or(path), // No prefix - no problem.
         );
 
         // A string of the path of new created file to run instead of the SIPed file.
