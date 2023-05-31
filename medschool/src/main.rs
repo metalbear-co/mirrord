@@ -2,7 +2,7 @@
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt::Display,
-    fs::{write, File},
+    fs::{self, File},
     hash::Hash,
     io::Read,
 };
@@ -50,7 +50,7 @@ impl Ord for PartialType {
 
 impl Ord for PartialField {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.ty.cmp(&other.ty)
+        self.ty.len().cmp(&other.ty.len())
     }
 }
 
@@ -335,11 +335,12 @@ fn main() -> Result<(), DocsError> {
                     }
                     syn::Item::Enum(item) => {
                         let thing_docs_untreated = docs_from_attributes(item.attrs);
+                        let is_internal = thing_docs_untreated
+                            .iter()
+                            .any(|doc| doc.contains(&r"<!--${internal}-->"));
 
                         // We only care about types that have docs.
-                        if !thing_docs_untreated.is_empty()
-                            && !thing_docs_untreated.contains(&r"<!--${internal}-->".into())
-                        {
+                        if !thing_docs_untreated.is_empty() && !is_internal {
                             Some(PartialType {
                                 ident: item.ident.to_string(),
                                 docs: thing_docs_untreated,
@@ -360,6 +361,9 @@ fn main() -> Result<(), DocsError> {
                         fields.sort();
 
                         let thing_docs_untreated = docs_from_attributes(item.attrs);
+                        let is_internal = thing_docs_untreated
+                            .iter()
+                            .any(|doc| doc.contains(&r"<!--${internal}-->"));
 
                         let public_fields = fields
                             .into_iter()
@@ -369,7 +373,7 @@ fn main() -> Result<(), DocsError> {
                         // We only care about types that have docs.
                         if !thing_docs_untreated.is_empty()
                             && !public_fields.is_empty()
-                            && !thing_docs_untreated.contains(&r"<!--${internal}-->".into())
+                            && !is_internal
                         {
                             Some(PartialType {
                                 ident: item.ident.to_string(),
@@ -385,6 +389,7 @@ fn main() -> Result<(), DocsError> {
         })
         .collect::<BTreeSet<_>>();
 
+    fs::write("./type_docs.md", format!("{type_docs:#?}")).unwrap();
     // println!("types {type_docs:#?}\n");
 
     let mut new_types = Vec::with_capacity(8);
@@ -464,7 +469,7 @@ fn main() -> Result<(), DocsError> {
 
     println!("final docs \n{final_docs:#?}\n");
 
-    write("./configuration.md", final_docs).unwrap();
+    fs::write("./configuration.md", final_docs).unwrap();
 
     Ok(())
 }

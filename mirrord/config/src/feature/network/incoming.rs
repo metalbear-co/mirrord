@@ -255,7 +255,7 @@ pub struct IncomingConfig {
     pub mode: IncomingMode,
 
     /// #### feature.network.incoming.filter {#feature-network-incoming-filter}
-    pub http_header_filter: http_filter::HttpHeaderFilterConfig,
+    pub http_header_filter: HttpHeaderFilterConfig,
 }
 
 impl IncomingConfig {
@@ -286,14 +286,14 @@ impl IncomingConfig {
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum IncomingMode {
-    /// <!--{internal}-->
+    /// <!--${internal}-->
     /// ### mirror
     ///
     /// Sniffs on TCP port, and send a copy of the data to listeners.
     #[default]
     Mirror,
 
-    /// <!--{internal}-->
+    /// <!--${internal}-->
     /// ### steal
     ///
     /// Stealer supports 2 modes of operation:

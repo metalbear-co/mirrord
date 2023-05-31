@@ -48,14 +48,11 @@ pub struct NetworkConfig {
     #[config(toggleable, nested)]
     pub incoming: IncomingConfig,
 
-    /// ### outgoing
-    ///
-    /// Tunnel outgoing network operations through mirrord, see [`outgoing`](##outgoing) for
-    /// more details.
+    /// ### feature.network.outgoing {#feature-network-outgoing}
     #[config(toggleable, nested)]
     pub outgoing: OutgoingConfig,
 
-    /// ### dns
+    /// ### feature.network.dns {#feature-network-dns}
     ///
     /// Resolve DNS via the remote pod.
     ///

@@ -29,7 +29,7 @@ use crate::{
 #[config(map_to = "HttpHeaderFilterFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct HttpHeaderFilterConfig {
-    /// ##### feature.network.incoming..http_header_filter.filter {#feature-network-incoming-http_header_filter-filter}
+    /// ##### feature.network.incoming.http_header_filter.filter {#feature-network-incoming-http_header_filter-filter}
     ///
     /// Used to match against the requests captured by the mirrord-agent pod.
     ///
@@ -41,7 +41,7 @@ pub struct HttpHeaderFilterConfig {
     #[config(env = "MIRRORD_HTTP_HEADER_FILTER")]
     pub filter: Option<String>,
 
-    /// ##### feature.network.incoming..http_header_filter.ports {#feature-network-incoming-http_header_filter-ports}
+    /// ##### feature.network.incoming.http_header_filter.ports {#feature-network-incoming-http_header_filter-ports}
     ///
     /// Activate the HTTP traffic filter only for these ports.
     ///
@@ -55,8 +55,6 @@ pub struct HttpHeaderFilterConfig {
 /// Helper struct for setting up ports configuration (part of the HTTP traffic stealer feature).
 ///
 /// Defaults to a list of ports `[80, 8080]`.
-///
-/// ## Internal
 ///
 /// We use this to allow implementing a custom [`Default`] initialization, as the [`MirrordConfig`]
 /// macro (currently) doesn't support more intricate expressions.

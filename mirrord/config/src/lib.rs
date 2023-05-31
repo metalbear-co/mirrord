@@ -167,7 +167,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_CONNECT_TCP")]
     pub connect_tcp: Option<String>,
 
-    /// <!--{internal}-->
+    /// <!--${internal}-->
     ///
     /// ## connect_agent_name {#root-connect_agent_name}
     ///
@@ -186,7 +186,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_CONNECT_AGENT")]
     pub connect_agent_name: Option<String>,
 
-    /// <!--{internal}-->
+    /// <!--${internal}-->
     ///
     /// ## connect_agent_port {#root-connect_agent_port}
     ///
