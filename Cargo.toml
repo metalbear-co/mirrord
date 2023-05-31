@@ -61,6 +61,7 @@ bimap = "0.6.2"
 socket2 = { git = "https://github.com/t4lz/socket2", branch = "unix-sockets", features = ["all"]}
 which = "4"
 semver = "1"
+tempfile = "3"
 
 
 [patch.crates-io]
