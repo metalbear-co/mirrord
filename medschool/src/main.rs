@@ -38,6 +38,10 @@ enum DocsError {
     /// IO issues we have when reading the source files or producing the `.md` file.
     #[error("IO error {0}")]
     IO(#[from] std::io::Error),
+
+    /// May happen (probably never) when [`parse_files`] is reading the source file into a `&str`.
+    #[error("Read past end of source!")]
+    ReadOutOfBounds,
 }
 
 /// We're extracting [`syn::Item`] structs and enums into this type.
@@ -209,26 +213,22 @@ fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> 
     let mut inner_type = None;
 
     // keep digging into the `PathArguments`
-    loop {
-        while let syn::PathArguments::AngleBracketed(generics) = &current_argument {
-            // go directly to the last piece of generics, skipping lifetimes
-            match generics.args.last()? {
-                // finally have something that resembles a type, but might be an `Option`, so
-                // we have to go deeper!
-                syn::GenericArgument::Type(Type::Path(generic_path)) => {
-                    // that's it, we've reached the final type
-                    inner_type = match generic_path.path.segments.last() {
-                        Some(t) => Some(t.ident.clone()),
-                        None => break,
-                    };
+    while let syn::PathArguments::AngleBracketed(generics) = &current_argument {
+        // go directly to the last piece of generics, skipping lifetimes
+        match generics.args.last()? {
+            // finally have something that resembles a type, but might be an `Option`, so
+            // we have to go deeper!
+            syn::GenericArgument::Type(Type::Path(generic_path)) => {
+                // that's it, we've reached the final type
+                inner_type = match generic_path.path.segments.last() {
+                    Some(t) => Some(t.ident.clone()),
+                    None => break,
+                };
 
-                    current_argument = generic_path.path.segments.last()?.arguments.clone();
-                }
-                _ => break,
+                current_argument = generic_path.path.segments.last()?.arguments.clone();
             }
+            _ => break,
         }
-
-        break;
     }
 
     inner_type
@@ -268,7 +268,11 @@ fn parse_files() -> Result<Vec<syn::File>, DocsError> {
         .map(|mut file| {
             let mut source = String::with_capacity(30 * 1024);
             let read_amount = file.read_to_string(&mut source)?;
-            Ok::<_, DocsError>(String::from(&source[..read_amount]))
+            let file_read = source
+                .get(..read_amount)
+                .ok_or(DocsError::ReadOutOfBounds)?;
+
+            Ok::<_, DocsError>(String::from(file_read))
         })
         .filter_map(Result::ok)
         .map(|raw_contents| syn::parse_file(&raw_contents))
