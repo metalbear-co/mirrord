@@ -140,7 +140,7 @@ unsafe fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
 /// Close the remote file if the call to [`libc::shm_open`] failed and we have an invalid local fd.
 #[tracing::instrument(level = "error")]
 fn close_remote_file_on_failure(fd: u64) -> Result<()> {
-    error!("Call to `libc::shm_open` resulted in an error, closing the file remotely!");
+    error!("Creating a temporary local file resulted in an error, closing the file remotely!");
     RemoteFile::remote_close(fd)
 }
 
