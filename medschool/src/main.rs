@@ -1,3 +1,15 @@
+//! `medschool` will extract the docs from the current directory, and build a nice
+//! `configuration.md` file.
+//!
+//! To use it simply run `medschool` on the directory you want to get docs from, for example:
+//!
+//! ```sh
+//! cd rust-project
+//! medschool
+//! ```
+//!
+//! It'll look into `rust-project/src` and produce `rust-project/configuration.md`.
+
 #![feature(const_trait_impl)]
 use std::{
     collections::{BTreeSet, HashSet},
@@ -7,21 +19,87 @@ use std::{
     io::Read,
 };
 
-use syn::{spanned::Spanned, Attribute, Expr, Ident, Type, TypePath};
+use syn::{Attribute, Expr, Ident, Type, TypePath};
 use thiserror::Error;
 
+/// We just _eat_ some of these errors (turn them into `None`).
+#[derive(Debug, Error)]
+enum DocsError {
+    #[error("Glob error {0}")]
+    Glob(#[from] glob::GlobError),
+
+    #[error("Glob error {0}")]
+    Pattern(#[from] glob::PatternError),
+
+    #[error("Glob error {0}")]
+    IO(#[from] std::io::Error),
+}
+
+/// We're extracting [`syn::Item`] structs and enums into this type.
+///
+/// Implements [`Ord`] by checking if any of its `PartialType::fields` belongs to another type that
+/// we have declared.
 #[derive(Debug, Default, Clone)]
 struct PartialType {
+    /// Only interested in the type name, e.g. `struct {Foo}`.
     ident: String,
+
+    /// The docs of the item, they come in as a bunch of strings from `syn`, and we just hold them
+    /// as they come.
     docs: Vec<String>,
+
+    /// Only useful when [`syn::ItemStruct`], we don't look into variants of enums.
     fields: Vec<PartialField>,
 }
 
+/// The fields when the item we're looking is [`syn::ItemStruct`].
+///
+/// Implements [`Ord`] by `PartialField::ty.len()`, thus making primitive types < custom types
+/// (usually).
 #[derive(Debug, Clone)]
 struct PartialField {
+    /// The name of the field, e.g. `{foo}: String`.
     ident: String,
+
+    /// The type of the field, e.g. `foo: {String}`.
+    ///
+    /// When we encounter generics, such as `foo: Option<String>`, we dig into the generics to get
+    /// the last [`syn::PathSegment`].
+    ///
+    /// Keep in mind that the handling for this is very crude, so if you have a field with anything
+    /// fancier than just the `foo` example (such as `foo: bar::String`), the assumptions break.
     ty: String,
+
+    /// The docs of the field, they come in as a bunch of strings from `syn`, and we just hold them
+    /// as they come.
+    ///
+    /// These docs will be merged with the type docs of this field's type, if it is a sub-type of
+    /// any type that we declared.
     docs: Vec<String>,
+}
+
+impl PartialField {
+    /// Converts a [`syn::Field`] into [`PartialField`], using
+    /// [`get_ident_from_field_skipping_generics`] to get the field type.
+    fn new(field: syn::Field) -> Option<Self> {
+        let type_ident = match field.ty {
+            Type::Path(type_path) => {
+                // `get_ident` returns `Some` if the `path` doesn't contain generics.
+                type_path
+                    .path
+                    .get_ident()
+                    .cloned()
+                    .or_else(|| get_ident_from_field_skipping_generics(type_path))
+            }
+            _ => None,
+        }?;
+
+        Some(Self {
+            ident: field.ident?.to_string(),
+            ty: type_ident.to_string(),
+            docs: docs_from_attributes(field.attrs),
+        })
+    }
 }
 
 impl PartialOrd for PartialType {
@@ -38,8 +116,8 @@ impl PartialOrd for PartialField {
 
 impl Ord for PartialType {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // `other` has a field that is of type `self`
         if other.fields.iter().any(|field| field.ty == self.ident) {
+            // `other` has a field that is of type `self`, so it "belongs" to `self`
             std::cmp::Ordering::Greater
         } else {
             std::cmp::Ordering::Less
@@ -49,6 +127,7 @@ impl Ord for PartialType {
 
 impl Ord for PartialField {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // primitive types < custom types (usually)
         self.ty.len().cmp(&other.ty.len())
     }
 }
@@ -93,6 +172,7 @@ impl Hash for PartialField {
 
 impl Display for PartialType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Prevents crashing the tool if the type is not properly documented.
         let docs = self.docs.last().cloned().unwrap_or_else(|| "".to_string());
         f.write_str(&docs)?;
 
@@ -103,31 +183,35 @@ impl Display for PartialType {
 
 impl Display for PartialField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Prevents crashing the tool if the field is not properly documented.
         let docs = self.docs.last().cloned().unwrap_or_else(|| "".to_string());
         f.write_str(&docs)
     }
 }
 
+/// Digs into the generics of a field ([`syn::ItemStruct`] only), trying to get the last
+/// [`syn::PathArguments`], which (hopefully) contains the concrete type we care about.
+///
+/// Extracts `Foo` from `foo: Option<Vec<{Foo}>>`.
+///
+/// Doesn't handle generics of generics though, so if your field is `baz: Option<T>` we're going to
+/// be assigning this field type to be the string `"T"` (which is probably not what you wanted).
 fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> {
-    let span = type_path.span();
-    let mut ignore_idents = HashSet::with_capacity(32);
-    ignore_idents.insert(Ident::new("Option", span));
-    ignore_idents.insert(Ident::new("VecOrSingle", span));
-    ignore_idents.insert(Ident::new("Result", span));
-    ignore_idents.insert(Ident::new("Vec", span));
-    ignore_idents.insert(Ident::new("HashMap", span));
-    ignore_idents.insert(Ident::new("HashSet", span));
-
     // welp, this path probably contains generics
     let segment = type_path.path.segments.last()?;
 
     let mut current_argument = segment.arguments.clone();
     let mut inner_type = None;
 
+    // keep digging into the `PathArguments`
     loop {
         match &current_argument {
+            // go directly to the last piece of generics, skipping lifetimes
             syn::PathArguments::AngleBracketed(generics) => match generics.args.last()? {
+                // finally have something that resembles a type, but might be an `Option`, so
+                // we have to go deeper!
                 syn::GenericArgument::Type(t) => match t {
+                    // that's it, we've reached the final type
                     Type::Path(generic_path) => {
                         inner_type = match generic_path.path.segments.last() {
                             Some(t) => Some(t.ident.clone()),
@@ -147,6 +231,9 @@ fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> 
     inner_type
 }
 
+/// Glues all the `Vec<String>` docs into one big `String`.
+///
+/// It can also be used to filter out docs with meta comments, such as `${internal}`.
 fn pretty_docs(docs: Vec<String>) -> String {
     for doc in docs.iter() {
         // removes docs that we don't want in `configuration.md`
@@ -158,40 +245,9 @@ fn pretty_docs(docs: Vec<String>) -> String {
     [docs.concat(), "\n".to_string()].concat()
 }
 
-impl PartialField {
-    fn new(field: syn::Field) -> Option<Self> {
-        let type_ident = match field.ty {
-            Type::Path(type_path) => {
-                // `get_ident` returns `Some` if the `path` doesn't contain generics.
-                type_path
-                    .path
-                    .get_ident()
-                    .cloned()
-                    .or_else(|| get_ident_from_field_skipping_generics(type_path))
-            }
-            _ => None,
-        }?;
-
-        Some(Self {
-            ident: field.ident?.to_string(),
-            ty: type_ident.to_string(),
-            docs: docs_from_attributes(field.attrs),
-        })
-    }
-}
-
-#[derive(Debug, Error)]
-enum DocsError {
-    #[error("Glob error {0}")]
-    Glob(#[from] glob::GlobError),
-
-    #[error("Glob error {0}")]
-    Pattern(#[from] glob::PatternError),
-
-    #[error("Glob error {0}")]
-    IO(#[from] std::io::Error),
-}
-
+/// Parses all files in the [`glob::glob`] pattern defined within, in the current directory.
+//
+// TODO(alex): Support specifying a path.
 fn parse_files() -> Result<Vec<syn::File>, DocsError> {
     let paths = glob::glob("./src/**/*.rs")?;
 
@@ -212,6 +268,7 @@ fn parse_files() -> Result<Vec<syn::File>, DocsError> {
         .collect::<Vec<_>>())
 }
 
+/// Look into the [`syn::Attribute`]s of whatever item we're handling, and extract its doc strings.
 fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
     attributes
         .into_iter()
@@ -239,8 +296,8 @@ fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
             syn::Lit::Str(doc_lit) => Some(doc_lit.value()),
             _ => None,
         })
-        // convert empty lines (spacer lines) into markdown newline, or add `\n` to end of lines
-        // (making paragraphs)
+        // convert empty lines (spacer lines) into markdown newline, or add `\n` to end of lines,
+        // making paragraphs
         .map(|doc| {
             if doc.trim().len() == 0 {
                 "\n".to_string()
@@ -254,7 +311,8 @@ fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
 fn main() -> Result<(), DocsError> {
     let type_docs = parse_files()?
         .into_iter()
-        // go through each `File` extracting the types into a map keyed by the type `Ident`
+        // go through each `File` extracting the types into a hierarchical tree based on which types
+        // belong to other types
         .flat_map(|syntaxed_file| {
             syntaxed_file
                 .items
@@ -321,16 +379,20 @@ fn main() -> Result<(), DocsError> {
         })
         .collect::<BTreeSet<_>>();
 
-    fs::write("./type_docs.md", format!("{type_docs:#?}")).unwrap();
-
+    // The types that have been rebuild after following each field "reference".
     let mut new_types = Vec::with_capacity(8);
+
+    // Perform a depth-first search-ish, building more complete types.
     for type_ in type_docs.iter() {
         let mut new_fields = Vec::with_capacity(8);
         let mut current_fields_iter = type_.fields.iter();
 
+        // Keeps track of where we stopped before digging deeper into some field type, so we can
+        // come back to it after we reached an edge.
         let mut previous_position = Vec::new();
 
         loop {
+            // No more fields of this type are part of another type.
             if !type_
                 .fields
                 .iter()
@@ -342,28 +404,36 @@ fn main() -> Result<(), DocsError> {
             if let Some(field) = current_fields_iter.next() {
                 let new_field = if let Some(child_type) =
                     type_docs.iter().find(|type_| field.ty == type_.ident)
-                // .get(&field.ty)
                 {
+                    // This field belongs to one of our custom types, so we store our iterator
+                    // position and change the `current_fields_iter` to dig into this field's
+                    // fields.
                     previous_position.push(current_fields_iter.clone());
                     current_fields_iter = child_type.fields.iter();
 
                     PartialField {
                         ident: field.ident.clone(),
                         ty: field.ty.clone(),
+                        // We want to glue the docs that were part of this field in the struct it
+                        // belongs to, with the docs of the field's type.
                         docs: [field.docs.clone(), child_type.docs.clone()].concat(),
                     }
                 } else {
+                    // Primitive type, or type outside our files.
                     field.clone()
                 };
 
                 new_fields.push(new_field);
             } else if let Some(previous_iter) = previous_position.pop() {
+                // Go back to where we were before digging into this edge.
                 current_fields_iter = previous_iter;
             } else {
+                // No fields left to see.
                 break;
             }
         }
 
+        // Now let's build a type with the mega fields we just built.
         let new_type = PartialType {
             ident: type_.ident.clone(),
             docs: type_.docs.clone(),
@@ -372,9 +442,12 @@ fn main() -> Result<(), DocsError> {
         new_types.push(new_type);
     }
 
+    // If all goes well, the first type should hold the root type.
     let the_mega_type = new_types.first().unwrap().clone();
 
     let type_docs = pretty_docs(the_mega_type.docs);
+
+    // Concat all the docs!
     let final_docs = [
         type_docs,
         the_mega_type
@@ -386,6 +459,7 @@ fn main() -> Result<(), DocsError> {
     ]
     .concat();
 
+    // TODO(alex): Support specifying a path.
     fs::write("./configuration.md", final_docs).unwrap();
 
     Ok(())
