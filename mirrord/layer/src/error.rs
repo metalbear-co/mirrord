@@ -264,41 +264,14 @@ impl From<HookError> for i64 {
                     mirrord_protocol::RemoteError::ConnectTimedOut(_) => libc::ENETUNREACH,
                     _ => libc::EINVAL,
                 },
-                ResponseError::DnsLookup(dns_fail) => match dns_fail.kind {
-                    ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
-                    ResolveErrorKindInternal::NoConnections => libc::EAI_AGAIN,
-                    ResolveErrorKindInternal::Message(msg) => {
-                        error!("DNS lookup failed with message: {}", msg);
-                        libc::EAI_FAIL
-                    }
-                    ResolveErrorKindInternal::Io(err) => {
-                        #[cfg(target_os = "macos")]
-                        match err {
-                            -1 => libc::EAI_BADFLAGS,
-                            -2 => libc::EAI_NONAME,
-                            -3 => libc::EAI_AGAIN,
-                            -4 => libc::EAI_FAIL,
-                            -5 => libc::EAI_NODATA,
-                            -6 => libc::EAI_FAMILY,
-                            -7 => libc::EAI_SOCKTYPE,
-                            -8 => libc::EAI_SERVICE,
-                            -10 => libc::EAI_MEMORY,
-                            -11 => libc::EAI_SYSTEM,
-                            -12 => libc::EAI_OVERFLOW,
-                            _ => libc::EAI_FAIL,
-                        }
-                        #[cfg(target_os = "linux")]
-                        err
-                    }
-                    ResolveErrorKindInternal::Proto => libc::EAI_FAIL,
-                    _ => libc::EAI_FAIL,
-                },
                 // for listen, EINVAL means "socket is already connected."
                 // Will not happen, because this ResponseError is not return from any hook, so it
                 // never appears as HookError::ResponseError(PortAlreadyStolen(_)).
                 // this could be changed by waiting for the Subscribed response from agent.
                 ResponseError::PortAlreadyStolen(_port) => libc::EINVAL,
                 ResponseError::NotImplemented => libc::EINVAL,
+                // TODO: getaddrinfo does not set errorno, what should we do here?
+                ResponseError::DnsLookup(_) => libc::EINVAL,
             },
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,
