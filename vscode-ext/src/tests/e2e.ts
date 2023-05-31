@@ -91,7 +91,9 @@ describe("mirrord sample flow test", function () {
 
         const inputBox = await InputBox.create();
         // assertion that podToSelect is not undefined is done in "before" block   
-        inputBox.wait(10000);
+        await browser.driver.wait(async () => {
+            return await inputBox.isDisplayed();
+        }, 10000, "quickPick not found -- timed out");
         await inputBox.selectQuickPick(podToSelect!);
     });
 
@@ -102,7 +104,7 @@ describe("mirrord sample flow test", function () {
         // for breakpoints
         await browser.driver.wait(async () => {
             return await debugToolbar.isDisplayed();
-        }, 10000, "debug toolbar not found -- timed out");
+        }, 20000, "debug toolbar not found -- timed out");
 
         await Promise.all([debugToolbar.waitForBreakPoint(), sendTrafficToPod()]);
     });
@@ -111,7 +113,8 @@ describe("mirrord sample flow test", function () {
 
 // This promise is run in parallel to the promise waiting for the breakpoint to be hit
 // We wait for 10 seconds to make sure that we are in listening state
-async function sendTrafficToPod() {    
+async function sendTrafficToPod() {
+    await new Promise(resolve => setTimeout(resolve, 10000));
     const response = await get(kubeService!!);
     expect(response.status).to.equal(200);
     expect(response.data).to.equal("OK - GET: Request completed\n");
