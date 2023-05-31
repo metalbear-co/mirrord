@@ -1,0 +1,1 @@
+Introduce a tool to extract config docs into a markdown file. Update docs to match whats in mirrord-dev.
