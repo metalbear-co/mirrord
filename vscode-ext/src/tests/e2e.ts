@@ -1,7 +1,7 @@
-import { existsSync } from "fs";
+import { existsSync, stat } from "fs";
 import { assert, expect } from "chai";
 import { join } from "path";
-import { VSBrowser, StatusBar, TextEditor, EditorView, ActivityBar, DebugView, InputBox, DebugToolbar } from "vscode-extension-tester";
+import { VSBrowser, StatusBar, TextEditor, EditorView, ActivityBar, DebugView, InputBox, DebugToolbar, Workbench, WebElement } from "vscode-extension-tester";
 import get from "axios";
 import { Breakpoint } from "vscode";
 
@@ -20,6 +20,7 @@ const podToSelect = process.env.POD_TO_SELECT;
 describe("mirrord sample flow test", function () {
 
     this.timeout(1000000); // --> mocha tests timeout
+    this.bail(true); // --> stop tests on first failure
 
     let browser: VSBrowser;
     let statusBar: StatusBar;
@@ -43,76 +44,92 @@ describe("mirrord sample flow test", function () {
     });
 
     after(async function () {
-        if (await debugToolbar.isDisplayed()) {
+        if (await debugToolbar?.isDisplayed()) {
             await debugToolbar.stop();
         }
     });
 
     it("enable mirrord", async function () {
-        statusBar = await new StatusBar().wait(5000);
-        const enableButton = await statusBar.getItem("Enable mirrord");        
-        expect(enableButton).to.not.be.undefined;
-        await enableButton?.click();
+        statusBar = await new StatusBar();
         await browser.driver.wait(async () => {
-            await enableButton?.getText() === "Disable mirrord"
-        }, 2000, "Mirrord not enabled -- timed out");
+            const enableButton = await statusBar.getItem("Enable mirrord");
+            if (enableButton !== undefined) {
+                enableButton.click();
+                return true;
+            }
+            return false;
+        }, 10000, "mirrord `enable` button not found -- timed out");
+
+        await browser.driver.wait(async () => {
+            const enableButton = await statusBar.getItem("Disable mirrord");
+            if (enableButton !== undefined) {
+                return true;
+            }
+            return false;
+        }, 10000, "Mirrord not enabled -- timed out");
     });
 
     it("create mirrord config", async function () {
         // gear -> $(gear) clicked to open mirrord config
-        const mirrordSettingsButton = await statusBar.getItem("gear");
-        expect(mirrordSettingsButton).to.not.be.undefined;
-        await mirrordSettingsButton?.click();
+        await browser.driver.wait(async () => {
+            const mirrordSettingsButton = await statusBar.getItem("gear");
+            if (mirrordSettingsButton !== undefined) {
+                mirrordSettingsButton.click();
+                return true;
+            }
+            return false;
+        }, 10000, "mirrord config `$(gear)` button not found -- timed out");
+
         await browser.driver.wait(async () => {
             return await existsSync(mirrordConfigPath);
-        }
-            , 10000, "Mirrord config not found");
+        }, 10000, "mirrord `default` config not found");
     });
 
     it("select pod from quickpick", async function () {
-        await setBreakPoint(fileName, breakPoint);
+        await setBreakPoint(fileName, breakPoint, browser);
         await startDebugging(configurationFile);
 
-        const input = await InputBox.create();
+        const inputBox = await InputBox.create();
         // assertion that podToSelect is not undefined is done in "before" block   
-        await sleep(5000);
-        await input.selectQuickPick(podToSelect!);
+        inputBox.wait(10000);
+        await inputBox.selectQuickPick(podToSelect!);
     });
 
     it("wait for breakpoint to be hit", async function () {
-        await sleep(10000);
-        debugToolbar = await DebugToolbar.create();
+        debugToolbar = await DebugToolbar.create(10000);
         // waiting for breakpoint and sending traffic to pod are run in parallel
         // however, traffic is sent after 10 seconds that we are sure the IDE is listening
         // for breakpoints
+        await browser.driver.wait(async () => {
+            return await debugToolbar.isDisplayed();
+        }, 10000, "debug toolbar not found -- timed out");
+
         await Promise.all([debugToolbar.waitForBreakPoint(), sendTrafficToPod()]);
     });
 
 });
 
-
-// utility function to wait for a given time
-async function sleep(time: number) {
-    await new Promise((resolve) => setTimeout(resolve, time));
-}
-
 // This promise is run in parallel to the promise waiting for the breakpoint to be hit
 // We wait for 10 seconds to make sure that we are in listening state
-async function sendTrafficToPod() {
-    await sleep(10000);
+async function sendTrafficToPod() {    
     const response = await get(kubeService!!);
     expect(response.status).to.equal(200);
     expect(response.data).to.equal("OK - GET: Request completed\n");
 }
 
 // opens and sets a breakpoint in the given file
-async function setBreakPoint(fileName: string, breakPoint: number) {
+async function setBreakPoint(fileName: string, breakPoint: number, browser: VSBrowser) {
     const editorView = new EditorView();
     await editorView.openEditor(fileName);
-    await sleep(5000);
     const currentTab = await editorView.getActiveTab();
     expect(currentTab).to.not.be.undefined;
-    assert(await currentTab?.getTitle() === fileName, "${fileName} not found");
+    await browser.driver.wait(async () => {
+        const tabTitle = await currentTab?.getTitle();
+        if (tabTitle !== undefined) {
+            return tabTitle === fileName;
+        }
+        return false;
+    }, 10000, "editor tab title not found -- timed out");
 
     const textEditor = new TextEditor();
     const result = await textEditor.toggleBreakpoint(breakPoint);
@@ -127,5 +144,4 @@ async function startDebugging(configurationFile: string) {
     const debugView = await activityBar?.openView() as DebugView;
     await debugView.selectLaunchConfiguration(configurationFile);
     debugView.start();
-    await sleep(10000);
 }
