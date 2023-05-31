@@ -126,22 +126,6 @@ impl CheckedInto<String> for *const c_char {
     }
 }
 
-/// For a given str, return whether it's the path of the current running executable.
-///
-/// Also returns false if determining the current executable failed, or if its path is non-unicode.
-#[cfg(target_os = "macos")]
-fn is_current_exe(path: &str) -> bool {
-    let canonoical_path_buf = Path::new(path).canonicalize();
-    CURRENT_EXE
-        .as_deref()
-        .map(|current_exe| {
-            canonoical_path_buf
-                .map(|path| current_exe == path)
-                .unwrap_or_default()
-        })
-        .unwrap_or_default()
-}
-
 impl CheckedInto<PathBuf> for *const c_char {
     /// Do the checked conversion to str, bypass if the str starts with temp dir's path, construct
     /// a `PathBuf` out of the str.
@@ -152,8 +136,6 @@ impl CheckedInto<PathBuf> for *const c_char {
             let optional_stripped_path = path_str
                 .strip_prefix(MIRRORD_TEMP_BIN_DIR_STRING.as_str())
                 .or_else(|| path_str.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()));
-            // TODO
-            // if let Some(stripped_path) = optional_stripped_path && !is_current_exe(path_str) {
             if let Some(stripped_path) = optional_stripped_path {
                 // actually stripped, so bypass and provide a pointer to after the temp dir.
                 // `stripped_path` is a reference to a later character in the same string as
