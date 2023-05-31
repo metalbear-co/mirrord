@@ -14,7 +14,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::{debug, trace, warn};
+use tracing::{debug, warn};
 
 use crate::{
     error::Result,
