@@ -107,7 +107,8 @@ impl std::borrow::Borrow<String> for PartialType {
 
 impl Display for PartialType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.docs.last().unwrap())?;
+        let docs = self.docs.last().cloned().unwrap_or_else(|| "".to_string());
+        f.write_str(&docs)?;
 
         let fields: String = self.fields.iter().map(|field| format!("{field}")).collect();
         f.write_str(&fields)
@@ -116,12 +117,13 @@ impl Display for PartialType {
 
 impl Display for PartialField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.docs.last().unwrap())
+        let docs = self.docs.last().cloned().unwrap_or_else(|| "".to_string());
+        f.write_str(&docs)
     }
 }
 
 fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> {
-    println!("Trying to delve into generics {type_path:#?}");
+    // println!("Trying to delve into generics {type_path:#?}");
 
     let span = type_path.span();
     let mut ignore_idents = HashSet::with_capacity(32);
@@ -147,7 +149,7 @@ fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> 
                             Some(t) => Some(t.ident.clone()),
                             None => break,
                         };
-                        println!("inner {inner_type:#?}");
+                        // println!("inner {inner_type:#?}");
 
                         current_argument = generic_path.path.segments.last()?.arguments.clone();
                     }
@@ -335,11 +337,17 @@ fn main() -> Result<(), DocsError> {
                         let thing_docs_untreated = docs_from_attributes(item.attrs);
 
                         // We only care about types that have docs.
-                        (!thing_docs_untreated.is_empty()).then_some(PartialType {
-                            ident: item.ident.to_string(),
-                            docs: thing_docs_untreated,
-                            fields: Default::default(),
-                        })
+                        if !thing_docs_untreated.is_empty()
+                            && !thing_docs_untreated.contains(&r"<!--${internal}-->".into())
+                        {
+                            Some(PartialType {
+                                ident: item.ident.to_string(),
+                                docs: thing_docs_untreated,
+                                fields: Default::default(),
+                            })
+                        } else {
+                            None
+                        }
                     }
                     syn::Item::Struct(item) => {
                         let mut fields = item
@@ -353,19 +361,31 @@ fn main() -> Result<(), DocsError> {
 
                         let thing_docs_untreated = docs_from_attributes(item.attrs);
 
+                        let public_fields = fields
+                            .into_iter()
+                            .filter(|field| !field.docs.contains(&r"<!--${internal}-->".into()))
+                            .collect::<Vec<_>>();
+
                         // We only care about types that have docs.
-                        (!thing_docs_untreated.is_empty()).then_some(PartialType {
-                            ident: item.ident.to_string(),
-                            docs: thing_docs_untreated,
-                            fields,
-                        })
+                        if !thing_docs_untreated.is_empty()
+                            && !public_fields.is_empty()
+                            && !thing_docs_untreated.contains(&r"<!--${internal}-->".into())
+                        {
+                            Some(PartialType {
+                                ident: item.ident.to_string(),
+                                docs: thing_docs_untreated,
+                                fields: public_fields,
+                            })
+                        } else {
+                            None
+                        }
                     }
                     _ => None,
                 })
         })
         .collect::<BTreeSet<_>>();
 
-    println!("types {type_docs:#?}\n");
+    // println!("types {type_docs:#?}\n");
 
     let mut new_types = Vec::with_capacity(8);
     for type_ in type_docs.iter() {
@@ -375,6 +395,14 @@ fn main() -> Result<(), DocsError> {
         let mut previous_position = Vec::new();
 
         loop {
+            if !type_
+                .fields
+                .iter()
+                .any(|f| type_docs.iter().find(|t| t.ident == f.ty).is_some())
+            {
+                break;
+            }
+
             if let Some(field) = current_fields_iter.next() {
                 let new_field = if let Some(child_type) =
                     type_docs.iter().find(|type_| field.ty == type_.ident)
@@ -413,9 +441,14 @@ fn main() -> Result<(), DocsError> {
         new_types.push(new_type);
     }
 
-    println!("new_types \n{new_types:#?}");
+    new_types
+        .iter()
+        .enumerate()
+        .for_each(|(i, t)| println!("new_type {i:#?} {t}"));
+    // println!("new_types \n{new_types:#?}");
 
     let the_mega_type = new_types.first().unwrap().clone();
+    // println!("the_mega_type {the_mega_type:#?}");
 
     let type_docs = pretty_docs(the_mega_type.docs);
     let final_docs = [
