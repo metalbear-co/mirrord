@@ -172,7 +172,6 @@ pub struct AgentConfig {
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).
-    // rustdoc-stripper-ignore-next-stop
     #[cfg(all(debug_assertions, not(test)))] // not(test) so that it's not included in the schema json.
     #[config(env = "MIRRORD_AGENT_TEST_ERROR", default = false, unstable)]
     pub test_error: bool,
