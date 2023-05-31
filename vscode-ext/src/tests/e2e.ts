@@ -39,7 +39,7 @@ describe("mirrord sample flow test", function () {
         browser = VSBrowser.instance;
         // need to bring the flask app in open editors
         await browser.openResources(testWorkspace, join(testWorkspace, fileName));
-        await browser.waitForWorkbench();        
+        await browser.waitForWorkbench();
     });
 
     after(async function () {
@@ -48,12 +48,9 @@ describe("mirrord sample flow test", function () {
         }
     });
 
-    it("enable mirrord", async function () {        
+    it("enable mirrord", async function () {
         statusBar = await new StatusBar().wait(5000);
-        const enableButton = await statusBar.getItem("Enable mirrord");
-        await browser.driver.wait(async () => {
-            return await enableButton?.isDisplayed();
-        });
+        const enableButton = await statusBar.getItem("Enable mirrord");        
         expect(enableButton).to.not.be.undefined;
         await enableButton?.click();
         await browser.driver.wait(async () => {
