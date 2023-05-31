@@ -3304,6 +3304,7 @@ dependencies = [
  "serde_json",
  "socket2 0.5.1",
  "streammap-ext",
+ "tempfile",
  "test-cdylib",
  "thiserror",
  "tokio",

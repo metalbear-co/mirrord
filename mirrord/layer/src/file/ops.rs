@@ -1,12 +1,16 @@
 use core::ffi::CStr;
-use std::{env::current_exe, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
+use std::{
+    io::SeekFrom,
+    os::{fd::AsRawFd, unix::io::RawFd},
+    path::PathBuf,
+};
 
-use errno::errno;
-use libc::{c_int, c_uint, geteuid, AT_FDCWD, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
+use libc::{c_int, AT_FDCWD, FILE};
 use mirrord_protocol::file::{
     OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse, WriteFileResponse,
     XstatFsResponse, XstatResponse,
 };
+use tempfile::tempfile;
 use tokio::sync::oneshot;
 use tracing::{error, trace};
 
@@ -118,38 +122,18 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<u64> {
     )
 }
 
-/// The pair [`libc::shm_open`], [`libc::shm_unlink`] are used to create a temporary file (in
-/// `/dev/shm/`), and then remove it, as we only care about the `fd`. This is done to preserve
-/// `open_flags`, as [`libc::memfd_create`] will always return a `File` with read and write
-/// permissions (which is undesirable).
+/// Create temporary local file to get a valid local fd.
 #[tracing::instrument(level = "trace")]
-unsafe fn create_local_fake_file(fake_local_file_name: CString, remote_fd: u64) -> Detour<RawFd> {
-    eprintln!("fake_local_file_name: {:?}", fake_local_file_name);
-    let local_file_fd = unsafe {
-        // `mode` is access rights: user, root, ...
-        eprintln!("shm_open: {:?}", fake_local_file_name);
-        eprintln!("euid: {}", geteuid());
-        eprintln!("current_exe: {:?}", current_exe().unwrap());
-        let local_file_fd = libc::shm_open(
-            fake_local_file_name.as_ptr(),
-            O_RDONLY | O_CREAT,
-            (S_IRUSR | S_IWUSR | S_IXUSR) as c_uint,
-        );
-        eprintln!("errno: {:?}", errno());
-
-        libc::shm_unlink(fake_local_file_name.as_ptr());
-        eprintln!("errno: {:?}", errno());
-        eprintln!("shm_unlink: {:?}", fake_local_file_name);
-
-        local_file_fd
-    };
-
-    // Close the remote file if the call to `libc::shm_open` failed and we have an invalid local fd.
-    if local_file_fd == -1 {
+unsafe fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
+    if let Ok(file) = tempfile() {
+        let local_file_fd = file.as_raw_fd();
+        // Hold on to file so that it does not get deleted until the process is done.
+        TEMP_LOCAL_FILES.insert(local_file_fd, file);
+        Detour::Success(local_file_fd)
+    } else {
+        // Close the remote file if creating a tmp local file failed and we have an invalid local fd
         close_remote_file_on_failure(remote_fd)?;
         Detour::Error(HookError::LocalFileCreation(remote_fd))
-    } else {
-        Detour::Success(local_file_fd)
     }
 }
 
@@ -191,8 +175,7 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
     // TODO: Need a way to say "open a directory", right now `is_dir` always returns false.
     // This requires having a fake directory name (`/fake`, for example), instead of just converting
     // the fd to a string.
-    let fake_local_file_name = CString::new(remote_fd.to_string())?;
-    let local_file_fd = unsafe { create_local_fake_file(fake_local_file_name, remote_fd) }?;
+    let local_file_fd = unsafe { create_local_fake_file(remote_fd) }?;
 
     OPEN_FILES.insert(
         local_file_fd,
@@ -250,8 +233,7 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
 
     let OpenDirResponse { fd: remote_dir_fd } = dir_channel_rx.blocking_recv()??;
 
-    let fake_local_dir_name = CString::new(fd.to_string())?;
-    let local_dir_fd = unsafe { create_local_fake_file(fake_local_dir_name, remote_dir_fd) }?;
+    let local_dir_fd = unsafe { create_local_fake_file(remote_dir_fd) }?;
     OPEN_DIRS.insert(local_dir_fd as usize, remote_dir_fd);
 
     // According to docs, when using fdopendir, the fd is now managed by OS - i.e closed
@@ -322,8 +304,7 @@ pub(crate) fn openat(
         blocking_send_file_message(FileOperation::OpenRelative(requesting_file))?;
 
         let OpenFileResponse { fd: remote_fd } = file_channel_rx.blocking_recv()??;
-        let fake_local_file_name = CString::new(remote_fd.to_string())?;
-        let local_file_fd = unsafe { create_local_fake_file(fake_local_file_name, remote_fd) }?;
+        let local_file_fd = unsafe { create_local_fake_file(remote_fd) }?;
 
         OPEN_FILES.insert(
             local_file_fd,
