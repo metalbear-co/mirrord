@@ -149,16 +149,9 @@ impl CheckedInto<PathBuf> for *const c_char {
         let str_det = CheckedInto::<&str>::checked_into(self);
         #[cfg(target_os = "macos")]
         let str_det = str_det.and_then(|path_str| {
-            trace!("path_str: {path_str}");
-            trace!("prefix: {}", MIRRORD_TEMP_BIN_DIR_STRING.as_str());
-            trace!(
-                "canonical prefix: {}",
-                MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()
-            );
             let optional_stripped_path = path_str
                 .strip_prefix(MIRRORD_TEMP_BIN_DIR_STRING.as_str())
                 .or_else(|| path_str.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()));
-            trace!("optional_stripped_path: {:?}", optional_stripped_path);
             // TODO
             // if let Some(stripped_path) = optional_stripped_path && !is_current_exe(path_str) {
             if let Some(stripped_path) = optional_stripped_path {
