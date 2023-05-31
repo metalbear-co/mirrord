@@ -236,9 +236,9 @@ mod utils {
                 Application::NodeHTTP2 => {
                     vec!["node", "node-e2e/http2/test_http2_traffic_steal.mjs"]
                 }
-                Application::Go18HTTP => vec!["go-e2e/18"],
-                Application::Go19HTTP => vec!["go-e2e/19"],
-                Application::Go20HTTP => vec!["go-e2e/20"],
+                Application::Go18HTTP => vec!["go-e2e/18.go_test_app"],
+                Application::Go19HTTP => vec!["go-e2e/19.go_test_app"],
+                Application::Go20HTTP => vec!["go-e2e/20.go_test_app"],
                 Application::CurlToKubeApi => {
                     vec!["curl", "https://kubernetes/api", "--insecure"]
                 }
@@ -295,9 +295,9 @@ mod utils {
                 }
                 #[cfg(target_os = "linux")]
                 FileOps::Rust => vec!["../target/debug/rust-e2e-fileops"],
-                FileOps::GoDir18 => vec!["go-e2e-dir/18"],
-                FileOps::GoDir19 => vec!["go-e2e-dir/19"],
-                FileOps::GoDir20 => vec!["go-e2e-dir/20"],
+                FileOps::GoDir18 => vec!["go-e2e-dir/18.go_test_app"],
+                FileOps::GoDir19 => vec!["go-e2e-dir/19.go_test_app"],
+                FileOps::GoDir20 => vec!["go-e2e-dir/20.go_test_app"],
             }
         }
 
@@ -313,9 +313,9 @@ mod utils {
     impl EnvApp {
         pub fn command(&self) -> Vec<&str> {
             match self {
-                Self::Go18 => vec!["go-e2e-env/18"],
-                Self::Go19 => vec!["go-e2e-env/19"],
-                Self::Go20 => vec!["go-e2e-env/20"],
+                Self::Go18 => vec!["go-e2e-env/18.go_test_app"],
+                Self::Go19 => vec!["go-e2e-env/19.go_test_app"],
+                Self::Go20 => vec!["go-e2e-env/20.go_test_app"],
                 Self::Bash => vec!["bash", "bash-e2e/env.sh"],
                 Self::BashInclude => vec!["bash", "bash-e2e/env.sh", "include"],
                 Self::BashExclude => vec!["bash", "bash-e2e/env.sh", "exclude"],
