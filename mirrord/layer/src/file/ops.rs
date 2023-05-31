@@ -1,7 +1,8 @@
 use core::ffi::CStr;
-use std::{ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
+use std::{env::current_exe, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
-use libc::{c_int, c_uint, AT_FDCWD, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
+use errno::errno;
+use libc::{c_int, c_uint, geteuid, AT_FDCWD, FILE, O_CREAT, O_RDONLY, S_IRUSR, S_IWUSR, S_IXUSR};
 use mirrord_protocol::file::{
     OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse, WriteFileResponse,
     XstatFsResponse, XstatResponse,
@@ -123,15 +124,22 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<u64> {
 /// permissions (which is undesirable).
 #[tracing::instrument(level = "trace")]
 unsafe fn create_local_fake_file(fake_local_file_name: CString, remote_fd: u64) -> Detour<RawFd> {
+    eprintln!("fake_local_file_name: {:?}", fake_local_file_name);
     let local_file_fd = unsafe {
         // `mode` is access rights: user, root, ...
+        eprintln!("shm_open: {:?}", fake_local_file_name);
+        eprintln!("euid: {}", geteuid());
+        eprintln!("current_exe: {:?}", current_exe().unwrap());
         let local_file_fd = libc::shm_open(
             fake_local_file_name.as_ptr(),
             O_RDONLY | O_CREAT,
             (S_IRUSR | S_IWUSR | S_IXUSR) as c_uint,
         );
+        eprintln!("errno: {:?}", errno());
 
         libc::shm_unlink(fake_local_file_name.as_ptr());
+        eprintln!("errno: {:?}", errno());
+        eprintln!("shm_unlink: {:?}", fake_local_file_name);
 
         local_file_fd
     };
