@@ -98,7 +98,7 @@ describe("mirrord sample flow test", function () {
     });
 
     it("wait for breakpoint to be hit", async function () {
-        debugToolbar = await DebugToolbar.create(10000);
+        debugToolbar = await DebugToolbar.create(20000);
         // waiting for breakpoint and sending traffic to pod are run in parallel
         // however, traffic is sent after 10 seconds that we are sure the IDE is listening
         // for breakpoints
