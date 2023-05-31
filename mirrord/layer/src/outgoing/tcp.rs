@@ -23,7 +23,7 @@ use tokio::{
     task,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::*;
 use crate::{common::ResponseDeque, detour::DetourGuard, error::LayerError};
@@ -158,6 +158,7 @@ impl TcpOutgoingHandler {
         };
 
         let mut buffer = vec![0; 1024];
+        let mut remote_stream_closed = false;
 
         loop {
             select! {
@@ -172,13 +173,17 @@ impl TcpOutgoingHandler {
                         },
                         Err(fail) => {
                             info!("Failed reading mirror_stream with {:#?}", fail);
-                            close_remote_stream(layer_tx.clone()).await;
+                            if !remote_stream_closed {
+                                close_remote_stream(layer_tx.clone()).await;
+                            }
 
                             break;
                         }
                         Ok(read_amount) if read_amount == 0 => {
                             trace!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
-                            close_remote_stream(layer_tx.clone()).await;
+                            if !remote_stream_closed {
+                                close_remote_stream(layer_tx.clone()).await;
+                            }
 
                             break;
                         },
@@ -202,7 +207,7 @@ impl TcpOutgoingHandler {
                         }
                     }
                 },
-                bytes = remote_stream.next() => {
+                bytes = remote_stream.next(), if !remote_stream_closed => {
                     match bytes {
                         Some(bytes) => {
                             // Writes the data sent by `agent` (that came from the actual remote
@@ -214,8 +219,10 @@ impl TcpOutgoingHandler {
                             }
                         },
                         None => {
-                            warn!("interceptor_task -> exiting due to remote stream closed!");
-                            break;
+                            if let Err(err) = layer_to_user_stream.shutdown().await {
+                                warn!("Failed shutting down mirror_stream with {:#?}!", err);
+                            }
+                            remote_stream_closed = true;
                         }
                     }
                 },
@@ -375,23 +382,45 @@ impl TcpOutgoingHandler {
             }
             DaemonTcpOutgoing::Read(read) => {
                 // (agent) read something from remote, so we write it to the user.
-                trace!("Read -> read {:?}", read);
-                let DaemonRead {
-                    connection_id,
-                    bytes,
-                } = read?;
+                debug!("read -> {read:#?}");
+                match read {
+                    Ok(DaemonRead {
+                        connection_id,
+                        bytes,
+                    }) => {
+                        let sender = self
+                            .mirrors
+                            .get_mut(&connection_id)
+                            .ok_or(LayerError::NoConnectionId(connection_id))?;
 
-                let sender = self
-                    .mirrors
-                    .get_mut(&connection_id)
-                    .ok_or(LayerError::NoConnectionId(connection_id))?;
-
-                sender.send(bytes).await.unwrap_or_else(|_| {
-                    warn!(
+                        sender.send(bytes).await.unwrap_or_else(|_| {
+                            warn!(
                         "Got new data from agent after application closed socket. connection_id: \
                     connection_id: {connection_id}"
                     );
-                });
+                        });
+                    }
+                    Err(e) => {
+                        // on errors, we need to end the interceptor task, however this would
+                        // require introducing some breaking changes to the protocol
+                        // on hold because of: https://github.com/metalbear-co/mirrord/issues/1353
+                        // some solutions (AH):
+                        // - add `DaemonTcpOutgoing::Error(errno)` and then pass it to the
+                        //   `interceptor_task` to break.
+                        // - change `DaemonTcpOutgoing::Close` to `Close(Option<errno>)` and pass it
+                        //   to the `interceptor_task` to know when to shutdown and when to break
+                        //   loop
+                        // we don't know who failed so we'll iterate the list then remove closed
+                        // sockets.
+                        debug!("Read error: {:?}", e);
+                        warn!("Read error: {:?}", e);
+                        self.mirrors = self
+                            .mirrors
+                            .drain()
+                            .filter(|(_k, v)| !v.is_closed())
+                            .collect();
+                    }
+                }
                 Ok(())
             }
             DaemonTcpOutgoing::Close(connection_id) => {
