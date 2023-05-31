@@ -145,11 +145,6 @@ pub(crate) enum CliError {
         "Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}",
     ))]
     ConfigFilePathError(PathBuf, std::io::Error),
-    // #[error("License Error: `{0:#?}`")]
-    // #[diagnostic(help(
-    //     r#"Check if license is valid and make sure you have working network
-    // connection{GENERAL_HELP}"# ))]
-    // LicenseError(reqwest::Error),
     #[error("Creating kubernetes manifest yaml file failed with err : {0:#?}")]
     #[diagnostic(help(
         r#"Check if you have permissions to write to the file and/or directory exists{GENERAL_HELP}"#
