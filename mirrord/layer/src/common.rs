@@ -1,16 +1,12 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{
-    collections::VecDeque,
-    ffi::CStr,
-    path::{Path, PathBuf},
-};
+use std::{collections::VecDeque, ffi::CStr, path::PathBuf};
 
 use libc::c_char;
 use mirrord_protocol::{file::OpenOptionsInternal, RemoteResult};
 #[cfg(target_os = "macos")]
-use mirrord_sip::{CURRENT_EXE, MIRRORD_TEMP_BIN_DIR_CANONIC_STRING, MIRRORD_TEMP_BIN_DIR_STRING};
+use mirrord_sip::{MIRRORD_TEMP_BIN_DIR_CANONIC_STRING, MIRRORD_TEMP_BIN_DIR_STRING};
 use tokio::sync::oneshot;
-use tracing::{trace, warn};
+use tracing::warn;
 
 use crate::{
     detour::{Bypass, Detour},

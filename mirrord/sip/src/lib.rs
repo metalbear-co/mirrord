@@ -67,13 +67,6 @@ mod main {
             .unwrap_or(MIRRORD_TEMP_BIN_DIR_STRING.to_string())
     });
 
-    /// Path of current executable, canonicalized, None if fetching/canonicalization failed.
-    pub static CURRENT_EXE: Lazy<Option<PathBuf>> = Lazy::new(|| {
-        std::env::current_exe()
-            .and_then(|path_buf| path_buf.canonicalize())
-            .ok()
-    });
-
     /// Check if a cpu subtype (already parsed with the correct endianness) is arm64e, given its
     /// main cpu type is arm64. We only consider the lowest byte in the check.
     #[cfg(target_arch = "aarch64")]
