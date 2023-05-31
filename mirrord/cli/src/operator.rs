@@ -10,6 +10,7 @@ use mirrord_operator::{
 };
 use mirrord_progress::{Progress, TaskProgress};
 use prettytable::{row, Table};
+use tokio::fs;
 
 use crate::{
     config::{OperatorArgs, OperatorCommand},
@@ -22,7 +23,7 @@ async fn operator_setup(
     accept_tos: bool,
     file: Option<PathBuf>,
     namespace: OperatorNamespace,
-    license_key: Option<String>,
+    license: Option<String>,
 ) -> Result<()> {
     if !accept_tos {
         eprintln!("Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS");
@@ -30,13 +31,13 @@ async fn operator_setup(
         return Ok(());
     }
 
-    if let Some(license_key) = license_key {
+    if let Some(license) = license {
         eprintln!(
             "Intalling mirrord operator with namespace: {}",
             namespace.name()
         );
 
-        let operator = Operator::new(license_key, namespace);
+        let operator = Operator::new(license, namespace);
 
         match file {
             Some(path) => {
@@ -45,7 +46,7 @@ async fn operator_setup(
             None => operator.to_writer(std::io::stdout()).unwrap(), /* unwrap because failing to write to std out.. well.. */
         }
     } else {
-        eprintln!("--license-key is required to install on cluster");
+        eprintln!("--license-key or --license-path is required to install on cluster");
     }
 
     Ok(())
@@ -138,7 +139,15 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             file,
             namespace,
             license_key,
-        } => operator_setup(accept_tos, file, namespace, license_key).await,
+            license_path,
+        } => {
+            let license = match license_path {
+                Some(path) => fs::read_to_string(path).await.ok(),
+                None => license_key,
+            };
+
+            operator_setup(accept_tos, file, namespace, license).await
+        }
         OperatorCommand::Status { config_file } => operator_status(config_file).await,
     }
 }
