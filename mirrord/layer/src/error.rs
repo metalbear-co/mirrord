@@ -271,7 +271,40 @@ impl From<HookError> for i64 {
                 ResponseError::PortAlreadyStolen(_port) => libc::EINVAL,
                 ResponseError::NotImplemented => libc::EINVAL,
                 // TODO: getaddrinfo does not set errorno, what should we do here?
-                ResponseError::DnsLookup(_) => libc::EINVAL,
+                ResponseError::DnsLookup(dns_err) => {
+                    return match dns_err.kind {
+                        ResolveErrorKindInternal::Message(msg) => {
+                            error!("Failed resolving DNS with {:#?}", msg);
+                            libc::EAI_FAIL.into()
+                        }
+                        ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN.into(),
+                        ResolveErrorKindInternal::Proto => libc::EAI_FAIL.into(),
+                        ResolveErrorKindInternal::NoConnections => libc::EAI_AGAIN.into(),
+                        ResolveErrorKindInternal::NoRecordsFound(_) => {
+                            error!("No records found for DNS lookup: {}", dns_err);
+                            libc::EAI_NODATA.into()
+                        }
+                        ResolveErrorKindInternal::Io(io_err) => {
+                            #[cfg(target_os = "macos")]
+                            let err = match io_err {
+                                -1 => libc::EAI_BADFLAGS,
+                                -2 => libc::EAI_NONAME,
+                                -3 => libc::EAI_AGAIN,
+                                -4 => libc::EAI_FAIL,
+                                -5 => libc::EAI_NODATA,
+                                -6 => libc::EAI_FAMILY,
+                                -7 => libc::EAI_SOCKTYPE,
+                                -8 => libc::EAI_SERVICE,
+                                -10 => libc::EAI_MEMORY,
+                                -11 => libc::EAI_SYSTEM,
+                                -12 => libc::EAI_OVERFLOW,
+                                _ => libc::EAI_FAIL,
+                            };
+                            err.into()
+                        }
+                        _ => libc::EAI_AGAIN.into(),
+                    }
+                }
             },
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,

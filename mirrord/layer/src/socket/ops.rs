@@ -13,7 +13,6 @@ use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::{
     dns::LookupRecord,
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
-    ResolveErrorKindInternal, ResponseError,
 };
 use socket2::SockAddr;
 use tokio::sync::oneshot;
@@ -634,6 +633,7 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
 ///
 /// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
 /// for the equivalent of this function).
+#[tracing::instrument(level = "trace")]
 pub(super) fn getaddrinfo(
     rawish_node: Option<&CStr>,
     rawish_service: Option<&CStr>,
@@ -684,46 +684,7 @@ pub(super) fn getaddrinfo(
 
     blocking_send_hook_message(HookMessage::GetAddrinfo(hook))?;
 
-    let addr_info_list = match hook_channel_rx.blocking_recv()? {
-        Ok(addr_info_list) => Ok(addr_info_list),
-        Err(fail) => {
-            warn!("Failed receiving `addr_info_list` with {:#?}", fail);
-            if let ResponseError::DnsLookup(dns_error) = fail {
-                let err_code = match dns_error.kind {
-                    ResolveErrorKindInternal::Message(msg) => {
-                        error!("Failed resolving DNS with {:#?}", msg);
-                        libc::EAI_FAIL
-                    }
-                    ResolveErrorKindInternal::NoConnections => libc::EAI_AGAIN,
-                    ResolveErrorKindInternal::NoRecordsFound(_) => libc::EAI_NODATA,
-                    ResolveErrorKindInternal::Proto => libc::EAI_FAIL,
-                    ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
-                    ResolveErrorKindInternal::Io(io_err) => {
-                        #[cfg(target_os = "macos")]
-                        match io_err {
-                            -1 => libc::EAI_BADFLAGS,
-                            -2 => libc::EAI_NONAME,
-                            -3 => libc::EAI_AGAIN,
-                            -4 => libc::EAI_FAIL,
-                            -5 => libc::EAI_NODATA,
-                            -6 => libc::EAI_FAMILY,
-                            -7 => libc::EAI_SOCKTYPE,
-                            -8 => libc::EAI_SERVICE,
-                            -10 => libc::EAI_MEMORY,
-                            -11 => libc::EAI_SYSTEM,
-                            -12 => libc::EAI_OVERFLOW,
-                            _ => libc::EAI_FAIL,
-                        }
-                        #[cfg(target_os = "linux")]
-                        err
-                    }
-                    ResolveErrorKindInternal::Unknown => libc::EAI_AGAIN,
-                };
-            } else {
-                Ok(fail)
-            }            
-        }
-    }?;
+    let addr_info_list = hook_channel_rx.blocking_recv()??;
 
     // Convert `service` into a port.
     let service = service.map_or(0, |s| s.parse().unwrap_or_default());
