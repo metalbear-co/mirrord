@@ -120,19 +120,19 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<u64> {
 
 /// Create temporary local file to get a valid local fd.
 #[tracing::instrument(level = "trace")]
-unsafe fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
+fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
     let random_string = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
     let file_name = format!("{remote_fd}-{random_string}");
     let file_path = env::temp_dir().join(file_name);
     let file_c_string = CString::new(file_path.to_string_lossy().to_string())?;
     let file_path_ptr = file_c_string.as_ptr();
-    let local_file_fd: RawFd = FN_OPEN(file_path_ptr, O_RDONLY | O_CREAT);
+    let local_file_fd: RawFd = unsafe { FN_OPEN(file_path_ptr, O_RDONLY | O_CREAT) };
     if local_file_fd == -1 {
         // Close the remote file if creating a tmp local file failed and we have an invalid local fd
         close_remote_file_on_failure(remote_fd)?;
         Detour::Error(HookError::LocalFileCreation(remote_fd))
     } else {
-        unlink(file_path_ptr);
+        unsafe { unlink(file_path_ptr) };
         Detour::Success(local_file_fd)
     }
 }
@@ -175,7 +175,7 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
     // TODO: Need a way to say "open a directory", right now `is_dir` always returns false.
     // This requires having a fake directory name (`/fake`, for example), instead of just converting
     // the fd to a string.
-    let local_file_fd = unsafe { create_local_fake_file(remote_fd) }?;
+    let local_file_fd = create_local_fake_file(remote_fd)?;
 
     OPEN_FILES.insert(
         local_file_fd,
@@ -233,7 +233,7 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
 
     let OpenDirResponse { fd: remote_dir_fd } = dir_channel_rx.blocking_recv()??;
 
-    let local_dir_fd = unsafe { create_local_fake_file(remote_dir_fd) }?;
+    let local_dir_fd = create_local_fake_file(remote_dir_fd)?;
     OPEN_DIRS.insert(local_dir_fd as usize, remote_dir_fd);
 
     // According to docs, when using fdopendir, the fd is now managed by OS - i.e closed
@@ -304,7 +304,7 @@ pub(crate) fn openat(
         blocking_send_file_message(FileOperation::OpenRelative(requesting_file))?;
 
         let OpenFileResponse { fd: remote_fd } = file_channel_rx.blocking_recv()??;
-        let local_file_fd = unsafe { create_local_fake_file(remote_fd) }?;
+        let local_file_fd = create_local_fake_file(remote_fd)?;
 
         OPEN_FILES.insert(
             local_file_fd,
