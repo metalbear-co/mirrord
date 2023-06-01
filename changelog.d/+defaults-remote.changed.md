@@ -1,0 +1,1 @@
+Add `/Volumes` to default local on macOS
