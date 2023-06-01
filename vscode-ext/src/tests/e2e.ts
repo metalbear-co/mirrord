@@ -102,17 +102,15 @@ describe("mirrord sample flow test", function () {
             return await debugToolbar.isDisplayed();
         }, 2 * defaultTimeout, "debug toolbar not found -- timed out");
 
-        await Promise.all([debugToolbar.waitForBreakPoint(), sendTrafficToPod(debugToolbar)]);
+        sendTrafficToPod(debugToolbar);
+        debugToolbar.waitForBreakPoint();
     });
 });
 
-// This promise is run in parallel to the promise waiting for the breakpoint to be hit
-// We wait for 10 seconds to make sure that we are in listening state
-async function sendTrafficToPod(debugToolbar: DebugToolbar) {
-    await new Promise(resolve => setTimeout(resolve, 10000));
+async function sendTrafficToPod(debugToolbar: DebugToolbar) {    
     const response = await get(kubeService!!);
     expect(response.status).to.equal(200);
-    expect(response.data).to.equal("OK - GET: Request completed\n");    
+    expect(response.data).to.equal("OK - GET: Request completed\n");
 }
 
 // opens and sets a breakpoint in the given file
