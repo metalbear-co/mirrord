@@ -61,7 +61,7 @@ pub(crate) struct TcpConnectionStealer {
     /// Connected clients (layer instances) and the channels which the stealer task uses to send
     /// back messages (stealer -> agent -> layer).
     clients: HashMap<ClientId, Sender<DaemonTcp>>,
-    index_allocator: IndexAllocator<ConnectionId>,
+    index_allocator: IndexAllocator<ConnectionId, 100>,
 
     /// Intercepts the connections, instead of letting them go through their normal pathways, this
     /// is used to steal the traffic.

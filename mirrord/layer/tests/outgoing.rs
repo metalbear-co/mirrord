@@ -19,6 +19,9 @@ mod common;
 pub use common::*;
 use futures::{SinkExt, TryStreamExt};
 
+// TODO: add a test for when DNS lookup is unsuccessful, to make sure the layer returns a valid
+//      error to the user application.
+
 /// Test outgoing UDP.
 /// Application, for each remote peer in [`RUST_OUTGOING_PEERS`]:
 /// 1. Opens a UDP port at [`RUST_OUTGOING_LOCAL`]
