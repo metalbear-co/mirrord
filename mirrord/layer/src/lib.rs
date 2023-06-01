@@ -792,7 +792,7 @@ async fn thread_loop(
             Some(response) = layer.http_response_receiver.recv() => {
                 layer.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response))).await.unwrap();
             }
-            _ = sleep(Duration::from_secs(60)) => {
+            _ = sleep(Duration::from_secs(30)) => {
                 if !layer.ping {
                     layer.send(ClientMessage::Ping).await.unwrap();
                     trace!("sent ping to daemon");
