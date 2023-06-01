@@ -11,7 +11,7 @@ use futures::{stream::StreamExt, SinkExt};
 use libc::{pid_t, O_RDWR};
 use mirrord_protocol::{file::*, *};
 #[cfg(target_os = "macos")]
-use mirrord_sip::{sip_patch, MIRRORD_PATCH_DIR};
+use mirrord_sip::{sip_patch, MIRRORD_TEMP_BIN_DIR_PATH_BUF};
 use nix::{
     sys::signal::{self, Signal},
     unistd::Pid,
@@ -62,11 +62,9 @@ async fn read_from_mirrord_bin(dylib_path: &PathBuf) {
     // write contents to <TMPDIR>/mirrord-test-read-from-mirrord-bin.
     fs::write(&file_path, contents).unwrap();
 
-    // <TMPDIR>/mirrord-bin
-    let mirrord_bin = temp_dir.join(MIRRORD_PATCH_DIR);
-
     // <TMPDIR>/mirrord-bin/<TMPDIR>/mirrord-test-read-from-mirrord-bin.
-    let path_in_mirrord_bin = mirrord_bin.join(&file_path.strip_prefix("/").unwrap());
+    let path_in_mirrord_bin =
+        MIRRORD_TEMP_BIN_DIR_PATH_BUF.join(&file_path.strip_prefix("/").unwrap());
 
     // Make sure we write and read from different paths (this is "meta check").
     assert_ne!(file_path, path_in_mirrord_bin);

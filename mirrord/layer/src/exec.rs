@@ -4,20 +4,25 @@ use std::{
     env,
     ffi::{c_void, CString},
     marker::PhantomData,
+    path::PathBuf,
     ptr,
     sync::OnceLock,
 };
 
 use libc::{c_char, c_int, pid_t};
 use mirrord_layer_macro::hook_guard_fn;
-use mirrord_sip::{sip_patch, SipError, MIRRORD_PATCH_DIR};
+use mirrord_sip::{
+    sip_patch, SipError, MIRRORD_TEMP_BIN_DIR_CANONIC_STRING, MIRRORD_TEMP_BIN_DIR_STRING,
+};
 use null_terminated::Nul;
 use tracing::{trace, warn};
 
 use crate::{
     common::CheckedInto,
     detour::{
-        Bypass::{ExecOnNonExistingFile, NoSipDetected, TooManyArgs},
+        Bypass::{
+            ExecOnNonExistingFile, FileOperationInMirrordBinTempDir, NoSipDetected, TooManyArgs,
+        },
         Detour,
         Detour::{Bypass, Error, Success},
     },
@@ -47,6 +52,13 @@ pub(crate) unsafe fn enable_execve_hook(
         posix_spawn_detour,
         FnPosix_spawn,
         FN_POSIX_SPAWN
+    );
+    replace!(
+        hook_manager,
+        "_NSGetExecutablePath",
+        _nsget_executable_path_detour,
+        Fn_nsget_executable_path,
+        FN__NSGET_EXECUTABLE_PATH
     );
 }
 
@@ -119,10 +131,6 @@ impl Argv {
 /// Check if the arguments to the new executable contain paths to mirrord's temp dir.
 /// If they do, create a new array with the original paths instead of the patched paths.
 fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
-    let tmp_dir = env::temp_dir()
-        .join(MIRRORD_PATCH_DIR)
-        .to_string_lossy()
-        .to_string();
     let mut c_string_vec = Argv::default();
 
     // Iterate through args, if an argument is a path inside our temp dir, save pointer to
@@ -140,23 +148,24 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
         let arg_str: &str = arg.checked_into()?;
         trace!("exec arg: {arg_str}");
 
-        c_string_vec.0.push(
-                CString::new(arg_str
-                    .strip_prefix(&tmp_dir)
-                    .inspect(|original_path| {
-                        trace!(
-                            "Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {}.",
-                            arg_str,
-                            original_path
-                        );
-                    })
-                    .unwrap_or(arg_str) // No temp-dir prefix found, use arg as is.
-                    // As the string slice we get here is a slice of memory allocated and managed by
-                    // the user app, we copy the data and create new CStrings out of the copy 
-                    // without consuming the original data.
-                    .to_owned()
-                )?
-            )
+        let stripped = arg_str
+            .strip_prefix(MIRRORD_TEMP_BIN_DIR_STRING.as_str())
+            // If /var/folders... not a prefix, check /private/var/folers...
+            .or(arg_str.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()))
+            .inspect(|original_path| {
+                trace!(
+                    "Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {}.",
+                    arg_str,
+                    original_path
+                );
+            })
+            .unwrap_or(arg_str) // No temp-dir prefix found, use arg as is.
+            // As the string slice we get here is a slice of memory allocated and managed by
+            // the user app, we copy the data and create new CStrings out of the copy
+            // without consuming the original data.
+            .to_owned();
+
+        c_string_vec.0.push(CString::new(stripped)?)
     }
     Success(c_string_vec)
 }
@@ -245,4 +254,41 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
         }
         _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
     }
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
+    path: *mut c_char,
+    buflen: *mut u32,
+) -> c_int {
+    let res = FN__NSGET_EXECUTABLE_PATH(path, buflen);
+    if res == 0 {
+        let path_buf_detour = CheckedInto::<PathBuf>::checked_into(path as *const c_char);
+        if let Bypass(FileOperationInMirrordBinTempDir(later_ptr)) = path_buf_detour {
+            // SAFETY: If we're here, the original function was passed this pointer and was
+            //         successful, so this pointer must be valid.
+            let old_len = *buflen;
+
+            // SAFETY:  `later_ptr` is a pointer to a later char in the same buffer.
+            let prefix_len = later_ptr.offset_from(path);
+
+            let stripped_len = old_len - prefix_len as u32;
+
+            // SAFETY:
+            // - can read `stripped_len` bytes from `path_cstring` because it's its length.
+            // - can write `stripped_len` bytes to `path`, because the length of the path after
+            //   stripping a prefix will always be shorter than before.
+            path.copy_from(later_ptr, stripped_len as _);
+
+            // SAFETY:
+            // - We call the original function before this, so if it's not a valid pointer we should
+            //   not get back 0, and then this code is not executed.
+            *buflen = stripped_len;
+
+            // If the buffer is long enough for the path, it is long enough for the stripped
+            // path.
+            return 0;
+        }
+    }
+    res
 }
