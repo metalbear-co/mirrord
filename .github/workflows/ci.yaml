@@ -68,6 +68,7 @@ jobs:
         with:
           files: |
             vscode-ext/**
+            vscode-ext/test-workspace/.vscode/**
       - name: get markdown changes
         id: changed-markdown
         uses: tj-actions/changed-files@v32
