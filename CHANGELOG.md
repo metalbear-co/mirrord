@@ -8,6 +8,44 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.44.2](https://github.com/metalbear-co/mirrord/tree/3.44.2) - 2023-06-01
+
+
+### Changed
+
+- Change phrasing on version mismatch warning.
+- Add `/Volumes` to default local on macOS
+- Change Ping interval from 60s down to 30s.
+- Changed local read defaults - list now includes `^/sbin(/|$)` and
+  `^/var/run/com.apple`.
+
+
+### Fixed
+
+- Running postman with mirrord works.
+  [#1445](https://github.com/metalbear-co/mirrord/issues/1445)
+- Return valid error code when dns lookup fails, instead of -1.
+
+
+### Internal
+
+- Add E2E tests for vscode extension
+  [#201](https://github.com/metalbear-co/mirrord/issues/201)
+- Fixed flaky integration tests.
+  [#1452](https://github.com/metalbear-co/mirrord/issues/1452)
+- Fixed e2e tests' flakiness in the CI.
+  [#1453](https://github.com/metalbear-co/mirrord/issues/1453)
+- Change CI log level to be debug instead of trace
+- Hooking `_NSGetExecutablePath` on macOS to strip the `mirrord-bin` temp dir
+  off the path.
+- Introduce a tool to extract config docs into a markdown file. Update docs to
+  match whats in mirrord-dev.
+- On macOS, if we path a binary for SIP and it is in a path that is inside a
+  directory that has a name that ends with `.app`, we add the frameworks
+  directory to `DYLD_FALLBACK_FRAMEWORK_PATH`.
+- Provide buffer for `IndexAllocator` to avoid re-use of indices too fast
+
+
 ## [3.44.1](https://github.com/metalbear-co/mirrord/tree/3.44.1) - 2023-05-26
 
 
