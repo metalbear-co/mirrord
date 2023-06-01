@@ -26,10 +26,8 @@ describe("mirrord sample flow test", function () {
 
     const testWorkspace = join(__dirname, '../../test-workspace');
     const fileName = "app_flask.py";
-    const mirrordConfigPath = join(testWorkspace, '.mirrord/mirrord.json');
-    const configurationFile = "Python: Current File";
-    const breakPoint = 9;
-    const DEFAULT_CONDITION_TIMEOUT = 10000;
+    const mirrordConfigPath = join(testWorkspace, '.mirrord/mirrord.json');    
+    const defaultTimeout = 10000;
 
     before(async function () {
         console.log("podToSelect: " + podToSelect);
@@ -57,14 +55,14 @@ describe("mirrord sample flow test", function () {
                 enableButton.click();
                 return true;
             }
-        }, DEFAULT_CONDITION_TIMEOUT, "mirrord `enable` button not found -- timed out");
+        }, defaultTimeout, "mirrord `enable` button not found -- timed out");
 
         await browser.driver.wait(async () => {
             const enableButton = await statusBar.getItem("Disable mirrord");
             if (enableButton !== undefined) {
                 return true;
             }
-        }, DEFAULT_CONDITION_TIMEOUT, "Mirrord not enabled -- timed out");
+        }, defaultTimeout, "mirrord `disable` button not found -- timed out");
     });
 
     it("create mirrord config", async function () {
@@ -76,49 +74,50 @@ describe("mirrord sample flow test", function () {
                 mirrordSettingsButton.click();
                 return true;
             }
-        }, DEFAULT_CONDITION_TIMEOUT, "mirrord config `$(gear)` button not found -- timed out");
+        }, defaultTimeout, "mirrord config `$(gear)` button not found -- timed out");
 
         await browser.driver.wait(async () => {
             return await existsSync(mirrordConfigPath);
-        }, DEFAULT_CONDITION_TIMEOUT, "mirrord `default` config not found");
+        }, defaultTimeout, "mirrord `default` config not found");
     });
 
     it("select pod from quickpick", async function () {
-        await setBreakPoint(fileName, breakPoint, browser);
-        await startDebugging(configurationFile);
+        await setBreakPoint(fileName, browser);
+        await startDebugging();
 
         const inputBox = await InputBox.create();
         // assertion that podToSelect is not undefined is done in "before" block   
         await browser.driver.wait(async () => {
             return await inputBox.isDisplayed();
-        }, DEFAULT_CONDITION_TIMEOUT, "quickPick not found -- timed out");
+        }, defaultTimeout, "quickPick not found -- timed out");
         await inputBox.selectQuickPick(podToSelect!);
     });
 
     it("wait for breakpoint to be hit", async function () {
-        debugToolbar = await DebugToolbar.create(20000);
+        debugToolbar = await DebugToolbar.create(2 * defaultTimeout);
         // waiting for breakpoint and sending traffic to pod are run in parallel
         // however, traffic is sent after 10 seconds that we are sure the IDE is listening
         // for breakpoints
         await browser.driver.wait(async () => {
             return await debugToolbar.isDisplayed();
-        }, 20000, "debug toolbar not found -- timed out");
+        }, 2 * defaultTimeout, "debug toolbar not found -- timed out");
 
-        await Promise.all([debugToolbar.waitForBreakPoint(), sendTrafficToPod()]);
+        await Promise.all([debugToolbar.waitForBreakPoint(), sendTrafficToPod(debugToolbar)]);
     });
 });
 
 // This promise is run in parallel to the promise waiting for the breakpoint to be hit
 // We wait for 10 seconds to make sure that we are in listening state
-async function sendTrafficToPod() {
-    await new Promise(resolve => setTimeout(resolve, 10000));
-    const response = await get(kubeService!!);
-    expect(response.status).to.equal(200);
-    expect(response.data).to.equal("OK - GET: Request completed\n");
+async function sendTrafficToPod(debugToolbar: DebugToolbar) {
+    if (await debugToolbar.isDisplayed()) {
+        const response = await get(kubeService!!);
+        expect(response.status).to.equal(200);
+        expect(response.data).to.equal("OK - GET: Request completed\n");
+    }
 }
 
 // opens and sets a breakpoint in the given file
-async function setBreakPoint(fileName: string, breakPoint: number, browser: VSBrowser, timeout: number = 10000) {
+async function setBreakPoint(fileName: string, browser: VSBrowser, breakPoint: number = 9, timeout: number = 10000) {
     const editorView = new EditorView();
     await editorView.openEditor(fileName);
     const currentTab = await editorView.getActiveTab();
@@ -127,17 +126,17 @@ async function setBreakPoint(fileName: string, breakPoint: number, browser: VSBr
         const tabTitle = await currentTab?.getTitle();
         if (tabTitle !== undefined) {
             return tabTitle === fileName;
-        }        
+        }
     }, timeout, "editor tab title not found -- timed out");
 
-    const textEditor = new TextEditor();
+    const textEditor = new TextEditor();    
     const result = await textEditor.toggleBreakpoint(breakPoint);
     expect(result).to.be.true;
 }
 
 // starts debugging the current file with the provided configuration
 // debugging starts from the "Run and Debug" button in the activity bar
-async function startDebugging(configurationFile: string) {
+async function startDebugging(configurationFile: string = "Python: Current File") {
     const activityBar = await new ActivityBar().getViewControl("Run and Debug");
     expect(activityBar).to.not.be.undefined;
     const debugView = await activityBar?.openView() as DebugView;
