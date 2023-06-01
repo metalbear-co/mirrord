@@ -268,12 +268,17 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
             if let Success(stripped_path) = CheckedInto::<&str>::checked_into(later_ptr) {
                 let path_cstring = CString::new(stripped_path).unwrap(); // TODO unwrap
 
-                let stripped_len = path_cstring.as_bytes().len() + 1;
+                let stripped_len = path_cstring.as_bytes_with_nul().len();
 
-                // TODO: safety
+                // SAFETY:
+                // - can read `stripped_len` bytes from `path_cstring` because it's its length.
+                // - can write `stripped_len` bytes to `path`, because the length of the path after
+                //   stripping a prefix will always be shorter than before.
                 path.copy_from(path_cstring.as_ptr(), stripped_len);
 
-                // TODO: safety
+                // SAFETY:
+                // - We call the original function before this, so if it's not a valid pointer we
+                //   should not get back 0, and then this code is not executed.
                 *buflen = stripped_len as u32;
 
                 // If the buffer is long enough for the path, it is long enough for the stripped
