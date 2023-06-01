@@ -163,6 +163,7 @@ pub mod testing {
 
     static SERIAL_TEST: LazyLock<Mutex<()>> = LazyLock::new(Default::default);
 
+    /// <!--${internal}-->
     /// Sets environment variables to the given value for the duration of the closure.
     /// Restores the previous values when the closure completes or panics, before unwinding the
     /// panic.
