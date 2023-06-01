@@ -211,7 +211,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: upload image
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: test
           path: /tmp/test.tar
@@ -440,7 +440,7 @@ jobs:
           cd tests/rust-bypassed-unix-socket
           cargo build
       - name: download image
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: test
           path: /tmp
@@ -500,7 +500,7 @@ jobs:
           cd vscode-ext
           npm install
       - name: download image
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: test
           path: /tmp
