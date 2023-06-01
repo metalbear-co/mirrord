@@ -79,11 +79,11 @@ jobs:
           echo ${{ steps.changed-rs.outputs.any_changed }};
           echo ${{ steps.changed-rs.outputs.all_changed_files }};
           echo ${{ steps.changed-intellij.outputs.any_changed }};
-          echo ${{ steps.changed-intellij.outputs.all_changed_files }};          
-          echo ${{ steps.changed-markdown.outputs.any_changed }};
-          echo ${{ steps.changed-markdown.outputs.all_changed_files }};
+          echo ${{ steps.changed-intellij.outputs.all_changed_files }};
           echo ${{ steps.changed-vscode.outputs.any_changed }};
-          echo ${{ steps.changed-vscode.outputs.all_changed_files }};
+          echo ${{ steps.changed-vscode.outputs.all_changed_files }};          
+          echo ${{ steps.changed-markdown.outputs.any_changed }};
+          echo ${{ steps.changed-markdown.outputs.all_changed_files }};          
   lint:
     runs-on: ubuntu-latest
     needs: changed_files
