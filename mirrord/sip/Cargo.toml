@@ -25,4 +25,4 @@ which.workspace = true
 
 
 [dev-dependencies]
-tempfile.workspace = true
+tempfile = "3.3.0"

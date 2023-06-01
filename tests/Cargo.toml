@@ -22,6 +22,6 @@ rand = "*"
 futures-util = "*"
 wsl = "0.1"
 chrono = "0.4"
-tempfile.workspace = true
+tempfile = "3"
 bytes = "1"
 tokio-tungstenite = { version = "0.18" }
