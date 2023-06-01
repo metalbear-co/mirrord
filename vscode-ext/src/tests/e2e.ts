@@ -26,7 +26,7 @@ describe("mirrord sample flow test", function () {
 
     const testWorkspace = join(__dirname, '../../test-workspace');
     const fileName = "app_flask.py";
-    const mirrordConfigPath = join(testWorkspace, '.mirrord/mirrord.json');    
+    const mirrordConfigPath = join(testWorkspace, '.mirrord/mirrord.json');
     const defaultTimeout = 10000;
 
     before(async function () {
@@ -82,7 +82,7 @@ describe("mirrord sample flow test", function () {
     });
 
     it("select pod from quickpick", async function () {
-        await setBreakPoint(fileName, browser);
+        await setBreakPoint(fileName, browser, defaultTimeout);
         await startDebugging();
 
         const inputBox = await InputBox.create();
@@ -109,15 +109,14 @@ describe("mirrord sample flow test", function () {
 // This promise is run in parallel to the promise waiting for the breakpoint to be hit
 // We wait for 10 seconds to make sure that we are in listening state
 async function sendTrafficToPod(debugToolbar: DebugToolbar) {
-    if (await debugToolbar.isDisplayed()) {
-        const response = await get(kubeService!!);
-        expect(response.status).to.equal(200);
-        expect(response.data).to.equal("OK - GET: Request completed\n");
-    }
+    await new Promise(resolve => setTimeout(resolve, 10000));
+    const response = await get(kubeService!!);
+    expect(response.status).to.equal(200);
+    expect(response.data).to.equal("OK - GET: Request completed\n");    
 }
 
 // opens and sets a breakpoint in the given file
-async function setBreakPoint(fileName: string, browser: VSBrowser, breakPoint: number = 9, timeout: number = 10000) {
+async function setBreakPoint(fileName: string, browser: VSBrowser, timeout: number, breakPoint: number = 9) {
     const editorView = new EditorView();
     await editorView.openEditor(fileName);
     const currentTab = await editorView.getActiveTab();
@@ -129,7 +128,7 @@ async function setBreakPoint(fileName: string, browser: VSBrowser, breakPoint: n
         }
     }, timeout, "editor tab title not found -- timed out");
 
-    const textEditor = new TextEditor();    
+    const textEditor = new TextEditor();
     const result = await textEditor.toggleBreakpoint(breakPoint);
     expect(result).to.be.true;
 }
