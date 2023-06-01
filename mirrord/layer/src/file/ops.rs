@@ -127,6 +127,7 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<u64> {
 unsafe fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
     if let Ok(file) = tempfile() {
         let local_file_fd = file.as_raw_fd();
+        eprintln!("local_file_fd: {local_file_fd}");
         // Hold on to file so that it does not get deleted until the process is done.
         TEMP_LOCAL_FILES.insert(local_file_fd, file);
         Detour::Success(local_file_fd)

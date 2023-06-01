@@ -60,7 +60,7 @@ pub(crate) static OPEN_FILES: LazyLock<DashMap<LocalFd, Arc<ops::RemoteFile>>> =
     LazyLock::new(|| DashMap::with_capacity(4));
 
 /// used just to have a local fd for each remote file.
-pub(crate) static mut TEMP_LOCAL_FILES: LazyLock<DashMap<LocalFd, File>> =
+pub(crate) static TEMP_LOCAL_FILES: LazyLock<DashMap<LocalFd, File>> =
     LazyLock::new(|| DashMap::with_capacity(4));
 
 pub(crate) static OPEN_DIRS: LazyLock<DashMap<DirStreamFd, RemoteFd>> =
