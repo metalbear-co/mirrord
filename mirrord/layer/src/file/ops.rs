@@ -1,20 +1,16 @@
 use core::ffi::CStr;
-use std::{
-    io::SeekFrom,
-    os::{fd::AsRawFd, unix::io::RawFd},
-    path::PathBuf,
-};
+use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
-use libc::{c_int, AT_FDCWD, FILE};
+use libc::{c_int, unlink, AT_FDCWD, FILE};
 use mirrord_protocol::file::{
     OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse, WriteFileResponse,
     XstatFsResponse, XstatResponse,
 };
-use tempfile::tempfile;
+use rand::distributions::{Alphanumeric, DistString};
 use tokio::sync::oneshot;
 use tracing::{error, trace};
 
-use super::{filter::FILE_FILTER, *};
+use super::{filter::FILE_FILTER, hooks::FN_OPEN, *};
 use crate::{
     common::blocking_send_hook_message,
     detour::{Bypass, Detour},
@@ -125,21 +121,24 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<u64> {
 /// Create temporary local file to get a valid local fd.
 #[tracing::instrument(level = "trace")]
 unsafe fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
-    if let Ok(file) = tempfile() {
-        let local_file_fd = file.as_raw_fd();
-        eprintln!("local_file_fd: {local_file_fd}");
-        // Hold on to file so that it does not get deleted until the process is done.
-        TEMP_LOCAL_FILES.insert(local_file_fd, file);
-        Detour::Success(local_file_fd)
-    } else {
+    let random_string = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
+    let file_name = format!("{remote_fd}-{random_string}");
+    let file_path = env::temp_dir().join(file_name);
+    let file_c_string = CString::new(file_path.to_string_lossy().to_string())?;
+    let file_path_ptr = file_c_string.as_ptr();
+    let local_file_fd: RawFd = FN_OPEN(file_path_ptr, O_RDONLY | O_CREAT);
+    if local_file_fd == -1 {
         // Close the remote file if creating a tmp local file failed and we have an invalid local fd
         close_remote_file_on_failure(remote_fd)?;
         Detour::Error(HookError::LocalFileCreation(remote_fd))
+    } else {
+        unlink(file_path_ptr);
+        Detour::Success(local_file_fd)
     }
 }
 
 /// Close the remote file if the call to [`libc::shm_open`] failed and we have an invalid local fd.
-#[tracing::instrument(level = "error")]
+#[tracing::instrument(level = "trace")]
 fn close_remote_file_on_failure(fd: u64) -> Result<()> {
     error!("Creating a temporary local file resulted in an error, closing the file remotely!");
     RemoteFile::remote_close(fd)

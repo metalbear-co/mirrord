@@ -1,6 +1,5 @@
 use core::fmt;
 use std::{
-    fs::File,
     io::SeekFrom,
     os::unix::io::RawFd,
     path::PathBuf,
@@ -57,10 +56,6 @@ pub(crate) struct DirStream {
 /// Opens file `A`, receives fd 1, then dups, receives 2 - both stay open, until both are closed.
 /// Previously in such scenario we would close the remote, causing issues.
 pub(crate) static OPEN_FILES: LazyLock<DashMap<LocalFd, Arc<ops::RemoteFile>>> =
-    LazyLock::new(|| DashMap::with_capacity(4));
-
-/// used just to have a local fd for each remote file.
-pub(crate) static TEMP_LOCAL_FILES: LazyLock<DashMap<LocalFd, File>> =
     LazyLock::new(|| DashMap::with_capacity(4));
 
 pub(crate) static OPEN_DIRS: LazyLock<DashMap<DirStreamFd, RemoteFd>> =
