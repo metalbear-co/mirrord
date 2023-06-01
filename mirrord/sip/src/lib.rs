@@ -387,19 +387,15 @@ mod main {
         get_sip_status_rec(path, &mut seen_paths, patch_binaries)
     }
 
-    /// Only call this function on a file that is SomeSIP.
-    /// Patch shebang scripts recursively and patch final binary.
-    fn patch_some_sip(path: &PathBuf, shebang_target: Option<Box<SipStatus>>) -> Result<String> {
-        // TODO: Change output to be with hash of the contents, so that old versions of changed
-        //       files do not get used. (Also change back existing file logic to always use.)
-
-        trace!(
-            "Using temp dir: {} for sip patches",
-            MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()
-        );
-
-        // For Mac Applications.
-        // TODO: move to separate function, document.
+    /// When patching a bundled mac application, it try to load libraries from its frameworks
+    /// directory. The patch might cause it to search under the `mirrord-bin` temp dir.
+    ///
+    /// To make sure it can find the libraries, we set (or add to) the
+    /// `DYLD_FALLBACK_FRAMEWORK_PATH` env var.
+    ///
+    /// Example, if we're running `/Applications/Postman.app/Contents/MacOS/Postman`, we'll add
+    /// `/Applications/Postman.app/Contents/Frameworks` to that env var.
+    fn set_fallback_frameworks_path_if_mac_app(path: &Path) {
         for ancestor in path.ancestors() {
             if ancestor
                 .extension()
@@ -419,6 +415,20 @@ mod main {
                 break;
             }
         }
+    }
+
+    /// Only call this function on a file that is SomeSIP.
+    /// Patch shebang scripts recursively and patch final binary.
+    fn patch_some_sip(path: &PathBuf, shebang_target: Option<Box<SipStatus>>) -> Result<String> {
+        // TODO: Change output to be with hash of the contents, so that old versions of changed
+        //       files do not get used. (Also change back existing file logic to always use.)
+
+        trace!(
+            "Using temp dir: {} for sip patches",
+            MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()
+        );
+
+        set_fallback_frameworks_path_if_mac_app(path);
 
         // Strip root path from binary path, as when joined it will clear the previous.
         let output = MIRRORD_TEMP_BIN_DIR_PATH_BUF.join(
@@ -678,6 +688,27 @@ mod main {
             script.flush().unwrap();
             let res = sip_patch(script.path().to_str().unwrap(), &Vec::new());
             assert!(matches!(res, Ok(None)));
+        }
+
+        #[test]
+        fn set_fallback_frameworks_path() {
+            let example_path = "/Applications/Postman.app/Contents/MacOS/Postman";
+            let frameworks_path = "/Applications/Postman.app/Contents/Frameworks";
+            let is_frameworks_path = |&path: &'_ &str| path == frameworks_path;
+
+            // Verify that the path was not there before.
+            assert!(!env::var(FRAMEWORKS_ENV_VAR_NAME)
+                .map(|value| value.split(":").find(is_frameworks_path).is_some())
+                .unwrap_or_default());
+
+            set_fallback_frameworks_path_if_mac_app(Path::new(example_path));
+
+            // Verify that the path is there after.
+            assert!(env::var(FRAMEWORKS_ENV_VAR_NAME)
+                .unwrap()
+                .split(":")
+                .find(is_frameworks_path)
+                .is_some());
         }
     }
 }
