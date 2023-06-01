@@ -1,5 +1,5 @@
-import existsSync from "fs";
-import expect from "chai";
+import { existsSync } from "fs";
+import { expect } from "chai";
 import { join } from "path";
 import { VSBrowser, StatusBar, TextEditor, EditorView, ActivityBar, DebugView, InputBox, DebugToolbar, Workbench, WebElement } from "vscode-extension-tester";
 import get from "axios";
