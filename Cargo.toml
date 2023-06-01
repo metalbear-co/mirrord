@@ -5,6 +5,7 @@ members = [
     "mirrord/layer/tests/apps/fileops",
     "mirrord/layer/tests/apps/outgoing",
     "sample/rust",
+    "medschool",
     "tests",
     "tests/rust-e2e-fileops",
     "tests/rust-unix-socket-client",

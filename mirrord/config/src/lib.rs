@@ -2,23 +2,18 @@
 #![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![warn(clippy::indexing_slicing)]
-
+//! <!--${internal}-->
+//! To generate the `mirrord-schema.json` file see
+//! [`tests::check_schema_file_exists_and_is_valid_or_create_it`].
+//!
+//! Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
+//! including if you only made documentation changes.
 pub mod agent;
 pub mod config;
-pub mod env;
 pub mod feature;
-pub mod fs;
-pub mod incoming;
-pub mod network;
-pub mod outgoing;
 pub mod target;
 pub mod util;
 
-/// To generate the `mirrord-schema.json` file see
-/// [`tests::check_schema_file_exists_and_is_valid_or_create_it`].
-///
-/// Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
-/// including if you only made documentation changes.
 use std::path::Path;
 
 use config::{ConfigError, MirrordConfig};
@@ -30,117 +25,229 @@ use crate::{
     target::TargetConfig, util::VecOrSingle,
 };
 
-/// Main struct for mirrord-layer's configuration
+/// mirrord allows for a high degree of customization when it comes to which features you want to
+/// enable, and how they should function.
 ///
-/// ## Examples
+/// All of the configuration fields have a default value, so a minimal configuration would be no
+/// configuration at all.
 ///
-/// - Run mirrord with read-only file operations, mirroring traffic, skipping unwanted processes:
+/// To help you get started, here are examples of a basic configuration file, and a complete
+/// configuration file containing all fields.
 ///
-/// ```toml
-/// # mirrord-config.toml
+/// ### Basic `config.json` {#root-basic}
 ///
-/// target = "pod/sample-pod-1234"
-/// skip_processes = ["ide-debugger", "ide-service"] # we don't want mirrord to hook into these
-///
-/// [agent]
-/// log_level = "debug"
-/// ttl = 1024 # seconds
-///
-/// [feature]
-/// fs = "read" # default
-///
-/// [feature.network]
-/// incoming = "mirror" # default
+/// ```json
+/// {
+///   "target": "pod/bear-pod",
+///   "feature": {
+///     "env": true,
+///     "fs": "read",
+///     "network": true
+///   }
+/// }
 /// ```
 ///
-/// - Run mirrord with read-write file operations, stealing traffic, accept local TLS certificates,
-///   use a custom mirrord-agent image:
+/// ### Complete `config.json` {#root-complete}
 ///
-/// ```toml
-/// # mirrord-config.toml
-///
-/// target = "pod/sample-pod-1234"
-/// accept_invalid_certificates = true
-///
-/// [agent]
-/// log_level = "trace"
-/// ttl = 1024 # seconds
-/// image = "registry/mirrord-agent-custom:latest"
-/// image_pull_policy = "Always"
-///
-/// [feature]
-/// fs = "write"
-///
-/// [feature.network]
-/// incoming = "steal"
+/// ```json
+/// {
+///   "accept_invalid_certificates": false,
+///   "skip_processes": "ide-debugger",
+///   "pause": false,
+///   "target": {
+///     "path": "pod/bear-pod",
+///     "namespace": "default"
+///   },
+///   "connect_tcp": null,
+///   "agent": {
+///     "log_level": "info",
+///     "namespace": "default",
+///     "image": "ghcr.io/metalbear-co/mirrord:latest",
+///     "image_pull_policy": "IfNotPresent",
+///     "image_pull_secrets": [ { "secret-key": "secret" } ],
+///     "ttl": 30,
+///     "ephemeral": false,
+///     "communication_timeout": 30,
+///     "startup_timeout": 360,
+///     "network_interface": "eth0",
+///     "flush_connections": true
+///   },
+///   "feature": {
+///     "env": {
+///       "include": "DATABASE_USER;PUBLIC_ENV",
+///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
+///       "overrides": {
+///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
+///         "LOCAL_BEAR": "panda"
+///       }
+///     },
+///     "fs": {
+///       "mode": "write",
+///       "read_write": ".+\.json" ,
+///       "read_only": [ ".+\.yaml", ".+important-file\.txt" ],
+///       "local": [ ".+\.js", ".+\.mjs" ]
+///     },
+///     "network": {
+///       "incoming": {
+///         "mode": "steal",
+///         "http_header_filter": {
+///           "filter": "host: api\..+",
+///           "ports": [80, 8080]
+///         },
+///         "port_mapping": [[ 7777, 8888 ]],
+///         "ignore_localhost": false,
+///         "ignore_ports": [9999, 10000]
+///       },
+///       "outgoing": {
+///         "tcp": true,
+///         "udp": true,
+///         "ignore_localhost": false,
+///         "unix_streams": "bear.+"
+///       },
+///       "dns": false
+///     },
+///     "capture_error_trace": false
+///   },
+///   "operator": true,
+///   "kubeconfig": "~/.kube/config",
+///   "sip_binaries": "bash"
+/// }
 /// ```
+///
+/// # Options {#root-options}
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "LayerFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct LayerConfig {
+    /// ## accept_invalid_certificates {#root-accept_invalid_certificates}
+    ///
     /// Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed
     /// certificates).
+    ///
+    /// Defaults to `false`.
     #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", default = false)]
     pub accept_invalid_certificates: bool,
 
+    /// ## skip_processes {#root-skip_processes}
+    ///
     /// Allows mirrord to skip unwanted processes.
     ///
     /// Useful when process A spawns process B, and the user wants mirrord to operate only on
     /// process B.
+    /// Accepts a single value, or multiple values separated by `;`.
+    ///
+    ///```json
+    /// {
+    ///  "skip_processes": "bash;node"
+    /// }
+    /// ```
     #[config(env = "MIRRORD_SKIP_PROCESSES")]
     pub skip_processes: Option<VecOrSingle<String>>,
 
-    /// Specifies the running pod to mirror.
-    ///
-    /// Supports:
-    /// - `pod/{sample-pod}/[container]/{sample-container}`;
-    /// - `podname/{sample-pod}/[container]/{sample-container}`;
-    /// - `deployment/{sample-deployment}/[container]/{sample-container}`;
-    #[config(nested)]
-    pub target: TargetConfig,
-
+    /// ## pause {#root-pause}
     /// Controls target pause feature. Unstable.
     ///
     /// With this feature enabled, the remote container is paused while this layer is connected to
     /// the agent.
+    ///
+    /// Defaults to `false`.
     #[config(env = "MIRRORD_PAUSE", default = false, unstable)]
     pub pause: bool,
 
+    /// ## connect_tcp {#root-connect_tpc}
+    ///
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.
+    ///
+    /// ```json
+    /// {
+    ///   "connect_tcp": "10.10.0.100:7777"
+    /// }
+    /// ```
     #[config(env = "MIRRORD_CONNECT_TCP")]
     pub connect_tcp: Option<String>,
 
+    /// <!--${internal}-->
+    ///
+    /// ## connect_agent_name {#root-connect_agent_name}
+    ///
     /// Agent name that already exists that we can connect to.
+    ///
+    /// Keep in mind that the intention here is to allow reusing a long living mirrord-agent pod,
+    /// and **not** to connect multiple (simultaneos) mirrord instances to a single
+    /// mirrord-agent, as the later is not properly supported without the use of
+    /// [mirrord-operator](https://metalbear.co/#waitlist-form).
+    ///
+    /// ```json
+    /// {
+    ///   "connect_agent_name": "mirrord-agent-still-alive"
+    /// }
+    /// ```
     #[config(env = "MIRRORD_CONNECT_AGENT")]
     pub connect_agent_name: Option<String>,
 
+    /// <!--${internal}-->
+    ///
+    /// ## connect_agent_port {#root-connect_agent_port}
+    ///
     /// Agent listen port that already exists that we can connect to.
+    ///
+    /// ```json
+    /// {
+    ///   "connect_agent_port": "8888"
+    /// }
+    /// ```
     #[config(env = "MIRRORD_CONNECT_PORT")]
     pub connect_agent_port: Option<u16>,
 
-    /// Agent configuration, see [`agent::AgentFileConfig`].
-    #[config(nested)]
-    pub agent: AgentConfig,
-
-    /// Controls mirrord features, see [`feature::FeatureFileConfig`].
-    #[config(nested)]
-    pub feature: FeatureConfig,
-
-    /// Allow to lookup if operator is installed on cluster and use it
+    /// ## operator {#root-operator}
+    ///
+    /// Allow to lookup if operator is installed on cluster and use it.
+    ///
+    /// Defaults to `true`.
     #[config(env = "MIRRORD_OPERATOR_ENABLE", default = true)]
     pub operator: bool,
 
-    /// Path to a kubeconfig file, if not specified, will use KUBECONFIG or ~/.kube/config or the
-    /// in-cluster config.
+    /// ## kubeconfig {#root-kubeconfig}
+    ///
+    /// Path to a kubeconfig file, if not specified, will use `KUBECONFIG`, or `~/.kube/config`, or
+    /// the in-cluster config.
+    ///
+    /// ```json
+    /// {
+    ///  "kubeconfig": "~/bear/kube-config"
+    /// }
+    /// ```
     #[config(env = "MIRRORD_KUBECONFIG")]
     pub kubeconfig: Option<String>,
 
+    /// ## sip_binaries {#root-sip_binaries}
+    ///
     /// Binaries to patch (macOS SIP).
-    /// Use this when mirrord isn't loaded to protected binaries
-    /// that weren't automatically patched.
-    /// Runs `endswith` on the binary path (so `bash` would apply to any binary
-    /// ending with `bash` while `/usr/bin/bash` would apply only for that binary).
+    ///
+    /// Use this when mirrord isn't loaded to protected binaries that weren't automatically
+    /// patched.
+    ///
+    /// Runs `endswith` on the binary path (so `bash` would apply to any binary ending with `bash`
+    /// while `/usr/bin/bash` would apply only for that binary).
+    ///
+    /// ```json
+    /// {
+    ///  "sip_binaries": "bash;python"
+    /// }
+    /// ```
     pub sip_binaries: Option<VecOrSingle<String>>,
+
+    /// ## target {#root-target}
+    #[config(nested)]
+    pub target: TargetConfig,
+
+    /// ## agent {#root-agent}
+    #[config(nested)]
+    pub agent: AgentConfig,
+
+    /// # feature {#root-feature}
+    #[config(nested)]
+    pub feature: FeatureConfig,
 }
 
 impl LayerConfig {
@@ -185,11 +292,15 @@ mod tests {
     use super::*;
     use crate::{
         agent::AgentFileConfig,
-        feature::FeatureFileConfig,
-        fs::{FsModeConfig, FsUserConfig},
-        incoming::{IncomingAdvancedFileConfig, IncomingFileConfig, IncomingMode},
-        network::NetworkFileConfig,
-        outgoing::OutgoingFileConfig,
+        feature::{
+            fs::{FsModeConfig, FsUserConfig},
+            network::{
+                incoming::{IncomingAdvancedFileConfig, IncomingFileConfig, IncomingMode},
+                outgoing::OutgoingFileConfig,
+                NetworkFileConfig,
+            },
+            FeatureFileConfig,
+        },
         target::{PodTarget, Target, TargetFileConfig},
         util::ToggleableConfig,
     };
@@ -408,6 +519,7 @@ mod tests {
         assert_eq!(config, expect);
     }
 
+    /// <!--${internal}-->
     /// Helper for printing the config schema.
     ///
     /// Run it with:
@@ -424,6 +536,7 @@ mod tests {
 
     const SCHEMA_FILE_PATH: &str = "../../mirrord-schema.json";
 
+    /// <!--${internal}-->
     /// Writes the config schema to a file (uploaded to the schema store).
     fn write_schema_to_file(schema: &RootSchema) -> File {
         println!("Writing schema to file.");
@@ -444,6 +557,7 @@ mod tests {
         file
     }
 
+    /// <!--${internal}-->
     /// Checks if a schema file already exists, otherwise generates the schema and creates the file.
     ///
     /// It also checks and updates when the schema file is outdated.
