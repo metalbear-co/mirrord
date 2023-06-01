@@ -1,9 +1,8 @@
-import { existsSync, stat } from "fs";
-import { assert, expect } from "chai";
+import existsSync from "fs";
+import expect from "chai";
 import { join } from "path";
 import { VSBrowser, StatusBar, TextEditor, EditorView, ActivityBar, DebugView, InputBox, DebugToolbar, Workbench, WebElement } from "vscode-extension-tester";
 import get from "axios";
-import { Breakpoint } from "vscode";
 
 
 // This suite tests basic flow of mirroring traffic from remote pod
@@ -31,16 +30,19 @@ describe("mirrord sample flow test", function () {
     const mirrordConfigPath = join(testWorkspace, '.mirrord/mirrord.json');
     const configurationFile = "Python: Current File";
     const breakPoint = 9;
+    const DEFAULT_CONDITION_TIMEOUT = 10000;
 
     before(async function () {
         console.log("podToSelect: " + podToSelect);
         console.log("kubeService: " + kubeService);
+
         expect(podToSelect).to.not.be.undefined;
         expect(kubeService).to.not.be.undefined;
+
         browser = VSBrowser.instance;
+        statusBar = await new StatusBar();
         // need to bring the flask app in open editors
         await browser.openResources(testWorkspace, join(testWorkspace, fileName));
-        await browser.waitForWorkbench();
     });
 
     after(async function () {
@@ -50,23 +52,20 @@ describe("mirrord sample flow test", function () {
     });
 
     it("enable mirrord", async function () {
-        statusBar = await new StatusBar();
         await browser.driver.wait(async () => {
             const enableButton = await statusBar.getItem("Enable mirrord");
             if (enableButton !== undefined) {
                 enableButton.click();
                 return true;
             }
-            return false;
-        }, 10000, "mirrord `enable` button not found -- timed out");
+        }, DEFAULT_CONDITION_TIMEOUT, "mirrord `enable` button not found -- timed out");
 
         await browser.driver.wait(async () => {
             const enableButton = await statusBar.getItem("Disable mirrord");
             if (enableButton !== undefined) {
                 return true;
             }
-            return false;
-        }, 10000, "Mirrord not enabled -- timed out");
+        }, DEFAULT_CONDITION_TIMEOUT, "Mirrord not enabled -- timed out");
     });
 
     it("create mirrord config", async function () {
@@ -77,12 +76,11 @@ describe("mirrord sample flow test", function () {
                 mirrordSettingsButton.click();
                 return true;
             }
-            return false;
-        }, 10000, "mirrord config `$(gear)` button not found -- timed out");
+        }, DEFAULT_CONDITION_TIMEOUT, "mirrord config `$(gear)` button not found -- timed out");
 
         await browser.driver.wait(async () => {
             return await existsSync(mirrordConfigPath);
-        }, 10000, "mirrord `default` config not found");
+        }, DEFAULT_CONDITION_TIMEOUT, "mirrord `default` config not found");
     });
 
     it("select pod from quickpick", async function () {
@@ -93,7 +91,7 @@ describe("mirrord sample flow test", function () {
         // assertion that podToSelect is not undefined is done in "before" block   
         await browser.driver.wait(async () => {
             return await inputBox.isDisplayed();
-        }, 10000, "quickPick not found -- timed out");
+        }, DEFAULT_CONDITION_TIMEOUT, "quickPick not found -- timed out");
         await inputBox.selectQuickPick(podToSelect!);
     });
 
@@ -121,7 +119,7 @@ async function sendTrafficToPod() {
 }
 
 // opens and sets a breakpoint in the given file
-async function setBreakPoint(fileName: string, breakPoint: number, browser: VSBrowser) {
+async function setBreakPoint(fileName: string, breakPoint: number, browser: VSBrowser, timeout: number = 10000) {
     const editorView = new EditorView();
     await editorView.openEditor(fileName);
     const currentTab = await editorView.getActiveTab();
@@ -132,7 +130,7 @@ async function setBreakPoint(fileName: string, breakPoint: number, browser: VSBr
             return tabTitle === fileName;
         }
         return false;
-    }, 10000, "editor tab title not found -- timed out");
+    }, timeout, "editor tab title not found -- timed out");
 
     const textEditor = new TextEditor();
     const result = await textEditor.toggleBreakpoint(breakPoint);

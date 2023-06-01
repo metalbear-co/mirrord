@@ -6,13 +6,16 @@ async function main(): Promise<void> {
     const testPath = path.join(__dirname, 'e2e.js');
     const storageFolder = path.join(__dirname, '..', 'storage');
     const extFolder = path.join(__dirname, '..', 'extensions');
+    
+    // required extension for debugging a python file
+    const requiredExtension = "ms-python.python";
 
     try {
         console.log(`Running tests from ${testPath}`);
         const exTester = new ExTester(storageFolder, ReleaseQuality.Stable, extFolder);
         await exTester.downloadCode(version);
         await exTester.installVsix({ useYarn: false });
-        await exTester.installFromMarketplace('ms-python.python');
+        await exTester.installFromMarketplace(requiredExtension);
         await exTester.downloadChromeDriver(version);
         const result = await exTester.runTests(testPath, {
             vscodeVersion: version,
