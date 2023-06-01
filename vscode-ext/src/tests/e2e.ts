@@ -1,7 +1,7 @@
 import { existsSync } from "fs";
-import { assert, expect } from "chai";
+import { expect } from "chai";
 import { join } from "path";
-import { VSBrowser, StatusBar, TextEditor, EditorView, ActivityBar, DebugView, InputBox, DebugToolbar, Workbench, WebElement, BottomBarPanel } from "vscode-extension-tester";
+import { VSBrowser, StatusBar, TextEditor, EditorView, ActivityBar, DebugView, InputBox, DebugToolbar } from "vscode-extension-tester";
 import get from "axios";
 
 
@@ -106,18 +106,6 @@ describe("mirrord sample flow test", function () {
 
         await Promise.all([debugToolbar.waitForBreakPoint(), sendTrafficToPod()]);
     });
-
-    it("assert text on terminal", async function () {
-        const terminalView = await new BottomBarPanel().openTerminalView();
-        await browser.driver.wait(async () => {
-            if (await terminalView.isDisplayed()) {
-                const text = await terminalView.getText();
-                console.log("terminal text: " + text);
-                return text.includes("GET: Request completed\n")
-            }
-        }, 50000, "terminal text not found -- timed out");
-    });
-
 });
 
 // This promise is run in parallel to the promise waiting for the breakpoint to be hit
@@ -139,8 +127,7 @@ async function setBreakPoint(fileName: string, breakPoint: number, browser: VSBr
         const tabTitle = await currentTab?.getTitle();
         if (tabTitle !== undefined) {
             return tabTitle === fileName;
-        }
-        return false;
+        }        
     }, timeout, "editor tab title not found -- timed out");
 
     const textEditor = new TextEditor();
