@@ -265,26 +265,29 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
     if res == 0 {
         let path_buf_detour = CheckedInto::<PathBuf>::checked_into(path as *const c_char);
         if let Bypass(FileOperationInMirrordBinTempDir(later_ptr)) = path_buf_detour {
-            if let Success(stripped_path) = CheckedInto::<&str>::checked_into(later_ptr) {
-                let path_cstring = CString::new(stripped_path).unwrap(); // TODO unwrap
+            // SAFETY: If we're here, the original function was passed this pointer and was
+            //         successful, so this pointer must be valid.
+            let old_len = *buflen;
 
-                let stripped_len = path_cstring.as_bytes_with_nul().len();
+            // SAFETY:  `later_ptr` is a pointer to a later char in the same buffer.
+            let prefix_len = later_ptr.offset_from(path);
 
-                // SAFETY:
-                // - can read `stripped_len` bytes from `path_cstring` because it's its length.
-                // - can write `stripped_len` bytes to `path`, because the length of the path after
-                //   stripping a prefix will always be shorter than before.
-                path.copy_from(path_cstring.as_ptr(), stripped_len);
+            let stripped_len = old_len - prefix_len as u32;
 
-                // SAFETY:
-                // - We call the original function before this, so if it's not a valid pointer we
-                //   should not get back 0, and then this code is not executed.
-                *buflen = stripped_len as u32;
+            // SAFETY:
+            // - can read `stripped_len` bytes from `path_cstring` because it's its length.
+            // - can write `stripped_len` bytes to `path`, because the length of the path after
+            //   stripping a prefix will always be shorter than before.
+            path.copy_from(later_ptr, stripped_len as _);
 
-                // If the buffer is long enough for the path, it is long enough for the stripped
-                // path.
-                return 0;
-            }
+            // SAFETY:
+            // - We call the original function before this, so if it's not a valid pointer we should
+            //   not get back 0, and then this code is not executed.
+            *buflen = stripped_len;
+
+            // If the buffer is long enough for the path, it is long enough for the stripped
+            // path.
+            return 0;
         }
     }
     res
