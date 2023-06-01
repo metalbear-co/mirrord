@@ -112,6 +112,7 @@ describe("mirrord sample flow test", function () {
         await browser.driver.wait(async () => {
             if (await terminalView.isDisplayed()) {
                 const text = await terminalView.getText();
+                console.log("terminal text: " + text);
                 return text.includes("GET: Request completed\n")
             }
         }, 50000, "terminal text not found -- timed out");
