@@ -11,12 +11,6 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 ## [3.44.2](https://github.com/metalbear-co/mirrord/tree/3.44.2) - 2023-06-01
 
 
-### Added
-
-- Add E2E tests for vscode extension
-  [#201](https://github.com/metalbear-co/mirrord/issues/201)
-
-
 ### Changed
 
 - Change phrasing on version mismatch warning.
@@ -36,6 +30,8 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Internal
 
+- Add E2E tests for vscode extension
+  [#201](https://github.com/metalbear-co/mirrord/issues/201)
 - Fixed flaky integration tests.
   [#1452](https://github.com/metalbear-co/mirrord/issues/1452)
 - Fixed e2e tests' flakiness in the CI.
