@@ -1,7 +1,7 @@
 import { existsSync } from "fs";
-import { expect } from "chai";
+import { assert, expect } from "chai";
 import { join } from "path";
-import { VSBrowser, StatusBar, TextEditor, EditorView, ActivityBar, DebugView, InputBox, DebugToolbar, Workbench, WebElement } from "vscode-extension-tester";
+import { VSBrowser, StatusBar, TextEditor, EditorView, ActivityBar, DebugView, InputBox, DebugToolbar, Workbench, WebElement, BottomBarPanel } from "vscode-extension-tester";
 import get from "axios";
 
 
@@ -105,6 +105,16 @@ describe("mirrord sample flow test", function () {
         }, 20000, "debug toolbar not found -- timed out");
 
         await Promise.all([debugToolbar.waitForBreakPoint(), sendTrafficToPod()]);
+    });
+
+    it("assert text on terminal", async function () {
+        const terminalView = await new BottomBarPanel().openTerminalView();
+        await browser.driver.wait(async () => {
+            if (await terminalView.isDisplayed()) {
+                const text = await terminalView.getText();
+                return text.includes("GET: Request completed\n")
+            }
+        }, 50000, "terminal text not found -- timed out");
     });
 
 });
