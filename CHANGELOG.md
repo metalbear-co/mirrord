@@ -14,7 +14,6 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 ### Changed
 
 - Change phrasing on version mismatch warning.
-  [#change-phrasing-on-version-mismatch-warning](https://github.com/metalbear-co/mirrord/issues/change-phrasing-on-version-mismatch-warning)
 - Add `/Volumes` to default local on macOS
 - Change Ping interval from 60s down to 30s.
 - Changed local read defaults - list now includes `^/sbin(/|$)` and
