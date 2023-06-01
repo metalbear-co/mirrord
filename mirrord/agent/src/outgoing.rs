@@ -198,9 +198,6 @@ impl TcpOutgoingApi {
                             daemon_tx.send(daemon_message).await?
                         }
                         None => {
-                            debug!("interceptor_task -> close connection {:#?}", connection_id);
-                            writers.remove(&connection_id);
-
                             let daemon_message = DaemonTcpOutgoing::Close(connection_id);
                             daemon_tx.send(daemon_message).await?
                         }
