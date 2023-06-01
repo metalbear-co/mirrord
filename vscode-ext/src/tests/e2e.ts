@@ -22,7 +22,6 @@ describe("mirrord sample flow test", function () {
     this.bail(true); // --> stop tests on first failure
 
     let browser: VSBrowser;
-    let statusBar: StatusBar;
     let debugToolbar: DebugToolbar;
 
     const testWorkspace = join(__dirname, '../../test-workspace');
@@ -40,7 +39,6 @@ describe("mirrord sample flow test", function () {
         expect(kubeService).to.not.be.undefined;
 
         browser = VSBrowser.instance;
-        statusBar = await new StatusBar();
         // need to bring the flask app in open editors
         await browser.openResources(testWorkspace, join(testWorkspace, fileName));
     });
@@ -52,6 +50,7 @@ describe("mirrord sample flow test", function () {
     });
 
     it("enable mirrord", async function () {
+        const statusBar = new StatusBar();
         await browser.driver.wait(async () => {
             const enableButton = await statusBar.getItem("Enable mirrord");
             if (enableButton !== undefined) {
@@ -70,6 +69,7 @@ describe("mirrord sample flow test", function () {
 
     it("create mirrord config", async function () {
         // gear -> $(gear) clicked to open mirrord config
+        const statusBar = new StatusBar();
         await browser.driver.wait(async () => {
             const mirrordSettingsButton = await statusBar.getItem("gear");
             if (mirrordSettingsButton !== undefined) {
