@@ -15,4 +15,7 @@ async fn test_dns_resolve(
     #[values(Application::NodeDnsResolve, Application::NodeRawDnsResolve)] application: Application,
     dylib_path: &PathBuf,
 ) {
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(dylib_path, vec![], None)
+        .await;
 }
