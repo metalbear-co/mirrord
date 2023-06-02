@@ -402,7 +402,7 @@ jobs:
         container-runtime: ["docker", "containerd"]
     name: e2e
     needs: [build_mirrord, test_agent_image, changed_files]
-    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.any_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
