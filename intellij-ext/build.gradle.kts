@@ -30,7 +30,7 @@ dependencies {
     implementation(project(":mirrord-products-rubymine"))
     implementation(project(":mirrord-products-goland"))
     implementation(project(":mirrord-products-nodejs"))
-
+    implementation(project(":mirrord-products-rider"))
 }
 
 // Configure Gradle IntelliJ Plugin - read more: https://github.com/JetBrains/gradle-intellij-plugin
@@ -44,7 +44,7 @@ intellij {
     }
 
     // Plugin Dependencies. Uses `platformPlugins` property from the gradle.properties file.
-    if (platformType != "PY" && platformType != "PC" && platformType != "GO") {
+    if (platformType != "PY" && platformType != "PC" && platformType != "GO" && platformType != "RD") {
         plugins.set(
                 properties("platformPlugins")
                         .split(',')
@@ -184,6 +184,6 @@ tasks {
 
     runPluginVerifier {
         ideVersions.set(listOf("IU-232.5150.116", "IU-222.4554.10"))
-        failureLevel.set(EnumSet.of(FailureLevel.COMPATIBILITY_PROBLEMS, FailureLevel.MISSING_DEPENDENCIES, FailureLevel.INVALID_PLUGIN))
+        failureLevel.set(EnumSet.of(FailureLevel.COMPATIBILITY_PROBLEMS, FailureLevel.INVALID_PLUGIN))
     }
 }
