@@ -96,7 +96,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || steps.changed-ci.outputs.any_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed-ci.outputs.any_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
       - uses: arduino/setup-protoc@v1
@@ -119,7 +119,7 @@ jobs:
   check-rust-docs:
     runs-on: ubuntu-latest
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || steps.changed-ci.outputs.any_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed-ci.outputs.any_changed == 'true'}}
     env:
       # enables the creation of a workspace index.html page.
       RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
