@@ -482,6 +482,7 @@ jobs:
     if: ${{needs.changed_files.outputs.vscode_changed == 'true'}}
     env:
       CI_BUILD_PLUGIN: "true"
+      MIRRORD_AGENT_IMAGE: "test"
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-node@v3

@@ -7,10 +7,7 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "justMyCode": true,
-            "env": {
-                "MIRRORD_AGENT_IMAGE" : "test"
-            }
+            "justMyCode": true
         }
     ]
 }
