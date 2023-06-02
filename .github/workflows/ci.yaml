@@ -81,7 +81,7 @@ jobs:
           echo ${{ steps.changed-intellij.outputs.any_changed }};
           echo ${{ steps.changed-intellij.outputs.all_changed_files }};
           echo ${{ steps.changed-vscode.outputs.any_changed }};
-          echo ${{ steps.changed-vscode.outputs.all_changed_and_modified_files }};          
+          echo ${{ steps.changed-vscode.outputs.all_changed_files }};          
           echo ${{ steps.changed-markdown.outputs.any_changed }};
           echo ${{ steps.changed-markdown.outputs.all_changed_files }};          
   lint:

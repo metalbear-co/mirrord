@@ -14,11 +14,11 @@ build/
 *.go_test_app
 
 ### VSCode IDE ###
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
+# .vscode/*
+# !.vscode/settings.json
+# !.vscode/tasks.json
+# !.vscode/launch.json
+# !.vscode/extensions.json
 
 ### VSCode mirrord extension code ###
 # mirrord binary
