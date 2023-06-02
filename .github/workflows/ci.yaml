@@ -67,7 +67,7 @@ jobs:
         uses: tj-actions/changed-files@v32
         with:
           files: |
-            vscode-ext/{,.,**/*}
+            vscode-ext/**/*
       - name: get markdown changes
         id: changed-markdown
         uses: tj-actions/changed-files@v32
