@@ -555,7 +555,7 @@ jobs:
         run: |
           cd intellij-ext
           chmod +x ./gradlew
-          ./gradlew clean buildPlugin --refresh-dependencies
+          ./gradlew buildPlugin
       - name: Run plugin verifier
         env:
           CI_BUILD_PLUGIN: true
