@@ -9,7 +9,7 @@ use mirrord_protocol::{
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
         DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
     },
-    ClientMessage, DaemonMessage,
+    ClientMessage, DaemonMessage, FileRequest,
 };
 use rstest::rstest;
 
@@ -29,7 +29,16 @@ async fn test_dns_resolve(
         .await;
 
     let mut conn = layer_connection.codec;
-    let msg = conn.try_next().await.unwrap().unwrap();
+    let mut msg = conn.try_next().await.unwrap().unwrap();
+
+    // FileRequest(Open(OpenFileRequest { path: "/etc/resolv.conf", open_options: OpenOptionsInternal { read: true, write: false, append: false, truncate: false, create: false, create_new: false } }))
+
+    // on linux -> /etc/resolv.conf
+    // on macos -> /etc/hostname    
+    if let ClientMessage::FileRequest(FileRequest::Open(_)) = msg {
+        println!("Message received from layer: {msg:?}");
+        msg = conn.try_next().await.unwrap().unwrap();
+    };    
 
     let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect { remote_address: SocketAddress::Ip(addr) })) = msg else {
         panic!("Invalid message received from layer: {msg:?}");
@@ -44,7 +53,7 @@ async fn test_dns_resolve(
     .await
     .unwrap();
 
-    let msg = conn.try_next().await.unwrap().unwrap();
+    msg = conn.try_next().await.unwrap().unwrap();
 
     let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite { connection_id: 0, bytes: _ })) = msg else {
         panic!("Invalid message received from layer: {msg:?}");
