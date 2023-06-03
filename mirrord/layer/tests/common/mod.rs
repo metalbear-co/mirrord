@@ -719,7 +719,6 @@ pub enum Application {
     NodeFileOps,
     NodeSpawn,
     NodeDnsResolve,
-    NodeRawDnsResolve,
     Go19Dir,
     Go20Dir,
     Go19DirBypass,
@@ -793,10 +792,9 @@ impl Application {
                 )
             }
             Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
-            Application::NodeFileOps
-            | Application::NodeSpawn
-            | Application::NodeDnsResolve
-            | Application::NodeRawDnsResolve => String::from("node"),
+            Application::NodeFileOps | Application::NodeSpawn | Application::NodeDnsResolve => {
+                String::from("node")
+            }
             Application::Go19Dir => String::from("tests/apps/dir_go/19.go_test_app"),
             Application::Go20Dir => String::from("tests/apps/dir_go/20.go_test_app"),
             Application::Go20Issue834 => String::from("tests/apps/issue834/20.go_test_app"),
@@ -867,10 +865,6 @@ impl Application {
                 app_path.push("dns_resolve.js");
                 vec![app_path.to_string_lossy().to_string()]
             }
-            Application::NodeRawDnsResolve => {
-                app_path.push("raw_dns_resolve.mjs");
-                vec![app_path.to_string_lossy().to_string()]
-            }
             Application::NodeSpawn => {
                 app_path.push("node_spawn.mjs");
                 vec![app_path.to_string_lossy().to_string()]
@@ -939,7 +933,6 @@ impl Application {
             | Application::NodeFileOps
             | Application::NodeSpawn
             | Application::NodeDnsResolve
-            | Application::NodeRawDnsResolve
             | Application::BashShebang
             | Application::Go20Issue834
             | Application::Go19Issue834
