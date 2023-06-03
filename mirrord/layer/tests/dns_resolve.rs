@@ -30,15 +30,20 @@ async fn test_dns_resolve(
 
     let mut conn = layer_connection.codec;
     let mut msg = conn.try_next().await.unwrap().unwrap();
-
-    // FileRequest(Open(OpenFileRequest { path: "/etc/resolv.conf", open_options: OpenOptionsInternal { read: true, write: false, append: false, truncate: false, create: false, create_new: false } }))
-
     // on linux -> /etc/resolv.conf
-    // on macos -> /etc/hostname    
+    // on macos -> /etc/hostname
     if let ClientMessage::FileRequest(FileRequest::Open(_)) = msg {
         println!("Message received from layer: {msg:?}");
+        #[cfg(target_os = "macos")]
+        layer_connection
+            .expect_file_open_with_read_flag("/etc/hostname", 10)
+            .await;
+        #[cfg(target_os = "linux")]
+        layer_connection
+            .expect_file_open_with_read_flag("/etc/resolv.conf", 10)
+            .await;
         msg = conn.try_next().await.unwrap().unwrap();
-    };    
+    };
 
     let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect { remote_address: SocketAddress::Ip(addr) })) = msg else {
         panic!("Invalid message received from layer: {msg:?}");
