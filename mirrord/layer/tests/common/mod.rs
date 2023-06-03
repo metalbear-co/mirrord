@@ -868,7 +868,7 @@ impl Application {
                 vec![app_path.to_string_lossy().to_string()]
             }
             Application::NodeRawDnsResolve => {
-                app_path.push("raw_dns_resolve.js");
+                app_path.push("raw_dns_resolve.mjs");
                 vec![app_path.to_string_lossy().to_string()]
             }
             Application::NodeSpawn => {
@@ -973,7 +973,7 @@ impl Application {
     async fn get_test_process(&self, env: HashMap<&str, &str>) -> TestProcess {
         let executable = self.get_executable().await;
         println!("Using executable: {}", &executable);
-
+        println!("Using args: {:?}", self.get_args());
         TestProcess::start_process(executable, self.get_args(), env).await
     }
 
