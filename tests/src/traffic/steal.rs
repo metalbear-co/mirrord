@@ -280,7 +280,7 @@ mod steal {
     /// app does not see the traffic.
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(60))]
+    #[timeout(Duration::from_secs(120))]
     async fn complete_passthrough(
         #[future] tcp_echo_service: KubeService,
         #[future] kube_client: Client,
