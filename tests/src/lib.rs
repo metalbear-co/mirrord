@@ -559,17 +559,9 @@ mod utils {
         #[future] kube_client: Client,
     ) -> KubeService {
         let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
-        let now = Utc::now();
-        eprintln!(
-            "stderr {:02}:{:02}:{:02} {pid}: {}",
-            now.hour(),
-            now.minute(),
-            now.second(),
-            string
-        );
         println!(
-            "{:02}:{:02}:{:02} creating service {service_name:?} in namespace {namespace:?}",
-            Utc::now()
+            "{} creating service {service_name:?} in namespace {namespace:?}",
+            format_time()
         );
 
         let kube_client = kube_client.await;
