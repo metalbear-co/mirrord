@@ -19,7 +19,6 @@ edition.workspace = true
 default = []
 
 [dependencies]
-bcder = "0.7"
 bytes = "1"
 chrono = "0.4"
 home = "0.5"

@@ -3163,7 +3163,6 @@ dependencies = [
 name = "mirrord-auth"
 version = "3.44.2"
 dependencies = [
- "bcder",
  "bytes",
  "chrono",
  "home",
