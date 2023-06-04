@@ -114,7 +114,6 @@ async fn layer_recv(
             if let Err(fail) = daemon_write {
                 warn!("LayerTcpOutgoing::Write -> Failed with {:#?}", fail);
                 writers.remove(&connection_id);
-                readers.remove(&connection_id);
 
                 let daemon_message = DaemonTcpOutgoing::Close(connection_id);
                 daemon_tx.send(daemon_message).await?
@@ -124,7 +123,6 @@ async fn layer_recv(
         // `layer` closed their interceptor stream.
         LayerTcpOutgoing::Close(LayerClose { ref connection_id }) => {
             writers.remove(connection_id);
-            readers.remove(connection_id);
         }
     }
 
