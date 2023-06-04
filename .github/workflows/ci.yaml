@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
   towncrier_check:
@@ -36,6 +36,7 @@ jobs:
       rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
       intellij_changed: ${{ steps.changed-intellij.outputs.any_changed }}
       markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
+      vscode_changed: ${{ steps.changed-vscode.outputs.any_changed }}
     steps:
       - uses: actions/checkout@v3
         with:
@@ -61,6 +62,12 @@ jobs:
         with:
           files: |
             intellij-ext/**
+      - name: get vscode changes
+        id: changed-vscode
+        uses: tj-actions/changed-files@v32
+        with:
+          files: |
+            vscode-ext/**
       - name: get markdown changes
         id: changed-markdown
         uses: tj-actions/changed-files@v32
@@ -112,8 +119,8 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          # TODO(alex): update this when https://github.com/rust-lang/rust/issues/109631 is fixed 
-          toolchain: nightly-2023-01-31 
+          # TODO(alex): update this when https://github.com/rust-lang/rust/issues/109631 is fixed
+          toolchain: nightly-2023-01-31
       - run: cargo doc --document-private-items
 
   lint_macos:
@@ -258,8 +265,10 @@ jobs:
       - name: upload layer
         uses: actions/upload-artifact@v3
         with:
-          name: layer-lib
-          path: target/debug/libmirrord_layer.so
+          name: mirrord-artifacts
+          path: |
+            target/debug/libmirrord_layer.so
+            target/debug/mirrord
           if-no-files-found: error
 
   integration_tests:
@@ -317,7 +326,7 @@ jobs:
       - name: download layer # Download layer lib built in the `build_mirrord` job.
         uses: actions/download-artifact@v3
         with:
-          name: layer-lib
+          name: mirrord-artifacts
           path: target/debug/
       - run: cargo test -p mirrord-layer
 
@@ -451,6 +460,73 @@ jobs:
           kubectl describe pods
           docker exec minikube find /var/log/pods -print -exec cat {} \;
 
+  vscode_typescript_lint:
+    runs-on: ubuntu-latest
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.vscode_changed == 'true'}}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - run: |
+          cd vscode-ext 
+          npm install --no-package-lock --no-save eslint
+          npm run lint
+
+  vscode_e2e:
+    runs-on: ubuntu-latest
+    needs: [changed_files, build_mirrord, test_agent_image]
+    if: ${{needs.changed_files.outputs.vscode_changed == 'true'}}
+    env:
+      CI_BUILD_PLUGIN: "true"
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - name: Download layer
+        uses: actions/download-artifact@v3
+        with:
+          name: mirrord-artifacts
+          path: target/debug/
+      - name: move mirrord binary to bin/
+        run: |
+          cd vscode-ext
+          mkdir -p bin/linux/x64
+          cp ../target/debug/mirrord bin/linux/x64
+      - name: Install dependencies
+        run: |
+          cd vscode-ext
+          npm install
+      - name: download image
+        uses: actions/download-artifact@v2
+        with:
+          name: test
+          path: /tmp
+      - name: Start minikube
+        uses: medyagh/setup-minikube@master
+        with:
+          container-runtime: docker
+      - run: |
+          minikube image load /tmp/test.tar                    
+          kubectl apply -f sample/kubernetes/app.yaml          
+          echo "POD_TO_SELECT=$(kubectl get pods -o=name | head -n 1)" >> "$GITHUB_ENV"
+          kubectl wait --for=condition=ready --timeout=30s $(kubectl get pods -o=name | head -n 1)          
+          KUBE_SERVICE=$(minikube service list --output=json | jq -r '.[] | select(.Name == "py-serv") | .URLs[0]')
+          echo "$KUBE_SERVICE"
+          echo "KUBE_SERVICE=$KUBE_SERVICE" >> "$GITHUB_ENV"
+      # we can't run chrome like apps in the CI, we use a virtual frame buffer:
+      # refer: http://elementalselenium.com/tips/38-headless
+      - name: Run vscode e2e in headless state
+        uses: coactions/setup-xvfb@v1
+        env:
+          POD_TO_SELECT: ${{ env.POD_TO_SELECT }}
+          KUBE_SERVICE: ${{ env.KUBE_SERVICE }}
+        with:
+          run: npm run test
+          working-directory: vscode-ext
+
   build_intellij_plugin:
     runs-on: ubuntu-latest
     needs: changed_files
@@ -509,6 +585,8 @@ jobs:
         test_mirrord_config,
         test_mirrord_protocol,
         test_mirrord_sip,
+        vscode_typescript_lint,
+        vscode_e2e,
         build_intellij_plugin,
         lint_markdown,
       ]
@@ -532,6 +610,8 @@ jobs:
             (needs.test_mirrord_config.result == 'success' || needs.test_mirrord_config.result == 'skipped') &&
             (needs.test_mirrord_protocol.result == 'success' || needs.test_mirrord_protocol.result == 'skipped') &&
             (needs.test_mirrord_sip.result == 'success' || needs.test_mirrord_sip.result == 'skipped') &&
+            (needs.vscode_typescript_lint.result == 'success' || needs.vscode_typescript_lint.result == 'skipped') &&
+            (needs.vscode_e2e.result == 'success' || needs.vscode_e2e.result == 'skipped') &&
             (needs.build_intellij_plugin.result == 'success' || needs.build_intellij_plugin.result == 'skipped') &&
             (needs.lint_markdown.result == 'success' || needs.lint_markdown.result == 'skipped') }}
         run: echo $CI_SUCCESS && if [ "$CI_SUCCESS" == "true" ]; then echo "SUCCESS" && exit 0; else echo "Failure" && exit 1; fi
