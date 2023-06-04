@@ -72,6 +72,9 @@ impl Default for TcpOutgoingHandler {
     }
 }
 
+/// Struct that wraps `Sender<LayerTcpOutgoing>` and `Receiver<Vec<u8>>`
+struct RemoteSocket {}
+
 impl TcpOutgoingHandler {
     /// # Arguments
     ///
@@ -159,32 +162,27 @@ impl TcpOutgoingHandler {
 
         let mut buffer = vec![0; 1024];
         let mut remote_stream_closed = false;
-
+        let mut layer_to_user_stream_closed = false;
         loop {
             select! {
                 biased; // To allow local socket to be read before being closed
 
                 // Reads data that the user is sending from their socket to mirrord's interceptor
                 // socket.
-                read = layer_to_user_stream.read(&mut buffer) => {
+                read = layer_to_user_stream.read(&mut buffer), if !layer_to_user_stream_closed => {
                     match read {
                         Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
                             continue;
                         },
                         Err(fail) => {
                             info!("Failed reading mirror_stream with {:#?}", fail);
-                            if !remote_stream_closed {
-                                close_remote_stream(layer_tx.clone()).await;
-                            }
 
+                            layer_to_user_stream_closed = true;
                             break;
                         }
                         Ok(read_amount) if read_amount == 0 => {
                             trace!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
-                            if !remote_stream_closed {
-                                close_remote_stream(layer_tx.clone()).await;
-                            }
-
+                            layer_to_user_stream_closed = true;
                             break;
                         },
                         Ok(read_amount) => {
@@ -200,9 +198,7 @@ impl TcpOutgoingHandler {
                             let outgoing_write = LayerTcpOutgoing::Write(write);
 
                             if let Err(fail) = layer_tx.send(outgoing_write).await {
-                                error!("Failed sending write message with {:#?}!", fail);
-
-                                break;
+                                warn!("Failed sending write message with {:#?}!", fail);
                             }
                         }
                     }
@@ -226,7 +222,14 @@ impl TcpOutgoingHandler {
                         }
                     }
                 },
+                else => {
+                    break;
+                }
             }
+        }
+
+        if !remote_stream_closed {
+            close_remote_stream(layer_tx.clone()).await;
         }
     }
 
