@@ -72,7 +72,6 @@ impl Default for TcpOutgoingHandler {
     }
 }
 
-
 impl TcpOutgoingHandler {
     /// # Arguments
     ///
