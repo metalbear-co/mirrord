@@ -1,1 +1,0 @@
-Changed local read defaults - list now includes `^/sbin(/|$)` and `^/var/run/com.apple`.

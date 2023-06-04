@@ -8,63 +8,57 @@ use crate::{
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
-/// Allows the user to set or override a local process' environment variables with the ones from a
-/// remote pod.
+/// Allows the user to set or override the local process' environment variables with the ones
+/// from the remote pod.
 ///
 /// Which environment variables to load from the remote pod are controlled by setting either
-/// `include` or `exclude`.
+/// [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).
 ///
-/// See the environment variables [reference](https://mirrord.dev/docs/reference/env/)
-/// for more details.
+/// See the environment variables [reference](https://mirrord.dev/docs/reference/env/) for more details.
 ///
-/// ## Examples
-///
-/// - Include every environment variable from the remote pod (default):
-///
-/// ```toml
-/// # mirrord-config.toml
-///
-/// [feature.env]
-/// include = "*"
-/// ```
-///
-/// Some environment variables are excluded by default (`PATH` for example), including these
-/// requires specifying them with `include`, see `mirrord-agent::env::EnvFilter`.
-///
-/// - Include the remote pod's environment variables "PROJECT", "DATABASE":
-///
-/// ```toml
-/// # mirrord-config.toml
-///
-/// [feature.env]
-/// include = "PROJECT;DATABASE"
-/// ```
-///
-/// - Exclude the remote pod's environment variables "USER", "SECRET", and include everything else:
-///
-/// ```toml
-/// # mirrord-config.toml
-///
-/// [feature.env]
-/// exclude = "USER;SECRET"
+/// ```json
+/// {
+///   "feature": {
+///     "env": {
+///       "include": "DATABASE_USER;PUBLIC_ENV",
+///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
+///       "override": {
+///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
+///         "LOCAL_BEAR": "panda"
+///       }
+///     }
+///   }
+/// }
 /// ```
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "EnvFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct EnvConfig {
+    /// ### feature.env.include {#feature-env-include}
+    ///
     /// Include only these remote environment variables in the local process.
     ///
     /// Value is a list separated by ";".
+    ///
+    /// Some environment variables are excluded by default (`PATH` for example), including these
+    /// requires specifying them with `include`
     #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE")]
     pub include: Option<VecOrSingle<String>>,
 
+    /// ### feature.env.exclude {#feature-env-exclude}
+    ///
     /// Include the remote environment variables in the local process that are **NOT** specified by
     /// this option.
+    ///
+    /// Some of the variables that are excluded by default:
+    /// `PATH`, `HOME`, `HOMEPATH`, `CLASSPATH`, `JAVA_EXE`, `JAVA_HOME`, `PYTHONPATH`.
     ///
     /// Value is a list separated by ";".
     #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE")]
     pub exclude: Option<VecOrSingle<String>>,
 
+    /// ### feature.env.override {#feature-env-override}
+    ///
     /// Allows setting or overriding environment variables (locally) with a custom value.
     ///
     /// For example, if the remote pod has an environment variable `REGION=1`, but this is an

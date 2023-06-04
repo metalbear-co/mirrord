@@ -25,9 +25,10 @@ where
     }
 }
 
-/// This is the same as `FromEnv` but doesn't discard the error
-/// returned from parse. This is for parsing `Target`.
-/// I (A.H) couldn't find any better way to do this since you can't
+/// <!--${internal}-->
+/// This is the same as `FromEnv` but doesn't discard the error returned from parse.
+///
+/// This is for parsing `Target`. I (A.H) couldn't find any better way to do this since you can't
 /// do specialization on associated types.
 #[derive(Clone)]
 pub struct FromEnvWithError<T>(&'static str, PhantomData<T>);
