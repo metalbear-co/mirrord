@@ -21,8 +21,7 @@ describe("mirrord sample flow test", function () {
     this.timeout(1000000); // --> mocha tests timeout
     this.bail(true); // --> stop tests on first failure
 
-    let browser: VSBrowser;
-    let debugToolbar: DebugToolbar;
+    let browser: VSBrowser;    
 
     const testWorkspace = join(__dirname, '../../test-workspace');
     const fileName = "app_flask.py";
@@ -40,13 +39,7 @@ describe("mirrord sample flow test", function () {
         // need to bring the flask app in open editors
         await browser.openResources(testWorkspace, join(testWorkspace, fileName));
     });
-
-    after(async function () {
-        if (await debugToolbar?.isDisplayed()) {
-            await debugToolbar.stop();
-        }
-    });
-
+    
     it("enable mirrord", async function () {
         const statusBar = new StatusBar();
         await browser.driver.wait(async () => {
@@ -94,7 +87,7 @@ describe("mirrord sample flow test", function () {
     });
 
     it("wait for breakpoint to be hit", async function () {
-        debugToolbar = await DebugToolbar.create(2 * defaultTimeout);
+        const debugToolbar = await DebugToolbar.create(2 * defaultTimeout);
         // waiting for breakpoint and sending traffic to pod are run in parallel
         // however, traffic is sent after 10 seconds that we are sure the IDE is listening
         // for breakpoints
@@ -107,7 +100,7 @@ describe("mirrord sample flow test", function () {
     });
 });
 
-async function sendTrafficToPod(debugToolbar: DebugToolbar) {    
+async function sendTrafficToPod(debugToolbar: DebugToolbar) {
     const response = await get(kubeService!!);
     expect(response.status).to.equal(200);
     expect(response.data).to.equal("OK - GET: Request completed\n");
