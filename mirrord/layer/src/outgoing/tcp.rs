@@ -72,8 +72,6 @@ impl Default for TcpOutgoingHandler {
     }
 }
 
-/// Struct that wraps `Sender<LayerTcpOutgoing>` and `Receiver<Vec<u8>>`
-struct RemoteSocket {}
 
 impl TcpOutgoingHandler {
     /// # Arguments
@@ -140,6 +138,7 @@ impl TcpOutgoingHandler {
     ///   async read and write) between the user app and the layer.
     /// * `remote_stream` - A [`ReceiverStream`] to read the response data forwarded from the agent
     ///   (to be forwarded to `layer_to_user_stream`).
+    #[allow(unused_assignments)]
     async fn forward_bidirectionally<T: AsyncRead + AsyncWrite + Unpin>(
         layer_tx: Sender<LayerTcpOutgoing>,
         connection_id: ConnectionId,
@@ -165,8 +164,6 @@ impl TcpOutgoingHandler {
         let mut layer_to_user_stream_closed = false;
         loop {
             select! {
-                biased; // To allow local socket to be read before being closed
-
                 // Reads data that the user is sending from their socket to mirrord's interceptor
                 // socket.
                 read = layer_to_user_stream.read(&mut buffer), if !layer_to_user_stream_closed => {
