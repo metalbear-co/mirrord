@@ -18,7 +18,7 @@ tasks {
 
 intellij {
     version.set(properties("platformVersion"))
-    plugins.set(listOf("org.jetbrains.plugins.ruby:223.7571.4"))
+    plugins.set(listOf("org.jetbrains.plugins.ruby:223.8617.56"))
 }
 
 dependencies {

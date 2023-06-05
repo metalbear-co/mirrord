@@ -13,16 +13,8 @@ build/
 ### go tests ###
 *.go_test_app
 
-### VSCode IDE ###
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-
-### VSCode mirrord extension code ###
-# mirrord binary
-vscode-ext/mirrord
+### VSCode ###
+vscode-ext/bin
 
 ### Intellij ###
 intellij-ext/.gradle

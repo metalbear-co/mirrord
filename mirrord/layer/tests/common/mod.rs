@@ -9,7 +9,7 @@ use std::{
 };
 
 use actix_codec::Framed;
-use chrono::Utc;
+use chrono::{Timelike, Utc};
 use fancy_regex::Regex;
 use futures::{SinkExt, StreamExt};
 use mirrord_protocol::{
@@ -31,6 +31,12 @@ use tokio::{
 pub const RUST_OUTGOING_PEERS: &str = "1.1.1.1:1111,2.2.2.2:2222,3.3.3.3:3333";
 /// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
 pub const RUST_OUTGOING_LOCAL: &str = "4.4.4.4:4444";
+
+/// Returns string with time format of hh:mm:ss
+fn format_time() -> String {
+    let now = Utc::now();
+    format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
+}
 
 pub struct TestProcess {
     pub child: Option<Child>,
@@ -73,9 +79,8 @@ impl TestProcess {
                 if n == 0 {
                     break;
                 }
-
                 let string = String::from_utf8_lossy(&buf[..n]);
-                eprintln!("stderr {:?} {pid}: {}", Utc::now(), string);
+                eprintln!("stderr {} {pid}: {}", format_time(), string);
                 {
                     stderr_data_reader.lock().unwrap().push_str(&string);
                 }
@@ -90,7 +95,7 @@ impl TestProcess {
                     break;
                 }
                 let string = String::from_utf8_lossy(&buf[..n]);
-                print!("stdout {:?} {pid}: {}", Utc::now(), string);
+                print!("stdout {} {pid}: {}", format_time(), string);
                 {
                     stdout_data_reader.lock().unwrap().push_str(&string);
                 }

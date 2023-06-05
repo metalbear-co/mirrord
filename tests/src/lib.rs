@@ -20,7 +20,7 @@ mod utils {
         time::Duration,
     };
 
-    use chrono::Utc;
+    use chrono::{Timelike, Utc};
     use futures_util::stream::TryStreamExt;
     use k8s_openapi::api::{
         apps::v1::Deployment,
@@ -84,6 +84,12 @@ mod utils {
             .map(char::from)
             .collect::<String>()
             .to_ascii_lowercase()
+    }
+
+    /// Returns string with time format of hh:mm:ss
+    fn format_time() -> String {
+        let now = Utc::now();
+        format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
     }
 
     #[derive(Debug)]
@@ -187,7 +193,7 @@ mod utils {
                     }
 
                     let string = String::from_utf8_lossy(&buf[..n]);
-                    eprintln!("stderr {:?} {pid}: {}", Utc::now(), string);
+                    eprintln!("stderr {} {pid}: {}", format_time(), string);
                     {
                         stderr_data_reader.lock().unwrap().push_str(&string);
                     }
@@ -202,7 +208,7 @@ mod utils {
                         break;
                     }
                     let string = String::from_utf8_lossy(&buf[..n]);
-                    println!("stdout {:?} {pid}: {}", Utc::now(), string);
+                    print!("stdout {} {pid}: {}", format_time(), string);
                     {
                         stdout_data_reader.lock().unwrap().push_str(&string);
                     }
@@ -553,10 +559,9 @@ mod utils {
         #[future] kube_client: Client,
     ) -> KubeService {
         let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
-
         println!(
-            "{:?} creating service {service_name:?} in namespace {namespace:?}",
-            Utc::now()
+            "{} creating service {service_name:?} in namespace {namespace:?}",
+            format_time()
         );
 
         let kube_client = kube_client.await;
