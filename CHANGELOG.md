@@ -8,6 +8,30 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.45.0](https://github.com/metalbear-co/mirrord/tree/3.45.0) - 2023-06-05
+
+
+### Added
+
+- Rider is now supported by the IntelliJ plugin.
+  [#1012](https://github.com/metalbear-co/mirrord/issues/1012)
+
+
+### Fixed
+
+- Chagned agent to not return errors on reading from outgoing sockets, and
+  layer to not crash in that case anyway
+
+
+### Internal
+
+- Use one thread for namespaced runtimes
+  [#1287](https://github.com/metalbear-co/mirrord/issues/1287)
+- Better timeformatting in e2e and maybe reduce flakiness?
+- Fix nodejs deprecation warnings in CI
+- Set MIRRORD_AGENT_IMAGE for vscode e2e
+
+
 ## [3.44.2](https://github.com/metalbear-co/mirrord/tree/3.44.2) - 2023-06-01
 
 
