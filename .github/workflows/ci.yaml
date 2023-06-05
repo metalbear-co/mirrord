@@ -381,6 +381,9 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/recv_from
+          cargo build          
       - uses: actions/setup-node@v3
         with:
           node-version: 14
