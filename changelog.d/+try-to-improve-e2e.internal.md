@@ -1,1 +1,0 @@
-Better timeformatting in e2e and maybe reduce flakiness?
