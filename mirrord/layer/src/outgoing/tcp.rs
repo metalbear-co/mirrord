@@ -23,7 +23,7 @@ use tokio::{
     task,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::*;
 use crate::{common::ResponseDeque, detour::DetourGuard, error::LayerError};
@@ -396,7 +396,7 @@ impl TcpOutgoingHandler {
                     // We need connection id with these errors to actually do something
                     // pending protocol change
                     Err(e) => {
-                        info!("Remote socket disconnected")
+                        debug!("Remote socket disconnected {e:#?}")
                     }
                 }
 
