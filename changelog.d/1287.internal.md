@@ -1,0 +1,1 @@
+Use one thread for namespaced runtimes
