@@ -4359,7 +4359,6 @@ dependencies = [
 name = "recv_from"
 version = "0.1.0"
 dependencies = [
- "hex",
  "socket2 0.4.9",
 ]
 
