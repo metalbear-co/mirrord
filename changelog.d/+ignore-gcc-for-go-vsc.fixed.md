@@ -1,0 +1,1 @@
+Skipping `gcc` when debugging Go in VS Code extension.
