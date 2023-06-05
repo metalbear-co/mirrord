@@ -185,12 +185,21 @@ impl TcpOutgoingApi {
                     trace!("interceptor_task -> read connection_id {:#?}", connection_id);
 
                     match remote_read {
-                        Some(read) => {
-                            let daemon_read = read
-                                .map_err(ResponseError::from)
-                                .map(|bytes| DaemonRead { connection_id, bytes: bytes.to_vec() });
+                        // TODO: PROTOCOL
+                        // We shouldn't return it as a `Result<T, ResponseError>` since we lose track of connection id
+                        // and it doesn't really make sense to do it, but we don't want to break the protocol
+                        // so we'll still wrap it with Ok() and if we error we just close the connection.
+                        Some(Ok(read)) => {
+                            let daemon_read = DaemonRead { connection_id, bytes: read.to_vec() };
 
-                            let daemon_message = DaemonTcpOutgoing::Read(daemon_read);
+                            let daemon_message = DaemonTcpOutgoing::Read(Ok(daemon_read));
+                            daemon_tx.send(daemon_message).await?
+                        },
+                        Some(Err(err)) => {
+                            warn!("interceptor_task -> read connection_id {:#?} failed with {:#?}", connection_id, err);
+                            writers.remove(&connection_id);
+
+                            let daemon_message = DaemonTcpOutgoing::Close(connection_id);
                             daemon_tx.send(daemon_message).await?
                         }
                         None => {

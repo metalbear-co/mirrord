@@ -376,22 +376,30 @@ impl TcpOutgoingHandler {
             DaemonTcpOutgoing::Read(read) => {
                 // (agent) read something from remote, so we write it to the user.
                 trace!("Read -> read {:?}", read);
-                let DaemonRead {
-                    connection_id,
-                    bytes,
-                } = read?;
+                match read {
+                    Ok(DaemonRead {
+                        connection_id,
+                        bytes,
+                    }) => {
+                        let sender = self
+                            .mirrors
+                            .get_mut(&connection_id)
+                            .ok_or(LayerError::NoConnectionId(connection_id))?;
 
-                let sender = self
-                    .mirrors
-                    .get_mut(&connection_id)
-                    .ok_or(LayerError::NoConnectionId(connection_id))?;
+                        sender.send(bytes).await.unwrap_or_else(|_| {
+                            warn!(
+                                "Got new data from agent after application closed socket. \
+                            connection_id: {connection_id}"
+                            );
+                        });
+                    }
+                    // We need connection id with these errors to actually do something
+                    // pending protocol change
+                    Err(e) => {
+                        info!("Remote socket disconnected")
+                    }
+                }
 
-                sender.send(bytes).await.unwrap_or_else(|_| {
-                    warn!(
-                        "Got new data from agent after application closed socket. connection_id: \
-                    connection_id: {connection_id}"
-                    );
-                });
                 Ok(())
             }
             DaemonTcpOutgoing::Close(connection_id) => {
