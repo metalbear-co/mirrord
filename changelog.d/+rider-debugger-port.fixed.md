@@ -1,1 +1,1 @@
-Properly detecting and ignoring ocalhost port used by Rider's debugger. 
+Properly detecting and ignoring localhost port used by Rider's debugger. 

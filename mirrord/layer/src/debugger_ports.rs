@@ -56,7 +56,7 @@ pub enum DebuggerType {
     /// /path/to/rider/lib/ReSharperHost/JetBrains.Debugger.Worker.exe --mode=client
     /// --frontend-port=36977 ...`.
     ///
-    /// Port would not be extractged from a command like
+    /// Port would not be extracted from a command like
     /// `/some/executable exec /path/to/rider/lib/ReSharperHost/JetBrains.Debugger.Worker.exe
     /// --mode=client --frontend-port=36977 ...` (dotnet executable missing) or
     /// `/path/to/rider/lib/ ReSharperHost/linux-x64/dotnet/dotnet exec --mode=client
