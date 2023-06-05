@@ -1,4 +1,9 @@
-use std::{collections::BTreeMap, fmt::Debug, path::PathBuf, sync::LazyLock};
+use std::{
+    collections::{btree_map::Entry, BTreeMap},
+    fmt::Debug,
+    path::PathBuf,
+    sync::LazyLock,
+};
 
 use kube::{Client, Resource};
 use serde::{Deserialize, Serialize};
@@ -18,6 +23,7 @@ static CREDENTIALS_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CredentialStore {
     active: String,
+    common_name: Option<String>,
     client_credentials: BTreeMap<String, Credentials>,
 }
 
@@ -25,6 +31,7 @@ impl Default for CredentialStore {
     fn default() -> Self {
         CredentialStore {
             active: "default".to_string(),
+            common_name: None,
             client_credentials: BTreeMap::new(),
         }
     }
@@ -50,25 +57,26 @@ impl CredentialStore {
             .map_err(AuthenticationError::from)
     }
 
-    pub async fn get_or_init<R>(&mut self, client: &Client, cn: &str) -> Result<&mut Credentials>
+    pub async fn get_or_init<R>(&mut self, client: &Client) -> Result<&mut Credentials>
     where
         R: Resource + Clone + Debug,
         R: for<'de> Deserialize<'de>,
         R::DynamicType: Default,
     {
-        if !self.client_credentials.contains_key(&self.active) {
-            self.client_credentials
-                .insert(self.active.clone(), Credentials::init()?);
-        }
-
-        let credentials = self
-            .client_credentials
-            .get_mut(&self.active)
-            .expect("Unreachable");
+        let credentials = match self.client_credentials.entry(self.active.clone()) {
+            Entry::Vacant(entry) => entry.insert(Credentials::init()?),
+            Entry::Occupied(entry) => entry.into_mut(),
+        };
 
         if !credentials.is_ready() {
+            let common_name = self
+                .common_name
+                .clone()
+                .or_else(|| gethostname::gethostname().into_string().ok())
+                .unwrap_or_default();
+
             credentials
-                .get_client_certificate::<R>(client.clone(), cn)
+                .get_client_certificate::<R>(client.clone(), &common_name)
                 .await?;
         }
 

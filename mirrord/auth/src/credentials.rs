@@ -36,24 +36,30 @@ impl Credentials {
         self.certificate.is_some()
     }
 
-    pub fn certificate_request(&self, cn: &str) -> Result<rfc2986::CertificationRequest> {
+    pub fn certificate_request(&self, common_name: &str) -> Result<rfc2986::CertificationRequest> {
         let mut builder = X509CertificateBuilder::new(KeyAlgorithm::Ed25519);
 
-        let _ = builder.subject().append_common_name_utf8_string(cn);
+        let _ = builder
+            .subject()
+            .append_common_name_utf8_string(common_name);
 
         builder
             .create_certificate_signing_request(self.key_pair.deref())
             .map_err(AuthenticationError::from)
     }
 
-    pub async fn get_client_certificate<R>(&mut self, client: Client, cn: &str) -> Result<()>
+    pub async fn get_client_certificate<R>(
+        &mut self,
+        client: Client,
+        common_name: &str,
+    ) -> Result<()>
     where
         R: Resource + Clone + Debug,
         R: for<'de> Deserialize<'de>,
         R::DynamicType: Default,
     {
         let certificate_request = self
-            .certificate_request(cn)?
+            .certificate_request(common_name)?
             .encode_pem()
             .map_err(X509CertificateError::from)?;
 

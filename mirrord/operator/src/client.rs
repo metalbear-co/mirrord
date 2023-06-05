@@ -117,7 +117,7 @@ impl OperatorApi {
             .credentials
             .write()
             .await
-            .get_or_init::<MirrordOperatorCrd>(&self.client, "default@example.com")
+            .get_or_init::<MirrordOperatorCrd>(&self.client)
             .await?
             .as_ref()
             .encode_der()

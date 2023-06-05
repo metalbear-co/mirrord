@@ -22,6 +22,7 @@ default = []
 bytes = "1"
 chrono = "0.4"
 home = "0.5"
+gethostname = "0.4"
 pem = "2"
 k8s-openapi.workspace = true
 kube.workspace = true
