@@ -111,19 +111,26 @@ Operator License
 "#
     );
 
+    let Some(status) = mirrord_status.status else {
+        return Ok(());
+    };
+
+    if let Some(statistics) = status.statistics {
+        println!("Operator Daily Users: {}", statistics.dau);
+        println!("Operator Monthly Users: {}", statistics.mau);
+    }
+
     let mut sessions = Table::new();
 
     sessions.add_row(row!["Session ID", "Target", "User", "Session Duration"]);
 
-    if let Some(status) = mirrord_status.status {
-        for session in &status.sessions {
-            sessions.add_row(row![
-                session.id.as_deref().unwrap_or(""),
-                &session.target,
-                &session.user,
-                humantime::format_duration(Duration::from_secs(session.duration_secs)),
-            ]);
-        }
+    for session in &status.sessions {
+        sessions.add_row(row![
+            session.id.as_deref().unwrap_or(""),
+            &session.target,
+            &session.user,
+            humantime::format_duration(Duration::from_secs(session.duration_secs)),
+        ]);
     }
 
     sessions.printstd();
