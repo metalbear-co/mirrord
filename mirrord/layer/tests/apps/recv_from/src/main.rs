@@ -26,9 +26,8 @@ fn main() {
         .recv_from(&mut response)
         .expect("Failed to receive response");
 
-    if let Some(addr) = source_address.as_socket_ipv4() {
-        assert_eq!(addr.to_string(), google_dns_server);
-    } else {
-        panic!("Expected source address to be an IPv4 address")
-    }
+    assert_eq!(
+        source_address.as_socket_ipv4().unwrap().to_string(),
+        google_dns_server
+    );
 }
