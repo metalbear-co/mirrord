@@ -22,7 +22,7 @@ async fn test_dns_resolve(
     #[values(Application::RustDnsResolve)] application: Application,
     dylib_path: &PathBuf,
 ) {
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, layer_connection) = application
         .start_process_with_layer(dylib_path, vec![("MIRRORD_REMOTE_DNS", "true")], None)
         .await;
 
@@ -44,7 +44,7 @@ async fn test_dns_resolve(
 
     let msg = conn.try_next().await.unwrap().unwrap();
 
-    let ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node }) = msg else {
+    let ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node: _ }) = msg else {
         panic!("Invalid message received from layer: {msg:?}");
     };
 
@@ -55,4 +55,8 @@ async fn test_dns_resolve(
     )))
     .await
     .unwrap();
+
+    test_process.wait_assert_success().await;
+    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stdout();
 }
