@@ -158,7 +158,7 @@ where
     std::thread::spawn(move || {
         on_start_fn();
 
-        let rt = tokio::runtime::Builder::new_multi_thread()
+        let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .thread_name(thread_name)
             .on_thread_start(on_start_fn)
