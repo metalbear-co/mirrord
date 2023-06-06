@@ -20,7 +20,9 @@ fn main() {
         .recv_from(&mut response)
         .expect("Failed to receive response");
 
-    let response = response[..len]
+    let response = response
+        .get(..len)
+        .unwrap()
         .iter()
         .map(|b| unsafe { b.assume_init() })
         .collect::<Vec<u8>>();
