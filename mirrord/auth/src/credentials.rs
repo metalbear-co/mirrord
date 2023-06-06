@@ -15,7 +15,9 @@ use crate::{
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Credentials {
+    /// Generated Certificate from operator
     certificate: Option<Certificate>,
+    /// Local Keypair for creating CertificateRequest for operator
     key_pair: KeyPair,
 }
 

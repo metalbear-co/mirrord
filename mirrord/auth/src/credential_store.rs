@@ -1,5 +1,5 @@
 use std::{
-    collections::{btree_map::Entry, BTreeMap},
+    collections::{hash_map::Entry, HashMap},
     fmt::Debug,
     path::PathBuf,
     sync::LazyLock,
@@ -22,17 +22,21 @@ static CREDENTIALS_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CredentialStore {
-    active: String,
+    /// Currently active credential key from `credentials` field
+    active_credential: String,
+    /// User-specified CN to be used in all new certificates in this store. (Defaults to hostname)
     common_name: Option<String>,
-    client_credentials: BTreeMap<String, Credentials>,
+    /// Credentials for operator
+    /// Can be linked to several diffrent operator licenses via diffrent keys
+    credentials: HashMap<String, Credentials>,
 }
 
 impl Default for CredentialStore {
     fn default() -> Self {
         CredentialStore {
-            active: "default".to_string(),
+            active_credential: "default".to_string(),
             common_name: None,
-            client_credentials: BTreeMap::new(),
+            credentials: HashMap::new(),
         }
     }
 }
@@ -63,7 +67,7 @@ impl CredentialStore {
         R: for<'de> Deserialize<'de>,
         R::DynamicType: Default,
     {
-        let credentials = match self.client_credentials.entry(self.active.clone()) {
+        let credentials = match self.credentials.entry(self.active_credential.clone()) {
             Entry::Vacant(entry) => entry.insert(Credentials::init()?),
             Entry::Occupied(entry) => entry.into_mut(),
         };
