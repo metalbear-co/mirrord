@@ -723,7 +723,6 @@ pub enum Application {
     EnvBashCat,
     NodeFileOps,
     NodeSpawn,
-    NodeDnsResolve,
     Go19Dir,
     Go20Dir,
     Go19DirBypass,
@@ -749,6 +748,7 @@ pub enum Application {
     RustOutgoingTcp,
     RustIssue1123,
     RustIssue1054,
+    RustDnsResolve,
     // For running applications with the executable and arguments determined at runtime.
     // Compiled only on macos just because it's currently only used there, but could be used also
     // on Linux.
@@ -797,9 +797,7 @@ impl Application {
                 )
             }
             Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
-            Application::NodeFileOps | Application::NodeSpawn | Application::NodeDnsResolve => {
-                String::from("node")
-            }
+            Application::NodeFileOps | Application::NodeSpawn => String::from("node"),
             Application::Go19Dir => String::from("tests/apps/dir_go/19.go_test_app"),
             Application::Go20Dir => String::from("tests/apps/dir_go/20.go_test_app"),
             Application::Go20Issue834 => String::from("tests/apps/issue834/20.go_test_app"),
@@ -827,6 +825,11 @@ impl Application {
                 "{}/{}",
                 env!("CARGO_MANIFEST_DIR"),
                 "../../target/debug/outgoing",
+            ),
+            Application::RustDnsResolve => format!(
+                "{}/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                "../../target/debug/dns_resolve",
             ),
             #[cfg(target_os = "macos")]
             Application::DynamicApp(exe, _args) => exe.clone(),
@@ -866,10 +869,6 @@ impl Application {
                 app_path.push("fileops.js");
                 vec![app_path.to_string_lossy().to_string()]
             }
-            Application::NodeDnsResolve => {
-                app_path.push("dns_resolve.js");
-                vec![app_path.to_string_lossy().to_string()]
-            }
             Application::NodeSpawn => {
                 app_path.push("node_spawn.mjs");
                 vec![app_path.to_string_lossy().to_string()]
@@ -902,6 +901,7 @@ impl Application {
             | Application::RustFileOps
             | Application::RustIssue1123
             | Application::RustIssue1054
+            | Application::RustDnsResolve
             | Application::EnvBashCat
             | Application::BashShebang
             | Application::Go19SelfOpen
@@ -934,10 +934,10 @@ impl Application {
             Application::PythonListen => 21232,
             Application::PythonDontLoad
             | Application::RustFileOps
+            | Application::RustDnsResolve
             | Application::EnvBashCat
             | Application::NodeFileOps
             | Application::NodeSpawn
-            | Application::NodeDnsResolve
             | Application::BashShebang
             | Application::Go20Issue834
             | Application::Go19Issue834
