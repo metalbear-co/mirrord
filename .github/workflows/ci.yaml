@@ -61,7 +61,7 @@ jobs:
             .dockerignore
             rust-toolchain.toml
             rustfmt.toml
-            .cargo/**            
+            .cargo/**
       - name: get intellij changes
         id: changed-intellij
         uses: tj-actions/changed-files@v36
@@ -91,7 +91,7 @@ jobs:
           echo ${{ steps.changed-markdown.outputs.any_changed }};
           echo ${{ steps.changed-markdown.outputs.all_changed_files }};    
           echo ${{ steps.changed-ci.outputs.any_changed }};
-          echo ${{ steps.changed-ci.outputs.all_changed_files }};      
+          echo ${{ steps.changed-ci.outputs.all_changed_files }};
   lint:
     runs-on: ubuntu-latest
     needs: changed_files
@@ -335,7 +335,7 @@ jobs:
           cargo build
       - run: |
           cd mirrord/layer/tests/apps/recv_from
-          cargo build                    
+          cargo build
       - name: download layer # Download layer lib built in the `build_mirrord` job.
         uses: actions/download-artifact@v3
         with:
@@ -386,7 +386,7 @@ jobs:
           cargo build
       - run: |
           cd mirrord/layer/tests/apps/recv_from
-          cargo build          
+          cargo build
       - uses: actions/setup-node@v3
         with:
           node-version: 14

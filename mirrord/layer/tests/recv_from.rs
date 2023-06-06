@@ -46,14 +46,15 @@ async fn recv_from(
 
     let msg = conn.try_next().await.unwrap().unwrap();
 
-    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite { connection_id: 0, bytes: _ })) = msg else {
+    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite { connection_id: 0, bytes })) = msg else {
         panic!("Invalid message received from layer: {msg:?}");
     };
 
+    // send back the same bytes, the app asserts that they are the same
     conn.send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
         DaemonRead {
             connection_id: 0,
-            bytes: vec![],
+            bytes: bytes,
         },
     ))))
     .await
