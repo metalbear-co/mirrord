@@ -749,6 +749,7 @@ pub enum Application {
     RustIssue1123,
     RustIssue1054,
     RustDnsResolve,
+    RustRecvFrom,
     // For running applications with the executable and arguments determined at runtime.
     // Compiled only on macos just because it's currently only used there, but could be used also
     // on Linux.
@@ -831,6 +832,13 @@ impl Application {
                 env!("CARGO_MANIFEST_DIR"),
                 "../../target/debug/dns_resolve",
             ),
+            Application::RustRecvFrom => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/recv_from"
+                )
+            }
             #[cfg(target_os = "macos")]
             Application::DynamicApp(exe, _args) => exe.clone(),
         }
@@ -902,6 +910,7 @@ impl Application {
             | Application::RustIssue1123
             | Application::RustIssue1054
             | Application::RustDnsResolve
+            | Application::RustRecvFrom
             | Application::EnvBashCat
             | Application::BashShebang
             | Application::Go19SelfOpen
@@ -960,7 +969,8 @@ impl Application {
             | Application::Go19Dir
             | Application::Go20Dir
             | Application::RustOutgoingUdp
-            | Application::RustOutgoingTcp => unimplemented!("shouldn't get here"),
+            | Application::RustOutgoingTcp
+            | Application::RustRecvFrom => unimplemented!("shouldn't get here"),
             #[cfg(target_os = "macos")]
             Application::DynamicApp(_, _) => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,

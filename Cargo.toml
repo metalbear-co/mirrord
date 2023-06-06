@@ -5,6 +5,7 @@ members = [
     "mirrord/layer/tests/apps/fileops",
     "mirrord/layer/tests/apps/outgoing",
     "mirrord/layer/tests/apps/dns_resolve",
+    "mirrord/layer/tests/apps/recv_from",
     "sample/rust",
     "medschool",
     "tests",
@@ -15,7 +16,7 @@ members = [
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.44.2"
+version = "3.45.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
