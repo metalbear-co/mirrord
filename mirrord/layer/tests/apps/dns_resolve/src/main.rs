@@ -3,7 +3,6 @@ use std::{ffi::CString, ptr, str};
 use libc;
 
 fn get_ip_addresses(node: &str) -> (Vec<String>, i32) {
-    println!("Getting addresses for {}", node);
     let node = CString::new(node).unwrap();
     let service = CString::new("http").unwrap();
 
