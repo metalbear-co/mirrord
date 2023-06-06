@@ -4356,6 +4356,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "recv_from"
+version = "0.1.0"
+dependencies = [
+ "socket2 0.4.9",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
