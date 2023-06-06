@@ -1,21 +1,25 @@
-use std::{
-    mem::MaybeUninit,
-    net::{SocketAddr, ToSocketAddrs},
-};
+use std::{mem::MaybeUninit, net::ToSocketAddrs};
 
-use socket2::{Domain, Socket, Type};
+use socket2::{Domain, SockAddr, Socket, Type};
 
 fn main() {
     let google_dns_server = "8.8.8.8:53";
+    let google_dns_server_addr: SockAddr = google_dns_server
+        .to_socket_addrs()
+        .unwrap()
+        .next()
+        .unwrap()
+        .into();
 
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, None).expect("Failed to create socket");
 
-    let query = "example.com. IN A\n";
-    let server_address: SocketAddr = google_dns_server.to_socket_addrs().unwrap().next().unwrap();
-
     socket
-        .send_to(query.as_bytes(), &server_address.into())
-        .expect("Failed to send query");
+        .connect(&google_dns_server_addr)
+        .expect("Failed to connect to socket");
+
+    let query = "example.com. IN A\n";
+
+    socket.send(query.as_bytes()).expect("Failed to send query");
 
     let mut response = [MaybeUninit::<u8>::uninit(); 1024];
     let (_, source_address) = socket
@@ -24,5 +28,7 @@ fn main() {
 
     if let Some(addr) = source_address.as_socket_ipv4() {
         assert_eq!(addr.to_string(), google_dns_server);
+    } else {
+        panic!("Expected source address to be an IPv4 address")
     }
 }
