@@ -1,10 +1,12 @@
 use std::{fmt::Debug, ops::Deref};
 
+use chrono::{DateTime, Utc};
 use kube::{api::PostParams, Api, Client, Resource};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
 use x509_certificate::{
-    rfc2986, InMemorySigningKeyPair, KeyAlgorithm, X509CertificateBuilder, X509CertificateError,
+    asn1time::Time, rfc2986, rfc5280, InMemorySigningKeyPair, KeyAlgorithm, X509CertificateBuilder,
+    X509CertificateError,
 };
 
 use crate::{
@@ -35,7 +37,15 @@ impl Credentials {
     }
 
     pub fn is_ready(&self) -> bool {
-        self.certificate.is_some()
+        let Some(certificate) = self.certificate.as_ref() else {
+            return false
+        };
+
+        certificate
+            .as_ref()
+            .tbs_certificate
+            .validity
+            .is_valid(Utc::now())
     }
 
     pub fn certificate_request(&self, common_name: &str) -> Result<rfc2986::CertificationRequest> {
@@ -85,5 +95,25 @@ impl Credentials {
 impl AsRef<Certificate> for Credentials {
     fn as_ref(&self) -> &Certificate {
         self.certificate.as_ref().expect("Certificate not ready")
+    }
+}
+
+trait ValidityExt {
+    fn is_valid(&self, other: DateTime<Utc>) -> bool;
+}
+
+impl ValidityExt for rfc5280::Validity {
+    fn is_valid(&self, other: DateTime<Utc>) -> bool {
+        let not_before: DateTime<Utc> = match self.not_before.clone() {
+            Time::UtcTime(time) => *time,
+            Time::GeneralTime(time) => DateTime::<Utc>::from(time),
+        };
+
+        let not_after: DateTime<Utc> = match self.not_after.clone() {
+            Time::UtcTime(time) => *time,
+            Time::GeneralTime(time) => DateTime::<Utc>::from(time),
+        };
+
+        not_before < other && other < not_after
     }
 }
