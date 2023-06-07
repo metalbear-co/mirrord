@@ -29,7 +29,8 @@ copy() {
       mv /tmp/mirrord "$HOME/.local/bin/mirrord"
   else
       echo "installation target directory is write protected, run as root to override"
-      sudo mv /tmp/mirrord /usr/local/bin/mirrord
+      # Try without sudo first, run with sudo only if mv failed without it.
+      mv /tmp/mirrord /usr/local/bin/mirrord || sudo mv /tmp/mirrord /usr/local/bin/mirrord
   fi
 }
 
