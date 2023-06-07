@@ -43,7 +43,7 @@ pub static CONNECTION_QUEUE: LazyLock<ConnectionQueue> = LazyLock::new(Connectio
 
 /// Struct sent over the socket once created to pass metadata to the hook
 #[derive(Debug)]
-pub struct SocketInformation {
+pub(super) struct SocketInformation {
     /// Address of the incoming peer
     pub remote_address: SocketAddr,
 
@@ -105,13 +105,16 @@ pub struct Connected {
     /// ```sh
     /// $ kubectl get pod -o wide
     ///
-    /// NAME             READY   STATUS    IP       
+    /// NAME             READY   STATUS    IP
     /// impersonated-pod 0/1     Running   1.2.3.4
     /// ```
     ///
     /// We would set this ip as `1.2.3.4:{port}` in [`bind`], where `{port}` is the user requested
     /// port.
     local_address: SocketAddress,
+
+    /// The address of the interceptor socket (this is what we're really connected to).
+    layer_address: Option<SocketAddress>,
 }
 
 /// Represents a [`SocketState`] where the user made a [`libc::bind`] call, and we intercepted it.
@@ -257,7 +260,9 @@ impl ProtocolExt for Protocol {
     }
 }
 
+/// Trait that expands `std` and `socket2` sockets.
 pub(crate) trait SocketAddrExt {
+    /// Converts a raw [`sockaddr`] pointer into a more _Rusty_ type
     fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<Self>
     where
         Self: Sized;
