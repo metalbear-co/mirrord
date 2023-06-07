@@ -11,6 +11,7 @@ use mirrord_operator::{
 use mirrord_progress::{Progress, TaskProgress};
 use prettytable::{row, Table};
 use tokio::fs;
+use tracing::warn;
 
 use crate::{
     config::{OperatorArgs, OperatorCommand},
@@ -142,7 +143,12 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             license_path,
         } => {
             let license = match license_path {
-                Some(path) => fs::read_to_string(path).await.ok(),
+                Some(path) => fs::read_to_string(&path)
+                    .await
+                    .inspect_err(|err| {
+                        warn!("Unable to read license at path {}: {err}", path.display())
+                    })
+                    .ok(),
                 None => license_key,
             };
 
