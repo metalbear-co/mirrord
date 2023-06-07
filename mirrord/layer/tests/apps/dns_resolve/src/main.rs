@@ -2,14 +2,12 @@ use std::{ffi::CString, ptr, str};
 
 fn get_ip_addresses(node: &str) -> (Vec<String>, i32) {
     let node = CString::new(node).unwrap();
-    let service = CString::new("http").unwrap();
+    let service = ptr::null_mut::<libc::c_char>();
 
-    let mut hints: libc::addrinfo = unsafe { std::mem::zeroed() };
-    hints.ai_family = libc::AF_UNSPEC;
-    hints.ai_socktype = libc::SOCK_STREAM;
+    let hints: libc::addrinfo = unsafe { std::mem::zeroed() };
 
     let mut res: *mut libc::addrinfo = ptr::null_mut();
-    let result = unsafe { libc::getaddrinfo(node.as_ptr(), service.as_ptr(), &hints, &mut res) };
+    let result = unsafe { libc::getaddrinfo(node.as_ptr(), service, &hints, &mut res) };
     let mut current = res;
     let mut addresses = Vec::new();
     while !current.is_null() {
