@@ -512,7 +512,7 @@ in the launch configuration of the second window.
 
 ## Debugging the JetBrains plugin
 
-First, [build the mirrord binaries](TESTING.md#build-and-run-mirrord) if not yet built. Then:
+First, [build the mirrord binaries](#build-and-run-mirrord) if not yet built. Then:
 
 ```bash
 cd intellij-ext
