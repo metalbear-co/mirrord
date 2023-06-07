@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { ExTester, ReleaseQuality } from 'vscode-extension-tester';
+import { ExTester, ReleaseQuality, logging } from 'vscode-extension-tester';
 
 async function main(): Promise<void> {
     const version = "latest";
@@ -20,6 +20,7 @@ async function main(): Promise<void> {
         const result = await exTester.runTests(testPath, {
             vscodeVersion: version,
             resources: [storageFolder],
+            logLevel: logging.Level.DEBUG,
         });
 
         process.exit(result);
