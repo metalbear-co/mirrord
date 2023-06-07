@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as vscode from 'vscode';
 import YAML from 'yaml';
-import { ChildProcess, ExecException, spawn } from 'child_process';
+import { ChildProcessWithoutNullStreams, ExecException, spawn } from 'child_process';
 
 const TOML = require('toml');
 const semver = require('semver');
@@ -57,8 +57,8 @@ async function configFilePath() {
 }
 
 // Display error message with help
-function mirrordFailure(err: any) {
-	vscode.window.showErrorMessage("mirrord failed to start. Please check the logs/errors.", "Get help on Discord", "Open an issue on GitHub", "Send us an email").then(value => {
+function mirrordFailure() {
+	vscode.window.showErrorMessage("mirrord failed. Please check the logs/errors.", "Get help on Discord", "Open an issue on GitHub", "Send us an email").then(value => {
 		if (value === "Get help on Discord") {
 			vscode.env.openExternal(vscode.Uri.parse('https://discord.gg/metalbear'));
 		} else if (value === "Open an issue on GitHub") {
@@ -147,7 +147,7 @@ class MirrordAPI {
 
 	// Spawn the mirrord cli with the given arguments
 	// used for reading/interacting while process still runs.
-	spawn(args: string[]): ChildProcess {
+	spawn(args: string[]): ChildProcessWithoutNullStreams {
 		let env = {
 			// eslint-disable-next-line @typescript-eslint/naming-convention
 			"MIRRORD_PROGRESS_MODE": "json",
@@ -170,9 +170,15 @@ class MirrordAPI {
 
 		if (stderr) {
 			const match = stderr.match(/Error: (.*)/)?.[1];
-			const notificationError = match ? JSON.parse(match)["message"] : stderr;
-			mirrordFailure(stderr);
-			throw new Error(`mirrord failed to 'ls' targets\n${notificationError}`);
+
+			mirrordFailure();
+
+			if (match) {
+				const error = JSON.parse(match)["message"];
+				throw new Error(`mirrord failed to list available targets: ${error}`);
+			} else {
+				throw new Error(`mirrord failed to list available targets with an unknown error. Stderr: ${stderr}`)
+			}
 		}
 
 		const targets: string[] = JSON.parse(stdout);
@@ -204,7 +210,7 @@ class MirrordAPI {
 		}, (progress, _) => {
 			return new Promise<MirrordExecution | null>((resolve, reject) => {
 				setTimeout(() => {
-					reject("Timeout");
+					reject("mirrord failed: timeout");
 				}, 60 * 1000);
 
 				const args = ["ext"];
@@ -220,34 +226,36 @@ class MirrordAPI {
 				let child = this.spawn(args);
 
 				child.on('error', (err) => {
-					console.error('Failed to run mirrord.' + err);
-					mirrordFailure(err);
-					reject(err);
+					const msg = `Failed to run mirrord: ${err}`;
+					console.error(msg);
+					mirrordFailure();
+					reject(msg);
 				});
 
 				let stderrData = '';
-				child.stderr?.on('data', (data) => {
+				child.stderr.on('data', (data) => {
 					stderrData += data.toString();
 				});
 
-				child.stderr?.on('close', () => {
+				child.stderr.on('close', () => {
 					const match = stderrData.match(/Error: (.*)/)?.[1];
 					if (match) {
 						const error = JSON.parse(match);
-						mirrordFailure(stderrData);
-						vscode.window.showErrorMessage(error["message"]).then(() => {
+						mirrordFailure();
+						vscode.window.showErrorMessage(`mirrord error: ${error["message"]}`).then(() => {
 							vscode.window.showInformationMessage(error["help"]);
-						});						
-					} else {
-						mirrordFailure(stderrData);
-						vscode.window.showErrorMessage(stderrData);
+						});
+						console.error(`mirrord error: ${error}`);
+					} else if (stderrData) {
+						mirrordFailure();
+						vscode.window.showErrorMessage(`mirrord unknown error. Stderr: ${stderrData}`);
+						console.error(`mirrord unknown error. Stderr: ${stderrData}`);
 					}
-					console.error(`mirrord stderr: ${stderrData}`);
 				});
 
 
 				let buffer = "";
-				child.stdout?.on('data', (data) => {
+				child.stdout.on('data', (data) => {
 					console.log(`mirrord: ${data}`);
 					buffer += data;
 					// fml - AH
@@ -292,7 +300,6 @@ class MirrordAPI {
 						}
 					}
 				});
-
 			});
 		});
 	}
