@@ -17,13 +17,15 @@ use crate::{
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Credentials {
-    /// Generated Certificate from operator
+    /// Generated Certificate from operator can be None when request isn't signed yet and will
+    /// result in is_ready returning false
     certificate: Option<Certificate>,
     /// Local Keypair for creating CertificateRequest for operator
     key_pair: KeyPair,
 }
 
 impl Credentials {
+    /// Creatate new credentials with random `key_pair` and empty `certificate`
     pub fn init() -> Result<Self> {
         let key_algorithm = KeyAlgorithm::Ed25519;
         let (_, document) = InMemorySigningKeyPair::generate_random(key_algorithm)?;
@@ -36,6 +38,7 @@ impl Credentials {
         })
     }
 
+    /// Checks if certificate exists in credentials and the validitiy in terms of expiration
     pub fn is_ready(&self) -> bool {
         let Some(certificate) = self.certificate.as_ref() else {
             return false
@@ -48,6 +51,7 @@ impl Credentials {
             .is_valid(Utc::now())
     }
 
+    /// Create `rfc2986::CertificationRequest` for `Certificate` generation signed with `KeyPair`
     pub fn certificate_request(&self, common_name: &str) -> Result<rfc2986::CertificationRequest> {
         let mut builder = X509CertificateBuilder::new(KeyAlgorithm::Ed25519);
 
@@ -60,6 +64,8 @@ impl Credentials {
             .map_err(AuthenticationError::from)
     }
 
+    /// Create `rfc2986::CertificationRequest` and send to operator to replace `Certificate` inside
+    /// of self.certificate making the Credentials ready
     pub async fn get_client_certificate<R>(
         &mut self,
         client: Client,

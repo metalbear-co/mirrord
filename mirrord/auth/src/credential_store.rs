@@ -69,6 +69,7 @@ impl CredentialStore {
             .map_err(AuthenticationError::from)
     }
 
+    /// Get or create and ready up a certificate at `active_credential` slot
     pub async fn get_or_init<R>(&mut self, client: &Client) -> Result<&mut Credentials>
     where
         R: Resource + Clone + Debug,
@@ -96,6 +97,7 @@ impl CredentialStore {
     }
 }
 
+/// A `CredentialStore` but saved loaded from file and saved with exclusive lock on the file
 pub struct CredentialStoreSync;
 
 impl CredentialStoreSync {
