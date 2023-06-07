@@ -94,6 +94,11 @@ impl MirrordConfig for IncomingFileConfig {
                     .transpose()?
                     .unwrap_or_default(),
                 http_header_filter: HttpHeaderFilterFileConfig::default().generate_config()?,
+                on_multi_steal: FromEnv::new("MIRRORD_OPERATOR_ON_MULTI_STEAL")
+                    .layer(|layer| Unstable::new("IncomingFileConfig", "on_multi_steal", layer))
+                    .source_value()
+                    .transpose()?
+                    .unwrap_or_default(),
                 ..Default::default()
             },
             IncomingFileConfig::Advanced(advanced) => IncomingConfig {
