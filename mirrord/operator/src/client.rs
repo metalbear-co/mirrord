@@ -46,7 +46,7 @@ pub struct OperatorApi {
     target_api: Api<TargetCrd>,
     version_api: Api<MirrordOperatorCrd>,
     target_config: TargetConfig,
-    override_port_guard: bool,
+    on_multi_steal: MultiSteal,
 }
 
 impl OperatorApi {
@@ -106,12 +106,8 @@ impl OperatorApi {
     }
 
     async fn new(config: &LayerConfig) -> Result<Self> {
-        eprintln!("{:?}", config.feature.network.incoming.on_multi_steal);
-
-        let override_port_guard =
-            config.feature.network.incoming.on_multi_steal == MultiSteal::Override;
-
         let target_config = config.target.clone();
+        let on_multi_steal = config.feature.network.incoming.on_multi_steal.clone();
 
         let client = create_kube_api(
             config.accept_invalid_certificates,
@@ -136,7 +132,7 @@ impl OperatorApi {
             target_api,
             version_api,
             target_config,
-            override_port_guard,
+            on_multi_steal,
         })
     }
 
@@ -169,10 +165,10 @@ impl OperatorApi {
             .connect(
                 Request::builder()
                     .uri(format!(
-                        "{}/{}?connect=true&override_port_guard={}",
+                        "{}/{}?on_multi_steal={}&connect=true",
                         self.target_api.resource_url(),
                         target.name(),
-                        self.override_port_guard
+                        self.on_multi_steal
                     ))
                     .header("x-session-id", Self::session_id())
                     .body(vec![])?,

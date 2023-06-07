@@ -1,8 +1,8 @@
-use std::{collections::HashSet, str::FromStr};
+use std::{collections::HashSet, fmt, str::FromStr};
 
 use bimap::BiMap;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
@@ -345,7 +345,7 @@ impl FromStr for IncomingMode {
     }
 }
 
-#[derive(Default, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
+#[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum MultiSteal {
     Override,
@@ -365,6 +365,15 @@ impl FromStr for MultiSteal {
             "override" => Ok(Self::Override),
             "continue" => Ok(Self::Continue),
             _ => Err(MultiStealParseError),
+        }
+    }
+}
+
+impl fmt::Display for MultiSteal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Override => write!(f, "override"),
+            Self::Continue => write!(f, "continue"),
         }
     }
 }
