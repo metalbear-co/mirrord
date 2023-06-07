@@ -490,7 +490,7 @@ kubectl logs <YOUR_POD_NAME> | less -R
 where you would replace `<YOUR_POD_NAME>` with the name of the pod.
 
 ## Debugging the vscode extension
-In order to debug the vscode extension, first [build the mirrord binary](TESTING.md#build-and-run-mirrord). Then run:
+In order to debug the vscode extension, first [build the mirrord binary](#build-and-run-mirrord). Then run:
 ```bash
 cd vscode-ext
 npm install
