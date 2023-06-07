@@ -90,7 +90,7 @@
 		"ts-loader": "^9.4.2",
 		"typescript": "^4.5.4",
 		"@vscode/vsce": "^2.9.2",
-		"vscode-extension-tester": "^5.7.0",
+		"vscode-extension-tester": "^5.6.0",
 		"webpack": "^5.76.0",
 		"webpack-cli": "^5.0.1"
 	},
