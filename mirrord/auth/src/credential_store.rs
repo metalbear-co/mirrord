@@ -5,9 +5,13 @@ use std::{
     sync::LazyLock,
 };
 
+use fs4::tokio::AsyncFileExt;
 use kube::{Client, Resource};
 use serde::{Deserialize, Serialize};
-use tokio::fs;
+use tokio::{
+    fs,
+    io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt, SeekFrom},
+};
 
 use crate::{
     credentials::Credentials,
@@ -42,8 +46,11 @@ impl Default for CredentialStore {
 }
 
 impl CredentialStore {
-    pub async fn load() -> Result<Self> {
-        let buffer = fs::read(&*CREDENTIALS_PATH)
+    async fn load<R: AsyncRead + Unpin>(source: &mut R) -> Result<Self> {
+        let mut buffer = Vec::new();
+
+        source
+            .read_to_end(&mut buffer)
             .await
             .map_err(CertificateStoreError::from)?;
 
@@ -52,10 +59,11 @@ impl CredentialStore {
             .map_err(AuthenticationError::from)
     }
 
-    pub async fn save(&self) -> Result<()> {
+    async fn save<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> Result<()> {
         let buffer = serde_yaml::to_string(&self).map_err(CertificateStoreError::from)?;
 
-        fs::write(&*CREDENTIALS_PATH, &buffer)
+        writer
+            .write_all(buffer.as_bytes())
             .await
             .map_err(CertificateStoreError::from)
             .map_err(AuthenticationError::from)
@@ -85,5 +93,67 @@ impl CredentialStore {
         }
 
         Ok(credentials)
+    }
+}
+
+pub struct CredentialStoreSync;
+
+impl CredentialStoreSync {
+    pub async fn try_get_client_certificate<R>(
+        client: &Client,
+        store_file: &mut fs::File,
+    ) -> Result<Vec<u8>>
+    where
+        R: Resource + Clone + Debug,
+        R: for<'de> Deserialize<'de>,
+        R::DynamicType: Default,
+    {
+        let mut store = CredentialStore::load(store_file)
+            .await
+            .inspect_err(|err| eprintln!("CredentialStore Load Error {err:?}"))
+            .unwrap_or_default();
+
+        store_file
+            .seek(SeekFrom::Start(0))
+            .await
+            .map_err(CertificateStoreError::from)?;
+
+        let certificate_der = store
+            .get_or_init::<R>(client)
+            .await?
+            .as_ref()
+            .encode_der()
+            .map_err(AuthenticationError::Pem)?;
+
+        store.save(store_file).await?;
+
+        Ok(certificate_der)
+    }
+
+    pub async fn get_client_certificate<R>(client: &Client) -> Result<Vec<u8>>
+    where
+        R: Resource + Clone + Debug,
+        R: for<'de> Deserialize<'de>,
+        R::DynamicType: Default,
+    {
+        let mut store_file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&*CREDENTIALS_PATH)
+            .await
+            .map_err(CertificateStoreError::from)?;
+
+        store_file
+            .lock_exclusive()
+            .map_err(CertificateStoreError::Lockfile)?;
+
+        let result = Self::try_get_client_certificate::<R>(client, &mut store_file).await;
+
+        store_file
+            .unlock()
+            .map_err(CertificateStoreError::Lockfile)?;
+
+        result
     }
 }

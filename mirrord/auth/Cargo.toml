@@ -24,6 +24,7 @@ chrono = "0.4"
 home = "0.5"
 gethostname = "0.4"
 pem = "2"
+fs4 = { version = "0.6", features = ["tokio-async"] }
 k8s-openapi.workspace = true
 kube.workspace = true
 schemars = { version = "0.8", features = ["chrono"] }
@@ -32,3 +33,4 @@ serde_yaml = "0.9"
 tokio = { workspace = true, features = ["fs"] }
 thiserror = "1"
 x509-certificate = "0.19"
+

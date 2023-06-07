@@ -114,6 +114,8 @@ impl ValidityExt for rfc5280::Validity {
             Time::GeneralTime(time) => DateTime::<Utc>::from(time),
         };
 
+        eprintln!("{not_before:?} {not_after:?} {other:?}");
+
         not_before < other && other < not_after
     }
 }

@@ -1975,6 +1975,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs4"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7672706608ecb74ab2e055c68327ffc25ae4cac1e12349204fd5fb0f3487cce2"
+dependencies = [
+ "async-trait",
+ "rustix",
+ "tokio",
+ "windows-sys 0.48.0",
+]
+
+[[package]]
 name = "funty"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3175,6 +3187,7 @@ version = "3.44.2"
 dependencies = [
  "bytes",
  "chrono",
+ "fs4",
  "gethostname",
  "home",
  "k8s-openapi",

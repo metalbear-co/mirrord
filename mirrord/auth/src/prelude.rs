@@ -1,3 +1,5 @@
 pub use crate::{
-    credential_store::CredentialStore, credentials::Credentials, error::AuthenticationError,
+    credential_store::{CredentialStore, CredentialStoreSync},
+    credentials::Credentials,
+    error::AuthenticationError,
 };

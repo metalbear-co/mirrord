@@ -8,6 +8,8 @@ pub enum AuthenticationError {
     #[error(transparent)]
     Kube(#[from] kube::Error),
     #[error(transparent)]
+    Pem(std::io::Error),
+    #[error(transparent)]
     X509Certificate(#[from] X509CertificateError),
 }
 
@@ -15,6 +17,8 @@ pub enum AuthenticationError {
 pub enum CertificateStoreError {
     #[error("Unable to save/load CertificateStore: {0}")]
     Io(#[from] std::io::Error),
+    #[error("Unable to create CertificateStore lockfile: {0}")]
+    Lockfile(std::io::Error),
     #[error("Unable serialize/deserialize CertificateStore: {0}")]
     Yaml(#[from] serde_yaml::Error),
 }

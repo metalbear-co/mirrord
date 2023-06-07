@@ -2,7 +2,7 @@ use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
 use kube::{error::ErrorResponse, Api, Client};
-use mirrord_auth::prelude::{AuthenticationError, CredentialStore};
+use mirrord_auth::prelude::*;
 use mirrord_config::{target::TargetConfig, LayerConfig};
 use mirrord_kube::{
     api::{get_k8s_resource_api, kubernetes::create_kube_api},
@@ -12,10 +12,7 @@ use mirrord_progress::{MessageKind, Progress};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use semver::Version;
 use thiserror::Error;
-use tokio::sync::{
-    mpsc::{self, Receiver, Sender},
-    RwLock,
-};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 use tracing::{error, trace, warn};
 
@@ -53,7 +50,6 @@ pub struct OperatorApi {
     target_api: Api<TargetCrd>,
     version_api: Api<MirrordOperatorCrd>,
     target_config: TargetConfig,
-    credentials: RwLock<CredentialStore>,
 }
 
 impl OperatorApi {
@@ -112,20 +108,6 @@ impl OperatorApi {
             })
     }
 
-    async fn client_certificate(&self) -> Result<String> {
-        let certificate_der = self
-            .credentials
-            .write()
-            .await
-            .get_or_init::<MirrordOperatorCrd>(&self.client)
-            .await?
-            .as_ref()
-            .encode_der()
-            .map_err(|err| AuthenticationError::X509Certificate(err.into()))?;
-
-        Ok(general_purpose::STANDARD.encode(certificate_der))
-    }
-
     async fn new(config: &LayerConfig) -> Result<Self> {
         let target_config = config.target.clone();
 
@@ -147,14 +129,11 @@ impl OperatorApi {
 
         let version_api: Api<MirrordOperatorCrd> = Api::all(client.clone());
 
-        let credentials = CredentialStore::load().await.unwrap_or_default().into();
-
         Ok(OperatorApi {
             client,
             target_api,
             version_api,
             target_config,
-            credentials,
         })
     }
 
@@ -182,7 +161,10 @@ impl OperatorApi {
         &self,
         target: TargetCrd,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        let client_credentials = self.client_certificate().await?;
+        let client_credentials =
+            CredentialStoreSync::get_client_certificate::<MirrordOperatorCrd>(&self.client)
+                .await
+                .map(|certificate_der| general_purpose::STANDARD.encode(certificate_der))?;
 
         let connection = self
             .client
@@ -199,8 +181,6 @@ impl OperatorApi {
             )
             .await
             .map_err(KubeApiError::from)?;
-
-        self.credentials.write().await.save().await?;
 
         Ok(ConnectionWrapper::wrap(connection))
     }
