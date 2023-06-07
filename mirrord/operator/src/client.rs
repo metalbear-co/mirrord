@@ -1,7 +1,7 @@
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
 use kube::{error::ErrorResponse, Api, Client};
-use mirrord_config::{target::TargetConfig, LayerConfig};
+use mirrord_config::{feature::network::incoming::MultiSteal, target::TargetConfig, LayerConfig};
 use mirrord_kube::{
     api::{get_k8s_resource_api, kubernetes::create_kube_api},
     error::KubeApiError,
@@ -46,6 +46,7 @@ pub struct OperatorApi {
     target_api: Api<TargetCrd>,
     version_api: Api<MirrordOperatorCrd>,
     target_config: TargetConfig,
+    override_port_guard: bool,
 }
 
 impl OperatorApi {
@@ -85,7 +86,7 @@ impl OperatorApi {
     }
 
     /// Uses `MIRRORD_OPERATOR_SESSION_ID` to have a persistant session_id across child processes,
-    /// if env var is empty or missing random id will be generated and saved in env
+    /// if env var is empty or missing random id will be generated and saved in exnv
     fn session_id() -> u64 {
         std::env::var(MIRRORD_OPERATOR_SESSION_ID)
             .inspect_err(|_| trace!("{MIRRORD_OPERATOR_SESSION_ID} empty, creating new session"))
@@ -105,6 +106,11 @@ impl OperatorApi {
     }
 
     async fn new(config: &LayerConfig) -> Result<Self> {
+        eprintln!("{:?}", config.feature.network.incoming.on_multi_steal);
+
+        let override_port_guard =
+            config.feature.network.incoming.on_multi_steal == MultiSteal::Override;
+
         let target_config = config.target.clone();
 
         let client = create_kube_api(
@@ -130,6 +136,7 @@ impl OperatorApi {
             target_api,
             version_api,
             target_config,
+            override_port_guard,
         })
     }
 
@@ -162,9 +169,10 @@ impl OperatorApi {
             .connect(
                 Request::builder()
                     .uri(format!(
-                        "{}/{}?connect=true",
+                        "{}/{}?connect=true&override_port_guard={}",
                         self.target_api.resource_url(),
-                        target.name()
+                        target.name(),
+                        self.override_port_guard
                     ))
                     .header("x-session-id", Self::session_id())
                     .body(vec![])?,

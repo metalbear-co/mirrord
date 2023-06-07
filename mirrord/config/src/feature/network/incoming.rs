@@ -120,6 +120,12 @@ impl MirrordConfig for IncomingFileConfig {
                     .source_value()
                     .transpose()?
                     .unwrap_or_default(),
+                on_multi_steal: FromEnv::new("MIRRORD_OPERATOR_ON_MULTI_STEAL")
+                    .or(advanced.on_multi_steal)
+                    .layer(|layer| Unstable::new("IncomingFileConfig", "on_multi_steal", layer))
+                    .source_value()
+                    .transpose()?
+                    .unwrap_or_default(),
             },
         };
 
@@ -132,8 +138,15 @@ impl MirrordToggleableConfig for IncomingFileConfig {
             .source_value()
             .unwrap_or_else(|| Ok(Default::default()))?;
 
+        let on_multi_steal = FromEnv::new("MIRRORD_OPERATOR_ON_MULTI_STEAL")
+            .layer(|layer| Unstable::new("IncomingFileConfig", "on_multi_steal", layer))
+            .source_value()
+            .transpose()?
+            .unwrap_or_default();
+
         Ok(IncomingConfig {
             mode,
+            on_multi_steal,
             http_header_filter: HttpHeaderFilterFileConfig::disabled_config()?,
             ..Default::default()
         })
@@ -179,6 +192,8 @@ pub struct IncomingAdvancedFileConfig {
     /// Ports to ignore when mirroring/stealing traffic. Useful if you want specific ports to be
     /// used locally only.
     pub ignore_ports: Option<Vec<u16>>,
+
+    pub on_multi_steal: Option<MultiSteal>,
 }
 
 /// Controls the incoming TCP traffic feature.
@@ -256,6 +271,8 @@ pub struct IncomingConfig {
 
     /// #### feature.network.incoming.filter {#feature-network-incoming-filter}
     pub http_header_filter: HttpHeaderFilterConfig,
+
+    pub on_multi_steal: MultiSteal,
 }
 
 impl IncomingConfig {
@@ -324,6 +341,30 @@ impl FromStr for IncomingMode {
                 "mirror" => Ok(Self::Mirror),
                 _ => Err(IncomingConfigParseError),
             },
+        }
+    }
+}
+
+#[derive(Default, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum MultiSteal {
+    Override,
+    #[default]
+    Continue,
+}
+
+#[derive(Error, Debug)]
+#[error("could not parse MultiSteal from string, values continue/override")]
+pub struct MultiStealParseError;
+
+impl FromStr for MultiSteal {
+    type Err = MultiStealParseError;
+
+    fn from_str(val: &str) -> Result<Self, Self::Err> {
+        match val {
+            "override" => Ok(Self::Override),
+            "continue" => Ok(Self::Continue),
+            _ => Err(MultiStealParseError),
         }
     }
 }
