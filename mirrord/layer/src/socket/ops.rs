@@ -79,7 +79,7 @@ impl From<ConnectResult> for i32 {
 }
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "debug", ret)]
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
     let socket_kind = type_.try_into()?;
 
@@ -110,7 +110,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
 
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state.
-#[tracing::instrument(level = "trace", ret, skip(raw_address))]
+#[tracing::instrument(level = "debug", ret, skip(raw_address))]
 pub(super) fn bind(
     sockfd: c_int,
     raw_address: *const sockaddr,
@@ -237,7 +237,7 @@ pub(super) fn bind(
 
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
 /// later be routed to the fake local port.
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "debug", ret)]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
     let mut socket = {
         SOCKETS
@@ -290,7 +290,7 @@ const UDP: ConnectType = !TCP;
 /// interception procedure.
 /// This returns errno so we can restore the correct errno in case result is -1 (until we get
 /// back to the hook we might call functions that will corrupt errno)
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "debug", ret)]
 fn connect_outgoing<const TYPE: ConnectType, const CALL_CONNECT: bool>(
     sockfd: RawFd,
     remote_address: SockAddr,
@@ -360,7 +360,7 @@ fn connect_outgoing<const TYPE: ConnectType, const CALL_CONNECT: bool>(
 /// that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request interception procedure.
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "debug", ret)]
 pub(super) fn connect(
     sockfd: RawFd,
     raw_address: *const sockaddr,
@@ -837,11 +837,9 @@ pub(super) fn send_to(
     raw_destination: *const sockaddr,
     destination_length: socklen_t,
 ) -> Detour<isize> {
-    // let bytes = message?;
     let destination = SockAddr::try_from_raw(raw_destination, destination_length)?;
     debug!("destination {destination:#?}");
 
-    // TODO(alex) [high] 2023-06-07: Modify the socket to have our `fill_address` for later.
     let (_, user_socket_info) = SOCKETS
         .remove(&sockfd)
         .ok_or(Bypass::LocalFdNotFound(sockfd))?;
@@ -869,17 +867,6 @@ pub(super) fn send_to(
             raw_interceptor_length,
         )
     };
-
-    // TODO(alex) [high] 2023-06-06: Could have a "Fake connect" state for this socket, so we can
-    // keep the `destination` for both `recv_from`, and for further `send_to` calls.
-
-    // let send_to_hook = UdpOutgoing::SendTo(SendTo {
-    //     destination,
-    //     bytes,
-    //     channel_tx: mirror_tx,
-    // });
-
-    // TODO(alex) [high] 2023-06-06: DNS resolution starts from here.
 
     Detour::Success(sent)
 }
