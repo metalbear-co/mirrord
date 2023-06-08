@@ -100,9 +100,6 @@ pub enum StealType {
     All(Port),
     /// Steal HTTP traffic matching a given filter (header based).
     FilteredHttp(Port, Filter),
-    /// Steal HTTP traffic matching a given filter (path based).
-    /// TODO: Should be merged into above once we break the protocol.
-    FilteredHttpPath(Port, Filter),
 }
 
 /// Messages related to Steal Tcp handler from client.
