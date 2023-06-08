@@ -89,6 +89,11 @@ impl<'a> RequestMatchCandidate<'a> {
 
         ref_headers
     }
+
+    /// Returns path of the request.
+    fn path(&self) -> &str {
+        self.request.uri().path()
+    }
 }
 
 /// Trait that needs to be implemented for each [`HttpFilter`] variant.
@@ -113,6 +118,17 @@ impl RequestMatch for HttpHeaderFilter {
                 }
             }
         }
+        false
+    }
+}
+
+impl RequestMatch for HttpPathFilter {
+    fn matches(&self, request: &mut RequestMatchCandidate<'_>) -> bool {
+        let path = request.path();
+        self.0.is_match(path).unwrap_or_else(|err| {
+            error!("Error while matching path: {path:?}, {err:?}");
+            false
+        })
     }
 }
 
