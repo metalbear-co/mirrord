@@ -336,6 +336,9 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/recv_from
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/dns_resolve
+          cargo build          
       - name: download layer # Download layer lib built in the `build_mirrord` job.
         uses: actions/download-artifact@v3
         with:
@@ -387,6 +390,9 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/recv_from
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/dns_resolve
+          cargo build                    
       - uses: actions/setup-node@v3
         with:
           node-version: 14

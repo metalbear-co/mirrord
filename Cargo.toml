@@ -4,6 +4,7 @@ members = [
     "mirrord/*",
     "mirrord/layer/tests/apps/fileops",
     "mirrord/layer/tests/apps/outgoing",
+    "mirrord/layer/tests/apps/dns_resolve",
     "mirrord/layer/tests/apps/recv_from",
     "sample/rust",
     "medschool",

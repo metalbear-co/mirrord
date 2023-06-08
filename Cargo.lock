@@ -1678,6 +1678,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dns_resolve"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "doc-comment"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
