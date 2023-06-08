@@ -87,7 +87,7 @@ jobs:
         with:
           files: |
             mirrord/protocol/**
-      - name: get protocol changes
+      - name: get protocol toml changes
         id: changed-protocol-toml
         uses: tj-actions/changed-files@v36
         with:
