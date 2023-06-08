@@ -599,6 +599,7 @@ jobs:
       - uses: avto-dev/markdown-lint@v1
         with:
           config: "markdownlint-config.json"
+          args: "README.md"
    
   # We need some "accummulation" job here because bors fails (timeouts) to
   # listen on matrix builds.

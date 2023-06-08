@@ -3341,7 +3341,6 @@ version = "3.45.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
- "quote",
  "semver 1.0.17",
  "syn 1.0.109",
 ]
