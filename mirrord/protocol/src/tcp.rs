@@ -98,7 +98,7 @@ impl Display for Filter {
 pub enum StealType {
     /// Steal all traffic to this port.
     All(Port),
-    /// Steal HTTP traffic matching a given filter.
+    /// Steal HTTP traffic matching a given filter (header based).
     FilteredHttp(Port, Filter),
 }
 

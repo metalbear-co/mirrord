@@ -722,6 +722,7 @@ pub enum Application {
     Go20FileOps,
     EnvBashCat,
     NodeFileOps,
+    NodeSpawn,
     Go19Dir,
     Go20Dir,
     Go19DirBypass,
@@ -729,7 +730,6 @@ pub enum Application {
     Go20Issue834,
     Go19Issue834,
     Go18Issue834,
-    NodeSpawn,
     BashShebang,
     Go18Read,
     Go19Read,
@@ -748,6 +748,7 @@ pub enum Application {
     RustOutgoingTcp,
     RustIssue1123,
     RustIssue1054,
+    RustDnsResolve,
     RustRecvFrom,
     // For running applications with the executable and arguments determined at runtime.
     // Compiled only on macos just because it's currently only used there, but could be used also
@@ -797,7 +798,7 @@ impl Application {
                 )
             }
             Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
-            Application::NodeFileOps => String::from("node"),
+            Application::NodeFileOps | Application::NodeSpawn => String::from("node"),
             Application::Go19Dir => String::from("tests/apps/dir_go/19.go_test_app"),
             Application::Go20Dir => String::from("tests/apps/dir_go/20.go_test_app"),
             Application::Go20Issue834 => String::from("tests/apps/issue834/20.go_test_app"),
@@ -805,7 +806,6 @@ impl Application {
             Application::Go18Issue834 => String::from("tests/apps/issue834/18.go_test_app"),
             Application::Go19DirBypass => String::from("tests/apps/dir_go_bypass/19.go_test_app"),
             Application::Go20DirBypass => String::from("tests/apps/dir_go_bypass/20.go_test_app"),
-            Application::NodeSpawn => String::from("node"),
             Application::BashShebang => String::from("tests/apps/nothing.sh"),
             Application::Go18Read => String::from("tests/apps/read_go/18.go_test_app"),
             Application::Go19Read => String::from("tests/apps/read_go/19.go_test_app"),
@@ -826,6 +826,11 @@ impl Application {
                 "{}/{}",
                 env!("CARGO_MANIFEST_DIR"),
                 "../../target/debug/outgoing",
+            ),
+            Application::RustDnsResolve => format!(
+                "{}/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                "../../target/debug/dns_resolve",
             ),
             Application::RustRecvFrom => {
                 format!(
@@ -904,6 +909,7 @@ impl Application {
             | Application::RustFileOps
             | Application::RustIssue1123
             | Application::RustIssue1054
+            | Application::RustDnsResolve
             | Application::RustRecvFrom
             | Application::EnvBashCat
             | Application::BashShebang
@@ -937,6 +943,7 @@ impl Application {
             Application::PythonListen => 21232,
             Application::PythonDontLoad
             | Application::RustFileOps
+            | Application::RustDnsResolve
             | Application::EnvBashCat
             | Application::NodeFileOps
             | Application::NodeSpawn
@@ -974,7 +981,7 @@ impl Application {
     async fn get_test_process(&self, env: HashMap<&str, &str>) -> TestProcess {
         let executable = self.get_executable().await;
         println!("Using executable: {}", &executable);
-
+        println!("Using args: {:?}", self.get_args());
         TestProcess::start_process(executable, self.get_args(), env).await
     }
 

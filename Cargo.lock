@@ -1678,6 +1678,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dns_resolve"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "doc-comment"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3181,7 +3188,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
- "socket2 0.5.1",
+ "socket2 0.5.3",
  "streammap-ext",
  "test_bin",
  "thiserror",
@@ -3311,7 +3318,7 @@ dependencies = [
  "regex",
  "rstest",
  "serde_json",
- "socket2 0.5.1",
+ "socket2 0.5.3",
  "streammap-ext",
  "test-cdylib",
  "thiserror",
@@ -3332,6 +3339,16 @@ version = "3.45.0"
 dependencies = [
  "proc-macro2",
  "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "mirrord-macros"
+version = "3.45.0"
+dependencies = [
+ "proc-macro2",
+ "proc-macro2-diagnostics",
+ "semver 1.0.17",
  "syn 1.0.109",
 ]
 
@@ -3378,7 +3395,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "3.45.0"
+version = "1.0.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -3388,9 +3405,11 @@ dependencies = [
  "http-serde",
  "hyper 1.0.0-rc.3",
  "libc",
+ "mirrord-macros",
  "nix 0.24.3",
+ "semver 1.0.17",
  "serde",
- "socket2 0.5.1",
+ "socket2 0.5.3",
  "thiserror",
  "tracing",
  "trust-dns-resolver",
@@ -5102,15 +5121,6 @@ checksum = "64a4a911eed85daf18834cfaa86a79b7d266ff93ff5ba14005426219480ed662"
 dependencies = [
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "socket2"
-version = "0.5.1"
-source = "git+https://github.com/t4lz/socket2?branch=unix-sockets#040f8c0c8861b2aaff53d9d1af63ca35b1b69fab"
-dependencies = [
- "libc",
- "windows-sys 0.45.0",
 ]
 
 [[package]]
