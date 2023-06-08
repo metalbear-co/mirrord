@@ -348,16 +348,10 @@ pub(super) unsafe extern "C" fn send_to_detour(
     raw_destination: *const sockaddr,
     destination_length: socklen_t,
 ) -> ssize_t {
-    send_to(
-        sockfd,
-        raw_message,
-        message_length,
-        flags,
-        raw_destination,
-        destination_length,
-    )
-    .unwrap_or_bypass_with(|_| {
-        FN_SEND_TO(
+    if raw_destination.is_null() {
+        libc::send(sockfd, raw_message, message_length, flags)
+    } else {
+        send_to(
             sockfd,
             raw_message,
             message_length,
@@ -365,7 +359,17 @@ pub(super) unsafe extern "C" fn send_to_detour(
             raw_destination,
             destination_length,
         )
-    })
+        .unwrap_or_bypass_with(|_| {
+            FN_SEND_TO(
+                sockfd,
+                raw_message,
+                message_length,
+                flags,
+                raw_destination,
+                destination_length,
+            )
+        })
+    }
 }
 pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled_remote_dns: bool) {
     replace!(hook_manager, "socket", socket_detour, FnSocket, FN_SOCKET);
