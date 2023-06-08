@@ -104,10 +104,11 @@ pub enum HTTPFilter {
 
 /// Describes the stealing subscription to a port:
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[protocol_break(2)]
 pub enum StealType {
     /// Steal all traffic to this port.
     All(Port),
-    /// Steal HTTP traffic matching a given filter (header based).
+    /// Steal HTTP traffic matching a given filter (header based). - REMOVE THIS WHEN BREAKING PROTOCOL
     FilteredHttp(Port, Filter),
     /// Steal HTTP traffic matching a given filter - supporting more than once kind of filter
     FilteredHttpMany(Port, HTTPFilter),
