@@ -23,7 +23,7 @@ use tokio::{
 };
 use tracing::error;
 
-use super::{error::HttpTrafficError, HttpV, filter::HttpFilter};
+use super::{error::HttpTrafficError, filter::HttpFilter, HttpV};
 use crate::{
     steal::{HandlerHttpRequest, MatchedHttpRequest},
     util::ClientId,

@@ -25,7 +25,7 @@ use tokio::{
 use tracing::error;
 
 use super::{
-    filter::{close_connection, TokioExecutor, HttpFilter},
+    filter::{close_connection, HttpFilter, TokioExecutor},
     hyper_handler::{collect_response, prepare_response, HyperHandler},
     DefaultReversibleStream, HttpV, RawHyperConnection,
 };

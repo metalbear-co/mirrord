@@ -15,16 +15,12 @@
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Duration};
 
 use dashmap::DashMap;
+use enum_dispatch::enum_dispatch;
 use fancy_regex::Regex;
-use hyper::rt::Executor;
+use hyper::{body::Incoming, rt::Executor, Request};
 use mirrord_protocol::ConnectionId;
 use tokio::{io::copy_bidirectional, net::TcpStream, sync::mpsc::Sender};
 use tracing::{error, trace};
-use enum_dispatch::enum_dispatch;
-use hyper::{
-    body::Incoming,
-    Request
-};
 
 use super::{
     error::HttpTrafficError, v1::HttpV1, v2::HttpV2, DefaultReversibleStream, HttpV, HttpVersion,
@@ -85,11 +81,13 @@ impl<'a> RequestMatchCandidate<'a> {
                     .to_str()
                     .map(|header_value| format!("{header_name}: {header_value}"))
             })
+            .filter_map(Result::ok)
             .collect();
 
+        let ref_headers = &headers;
         self.headers = Some(headers);
 
-        &self.headers
+        ref_headers
     }
 }
 
@@ -97,38 +95,24 @@ impl<'a> RequestMatchCandidate<'a> {
 #[enum_dispatch]
 trait RequestMatch {
     /// Checks if the request matches the filter.
-    fn matches(
-        &self,
-        request: &mut RequestMatchCandidate<'_>,
-    ) -> bool;
+    fn matches(&self, request: &mut RequestMatchCandidate<'_>) -> bool;
 }
 
-impl RequestMatch for Header {
-    fn matches(
-        &self,
-        request: &Request<Incoming>,
-    ) -> bool {
-        request
-        .headers()
-        .iter()
-        .map(|(header_name, header_value)| {
-            header_value
-                .to_str()
-                .map(|header_value| format!("{header_name}: {header_value}"))
-        })
-        .find_map(|header| {
-            self.
-            // filters.iter().find_map(|filter| {
-            //     filter
-            //         .is_match(
-            //             header
-            //                 .as_ref()
-            //                 .expect("The header value has to be convertible to `String`!"),
-            //         )
-            //         .expect("Something went wrong in the regex matcher!")
-            //         .then_some(*filter.key())
-            // })
-        })
+impl RequestMatch for HttpHeaderFilter {
+    fn matches(&self, request: &mut RequestMatchCandidate<'_>) -> bool {
+        for header in request.headers() {
+            match self.0.is_match(header) {
+                Ok(true) => return true,
+                Ok(false) => continue,
+                Err(err) => {
+                    error!(
+                        "Error while matching header: {header:?}, {:?}, {err:?}",
+                        self.0
+                    );
+                    return false;
+                }
+            }
+        }
     }
 }
 

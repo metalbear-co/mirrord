@@ -23,7 +23,9 @@ use tokio::{
 };
 
 use self::{
-    error::HttpTrafficError, filter::{MINIMAL_HEADER_SIZE, HttpFilter}, hyper_handler::RawHyperConnection,
+    error::HttpTrafficError,
+    filter::{HttpFilter, MINIMAL_HEADER_SIZE},
+    hyper_handler::RawHyperConnection,
     reversible_stream::ReversibleStream,
 };
 use crate::{
@@ -40,8 +42,6 @@ mod v2;
 
 /// Handy alias due to [`ReversibleStream`] being generic, avoiding value mismatches.
 type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
-
-
 
 /// Unifies [`hyper`] handling for HTTP/1 and HTTP/2.
 ///
@@ -172,7 +172,11 @@ impl HttpFilterManager {
     /// [`HttpFilterManager::client_filters`] are shared between hyper tasks, so adding a new one
     /// here will impact the tasks as well.
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) fn add_client(&mut self, client_id: ClientId, filter: HttpFilter) -> Option<HttpFilter> {
+    pub(super) fn add_client(
+        &mut self,
+        client_id: ClientId,
+        filter: HttpFilter,
+    ) -> Option<HttpFilter> {
         self.client_filters.insert(client_id, filter)
     }
 
