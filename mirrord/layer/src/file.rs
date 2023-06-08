@@ -225,6 +225,13 @@ impl FileHandler {
                 trace!("DaemonMessage::GetDEnts64Response {getdents64:#?}!");
                 pop_send(&mut self.getdents64_queue, getdents64)
             }
+            #[cfg(not(target_os = "linux"))]
+            GetDEnts64(_) => {
+                error!(
+                    "Received GetDEnts64Response on non-linux platform! Please report this to us!"
+                );
+                Ok(())
+            }
         }
     }
 

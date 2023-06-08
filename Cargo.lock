@@ -3343,6 +3343,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-macros"
+version = "3.45.0"
+dependencies = [
+ "proc-macro2",
+ "proc-macro2-diagnostics",
+ "semver 1.0.17",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "mirrord-operator"
 version = "3.45.0"
 dependencies = [
@@ -3385,7 +3395,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "3.45.0"
+version = "1.0.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -3395,7 +3405,9 @@ dependencies = [
  "http-serde",
  "hyper 1.0.0-rc.3",
  "libc",
+ "mirrord-macros",
  "nix 0.24.3",
+ "semver 1.0.17",
  "serde",
  "socket2 0.5.3",
  "thiserror",
