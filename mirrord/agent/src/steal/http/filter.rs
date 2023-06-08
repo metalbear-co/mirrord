@@ -36,11 +36,15 @@ const H2_PREFACE: &[u8; 14] = b"PRI * HTTP/2.0";
 /// version we're dealing with.
 const DEFAULT_HTTP_VERSION_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
+#[derive(Debug)]
 struct HttpHeaderFilter(Regex);
+
+#[derive(Debug)]
 struct HttpPathFilter(Regex);
 
 /// Current supported filtering criterias.
 #[enum_dispatch(RequestMatch)]
+#[derive(Debug)]
 pub(crate) enum HttpFilter {
     /// Header based filter.
     Header(HttpHeaderFilter),
@@ -48,8 +52,18 @@ pub(crate) enum HttpFilter {
     Path(HttpPathFilter),
 }
 
+impl HttpFilter {
+    pub fn new_header_filter(header: Regex) -> Self {
+        Self::Header(HttpHeaderFilter(header))
+    }
+
+    pub fn new_path_filter(path: Regex) -> Self {
+        Self::Path(HttpPathFilter(path))
+    }
+}
+
 /// Struct to hold cache/hold/reuse the attributes that a [`Request`] can be matched upon
-struct RequestMatchCandidate<'a> {
+pub(crate) struct RequestMatchCandidate<'a> {
     /// The original request
     request: &'a Request<Incoming>,
     /// Headers in `k: v` format.

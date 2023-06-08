@@ -94,6 +94,7 @@ impl Display for Filter {
 }
 
 /// Describes different types of HTTP filtering available
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum HTTPFilter {
     /// Filter by header ("User-Agent: B")
     Header(Filter),

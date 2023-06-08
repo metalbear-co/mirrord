@@ -29,7 +29,7 @@ use crate::{
     error::Result,
     steal::{
         connection::StealSubscription::{HttpFiltered, Unfiltered},
-        http::HttpFilterManager,
+        http::{HttpFilter, HttpFilterManager},
     },
     AgentError::{AgentInvariantViolated, HttpRequestReceiverClosed},
 };
@@ -440,7 +440,7 @@ impl TcpConnectionStealer {
                             Err(PortAlreadyStolen(port))
                         }
                         Some(HttpFiltered(manager)) => {
-                            manager.add_client(client_id, regex);
+                            manager.add_client(client_id, HttpFilter::new_header_filter(regex));
                             Ok(port)
                         }
                         None => {

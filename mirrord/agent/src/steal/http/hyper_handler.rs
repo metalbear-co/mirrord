@@ -76,31 +76,19 @@ pub(super) struct RawHyperConnection {
     pub(super) unprocessed_bytes: Bytes,
 }
 
-/// Checks if the [`Request`]'s [`HeaderMap`] contains a header that matches any of the `filters`.
-fn header_matches(
+/// Checks if the [`Request`]'s  matches any of the `filters`.
+fn match_request(
     request: &Request<Incoming>,
-    filters: &Arc<DashMap<ClientId, Regex>>,
+    filters: &Arc<DashMap<ClientId, HttpFilter>>,
 ) -> Option<ClientId> {
-    request
-        .headers()
-        .iter()
-        .map(|(header_name, header_value)| {
-            header_value
-                .to_str()
-                .map(|header_value| format!("{header_name}: {header_value}"))
-        })
-        .find_map(|header| {
-            filters.iter().find_map(|filter| {
-                filter
-                    .is_match(
-                        header
-                            .as_ref()
-                            .expect("The header value has to be convertible to `String`!"),
-                    )
-                    .expect("Something went wrong in the regex matcher!")
-                    .then_some(*filter.key())
-            })
-        })
+    let request = request.into();
+    filters.iter().find_map(|entry| {
+        if entry.value().matches(&request) {
+            Some(*entry.key())
+        } else {
+            None
+        }
+    })
 }
 
 /// Remove headers that would be invalid due to us fiddling with the `body`, and rebuilds the
@@ -232,7 +220,7 @@ where
         request: Request<Incoming>,
         original_destination: SocketAddr,
         upgrade_tx: Option<oneshot::Sender<RawHyperConnection>>,
-        filters: Arc<DashMap<ClientId, Regex>>,
+        filters: Arc<DashMap<ClientId, HttpFilter>>,
         port: Port,
         connection_id: ConnectionId,
         request_id: RequestId,
@@ -240,7 +228,7 @@ where
     ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
         if V::is_upgrade(&request) {
             Self::unmatched_request(request, upgrade_tx, original_destination).await
-        } else if let Some(client_id) = header_matches(&request, &filters) {
+        } else if let Some(client_id) = match_request(&request, &filters) {
             let request = MatchedHttpRequest {
                 port,
                 connection_id,

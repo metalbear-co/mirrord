@@ -13,7 +13,6 @@ use std::{net::SocketAddr, sync::Arc};
 
 use bytes::Bytes;
 use dashmap::DashMap;
-use fancy_regex::Regex;
 use http_body_util::Full;
 use hyper::{body::Incoming, Request, Response};
 use mirrord_protocol::ConnectionId;
@@ -23,9 +22,7 @@ use tokio::{
 };
 
 use self::{
-    error::HttpTrafficError,
-    filter::{HttpFilter, MINIMAL_HEADER_SIZE},
-    hyper_handler::RawHyperConnection,
+    error::HttpTrafficError, filter::MINIMAL_HEADER_SIZE, hyper_handler::RawHyperConnection,
     reversible_stream::ReversibleStream,
 };
 use crate::{
@@ -39,6 +36,8 @@ mod hyper_handler;
 mod reversible_stream;
 mod v1;
 mod v2;
+
+pub(crate) use filter::HttpFilter;
 
 /// Handy alias due to [`ReversibleStream`] being generic, avoiding value mismatches.
 type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
