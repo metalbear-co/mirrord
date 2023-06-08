@@ -107,7 +107,7 @@ pub enum HTTPFilter {
 pub enum StealType {
     /// Steal all traffic to this port.
     All(Port),
-    /// Steal HTTP traffic matching a given filter.
+    /// Steal HTTP traffic matching a given filter (header based).
     FilteredHttp(Port, Filter),
     /// Steal HTTP traffic matching a given filter - supporting more than once kind of filter
     FilteredHttpMany(Port, HTTPFilter),
