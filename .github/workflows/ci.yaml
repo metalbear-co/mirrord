@@ -38,6 +38,7 @@ jobs:
       markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
       vscode_changed: ${{ steps.changed-vscode.outputs.any_changed }}
       ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
+      protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
     steps:
       - uses: actions/checkout@v3
         with:
@@ -80,6 +81,24 @@ jobs:
         with:
           files: |
             README.md
+      - name: get protocol changes
+        id: changed-protocol
+        uses: tj-actions/changed-files@v36
+        with:
+          files: |
+            mirrord/protocol/**
+      - name: get protocol changes
+        id: changed-protocol-toml
+        uses: tj-actions/changed-files@v36
+        with:
+          files: |
+            mirrord/protocol/Cargo.toml
+      - name: verify protocol bump
+        run: |
+          if [ "${{ steps.changed-protocol.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-protocol-toml.outputs.any_changed }}" != "true" ]; then
+            echo "Error: Protocol has changed but Cargo.toml has not. Please update Cargo.toml."
+            exit 1
+          fi
       - name: output test
         run: |
           echo ${{ steps.changed-rs.outputs.any_changed }};
@@ -92,6 +111,8 @@ jobs:
           echo ${{ steps.changed-markdown.outputs.all_changed_files }};    
           echo ${{ steps.changed-ci.outputs.any_changed }};
           echo ${{ steps.changed-ci.outputs.all_changed_files }};
+          echo ${{ steps.changed-protocol.outputs.any_changed }};
+          echo ${{ steps.changed-protocol-toml.outputs.any_changed }};
   lint:
     runs-on: ubuntu-latest
     needs: changed_files
@@ -578,7 +599,7 @@ jobs:
       - uses: avto-dev/markdown-lint@v1
         with:
           config: "markdownlint-config.json"
-          args: "README.md"
+   
   # We need some "accummulation" job here because bors fails (timeouts) to
   # listen on matrix builds.
   # Hence, we have some kind of dummy here that bors can listen on
