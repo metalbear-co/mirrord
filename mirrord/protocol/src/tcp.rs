@@ -110,7 +110,7 @@ pub enum StealType {
     /// Steal HTTP traffic matching a given filter.
     FilteredHttp(Port, Filter),
     /// Steal HTTP traffic matching a given filter - supporting more than once kind of filter
-    FilteredHttpV2(Port, HTTPFilter),
+    FilteredHttpMany(Port, HTTPFilter),
 }
 
 /// Messages related to Steal Tcp handler from client.

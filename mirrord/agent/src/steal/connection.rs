@@ -448,7 +448,7 @@ impl TcpConnectionStealer {
 
                             let manager = HttpFiltered(HttpFilterManager::new(
                                 client_id,
-                                regex,
+                                HttpFilter::new_header_filter(regex),
                                 self.http_request_sender.clone(),
                             ));
 
@@ -458,6 +458,9 @@ impl TcpConnectionStealer {
                     },
                     Err(fail) => Err(From::from(BadHttpFilterRegex(filter, fail.to_string()))),
                 }
+            }
+            StealType::FilteredHttpMany(_port, _filter) => {
+                todo!("advanced filter isn't implemented yet");
             }
         };
 

@@ -19,6 +19,7 @@ use enum_dispatch::enum_dispatch;
 use fancy_regex::Regex;
 use hyper::{body::Incoming, rt::Executor, Request};
 use mirrord_protocol::ConnectionId;
+use once_cell::unsync::OnceCell;
 use tokio::{io::copy_bidirectional, net::TcpStream, sync::mpsc::Sender};
 use tracing::{error, trace};
 
@@ -37,13 +38,13 @@ const H2_PREFACE: &[u8; 14] = b"PRI * HTTP/2.0";
 const DEFAULT_HTTP_VERSION_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
-struct HttpHeaderFilter(Regex);
+pub(crate) struct HttpHeaderFilter(Regex);
 
 #[derive(Debug)]
-struct HttpPathFilter(Regex);
+pub(crate) struct HttpPathFilter(Regex);
 
 /// Current supported filtering criterias.
-#[enum_dispatch(RequestMatch)]
+#[enum_dispatch]
 #[derive(Debug)]
 pub(crate) enum HttpFilter {
     /// Header based filter.
@@ -56,7 +57,7 @@ impl HttpFilter {
     pub fn new_header_filter(header: Regex) -> Self {
         Self::Header(HttpHeaderFilter(header))
     }
-
+    #[allow(dead_code)]
     pub fn new_path_filter(path: Regex) -> Self {
         Self::Path(HttpPathFilter(path))
     }
@@ -67,14 +68,14 @@ pub(crate) struct RequestMatchCandidate<'a> {
     /// The original request
     request: &'a Request<Incoming>,
     /// Headers in `k: v` format.
-    headers: Option<Vec<String>>,
+    headers: OnceCell<Vec<String>>,
 }
 
 impl<'a> From<&'a Request<Incoming>> for RequestMatchCandidate<'a> {
     fn from(request: &'a Request<Incoming>) -> Self {
         Self {
-            request: &request,
-            headers: None,
+            request,
+            headers: OnceCell::new(),
         }
     }
 }
@@ -82,26 +83,18 @@ impl<'a> From<&'a Request<Incoming>> for RequestMatchCandidate<'a> {
 impl<'a> RequestMatchCandidate<'a> {
     /// Returns the headers in `k: v` format.
     fn headers(&mut self) -> &Vec<String> {
-        if let Some(headers) = &self.headers {
-            return headers;
-        }
-
-        let headers = self
-            .request
-            .headers()
-            .iter()
-            .map(|(header_name, header_value)| {
-                header_value
-                    .to_str()
-                    .map(|header_value| format!("{header_name}: {header_value}"))
-            })
-            .filter_map(Result::ok)
-            .collect();
-
-        let ref_headers = &headers;
-        self.headers = Some(headers);
-
-        ref_headers
+        self.headers.get_or_init(|| {
+            self.request
+                .headers()
+                .iter()
+                .map(|(header_name, header_value)| {
+                    header_value
+                        .to_str()
+                        .map(|header_value| format!("{header_name}: {header_value}"))
+                })
+                .filter_map(Result::ok)
+                .collect()
+        })
     }
 
     /// Returns path of the request.
@@ -111,8 +104,8 @@ impl<'a> RequestMatchCandidate<'a> {
 }
 
 /// Trait that needs to be implemented for each [`HttpFilter`] variant.
-#[enum_dispatch]
-trait RequestMatch {
+#[enum_dispatch(HttpFilter)]
+pub(crate) trait RequestMatch {
     /// Checks if the request matches the filter.
     fn matches(&self, request: &mut RequestMatchCandidate<'_>) -> bool;
 }

@@ -3174,6 +3174,7 @@ dependencies = [
  "nix 0.24.3",
  "num-traits",
  "oci-spec",
+ "once_cell",
  "pin-project",
  "pnet",
  "rand",

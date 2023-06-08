@@ -8,7 +8,6 @@ use std::{net::SocketAddr, sync::Arc};
 
 use bytes::Bytes;
 use dashmap::DashMap;
-use fancy_regex::Regex;
 use futures::TryFutureExt;
 use http_body_util::{BodyExt, Full};
 use hyper::{
@@ -23,7 +22,11 @@ use tokio::{
 };
 use tracing::error;
 
-use super::{error::HttpTrafficError, filter::HttpFilter, HttpV};
+use super::{
+    error::HttpTrafficError,
+    filter::{HttpFilter, RequestMatch},
+    HttpV,
+};
 use crate::{
     steal::{HandlerHttpRequest, MatchedHttpRequest},
     util::ClientId,
@@ -81,9 +84,9 @@ fn match_request(
     request: &Request<Incoming>,
     filters: &Arc<DashMap<ClientId, HttpFilter>>,
 ) -> Option<ClientId> {
-    let request = request.into();
+    let mut request = request.into();
     filters.iter().find_map(|entry| {
-        if entry.value().matches(&request) {
+        if entry.value().matches(&mut request) {
             Some(*entry.key())
         } else {
             None
