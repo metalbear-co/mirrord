@@ -314,6 +314,7 @@ pub(super) unsafe extern "C" fn recv_from_detour(
     raw_source: *mut sockaddr,
     source_length: *mut socklen_t,
 ) -> ssize_t {
+    // Equivalent to just calling `recv`.
     if raw_source.is_null() {
         libc::recv(sockfd, out_buffer, buffer_length, flags)
     } else {
@@ -348,6 +349,7 @@ pub(super) unsafe extern "C" fn send_to_detour(
     raw_destination: *const sockaddr,
     destination_length: socklen_t,
 ) -> ssize_t {
+    // Equivalent to just calling `send`.
     if raw_destination.is_null() {
         libc::send(sockfd, raw_message, message_length, flags)
     } else {
