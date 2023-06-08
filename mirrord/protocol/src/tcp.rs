@@ -8,6 +8,7 @@ use hyper::{
     body::Incoming, http, http::response::Parts, HeaderMap, Method, Request, Response, StatusCode,
     Uri, Version,
 };
+use mirrord_macros::protocol_break;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
