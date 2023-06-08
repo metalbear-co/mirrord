@@ -20,6 +20,11 @@ use hyper::rt::Executor;
 use mirrord_protocol::ConnectionId;
 use tokio::{io::copy_bidirectional, net::TcpStream, sync::mpsc::Sender};
 use tracing::{error, trace};
+use enum_dispatch::enum_dispatch;
+use hyper::{
+    body::Incoming,
+    Request
+};
 
 use super::{
     error::HttpTrafficError, v1::HttpV1, v2::HttpV2, DefaultReversibleStream, HttpV, HttpVersion,
@@ -34,6 +39,98 @@ const H2_PREFACE: &[u8; 14] = b"PRI * HTTP/2.0";
 /// Timeout value for how long we wait for a stream to contain enough bytes to assert which HTTP
 /// version we're dealing with.
 const DEFAULT_HTTP_VERSION_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
+
+struct HttpHeaderFilter(Regex);
+struct HttpPathFilter(Regex);
+
+/// Current supported filtering criterias.
+#[enum_dispatch(RequestMatch)]
+pub(crate) enum HttpFilter {
+    /// Header based filter.
+    Header(HttpHeaderFilter),
+    /// Path based filter
+    Path(HttpPathFilter),
+}
+
+/// Struct to hold cache/hold/reuse the attributes that a [`Request`] can be matched upon
+struct RequestMatchCandidate<'a> {
+    /// The original request
+    request: &'a Request<Incoming>,
+    /// Headers in `k: v` format.
+    headers: Option<Vec<String>>,
+}
+
+impl<'a> From<&'a Request<Incoming>> for RequestMatchCandidate<'a> {
+    fn from(request: &'a Request<Incoming>) -> Self {
+        Self {
+            request: &request,
+            headers: None,
+        }
+    }
+}
+
+impl<'a> RequestMatchCandidate<'a> {
+    /// Returns the headers in `k: v` format.
+    fn headers(&mut self) -> &Vec<String> {
+        if let Some(headers) = &self.headers {
+            return headers;
+        }
+
+        let headers = self
+            .request
+            .headers()
+            .iter()
+            .map(|(header_name, header_value)| {
+                header_value
+                    .to_str()
+                    .map(|header_value| format!("{header_name}: {header_value}"))
+            })
+            .collect();
+
+        self.headers = Some(headers);
+
+        &self.headers
+    }
+}
+
+/// Trait that needs to be implemented for each [`HttpFilter`] variant.
+#[enum_dispatch]
+trait RequestMatch {
+    /// Checks if the request matches the filter.
+    fn matches(
+        &self,
+        request: &mut RequestMatchCandidate<'_>,
+    ) -> bool;
+}
+
+impl RequestMatch for Header {
+    fn matches(
+        &self,
+        request: &Request<Incoming>,
+    ) -> bool {
+        request
+        .headers()
+        .iter()
+        .map(|(header_name, header_value)| {
+            header_value
+                .to_str()
+                .map(|header_value| format!("{header_name}: {header_value}"))
+        })
+        .find_map(|header| {
+            self.
+            // filters.iter().find_map(|filter| {
+            //     filter
+            //         .is_match(
+            //             header
+            //                 .as_ref()
+            //                 .expect("The header value has to be convertible to `String`!"),
+            //         )
+            //         .expect("Something went wrong in the regex matcher!")
+            //         .then_some(*filter.key())
+            // })
+        })
+    }
+}
 
 // TODO(alex): Import this from `hyper-util` when the crate is actually published.
 /// Future executor that utilises `tokio` threads.
@@ -88,7 +185,7 @@ pub(super) async fn filter_task(
     stolen_stream: TcpStream,
     original_destination: SocketAddr,
     connection_id: ConnectionId,
-    filters: Arc<DashMap<ClientId, Regex>>,
+    filters: Arc<DashMap<ClientId, HttpFilter>>,
     matched_tx: Sender<HandlerHttpRequest>,
     connection_close_sender: Sender<ConnectionId>,
 ) -> Result<(), HttpTrafficError> {

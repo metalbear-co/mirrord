@@ -8,7 +8,6 @@ use std::{net::SocketAddr, sync::Arc};
 
 use bytes::Bytes;
 use dashmap::DashMap;
-use fancy_regex::Regex;
 use futures::TryFutureExt;
 use http_body_util::Full;
 use hyper::{
@@ -26,7 +25,7 @@ use tokio::{
 use tracing::error;
 
 use super::{
-    filter::{close_connection, TokioExecutor},
+    filter::{close_connection, TokioExecutor, HttpFilter},
     hyper_handler::{collect_response, prepare_response, HyperHandler},
     DefaultReversibleStream, HttpV, RawHyperConnection,
 };
@@ -48,7 +47,7 @@ impl HttpV for HttpV2 {
         stream: DefaultReversibleStream,
         original_destination: SocketAddr,
         connection_id: ConnectionId,
-        filters: Arc<DashMap<ClientId, Regex>>,
+        filters: Arc<DashMap<ClientId, HttpFilter>>,
         matched_tx: Sender<HandlerHttpRequest>,
         connection_close_sender: Sender<ConnectionId>,
     ) -> Result<(), HttpTrafficError> {
@@ -115,7 +114,7 @@ impl HyperHandler<HttpV2> {
     /// Creates a new [`HyperHandler`] specifically tuned to handle HTTP/2 requests.
     #[tracing::instrument(level = "trace")]
     pub(crate) fn new(
-        filters: Arc<DashMap<ClientId, Regex>>,
+        filters: Arc<DashMap<ClientId, HttpFilter>>,
         matched_tx: Sender<HandlerHttpRequest>,
         connection_id: ConnectionId,
         port: Port,

@@ -23,7 +23,7 @@ use tokio::{
 };
 
 use self::{
-    error::HttpTrafficError, filter::MINIMAL_HEADER_SIZE, hyper_handler::RawHyperConnection,
+    error::HttpTrafficError, filter::{MINIMAL_HEADER_SIZE, HttpFilter}, hyper_handler::RawHyperConnection,
     reversible_stream::ReversibleStream,
 };
 use crate::{
@@ -40,6 +40,8 @@ mod v2;
 
 /// Handy alias due to [`ReversibleStream`] being generic, avoiding value mismatches.
 type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
+
+
 
 /// Unifies [`hyper`] handling for HTTP/1 and HTTP/2.
 ///
@@ -65,7 +67,7 @@ trait HttpV {
         stream: DefaultReversibleStream,
         original_destination: SocketAddr,
         connection_id: ConnectionId,
-        filters: Arc<DashMap<ClientId, Regex>>,
+        filters: Arc<DashMap<ClientId, HttpFilter>>,
         matched_tx: Sender<HandlerHttpRequest>,
         connection_close_sender: Sender<ConnectionId>,
     ) -> Result<(), HttpTrafficError>;
@@ -139,7 +141,7 @@ impl HttpVersion {
 #[derive(Debug)]
 pub(super) struct HttpFilterManager {
     /// Filters that we're going to be matching against (specified by the user).
-    client_filters: Arc<DashMap<ClientId, Regex>>,
+    client_filters: Arc<DashMap<ClientId, HttpFilter>>,
 
     /// We clone this to pass them down to the hyper tasks.
     matched_tx: Sender<HandlerHttpRequest>,
@@ -153,10 +155,10 @@ impl HttpFilterManager {
     #[tracing::instrument(level = "trace", skip(matched_tx))]
     pub(super) fn new(
         client_id: ClientId,
-        filter: Regex,
+        filter: HttpFilter,
         matched_tx: Sender<HandlerHttpRequest>,
     ) -> Self {
-        let client_filters = Arc::new(DashMap::with_capacity(128));
+        let client_filters = Arc::new(DashMap::new());
         client_filters.insert(client_id, filter);
 
         Self {
@@ -170,7 +172,7 @@ impl HttpFilterManager {
     /// [`HttpFilterManager::client_filters`] are shared between hyper tasks, so adding a new one
     /// here will impact the tasks as well.
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) fn add_client(&mut self, client_id: ClientId, filter: Regex) -> Option<Regex> {
+    pub(super) fn add_client(&mut self, client_id: ClientId, filter: HttpFilter) -> Option<HttpFilter> {
         self.client_filters.insert(client_id, filter)
     }
 
@@ -179,7 +181,7 @@ impl HttpFilterManager {
     /// [`HttpFilterManager::client_filters`] are shared between hyper tasks, so removing a client
     /// here will impact the tasks as well.
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) fn remove_client(&mut self, client_id: &ClientId) -> Option<(ClientId, Regex)> {
+    pub(super) fn remove_client(&mut self, client_id: &ClientId) -> Option<(ClientId, HttpFilter)> {
         self.client_filters.remove(client_id)
     }
 

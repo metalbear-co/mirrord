@@ -93,6 +93,14 @@ impl Display for Filter {
     }
 }
 
+/// Describes different types of HTTP filtering available
+pub enum HTTPFilter {
+    /// Filter by header ("User-Agent: B")
+    Header(Filter),
+    /// Filter by path ("/api/v1")
+    Path(Filter),
+}
+
 /// Describes the stealing subscription to a port:
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum StealType {
@@ -100,6 +108,8 @@ pub enum StealType {
     All(Port),
     /// Steal HTTP traffic matching a given filter.
     FilteredHttp(Port, Filter),
+    /// Steal HTTP traffic matching a given filter - supporting more than once kind of filter
+    FilteredHttpV2(Port, HTTPFilter),
 }
 
 /// Messages related to Steal Tcp handler from client.

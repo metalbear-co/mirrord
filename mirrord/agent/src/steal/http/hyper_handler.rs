@@ -23,7 +23,7 @@ use tokio::{
 };
 use tracing::error;
 
-use super::{error::HttpTrafficError, HttpV};
+use super::{error::HttpTrafficError, HttpV, filter::HttpFilter};
 use crate::{
     steal::{HandlerHttpRequest, MatchedHttpRequest},
     util::ClientId,
@@ -42,7 +42,7 @@ where
 {
     /// The (shared with the stealer) HTTP filter regexes that are used to filter traffic for this
     /// particular connection.
-    pub(super) filters: Arc<DashMap<ClientId, Regex>>,
+    pub(super) filters: Arc<DashMap<ClientId, HttpFilter>>,
 
     /// [`Sender`] part of the channel used to communicate with the agent that we have a
     /// [`MatchedHttpRequest`], and it should be forwarded to the layer.
