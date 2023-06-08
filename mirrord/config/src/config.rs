@@ -35,6 +35,9 @@ pub enum ConfigError {
 
     #[error("Invalid FS mode `{0}`!")]
     InvalidFsMode(String),
+
+    #[error("Conflicting configuration found `{0}`")]
+    Conflict(String),
 }
 
 pub type Result<T, E = ConfigError> = std::result::Result<T, E>;

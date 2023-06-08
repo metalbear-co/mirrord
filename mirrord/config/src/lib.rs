@@ -19,11 +19,25 @@ use std::path::Path;
 use config::{ConfigError, MirrordConfig};
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
+use tracing::warn;
 
 use crate::{
     agent::AgentConfig, config::source::MirrordConfigSource, feature::FeatureConfig,
     target::TargetConfig, util::VecOrSingle,
 };
+
+const PAUSE_WITHOUT_STEAL_WARNING: &str =
+    "--pause specified without --steal: Incoming requests to the application will
+                                           not be handled. The target container running the deployed application is paused,
+                                           and responses from the local application are dropped.
+
+                                           Attention: if network based liveness/readiness probes are defined for the
+                                           target, they will fail under this configuration.
+
+                                           To have the local application handle incoming requests you can run again with
+                                           `--steal`. To have the deployed application handle requests, run again without
+                                           specifying `--pause`.
+    ";
 
 /// mirrord allows for a high degree of customization when it comes to which features you want to
 /// enable, and how they should function.
@@ -257,6 +271,64 @@ impl LayerConfig {
         } else {
             LayerFileConfig::default().generate_config()
         }
+    }
+
+    /// Verify that there are no conflicting settings.
+    /// We don't call it from `from_env` since we want to verify it only once (from cli)
+    pub fn verify(&self) -> Result<(), ConfigError> {
+        if self.pause {
+            if self.agent.ephemeral {
+                return Err(ConfigError::Conflict("Pausing is not yet supported together with an ephemeral agent container.
+                Mutually exclusive arguments `--pause` and `--ephemeral-container` passed together.".to_string()));
+            }
+            if !self.feature.network.incoming.is_steal() {
+                warn!("{PAUSE_WITHOUT_STEAL_WARNING}");
+            }
+        }
+        if self
+            .feature
+            .network
+            .incoming
+            .http_filter
+            .path_filter
+            .is_some()
+            && self
+                .feature
+                .network
+                .incoming
+                .http_filter
+                .header_filter
+                .is_some()
+        {
+            return Err(ConfigError::Conflict(
+                "Cannot use both HTTP header filter and path filter at the same time".to_string(),
+            ));
+        }
+        if self
+            .feature
+            .network
+            .incoming
+            .http_header_filter
+            .filter
+            .is_some()
+            && (self
+                .feature
+                .network
+                .incoming
+                .http_filter
+                .path_filter
+                .is_some()
+                || self
+                    .feature
+                    .network
+                    .incoming
+                    .http_filter
+                    .header_filter
+                    .is_some())
+        {
+            return Err(ConfigError::Conflict("Cannot use old http filter and new http filter at the same time. Use only `http_filter` instead of `http_header_filter`".to_string()));
+        }
+        Ok(())
     }
 }
 

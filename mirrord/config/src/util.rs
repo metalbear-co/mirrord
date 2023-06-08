@@ -1,4 +1,4 @@
-use std::{fmt, marker::PhantomData, slice::Join, str::FromStr};
+use std::{fmt, marker::PhantomData, slice::Join, str::FromStr, collections::HashSet, hash::Hash};
 
 use schemars::JsonSchema;
 use serde::{
@@ -73,6 +73,19 @@ impl<T> VecOrSingle<T> {
         match self {
             VecOrSingle::Single(val) => vec![val],
             VecOrSingle::Multiple(vals) => vals,
+        }
+    }
+}
+
+impl<T: Hash + Eq> From<VecOrSingle<T>> for HashSet<T> {
+    fn from(value: VecOrSingle<T>) -> Self {
+        match value {
+            VecOrSingle::Single(val) => {
+                let mut set = HashSet::with_capacity(1);
+                set.insert(val);
+                set
+            }
+            VecOrSingle::Multiple(vals) => vals.into_iter().collect(),
         }
     }
 }
