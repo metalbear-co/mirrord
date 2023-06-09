@@ -63,7 +63,7 @@ impl HttpFilter {
     }
 }
 
-/// Struct to hold cache/hold/reuse the attributes that a [`Request`] can be matched upon
+/// Struct to cache/hold/reuse the attributes that a [`Request`] can be matched upon
 pub(crate) struct RequestMatchCandidate<'a> {
     /// The original request
     request: &'a Request<Incoming>,
