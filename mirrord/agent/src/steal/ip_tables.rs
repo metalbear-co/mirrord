@@ -233,6 +233,11 @@ mod tests {
             .times(1)
             .returning(|_, _| Ok(()));
 
+        mock.expect_remove_rule()
+            .with(eq("OUTPUT"), str::starts_with("-j MIRRORD_INPUT_"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
         mock.expect_remove_chain()
             .with(str::starts_with("MIRRORD_INPUT_"))
             .times(1)

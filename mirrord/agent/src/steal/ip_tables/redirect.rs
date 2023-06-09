@@ -109,13 +109,13 @@ where
     const ENTRYPOINT: &'static str = "OUTPUT";
 
     pub fn create(ipt: Arc<IPT>) -> Result<Self> {
-        let preroute = PreroutingRedirect::create(ipt.clone())?;
+        let preroute = PreroutingRedirect::create(ipt)?;
 
         Ok(StandardRedirect { preroute })
     }
 
     pub fn load(ipt: Arc<IPT>) -> Result<Self> {
-        let preroute = PreroutingRedirect::load(ipt.clone())?;
+        let preroute = PreroutingRedirect::load(ipt)?;
 
         Ok(StandardRedirect { preroute })
     }
