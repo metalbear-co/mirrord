@@ -30,7 +30,7 @@ impl<IPT> PreroutingRedirect<IPT>
 where
     IPT: IPTables,
 {
-    const ENTRYPOINT: &'static str = "PREROUTING";
+    pub const ENTRYPOINT: &'static str = "PREROUTING";
 
     pub fn create(ipt: Arc<IPT>) -> Result<Self> {
         let managed = IPTableChain::create(ipt, IPTABLE_PREROUTING.to_string())?;
@@ -95,6 +95,85 @@ where
 
     fn deref(&self) -> &Self::Target {
         &self.managed
+    }
+}
+
+pub struct StandardRedirect<IPT: IPTables> {
+    preroute: PreroutingRedirect<IPT>,
+}
+
+impl<IPT> StandardRedirect<IPT>
+where
+    IPT: IPTables,
+{
+    const ENTRYPOINT: &'static str = "OUTPUT";
+
+    pub fn create(ipt: Arc<IPT>) -> Result<Self> {
+        let preroute = PreroutingRedirect::create(ipt.clone())?;
+
+        Ok(StandardRedirect { preroute })
+    }
+
+    pub fn load(ipt: Arc<IPT>) -> Result<Self> {
+        let preroute = PreroutingRedirect::load(ipt.clone())?;
+
+        Ok(StandardRedirect { preroute })
+    }
+}
+
+
+
+/// This wrapper adds a new rule to the NAT OUTPUT chain to redirect "localhost" traffic as well
+/// Note: OUTPUT chain is only traversed for packets produced by local applications
+#[async_trait]
+impl<IPT> Redirect for StandardRedirect<IPT>
+where
+    IPT: IPTables + Send + Sync,
+{
+    async fn mount_entrypoint(&self) -> Result<()> {
+        self.preroute.managed.inner().add_rule(
+            PreroutingRedirect::<IPT>::ENTRYPOINT,
+            &format!("-j {}", self.preroute.managed.chain_name()),
+        )?;
+
+        self.preroute.managed.inner().add_rule(
+            Self::ENTRYPOINT,
+            &format!("-j {}", self.preroute.managed.chain_name()),
+        )?;
+
+        Ok(())
+    }
+
+    async fn unmount_entrypoint(&self) -> Result<()> {
+        self.preroute.managed.inner().remove_rule(
+            PreroutingRedirect::<IPT>::ENTRYPOINT,
+            &format!("-j {}", self.preroute.managed.chain_name()),
+        )?;
+
+        self.preroute.managed.inner().remove_rule(
+            Self::ENTRYPOINT,
+            &format!("-j {}", self.preroute.managed.chain_name()),
+        )?;
+
+        Ok(())
+    }
+
+    async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+        let redirect_rule =
+            format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
+
+        self.preroute.managed.add_rule(&redirect_rule)?;
+
+        Ok(())
+    }
+
+    async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+        let redirect_rule =
+            format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
+
+        self.preroute.managed.remove_rule(&redirect_rule)?;
+
+        Ok(())
     }
 }
 

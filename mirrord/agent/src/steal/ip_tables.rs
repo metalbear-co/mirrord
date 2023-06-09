@@ -9,7 +9,7 @@ use crate::{
     steal::ip_tables::{
         flush_connections::FlushConnections,
         mesh::{MeshRedirect, MeshVendor},
-        redirect::{PreroutingRedirect, Redirect},
+        redirect::{Redirect, StandardRedirect},
     },
 };
 
@@ -99,7 +99,7 @@ impl IPTables for iptables::IPTables {
 
 #[enum_dispatch(Redirect)]
 pub enum Redirects<IPT: IPTables + Send + Sync> {
-    Standard(PreroutingRedirect<IPT>),
+    Standard(StandardRedirect<IPT>),
     Mesh(MeshRedirect<IPT>),
     FlushConnections(FlushConnections<Redirects<IPT>>),
 }
@@ -122,7 +122,7 @@ where
         let mut redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
             Redirects::Mesh(MeshRedirect::create(Arc::new(ipt), vendor)?)
         } else {
-            Redirects::Standard(PreroutingRedirect::create(Arc::new(ipt))?)
+            Redirects::Standard(StandardRedirect::create(Arc::new(ipt))?)
         };
 
         if flush_connections {
@@ -138,7 +138,7 @@ where
         let mut redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
             Redirects::Mesh(MeshRedirect::load(Arc::new(ipt), vendor)?)
         } else {
-            Redirects::Standard(PreroutingRedirect::load(Arc::new(ipt))?)
+            Redirects::Standard(StandardRedirect::load(Arc::new(ipt))?)
         };
 
         if flush_connections {
