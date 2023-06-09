@@ -20,6 +20,7 @@ use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse,
 };
+use mirrord_sip::sip_patch;
 use rstest::fixture;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
@@ -450,6 +451,14 @@ impl LayerConnection {
         .await
     }
 
+    pub async fn expect_port_subscribe(&mut self, port: u16) {
+        // Verify the app tries to open the expected file.
+        assert_eq!(
+            self.codec.next().await.unwrap().unwrap(),
+            ClientMessage::Tcp(LayerTcp::PortSubscribe(port))
+        );
+    }
+
     /// Verify layer hooks an `open` of file `file_name` with given open options, send back answer
     /// with given `fd`.
     pub async fn expect_file_open_with_options(
@@ -750,6 +759,7 @@ pub enum Application {
     RustIssue1054,
     RustDnsResolve,
     RustRecvFrom,
+    React,
     // For running applications with the executable and arguments determined at runtime.
     // Compiled only on macos just because it's currently only used there, but could be used also
     // on Linux.
@@ -780,6 +790,7 @@ impl Application {
 
     pub async fn get_executable(&self) -> String {
         match self {
+            Application::React => String::from("npm"),
             Application::PythonFlaskHTTP
             | Application::PythonSelfConnect
             | Application::PythonDontLoad
@@ -848,6 +859,15 @@ impl Application {
         let mut app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         app_path.push("tests/apps/");
         match self {
+            Application::React => {
+                app_path.push("react");
+                vec![
+                    String::from("start"),
+                    // In order to start an app not in the current dir:
+                    String::from("--prefix"),
+                    app_path.to_string_lossy().to_string(),
+                ]
+            }
             Application::PythonFlaskHTTP => {
                 app_path.push("app_flask.py");
                 println!("using flask server from {app_path:?}");
@@ -939,6 +959,7 @@ impl Application {
             | Application::RustIssue1123
             | Application::RustIssue1054
             | Application::PythonFlaskHTTP => 80,
+            Application::React => 3000,
             Application::PythonFastApiHTTP => 1234,
             Application::PythonListen => 21232,
             Application::PythonDontLoad
@@ -980,6 +1001,10 @@ impl Application {
     /// Start the test process with the given env.
     async fn get_test_process(&self, env: HashMap<&str, &str>) -> TestProcess {
         let executable = self.get_executable().await;
+        #[cfg(target_os = "macos")]
+        let executable = sip_patch(&executable, &Vec::new())
+            .unwrap()
+            .unwrap_or(executable);
         println!("Using executable: {}", &executable);
         println!("Using args: {:?}", self.get_args());
         TestProcess::start_process(executable, self.get_args(), env).await

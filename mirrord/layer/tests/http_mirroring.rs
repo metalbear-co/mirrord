@@ -85,3 +85,44 @@ async fn mirroring_with_http_go(
 ) {
     mirroring_with_http(application, dylib_path, config_dir).await;
 }
+
+/// React apps try to bind the same socket multiple times for some reason.
+/// We had a bug where if an app listens on a port, then closes the socket, then listens again,
+/// we would not update the local port (the port we make the user app listen on locally and then
+/// connect to from the layer).
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(60))]
+async fn multiple_binds(dylib_path: &PathBuf) {
+    let application = Application::React;
+    let (mut test_process, listener) = application
+        .get_test_process_and_listener(
+            dylib_path,
+            vec![
+                ("MIRRORD_FILE_MODE", "local"),
+                ("MIRRORD_UDP_OUTGOING", "false"),
+            ],
+            None,
+        )
+        .await;
+
+    let mut connections = Vec::with_capacity(4);
+    for _ in 0..3 {
+        let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+        layer_connection.expect_port_subscribe(application.get_app_port());
+        connections.push(layer_connection);
+    }
+    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    layer_connection.expect_port_subscribe(application.get_app_port());
+
+    println!("Application subscribed to port, sending HTTP requests.");
+
+    layer_connection
+        .send_connection_then_data(
+            "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            application.get_app_port(),
+        )
+        .await;
+
+    test_process.wait_assert_success().await;
+}
