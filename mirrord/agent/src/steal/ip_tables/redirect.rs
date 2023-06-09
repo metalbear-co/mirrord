@@ -30,7 +30,7 @@ impl<IPT> PreroutingRedirect<IPT>
 where
     IPT: IPTables,
 {
-    pub const ENTRYPOINT: &'static str = "PREROUTING";
+    const ENTRYPOINT: &'static str = "PREROUTING";
 
     pub fn create(ipt: Arc<IPT>) -> Result<Self> {
         let managed = IPTableChain::create(ipt, IPTABLE_PREROUTING.to_string())?;
@@ -120,8 +120,6 @@ where
         Ok(StandardRedirect { preroute })
     }
 }
-
-
 
 /// This wrapper adds a new rule to the NAT OUTPUT chain to redirect "localhost" traffic as well
 /// Note: OUTPUT chain is only traversed for packets produced by local applications
