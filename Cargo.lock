@@ -3181,6 +3181,7 @@ dependencies = [
  "nix 0.24.3",
  "num-traits",
  "oci-spec",
+ "once_cell",
  "pin-project",
  "pnet",
  "rand",
@@ -3395,7 +3396,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "actix-codec",
  "bincode",
