@@ -64,7 +64,7 @@ bimap = "0.6.2"
 socket2 = { version = "0.5.3", features = ["all"]}
 which = "4"
 semver = "1"
-
+once_cell = "1"
 
 [patch.crates-io]
 tracing = { git = "https://github.com/metalbear-co/tracing", package = "tracing", branch = "worker_options_non_blocking_v1" }
