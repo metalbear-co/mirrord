@@ -1,1 +1,0 @@
-Chagned agent to not return errors on reading from outgoing sockets, and layer to not crash in that case anyway

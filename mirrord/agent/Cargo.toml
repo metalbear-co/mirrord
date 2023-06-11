@@ -41,7 +41,7 @@ bytes = "1.2"
 regex = "1"
 socket2.workspace = true
 wildmatch = "2"
-enum_dispatch = "0.3.8"
+enum_dispatch = "0.3"
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["full"] }
 httparse = "1"
@@ -54,9 +54,12 @@ tonic = "0.9"
 tower = "0.4"
 http = "0.2"
 k8s-cri = "0.7"
+once_cell.workspace = true
+
 [target.'cfg(target_os = "linux")'.dependencies]
 iptables = "0.5"
 rawsocket = {git = "https://github.com/metalbear-co/rawsocket.git"}
+
 
 [dev-dependencies]
 mockall = "0.11.2" # 0.11.3 is broken
