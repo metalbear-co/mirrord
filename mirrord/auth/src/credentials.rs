@@ -13,6 +13,7 @@ use crate::{
     key_pair::KeyPair,
 };
 
+/// Client Credentials container for authorization against Operator
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Credentials {
     /// Generated Certificate from operator can be None when request isn't signed yet and will
@@ -69,7 +70,9 @@ impl AsRef<Certificate> for Credentials {
     }
 }
 
+/// Ext trait for validation of dates of `rfc5280::Validity`
 pub trait DateValidityExt {
+    /// Check other is in between not_before and not_after
     fn is_date_valid(&self, other: DateTime<Utc>) -> bool;
 }
 
@@ -89,6 +92,7 @@ impl DateValidityExt for rfc5280::Validity {
     }
 }
 
+/// Extenstion of Credentials for functions that accesses Operator
 #[cfg(feature = "client")]
 pub mod client {
     use kube::{api::PostParams, Api, Client, Resource};

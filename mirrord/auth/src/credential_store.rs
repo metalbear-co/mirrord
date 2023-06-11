@@ -18,12 +18,14 @@ use crate::{
     error::{AuthenticationError, CertificateStoreError, Result},
 };
 
+/// "~/.mirrord/credentials"
 static CREDENTIALS_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
     home::home_dir()
         .unwrap_or_else(|| PathBuf::from("~"))
         .join(".mirrord/credentials")
 });
 
+/// Container that is responsible for creating/loading `Credentials`
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CredentialStore {
     /// Currently active credential key from `credentials` field
@@ -46,6 +48,7 @@ impl Default for CredentialStore {
 }
 
 impl CredentialStore {
+    /// Load contents of store from file
     async fn load<R: AsyncRead + Unpin>(source: &mut R) -> Result<Self> {
         let mut buffer = Vec::new();
 
@@ -59,6 +62,7 @@ impl CredentialStore {
             .map_err(AuthenticationError::from)
     }
 
+    /// Save contents of store to file
     async fn save<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> Result<()> {
         let buffer = serde_yaml::to_string(&self).map_err(CertificateStoreError::from)?;
 
@@ -101,7 +105,9 @@ impl CredentialStore {
 pub struct CredentialStoreSync;
 
 impl CredentialStoreSync {
-    pub async fn try_get_client_certificate<R>(
+    /// Try and get/create a client certificate used for `get_client_certificate` once a file lock
+    /// is created
+    async fn try_get_client_certificate<R>(
         client: &Client,
         store_file: &mut fs::File,
     ) -> Result<Vec<u8>>
@@ -132,6 +138,8 @@ impl CredentialStoreSync {
         Ok(certificate_der)
     }
 
+    /// Get client certificate while keeping an exclusive lock on `CREDENTIALS_PATH` (and releasing
+    /// it regrading of result)
     pub async fn get_client_certificate<R>(client: &Client) -> Result<Vec<u8>>
     where
         R: Resource + Clone + Debug,
