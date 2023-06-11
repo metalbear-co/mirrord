@@ -198,6 +198,10 @@ pub struct IncomingAdvancedFileConfig {
     /// used locally only.
     pub ignore_ports: Option<Vec<u16>>,
 
+    /// ### on_multi_steal
+    ///
+    /// (Operator Only): if value of override is passed then current later will override any
+    /// PortLocks and force close other connections
     pub on_multi_steal: Option<MultiSteal>,
 }
 
@@ -277,6 +281,7 @@ pub struct IncomingConfig {
     /// #### feature.network.incoming.filter {#feature-network-incoming-filter}
     pub http_header_filter: HttpHeaderFilterConfig,
 
+    /// #### feature.network.incoming.on_multi_steal {#feature-network-incoming-on_multi_steal}
     pub on_multi_steal: MultiSteal,
 }
 
@@ -350,6 +355,13 @@ impl FromStr for IncomingMode {
     }
 }
 
+/// (Operator Only): Allows overiding port locks
+///
+/// Can be set to either `"continue"` (default) or `"override"`.
+///
+/// - `"continue"`: Send appropriate error if trying to lock a port that has already been locked
+/// - `"override"`: If port lock detected then override it with new lock and force close the
+///   original locking connection
 #[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum MultiSteal {
