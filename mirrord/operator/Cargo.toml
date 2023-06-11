@@ -41,7 +41,7 @@ setup = ["crd", "dep:rcgen", "dep:serde_yaml"]
 
 
 [dependencies]
-mirrord-auth = { path = "../auth", optional = true }
+mirrord-auth = { path = "../auth", features = ["client"], optional = true }
 mirrord-config = { path = "../config", optional = true }
 mirrord-kube = { path = "../kube", optional = true }
 mirrord-progress = { path = "../progress", optional = true }

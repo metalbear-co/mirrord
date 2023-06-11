@@ -4,15 +4,18 @@ use x509_certificate::X509CertificateError;
 #[derive(Debug, Error)]
 pub enum AuthenticationError {
     #[error(transparent)]
-    CertificateStore(#[from] CertificateStoreError),
-    #[error(transparent)]
-    Kube(#[from] kube::Error),
-    #[error(transparent)]
     Pem(std::io::Error),
     #[error(transparent)]
     X509Certificate(#[from] X509CertificateError),
+    #[cfg(feature = "client")]
+    #[error(transparent)]
+    CertificateStore(#[from] CertificateStoreError),
+    #[cfg(feature = "client")]
+    #[error(transparent)]
+    Kube(#[from] kube::Error),
 }
 
+#[cfg(feature = "client")]
 #[derive(Debug, Error)]
 pub enum CertificateStoreError {
     #[error("Unable to save/load CertificateStore: {0}")]

@@ -1,12 +1,10 @@
 use std::{fmt::Debug, ops::Deref};
 
 use chrono::{DateTime, Utc};
-use kube::{api::PostParams, Api, Client, Resource};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
 use x509_certificate::{
     asn1time::Time, rfc2986, rfc5280, InMemorySigningKeyPair, KeyAlgorithm, X509CertificateBuilder,
-    X509CertificateError,
 };
 
 use crate::{
@@ -63,39 +61,6 @@ impl Credentials {
             .create_certificate_signing_request(self.key_pair.deref())
             .map_err(AuthenticationError::from)
     }
-
-    /// Create `rfc2986::CertificationRequest` and send to operator to replace `Certificate` inside
-    /// of self.certificate making the Credentials ready
-    pub async fn get_client_certificate<R>(
-        &mut self,
-        client: Client,
-        common_name: &str,
-    ) -> Result<()>
-    where
-        R: Resource + Clone + Debug,
-        R: for<'de> Deserialize<'de>,
-        R::DynamicType: Default,
-    {
-        let certificate_request = self
-            .certificate_request(common_name)?
-            .encode_pem()
-            .map_err(X509CertificateError::from)?;
-
-        let api: Api<R> = Api::all(client);
-
-        let certificate: Certificate = api
-            .create_subresource(
-                "certificate",
-                "operator",
-                &PostParams::default(),
-                certificate_request.into(),
-            )
-            .await?;
-
-        self.certificate.replace(certificate);
-
-        Ok(())
-    }
 }
 
 impl AsRef<Certificate> for Credentials {
@@ -121,5 +86,47 @@ impl DateValidityExt for rfc5280::Validity {
         };
 
         not_before < other && other < not_after
+    }
+}
+
+#[cfg(feature = "client")]
+pub mod client {
+    use kube::{api::PostParams, Api, Client, Resource};
+
+    use super::*;
+
+    impl Credentials {
+        /// Create `rfc2986::CertificationRequest` and send to operator to replace `Certificate`
+        /// inside of self.certificate making the Credentials ready
+        pub async fn get_client_certificate<R>(
+            &mut self,
+            client: Client,
+            common_name: &str,
+        ) -> Result<()>
+        where
+            R: Resource + Clone + Debug,
+            R: for<'de> Deserialize<'de>,
+            R::DynamicType: Default,
+        {
+            let certificate_request = self
+                .certificate_request(common_name)?
+                .encode_pem()
+                .map_err(x509_certificate::X509CertificateError::from)?;
+
+            let api: Api<R> = Api::all(client);
+
+            let certificate: Certificate = api
+                .create_subresource(
+                    "certificate",
+                    "operator",
+                    &PostParams::default(),
+                    certificate_request.into(),
+                )
+                .await?;
+
+            self.certificate.replace(certificate);
+
+            Ok(())
+        }
     }
 }

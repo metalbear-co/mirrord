@@ -5,6 +5,7 @@ pub use pem;
 pub use x509_certificate;
 
 pub mod certificate;
+#[cfg(feature = "client")]
 pub mod credential_store;
 pub mod credentials;
 pub mod error;

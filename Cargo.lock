@@ -3185,7 +3185,6 @@ dependencies = [
 name = "mirrord-auth"
 version = "3.44.2"
 dependencies = [
- "bytes",
  "chrono",
  "fs4",
  "gethostname",
@@ -3193,7 +3192,6 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "pem 2.0.1",
- "schemars",
  "serde",
  "serde_yaml",
  "thiserror",
