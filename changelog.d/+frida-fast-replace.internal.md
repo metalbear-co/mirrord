@@ -1,0 +1,1 @@
+Frida use fast replace

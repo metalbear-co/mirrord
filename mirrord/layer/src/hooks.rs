@@ -1,4 +1,4 @@
-use std::{ptr::null_mut, sync::LazyLock};
+use std::sync::LazyLock;
 
 use frida_gum::{interceptor::Interceptor, Gum, Module, NativePointer};
 use tracing::trace;
@@ -42,11 +42,10 @@ impl<'a> HookManager<'a> {
             }
             if let Ok(function) = get_export_by_name(Some(module), symbol) {
                 trace!("found {symbol:?} in {module:?}, hooking");
-                match self.interceptor.replace(
-                    function,
-                    NativePointer(detour),
-                    NativePointer(null_mut()),
-                ) {
+                match self
+                    .interceptor
+                    .replace_fast(function, NativePointer(detour))
+                {
                     Ok(original) => return Ok(original),
                     Err(err) => {
                         trace!("hook {symbol:?} in {module:?} failed with err {err:?}")
@@ -70,7 +69,7 @@ impl<'a> HookManager<'a> {
         let function = get_export_by_name(None, symbol)?;
 
         self.interceptor
-            .replace(function, NativePointer(detour), NativePointer(null_mut()))
+            .replace_fast(function, NativePointer(detour))
             .or_else(|_| self.hook_any_lib_export(symbol, detour))
     }
 
@@ -87,7 +86,7 @@ impl<'a> HookManager<'a> {
             .ok_or_else(|| LayerError::NoSymbolName(symbol.to_string()))?;
 
         self.interceptor
-            .replace(function, NativePointer(detour), NativePointer(null_mut()))
+            .replace_fast(function, NativePointer(detour))
             .map_err(Into::into)
     }
 
