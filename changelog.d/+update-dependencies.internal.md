@@ -1,0 +1,1 @@
+Frida bump and other dependencies
