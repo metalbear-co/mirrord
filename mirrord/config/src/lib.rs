@@ -501,6 +501,7 @@ mod tests {
                             port_mapping: None,
                             ignore_localhost: None,
                             ignore_ports: None,
+                            on_multi_steal: None,
                         },
                     ))),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {
