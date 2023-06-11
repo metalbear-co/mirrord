@@ -104,12 +104,12 @@ impl AsRef<Certificate> for Credentials {
     }
 }
 
-trait ValidityExt {
-    fn is_valid(&self, other: DateTime<Utc>) -> bool;
+pub trait DateValidityExt {
+    fn is_date_valid(&self, other: DateTime<Utc>) -> bool;
 }
 
-impl ValidityExt for rfc5280::Validity {
-    fn is_valid(&self, other: DateTime<Utc>) -> bool {
+impl DateValidityExt for rfc5280::Validity {
+    fn is_date_valid(&self, other: DateTime<Utc>) -> bool {
         let not_before: DateTime<Utc> = match self.not_before.clone() {
             Time::UtcTime(time) => *time,
             Time::GeneralTime(time) => DateTime::<Utc>::from(time),
@@ -119,8 +119,6 @@ impl ValidityExt for rfc5280::Validity {
             Time::UtcTime(time) => *time,
             Time::GeneralTime(time) => DateTime::<Utc>::from(time),
         };
-
-        eprintln!("{not_before:?} {not_after:?} {other:?}");
 
         not_before < other && other < not_after
     }
