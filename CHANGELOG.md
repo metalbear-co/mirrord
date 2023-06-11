@@ -8,6 +8,41 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.45.1](https://github.com/metalbear-co/mirrord/tree/3.45.1) - 2023-06-11
+
+
+### Fixed
+
+- Installation script now does not use `sudo` when not needed. This enbables
+  installing mirrord in a `RUN` step in an ubuntu docker container, without
+  installing `sudo` in an earlier step.
+  [#1514](https://github.com/metalbear-co/mirrord/issues/1514)
+- fix crio on openshift
+  [#1534](https://github.com/metalbear-co/mirrord/issues/1534)
+- Skipping `gcc` when debugging Go in VS Code extension.
+
+
+### Internal
+
+- change `mirrord-protocol` to have its own versioning. add `mirrord-macros`
+  and `protocol_break` attribute to mark places we want to break on major
+  updates.
+  Add CI to verify that if protocol is changed, `Cargo.toml` is changed as well
+  (to force bumps)
+  Fix some of the structs being `OS` controlled, potentially breaking the
+  protocol between different OS's.
+  (`GetDEnts64(RemoteResult<GetDEnts64Response>),`)
+  [#1355](https://github.com/metalbear-co/mirrord/issues/1355)
+- Partial refactor towards 1512
+  [#1512](https://github.com/metalbear-co/mirrord/issues/1512)
+- Add integration test for DNS resolution
+- Bumped versions of some VS Code extension dependencies.
+- Frida bump and other dependencies
+- Integration test for recv_from
+- Reorganize dev docs
+- Update our socket2 dependency, since the code we pushed there was released.
+
+
 ## [3.45.0](https://github.com/metalbear-co/mirrord/tree/3.45.0) - 2023-06-05
 
 
