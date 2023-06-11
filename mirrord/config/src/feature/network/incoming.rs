@@ -359,13 +359,21 @@ impl FromStr for IncomingMode {
 ///
 /// Can be set to either `"continue"` (default) or `"override"`.
 ///
-/// - `"continue"`: Send appropriate error if trying to lock a port that has already been locked
+/// - `"continue"`: Continue with normal execution
 /// - `"override"`: If port lock detected then override it with new lock and force close the
 ///   original locking connection
 #[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum MultiSteal {
+    /// <!--${internal}-->
+    /// ### override
+    ///
+    /// Override any port lock and force close the original lock connection
     Override,
+    /// <!--${internal}-->
+    /// ### continue
+    ///
+    /// Continue with normal execution
     #[default]
     Continue,
 }
