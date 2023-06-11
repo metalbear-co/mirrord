@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use email_address::EmailAddress;
+use mirrord_config::feature::network::incoming::MultiSteal;
 use mirrord_operator::setup::OperatorNamespace;
 
 #[derive(Parser)]
@@ -183,6 +184,10 @@ pub(super) struct ExecArgs {
     /// Create a trace file of errors for debugging.
     #[arg(long)]
     pub capture_error_trace: bool,
+
+    /// Allows overiding port lock
+    #[arg(long)]
+    pub on_multi_steal: Option<MultiSteal>,
 }
 
 #[derive(Args, Debug)]
