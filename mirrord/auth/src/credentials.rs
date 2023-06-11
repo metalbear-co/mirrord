@@ -48,7 +48,7 @@ impl Credentials {
             .as_ref()
             .tbs_certificate
             .validity
-            .is_valid(Utc::now())
+            .is_date_valid(Utc::now())
     }
 
     /// Create `rfc2986::CertificationRequest` for `Certificate` generation signed with `KeyPair`
