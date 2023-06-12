@@ -41,11 +41,11 @@
     },
     {
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}"
+        "--extensionDevelopmentPath=${workspaceFolder}/vscode-ext"
       ],
       "name": "Launch Extension",
       "outFiles": [
-        "${workspaceFolder}/vscode-ext/out/**/*.js"
+        "${workspaceFolder}/vscode-ext/dist/*.js"
       ],
       "request": "launch",
       "type": "extensionHost"
