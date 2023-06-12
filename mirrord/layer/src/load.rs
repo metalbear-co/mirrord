@@ -32,11 +32,6 @@ pub enum LoadType {
 pub fn load_type(given_process: &str, config: LayerConfig) -> LoadType {
     let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
 
-    #[cfg(target_os = "macos")]
-    {
-        if given_process.ends_with("dotnet") {}
-    }
-
     if should_load(given_process, skip_processes) {
         trace!("Loading into process: {given_process}.");
         LoadType::Full(Box::new(config))
