@@ -28,7 +28,9 @@ static OPERATOR_NAME: &str = "mirrord-operator";
 static OPERATOR_PORT: i32 = 3000;
 static OPERATOR_ROLE_NAME: &str = "mirrord-operator";
 static OPERATOR_ROLE_BINDING_NAME: &str = "mirrord-operator";
-static OPERATOR_SECRET_NAME: &str = "mirrord-operator-license";
+static OPERATOR_LICENSE_SECRET_NAME: &str = "mirrord-operator-license";
+static OPERATOR_LICENSE_SECRET_FILE_NAME: &str = "license.pem";
+static OPERATOR_LICENSE_SECRET_VOLUME_NAME: &str = "license-volume";
 static OPERATOR_TLS_SECRET_NAME: &str = "mirrord-operator-tls";
 static OPERATOR_TLS_VOLUME_NAME: &str = "tls-volume";
 static OPERATOR_TLS_KEY_FILE_NAME: &str = "tls.key";
@@ -66,7 +68,7 @@ pub struct Operator {
     deployment: OperatorDeployment,
     role: OperatorRole,
     role_binding: OperatorRoleBinding,
-    secret: OperatorSecret,
+    secret: OperatorLicenseSecret,
     service: OperatorService,
     service_account: OperatorServiceAccount,
     tls_secret: OperatorTlsSecret,
@@ -74,8 +76,8 @@ pub struct Operator {
 }
 
 impl Operator {
-    pub fn new(license_key: String, namespace: OperatorNamespace) -> Self {
-        let secret = OperatorSecret::new(&license_key, &namespace);
+    pub fn new(license: String, namespace: OperatorNamespace) -> Self {
+        let secret = OperatorLicenseSecret::new(&license, &namespace);
         let service_account = OperatorServiceAccount::new(&namespace);
 
         let tls_secret = OperatorTlsSecret::new(&namespace);
@@ -174,7 +176,7 @@ impl OperatorDeployment {
     pub fn new(
         namespace: &OperatorNamespace,
         sa: &OperatorServiceAccount,
-        secret: &OperatorSecret,
+        license_secret: &OperatorLicenseSecret,
         tls_secret: &OperatorTlsSecret,
     ) -> Self {
         let container = Container {
@@ -196,6 +198,11 @@ impl OperatorDeployment {
                     value_from: None,
                 },
                 EnvVar {
+                    name: "OPERATOR_LICENSE_PATH".to_owned(),
+                    value: Some(format!("/license/{OPERATOR_LICENSE_SECRET_FILE_NAME}")),
+                    value_from: None,
+                },
+                EnvVar {
                     name: "OPERATOR_TLS_CERT_PATH".to_owned(),
                     value: Some(format!("/tls/{OPERATOR_TLS_CERT_FILE_NAME}")),
                     value_from: None,
@@ -208,7 +215,7 @@ impl OperatorDeployment {
             ]),
             env_from: Some(vec![EnvFromSource {
                 secret_ref: Some(SecretEnvSource {
-                    name: Some(secret.name().to_owned()),
+                    name: Some(license_secret.name().to_owned()),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -218,11 +225,18 @@ impl OperatorDeployment {
                 container_port: OPERATOR_PORT,
                 ..Default::default()
             }]),
-            volume_mounts: Some(vec![VolumeMount {
-                name: OPERATOR_TLS_VOLUME_NAME.to_owned(),
-                mount_path: "/tls".to_owned(),
-                ..Default::default()
-            }]),
+            volume_mounts: Some(vec![
+                VolumeMount {
+                    name: OPERATOR_LICENSE_SECRET_VOLUME_NAME.to_owned(),
+                    mount_path: "/license".to_owned(),
+                    ..Default::default()
+                },
+                VolumeMount {
+                    name: OPERATOR_TLS_VOLUME_NAME.to_owned(),
+                    mount_path: "/tls".to_owned(),
+                    ..Default::default()
+                },
+            ]),
             security_context: Some(SecurityContext {
                 allow_privilege_escalation: Some(false),
                 privileged: Some(false),
@@ -239,14 +253,24 @@ impl OperatorDeployment {
         let pod_spec = PodSpec {
             containers: vec![container],
             service_account_name: Some(sa.name().to_owned()),
-            volumes: Some(vec![Volume {
-                name: OPERATOR_TLS_VOLUME_NAME.to_owned(),
-                secret: Some(SecretVolumeSource {
-                    secret_name: Some(tls_secret.name().to_owned()),
+            volumes: Some(vec![
+                Volume {
+                    name: OPERATOR_LICENSE_SECRET_VOLUME_NAME.to_owned(),
+                    secret: Some(SecretVolumeSource {
+                        secret_name: Some(license_secret.name().to_owned()),
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            }]),
+                },
+                Volume {
+                    name: OPERATOR_TLS_VOLUME_NAME.to_owned(),
+                    secret: Some(SecretVolumeSource {
+                        secret_name: Some(tls_secret.name().to_owned()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            ]),
             ..Default::default()
         };
 
@@ -426,24 +450,24 @@ impl OperatorSetup for OperatorRoleBinding {
 }
 
 #[derive(Debug)]
-pub struct OperatorSecret(Secret);
+pub struct OperatorLicenseSecret(Secret);
 
-impl OperatorSecret {
-    pub fn new(license_key: &str, namespace: &OperatorNamespace) -> Self {
+impl OperatorLicenseSecret {
+    pub fn new(license: &str, namespace: &OperatorNamespace) -> Self {
         let secret = Secret {
             metadata: ObjectMeta {
-                name: Some(OPERATOR_SECRET_NAME.to_owned()),
+                name: Some(OPERATOR_LICENSE_SECRET_NAME.to_owned()),
                 namespace: Some(namespace.name().to_owned()),
                 ..Default::default()
             },
             string_data: Some(BTreeMap::from([(
-                "OPERATOR_LICENSE_KEY".to_owned(),
-                license_key.to_owned(),
+                OPERATOR_LICENSE_SECRET_FILE_NAME.to_owned(),
+                license.to_owned(),
             )])),
             ..Default::default()
         };
 
-        OperatorSecret(secret)
+        OperatorLicenseSecret(secret)
     }
 
     fn name(&self) -> &str {
@@ -451,7 +475,7 @@ impl OperatorSecret {
     }
 }
 
-impl OperatorSetup for OperatorSecret {
+impl OperatorSetup for OperatorLicenseSecret {
     fn to_writer<W: Write>(&self, mut writer: W) -> Result<()> {
         serde_yaml::to_writer(&mut writer, &self.0).map_err(SetupError::from)
     }
