@@ -5,16 +5,17 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>issue</groupId>
-  <artifactId>issue-1458</artifactId>
-  <version>1.0-SNAPSHOT</version>
+  <artifactId>issue1458</artifactId>
+  <packaging>jar</packaging>
+  <version>1.0</version>
 
   <name>issue-1458</name>
   <url>https://mirrord.dev/</url>
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <maven.compiler.source>1.7</maven.compiler.source>
-    <maven.compiler.target>1.7</maven.compiler.target>
+    <maven.compiler.source>1.8</maven.compiler.source>
+    <maven.compiler.target>1.8</maven.compiler.target>
   </properties>
 
   <dependencies>
@@ -67,6 +68,28 @@
           <artifactId>maven-project-info-reports-plugin</artifactId>
           <version>3.0.0</version>
         </plugin>
+        <plugin>
+            <artifactId>maven-assembly-plugin</artifactId>
+            <executions>
+              <execution>
+                <phase>package</phase>
+                <goals>
+                  <goal>single</goal>
+                </goals>
+              </execution>
+            </executions>
+            <configuration>
+              <archive>
+                <manifest>
+                  <addClasspath>true</addClasspath>
+                  <mainClass>issue.Issue1458</mainClass>
+                </manifest>
+              </archive>
+              <descriptorRefs>
+                <descriptorRef>jar-with-dependencies</descriptorRef>
+              </descriptorRefs>
+            </configuration>
+          </plugin>
       </plugins>
     </pluginManagement>
   </build>

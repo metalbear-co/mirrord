@@ -748,6 +748,7 @@ pub enum Application {
     RustOutgoingTcp,
     RustIssue1123,
     RustIssue1054,
+    RustIssue1458,
     RustDnsResolve,
     RustRecvFrom,
     // For running applications with the executable and arguments determined at runtime.
@@ -822,6 +823,7 @@ impl Application {
             Application::Go19SelfOpen => String::from("tests/apps/self_open/19.go_test_app"),
             Application::RustIssue1123 => String::from("tests/apps/issue1123/target/issue1123"),
             Application::RustIssue1054 => String::from("tests/apps/issue1054/target/issue1054"),
+            Application::RustIssue1458 => String::from("java"),
             Application::RustOutgoingUdp | Application::RustOutgoingTcp => format!(
                 "{}/{}",
                 env!("CARGO_MANIFEST_DIR"),
@@ -884,6 +886,11 @@ impl Application {
             Application::PythonSelfConnect => {
                 app_path.push("self_connect.py");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
+            }
+            Application::RustIssue1458 => {
+                app_path.push("issue1458/target/issue1458-1.0-jar-with-dependencies.jar");
+                println!("using jar from {app_path:?}");
+                vec![app_path.to_string_lossy().to_string()]
             }
             Application::Go19HTTP
             | Application::Go20HTTP
@@ -948,6 +955,7 @@ impl Application {
             | Application::NodeFileOps
             | Application::NodeSpawn
             | Application::BashShebang
+            | Application::RustIssue1458
             | Application::Go20Issue834
             | Application::Go19Issue834
             | Application::Go18Issue834
