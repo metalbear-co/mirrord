@@ -1,15 +1,10 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
-use std::{
-    net::{SocketAddr, UdpSocket},
-    path::PathBuf,
-    time::Duration,
-};
+use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use futures::{SinkExt, TryStreamExt};
 use mirrord_protocol::{
     outgoing::{
-        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
         DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
     },
