@@ -86,7 +86,7 @@ impl OperatorApi {
     }
 
     /// Uses `MIRRORD_OPERATOR_SESSION_ID` to have a persistant session_id across child processes,
-    /// if env var is empty or missing random id will be generated and saved in exnv
+    /// if env var is empty or missing random id will be generated and saved in env
     fn session_id() -> u64 {
         std::env::var(MIRRORD_OPERATOR_SESSION_ID)
             .inspect_err(|_| trace!("{MIRRORD_OPERATOR_SESSION_ID} empty, creating new session"))
