@@ -1,0 +1,1 @@
+fix launch json for vscode extension
