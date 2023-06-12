@@ -18,12 +18,15 @@ use crate::{
     error::{AuthenticationError, CertificateStoreError, Result},
 };
 
-/// "~/.mirrord/credentials"
-static CREDENTIALS_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
+/// "~/.mirrord"
+static CREDENTIALS_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
     home::home_dir()
         .unwrap_or_else(|| PathBuf::from("~"))
-        .join(".mirrord/credentials")
+        .join(".mirrord")
 });
+
+/// "~/.mirrord/credentials"
+static CREDENTIALS_PATH: LazyLock<PathBuf> = LazyLock::new(|| CREDENTIALS_DIR.join("credentials"));
 
 /// Container that is responsible for creating/loading `Credentials`
 #[derive(Default, Debug, Serialize, Deserialize)]
@@ -143,6 +146,12 @@ impl CredentialStoreSync {
         R: for<'de> Deserialize<'de>,
         R::DynamicType: Default,
     {
+        if !CREDENTIALS_DIR.exists() {
+            fs::create_dir_all(&*CREDENTIALS_DIR)
+                .await
+                .map_err(CertificateStoreError::from)?;
+        }
+
         let mut store_file = fs::OpenOptions::new()
             .read(true)
             .write(true)
