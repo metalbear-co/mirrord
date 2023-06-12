@@ -38,10 +38,12 @@ async fn test_issue1458(
     println!("Application started, preparing to resolve DNS.");
     let mut connection = layer_connection.codec;
 
-    let msg = connection.try_next().await.unwrap().unwrap();
-    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect { remote_address: SocketAddress::Ip(addr) })) = msg else {
-            panic!("Invalid message received from layer: {msg:?}");
-        };
+    let client_msg = connection.try_next().await.unwrap().unwrap();
+    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect { remote_address: SocketAddress::Ip(addr) })) = client_msg else {
+            panic!("Invalid message received from layer: {client_msg:?}");
+    };
+
+    println!("connecting to address {addr:#?}");
 
     connection
         .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Ok(
@@ -54,10 +56,9 @@ async fn test_issue1458(
         .await
         .unwrap();
 
-    let msg = connection.try_next().await.unwrap().unwrap();
-
-    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite { connection_id: 0, .. })) = msg else {
-        panic!("Invalid message received from layer: {msg:?}");
+    let client_msg = connection.try_next().await.unwrap().unwrap();
+    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite { connection_id: 0, .. })) = client_msg else {
+        panic!("Invalid message received from layer: {client_msg:?}");
     };
 
     connection
