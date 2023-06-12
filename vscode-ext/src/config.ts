@@ -2,6 +2,9 @@ import * as glob from 'glob';
 import * as vscode from 'vscode';
 import YAML from 'yaml';
 import TOML from 'toml';
+
+// Default mirrord configuration written to .mirrord/mirrord.json on 
+// clicking the gear icon
 export const DEFAULT_CONFIG = `
 {
     "accept_invalid_certificates": false,
@@ -24,6 +27,7 @@ const MIRRORD_DIR = function () {
     }
     return vscode.Uri.joinPath(folders[0].uri, '.mirrord');
 }();
+
 // Get the file path to the user's mirrord-config file, if it exists. 
 export async function configFilePath() {
     let fileUri = vscode.Uri.joinPath(MIRRORD_DIR, '?(*.)mirrord.+(toml|json|y?(a)ml)');

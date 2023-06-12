@@ -2,12 +2,30 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { ChildProcess, ExecException, spawn } from 'child_process';
-import { LAST_TARGET_KEY, mirrordFailure } from './util';
 import { globalContext } from './extension';
 const util = require('node:util');
 const exec = util.promisify(require('node:child_process').exec);
 
-/// Like the Rust MirrordExecution struct.
+/// Key used to store the last selected target in the persistent state.
+export const LAST_TARGET_KEY = "mirrord-last-target";
+
+// Option in the target selector that represents no target.
+export const TARGETLESS_TARGET_NAME = "No Target (\"targetless\")";
+
+// Display error message with help
+export function mirrordFailure(err: any) {
+    vscode.window.showErrorMessage("mirrord failed to start. Please check the logs/errors.", "Get help on Discord", "Open an issue on GitHub", "Send us an email").then(value => {
+        if (value === "Get help on Discord") {
+            vscode.env.openExternal(vscode.Uri.parse('https://discord.gg/metalbear'));
+        } else if (value === "Open an issue on GitHub") {
+            vscode.env.openExternal(vscode.Uri.parse('https://github.com/metalbear-co/mirrord/issues/new/choose'));
+        } else if (value === "Send us an email") {
+            vscode.env.openExternal(vscode.Uri.parse('mailto:hi@metalbear.co'));
+        }
+    });
+}
+
+// Like the Rust MirrordExecution struct.
 class MirrordExecution {
 
     env: Map<string, string>;
@@ -25,7 +43,7 @@ class MirrordExecution {
 
 }
 
-
+// API to interact with the mirrord CLI, runs in the "ext" mode
 export class MirrordAPI {
     context: vscode.ExtensionContext;
     cliPath: string;

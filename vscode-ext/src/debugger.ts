@@ -2,14 +2,10 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { globalContext } from './extension';
 import { configFilePath, isTargetInFile } from './config';
-import { LAST_TARGET_KEY, TARGETLESS_TARGET_NAME } from './util';
-import { MirrordAPI } from './api';
-import { checkVersion, versionCheckInterval } from './versionCheck';
-
+import { LAST_TARGET_KEY, MirrordAPI, TARGETLESS_TARGET_NAME } from './api';
+import { updateTelemetries } from './versionCheck';
 
 const CI_BUILD_PLUGIN = process.env.CI_BUILD_PLUGIN === 'true';
-
-
 
 /// Get the name of the field that holds the exectuable in a debug configuration of the given type.
 function getExecutableFieldName(config: vscode.DebugConfiguration): keyof vscode.DebugConfiguration {
@@ -46,14 +42,7 @@ export class ConfigurationProvider implements vscode.DebugConfigurationProvider 
 			return config;
 		}
 
-		// do not send telemetry for CI runs
-		if (vscode.env.isTelemetryEnabled && !CI_BUILD_PLUGIN) {
-			let lastChecked = globalContext.globalState.get('lastChecked', 0);
-			if (lastChecked < Date.now() - versionCheckInterval) {
-				checkVersion(globalContext.extension.packageJSON.version);
-				globalContext.globalState.update('lastChecked', Date.now());
-			}
-		}
+		updateTelemetries();
 
 		let mirrordApi = new MirrordAPI(globalContext);
 

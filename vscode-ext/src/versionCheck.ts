@@ -2,9 +2,11 @@ import * as vscode from 'vscode';
 import * as semver from 'semver';
 import * as https from 'https';
 import { platform } from 'os';
+import { globalContext } from './extension';
 
+const CI_BUILD_PLUGIN = process.env.CI_BUILD_PLUGIN === 'true';
 const versionCheckEndpoint = 'https://version.mirrord.dev/get-latest-version';
-export const versionCheckInterval = 1000 * 60 * 3;
+const versionCheckInterval = 1000 * 60 * 3;
 
 
 export async function checkVersion(version: string) {
@@ -28,4 +30,15 @@ export async function checkVersion(version: string) {
 	}).on('error', (e: any) => {
 		console.error(e);
 	});
+}
+
+// Run the version check, no telemetries are sent in case of an e2e run.
+export async function updateTelemetries() {
+	if (vscode.env.isTelemetryEnabled && !CI_BUILD_PLUGIN) {
+		let lastChecked = globalContext.globalState.get('lastChecked', 0);
+		if (lastChecked < Date.now() - versionCheckInterval) {
+			checkVersion(globalContext.extension.packageJSON.version);
+			globalContext.globalState.update('lastChecked', Date.now());
+		}
+	}
 }
