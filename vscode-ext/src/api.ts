@@ -3,8 +3,6 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { ChildProcessWithoutNullStreams, spawn } from 'child_process';
 import { globalContext } from './extension';
-const util = require('node:util');
-const exec = util.promisify(require('node:child_process').exec);
 
 /// Key used to store the last selected target in the persistent state.
 export const LAST_TARGET_KEY = "mirrord-last-target";
