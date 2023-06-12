@@ -38,7 +38,7 @@ class MirrordExecution {
 
     static mirrordExecutionFromJson(data: string): MirrordExecution {
         const parsed = JSON.parse(data);
-        return new MirrordExecution(parsed["environment"], parsed["patchedPath"]);
+        return new MirrordExecution(parsed["environment"], parsed["patched_path"]);
     }
 
 }
