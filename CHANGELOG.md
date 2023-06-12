@@ -8,6 +8,14 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.45.2](https://github.com/metalbear-co/mirrord/tree/3.45.2) - 2023-06-12
+
+
+### Internal
+
+- Remove frida openSSL dependency
+
+
 ## [3.45.1](https://github.com/metalbear-co/mirrord/tree/3.45.1) - 2023-06-11
 
 
