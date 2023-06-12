@@ -2,10 +2,8 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { globalContext } from './extension';
 import { configFilePath, isTargetInFile } from './config';
-import { LAST_TARGET_KEY, MirrordAPI, TARGETLESS_TARGET_NAME } from './api';
+import { LAST_TARGET_KEY, MirrordAPI, TARGETLESS_TARGET_NAME, mirrordFailure } from './api';
 import { updateTelemetries } from './versionCheck';
-
-const CI_BUILD_PLUGIN = process.env.CI_BUILD_PLUGIN === 'true';
 
 /// Get the name of the field that holds the exectuable in a debug configuration of the given type.
 function getExecutableFieldName(config: vscode.DebugConfiguration): keyof vscode.DebugConfiguration {
@@ -51,8 +49,14 @@ export class ConfigurationProvider implements vscode.DebugConfigurationProvider 
 
 		let configPath = await configFilePath();
 		// If target wasn't specified in the config file, let user choose pod from dropdown
-		if (!await isTargetInFile()) {
-			let targets = await mirrordApi.listTargets(configPath);
+		if (!await isTargetInFile()) {			
+			let targets;
+			try {
+				targets = await mirrordApi.listTargets(configPath);
+			} catch (err) {
+				mirrordFailure(`mirrord failed to list targets: ${err}`);
+				return null;
+			}
 			if (targets.length === 0) {
 				vscode.window.showInformationMessage(
 					"No mirrord target available in the configured namespace. " +
@@ -61,7 +65,6 @@ export class ConfigurationProvider implements vscode.DebugConfigurationProvider 
 			}
 			targets.push(TARGETLESS_TARGET_NAME);
 			let targetName = await vscode.window.showQuickPick(targets, { placeHolder: 'Select a target path to mirror' });
-
 			if (targetName) {
 				if (targetName !== TARGETLESS_TARGET_NAME) {
 					target = targetName;
@@ -92,11 +95,16 @@ export class ConfigurationProvider implements vscode.DebugConfigurationProvider 
 		let executableFieldName = getExecutableFieldName(config);
 
 		let executionInfo;
-		if (executableFieldName in config) {
-			executionInfo = await mirrordApi.binaryExecute(target, configPath, config[executableFieldName]);
-		} else {
-			// Even `program` is not in config, so no idea what's the executable in the end.
-			executionInfo = await mirrordApi.binaryExecute(target, configPath, null);
+		try {
+			if (executableFieldName in config) {
+				executionInfo = await mirrordApi.binaryExecute(target, configPath, config[executableFieldName]);
+			} else {
+				// Even `program` is not in config, so no idea what's the executable in the end.
+				executionInfo = await mirrordApi.binaryExecute(target, configPath, null);
+			}
+		} catch (err) {
+			mirrordFailure(`mirrord preparation failed: ${err}`);
+			return null;
 		}
 
 		// For sidestepping SIP on macOS. If we didn't patch, we don't change that config value.
