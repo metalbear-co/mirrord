@@ -79,7 +79,7 @@ impl From<ConnectResult> for i32 {
 }
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-#[tracing::instrument(level = "debug", ret)]
+#[tracing::instrument(level = "trace", ret)]
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
     let socket_kind = type_.try_into()?;
 
@@ -110,7 +110,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
 
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state.
-#[tracing::instrument(level = "debug", ret, skip(raw_address))]
+#[tracing::instrument(level = "trace", ret, skip(raw_address))]
 pub(super) fn bind(
     sockfd: c_int,
     raw_address: *const sockaddr,
@@ -141,12 +141,7 @@ pub(super) fn bind(
         return Detour::Bypass(Bypass::IgnoreLocalhost(requested_port));
     }
 
-    // TODO(alex) [high] 2023-06-06: DNS resolution tries to bind on port `0`, thus we ignore the
-    // bind and drop our socket.
-    //
-    // We could check if this `socket` is `UDP`, and if it is + it's trying to bind on port 0, then
-    // we change the port to some random, free, value (not in `SOCKETS`), and proceed, thus not
-    // completely removing the port 0 ignore behavior.
+    // To handle #1458, we don't ignore port `0` for UDP.
     if (is_ignored_port(&requested_address) && matches!(socket.kind, SocketKind::Tcp(_)))
         || is_debugger_port(&requested_address)
         || INCOMING_IGNORE_PORTS
@@ -237,7 +232,7 @@ pub(super) fn bind(
 
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
 /// later be routed to the fake local port.
-#[tracing::instrument(level = "debug", ret)]
+#[tracing::instrument(level = "trace", ret)]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
     let mut socket = {
         SOCKETS
@@ -290,7 +285,7 @@ const UDP: ConnectType = !TCP;
 /// interception procedure.
 /// This returns errno so we can restore the correct errno in case result is -1 (until we get
 /// back to the hook we might call functions that will corrupt errno)
-#[tracing::instrument(level = "debug", ret)]
+#[tracing::instrument(level = "trace", ret)]
 fn connect_outgoing<const TYPE: ConnectType, const CALL_CONNECT: bool>(
     sockfd: RawFd,
     remote_address: SockAddr,
@@ -360,7 +355,7 @@ fn connect_outgoing<const TYPE: ConnectType, const CALL_CONNECT: bool>(
 /// that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request interception procedure.
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
-#[tracing::instrument(level = "debug", ret)]
+#[tracing::instrument(level = "trace", ret)]
 pub(super) fn connect(
     sockfd: RawFd,
     raw_address: *const sockaddr,
@@ -779,9 +774,16 @@ pub(super) fn gethostname() -> Detour<&'static CString> {
     HOSTNAME.get_or_detour_init(remote_hostname_string)
 }
 
-/// libraries like `c-ares` expect messages to be from the address they were sent to.
-/// currently this function just fills in the address expected by the caller.
-#[tracing::instrument(level = "debug", ret, skip(out_buffer, raw_source, source_length))]
+/// We handle UDP sockets by putting them in a sort of _semantically_ connected state, meaning that
+/// we don't actually [`libc::connect`] `sockfd`, but we change the respective [`UserSocket`] to
+/// [`SocketState::Connected`].
+///
+/// Here we check for this invariant, so if a user calls [`libc::recv_from`] without previously
+/// either connecting this `sockfd`, or calling [`libc::send_to`], we're going to panic.
+///
+/// It performs the [`fill_address`] requirement of [`libc::recv_from`] with the correct remote
+/// address (instead of using our interceptor address).
+#[tracing::instrument(level = "trace", ret, skip(out_buffer, raw_source, source_length))]
 pub(super) fn recv_from(
     sockfd: i32,
     out_buffer: *mut c_void,
@@ -797,15 +799,6 @@ pub(super) fn recv_from(
             _ => unreachable!(),
         })
         .map(SocketAddress::try_into)??;
-
-    // TODO(alex) [high] 2023-06-06: The flow is:
-    //
-    // 1. `send_to` to internet provider, which is `A:53`;
-    // 2. `recv_from` receives bytes from `A:53`;
-    // 3. `recv_from` receives bytes from `A:53`;
-    //
-    // This means that DNS resolution with `send_to` and `recv_from` is basically a
-    // `connect` -> `send` -> `recv`, as we're always interacting with the same IP.
 
     let recv_from_result = unsafe {
         FN_RECV_FROM(
@@ -823,14 +816,17 @@ pub(super) fn recv_from(
     Detour::Success(recv_from_result)
 }
 
+/// There is a bit of trickery going on here, as this function first triggers a _semantical_
+/// connection to an interceptor socket (we don't [`libc::connect`] this `sockfd`, just change the
+/// [`UserSocket`] state), and only then calls the actual [`libc::send_to`] to send `raw_message` to
+/// the interceptor address (instead of the `raw_destination`).
 #[tracing::instrument(
-    level = "debug",
+    level = "trace",
     ret,
     skip(raw_message, raw_destination, destination_length)
 )]
 pub(super) fn send_to(
     sockfd: RawFd,
-    // message: Option<Vec<u8>>,
     raw_message: *const c_void,
     message_length: usize,
     flags: i32,
@@ -838,7 +834,6 @@ pub(super) fn send_to(
     destination_length: socklen_t,
 ) -> Detour<isize> {
     let destination = SockAddr::try_from_raw(raw_destination, destination_length)?;
-    debug!("destination {destination:#?}");
 
     let (_, user_socket_info) = SOCKETS
         .remove(&sockfd)
