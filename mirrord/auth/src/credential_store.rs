@@ -121,17 +121,18 @@ impl CredentialStoreSync {
             .inspect_err(|err| eprintln!("CredentialStore Load Error {err:?}"))
             .unwrap_or_default();
 
-        store_file
-            .seek(SeekFrom::Start(0))
-            .await
-            .map_err(CertificateStoreError::from)?;
-
         let certificate_der = store
             .get_or_init::<R>(client)
             .await?
             .as_ref()
             .encode_der()
             .map_err(AuthenticationError::Pem)?;
+
+        // Make sure the store_file's cursor is at the start of the file before sending it to save
+        store_file
+            .seek(SeekFrom::Start(0))
+            .await
+            .map_err(CertificateStoreError::from)?;
 
         store.save(store_file).await?;
 
