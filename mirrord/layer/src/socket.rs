@@ -95,7 +95,7 @@ impl SocketInformation {
 
 #[derive(Debug)]
 pub struct Connected {
-    /// Remote address we're connected to.
+    /// Remote address we're (supposedly) connected to.
     remote_address: SocketAddress,
 
     /// Local address (pod-wise)

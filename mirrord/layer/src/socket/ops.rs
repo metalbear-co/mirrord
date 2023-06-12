@@ -820,6 +820,8 @@ pub(super) fn recv_from(
 /// connection to an interceptor socket (we don't [`libc::connect`] this `sockfd`, just change the
 /// [`UserSocket`] state), and only then calls the actual [`libc::send_to`] to send `raw_message` to
 /// the interceptor address (instead of the `raw_destination`).
+///
+/// See [`recv_from`] for more information.
 #[tracing::instrument(
     level = "trace",
     ret,

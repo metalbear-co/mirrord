@@ -302,9 +302,7 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
         })
 }
 
-/// Hook for [`libc::recvfrom`].
-/// This hook currently just helps some udp flows to go through by filling in
-/// original address for the caller.
+/// Not a faithful reproduction of what [`libc::recv_from`] is supposed to do, see [`recv_from`].
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn recv_from_detour(
     sockfd: i32,
@@ -326,7 +324,6 @@ pub(super) unsafe extern "C" fn recv_from_detour(
             raw_source,
             source_length,
         )
-        // .map(|bytes| todo!())
         .unwrap_or_bypass_with(|_| {
             FN_RECV_FROM(
                 sockfd,
@@ -340,6 +337,7 @@ pub(super) unsafe extern "C" fn recv_from_detour(
     }
 }
 
+/// Not a faithful reproduction of what [`libc::send_to`] is supposed to do, see [`send_to`].
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn send_to_detour(
     sockfd: RawFd,
