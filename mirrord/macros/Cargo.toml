@@ -1,5 +1,5 @@
 [package]
-name = "mirrord-sip"
+name = "mirrord-macros"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -13,16 +13,12 @@ categories.workspace = true
 publish.workspace = true
 edition.workspace = true
 
+
+[lib]
+proc-macro = true
+
 [dependencies]
-object = "0.29"
-memchr = "2"
-apple-codesign = "0.22"
-
-once_cell.workspace = true
-tracing.workspace = true
-thiserror.workspace = true
-which.workspace = true
-
-
-[dev-dependencies]
-tempfile = "3.3.0"
+proc-macro2 = "1"
+proc-macro2-diagnostics = "0.10"
+syn = { version = "1", features = ["full", "extra-traits"] }
+semver.workspace = true

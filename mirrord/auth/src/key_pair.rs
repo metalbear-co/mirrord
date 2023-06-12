@@ -3,6 +3,7 @@ use std::{ops::Deref, sync::OnceLock};
 use serde::{Deserialize, Serialize};
 use x509_certificate::InMemorySigningKeyPair;
 
+/// Wrapps `InMemorySigningKeyPair` & the underlying pkcs8 formatted key
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct KeyPair(String, #[serde(skip)] OnceLock<InMemorySigningKeyPair>);

@@ -15,9 +15,11 @@
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Duration};
 
 use dashmap::DashMap;
+use enum_dispatch::enum_dispatch;
 use fancy_regex::Regex;
-use hyper::rt::Executor;
+use hyper::{body::Incoming, rt::Executor, Request};
 use mirrord_protocol::ConnectionId;
+use once_cell::unsync::OnceCell;
 use tokio::{io::copy_bidirectional, net::TcpStream, sync::mpsc::Sender};
 use tracing::{error, trace};
 
@@ -34,6 +36,108 @@ const H2_PREFACE: &[u8; 14] = b"PRI * HTTP/2.0";
 /// Timeout value for how long we wait for a stream to contain enough bytes to assert which HTTP
 /// version we're dealing with.
 const DEFAULT_HTTP_VERSION_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[derive(Debug)]
+pub(crate) struct HttpHeaderFilter(Regex);
+
+#[derive(Debug)]
+pub(crate) struct HttpPathFilter(Regex);
+
+/// Current supported filtering criterias.
+#[enum_dispatch]
+#[derive(Debug)]
+pub(crate) enum HttpFilter {
+    /// Header based filter.
+    Header(HttpHeaderFilter),
+    /// Path based filter
+    Path(HttpPathFilter),
+}
+
+impl HttpFilter {
+    pub fn new_header_filter(header: Regex) -> Self {
+        Self::Header(HttpHeaderFilter(header))
+    }
+    #[allow(dead_code)]
+    pub fn new_path_filter(path: Regex) -> Self {
+        Self::Path(HttpPathFilter(path))
+    }
+}
+
+/// Struct to cache/hold/reuse the attributes that a [`Request`] can be matched upon
+pub(crate) struct RequestMatchCandidate<'a> {
+    /// The original request
+    request: &'a Request<Incoming>,
+    /// Headers in `k: v` format.
+    headers: OnceCell<Vec<String>>,
+}
+
+impl<'a> From<&'a Request<Incoming>> for RequestMatchCandidate<'a> {
+    fn from(request: &'a Request<Incoming>) -> Self {
+        Self {
+            request,
+            headers: OnceCell::new(),
+        }
+    }
+}
+
+impl<'a> RequestMatchCandidate<'a> {
+    /// Returns the headers in `k: v` format.
+    fn headers(&mut self) -> &Vec<String> {
+        self.headers.get_or_init(|| {
+            self.request
+                .headers()
+                .iter()
+                .map(|(header_name, header_value)| {
+                    header_value
+                        .to_str()
+                        .map(|header_value| format!("{header_name}: {header_value}"))
+                })
+                .filter_map(Result::ok)
+                .collect()
+        })
+    }
+
+    /// Returns path of the request.
+    fn path(&self) -> &str {
+        self.request.uri().path()
+    }
+}
+
+/// Trait that needs to be implemented for each [`HttpFilter`] variant.
+#[enum_dispatch(HttpFilter)]
+pub(crate) trait RequestMatch {
+    /// Checks if the request matches the filter.
+    fn matches(&self, request: &mut RequestMatchCandidate<'_>) -> bool;
+}
+
+impl RequestMatch for HttpHeaderFilter {
+    fn matches(&self, request: &mut RequestMatchCandidate<'_>) -> bool {
+        for header in request.headers() {
+            match self.0.is_match(header) {
+                Ok(true) => return true,
+                Ok(false) => continue,
+                Err(err) => {
+                    error!(
+                        "Error while matching header: {header:?}, {:?}, {err:?}",
+                        self.0
+                    );
+                    return false;
+                }
+            }
+        }
+        false
+    }
+}
+
+impl RequestMatch for HttpPathFilter {
+    fn matches(&self, request: &mut RequestMatchCandidate<'_>) -> bool {
+        let path = request.path();
+        self.0.is_match(path).unwrap_or_else(|err| {
+            error!("Error while matching path: {path:?}, {err:?}");
+            false
+        })
+    }
+}
 
 // TODO(alex): Import this from `hyper-util` when the crate is actually published.
 /// Future executor that utilises `tokio` threads.
@@ -88,7 +192,7 @@ pub(super) async fn filter_task(
     stolen_stream: TcpStream,
     original_destination: SocketAddr,
     connection_id: ConnectionId,
-    filters: Arc<DashMap<ClientId, Regex>>,
+    filters: Arc<DashMap<ClientId, HttpFilter>>,
     matched_tx: Sender<HandlerHttpRequest>,
     connection_close_sender: Sender<ConnectionId>,
 ) -> Result<(), HttpTrafficError> {

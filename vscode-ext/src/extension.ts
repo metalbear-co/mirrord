@@ -83,7 +83,7 @@ class MirrordExecution {
 
 function mirrordExecutionFromJson(data: string): MirrordExecution {
 	let parsed = JSON.parse(data);
-	return new MirrordExecution(parsed["environment"], parsed["patchedPath"]);
+	return new MirrordExecution(parsed["environment"], parsed["patched_path"]);
 }
 
 class MirrordAPI {
@@ -476,7 +476,7 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		}
 
 		if (config.type === "go") {
-			config.env["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver;compile;go;asm;cgo;link;git";
+			config.env["MIRRORD_SKIP_PROCESSES"] = "dlv;debugserver;compile;go;asm;cgo;link;git;gcc";
 			// use our custom delve to fix being loaded into debugserver
 
 			if (process.platform === "darwin") {

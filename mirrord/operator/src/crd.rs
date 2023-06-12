@@ -95,4 +95,5 @@ pub struct LicenseInfoOwned {
     pub name: String,
     pub organization: String,
     pub expire_at: NaiveDate,
+    pub fingerprint: Option<String>,
 }

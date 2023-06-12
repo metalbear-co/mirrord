@@ -17,17 +17,26 @@ edition.workspace = true
 
 [features]
 default = []
+client = [
+	"dep:gethostname",
+	"dep:home",
+	"dep:fs4",
+	"dep:k8s-openapi",
+	"dep:kube",
+	"dep:serde_yaml",
+	"dep:tokio"
+]
 
 [dependencies]
-bytes = "1"
 chrono = "0.4"
-home = "0.5"
+gethostname = { version = "0.4", optional = true }
+home = { version = "0.5", optional = true }
 pem = "2"
-k8s-openapi.workspace = true
-kube.workspace = true
-schemars = { version = "0.8", features = ["chrono"] }
+fs4 = { version = "0.6", features = ["tokio-async"], optional = true }
+k8s-openapi = { workspace = true, optional = true }
+kube = { workspace = true, optional = true }
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
-tokio = { workspace = true, features = ["fs"] }
+serde_yaml = { version = "0.9", optional = true }
+tokio = { workspace = true, features = ["fs"], optional = true  }
 thiserror = "1"
 x509-certificate = "0.19"

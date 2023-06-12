@@ -2,7 +2,7 @@ use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
 use kube::{error::ErrorResponse, Api, Client};
-use mirrord_auth::prelude::{AuthenticationError, CredentialStore};
+use mirrord_auth::{credential_store::CredentialStoreSync, error::AuthenticationError};
 use mirrord_config::{target::TargetConfig, LayerConfig};
 use mirrord_kube::{
     api::{get_k8s_resource_api, kubernetes::create_kube_api},
@@ -12,10 +12,7 @@ use mirrord_progress::{MessageKind, Progress};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use semver::Version;
 use thiserror::Error;
-use tokio::sync::{
-    mpsc::{self, Receiver, Sender},
-    RwLock,
-};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 use tracing::{error, trace, warn};
 
@@ -53,7 +50,6 @@ pub struct OperatorApi {
     target_api: Api<TargetCrd>,
     version_api: Api<MirrordOperatorCrd>,
     target_config: TargetConfig,
-    credentials: RwLock<CredentialStore>,
 }
 
 impl OperatorApi {
@@ -67,7 +63,9 @@ impl OperatorApi {
         let operator_api = OperatorApi::new(config).await?;
 
         if let Some(target) = operator_api.fetch_target().await? {
-            let operator_version = Version::parse(&operator_api.get_version().await?).unwrap(); // TODO: Remove unwrap
+            let status = operator_api.get_status().await?;
+
+            let operator_version = Version::parse(&status.spec.operator_version).unwrap(); // TODO: Remove unwrap
 
             // This is printed multiple times when the local process forks. Can be solved by e.g.
             // propagating an env var, don't think it's worth the extra complexity though
@@ -85,7 +83,11 @@ impl OperatorApi {
                     progress.subtask("comparing versions").print_message(MessageKind::Warning, Some("Consider either updating your operator version to match your mirrord plugin/CLI version, or downgrading your mirrord plugin/CLI."));
                 }
             }
-            operator_api.connect_target(target).await.map(Some)
+
+            operator_api
+                .connect_target(target, status.spec.license.fingerprint)
+                .await
+                .map(Some)
         } else {
             // No operator found
             Ok(None)
@@ -112,20 +114,6 @@ impl OperatorApi {
             })
     }
 
-    async fn client_certificate(&self) -> Result<String> {
-        let certificate_der = self
-            .credentials
-            .write()
-            .await
-            .get_or_init::<MirrordOperatorCrd>(&self.client, "default@example.com")
-            .await?
-            .as_ref()
-            .encode_der()
-            .map_err(|err| AuthenticationError::X509Certificate(err.into()))?;
-
-        Ok(general_purpose::STANDARD.encode(certificate_der))
-    }
-
     async fn new(config: &LayerConfig) -> Result<Self> {
         let target_config = config.target.clone();
 
@@ -147,24 +135,20 @@ impl OperatorApi {
 
         let version_api: Api<MirrordOperatorCrd> = Api::all(client.clone());
 
-        let credentials = CredentialStore::load().await.unwrap_or_default().into();
-
         Ok(OperatorApi {
             client,
             target_api,
             version_api,
             target_config,
-            credentials,
         })
     }
 
-    async fn get_version(&self) -> Result<String> {
+    async fn get_status(&self) -> Result<MirrordOperatorCrd> {
         self.version_api
             .get(OPERATOR_STATUS_NAME)
             .await
             .map_err(KubeApiError::KubeError)
             .map_err(OperatorApiError::KubeApiError)
-            .map(|status| status.spec.operator_version)
     }
 
     async fn fetch_target(&self) -> Result<Option<TargetCrd>> {
@@ -181,26 +165,31 @@ impl OperatorApi {
     async fn connect_target(
         &self,
         target: TargetCrd,
+        credential_name: Option<String>,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        let client_credentials = self.client_certificate().await?;
+        let mut builder = Request::builder()
+            .uri(format!(
+                "{}/{}?connect=true",
+                self.target_api.resource_url(),
+                target.name()
+            ))
+            .header("x-session-id", Self::session_id());
+
+        if let Some(credential_name) = credential_name {
+            let client_credentials = CredentialStoreSync::get_client_certificate::<
+                MirrordOperatorCrd,
+            >(&self.client, credential_name)
+            .await
+            .map(|certificate_der| general_purpose::STANDARD.encode(certificate_der))?;
+
+            builder = builder.header("x-client-der", client_credentials);
+        }
 
         let connection = self
             .client
-            .connect(
-                Request::builder()
-                    .uri(format!(
-                        "{}/{}?connect=true",
-                        self.target_api.resource_url(),
-                        target.name()
-                    ))
-                    .header("x-session-id", Self::session_id())
-                    .header("x-client-der", client_credentials)
-                    .body(vec![])?,
-            )
+            .connect(builder.body(vec![])?)
             .await
             .map_err(KubeApiError::from)?;
-
-        self.credentials.write().await.save().await?;
 
         Ok(ConnectionWrapper::wrap(connection))
     }

@@ -3,6 +3,7 @@ use std::{ops::Deref, str::FromStr};
 use serde::{de, ser, Deserialize, Serialize};
 use x509_certificate::{X509Certificate, X509CertificateError};
 
+/// Serialize pem contents of `X509Certificate`
 fn x509_serialize<S>(certificate: &X509Certificate, serialzer: S) -> Result<S::Ok, S::Error>
 where
     S: ser::Serializer,
@@ -12,6 +13,7 @@ where
     certificate.serialize(serialzer)
 }
 
+/// Deserialize `X509Certificate` from pem content
 fn x509_deserialize<'de, D>(deserializer: D) -> Result<X509Certificate, D::Error>
 where
     D: de::Deserializer<'de>,
@@ -21,6 +23,7 @@ where
     X509Certificate::from_pem(certificate).map_err(de::Error::custom)
 }
 
+/// Serializable `X509Certificate`
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Certificate(
     #[serde(
