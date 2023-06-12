@@ -23,6 +23,7 @@ pub enum LoadType {
     /// Only load sip patch required hooks
     #[cfg(target_os = "macos")]
     SIPOnly,
+
     /// Skip on current process
     Skip,
 }
@@ -30,6 +31,11 @@ pub enum LoadType {
 /// Determine the load type for the `given_process` with the help of [`should_load`]
 pub fn load_type(given_process: &str, config: LayerConfig) -> LoadType {
     let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
+
+    #[cfg(target_os = "macos")]
+    {
+        if given_process.ends_with("dotnet") {}
+    }
 
     if should_load(given_process, skip_processes) {
         trace!("Loading into process: {given_process}.");

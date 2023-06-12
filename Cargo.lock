@@ -3295,6 +3295,7 @@ dependencies = [
  "ctor",
  "dashmap",
  "errno 0.3.1",
+ "exec",
  "fancy-regex",
  "frida-gum",
  "futures",

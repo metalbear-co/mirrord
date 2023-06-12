@@ -135,7 +135,7 @@ mod detour;
 mod dns;
 mod error;
 #[cfg(target_os = "macos")]
-mod exec;
+mod exec_utils;
 mod file;
 mod hooks;
 mod load;
@@ -303,6 +303,20 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         .clone()
         .map(|x| x.to_vec())
         .unwrap_or_default();
+
+    // SIP Patch the process' binary then re-execute it. Needed
+    // for https://github.com/metalbear-co/mirrord/issues/1529
+    if given_process.ends_with("dotnet") {
+        if let Ok(path) = std::env::current_exe() {
+            if let Ok(Some(binary)) =
+                mirrord_sip::sip_patch(path.to_str().unwrap(), &patch_binaries)
+            {
+                let err = exec::execvp(binary, std::env::args());
+                error!("Couldn't execute {:?}", err);
+                return Err(LayerError::ExecFailed(err));
+            }
+        }
+    }
 
     match load::load_type(given_process, config) {
         LoadType::Full(config) => layer_start(*config),
@@ -474,7 +488,7 @@ fn layer_start(config: LayerConfig) {
 fn sip_only_layer_start(patch_binaries: Vec<String>) {
     let mut hook_manager = HookManager::default();
 
-    unsafe { exec::enable_execve_hook(&mut hook_manager, patch_binaries) };
+    unsafe { exec_utils::enable_execve_hook(&mut hook_manager, patch_binaries) };
 }
 
 /// Acts as an API to the various features of mirrord-layer, holding the actual feature handler
@@ -883,7 +897,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
 
     #[cfg(target_os = "macos")]
     unsafe {
-        exec::enable_execve_hook(&mut hook_manager, patch_binaries)
+        exec_utils::enable_execve_hook(&mut hook_manager, patch_binaries)
     };
 
     if enabled_file_ops {
