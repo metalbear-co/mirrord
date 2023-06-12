@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as vscode from 'vscode';
 import YAML from 'yaml';
-import { ChildProcess, ExecException, spawn } from 'child_process';
+import { ChildProcessWithoutNullStreams, spawn } from 'child_process';
 
 const TOML = require('toml');
 const semver = require('semver');
@@ -10,8 +10,6 @@ const path = require('path');
 const os = require('os');
 const glob = require('glob');
 const util = require('node:util');
-const exec = util.promisify(require('node:child_process').exec);
-
 
 
 const CI_BUILD_PLUGIN = process.env.CI_BUILD_PLUGIN === 'true';
@@ -57,8 +55,8 @@ async function configFilePath() {
 }
 
 // Display error message with help
-function mirrordFailure(err: any) {
-	vscode.window.showErrorMessage("mirrord failed to start. Please check the logs/errors.", "Get help on Discord", "Open an issue on GitHub", "Send us an email").then(value => {
+function mirrordFailure(error: string) {
+	vscode.window.showErrorMessage(`${error}. Please check the logs/errors.`, "Get help on Discord", "Open an issue on GitHub", "Send us an email").then(value => {
 		if (value === "Get help on Discord") {
 			vscode.env.openExternal(vscode.Uri.parse('https://discord.gg/metalbear'));
 		} else if (value === "Open an issue on GitHub") {
@@ -117,63 +115,74 @@ class MirrordAPI {
 		}
 	}
 
-	// Execute the mirrord cli with the given arguments, return stdout, stderr.
-	async exec(args: string[]): Promise<[string, string]> {
-		// Check if arg contains space, and if it does, wrap it in quotes
-		args = args.map(arg => arg.includes(' ') ? `"${arg}"` : arg);
-		let commandLine = [this.cliPath, ...args];
+	// Return environment for the spawned mirrord cli processes.
+	private static getEnv(): NodeJS.ProcessEnv {
 		// clone env vars and add MIRRORD_PROGRESS_MODE
-		let env = {
+		return {
 			// eslint-disable-next-line @typescript-eslint/naming-convention
 			"MIRRORD_PROGRESS_MODE": "json",
 			...process.env,
 		};
-		try {
-			const value = await new Promise((resolve, reject) => {
-				exec(commandLine.join(' '), { env }, (error: ExecException | null, stdout: string, stderr: string) => {
-					if (error) {
-						reject(error);
-					} else {
-						resolve([stdout, stderr]);
-					}
-				});
+	}
+
+	// Execute the mirrord cli with the given arguments, return stdout.
+	private async exec(args: string[]): Promise<string> {
+		const child = this.spawn(args);
+
+		return await new Promise<string>((resolve, reject) => {
+			let stdoutData = "";
+			let stderrData = "";
+
+			child.stdout.on("data", (data) => stdoutData += data.toString());
+			child.stderr.on("data", (data) => stderrData += data.toString());
+
+			child.on("error", (err) => {
+				console.error(err);
+				reject(`process failed: ${err.message}`);
 			});
 
-			return value as [string, string];
-		} catch (error: any) {
-			return ['', error.message];
-		}
+			child.on("close", (code, signal) => {
+				const match = stderrData.match(/Error: (.*)/)?.[1];
+				if (match) {
+					const error = JSON.parse(match);
+					vscode.window
+						.showErrorMessage(`mirrord error: ${error["message"]}`)
+						.then(() => {
+							if (error["help"]) {
+								vscode.window.showInformationMessage(error["help"]);
+							}
+						});
+					return reject(error["message"]);
+				}
+
+				if (code) {
+					return reject(`process exited with error code: ${code}`);
+				}
+
+				if (signal !== null) {
+					return reject(`process was killed by signal: ${signal}`);
+				}
+
+				resolve(stdoutData);
+			});
+		});
 	}
 
 	// Spawn the mirrord cli with the given arguments
 	// used for reading/interacting while process still runs.
-	spawn(args: string[]): ChildProcess {
-		let env = {
-			// eslint-disable-next-line @typescript-eslint/naming-convention
-			"MIRRORD_PROGRESS_MODE": "json",
-			...process.env,
-		};
-		return spawn(this.cliPath, args, { env });
+	private spawn(args: string[]): ChildProcessWithoutNullStreams {
+		return spawn(this.cliPath, args, { env: MirrordAPI.getEnv() });
 	}
-
 
 	/// Uses `mirrord ls` to get a list of all targets.
 	/// Targets are sorted, with an exception of the last used target being the first on the list.
 	async listTargets(configPath: string | null | undefined): Promise<string[]> {
 		const args = ['ls'];
-
 		if (configPath) {
 			args.push('-f', configPath);
 		}
 
-		const [stdout, stderr] = await this.exec(args);
-
-		if (stderr) {
-			const match = stderr.match(/Error: (.*)/)?.[1];
-			const notificationError = match ? JSON.parse(match)["message"] : stderr;
-			mirrordFailure(stderr);
-			throw new Error(`mirrord failed to 'ls' targets\n${notificationError}`);
-		}
+		const stdout = await this.exec(args);
 
 		const targets: string[] = JSON.parse(stdout);
 		targets.sort();
@@ -195,16 +204,16 @@ class MirrordAPI {
 	// Run the extension execute sequence
 	// Creating agent and gathering execution runtime (env vars to set)
 	// Has 60 seconds timeout
-	async binaryExecute(target: string | null, configFile: string | null, executable: string | null): Promise<MirrordExecution | null> {
+	async binaryExecute(target: string | null, configFile: string | null, executable: string | null): Promise<MirrordExecution> {
 		/// Create a promise that resolves when the mirrord process exits
 		return await vscode.window.withProgress({
 			location: vscode.ProgressLocation.Notification,
 			title: "mirrord",
 			cancellable: false
 		}, (progress, _) => {
-			return new Promise<MirrordExecution | null>((resolve, reject) => {
+			return new Promise<MirrordExecution>((resolve, reject) => {
 				setTimeout(() => {
-					reject("Timeout");
+					reject("timeout");
 				}, 60 * 1000);
 
 				const args = ["ext"];
@@ -217,37 +226,42 @@ class MirrordAPI {
 				if (executable) {
 					args.push("-e", executable);
 				}
-				let child = this.spawn(args);
 
-				child.on('error', (err) => {
-					console.error('Failed to run mirrord.' + err);
-					mirrordFailure(err);
-					reject(err);
+				const child = this.spawn(args);
+
+				let stderrData = "";
+				child.stderr.on("data", (data) => stderrData += data.toString());
+
+				child.on("error", (err) => {
+					console.error(err);
+					reject(`process failed: ${err.message}`);
 				});
 
-				let stderrData = '';
-				child.stderr?.on('data', (data) => {
-					stderrData += data.toString();
-				});
-
-				child.stderr?.on('close', () => {
+				child.on("close", (code, signal) => {
 					const match = stderrData.match(/Error: (.*)/)?.[1];
 					if (match) {
 						const error = JSON.parse(match);
-						mirrordFailure(stderrData);
-						vscode.window.showErrorMessage(error["message"]).then(() => {
-							vscode.window.showInformationMessage(error["help"]);
-						});						
-					} else {
-						mirrordFailure(stderrData);
-						vscode.window.showErrorMessage(stderrData);
+						vscode.window
+							.showErrorMessage(`mirrord error: ${error["message"]}`)
+							.then(() => {
+								if (error["help"]) {
+									vscode.window.showInformationMessage(error["help"]);
+								}
+							});
+						return reject(error["message"]);
 					}
-					console.error(`mirrord stderr: ${stderrData}`);
+
+					if (code) {
+						return reject(`process exited with error code: ${code}`);
+					}
+
+					if (signal !== null) {
+						return reject(`process was killed by signal: ${signal}`);
+					}
 				});
 
-
 				let buffer = "";
-				child.stdout?.on('data', (data) => {
+				child.stdout.on("data", (data) => {
 					console.log(`mirrord: ${data}`);
 					buffer += data;
 					// fml - AH
@@ -271,13 +285,8 @@ class MirrordAPI {
 						if ((message["name"] === "mirrord preparing to launch") && (message["type"]) === "FinishedTask") {
 							if (message["success"]) {
 								progress.report({ message: "mirrord started successfully, launching target." });
-								resolve(mirrordExecutionFromJson(message["message"]));
-								let res = JSON.parse(message["message"]);
-								resolve(res);
-							} else {
-								reject(null);
+								return resolve(mirrordExecutionFromJson(message["message"]));
 							}
-							return;
 						}
 
 						if (message["type"] === "Warning") {
@@ -292,7 +301,6 @@ class MirrordAPI {
 						}
 					}
 				});
-
 			});
 		});
 	}
@@ -453,7 +461,13 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		let configPath = await configFilePath();
 		// If target wasn't specified in the config file, let user choose pod from dropdown
 		if (!await isTargetInFile()) {
-			let targets = await mirrordApi.listTargets(configPath);
+			let targets;
+			try {
+				targets = await mirrordApi.listTargets(configPath);
+			} catch (err) {
+				mirrordFailure(`mirrord failed to list targets: ${err}`);
+				return null;
+			}
 			if (targets.length === 0) {
 				vscode.window.showInformationMessage(
 					"No mirrord target available in the configured namespace. " +
@@ -493,11 +507,16 @@ class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 		let executableFieldName = getExecutableFieldName(config);
 
 		let executionInfo;
-		if (executableFieldName in config) {
-			executionInfo = await mirrordApi.binaryExecute(target, configPath, config[executableFieldName]);
-		} else {
-			// Even `program` is not in config, so no idea what's the executable in the end.
-			executionInfo = await mirrordApi.binaryExecute(target, configPath, null);
+		try {
+			if (executableFieldName in config) {
+				executionInfo = await mirrordApi.binaryExecute(target, configPath, config[executableFieldName]);
+			} else {
+				// Even `program` is not in config, so no idea what's the executable in the end.
+				executionInfo = await mirrordApi.binaryExecute(target, configPath, null);
+			}
+		} catch (err) {
+			mirrordFailure(`mirrord preparation failed: ${err}`);
+			return null;
 		}
 
 		// For sidestepping SIP on macOS. If we didn't patch, we don't change that config value.

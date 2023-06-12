@@ -41,9 +41,6 @@ pub(super) enum Commands {
 
     #[command(hide = true)]
     Extract { path: String },
-    #[allow(dead_code)]
-    #[command(skip)]
-    Login(LoginArgs),
     /// Operator commands eg. setup
     #[command(hide = true)]
     Operator(Box<OperatorArgs>),
@@ -224,6 +221,10 @@ pub(super) enum OperatorCommand {
         /// License key to be stored in mirrord-operator-license secret
         #[arg(long)]
         license_key: Option<String>,
+
+        /// License key file path to be stored in mirrord-operator-license secret
+        #[arg(long)]
+        license_path: Option<PathBuf>,
 
         /// Output to kubernetes specs to file instead of stdout and piping to kubectl
         #[arg(short, long)]
