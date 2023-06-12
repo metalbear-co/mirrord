@@ -306,6 +306,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
 
     // SIP Patch the process' binary then re-execute it. Needed
     // for https://github.com/metalbear-co/mirrord/issues/1529
+    #[cfg(target_os = "macos")]
     if given_process.ends_with("dotnet") {
         if let Ok(path) = std::env::current_exe() {
             if let Ok(Some(binary)) =
