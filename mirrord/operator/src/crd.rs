@@ -1,9 +1,8 @@
+use chrono::NaiveDate;
 use kube::CustomResource;
 use mirrord_config::target::{Target, TargetConfig};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-use crate::license::License;
 
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
@@ -68,7 +67,7 @@ pub static OPERATOR_STATUS_NAME: &str = "operator";
 pub struct MirrordOperatorSpec {
     pub operator_version: String,
     pub default_namespace: String,
-    pub license: License,
+    pub license: LicenseInfoOwned,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -82,4 +81,12 @@ pub struct Session {
     pub duration_secs: u64,
     pub user: String,
     pub target: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LicenseInfoOwned {
+    pub name: String,
+    pub organization: String,
+    pub expire_at: NaiveDate,
+    pub fingerprint: Option<String>,
 }
