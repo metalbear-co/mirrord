@@ -1,6 +1,8 @@
+use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
 use kube::{error::ErrorResponse, Api, Client};
+use mirrord_auth::{credential_store::CredentialStoreSync, error::AuthenticationError};
 use mirrord_config::{feature::network::incoming::MultiSteal, target::TargetConfig, LayerConfig};
 use mirrord_kube::{
     api::{get_k8s_resource_api, kubernetes::create_kube_api},
@@ -37,6 +39,8 @@ pub enum OperatorApiError {
     InvalidMessage(Message),
     #[error("Receiver<DaemonMessage> was dropped")]
     DaemonReceiverDropped,
+    #[error(transparent)]
+    Authentication(#[from] AuthenticationError),
 }
 
 type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
@@ -60,7 +64,9 @@ impl OperatorApi {
         let operator_api = OperatorApi::new(config).await?;
 
         if let Some(target) = operator_api.fetch_target().await? {
-            let operator_version = Version::parse(&operator_api.get_version().await?).unwrap(); // TODO: Remove unwrap
+            let status = operator_api.get_status().await?;
+
+            let operator_version = Version::parse(&status.spec.operator_version).unwrap(); // TODO: Remove unwrap
 
             // This is printed multiple times when the local process forks. Can be solved by e.g.
             // propagating an env var, don't think it's worth the extra complexity though
@@ -78,7 +84,11 @@ impl OperatorApi {
                     progress.subtask("comparing versions").print_message(MessageKind::Warning, Some("Consider either updating your operator version to match your mirrord plugin/CLI version, or downgrading your mirrord plugin/CLI."));
                 }
             }
-            operator_api.connect_target(target).await.map(Some)
+
+            operator_api
+                .connect_target(target, status.spec.license.fingerprint)
+                .await
+                .map(Some)
         } else {
             // No operator found
             Ok(None)
@@ -136,13 +146,12 @@ impl OperatorApi {
         })
     }
 
-    async fn get_version(&self) -> Result<String> {
+    async fn get_status(&self) -> Result<MirrordOperatorCrd> {
         self.version_api
             .get(OPERATOR_STATUS_NAME)
             .await
             .map_err(KubeApiError::KubeError)
             .map_err(OperatorApiError::KubeApiError)
-            .map(|status| status.spec.operator_version)
     }
 
     async fn fetch_target(&self) -> Result<Option<TargetCrd>> {
@@ -159,20 +168,30 @@ impl OperatorApi {
     async fn connect_target(
         &self,
         target: TargetCrd,
+        credential_name: Option<String>,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+        let mut builder = Request::builder()
+            .uri(format!(
+                "{}/{}?on_multi_steal={}&connect=true",
+                self.target_api.resource_url(),
+                target.name(),
+                self.on_multi_steal
+            ))
+            .header("x-session-id", Self::session_id());
+
+        if let Some(credential_name) = credential_name {
+            let client_credentials = CredentialStoreSync::get_client_certificate::<
+                MirrordOperatorCrd,
+            >(&self.client, credential_name)
+            .await
+            .map(|certificate_der| general_purpose::STANDARD.encode(certificate_der))?;
+
+            builder = builder.header("x-client-der", client_credentials);
+        }
+
         let connection = self
             .client
-            .connect(
-                Request::builder()
-                    .uri(format!(
-                        "{}/{}?on_multi_steal={}&connect=true",
-                        self.target_api.resource_url(),
-                        target.name(),
-                        self.on_multi_steal
-                    ))
-                    .header("x-session-id", Self::session_id())
-                    .body(vec![])?,
-            )
+            .connect(builder.body(vec![])?)
             .await
             .map_err(KubeApiError::from)?;
 
