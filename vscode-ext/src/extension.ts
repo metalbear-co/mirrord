@@ -155,7 +155,7 @@ class MirrordAPI {
 					return reject(error["message"]);
 				}
 
-				if (code !== null && code !== 0) {
+				if (code) {
 					return reject(`process exited with error code: ${code}`);
 				}
 
@@ -251,7 +251,7 @@ class MirrordAPI {
 						return reject(error["message"]);
 					}
 
-					if (code !== null && code !== 0) {
+					if (code) {
 						return reject(`process exited with error code: ${code}`);
 					}
 
