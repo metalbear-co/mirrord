@@ -4,6 +4,7 @@ members = [
     "mirrord/*",
     "mirrord/layer/tests/apps/fileops",
     "mirrord/layer/tests/apps/outgoing",
+    "mirrord/layer/tests/apps/dns_resolve",
     "mirrord/layer/tests/apps/recv_from",
     "sample/rust",
     "medschool",
@@ -15,7 +16,7 @@ members = [
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.45.0"
+version = "3.45.2"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -60,10 +61,10 @@ http-body = { git = "https://github.com/meowjesty/http-body", branch = "issue/92
 http-body-util = { git = "https://github.com/meowjesty/http-body", branch = "issue/922/http2" }
 libc = "0.2"
 bimap = "0.6.2"
-socket2 = { git = "https://github.com/t4lz/socket2", branch = "unix-sockets", features = ["all"]}
+socket2 = { version = "0.5.3", features = ["all"]}
 which = "4"
 semver = "1"
-
+once_cell = "1"
 
 [patch.crates-io]
 tracing = { git = "https://github.com/metalbear-co/tracing", package = "tracing", branch = "worker_options_non_blocking_v1" }

@@ -8,7 +8,6 @@ use std::{net::SocketAddr, sync::Arc};
 
 use bytes::Bytes;
 use dashmap::DashMap;
-use fancy_regex::Regex;
 use futures::TryFutureExt;
 use http_body_util::Full;
 use hyper::{
@@ -31,7 +30,7 @@ use tracing::error;
 use super::{
     filter::close_connection,
     hyper_handler::{collect_response, prepare_response, HyperHandler},
-    DefaultReversibleStream, HttpV, RawHyperConnection,
+    DefaultReversibleStream, HttpFilter, HttpV, RawHyperConnection,
 };
 use crate::{
     steal::{http::error::HttpTrafficError, HandlerHttpRequest},
@@ -61,7 +60,7 @@ impl HttpV for HttpV1 {
         stream: DefaultReversibleStream,
         original_destination: SocketAddr,
         connection_id: ConnectionId,
-        filters: Arc<DashMap<ClientId, Regex>>,
+        filters: Arc<DashMap<ClientId, HttpFilter>>,
         matched_tx: Sender<HandlerHttpRequest>,
         connection_close_sender: Sender<ConnectionId>,
     ) -> Result<(), HttpTrafficError> {
@@ -171,7 +170,7 @@ impl HyperHandler<HttpV1> {
     /// Creates a new [`HyperHandler`] specifically tuned to handle HTTP/1 requests.
     #[tracing::instrument(level = "trace")]
     pub(super) fn new(
-        filters: Arc<DashMap<ClientId, Regex>>,
+        filters: Arc<DashMap<ClientId, HttpFilter>>,
         matched_tx: Sender<HandlerHttpRequest>,
         connection_id: ConnectionId,
         port: Port,

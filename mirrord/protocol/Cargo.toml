@@ -1,6 +1,6 @@
 [package]
 name = "mirrord-protocol"
-version.workspace = true
+version = "1.1.0"
 authors.workspace = true
 description.workspace = true
 documentation.workspace = true
@@ -27,6 +27,9 @@ http-body-util = { workspace = true }
 fancy-regex = { workspace = true }
 libc.workspace = true
 socket2.workspace = true
+semver.workspace = true
+
+mirrord-macros = { path = "../macros" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 nix.workspace = true

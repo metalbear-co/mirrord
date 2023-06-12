@@ -1,1 +1,0 @@
-Bumped versions of some VS Code extension dependencies.
