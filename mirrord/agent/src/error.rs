@@ -97,8 +97,8 @@ pub enum AgentError {
     #[error("DNS response receive failed with `{0}`")]
     DnsResponseReceiveError(#[from] tokio::sync::oneshot::error::RecvError),
 
-    #[error("Pause was set, but container id or runtime is missing.")]
-    MissingContainerInfo,
+    #[error("Failed to fetch container info with `{0}`")]
+    MissingContainerInfo(String),
 
     #[error("Ran out of connections, dropping new connection")]
     ConnectionLimitReached,
