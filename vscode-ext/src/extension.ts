@@ -5,8 +5,6 @@ import { openConfig } from './config';
 let buttons: { toggle: vscode.StatusBarItem, settings: vscode.StatusBarItem };
 export let globalContext: vscode.ExtensionContext;
 
-
-
 async function toggle(context: vscode.ExtensionContext, button: vscode.StatusBarItem) {
 	if (process.platform === "win32") {
 		vscode.window.showErrorMessage('mirrord is not supported on Windows. You can use it via remote development or WSL.');
@@ -21,7 +19,6 @@ async function toggle(context: vscode.ExtensionContext, button: vscode.StatusBar
 		button.text = 'Disable mirrord';
 	}
 }
-
 
 // This method is called when your extension is activated
 // your extension is activated the very first time the command is executed
@@ -50,6 +47,3 @@ export async function activate(context: vscode.ExtensionContext) {
 		button.show();
 	};
 }
-
-
-
