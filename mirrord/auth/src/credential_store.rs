@@ -26,25 +26,13 @@ static CREDENTIALS_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
 });
 
 /// Container that is responsible for creating/loading `Credentials`
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Default, Debug, Serialize, Deserialize)]
 pub struct CredentialStore {
-    /// Currently active credential key from `credentials` field
-    active_credential: String,
     /// User-specified CN to be used in all new certificates in this store. (Defaults to hostname)
     common_name: Option<String>,
     /// Credentials for operator
     /// Can be linked to several diffrent operator licenses via diffrent keys
     credentials: HashMap<String, Credentials>,
-}
-
-impl Default for CredentialStore {
-    fn default() -> Self {
-        CredentialStore {
-            active_credential: "default".to_string(),
-            common_name: None,
-            credentials: HashMap::new(),
-        }
-    }
 }
 
 impl CredentialStore {
@@ -74,13 +62,17 @@ impl CredentialStore {
     }
 
     /// Get or create and ready up a certificate at `active_credential` slot
-    pub async fn get_or_init<R>(&mut self, client: &Client) -> Result<&mut Credentials>
+    pub async fn get_or_init<R>(
+        &mut self,
+        client: &Client,
+        credential_name: String,
+    ) -> Result<&mut Credentials>
     where
         R: Resource + Clone + Debug,
         R: for<'de> Deserialize<'de>,
         R::DynamicType: Default,
     {
-        let credentials = match self.credentials.entry(self.active_credential.clone()) {
+        let credentials = match self.credentials.entry(credential_name) {
             Entry::Vacant(entry) => entry.insert(Credentials::init()?),
             Entry::Occupied(entry) => entry.into_mut(),
         };
@@ -109,6 +101,7 @@ impl CredentialStoreSync {
     /// is created
     async fn try_get_client_certificate<R>(
         client: &Client,
+        credential_name: String,
         store_file: &mut fs::File,
     ) -> Result<Vec<u8>>
     where
@@ -122,7 +115,7 @@ impl CredentialStoreSync {
             .unwrap_or_default();
 
         let certificate_der = store
-            .get_or_init::<R>(client)
+            .get_or_init::<R>(client, credential_name)
             .await?
             .as_ref()
             .encode_der()
@@ -141,7 +134,10 @@ impl CredentialStoreSync {
 
     /// Get client certificate while keeping an exclusive lock on `CREDENTIALS_PATH` (and releasing
     /// it regrading of result)
-    pub async fn get_client_certificate<R>(client: &Client) -> Result<Vec<u8>>
+    pub async fn get_client_certificate<R>(
+        client: &Client,
+        credential_name: String,
+    ) -> Result<Vec<u8>>
     where
         R: Resource + Clone + Debug,
         R: for<'de> Deserialize<'de>,
@@ -159,7 +155,8 @@ impl CredentialStoreSync {
             .lock_exclusive()
             .map_err(CertificateStoreError::Lockfile)?;
 
-        let result = Self::try_get_client_certificate::<R>(client, &mut store_file).await;
+        let result =
+            Self::try_get_client_certificate::<R>(client, credential_name, &mut store_file).await;
 
         store_file
             .unlock()

@@ -16,5 +16,3 @@ pub mod credentials;
 pub mod error;
 /// Public/Private key abstraction for serialization and deserialization
 pub mod key_pair;
-/// Prdlude
-pub mod prelude;

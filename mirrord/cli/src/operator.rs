@@ -96,6 +96,7 @@ async fn operator_status(config: Option<String>) -> Result<()> {
                 name,
                 organization,
                 expire_at,
+                ..
             },
     } = mirrord_status.spec;
 
