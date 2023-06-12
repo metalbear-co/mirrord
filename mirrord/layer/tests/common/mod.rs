@@ -313,7 +313,7 @@ impl LayerConnection {
             .expect("Close request success!")
             .expect("Close request exists!");
 
-        println!("Should be a close file request: {read_request:#?}");
+        println!("Should be a close file request: {close_request:#?}");
         assert_eq!(
             close_request,
             ClientMessage::FileRequest(FileRequest::Close(
@@ -326,8 +326,8 @@ impl LayerConnection {
             .codec
             .next()
             .await
-            .expect("PortSubscribe request success!")
-            .expect("PortSubscribe request exists!");
+            .expect("PortSubscribe request expected, but there are no more messages.")
+            .expect("Reading client message failed.");
         assert_eq!(
             port_subscribe,
             ClientMessage::Tcp(LayerTcp::PortSubscribe(port))
@@ -712,6 +712,12 @@ impl LayerConnection {
         self.expect_single_file_read("foobar\n", fd).await;
 
         self.expect_file_close(fd).await;
+    }
+
+    pub async fn print_all_subsequent_messages(&mut self, prefix: &str) {
+        while let Some(message) = self.codec.next().await {
+            eprintln!("{prefix}{:?}", message.unwrap());
+        }
     }
 }
 

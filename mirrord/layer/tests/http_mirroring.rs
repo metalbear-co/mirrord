@@ -8,6 +8,12 @@ use rstest::rstest;
 mod common;
 
 pub use common::*;
+use futures::SinkExt;
+use mirrord_protocol::{
+    tcp::{DaemonTcp, LayerTcp},
+    ClientMessage, DaemonMessage, FileRequest,
+};
+use tokio_stream::StreamExt;
 
 /// Start an HTTP server injected with the layer, simulate the agent, verify expected messages from
 /// the layer, send HTTP requests and verify in the server output that the application received
@@ -93,36 +99,57 @@ async fn mirroring_with_http_go(
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
-async fn multiple_binds(dylib_path: &PathBuf) {
+async fn listen_on_same_port_again(dylib_path: &PathBuf) {
     let application = Application::React;
-    let (mut test_process, listener) = application
+    let (mut _test_process, listener) = application
         .get_test_process_and_listener(
             dylib_path,
             vec![
                 ("MIRRORD_FILE_MODE", "local"),
                 ("MIRRORD_UDP_OUTGOING", "false"),
+                // ("RUST_LOG", "mirrord=trace"),
             ],
             None,
         )
         .await;
 
-    let mut connections = Vec::with_capacity(4);
-    for _ in 0..3 {
+    loop {
         let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-        layer_connection.expect_port_subscribe(application.get_app_port());
-        connections.push(layer_connection);
+        eprintln!("Got another layer connection!");
+        tokio::spawn(async move {
+            let next_message = layer_connection.codec.next().await;
+            eprintln!("layer message: {next_message:?}");
+            match next_message {
+                Some(result) => match result.unwrap() {
+                    ClientMessage::FileRequest(FileRequest::Open(
+                        mirrord_protocol::file::OpenFileRequest { path, .. },
+                    )) if path.to_str().unwrap() == "/etc/hostname" => {
+                        eprintln!("Got hostname req. Handling.");
+                        layer_connection.handle_gethostname::<false>(None).await;
+                        layer_connection
+                            .print_all_subsequent_messages("~~~After hostname: ")
+                            .await;
+                    }
+                    ClientMessage::Tcp(LayerTcp::PortSubscribe(port)) => {
+                        eprintln!("Got port subscribe to {port}");
+                        layer_connection
+                            .codec
+                            .send(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(port))))
+                            .await
+                            .unwrap();
+                        layer_connection
+                            .print_all_subsequent_messages("~~~After port subscribe: ")
+                            .await;
+                    }
+                    other_message => {
+                        eprintln!("not answering this message: {other_message:?}");
+                        layer_connection
+                            .print_all_subsequent_messages("~~~After other message: ")
+                            .await;
+                    }
+                },
+                _ => {}
+            }
+        });
     }
-    let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    layer_connection.expect_port_subscribe(application.get_app_port());
-
-    println!("Application subscribed to port, sending HTTP requests.");
-
-    layer_connection
-        .send_connection_then_data(
-            "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n",
-            application.get_app_port(),
-        )
-        .await;
-
-    test_process.wait_assert_success().await;
 }
