@@ -81,7 +81,7 @@ class MirrordExecution {
 
 function mirrordExecutionFromJson(data: string): MirrordExecution {
 	let parsed = JSON.parse(data);
-	return new MirrordExecution(parsed["environment"], parsed["patchedPath"]);
+	return new MirrordExecution(parsed["environment"], parsed["patched_path"]);
 }
 
 class MirrordAPI {

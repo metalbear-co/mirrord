@@ -1,5 +1,6 @@
 #![feature(let_chains)]
 #![feature(once_cell)]
+#![feature(result_option_inspect)]
 #![warn(clippy::indexing_slicing)]
 
 use std::{collections::HashMap, sync::LazyLock, time::Duration};
@@ -14,7 +15,6 @@ use extract::extract_library;
 use k8s_openapi::api::core::v1::Pod;
 use kube::{api::ListParams, Api};
 use miette::JSONReportHandler;
-use mirrord_auth::AuthConfig;
 use mirrord_config::{config::MirrordConfig, LayerConfig, LayerFileConfig};
 use mirrord_kube::{
     api::{container::SKIP_NAMES, get_k8s_resource_api, kubernetes::create_kube_api},
@@ -306,22 +306,6 @@ async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
     Ok(())
 }
 
-fn login(args: LoginArgs) -> Result<()> {
-    match &args.token {
-        Some(token) => AuthConfig::from_input(token)?.save()?,
-        None => {
-            AuthConfig::from_webbrowser(&args.auth_server, args.timeout, args.no_open)?.save()?
-        }
-    }
-
-    println!(
-        "Config succesfuly saved at {}",
-        AuthConfig::config_path().display()
-    );
-
-    Ok(())
-}
-
 /// Register the email to the waitlist.
 async fn register_to_waitlist(email: EmailAddress) -> Result<()> {
     const WAITLIST_API: &str = "https://waitlist.metalbear.co/v1/waitlist";
@@ -366,7 +350,6 @@ async fn main() -> miette::Result<()> {
             extract_library(Some(path), &MAIN_PROGRESS_TASK.subtask("extract"), false)?;
         }
         Commands::ListTargets(args) => print_pod_targets(&args).await?,
-        Commands::Login(args) => login(args)?,
         Commands::Operator(args) => operator_command(*args).await?,
         Commands::ExtensionExec(args) => {
             extension_exec(*args, &MAIN_PROGRESS_TASK.subtask("ext")).await?
