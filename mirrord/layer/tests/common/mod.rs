@@ -823,7 +823,7 @@ impl Application {
             Application::Go19SelfOpen => String::from("tests/apps/self_open/19.go_test_app"),
             Application::RustIssue1123 => String::from("tests/apps/issue1123/target/issue1123"),
             Application::RustIssue1054 => String::from("tests/apps/issue1054/target/issue1054"),
-            Application::RustIssue1458 => String::from("java"),
+            Application::RustIssue1458 => String::from("tests/apps/issue1458/target/issue1458"),
             Application::RustOutgoingUdp | Application::RustOutgoingTcp => format!(
                 "{}/{}",
                 env!("CARGO_MANIFEST_DIR"),
@@ -887,11 +887,6 @@ impl Application {
                 app_path.push("self_connect.py");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
-            Application::RustIssue1458 => {
-                app_path.push("issue1458/target/issue1458-1.0-jar-with-dependencies.jar");
-                println!("using jar from {app_path:?}");
-                vec![app_path.to_string_lossy().to_string()]
-            }
             Application::Go19HTTP
             | Application::Go20HTTP
             | Application::Go19Dir
@@ -916,6 +911,7 @@ impl Application {
             | Application::RustFileOps
             | Application::RustIssue1123
             | Application::RustIssue1054
+            | Application::RustIssue1458
             | Application::RustDnsResolve
             | Application::RustRecvFrom
             | Application::EnvBashCat
@@ -955,7 +951,6 @@ impl Application {
             | Application::NodeFileOps
             | Application::NodeSpawn
             | Application::BashShebang
-            | Application::RustIssue1458
             | Application::Go20Issue834
             | Application::Go19Issue834
             | Application::Go18Issue834
@@ -978,6 +973,7 @@ impl Application {
             | Application::Go20Dir
             | Application::RustOutgoingUdp
             | Application::RustOutgoingTcp
+            | Application::RustIssue1458
             | Application::RustRecvFrom => unimplemented!("shouldn't get here"),
             #[cfg(target_os = "macos")]
             Application::DynamicApp(_, _) => unimplemented!("shouldn't get here"),
