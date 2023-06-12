@@ -30,7 +30,6 @@ It comes as a Visual Studio Code extension, an IntelliJ plugin and a CLI tool. Y
   - [How It Works](#how-it-works)
   - [FAQ](#faq)
   - [Contributing](#contributing)
-  - [Development](#development)
   - [Help and Community](#help-and-community)
   - [Code of Conduct](#code-of-conduct)
   - [License](#license)
@@ -136,13 +135,8 @@ or on [Discord](https://discord.gg/metalbear).
 
 ## Contributing
 
-Contributions are much welcome. Start by checking out [issues](https://github.com/metalbear-co/mirrord/issues).
-If you wish to work an issue, please comment so you can be assigned.
-
-## Development
-
-- Read the [testing guide](TESTING.md) that explains how to run the tests locally.
-- Read the [debugging guide](DEBUGGING.md) for tips on how to debug different components of mirrord.
+Contributions are very welcome. Start by checking out our [open issues](https://github.com/metalbear-co/mirrord/issues), and by going through our [contributing guide](CONTRIBUTING.md).
+We're available on [Discord](https://discord.gg/metalbear) for any questions.
 
 ## Help and Community
 

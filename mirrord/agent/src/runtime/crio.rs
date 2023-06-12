@@ -4,6 +4,7 @@ use http::{Request, Response};
 use http_body_util::{BodyExt, Empty};
 use hyper::{body::Incoming, client::conn};
 use k8s_cri::v1alpha2::{runtime_service_client::RuntimeServiceClient, ContainerStatusRequest};
+use serde::Deserialize;
 use tokio::net::UnixStream;
 use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
@@ -19,6 +20,11 @@ static CRIO_DEFAULT_SOCK_PATH: &str = "/host/run/crio/crio.sock";
 #[derive(Debug)]
 pub(crate) struct CriOContainer {
     pub container_id: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct ContainerStatus {
+    pid: u64,
 }
 
 impl CriOContainer {
@@ -67,11 +73,23 @@ impl ContainerRuntime for CriOContainer {
             .await?
             .into_inner();
 
-        let pid: u64 = status
-            .info
-            .get("pid")
-            .and_then(|val| val.parse().ok())
-            .ok_or(AgentError::MissingContainerInfo)?;
+        // Not sure if the `.get("pid")` logic works as on OpenShift
+        // we observed that the `pid` exists in the `info` field which is JSON encoded.
+        // for now we're adding a fallback
+        let pid: u64 = match status.info.get("pid") {
+            Some(val) => val.parse().map_err(|err| {
+                AgentError::MissingContainerInfo(format!("Failed to parse pid: {err:?}"))
+            })?,
+            None => {
+                let info_json = status.info.get("info").ok_or_else(|| {
+                    AgentError::MissingContainerInfo("no info found in status".into())
+                })?;
+                let info: ContainerStatus = serde_json::from_str(info_json).map_err(|err| {
+                    AgentError::MissingContainerInfo(format!("Failed to parse pid: {err:?}"))
+                })?;
+                info.pid
+            }
+        };
 
         Ok(ContainerInfo::new(pid, Default::default()))
     }

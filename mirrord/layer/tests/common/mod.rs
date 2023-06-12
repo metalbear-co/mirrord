@@ -9,7 +9,7 @@ use std::{
 };
 
 use actix_codec::Framed;
-use chrono::Utc;
+use chrono::{Timelike, Utc};
 use fancy_regex::Regex;
 use futures::{SinkExt, StreamExt};
 use mirrord_protocol::{
@@ -31,6 +31,12 @@ use tokio::{
 pub const RUST_OUTGOING_PEERS: &str = "1.1.1.1:1111,2.2.2.2:2222,3.3.3.3:3333";
 /// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
 pub const RUST_OUTGOING_LOCAL: &str = "4.4.4.4:4444";
+
+/// Returns string with time format of hh:mm:ss
+fn format_time() -> String {
+    let now = Utc::now();
+    format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
+}
 
 pub struct TestProcess {
     pub child: Option<Child>,
@@ -73,9 +79,8 @@ impl TestProcess {
                 if n == 0 {
                     break;
                 }
-
                 let string = String::from_utf8_lossy(&buf[..n]);
-                eprintln!("stderr {:?} {pid}: {}", Utc::now(), string);
+                eprintln!("stderr {} {pid}: {}", format_time(), string);
                 {
                     stderr_data_reader.lock().unwrap().push_str(&string);
                 }
@@ -90,7 +95,7 @@ impl TestProcess {
                     break;
                 }
                 let string = String::from_utf8_lossy(&buf[..n]);
-                print!("stdout {:?} {pid}: {}", Utc::now(), string);
+                print!("stdout {} {pid}: {}", format_time(), string);
                 {
                     stdout_data_reader.lock().unwrap().push_str(&string);
                 }
@@ -717,6 +722,7 @@ pub enum Application {
     Go20FileOps,
     EnvBashCat,
     NodeFileOps,
+    NodeSpawn,
     Go19Dir,
     Go20Dir,
     Go19DirBypass,
@@ -724,7 +730,6 @@ pub enum Application {
     Go20Issue834,
     Go19Issue834,
     Go18Issue834,
-    NodeSpawn,
     BashShebang,
     Go18Read,
     Go19Read,
@@ -743,6 +748,8 @@ pub enum Application {
     RustOutgoingTcp,
     RustIssue1123,
     RustIssue1054,
+    RustDnsResolve,
+    RustRecvFrom,
     // For running applications with the executable and arguments determined at runtime.
     // Compiled only on macos just because it's currently only used there, but could be used also
     // on Linux.
@@ -791,7 +798,7 @@ impl Application {
                 )
             }
             Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
-            Application::NodeFileOps => String::from("node"),
+            Application::NodeFileOps | Application::NodeSpawn => String::from("node"),
             Application::Go19Dir => String::from("tests/apps/dir_go/19.go_test_app"),
             Application::Go20Dir => String::from("tests/apps/dir_go/20.go_test_app"),
             Application::Go20Issue834 => String::from("tests/apps/issue834/20.go_test_app"),
@@ -799,7 +806,6 @@ impl Application {
             Application::Go18Issue834 => String::from("tests/apps/issue834/18.go_test_app"),
             Application::Go19DirBypass => String::from("tests/apps/dir_go_bypass/19.go_test_app"),
             Application::Go20DirBypass => String::from("tests/apps/dir_go_bypass/20.go_test_app"),
-            Application::NodeSpawn => String::from("node"),
             Application::BashShebang => String::from("tests/apps/nothing.sh"),
             Application::Go18Read => String::from("tests/apps/read_go/18.go_test_app"),
             Application::Go19Read => String::from("tests/apps/read_go/19.go_test_app"),
@@ -821,6 +827,18 @@ impl Application {
                 env!("CARGO_MANIFEST_DIR"),
                 "../../target/debug/outgoing",
             ),
+            Application::RustDnsResolve => format!(
+                "{}/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                "../../target/debug/dns_resolve",
+            ),
+            Application::RustRecvFrom => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/recv_from"
+                )
+            }
             #[cfg(target_os = "macos")]
             Application::DynamicApp(exe, _args) => exe.clone(),
         }
@@ -891,6 +909,8 @@ impl Application {
             | Application::RustFileOps
             | Application::RustIssue1123
             | Application::RustIssue1054
+            | Application::RustDnsResolve
+            | Application::RustRecvFrom
             | Application::EnvBashCat
             | Application::BashShebang
             | Application::Go19SelfOpen
@@ -923,6 +943,7 @@ impl Application {
             Application::PythonListen => 21232,
             Application::PythonDontLoad
             | Application::RustFileOps
+            | Application::RustDnsResolve
             | Application::EnvBashCat
             | Application::NodeFileOps
             | Application::NodeSpawn
@@ -948,7 +969,8 @@ impl Application {
             | Application::Go19Dir
             | Application::Go20Dir
             | Application::RustOutgoingUdp
-            | Application::RustOutgoingTcp => unimplemented!("shouldn't get here"),
+            | Application::RustOutgoingTcp
+            | Application::RustRecvFrom => unimplemented!("shouldn't get here"),
             #[cfg(target_os = "macos")]
             Application::DynamicApp(_, _) => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
@@ -959,7 +981,7 @@ impl Application {
     async fn get_test_process(&self, env: HashMap<&str, &str>) -> TestProcess {
         let executable = self.get_executable().await;
         println!("Using executable: {}", &executable);
-
+        println!("Using args: {:?}", self.get_args());
         TestProcess::start_process(executable, self.get_args(), env).await
     }
 
