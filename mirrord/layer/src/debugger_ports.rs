@@ -49,6 +49,21 @@ pub enum DebuggerType {
     /// missing) or `/path/to/python /path/to/pycharm/plugins/pydevd.py --client 127.0.0.1 ...`
     /// (port missing).
     PyDevD,
+    /// Used in Rider.
+    ///
+    /// Command used to invoke this debugger looked like
+    /// `/path/to/rider/lib/ReSharperHost/linux-x64/dotnet/dotnet exec
+    /// /path/to/rider/lib/ReSharperHost/JetBrains.Debugger.Worker.exe --mode=client
+    /// --frontend-port=36977 ...`.
+    ///
+    /// Port would not be extracted from a command like
+    /// `/some/executable exec /path/to/rider/lib/ReSharperHost/JetBrains.Debugger.Worker.exe
+    /// --mode=client --frontend-port=36977 ...` (dotnet executable missing) or
+    /// `/path/to/rider/lib/ ReSharperHost/linux-x64/dotnet/dotnet exec --mode=client
+    /// --frontend-port=36977 ...` (debugger missing) or
+    /// `/path/to/rider/lib/ReSharperHost/linux-x64/dotnet/dotnet exec /path/to/rider/lib/
+    /// ReSharperHost/JetBrains.Debugger.Worker.exe --mode=client ...` (port missing).
+    ReSharper,
 }
 
 impl FromStr for DebuggerType {
@@ -58,6 +73,7 @@ impl FromStr for DebuggerType {
         match s {
             "debugpy" => Ok(Self::DebugPy),
             "pydevd" => Ok(Self::PyDevD),
+            "resharper" => Ok(Self::ReSharper),
             _ => Err(format!("invalid debugger type: {s}")),
         }
     }
@@ -98,6 +114,19 @@ impl DebuggerType {
                 })?;
 
                 SocketAddr::new(client, port).into()
+            }
+            Self::ReSharper => {
+                let is_dotnet = args.first()?.ends_with("dotnet");
+                let runs_debugger = args.get(2)?.contains("Debugger");
+
+                if !is_dotnet || !runs_debugger {
+                    None?
+                }
+
+                args.iter()
+                    .find_map(|arg| arg.strip_prefix("--frontend-port="))
+                    .and_then(|port| port.parse::<u16>().ok())
+                    .map(|port| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
             }
         }
         .and_then(|addr| match addr.ip() {
@@ -229,6 +258,22 @@ mod test {
                     .collect::<Vec<_>>()
             ),
             Some(32845),
+        )
+    }
+
+    #[test]
+    fn detect_resharper_port() {
+        let debugger = DebuggerType::ReSharper;
+        let command = "/path/to/rider/lib/ReSharperHost/linux-x64/dotnet/dotnet exec /path/to/rider/lib/ReSharperHost/JetBrains.Debugger.Worker.exe --mode=client --frontend-port=40905 --plugins=/path/to/rider/plugins/rider-unity/dotnetDebuggerWorker;/path/to/rider/plugins/dpa/DotFiles/JetBrains.DPA.DebugInjector.dll --etw-collect-flags=2 --backend-pid=222222 --handle=333";
+
+        assert_eq!(
+            debugger.get_port(
+                &command
+                    .split_ascii_whitespace()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+            ),
+            Some(40905)
         )
     }
 
