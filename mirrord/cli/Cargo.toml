@@ -16,7 +16,7 @@ edition.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-mirrord-auth = { path="../auth", features = ["webbrowser"] }
+mirrord-auth = { path = "../auth" }
 mirrord-operator = { path = "../operator", features = ["client", "license-fetch", "setup"] }
 mirrord-progress = { path = "../progress" }
 mirrord-kube = { path = "../kube" }
