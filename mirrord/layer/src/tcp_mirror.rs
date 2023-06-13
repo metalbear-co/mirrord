@@ -8,7 +8,7 @@ use std::{
 use bimap::BiMap;
 use mirrord_protocol::{
     tcp::{HttpRequest, LayerTcp, NewTcpConnection, TcpClose, TcpData},
-    ClientMessage, ConnectionId,
+    ClientMessage, ConnectionId, Port,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -224,5 +224,16 @@ impl TcpHandler for TcpMirrorHandler {
         error!("Error: Mirror handler received http request.");
         debug_assert!(false);
         Ok(())
+    }
+
+    async fn handle_server_side_socket_close(
+        &mut self,
+        port: Port,
+        tx: &Sender<ClientMessage>,
+    ) -> std::result::Result<(), LayerError> {
+        self.ports_mut().remove(&port);
+        tx.send(ClientMessage::Tcp(LayerTcp::PortUnsubscribe(port)))
+            .await
+            .map_err(From::from)
     }
 }

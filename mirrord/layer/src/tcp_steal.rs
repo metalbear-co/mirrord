@@ -252,6 +252,19 @@ impl TcpHandler for TcpStealHandler {
         .await
         .map_err(From::from)
     }
+
+    async fn handle_server_side_socket_close(
+        &mut self,
+        port: Port,
+        tx: &Sender<ClientMessage>,
+    ) -> Result<(), LayerError> {
+        self.ports_mut().remove(&port);
+        tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(
+            port,
+        )))
+        .await
+        .map_err(From::from)
+    }
 }
 
 impl TcpStealHandler {

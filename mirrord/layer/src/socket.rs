@@ -213,6 +213,22 @@ impl UserSocket {
             kind,
         }
     }
+
+    /// Return the local (requested) port the user socket is conceptually bound to.
+    /// So if the app tried to bind port 80, return `Some(80)` (even if we actually mapped it to
+    /// some other port).
+    /// `None` if socket is not bound yet.
+    pub(crate) fn get_port(&self) -> Option<u16> {
+        match &self.state {
+            SocketState::Initialized => None,
+            SocketState::Bound(Bound { address, .. })
+            | SocketState::Listening(Bound { address, .. }) => Some(address.port()),
+            SocketState::Connected(Connected {
+                local_address: address,
+                ..
+            }) => address.get_port(),
+        }
+    }
 }
 
 #[inline]

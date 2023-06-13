@@ -25,6 +25,7 @@ use crate::{
 #[derive(Debug)]
 pub(crate) enum TcpIncoming {
     Listen(Listen),
+    Close(Port),
 }
 
 #[derive(Debug, Clone)]
@@ -122,6 +123,7 @@ pub(crate) trait TcpHandler {
     ) -> Result<(), LayerError> {
         match message {
             TcpIncoming::Listen(listen) => self.handle_listen(listen, tx).await,
+            TcpIncoming::Close(port) => self.handle_server_side_socket_close(port, tx).await,
         }
     }
 
@@ -175,8 +177,15 @@ pub(crate) trait TcpHandler {
     /// Handle New Data messages
     async fn handle_http_request(&mut self, request: HttpRequest) -> Result<(), LayerError>;
 
-    /// Handle connection close
+    /// Handle connection close from the client side (notified via agent message).
     fn handle_close(&mut self, close: TcpClose) -> Result<(), LayerError>;
+
+    /// Handle the user application closing the socket.
+    async fn handle_server_side_socket_close(
+        &mut self,
+        port: Port,
+        tx: &Sender<ClientMessage>,
+    ) -> Result<(), LayerError>;
 
     /// Handle listen request
     async fn handle_listen(

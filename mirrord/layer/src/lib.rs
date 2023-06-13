@@ -118,11 +118,11 @@ use tracing::{error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
-    common::HookMessage,
+    common::{blocking_send_hook_message, HookMessage},
     debugger_ports::DebuggerPorts,
     file::{filter::FILE_FILTER, FileHandler},
     load::LoadType,
-    socket::CONNECTION_QUEUE,
+    socket::{SocketKind, CONNECTION_QUEUE},
 };
 
 mod common;
@@ -934,6 +934,20 @@ pub(crate) fn close_layer_fd(fd: c_int) {
     // Remove from sockets, also removing the `ConnectionQueue` associated with the socket.
     if let Some((_, socket)) = SOCKETS.remove(&fd) {
         CONNECTION_QUEUE.remove(socket.id);
+
+        // Closed file is a socket, so if it's already bound to a port - notify agent to stop
+        // mirroring/stealing that port.
+        if let Some(port) = socket.get_port() {
+            match socket.kind {
+                SocketKind::Tcp(_) => {
+                    // TODO: can we do anything with this result?
+                    let _ =
+                        blocking_send_hook_message(HookMessage::Tcp(tcp::TcpIncoming::Close(port)));
+                }
+                // TODO: I think we don't need to notify the agent about a udp socket close, right?
+                SocketKind::Udp(_) => {}
+            }
+        }
     } else if file_mode_active {
         OPEN_FILES.remove(&fd);
     }
