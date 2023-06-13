@@ -21,7 +21,7 @@ use tokio::{
     task,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{error, info, trace, warn};
 
 use super::*;
 use crate::{common::ResponseDeque, detour::DetourGuard, error::LayerError};
@@ -89,14 +89,13 @@ impl Default for UdpOutgoingHandler {
 }
 
 impl UdpOutgoingHandler {
-    #[tracing::instrument(level = "debug", skip(layer_tx, remote_rx))]
+    #[tracing::instrument(level = "trace", ret, skip(layer_tx, remote_rx))]
     async fn interceptor_task(
         layer_tx: Sender<LayerUdpOutgoing>,
         connection_id: ConnectionId,
         mirror_socket: UdpSocket,
         remote_rx: Receiver<Vec<u8>>,
     ) {
-        debug!("UDP interceptor started.");
         let mut remote_stream = ReceiverStream::new(remote_rx);
         let mut recv_from_buffer = vec![0; 1500];
 
@@ -121,7 +120,6 @@ impl UdpOutgoingHandler {
                 biased; // To allow local socket to be read before being closed
 
                 read = mirror_socket.recv_from(&mut recv_from_buffer) => {
-                    debug!("read from recv_from");
                     match read {
                         Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
                             continue;
@@ -200,7 +198,7 @@ impl UdpOutgoingHandler {
     ///
     /// - `UdpOutgoing::Write`: sends a `UdpOutgoingRequest::Write` message to (agent) with the data
     ///   that our interceptor socket intercepted.
-    #[tracing::instrument(level = "debug", skip(self, tx))]
+    #[tracing::instrument(level = "trace", ret, skip(self, tx))]
     pub(crate) async fn handle_hook_message(
         &mut self,
         message: UdpOutgoing,
@@ -248,7 +246,7 @@ impl UdpOutgoingHandler {
     ///
     /// - `UdpOutgoingResponse::Write`: (agent) sent some data to the remote host, currently this
     ///   response is only significant to handle errors when this send failed.
-    #[tracing::instrument(level = "debug", ret, skip(self))]
+    #[tracing::instrument(level = "trace", ret, skip(self))]
     pub(crate) async fn handle_daemon_message(
         &mut self,
         response: DaemonUdpOutgoing,
@@ -266,16 +264,10 @@ impl UdpOutgoingHandler {
 
                             let mirror_socket = match remote_address {
                                 SocketAddress::Ip(SocketAddr::V4(_)) => UdpSocket::bind(
-                                    #[cfg(target_os = "macos")]
                                     SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
-                                    #[cfg(not(target_os = "macos"))]
-                                    SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
                                 ),
                                 SocketAddress::Ip(SocketAddr::V6(_)) => UdpSocket::bind(
-                                    #[cfg(target_os = "macos")]
                                     SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 0),
-                                    #[cfg(not(target_os = "macos"))]
-                                    SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
                                 ),
                                 SocketAddress::Unix(_) => {
                                     // This should never happen. If we're here - the agent reported

@@ -6,7 +6,7 @@ use std::net::{SocketAddr, UdpSocket};
 fn main() {
     println!("test issue 1458: START");
 
-    let local_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
+    let local_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let remote_addr: SocketAddr = "1.2.3.4:53".parse().unwrap();
 
     let s = UdpSocket::bind(local_addr).unwrap();

@@ -110,7 +110,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
 
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state.
-#[tracing::instrument(level = "debug", ret, skip(raw_address))]
+#[tracing::instrument(level = "trace", ret, skip(raw_address))]
 pub(super) fn bind(
     sockfd: c_int,
     raw_address: *const sockaddr,
@@ -285,7 +285,7 @@ const UDP: ConnectType = !TCP;
 /// interception procedure.
 /// This returns errno so we can restore the correct errno in case result is -1 (until we get
 /// back to the hook we might call functions that will corrupt errno)
-#[tracing::instrument(level = "debug", ret)]
+#[tracing::instrument(level = "trace", ret)]
 fn connect_outgoing<const TYPE: ConnectType, const CALL_CONNECT: bool>(
     sockfd: RawFd,
     remote_address: SockAddr,
@@ -823,7 +823,7 @@ pub(super) fn recv_from(
 ///
 /// See [`recv_from`] for more information.
 #[tracing::instrument(
-    level = "debug",
+    level = "trace",
     ret,
     skip(raw_message, raw_destination, destination_length)
 )]
@@ -842,19 +842,15 @@ pub(super) fn send_to(
         .ok_or(Bypass::LocalFdNotFound(sockfd))?;
 
     connect_outgoing::<UDP, false>(sockfd, destination, user_socket_info)?;
-    debug!("we're connected (supposedly)");
 
     let layer_address: SockAddr = SOCKETS
         .get(&sockfd)
-        .inspect(|user_socket| debug!("socket info {:#?}", user_socket.value()))
         .and_then(|socket| match &socket.state {
             SocketState::Connected(connected) => connected.layer_address.clone(),
             _ => unreachable!(),
         })
         .map(SocketAddress::try_into)??;
 
-    let debug_address = layer_address.as_socket();
-    debug!("now we send data to our interceptor socket {debug_address:?}");
     let raw_interceptor_address = layer_address.as_ptr();
     let raw_interceptor_length = layer_address.len();
 
