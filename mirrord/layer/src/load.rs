@@ -23,6 +23,7 @@ pub enum LoadType {
     /// Only load sip patch required hooks
     #[cfg(target_os = "macos")]
     SIPOnly,
+
     /// Skip on current process
     Skip,
 }
