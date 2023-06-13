@@ -48,7 +48,7 @@ where
 
         self.managed.inner().add_rule(
             Self::ENTRYPOINT,
-            &format!("-j {}", self.preroute.managed.chain_name()),
+            &format!("-j {}", self.managed.chain_name()),
         )?;
 
         Ok(())
@@ -59,7 +59,7 @@ where
 
         self.managed.inner().remove_rule(
             Self::ENTRYPOINT,
-            &format!("-j {}", self.preroute.managed.chain_name()),
+            &format!("-j {}", self.managed.chain_name()),
         )?;
 
         Ok(())
