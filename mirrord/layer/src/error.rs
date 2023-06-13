@@ -196,6 +196,7 @@ pub(crate) enum LayerError {
     )]
     UnsupportedSocketType,
 
+    #[cfg(target_os = "macos")]
     #[error("Exec failed with error {0:?}, please report this error!")]
     ExecFailed(exec::Error),
 }
