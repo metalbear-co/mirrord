@@ -89,7 +89,7 @@ impl Default for UdpOutgoingHandler {
 }
 
 impl UdpOutgoingHandler {
-    #[tracing::instrument(level = "trace", skip(layer_tx, mirror_socket, remote_rx))]
+    #[tracing::instrument(level = "trace", skip(layer_tx, remote_rx))]
     async fn interceptor_task(
         layer_tx: Sender<LayerUdpOutgoing>,
         connection_id: ConnectionId,
@@ -249,7 +249,7 @@ impl UdpOutgoingHandler {
     ///
     /// - `UdpOutgoingResponse::Write`: (agent) sent some data to the remote host, currently this
     ///   response is only significant to handle errors when this send failed.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", ret, skip(self))]
     pub(crate) async fn handle_daemon_message(
         &mut self,
         response: DaemonUdpOutgoing,
