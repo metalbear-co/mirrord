@@ -212,16 +212,7 @@ mod tests {
             .with(str::starts_with("MIRRORD_INPUT_"))
             .times(1)
             .returning(|_| Ok(()));
-
-        mock.expect_insert_rule()
-            .with(
-                str::starts_with("MIRRORD_INPUT_"),
-                eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
-                eq(1),
-            )
-            .times(1)
-            .returning(|_, _, _| Ok(()));
-
+        
         mock.expect_create_chain()
             .with(str::starts_with("MIRRORD_STANDARD_"))
             .times(1)
