@@ -6,8 +6,7 @@ use mirrord_protocol::Port;
 use crate::{
     error::Result,
     steal::ip_tables::{
-        chain::IPTableChain, redirect::PreroutingRedirect, IPTables, Redirect,
-        IPTABLE_OUTPUT_STANDARD,
+        chain::IPTableChain, redirect::PreroutingRedirect, IPTables, Redirect, IPTABLE_STANDARD,
     },
 };
 
@@ -24,14 +23,14 @@ where
 
     pub fn create(ipt: Arc<IPT>) -> Result<Self> {
         let preroute = PreroutingRedirect::create(ipt.clone())?;
-        let managed = IPTableChain::create(ipt, IPTABLE_OUTPUT_STANDARD.to_string())?;
+        let managed = IPTableChain::create(ipt, IPTABLE_STANDARD.to_string())?;
 
         Ok(StandardRedirect { preroute, managed })
     }
 
     pub fn load(ipt: Arc<IPT>) -> Result<Self> {
         let preroute = PreroutingRedirect::load(ipt.clone())?;
-        let managed = IPTableChain::create(ipt, IPTABLE_OUTPUT_STANDARD.to_string())?;
+        let managed = IPTableChain::create(ipt, IPTABLE_STANDARD.to_string())?;
 
         Ok(StandardRedirect { preroute, managed })
     }

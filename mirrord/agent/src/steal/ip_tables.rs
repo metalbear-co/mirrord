@@ -40,11 +40,11 @@ pub static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
     })
 });
 
-pub static IPTABLE_OUTPUT_STANDARD_ENV: &str = "MIRRORD_IPTABLE_OUTPUT_STANDARD_NAME";
-pub static IPTABLE_OUTPUT_STANDARD: LazyLock<String> = LazyLock::new(|| {
+pub static IPTABLE_STANDARD_ENV: &str = "MIRRORD_IPTABLE_STANDARD_NAME";
+pub static IPTABLE_STANDARD: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_PREROUTING_ENV).unwrap_or_else(|_| {
         format!(
-            "MIRRORD_OUTPUT_{}",
+            "MIRRORD_STANDARD_{}",
             Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
         )
     })
