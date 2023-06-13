@@ -240,6 +240,11 @@ pub(super) enum OperatorCommand {
         #[arg(short = 'f')]
         config_file: Option<String>,
     },
+    TelemetryExport {
+        /// Specify config file to use
+        #[arg(short = 'f')]
+        config_file: Option<String>,
+    },
 }
 
 #[derive(ValueEnum, Clone, Debug)]

@@ -68,12 +68,25 @@ pub struct MirrordOperatorSpec {
     pub operator_version: String,
     pub default_namespace: String,
     pub license: LicenseInfoOwned,
+    pub telemetry_exports: Option<MirrordOperatorTelemetryReports>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatus {
     pub sessions: Vec<Session>,
     pub statistics: Option<MirrordOperatorStatusStatistics>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct MirrordOperatorTelemetryReports {
+    id: String,
+    reports: Vec<MirrordOperatorTelemetryReport>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct MirrordOperatorTelemetryReport {
+    timestamp: u64,
+    report: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]

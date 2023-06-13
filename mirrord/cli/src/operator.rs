@@ -53,9 +53,7 @@ async fn operator_setup(
     Ok(())
 }
 
-async fn operator_status(config: Option<String>) -> Result<()> {
-    let progress = TaskProgress::new("Operator Status").fail_on_drop(true);
-
+async fn get_status_api(config: Option<String>) -> Result<Api<MirrordOperatorCrd>> {
     let kube_api = if let Some(config_path) = config {
         let config = LayerFileConfig::from_path(config_path)?.generate_config()?;
         create_kube_api(config.accept_invalid_certificates, config.kubeconfig)
@@ -65,7 +63,13 @@ async fn operator_status(config: Option<String>) -> Result<()> {
     .await
     .map_err(CliError::KubernetesApiFailed)?;
 
-    let status_api: Api<MirrordOperatorCrd> = Api::all(kube_api);
+    Ok(Api::all(kube_api))
+}
+
+async fn operator_status(config: Option<String>) -> Result<()> {
+    let progress = TaskProgress::new("Operator Status").fail_on_drop(true);
+
+    let status_api = get_status_api(config).await?;
 
     let status_progress = progress.subtask("fetching status");
 
@@ -98,6 +102,7 @@ async fn operator_status(config: Option<String>) -> Result<()> {
                 expire_at,
                 ..
             },
+        ..
     } = mirrord_status.spec;
 
     let expire_at = expire_at.format("%e-%b-%Y");
@@ -140,6 +145,23 @@ Operator License
     Ok(())
 }
 
+async fn operator_telemetry_expory(config: Option<String>) -> Result<()> {
+    let status_api = get_status_api(config).await?;
+
+    let status = status_api
+        .get_subresource("telemetry-export", OPERATOR_STATUS_NAME)
+        .await
+        .map_err(KubeApiError::KubeError)
+        .map_err(OperatorApiError::KubeApiError)
+        .map_err(CliError::OperatorConnectionFailed)?;
+
+    if let Some(exports) = status.spec.telemetry_exports {
+        println!("{}", serde_json::to_string(&exports)?);
+    }
+
+    Ok(())
+}
+
 /// Handle commands related to the operator `mirrord operator ...`
 pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
     match args.command {
@@ -163,5 +185,8 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             operator_setup(accept_tos, file, namespace, license).await
         }
         OperatorCommand::Status { config_file } => operator_status(config_file).await,
+        OperatorCommand::TelemetryExport { config_file } => {
+            operator_telemetry_expory(config_file).await
+        }
     }
 }
