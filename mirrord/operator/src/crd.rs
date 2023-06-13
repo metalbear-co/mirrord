@@ -85,7 +85,10 @@ pub struct MirrordOperatorTelemetryReports {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorTelemetryReport {
-    #[serde(with = "ts_milliseconds")]
+    #[serde(
+        serialize_with = "ts_milliseconds::serialize",
+        deserialize_with = "ts_milliseconds::deserialize"
+    )]
     pub timestamp: DateTime<Utc>,
     pub report: String,
 }
