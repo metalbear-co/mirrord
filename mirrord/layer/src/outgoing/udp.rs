@@ -266,9 +266,15 @@ impl UdpOutgoingHandler {
 
                             let mirror_socket = match remote_address {
                                 SocketAddress::Ip(SocketAddr::V4(_)) => UdpSocket::bind(
+                                    #[cfg(target_os = "macos")]
+                                    SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+                                    #[cfg(not(target_os = "macos"))]
                                     SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
                                 ),
                                 SocketAddress::Ip(SocketAddr::V6(_)) => UdpSocket::bind(
+                                    #[cfg(target_os = "macos")]
+                                    SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 0),
+                                    #[cfg(not(target_os = "macos"))]
                                     SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
                                 ),
                                 SocketAddress::Unix(_) => {
