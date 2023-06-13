@@ -213,6 +213,11 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
+        mock.expect_create_chain()
+            .with(str::starts_with("MIRRORD_STANDARD_"))
+            .times(1)
+            .returning(|_| Ok(()));
+
         mock.expect_insert_rule()
             .with(
                 str::starts_with("MIRRORD_INPUT_"),
