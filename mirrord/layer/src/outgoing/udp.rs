@@ -201,7 +201,7 @@ impl UdpOutgoingHandler {
     ///
     /// - `UdpOutgoing::Write`: sends a `UdpOutgoingRequest::Write` message to (agent) with the data
     ///   that our interceptor socket intercepted.
-    #[tracing::instrument(level = "trace", skip(self, tx))]
+    #[tracing::instrument(level = "debug", skip(self, tx))]
     pub(crate) async fn handle_hook_message(
         &mut self,
         message: UdpOutgoing,
@@ -249,7 +249,7 @@ impl UdpOutgoingHandler {
     ///
     /// - `UdpOutgoingResponse::Write`: (agent) sent some data to the remote host, currently this
     ///   response is only significant to handle errors when this send failed.
-    #[tracing::instrument(level = "trace", ret, skip(self))]
+    #[tracing::instrument(level = "debug", ret, skip(self))]
     pub(crate) async fn handle_daemon_message(
         &mut self,
         response: DaemonUdpOutgoing,
