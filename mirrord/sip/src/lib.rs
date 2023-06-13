@@ -343,6 +343,16 @@ mod main {
         }
         let canonical_path = complete_path.canonicalize()?;
 
+        // If the binary is in our temp bin dir, it's not SIP protected.
+        // unwrap_or_default because path might be non-existent yet.
+        if MIRRORD_TEMP_BIN_DIR_PATH_BUF
+            .canonicalize()
+            .map(|x| canonical_path.starts_with(x))
+            .unwrap_or_default()
+        {
+            return Ok(SipStatus::NoSIP);
+        }
+
         // TODO: Don't recursively follow the shebangs, instead only read the first one because on
         //  macOS a shebang cannot lead to a script only to a binary. Then there should be no danger
         //  of recursing over a cycle of shebangs until a stack overflow, so this check and keeping
