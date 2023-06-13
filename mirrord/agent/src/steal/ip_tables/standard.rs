@@ -66,6 +66,9 @@ where
     }
 
     async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+        self.preroute
+            .add_redirect(redirected_port, target_port)
+            .await?;
         let redirect_rule =
             format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
 
@@ -75,6 +78,10 @@ where
     }
 
     async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+        self.preroute
+            .remove_redirect(redirected_port, target_port)
+            .await?;
+
         let redirect_rule =
             format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
 
