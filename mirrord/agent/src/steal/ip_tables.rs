@@ -9,7 +9,8 @@ use crate::{
     steal::ip_tables::{
         flush_connections::FlushConnections,
         mesh::{MeshRedirect, MeshVendor},
-        redirect::{Redirect, StandardRedirect},
+        redirect::Redirect,
+        standard::StandardRedirect,
     },
 };
 
@@ -17,6 +18,7 @@ pub(crate) mod chain;
 pub(crate) mod flush_connections;
 pub(crate) mod mesh;
 pub(crate) mod redirect;
+pub(crate) mod standard;
 
 pub static IPTABLE_PREROUTING_ENV: &str = "MIRRORD_IPTABLE_PREROUTING_NAME";
 pub static IPTABLE_PREROUTING: LazyLock<String> = LazyLock::new(|| {
@@ -31,6 +33,16 @@ pub static IPTABLE_PREROUTING: LazyLock<String> = LazyLock::new(|| {
 pub static IPTABLE_MESH_ENV: &str = "MIRRORD_IPTABLE_MESH_NAME";
 pub static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_MESH_ENV).unwrap_or_else(|_| {
+        format!(
+            "MIRRORD_OUTPUT_{}",
+            Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
+        )
+    })
+});
+
+pub static IPTABLE_OUTPUT_STANDARD_ENV: &str = "MIRRORD_IPTABLE_OUTPUT_STANDARD_NAME";
+pub static IPTABLE_OUTPUT_STANDARD: LazyLock<String> = LazyLock::new(|| {
+    std::env::var(IPTABLE_PREROUTING_ENV).unwrap_or_else(|_| {
         format!(
             "MIRRORD_OUTPUT_{}",
             Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
