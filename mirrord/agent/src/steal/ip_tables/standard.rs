@@ -69,7 +69,7 @@ where
         let redirect_rule =
             format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
 
-        self.preroute.managed.add_rule(&redirect_rule)?;
+        self.managed.add_rule(&redirect_rule)?;
 
         Ok(())
     }
@@ -78,7 +78,7 @@ where
         let redirect_rule =
             format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
 
-        self.preroute.managed.remove_rule(&redirect_rule)?;
+        self.managed.remove_rule(&redirect_rule)?;
 
         Ok(())
     }
