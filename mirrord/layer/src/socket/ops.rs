@@ -842,16 +842,19 @@ pub(super) fn send_to(
         .ok_or(Bypass::LocalFdNotFound(sockfd))?;
 
     connect_outgoing::<UDP, false>(sockfd, destination, user_socket_info)?;
+    debug!("we're connected (supposedly)");
 
     let layer_address: SockAddr = SOCKETS
         .get(&sockfd)
+        .inspect(|user_socket| debug!("socket info {:#?}", user_socket.value()))
         .and_then(|socket| match &socket.state {
             SocketState::Connected(connected) => connected.layer_address.clone(),
             _ => unreachable!(),
         })
         .map(SocketAddress::try_into)??;
 
-    debug!("now we send data to our interceptor socket {layer_address:?}");
+    let debug_address = layer_address.as_socket();
+    debug!("now we send data to our interceptor socket {debug_address:?}");
     let raw_interceptor_address = layer_address.as_ptr();
     let raw_interceptor_length = layer_address.len();
 
