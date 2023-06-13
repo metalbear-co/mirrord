@@ -344,7 +344,12 @@ mod main {
         let canonical_path = complete_path.canonicalize()?;
 
         // If the binary is in our temp bin dir, it's not SIP protected.
-        if canonical_path.starts_with(MIRRORD_TEMP_BIN_DIR_PATH_BUF.canonicalize()?) {
+        // unwrap_or_default because path might be non-existent yet.
+        if MIRRORD_TEMP_BIN_DIR_PATH_BUF
+            .canonicalize()
+            .map(|x| canonical_path.starts_with(x))
+            .unwrap_or_default()
+        {
             return Ok(SipStatus::NoSIP);
         }
 
