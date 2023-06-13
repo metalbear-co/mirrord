@@ -89,7 +89,7 @@ impl Default for UdpOutgoingHandler {
 }
 
 impl UdpOutgoingHandler {
-    #[tracing::instrument(level = "trace", skip(layer_tx, remote_rx))]
+    #[tracing::instrument(level = "debug", skip(layer_tx, remote_rx))]
     async fn interceptor_task(
         layer_tx: Sender<LayerUdpOutgoing>,
         connection_id: ConnectionId,
@@ -114,7 +114,6 @@ impl UdpOutgoingHandler {
             }
         };
 
-        // TODO(alex): Connect this socket to the user socket.
         let mut user_address: Option<SocketAddr> = None;
 
         loop {

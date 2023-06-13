@@ -110,7 +110,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
 
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state.
-#[tracing::instrument(level = "trace", ret, skip(raw_address))]
+#[tracing::instrument(level = "debug", ret, skip(raw_address))]
 pub(super) fn bind(
     sockfd: c_int,
     raw_address: *const sockaddr,
@@ -851,6 +851,7 @@ pub(super) fn send_to(
         })
         .map(SocketAddress::try_into)??;
 
+    debug!("now we send data to our interceptor socket {layer_address:?}");
     let raw_interceptor_address = layer_address.as_ptr();
     let raw_interceptor_length = layer_address.len();
 
