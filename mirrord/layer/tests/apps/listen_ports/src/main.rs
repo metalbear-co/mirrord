@@ -1,5 +1,3 @@
-#![warn(clippy::indexing_slicing)]
-
 use std::net::{SocketAddr, TcpListener};
 
 fn main() {

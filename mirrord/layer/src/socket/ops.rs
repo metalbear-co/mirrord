@@ -108,6 +108,30 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
     Detour::Success(socket_fd)
 }
 
+#[tracing::instrument(level = "trace", ret)]
+fn bind_port(sockfd: c_int, domain: c_int, port: u16) -> Detour<()> {
+    let address = match domain {
+        libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            port,
+        ))),
+        libc::AF_INET6 => Ok(SockAddr::from(SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+            port,
+        ))),
+        invalid => Err(Bypass::Domain(invalid)),
+    }?;
+
+    trace!("bind -> {address:#?}");
+
+    let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
+    if bind_result != 0 {
+        return Err(io::Error::last_os_error())?;
+    }
+
+    Detour::Success(())
+}
+
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state.
 #[tracing::instrument(level = "trace", skip(raw_address))]
@@ -185,60 +209,18 @@ pub(super) fn bind(
         .get()
         .expect("`LISTEN_PORTS` not set. Please report a bug")
         .get_by_left(&requested_address.port())
-        .cloned()
-        .unwrap_or(requested_address.port());
+        .cloned();
 
-    let unbound_address = match socket.domain {
-        libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::LOCALHOST),
-            listen_port,
-        ))),
-        libc::AF_INET6 => Ok(SockAddr::from(SocketAddr::new(
-            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            listen_port,
-        ))),
-        invalid => Err(Bypass::Domain(invalid)),
-    }?;
-
-    trace!("bind -> unbound_address {:#?}", unbound_address);
-
-    let mut bind_result =
-        unsafe { FN_BIND(sockfd, unbound_address.as_ptr(), unbound_address.len()) };
-    if bind_result != 0 {
-        // If we didn't have `listen_ports` used here, just assign a random address.
-        if listen_port == requested_address.port() {
-            warn!("listen -> first `bind` failed with {listen_port:?}, trying to bind to a random port");
-            let unbound_address = match socket.domain {
-                libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
-                    IpAddr::V4(Ipv4Addr::LOCALHOST),
-                    0,
-                ))),
-                libc::AF_INET6 => Ok(SockAddr::from(SocketAddr::new(
-                    IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                    0,
-                ))),
-                invalid => Err(Bypass::Domain(invalid)),
-            }?;
-            bind_result =
-                unsafe { FN_BIND(sockfd, unbound_address.as_ptr(), unbound_address.len()) };
-            if bind_result != 0 {
-                error!(
-                    "listen -> Failed second `bind` sockfd {:#?} to address {:#?} with errno {:#?}!",
-                    sockfd,
-                    unbound_address,
-                    errno::errno()
-                );
-                return Err(io::Error::last_os_error())?;
-            }
-        } else {
-            error!(
-                "listen -> Failed `bind` with user address sockfd {:#?} to address {:#?} with errno {:#?}!",
-                sockfd,
-                unbound_address,
-                errno::errno()
+    // Listen port was specified
+    if let Some(port) = listen_port {
+        bind_port(sockfd, socket.domain, port)?;
+    } else {
+        bind_port(sockfd, socket.domain, requested_address.port()).or_else(|e| {
+            warn!(
+                "bind -> first `bind` failed with {listen_port:?}, trying to bind to a random port"
             );
-            return Err(io::Error::last_os_error())?;
-        }
+            bind_port(sockfd, socket.domain, 0)
+        })?
     }
 
     // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
@@ -265,7 +247,7 @@ pub(super) fn bind(
 
     SOCKETS.insert(sockfd, socket);
 
-    Detour::Success(bind_result)
+    Detour::Success(0)
 }
 
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will

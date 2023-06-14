@@ -332,6 +332,14 @@ impl<S> Detour<S> {
             _ => default,
         }
     }
+
+    #[inline]
+    pub fn or_else<F, O: FnOnce(E) -> Detour<T, F>>(self, op: O) -> Detour<T, F> {
+        match self {
+            Ok(t) => Ok(t),
+            Err(e) => op(e),
+        }
+    }
 }
 
 impl<S> Detour<S>
