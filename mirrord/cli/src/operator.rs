@@ -150,7 +150,7 @@ Operator License
     Ok(())
 }
 
-async fn operator_telemetry_expory(config: Option<String>) -> Result<()> {
+async fn operator_telemetry_export(config: Option<String>) -> Result<()> {
     let status_api = get_status_api(config).await?;
 
     let status = status_api
@@ -192,7 +192,7 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
         }
         OperatorCommand::Status { config_file } => operator_status(config_file).await,
         OperatorCommand::TelemetryExport { config_file } => {
-            operator_telemetry_expory(config_file).await
+            operator_telemetry_export(config_file).await
         }
     }
 }
