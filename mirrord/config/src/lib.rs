@@ -570,6 +570,7 @@ mod tests {
                         IncomingAdvancedFileConfig {
                             mode: Some(IncomingMode::Mirror),
                             http_header_filter: None,
+                            http_filter: None,
                             port_mapping: None,
                             ignore_localhost: None,
                             ignore_ports: None,

@@ -1,4 +1,4 @@
-use std::{ops::Deref, str::FromStr, collections::HashSet};
+use std::{collections::HashSet, ops::Deref, str::FromStr};
 
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;

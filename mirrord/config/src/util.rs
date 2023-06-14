@@ -1,4 +1,4 @@
-use std::{fmt, marker::PhantomData, slice::Join, str::FromStr, collections::HashSet, hash::Hash};
+use std::{collections::HashSet, fmt, hash::Hash, marker::PhantomData, slice::Join, str::FromStr};
 
 use schemars::JsonSchema;
 use serde::{
