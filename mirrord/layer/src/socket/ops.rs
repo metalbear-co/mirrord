@@ -202,11 +202,12 @@ pub(super) fn bind(
 
     trace!("bind -> unbound_address {:#?}", unbound_address);
 
-    let bind_result = unsafe { FN_BIND(sockfd, unbound_address.as_ptr(), unbound_address.len()) };
+    let mut bind_result =
+        unsafe { FN_BIND(sockfd, unbound_address.as_ptr(), unbound_address.len()) };
     if bind_result != 0 {
         // If we didn't have `listen_ports` used here, just assign a random address.
         if listen_port == requested_address.port() {
-            trace!("listen -> `bind` failed with `AddrInUse`, trying to bind to a random port");
+            warn!("listen -> `bind` failed with {listen_port:?}, trying to bind to a random port");
             let unbound_address = match socket.domain {
                 libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
                     IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -218,7 +219,7 @@ pub(super) fn bind(
                 ))),
                 invalid => Err(Bypass::Domain(invalid)),
             }?;
-            let bind_result =
+            bind_result =
                 unsafe { FN_BIND(sockfd, unbound_address.as_ptr(), unbound_address.len()) };
             if bind_result != 0 {
                 error!(
