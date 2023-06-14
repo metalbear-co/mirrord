@@ -334,10 +334,11 @@ impl<S> Detour<S> {
     }
 
     #[inline]
-    pub fn or_else<F, O: FnOnce(E) -> Detour<T, F>>(self, op: O) -> Detour<T, F> {
+    pub fn or_else<O: FnOnce(HookError) -> Detour<S>>(self, op: O) -> Detour<S> {
         match self {
-            Ok(t) => Ok(t),
-            Err(e) => op(e),
+            Detour::Success(s) => Detour::Success(s),
+            Detour::Bypass(b) => Detour::Bypass(b),
+            Detour::Error(e) => op(e),
         }
     }
 }

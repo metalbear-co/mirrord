@@ -217,7 +217,7 @@ pub(super) fn bind(
     } else {
         bind_port(sockfd, socket.domain, requested_address.port()).or_else(|e| {
             warn!(
-                "bind -> first `bind` failed with {listen_port:?}, trying to bind to a random port"
+                "bind -> first `bind` failed on port {listen_port:?} with {e:?}, trying to bind to a random port"
             );
             bind_port(sockfd, socket.domain, 0)
         })?
