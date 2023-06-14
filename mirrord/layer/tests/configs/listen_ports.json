@@ -1,0 +1,10 @@
+{
+    "feature": {
+        "network": {
+            "incoming": {
+                "mode": "steal",
+                "port_mapping": [[80, 51222]]
+            }
+        }
+    }
+}
