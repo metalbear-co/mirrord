@@ -28,7 +28,7 @@ use crate::{
     is_debugger_port,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
     tcp::{Listen, TcpIncoming},
-    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_LOCALHOST,
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_LOCALHOST, LISTEN_PORTS,
     OUTGOING_IGNORE_LOCALHOST, REMOTE_UNIX_STREAMS, TARGETLESS,
 };
 
@@ -165,20 +165,6 @@ pub(super) fn bind(
         return Detour::Bypass(Bypass::BindWhenTargetless);
     }
 
-    let unbound_address = match socket.domain {
-        libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::LOCALHOST),
-            0,
-        ))),
-        libc::AF_INET6 => Ok(SockAddr::from(SocketAddr::new(
-            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            0,
-        ))),
-        invalid => Err(Bypass::Domain(invalid)),
-    }?;
-
-    trace!("bind -> unbound_address {:#?}", unbound_address);
-
     // Check if the user's requested address isn't already in use, even though it's not actually
     // bound, as we bind to a different address, but if we don't check for this then we're
     // changing normal socket behavior (see issue #1123).
@@ -191,15 +177,58 @@ pub(super) fn bind(
         Err(HookError::AddressAlreadyBound(requested_address))?;
     }
 
-    let bind_result = unsafe { FN_BIND(sockfd, unbound_address.as_ptr(), unbound_address.len()) };
+    let listen_port = LISTEN_PORTS
+        .get()
+        .expect("`LISTEN_PORTS` not set. Please report a bug")
+        .get_by_left(&requested_address.port())
+        .cloned()
+        .unwrap_or(requested_address.port());
+
+    let unbound_address = match socket.domain {
+        libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            listen_port,
+        ))),
+        libc::AF_INET6 => Ok(SockAddr::from(SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+            listen_port,
+        ))),
+        invalid => Err(Bypass::Domain(invalid)),
+    }?;
+
+    trace!("bind -> unbound_address {:#?}", unbound_address);
+
+    let mut bind_result =
+        unsafe { FN_BIND(sockfd, unbound_address.as_ptr(), unbound_address.len()) };
     if bind_result != 0 {
-        error!(
-            "listen -> Failed `bind` sockfd {:#?} to address {:#?} with errno {:#?}!",
-            sockfd,
-            unbound_address,
-            errno::errno()
-        );
-        return Err(io::Error::last_os_error())?;
+        if matches!(io::Error::last_os_error().kind(), io::ErrorKind::AddrInUse) {
+            // If we didn't have `listen_ports` used here, just assign a random address.
+            if listen_port == requested_address.port() {
+                trace!("listen -> `bind` failed with `AddrInUse`, trying to bind to a random port");
+                let unbound_address = match socket.domain {
+                    libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
+                        IpAddr::V4(Ipv4Addr::LOCALHOST),
+                        0,
+                    ))),
+                    libc::AF_INET6 => Ok(SockAddr::from(SocketAddr::new(
+                        IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+                        0,
+                    ))),
+                    invalid => Err(Bypass::Domain(invalid)),
+                }?;
+                bind_result =
+                    unsafe { FN_BIND(sockfd, unbound_address.as_ptr(), unbound_address.len()) };
+            }
+        }
+        if bind_result != 0 {
+            error!(
+                "listen -> Failed `bind` sockfd {:#?} to address {:#?} with errno {:#?}!",
+                sockfd,
+                unbound_address,
+                errno::errno()
+            );
+            return Err(io::Error::last_os_error())?;
+        }
     }
 
     // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
