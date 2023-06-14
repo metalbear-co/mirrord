@@ -278,8 +278,8 @@ impl LayerConfig {
     pub fn verify(&self) -> Result<(), ConfigError> {
         if self.pause {
             if self.agent.ephemeral {
-                return Err(ConfigError::Conflict("Pausing is not yet supported together with an ephemeral agent container.
-                Mutually exclusive arguments `--pause` and `--ephemeral-container` passed together.".to_string()));
+                Err(ConfigError::Conflict("Pausing is not yet supported together with an ephemeral agent container.
+                Mutually exclusive arguments `--pause` and `--ephemeral-container` passed together.".to_string()))?;
             }
             if !self.feature.network.incoming.is_steal() {
                 warn!("{PAUSE_WITHOUT_STEAL_WARNING}");
@@ -300,9 +300,9 @@ impl LayerConfig {
                 .header_filter
                 .is_some()
         {
-            return Err(ConfigError::Conflict(
+            Err(ConfigError::Conflict(
                 "Cannot use both HTTP header filter and path filter at the same time".to_string(),
-            ));
+            ))?;
         }
         if self
             .feature
@@ -326,7 +326,25 @@ impl LayerConfig {
                     .header_filter
                     .is_some())
         {
-            return Err(ConfigError::Conflict("Cannot use old http filter and new http filter at the same time. Use only `http_filter` instead of `http_header_filter`".to_string()));
+            Err(ConfigError::Conflict("Cannot use old http filter and new http filter at the same time. Use only `http_filter` instead of `http_header_filter`".to_string()))?;
+        }
+        if self.target.path.is_none() {
+            if self.target.namespace.is_some() {
+                Err(ConfigError::TargetNamespaceWithoutTarget)?;
+            }
+            if self.feature.network.incoming.is_steal() {
+                Err(ConfigError::Conflict("Steal mode is not compatible with a targetless agent, please either disable this option or specify a target.".into()))?;
+            }
+            if self.agent.ephemeral {
+                Err(ConfigError::Conflict(
+                    "Using an ephemeral container for the agent is not compatible with a targetless agent, please either disable this option or specify a target.".into(),
+                ))?;
+            }
+            if self.pause {
+                Err(ConfigError::Conflict(
+                    "The target pause feature is not compatible with a targetless agent, please either disable this option or specify a target.".into(),
+                ))?;
+            }
         }
         Ok(())
     }

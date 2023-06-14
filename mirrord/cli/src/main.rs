@@ -149,8 +149,6 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 
     let config = LayerConfig::from_env()?;
 
-    config.verify()?;
-
     #[cfg(target_os = "macos")]
     let execution_info =
         MirrordExecution::start(&config, Some(&args.binary), progress, None).await?;
