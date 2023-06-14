@@ -6,7 +6,7 @@ use mirrord_kube::{api::kubernetes::create_kube_api, error::KubeApiError};
 use mirrord_operator::{
     client::OperatorApiError,
     crd::{LicenseInfoOwned, MirrordOperatorCrd, MirrordOperatorSpec, OPERATOR_STATUS_NAME},
-    setup::{Operator, OperatorNamespace, OperatorSetup},
+    setup::{Operator, OperatorNamespace, OperatorSetup, SetupOptions},
 };
 use mirrord_progress::{Progress, TaskProgress};
 use prettytable::{row, Table};
@@ -25,6 +25,7 @@ async fn operator_setup(
     file: Option<PathBuf>,
     namespace: OperatorNamespace,
     license: Option<String>,
+    offline: bool,
 ) -> Result<()> {
     if !accept_tos {
         eprintln!("Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS");
@@ -38,7 +39,11 @@ async fn operator_setup(
             namespace.name()
         );
 
-        let operator = Operator::new(license, namespace);
+        let operator = Operator::new(SetupOptions {
+            license,
+            namespace,
+            offline,
+        });
 
         match file {
             Some(path) => {
@@ -171,6 +176,7 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             namespace,
             license_key,
             license_path,
+            offline,
         } => {
             let license = match license_path {
                 Some(path) => fs::read_to_string(&path)
@@ -182,7 +188,7 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
                 None => license_key,
             };
 
-            operator_setup(accept_tos, file, namespace, license).await
+            operator_setup(accept_tos, file, namespace, license, offline).await
         }
         OperatorCommand::Status { config_file } => operator_status(config_file).await,
         OperatorCommand::TelemetryExport { config_file } => {

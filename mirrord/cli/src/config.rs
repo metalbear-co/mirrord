@@ -234,12 +234,18 @@ pub(super) enum OperatorCommand {
         /// be able to access)
         #[arg(short, long, default_value = "mirrord")]
         namespace: OperatorNamespace,
+
+        /// Setup operator for offline telemetry collection
+        #[arg(long, hide = true)]
+        offline: bool,
     },
+    /// Print operator status
     Status {
         /// Specify config file to use
         #[arg(short = 'f')]
         config_file: Option<String>,
     },
+    /// Print telemtry export for offline operators
     TelemetryExport {
         /// Specify config file to use
         #[arg(short = 'f')]

@@ -79,6 +79,12 @@ pub trait OperatorSetup {
     fn to_writer<W: Write>(&self, writer: W) -> Result<()>;
 }
 
+pub struct SetupOptions {
+    pub license: String,
+    pub namespace: OperatorNamespace,
+    pub offline: bool,
+}
+
 #[derive(Debug)]
 pub struct Operator {
     api_service: OperatorApiService,
@@ -94,7 +100,13 @@ pub struct Operator {
 }
 
 impl Operator {
-    pub fn new(license: String, namespace: OperatorNamespace) -> Self {
+    pub fn new(options: SetupOptions) -> Self {
+        let SetupOptions {
+            license,
+            namespace,
+            offline,
+        } = options;
+
         let secret = OperatorLicenseSecret::new(&license, &namespace);
         let service_account = OperatorServiceAccount::new(&namespace);
 
@@ -104,7 +116,7 @@ impl Operator {
         let role_binding = OperatorRoleBinding::new(&role, &service_account);
 
         let deployment =
-            OperatorDeployment::new(&namespace, &service_account, &secret, &tls_secret);
+            OperatorDeployment::new(&namespace, &service_account, &secret, &tls_secret, offline);
 
         let pvc = OperatorPersistentVolumeClaim::new(&namespace);
 
@@ -196,7 +208,49 @@ impl OperatorDeployment {
         sa: &OperatorServiceAccount,
         license_secret: &OperatorLicenseSecret,
         tls_secret: &OperatorTlsSecret,
+        offline: bool,
     ) -> Self {
+        let mut envs = vec![
+            EnvVar {
+                name: "RUST_LOG".to_owned(),
+                value: Some("mirrord=info,operator=info".to_owned()),
+                value_from: None,
+            },
+            EnvVar {
+                name: "OPERATOR_ADDR".to_owned(),
+                value: Some(format!("0.0.0.0:{OPERATOR_PORT}")),
+                value_from: None,
+            },
+            EnvVar {
+                name: "OPERATOR_LICENSE_PATH".to_owned(),
+                value: Some(format!("/license/{OPERATOR_LICENSE_SECRET_FILE_NAME}")),
+                value_from: None,
+            },
+            EnvVar {
+                name: "OPERATOR_TLS_CERT_PATH".to_owned(),
+                value: Some(format!("/tls/{OPERATOR_TLS_CERT_FILE_NAME}")),
+                value_from: None,
+            },
+            EnvVar {
+                name: "OPERATOR_TLS_KEY_PATH".to_owned(),
+                value: Some(format!("/tls/{OPERATOR_TLS_KEY_FILE_NAME}")),
+                value_from: None,
+            },
+            EnvVar {
+                name: "OPERATOR_TELEMETRY_STATISITIC_STATE_PATH".to_owned(),
+                value: Some(format!("/state/{OPERATOR_PVC_STATISITCS_FILE_NAME}")),
+                value_from: None,
+            },
+        ];
+
+        if offline {
+            envs.push(EnvVar {
+                name: "OPERATOR_TELEMETRY_INGRESS_ADDR".to_owned(),
+                value: Some(format!("file:///state/telemetry")),
+                value_from: None,
+            });
+        }
+
         let container = Container {
             name: OPERATOR_NAME.to_owned(),
             image: Some(format!(
@@ -204,38 +258,7 @@ impl OperatorDeployment {
                 env!("CARGO_PKG_VERSION")
             )),
             image_pull_policy: Some("IfNotPresent".to_owned()),
-            env: Some(vec![
-                EnvVar {
-                    name: "RUST_LOG".to_owned(),
-                    value: Some("mirrord=info,operator=info".to_owned()),
-                    value_from: None,
-                },
-                EnvVar {
-                    name: "OPERATOR_ADDR".to_owned(),
-                    value: Some(format!("0.0.0.0:{OPERATOR_PORT}")),
-                    value_from: None,
-                },
-                EnvVar {
-                    name: "OPERATOR_LICENSE_PATH".to_owned(),
-                    value: Some(format!("/license/{OPERATOR_LICENSE_SECRET_FILE_NAME}")),
-                    value_from: None,
-                },
-                EnvVar {
-                    name: "OPERATOR_TLS_CERT_PATH".to_owned(),
-                    value: Some(format!("/tls/{OPERATOR_TLS_CERT_FILE_NAME}")),
-                    value_from: None,
-                },
-                EnvVar {
-                    name: "OPERATOR_TLS_KEY_PATH".to_owned(),
-                    value: Some(format!("/tls/{OPERATOR_TLS_KEY_FILE_NAME}")),
-                    value_from: None,
-                },
-                EnvVar {
-                    name: "OPERATOR_TELEMETRY_STATISITIC_STATE_PATH".to_owned(),
-                    value: Some(format!("/state/{OPERATOR_PVC_STATISITCS_FILE_NAME}")),
-                    value_from: None,
-                },
-            ]),
+            env: Some(envs),
             env_from: Some(vec![EnvFromSource {
                 secret_ref: Some(SecretEnvSource {
                     name: Some(license_secret.name().to_owned()),
