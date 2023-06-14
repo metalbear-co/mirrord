@@ -450,7 +450,7 @@
       ]
     },
     "HttpFilterFileConfig": {
-      "description": "Filter configuration for the HTTP traffic stealer feature.\n\nAllows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic feature only captures HTTP requests that match the specified filter, forwarding unmatched requests to their original destinations.\n\nOnly does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is set as `\"steal\"`, ignored otherwise.\n\n```json { \"filter\": \"host: api\\..+\", \"ports\": [80, 8080] } ```",
+      "description": "Filter configuration for the HTTP traffic stealer feature.\n\nAllows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic feature only captures HTTP requests that match the specified filter, forwarding unmatched requests to their original destinations.\n\nOnly does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is set as `\"steal\"`, ignored otherwise.\n\nfor example, to filter based on header: ```json { \"header_filter\": \"host: api\\..+\", } ```\n\nfor example, to filter based on path ```json { \"path_filter\": \"host: api\\..+\", } ```",
       "type": "object",
       "properties": {
         "header_filter": {
