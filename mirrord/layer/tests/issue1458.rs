@@ -80,3 +80,31 @@ async fn test_issue1458(
     test_process.assert_stdout_contains("test issue 1458: START");
     test_process.assert_stdout_contains("test issue 1458: SUCCESS");
 }
+
+/// Verify that we don't intercept UDP packets when `sendto` address' port is not `53`.
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[timeout(Duration::from_secs(60))]
+async fn test_issue1458_port_not_53(
+    #[values(Application::RustIssue1458PortNot53)] application: Application,
+    dylib_path: &PathBuf,
+) {
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(
+            dylib_path,
+            vec![
+                ("MIRRORD_FILE_MODE", "local"),
+                ("MIRRORD_UDP_OUTGOING", "false"),
+            ],
+            None,
+        )
+        .await;
+
+    println!("Application started, preparing to send UDP packet.");
+
+    assert!(layer_connection.codec.try_next().await.unwrap().is_none());
+
+    test_process.wait_assert_success().await;
+    test_process.assert_stdout_contains("test issue 1458 port not 53: START");
+    test_process.assert_stdout_contains("test issue 1458 port not 53: SUCCESS");
+}

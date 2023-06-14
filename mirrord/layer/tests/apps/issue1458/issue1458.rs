@@ -9,12 +9,14 @@ fn main() {
     let local_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let remote_addr: SocketAddr = "1.2.3.4:53".parse().unwrap();
 
-    let s = UdpSocket::bind(local_addr).unwrap();
-    let amount = s.send_to(&vec![0; 1], remote_addr).unwrap();
+    let socket = UdpSocket::bind(local_addr).unwrap();
+
+    // mirrord should intercept this
+    let amount = socket.send_to(&vec![0; 1], remote_addr).unwrap();
     assert_eq!(amount, 1);
 
     let mut recv_buffer = vec![0; 1];
-    let (amount, remote) = s.recv_from(&mut recv_buffer).unwrap();
+    let (amount, remote) = socket.recv_from(&mut recv_buffer).unwrap();
     assert_eq!(amount, 1);
     assert_eq!(remote_addr, remote);
     assert_eq!(recv_buffer, vec![1; 1]);

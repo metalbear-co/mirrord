@@ -749,6 +749,7 @@ pub enum Application {
     RustIssue1123,
     RustIssue1054,
     RustIssue1458,
+    RustIssue1458PortNot53,
     RustDnsResolve,
     RustRecvFrom,
     // For running applications with the executable and arguments determined at runtime.
@@ -824,6 +825,9 @@ impl Application {
             Application::RustIssue1123 => String::from("tests/apps/issue1123/target/issue1123"),
             Application::RustIssue1054 => String::from("tests/apps/issue1054/target/issue1054"),
             Application::RustIssue1458 => String::from("tests/apps/issue1458/target/issue1458"),
+            Application::RustIssue1458PortNot53 => {
+                String::from("tests/apps/issue1458portnot53/target/issue1458portnot53")
+            }
             Application::RustOutgoingUdp | Application::RustOutgoingTcp => format!(
                 "{}/{}",
                 env!("CARGO_MANIFEST_DIR"),
@@ -912,6 +916,7 @@ impl Application {
             | Application::RustIssue1123
             | Application::RustIssue1054
             | Application::RustIssue1458
+            | Application::RustIssue1458PortNot53
             | Application::RustDnsResolve
             | Application::RustRecvFrom
             | Application::EnvBashCat
@@ -974,6 +979,7 @@ impl Application {
             | Application::RustOutgoingUdp
             | Application::RustOutgoingTcp
             | Application::RustIssue1458
+            | Application::RustIssue1458PortNot53
             | Application::RustRecvFrom => unimplemented!("shouldn't get here"),
             #[cfg(target_os = "macos")]
             Application::DynamicApp(_, _) => unimplemented!("shouldn't get here"),
