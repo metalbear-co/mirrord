@@ -226,6 +226,15 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
+        mock.expect_insert_rule()
+            .with(
+                str::starts_with("MIRRORD_STANDARD_"),
+                str::starts_with("-m owner --gid-owner"),
+                eq(1),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
         mock.expect_create_chain()
             .with(str::starts_with("MIRRORD_STANDARD_"))
             .times(1)
@@ -234,11 +243,19 @@ mod tests {
         mock.expect_insert_rule()
             .with(
                 str::starts_with("MIRRORD_STANDARD_"),
-                eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(1),
             )
             .times(1)
             .returning(|_, _, _| Ok(()));
+
+        mock.expect_remove_rule()
+            .with(
+                str::starts_with("MIRRORD_STANDARD_"),
+                eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+            )
+            .times(1)
+            .returning(|_, _| Ok(()));
 
         mock.expect_add_rule()
             .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
