@@ -796,7 +796,7 @@ pub(super) fn recv_from(
         .get(&sockfd)
         .map(|socket| match &socket.state {
             SocketState::Connected(connected) => connected.remote_address.clone(),
-            _ => unreachable!(),
+            _ => unreachable!("BUG: We should only get here if this is a mirrord socket!"),
         })
         .map(SocketAddress::try_into)??;
 
@@ -816,10 +816,16 @@ pub(super) fn recv_from(
     Detour::Success(recv_from_result)
 }
 
+/// Implemented only for `destination.port == 53` for DNS resolution!
+///
 /// There is a bit of trickery going on here, as this function first triggers a _semantical_
 /// connection to an interceptor socket (we don't [`libc::connect`] this `sockfd`, just change the
 /// [`UserSocket`] state), and only then calls the actual [`libc::send_to`] to send `raw_message` to
 /// the interceptor address (instead of the `raw_destination`).
+///
+/// **Warning**: The above flow won't work if the user calls [`libc::sendto`] multiple times with
+/// different `raw_destination` addresses, so if we detect that `destination.port != 53`, then we
+/// remove the socket from our hands, and bypass.
 ///
 /// See [`recv_from`] for more information.
 #[tracing::instrument(
@@ -840,6 +846,11 @@ pub(super) fn send_to(
     let (_, user_socket_info) = SOCKETS
         .remove(&sockfd)
         .ok_or(Bypass::LocalFdNotFound(sockfd))?;
+
+    // Currently this flow only handles DNS resolution.
+    if let Some(destination) = destination.as_socket() && destination.port() != 53 {
+        return Detour::Bypass(Bypass::Port(destination.port()));
+    }
 
     connect_outgoing::<UDP, false>(sockfd, destination, user_socket_info)?;
 
