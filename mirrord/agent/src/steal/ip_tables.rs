@@ -208,6 +208,10 @@ mod tests {
             .with(eq("OUTPUT"))
             .returning(|_| Ok(vec![]));
 
+        mock.expect_list_rules()
+            .with(str::starts_with("MIRRORD_STANDARD_"))
+            .returning(|_| Ok(vec![]));
+
         mock.expect_create_chain()
             .with(str::starts_with("MIRRORD_INPUT_"))
             .times(1)
