@@ -63,10 +63,17 @@ pub struct HttpHeaderFilterConfig {
 /// Only does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is
 /// set as `"steal"`, ignored otherwise.
 ///
+/// for example, to filter based on header:
 /// ```json
 /// {
-///   "filter": "host: api\..+",
-///   "ports": [80, 8080]
+///   "header_filter": "host: api\..+",
+/// }
+/// ```
+///
+/// for example, to filter based on path
+/// ```json
+/// {
+///   "path_filter": "host: api\..+",
 /// }
 /// ```
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
