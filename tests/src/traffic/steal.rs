@@ -158,11 +158,6 @@ mod steal {
         let mut config_path = config_dir.clone();
         config_path.push("http_filter_header.json");
 
-        let mut flags = Vec::new();
-        if let Some(flag) = agent.flag() {
-            flags.extend(flag)
-        }
-
         let mut client = application
             .run(
                 &service.target,
@@ -203,16 +198,11 @@ mod steal {
         let mut config_path = config_dir.clone();
         config_path.push("http_filter_path.json");
 
-        let mut flags = Vec::new();
-        if let Some(flag) = agent.flag() {
-            flags.extend(flag)
-        }
-
         let mut client = application
             .run(
                 &service.target,
                 Some(&service.namespace),
-                Some(flags),
+                agent.flag(),
                 Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
             )
             .await;
