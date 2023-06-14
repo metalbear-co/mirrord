@@ -25,6 +25,13 @@ app.delete("/", (req, res) => {
   process.kill(process.pid)
 });
 
+app.delete("/api/v1", (req, res) => {
+  console.log("/api/v1/ DELETE: Request completed");
+  res.send("DELETE");
+  server.close();
+  process.kill(process.pid)
+});
+
 var server = app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
