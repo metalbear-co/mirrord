@@ -213,7 +213,12 @@ mod steal {
         // Send a GET that should go through to remote
         let req_client = reqwest::Client::new();
         let req_builder = req_client.get(&url);
-        send_request(req_builder, Some("GET: Request completed"), headers.clone()).await;
+        send_request(
+            req_builder,
+            Some("OK - GET: Request completed\n"),
+            headers.clone(),
+        )
+        .await;
 
         // Send a DELETE that should match and cause the local app to return specific response
         // and also make the process quit.
