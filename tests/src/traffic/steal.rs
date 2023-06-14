@@ -162,7 +162,7 @@ mod steal {
             .run(
                 &service.target,
                 Some(&service.namespace),
-                Some(flags),
+                None,
                 Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
             )
             .await;
@@ -202,19 +202,17 @@ mod steal {
             .run(
                 &service.target,
                 Some(&service.namespace),
-                Some(flags),
+                None,
                 Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
             )
             .await;
 
         client.wait_for_line(Duration::from_secs(40), "daemon subscribed");
 
-        let mut headers = HeaderMap::default();
-
+        let headers = HeaderMap::default();
         // Send a GET that should go through
         let req_client = reqwest::Client::new();
         let req_builder = req_client.get(&url);
-        let mut headers = HeaderMap::default();
         send_request(req_builder, Some("GET"), headers.clone()).await;
 
         // Send a DELETE that should not be matched and thus not stolen.
@@ -222,7 +220,6 @@ mod steal {
         let mut match_url = Url::parse(&url).unwrap();
         match_url.set_path("/api/v1");
         let req_builder = req_client.delete(match_url);
-        let mut headers = HeaderMap::default();
         send_request(req_builder, None, headers.clone()).await;
 
         tokio::time::timeout(Duration::from_secs(40), client.child.wait())
