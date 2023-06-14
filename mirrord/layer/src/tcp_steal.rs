@@ -222,9 +222,12 @@ impl TcpHandler for TcpStealHandler {
         let request_port = listen.requested_port;
 
         if self.ports_mut().replace(listen).is_some() {
-            // This can also be because we currently don't inform the tcp handler when an app closes
-            // a socket (stops listening).
-            info!("Received listen hook message for port {request_port} while already listening. Might be on different address",);
+            // Since this struct identifies listening sockets by their port (#1558), we can only
+            // forward the incoming traffic to one socket with that port.
+            info!(
+                "Received listen hook message for port {request_port} while already listening. \
+                Might be on different address. Sending all incoming traffic to newest socket."
+            );
             return Ok(());
         }
 
