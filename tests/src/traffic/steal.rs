@@ -184,7 +184,7 @@ mod steal {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
-    async fn filter_with_single_client_and_only_matching_requests_by_path(
+    async fn filter_with_single_client_requests_by_path(
         config_dir: &std::path::PathBuf,
         #[future] service: KubeService,
         #[future] kube_client: Client,
@@ -210,12 +210,13 @@ mod steal {
         client.wait_for_line(Duration::from_secs(40), "daemon subscribed");
 
         let headers = HeaderMap::default();
-        // Send a GET that should go through
+        // Send a GET that should go through to remote
         let req_client = reqwest::Client::new();
         let req_builder = req_client.get(&url);
         send_request(req_builder, Some("GET: Request completed"), headers.clone()).await;
 
-        // Send a DELETE that should not be matched and thus not stolen.
+        // Send a DELETE that should match and cause the local app to return specific response
+        // and also make the process quit.
         let req_client = reqwest::Client::new();
         let mut match_url = Url::parse(&url).unwrap();
         match_url.set_path("/api/v1");
