@@ -90,10 +90,7 @@ use libc::c_int;
 use mirrord_config::{
     feature::{
         fs::{FsConfig, FsModeConfig},
-        network::{
-            incoming::{http_filter::HttpHeaderFilterConfig, IncomingConfig},
-            NetworkConfig,
-        },
+        network::{incoming::IncomingConfig, NetworkConfig},
         FeatureConfig,
     },
     util::VecOrSingle,
@@ -569,10 +566,12 @@ impl Layer {
         let (http_response_sender, http_response_receiver) = channel(1024);
         let steal = incoming.is_steal();
         let IncomingConfig {
-            http_header_filter: HttpHeaderFilterConfig { filter, ports },
+            http_header_filter,
+            http_filter,
             port_mapping,
             ..
         } = incoming;
+
         Self {
             tx,
             rx,
@@ -583,10 +582,9 @@ impl Layer {
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
             tcp_steal_handler: TcpStealHandler::new(
-                filter,
-                ports.into(),
                 http_response_sender,
                 port_mapping,
+                (http_filter, http_header_filter).into(),
             ),
             http_response_receiver,
             steal,

@@ -19,10 +19,7 @@ use tracing::{info, trace};
 
 use crate::{
     connection::{create_and_connect, AgentConnectInfo, AgentConnection},
-    error::{
-        CliError,
-        CliError::{IncompatibleWithTargetless, TargetNamespaceWithoutTarget},
-    },
+    error::CliError,
     extract::extract_library,
     Result,
 };
@@ -57,7 +54,7 @@ impl MirrordExecution {
     where
         P: Progress + Send + Sync,
     {
-        Self::check_config_for_targetless_agent(config)?;
+        config.verify()?;
         let lib_path = extract_library(None, progress, true)?;
         let mut env_vars = HashMap::new();
         let (connect_info, mut connection) = create_and_connect(config, progress).await?;
@@ -243,35 +240,6 @@ impl MirrordExecution {
             }
             msg => Err(CliError::InvalidMessage(format!("{msg:#?}"))),
         }
-    }
-
-    /// Some features are incompatible with targetless agents, return error if they are set and
-    /// there is no target.
-    ///
-    /// # Errors
-    ///
-    /// * [`IncompatibleWithTargetless`]
-    /// * [`TargetNamespaceWithoutTarget`]
-    fn check_config_for_targetless_agent(config: &LayerConfig) -> Result<()> {
-        if config.target.path.is_none() {
-            if config.target.namespace.is_some() {
-                Err(TargetNamespaceWithoutTarget)?
-            }
-            if config.feature.network.incoming.is_steal() {
-                Err(IncompatibleWithTargetless("Steal mode".into()))?
-            }
-            if config.agent.ephemeral {
-                Err(IncompatibleWithTargetless(
-                    "Using an ephemeral container for the agent".into(),
-                ))?
-            }
-            if config.pause {
-                Err(IncompatibleWithTargetless(
-                    "The target pause feature".into(),
-                ))?
-            }
-        }
-        Ok(())
     }
 
     /// Wait for the internal proxy to exit.
