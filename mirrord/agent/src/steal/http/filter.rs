@@ -53,6 +53,21 @@ pub(crate) enum HttpFilter {
     Path(HttpPathFilter),
 }
 
+impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
+    type Error = fancy_regex::Error;
+
+    fn try_from(filter: &mirrord_protocol::tcp::HttpFilter) -> Result<Self, Self::Error> {
+        match filter {
+            mirrord_protocol::tcp::HttpFilter::Header(header) => Ok(Self::Header(
+                HttpHeaderFilter(Regex::new(&format!("(?i){header}"))?),
+            )),
+            mirrord_protocol::tcp::HttpFilter::Path(path) => Ok(Self::Path(HttpPathFilter(
+                Regex::new(&format!("(?i){path}"))?,
+            ))),
+        }
+    }
+}
+
 impl HttpFilter {
     pub fn new_header_filter(header: Regex) -> Self {
         Self::Header(HttpHeaderFilter(header))

@@ -17,7 +17,7 @@ where
 
     fn source_value(self) -> Option<Result<Self::Value>> {
         self.1.source_value().map(|result| {
-            println!("{}", self.0);
+            tracing::warn!("{}", self.0);
             result
         })
     }

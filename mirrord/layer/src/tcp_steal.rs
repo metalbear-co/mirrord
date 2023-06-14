@@ -8,8 +8,8 @@ use futures::TryFutureExt;
 use hyper::{body::Incoming, Response, StatusCode};
 use mirrord_protocol::{
     tcp::{
-        Filter, HttpRequest, HttpResponse, LayerTcpSteal, NewTcpConnection,
-        StealType::{All, FilteredHttp},
+        Filter, HttpFilter, HttpRequest, HttpResponse, LayerTcpSteal, NewTcpConnection,
+        StealType::{All, FilteredHttp, FilteredHttpEx},
         TcpClose, TcpData,
     },
     ClientMessage, ConnectionId, Port, RequestId,
@@ -32,6 +32,7 @@ use crate::{
 
 pub(crate) mod http_forwarding;
 
+use self::http::{HttpFilterSettings, LayerHttpFilter};
 use crate::tcp_steal::http_forwarding::HttpForwarderError;
 
 mod http;
@@ -102,11 +103,8 @@ pub struct TcpStealHandler {
     /// This sender is cloned and moved into those tasks.
     http_response_sender: Sender<HttpResponse>,
 
-    /// A string with a header regex to filter HTTP requests by.
-    http_filter: Option<String>,
-
-    /// These ports would be filtered with the `http_filter`, if it's Some.
-    http_ports: Vec<u16>,
+    /// HTTP filter settings
+    http_filter_settings: HttpFilterSettings,
 
     /// LocalPort:RemotePort mapping.
     port_mapping: BiMap<u16, u16>,
@@ -230,8 +228,20 @@ impl TcpHandler for TcpStealHandler {
             return Ok(());
         }
 
-        let steal_type = if self.http_ports.contains(&original_port) && let Some(filter_str) = self.http_filter.take() {
-            FilteredHttp(request_port, Filter::new(filter_str)?)
+        let steal_type = if self.http_filter_settings.ports.contains(&original_port) {
+            match self.http_filter_settings.filter {
+                LayerHttpFilter::None => All(request_port),
+                LayerHttpFilter::HeaderDeprecated(ref header) => {
+                    FilteredHttp(request_port, Filter::new(header.clone())?)
+                }
+                LayerHttpFilter::Header(ref header) => FilteredHttpEx(
+                    request_port,
+                    HttpFilter::Header(Filter::new(header.clone())?),
+                ),
+                LayerHttpFilter::Path(ref path) => {
+                    FilteredHttpEx(request_port, HttpFilter::Path(Filter::new(path.clone())?))
+                }
+            }
         } else {
             All(request_port)
         };
@@ -246,10 +256,9 @@ impl TcpHandler for TcpStealHandler {
 
 impl TcpStealHandler {
     pub(crate) fn new(
-        http_filter: Option<String>,
-        http_ports: Vec<u16>,
         http_response_sender: Sender<HttpResponse>,
         port_mapping: BiMap<u16, u16>,
+        http_filter_settings: HttpFilterSettings,
     ) -> Self {
         Self {
             ports: Default::default(),
@@ -257,8 +266,7 @@ impl TcpStealHandler {
             read_streams: Default::default(),
             http_request_senders: Default::default(),
             http_response_sender,
-            http_filter,
-            http_ports,
+            http_filter_settings,
             port_mapping,
         }
     }
