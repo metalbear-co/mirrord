@@ -82,6 +82,9 @@ async fn test_issue1458(
 }
 
 /// Verify that we don't intercept UDP packets when `sendto` address' port is not `53`.
+///
+/// TODO(alex): When we fully implement proper UDP handling, this test will fail with some missing
+/// message (just delete it), you've been warned.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[timeout(Duration::from_secs(60))]
