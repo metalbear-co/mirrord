@@ -27,7 +27,7 @@ app.delete("/", (req, res) => {
 
 app.delete("/api/v1", (req, res) => {
   console.log("/api/v1/ DELETE: Request completed");
-  res.send("DELETE");
+  res.send("DELETEV1");
   server.close();
   process.kill(process.pid)
 });

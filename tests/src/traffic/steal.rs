@@ -223,14 +223,14 @@ mod steal {
         // Send a GET that should go through
         let req_client = reqwest::Client::new();
         let req_builder = req_client.get(&url);
-        send_request(req_builder, Some("GET"), headers.clone()).await;
+        send_request(req_builder, Some("GET: Request completed"), headers.clone()).await;
 
         // Send a DELETE that should not be matched and thus not stolen.
         let req_client = reqwest::Client::new();
         let mut match_url = Url::parse(&url).unwrap();
         match_url.set_path("/api/v1");
         let req_builder = req_client.delete(match_url);
-        send_request(req_builder, None, headers.clone()).await;
+        send_request(req_builder, Some("DELETEV1"), headers.clone()).await;
 
         tokio::time::timeout(Duration::from_secs(40), client.child.wait())
             .await
