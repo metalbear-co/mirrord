@@ -246,7 +246,7 @@ impl OperatorDeployment {
         if offline {
             envs.push(EnvVar {
                 name: "OPERATOR_TELEMETRY_INGRESS_ADDR".to_owned(),
-                value: Some(format!("file:///state/telemetry")),
+                value: Some("file:///state/telemetry".to_owned()),
                 value_from: None,
             });
         }
