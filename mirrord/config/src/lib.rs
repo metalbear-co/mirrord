@@ -28,15 +28,15 @@ use crate::{
 
 const PAUSE_WITHOUT_STEAL_WARNING: &str =
     "--pause specified without --steal: Incoming requests to the application will
-                                           not be handled. The target container running the deployed application is paused,
-                                           and responses from the local application are dropped.
+    not be handled. The target container running the deployed application is paused,
+    and responses from the local application are dropped.
 
-                                           Attention: if network based liveness/readiness probes are defined for the
-                                           target, they will fail under this configuration.
+    Attention: if network based liveness/readiness probes are defined for the
+    target, they will fail under this configuration.
 
-                                           To have the local application handle incoming requests you can run again with
-                                           `--steal`. To have the deployed application handle requests, run again without
-                                           specifying `--pause`.
+    To have the local application handle incoming requests you can run again with
+    `--steal`. To have the deployed application handle requests, run again without
+    specifying `--pause`.
     ";
 
 /// mirrord allows for a high degree of customization when it comes to which features you want to
