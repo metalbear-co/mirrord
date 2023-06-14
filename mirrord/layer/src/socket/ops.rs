@@ -177,6 +177,10 @@ pub(super) fn bind(
         Err(HookError::AddressAlreadyBound(requested_address))?;
     }
 
+    // Try to bind a port from listen ports, if no configuration
+    // try to bind the requested port, if not available get a random port
+    // if there's configuration and binding fails with the requested port
+    // we return address not available and not fallback to a random port.
     let listen_port = LISTEN_PORTS
         .get()
         .expect("`LISTEN_PORTS` not set. Please report a bug")
@@ -198,29 +202,34 @@ pub(super) fn bind(
 
     trace!("bind -> unbound_address {:#?}", unbound_address);
 
-    let mut bind_result =
-        unsafe { FN_BIND(sockfd, unbound_address.as_ptr(), unbound_address.len()) };
+    let bind_result = unsafe { FN_BIND(sockfd, unbound_address.as_ptr(), unbound_address.len()) };
     if bind_result != 0 {
-        if matches!(io::Error::last_os_error().kind(), io::ErrorKind::AddrInUse) {
-            // If we didn't have `listen_ports` used here, just assign a random address.
-            if listen_port == requested_address.port() {
-                trace!("listen -> `bind` failed with `AddrInUse`, trying to bind to a random port");
-                let unbound_address = match socket.domain {
-                    libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
-                        IpAddr::V4(Ipv4Addr::LOCALHOST),
-                        0,
-                    ))),
-                    libc::AF_INET6 => Ok(SockAddr::from(SocketAddr::new(
-                        IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                        0,
-                    ))),
-                    invalid => Err(Bypass::Domain(invalid)),
-                }?;
-                bind_result =
-                    unsafe { FN_BIND(sockfd, unbound_address.as_ptr(), unbound_address.len()) };
+        // If we didn't have `listen_ports` used here, just assign a random address.
+        if listen_port == requested_address.port() {
+            trace!("listen -> `bind` failed with `AddrInUse`, trying to bind to a random port");
+            let unbound_address = match socket.domain {
+                libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
+                    IpAddr::V4(Ipv4Addr::LOCALHOST),
+                    0,
+                ))),
+                libc::AF_INET6 => Ok(SockAddr::from(SocketAddr::new(
+                    IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+                    0,
+                ))),
+                invalid => Err(Bypass::Domain(invalid)),
+            }?;
+            let bind_result =
+                unsafe { FN_BIND(sockfd, unbound_address.as_ptr(), unbound_address.len()) };
+            if bind_result != 0 {
+                error!(
+                    "listen -> Failed `bind` sockfd {:#?} to address {:#?} with errno {:#?}!",
+                    sockfd,
+                    unbound_address,
+                    errno::errno()
+                );
+                return Err(io::Error::last_os_error())?;
             }
-        }
-        if bind_result != 0 {
+        } else {
             error!(
                 "listen -> Failed `bind` sockfd {:#?} to address {:#?} with errno {:#?}!",
                 sockfd,
