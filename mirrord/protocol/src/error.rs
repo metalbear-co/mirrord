@@ -5,7 +5,11 @@ use thiserror::Error;
 use tracing::warn;
 use trust_dns_resolver::error::{ResolveError, ResolveErrorKind};
 
-use crate::{outgoing::SocketAddress, tcp::Filter, Port};
+use crate::{
+    outgoing::SocketAddress,
+    tcp::{Filter, HttpFilter},
+    Port,
+};
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
 pub enum SerializationError {
@@ -61,6 +65,9 @@ pub enum RemoteError {
 
     #[error(r#"Got bad regex "{0}" for http filter subscriptions. Regex error: `{1}`."#)]
     BadHttpFilterRegex(Filter, String),
+
+    #[error(r#"Got bad regex "{0:?}" for http filter subscriptions. Regex error: `{1}`."#)]
+    BadHttpFilterExRegex(HttpFilter, String),
 }
 
 impl From<AddrParseError> for RemoteError {
