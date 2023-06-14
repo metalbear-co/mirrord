@@ -162,7 +162,7 @@ mod steal {
             .run(
                 &service.target,
                 Some(&service.namespace),
-                Some(flags),
+                agent.flag(),
                 Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
             )
             .await;
