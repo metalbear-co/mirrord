@@ -6,6 +6,8 @@ We welcome new/junior/starting developers. Feel free to join to our [Discord cha
 If you would like to start working on an issue, please comment on the issue on GitHub, so that we can assign you to that
 issue.
 
+Make sure to take a look at the project's [style guide](STYLE.md).
+
 # Contents
 
 - [Contents](#contents)
