@@ -35,9 +35,11 @@ async fn test_issue1054(
     println!("Application subscribed to port, sending tcp messages.");
 
     let new_connection_id = layer_connection
-        .send_new_connection(application.get_app_port())
+        .send_new_connection::<false>(application.get_app_port())
         .await;
-    layer_connection.send_close(new_connection_id).await;
+    layer_connection
+        .send_close::<false>(new_connection_id)
+        .await;
 
     test_process.wait_assert_success().await;
     test_process.assert_stdout_contains("test issue 1054: START");

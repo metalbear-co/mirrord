@@ -13,13 +13,18 @@ use chrono::{Timelike, Utc};
 use fancy_regex::Regex;
 use futures::{SinkExt, StreamExt};
 use mirrord_protocol::{
+    dns::{self, DnsLookup, GetAddrInfoResponse, LookupRecord},
     file::{
         AccessFileRequest, AccessFileResponse, OpenFileRequest, OpenOptionsInternal,
         ReadFileRequest, SeekFromInternal, XstatRequest, XstatResponse,
     },
-    tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
-    ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse,
+    tcp::{DaemonTcp, LayerTcp, LayerTcpSteal, NewTcpConnection, TcpClose, TcpData},
+    ClientMessage,
+    ClientMessage::{GetAddrInfoRequest, TcpSteal},
+    DaemonCodec, DaemonMessage, FileRequest, FileResponse,
 };
+#[cfg(target_os = "macos")]
+use mirrord_sip::sip_patch;
 use rstest::fixture;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
@@ -312,7 +317,7 @@ impl LayerConnection {
             .expect("Close request success!")
             .expect("Close request exists!");
 
-        println!("Should be a close file request: {read_request:#?}");
+        println!("Should be a close file request: {close_request:#?}");
         assert_eq!(
             close_request,
             ClientMessage::FileRequest(FileRequest::Close(
@@ -325,8 +330,8 @@ impl LayerConnection {
             .codec
             .next()
             .await
-            .expect("PortSubscribe request success!")
-            .expect("PortSubscribe request exists!");
+            .expect("PortSubscribe request expected, but there are no more messages.")
+            .expect("Reading client message failed.");
         assert_eq!(
             port_subscribe,
             ClientMessage::Tcp(LayerTcp::PortSubscribe(port))
@@ -343,52 +348,69 @@ impl LayerConnection {
     /// There is no such actual connection, because there is no target, but the layer should start
     /// a mirror connection with the application.
     /// Return the id of the new connection.
-    pub async fn send_new_connection(&mut self, port: u16) -> u64 {
+    pub async fn send_new_connection<const STEAL: bool>(&mut self, port: u16) -> u64 {
         let new_connection_id = self.num_connections;
-        self.codec
-            .send(DaemonMessage::Tcp(DaemonTcp::NewConnection(
-                NewTcpConnection {
-                    connection_id: new_connection_id,
-                    remote_address: "127.0.0.1".parse().unwrap(),
-                    destination_port: port,
-                    source_port: "31415".parse().unwrap(),
-                    local_address: "1.1.1.1".parse().unwrap(),
-                },
-            )))
-            .await
-            .unwrap();
+        let daemon_tcp = DaemonTcp::NewConnection(NewTcpConnection {
+            connection_id: new_connection_id,
+            remote_address: "127.0.0.1".parse().unwrap(),
+            destination_port: port,
+            source_port: "31415".parse().unwrap(),
+            local_address: "1.1.1.1".parse().unwrap(),
+        });
+        let message_wrapping = if STEAL {
+            DaemonMessage::TcpSteal
+        } else {
+            DaemonMessage::Tcp
+        };
+        self.codec.send(message_wrapping(daemon_tcp)).await.unwrap();
         self.num_connections += 1;
         new_connection_id
     }
 
-    async fn send_tcp_data(&mut self, message_data: &str, connection_id: u64) {
-        self.codec
-            .send(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
-                connection_id,
-                bytes: Vec::from(message_data),
-            })))
-            .await
-            .unwrap();
+    async fn send_tcp_data<const STEAL: bool>(&mut self, message_data: &str, connection_id: u64) {
+        let daemon_tcp = DaemonTcp::Data(TcpData {
+            connection_id,
+            bytes: Vec::from(message_data),
+        });
+        let message_wrapping = if STEAL {
+            DaemonMessage::TcpSteal
+        } else {
+            DaemonMessage::Tcp
+        };
+
+        self.codec.send(message_wrapping(daemon_tcp)).await.unwrap();
     }
 
     /// Send the layer a message telling it the target got a new incoming connection.
     /// There is no such actual connection, because there is no target, but the layer should start
     /// a mirror connection with the application.
     /// Return the id of the new connection.
-    pub async fn send_close(&mut self, connection_id: u64) {
-        self.codec
-            .send(DaemonMessage::Tcp(DaemonTcp::Close(TcpClose {
-                connection_id,
-            })))
-            .await
-            .unwrap();
+    pub async fn send_close<const STEAL: bool>(&mut self, connection_id: u64) {
+        let daemon_tcp = DaemonTcp::Close(TcpClose { connection_id });
+        let message_wrapping = if STEAL {
+            DaemonMessage::TcpSteal
+        } else {
+            DaemonMessage::Tcp
+        };
+        self.codec.send(message_wrapping(daemon_tcp)).await.unwrap();
     }
 
     /// Tell the layer there is a new incoming connection, then send data "from that connection".
-    pub async fn send_connection_then_data(&mut self, message_data: &str, port: u16) {
-        let new_connection_id = self.send_new_connection(port).await;
-        self.send_tcp_data(message_data, new_connection_id).await;
-        self.send_close(new_connection_id).await;
+    pub async fn send_connection_then_data<const STEAL: bool>(
+        &mut self,
+        message_data: &str,
+        port: u16,
+    ) {
+        let new_connection_id = self.send_new_connection::<STEAL>(port).await;
+        self.send_tcp_data::<STEAL>(message_data, new_connection_id)
+            .await;
+        if STEAL {
+            // Expect response data.
+            let next_message = self.codec.next().await.unwrap().unwrap();
+            let TcpSteal(LayerTcpSteal::Data(TcpData{ connection_id, .. })) = next_message else { panic!("Unexpected message from layer in test - expected TcpResponse got {next_message:?}") };
+            assert_eq!(connection_id, new_connection_id)
+        }
+        self.send_close::<STEAL>(new_connection_id).await;
     }
 
     /// Verify layer hooks an `open` of file `file_name` with only read flag set. Send back answer
@@ -448,6 +470,14 @@ impl LayerConnection {
             },
         )
         .await
+    }
+
+    pub async fn expect_port_subscribe(&mut self, port: u16) {
+        // Verify the app tries to open the expected file.
+        assert_eq!(
+            self.codec.next().await.unwrap().unwrap(),
+            ClientMessage::Tcp(LayerTcp::PortSubscribe(port))
+        );
     }
 
     /// Verify layer hooks an `open` of file `file_name` with given open options, send back answer
@@ -704,6 +734,32 @@ impl LayerConnection {
 
         self.expect_file_close(fd).await;
     }
+
+    /// Keep listening to incoming messages and eprint them.
+    ///
+    /// Can be used to keep tasks going as long as the connection exists, preventing tasks from
+    /// hanging up on layers.
+    pub async fn print_all_subsequent_messages(&mut self, prefix: &str) {
+        while let Some(message) = self.codec.next().await {
+            eprintln!("{prefix}{:?}", message.unwrap());
+        }
+    }
+
+    pub async fn expect_get_addr(&mut self, name_to_addr: HashMap<&str, &str>) {
+        let next_message = self.codec.next().await.unwrap().unwrap();
+        let GetAddrInfoRequest(dns::GetAddrInfoRequest { node: name }) = next_message else {panic!("expected GetAddrInfoRequest, got {next_message:?}")};
+        let ip = name_to_addr
+            .get(name.as_str())
+            .expect("Unexpected node in GetAddrInfoRequest")
+            .parse()
+            .unwrap();
+        self.codec
+            .send(DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(Ok(
+                DnsLookup(vec![LookupRecord { name, ip }]),
+            ))))
+            .await
+            .unwrap();
+    }
 }
 
 /// Various applications used by integration tests.
@@ -753,6 +809,7 @@ pub enum Application {
     RustDnsResolve,
     RustRecvFrom,
     RustListenPorts,
+    Relisten,
     // For running applications with the executable and arguments determined at runtime.
     // Compiled only on macos just because it's currently only used there, but could be used also
     // on Linux.
@@ -783,6 +840,7 @@ impl Application {
 
     pub async fn get_executable(&self) -> String {
         match self {
+            Application::Relisten => String::from("npm"),
             Application::PythonFlaskHTTP
             | Application::PythonSelfConnect
             | Application::PythonDontLoad
@@ -862,6 +920,15 @@ impl Application {
         let mut app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         app_path.push("tests/apps/");
         match self {
+            Application::Relisten => {
+                app_path.push("relisten");
+                vec![
+                    String::from("start"),
+                    // In order to start an app not in the current dir:
+                    String::from("--prefix"),
+                    app_path.to_string_lossy().to_string(),
+                ]
+            }
             Application::PythonFlaskHTTP => {
                 app_path.push("app_flask.py");
                 println!("using flask server from {app_path:?}");
@@ -956,6 +1023,7 @@ impl Application {
             | Application::RustIssue1123
             | Application::RustIssue1054
             | Application::PythonFlaskHTTP => 80,
+            Application::Relisten => 3000,
             Application::PythonFastApiHTTP => 1234,
             Application::PythonListen => 21232,
             Application::PythonDontLoad
@@ -1000,6 +1068,10 @@ impl Application {
     /// Start the test process with the given env.
     async fn get_test_process(&self, env: HashMap<&str, &str>) -> TestProcess {
         let executable = self.get_executable().await;
+        #[cfg(target_os = "macos")]
+        let executable = sip_patch(&executable, &Vec::new())
+            .unwrap()
+            .unwrap_or(executable);
         println!("Using executable: {}", &executable);
         println!("Using args: {:?}", self.get_args());
         TestProcess::start_process(executable, self.get_args(), env).await

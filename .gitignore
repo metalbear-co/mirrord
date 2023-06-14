@@ -13,6 +13,9 @@ build/
 ### go tests ###
 *.go_test_app
 
+### create-react-app test app ###
+mirrord/layer/tests/apps/relisten
+
 ### VSCode ###
 vscode-ext/bin
 

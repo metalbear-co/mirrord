@@ -310,6 +310,9 @@ jobs:
       - uses: actions/setup-node@v3 # For http mirroring test.
         with:
           node-version: 14
+      - run: |
+          cd mirrord/layer/tests/apps
+          npx create-react-app relisten
       - run: npm install express # For http mirroring test with node.
       - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
       - run: pip3 install flask # For http mirroring test with Flask.
@@ -415,6 +418,9 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 14
+      - run: |
+          cd mirrord/layer/tests/apps
+          npx create-react-app relisten
       - run: npm install express # For http mirroring test with node.
       - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
       - run: pip3 install flask # For http mirroring test with Flask.
