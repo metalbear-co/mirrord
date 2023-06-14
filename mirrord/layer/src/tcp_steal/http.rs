@@ -1,10 +1,13 @@
 //! # [`HttpV`]
 //!
 //! # [`ConnectionTask`]
-use std::{future::Future, net::SocketAddr};
+use std::{collections::HashSet, future::Future, net::SocketAddr};
 
 use futures::FutureExt;
 use hyper::{body::Incoming, Response};
+use mirrord_config::feature::network::incoming::http_filter::{
+    HttpFilterConfig, HttpHeaderFilterConfig,
+};
 use mirrord_protocol::{
     tcp::{HttpRequest, HttpResponse},
     ConnectionId, Port,
@@ -193,5 +196,54 @@ where
         });
 
         Ok(HttpV::new(http_request_sender))
+    }
+}
+
+pub(crate) enum LayerHttpFilter {
+    /// No filter
+    None,
+    /// HTTP Header match, to be removed once deprecated.
+    HeaderDeprecated(String),
+    /// HTTP Header match, new
+    Header(String),
+    /// Header or Path, new HTTP filter.
+    Path(String),
+}
+
+pub(crate) struct HttpFilterSettings {
+    /// The HTTP filter to use.
+    pub(crate) filter: LayerHttpFilter,
+    /// Ports to filter HTTP on
+    pub(crate) ports: HashSet<Port>,
+}
+
+impl From<(HttpFilterConfig, HttpHeaderFilterConfig)> for HttpFilterSettings {
+    fn from(
+        (http_filter_config, http_header_filter_config): (HttpFilterConfig, HttpHeaderFilterConfig),
+    ) -> Self {
+        let ports = {
+            if http_header_filter_config.filter.is_some() {
+                http_header_filter_config.ports
+            } else {
+                http_filter_config.ports
+            }
+        }
+        .into();
+
+        let filter = match (
+            http_filter_config.path_filter,
+            http_filter_config.header_filter,
+            http_header_filter_config.filter,
+        ) {
+            (Some(path), None, None) => LayerHttpFilter::Path(path),
+            (None, Some(header), None) => LayerHttpFilter::Header(header),
+            (None, None, Some(header)) => LayerHttpFilter::HeaderDeprecated(header),
+            (None, None, None) => LayerHttpFilter::None,
+            _ => {
+                unreachable!("Only one HTTP filter can be specified at a time, please report bug, config should fail before this.")
+            }
+        };
+
+        HttpFilterSettings { filter, ports }
     }
 }

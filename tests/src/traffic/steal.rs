@@ -7,14 +7,14 @@ mod steal {
     };
 
     use kube::Client;
-    use reqwest::header::HeaderMap;
+    use reqwest::{header::HeaderMap, Url};
     use rstest::*;
     use tokio_tungstenite::connect_async;
 
     use crate::utils::{
-        get_service_host_and_port, get_service_url, http2_service, kube_client, send_request,
-        send_requests, service, tcp_echo_service, websocket_service, Agent, Application,
-        KubeService,
+        config_dir, get_service_host_and_port, get_service_url, http2_service, kube_client,
+        send_request, send_requests, service, tcp_echo_service, websocket_service, Agent,
+        Application, KubeService,
     };
 
     #[cfg(target_os = "linux")]
@@ -132,6 +132,101 @@ mod steal {
         let mut headers = HeaderMap::default();
         headers.insert("x-filter", "yes".parse().unwrap());
         send_requests(&url, true, headers).await;
+
+        tokio::time::timeout(Duration::from_secs(40), client.child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+
+        application.assert(&client);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(120))]
+    async fn filter_with_single_client_and_only_matching_requests_new(
+        config_dir: &std::path::PathBuf,
+        #[future] service: KubeService,
+        #[future] kube_client: Client,
+        #[values(Application::NodeHTTP)] application: Application,
+        #[values(Agent::Job)] agent: Agent,
+    ) {
+        let service = service.await;
+        let kube_client = kube_client.await;
+        let url = get_service_url(kube_client.clone(), &service).await;
+
+        let mut config_path = config_dir.clone();
+        config_path.push("http_filter_header.json");
+
+        let mut client = application
+            .run(
+                &service.target,
+                Some(&service.namespace),
+                agent.flag(),
+                Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
+            )
+            .await;
+
+        client.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+
+        let mut headers = HeaderMap::default();
+        headers.insert("x-filter", "yes".parse().unwrap());
+        send_requests(&url, true, headers).await;
+
+        tokio::time::timeout(Duration::from_secs(40), client.child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+
+        application.assert(&client);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(120))]
+    async fn filter_with_single_client_requests_by_path(
+        config_dir: &std::path::PathBuf,
+        #[future] service: KubeService,
+        #[future] kube_client: Client,
+        #[values(Application::NodeHTTP)] application: Application,
+        #[values(Agent::Job)] agent: Agent,
+    ) {
+        let service = service.await;
+        let kube_client = kube_client.await;
+        let url = get_service_url(kube_client.clone(), &service).await;
+
+        let mut config_path = config_dir.clone();
+        config_path.push("http_filter_path.json");
+
+        let mut client = application
+            .run(
+                &service.target,
+                Some(&service.namespace),
+                agent.flag(),
+                Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
+            )
+            .await;
+
+        client.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+
+        let headers = HeaderMap::default();
+        // Send a GET that should go through to remote
+        let req_client = reqwest::Client::new();
+        let req_builder = req_client.get(&url);
+        send_request(
+            req_builder,
+            Some("OK - GET: Request completed\n"),
+            headers.clone(),
+        )
+        .await;
+
+        // Send a DELETE that should match and cause the local app to return specific response
+        // and also make the process quit.
+        let req_client = reqwest::Client::new();
+        let mut match_url = Url::parse(&url).unwrap();
+        match_url.set_path("/api/v1");
+        let req_builder = req_client.delete(match_url);
+        send_request(req_builder, Some("DELETEV1"), headers.clone()).await;
 
         tokio::time::timeout(Duration::from_secs(40), client.child.wait())
             .await
