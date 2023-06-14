@@ -38,7 +38,10 @@ pub struct HttpHeaderFilterConfig {
     ///
     /// The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
     /// case-insensitive.
-    #[config(env = "MIRRORD_HTTP_HEADER_FILTER")]
+    #[config(
+        env = "MIRRORD_HTTP_HEADER_FILTER",
+        deprecated = "use http_filter instead"
+    )]
     pub filter: Option<String>,
 
     /// ##### feature.network.incoming.http_header_filter.ports {#feature-network-incoming-http_header_filter-ports}
