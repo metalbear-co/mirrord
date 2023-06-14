@@ -613,7 +613,7 @@ impl OperatorPersistentVolumeClaim {
                 resources: Some(ResourceRequirements {
                     requests: Some(BTreeMap::from([(
                         "storage".to_owned(),
-                        Quantity("10Mi".to_owned()),
+                        Quantity("1Gi".to_owned()),
                     )])),
                     ..Default::default()
                 }),
