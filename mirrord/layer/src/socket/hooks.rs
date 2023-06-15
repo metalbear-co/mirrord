@@ -6,7 +6,6 @@ use dashmap::DashSet;
 use errno::{set_errno, Errno};
 use libc::{c_char, c_int, c_void, size_t, sockaddr, socklen_t, ssize_t, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
-use tracing::warn;
 
 use super::ops::*;
 use crate::{detour::DetourGuard, hooks::HookManager, replace};
