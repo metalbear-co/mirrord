@@ -213,15 +213,15 @@ pub(super) fn bind(
 
     // Listen port was specified
     if let Some(port) = listen_port {
-        bind_port(sockfd, socket.domain, port)?;
+        bind_port(sockfd, socket.domain, port)
     } else {
         bind_port(sockfd, socket.domain, requested_address.port()).or_else(|e| {
             warn!(
                 "bind -> first `bind` failed on port {listen_port:?} with {e:?}, trying to bind to a random port"
             );
             bind_port(sockfd, socket.domain, 0)
-        })?
-    }
+        })
+    }?;
 
     // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
     // connect to.
