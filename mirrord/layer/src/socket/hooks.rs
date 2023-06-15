@@ -6,6 +6,7 @@ use dashmap::DashSet;
 use errno::{set_errno, Errno};
 use libc::{c_char, c_int, c_void, size_t, sockaddr, socklen_t, ssize_t, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
+use tracing::warn;
 
 use super::ops::*;
 use crate::{detour::DetourGuard, hooks::HookManager, replace};
@@ -29,8 +30,13 @@ pub(crate) unsafe extern "C" fn bind_detour(
     raw_address: *const sockaddr,
     address_length: socklen_t,
 ) -> c_int {
-    bind(sockfd, raw_address, address_length)
-        .unwrap_or_bypass_with(|_| FN_BIND(sockfd, raw_address, address_length))
+    let res = bind(sockfd, raw_address, address_length);
+    warn!("res: {res:?}");
+    res.unwrap_or_bypass_with(|_| {
+        let res = FN_BIND(sockfd, raw_address, address_length);
+        warn!("res: {res:?}");
+        res
+    })
 }
 
 #[hook_guard_fn]
