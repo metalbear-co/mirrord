@@ -247,6 +247,7 @@ pub(super) fn bind(
 
     SOCKETS.insert(sockfd, socket);
 
+    errno::set_errno(errno::Errno(0));
     Detour::Success(0)
 }
 
