@@ -1,0 +1,1 @@
+Changed back required IntelliJ version to 222+ from 223+
