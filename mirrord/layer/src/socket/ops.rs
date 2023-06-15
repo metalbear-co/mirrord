@@ -827,7 +827,6 @@ pub(super) fn recv_from(
     source_length: *mut socklen_t,
 ) -> Detour<isize> {
     let source = SocketAddr::try_from_raw(raw_source as *const _, unsafe { *source_length })?;
-    debug!("source {source:?}");
 
     SOCKETS
         .get(&sockfd)
@@ -926,6 +925,7 @@ pub(super) fn send_to(
                     requested_address,
                     address,
                 }) => {
+                    // Special case for port `0`, see `getsockname`.
                     if requested_address.port() == 0 {
                         (SocketAddr::new(requested_address.ip(), address.port()) == destination)
                             .then_some(*address)
