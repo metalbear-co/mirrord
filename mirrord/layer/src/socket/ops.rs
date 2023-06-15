@@ -807,16 +807,14 @@ pub(super) fn gethostname() -> Detour<&'static CString> {
 ///
 /// When this function is called, we've already ran [`libc::recvfrom`], and checked for a successful
 /// result from it, so `raw_source` has been pre-filled for us, but it might contain the wrong
-/// address, if the packet came from one of our modified sockets.
+/// address, if the packet came from one of our modified (connected) sockets.
 ///
-/// Due to how we change the address when the user [`libc::bind`]s a socket, if we're receiving a
-/// packet that came from a "bound by mirrord" socket, then we have to change `raw_source` here,
-/// filling it with the address that the user **wanted** to bind, and not the address that the
-/// socket is actually bound, this means we call [`fill_address`] with the `requested_address` from
-/// [`Bound`].
+/// If the socket was bound to `0.0.0.0:{not 53}`, then `raw_source` here should be
+/// `127.0.0.1:{not 53}`, keeping in mind that the sender socket remains with address
+/// `0.0.0.0:{not 53}` (same behavior as not using mirrord).
 ///
-/// Similar logic applies to a [`Connected`] socket, but for this case we use the `remote_address`,
-/// instead of the `requested_address`.
+/// When the socket is in a [`Connected`] state, we call [`fill_address`] with its `remote_address`,
+/// instead of letting whatever came in `raw_source` through.
 ///
 /// See [`send_to`] for more information.
 #[tracing::instrument(level = "trace", ret, skip(raw_source, source_length))]
@@ -826,8 +824,6 @@ pub(super) fn recv_from(
     raw_source: *mut sockaddr,
     source_length: *mut socklen_t,
 ) -> Detour<isize> {
-    let source = SocketAddr::try_from_raw(raw_source as *const _, unsafe { *source_length })?;
-
     SOCKETS
         .get(&sockfd)
         .and_then(|socket| match &socket.state {
@@ -835,25 +831,6 @@ pub(super) fn recv_from(
                 Some(remote_address.clone())
             }
             _ => None,
-        })
-        .or_else(|| {
-            // Let's try to find if `source` belongs to one of our sockets.
-            SOCKETS
-                .iter()
-                .inspect(|s| debug!("bound s {:?}", s.value()))
-                .find_map(|socket| match socket.state {
-                    SocketState::Bound(Bound {
-                        requested_address,
-                        address,
-                    }) => {
-                        if source == address {
-                            Some(SocketAddr::new(requested_address.ip(), address.port()).into())
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                })
         })
         .map(SocketAddress::try_into)?
         .map(|address| fill_address(raw_source, source_length, address))??;
@@ -876,6 +853,11 @@ pub(super) fn recv_from(
 ///
 /// If we find `destination` as the `requested_address` of one of our [`Bound`] sockets, then we
 /// [`libc::sendto`] to the bound `address`. A similar logic applies to a [`Connected`] socket.
+///
+/// ## Destination is `0.0.0.0:{not 53}`
+///
+/// No special care is taken here, sending a packet to this address behaves the same with or without
+/// mirrord, which is: destination becomes `127.0.0.1:{not 53}`.
 ///
 /// See [`recv_from`] for more information.
 #[tracing::instrument(
