@@ -9,7 +9,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use libc::{c_int, c_void, size_t, sockaddr, socklen_t};
+use libc::{c_int, c_void, sockaddr, socklen_t};
 use mirrord_protocol::{
     dns::LookupRecord,
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
@@ -774,6 +774,8 @@ pub(super) fn gethostname() -> Detour<&'static CString> {
     HOSTNAME.get_or_detour_init(remote_hostname_string)
 }
 
+/// ## DNS resolution on port `53`
+///
 /// We handle UDP sockets by putting them in a sort of _semantically_ connected state, meaning that
 /// we don't actually [`libc::connect`] `sockfd`, but we change the respective [`UserSocket`] to
 /// [`SocketState::Connected`].
@@ -783,49 +785,77 @@ pub(super) fn gethostname() -> Detour<&'static CString> {
 ///
 /// It performs the [`fill_address`] requirement of [`libc::recv_from`] with the correct remote
 /// address (instead of using our interceptor address).
-#[tracing::instrument(level = "trace", ret, skip(out_buffer, raw_source, source_length))]
+///
+/// ## Any other port
+///
+/// When this function is called, we've already ran [`libc::recvfrom`], and checked for a successful
+/// result from it, so `raw_source` has been pre-filled for us, but it might contain the wrong
+/// address, if the packet came from one of our modified sockets.
+///
+/// Due to how we change the address when the user [`libc::bind`]s a socket, if we're receiving a
+/// packet that came from a "bound by mirrord" socket, then we have to change `raw_source` here,
+/// filling it with the address that the user **wanted** to bind, and not the address that the
+/// socket is actually bound, this means we call [`fill_address`] with the `requested_address` from
+/// [`Bound`].
+///
+/// Similar logic applies to a [`Connected`] socket, but for this case we use the `remote_address`,
+/// instead of the `requested_address`.
+///
+/// See [`send_to`] for more information.
+#[tracing::instrument(level = "trace", ret, skip(raw_source, source_length))]
 pub(super) fn recv_from(
     sockfd: i32,
-    out_buffer: *mut c_void,
-    buffer_length: size_t,
-    flags: i32,
+    recv_from_result: isize,
     raw_source: *mut sockaddr,
     source_length: *mut socklen_t,
 ) -> Detour<isize> {
-    let address = SOCKETS
+    let source = SocketAddr::try_from_raw(raw_source as *const _, unsafe { *source_length })?;
+
+    SOCKETS
         .get(&sockfd)
-        .map(|socket| match &socket.state {
-            SocketState::Connected(connected) => connected.remote_address.clone(),
-            _ => unreachable!("BUG: We should only get here if this is a mirrord socket!"),
+        .and_then(|socket| match &socket.state {
+            SocketState::Connected(Connected { remote_address, .. }) => {
+                Some(remote_address.clone())
+            }
+            _ => None,
         })
-        .map(SocketAddress::try_into)??;
-
-    let recv_from_result = unsafe {
-        FN_RECV_FROM(
-            sockfd,
-            out_buffer,
-            buffer_length,
-            flags,
-            raw_source,
-            source_length,
-        )
-    };
-
-    fill_address(raw_source, source_length, address)?;
+        .or_else(|| {
+            // Let's try to find if `source` belongs to one of our sockets.
+            SOCKETS.iter().find_map(|socket| match socket.state {
+                SocketState::Bound(Bound {
+                    requested_address,
+                    address,
+                }) => {
+                    if source == address {
+                        Some(requested_address.into())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+        })
+        .map(SocketAddress::try_into)?
+        .map(|address| fill_address(raw_source, source_length, address))??;
 
     Detour::Success(recv_from_result)
 }
 
-/// Implemented only for `destination.port == 53` for DNS resolution!
+/// ## DNS resolution on port `53`
 ///
 /// There is a bit of trickery going on here, as this function first triggers a _semantical_
 /// connection to an interceptor socket (we don't [`libc::connect`] this `sockfd`, just change the
 /// [`UserSocket`] state), and only then calls the actual [`libc::send_to`] to send `raw_message` to
 /// the interceptor address (instead of the `raw_destination`).
 ///
-/// **Warning**: The above flow won't work if the user calls [`libc::sendto`] multiple times with
-/// different `raw_destination` addresses, so if we detect that `destination.port != 53`, then we
-/// remove the socket from our hands, and bypass.
+/// ## Any other port
+///
+/// When `destination.port != 53`, we search our [`SOCKETS`] to see if we're holding the
+/// `destination` address, which would have the receiving socket bound to a different address than
+/// what the user sees.
+///
+/// If we find `destination` as the `requested_address` of one of our [`Bound`] sockets, then we
+/// [`libc::sendto`] to the bound `address`. A similar logic applies to a [`Connected`] socket.
 ///
 /// See [`recv_from`] for more information.
 #[tracing::instrument(
@@ -848,33 +878,87 @@ pub(super) fn send_to(
         .ok_or(Bypass::LocalFdNotFound(sockfd))?;
 
     // Currently this flow only handles DNS resolution.
-    if let Some(destination) = destination.as_socket() && destination.port() != 53 {
-        return Detour::Bypass(Bypass::Port(destination.port()));
-    }
+    // So here we have to check for 2 things:
+    //
+    // 1. Are we sending something port 53? Then we use mirrord flow;
+    // 2. Is the destination a socket that we have bound? Then we send it to the real address that
+    // we've bound the destination socket.
+    //
+    // If none of the above are true, then the destination is some real address outside our scope.
+    let sent_result = if let Some(destination) = destination
+        .as_socket()
+        .filter(|destination| destination.port() != 53)
+    {
+        // We want to keep holding this socket.
+        SOCKETS.insert(sockfd, user_socket_info);
 
-    connect_outgoing::<UDP, false>(sockfd, destination, user_socket_info)?;
+        // Sending a packet on port NOT 53.
+        let destination = SOCKETS
+            .iter()
+            .filter(|socket| socket.kind.is_udp())
+            // Is the `destination` one of our sockets? If so, then we grab the actual address,
+            // instead of the, possibly fake address from mirrord.
+            .find_map(|receiver_socket| match &receiver_socket.state {
+                SocketState::Bound(Bound {
+                    requested_address,
+                    address,
+                }) => (*requested_address == destination).then_some(*address),
+                SocketState::Connected(Connected {
+                    remote_address,
+                    layer_address,
+                    ..
+                }) => {
+                    let remote_address: SocketAddr = remote_address.clone().try_into().ok()?;
+                    let layer_address: SocketAddr = layer_address.clone()?.try_into().ok()?;
 
-    let layer_address: SockAddr = SOCKETS
-        .get(&sockfd)
-        .and_then(|socket| match &socket.state {
-            SocketState::Connected(connected) => connected.layer_address.clone(),
-            _ => unreachable!(),
-        })
-        .map(SocketAddress::try_into)??;
+                    if remote_address == destination {
+                        Some(layer_address)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })?;
 
-    let raw_interceptor_address = layer_address.as_ptr();
-    let raw_interceptor_length = layer_address.len();
+        let rawish_true_destination = SockAddr::from(destination);
+        let raw_true_destination = rawish_true_destination.as_ptr();
+        let raw_true_destination_length = rawish_true_destination.len();
 
-    let sent = unsafe {
-        FN_SEND_TO(
-            sockfd,
-            raw_message,
-            message_length,
-            flags,
-            raw_interceptor_address,
-            raw_interceptor_length,
-        )
+        unsafe {
+            FN_SEND_TO(
+                sockfd,
+                raw_message,
+                message_length,
+                flags,
+                raw_true_destination,
+                raw_true_destination_length,
+            )
+        }
+    } else {
+        connect_outgoing::<UDP, false>(sockfd, destination, user_socket_info)?;
+
+        let layer_address: SockAddr = SOCKETS
+            .get(&sockfd)
+            .and_then(|socket| match &socket.state {
+                SocketState::Connected(connected) => connected.layer_address.clone(),
+                _ => unreachable!(),
+            })
+            .map(SocketAddress::try_into)??;
+
+        let raw_interceptor_address = layer_address.as_ptr();
+        let raw_interceptor_length = layer_address.len();
+
+        unsafe {
+            FN_SEND_TO(
+                sockfd,
+                raw_message,
+                message_length,
+                flags,
+                raw_interceptor_address,
+                raw_interceptor_length,
+            )
+        }
     };
 
-    Detour::Success(sent)
+    Detour::Success(sent_result)
 }

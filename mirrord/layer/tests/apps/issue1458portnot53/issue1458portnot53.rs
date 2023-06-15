@@ -16,6 +16,7 @@ fn main() {
         let (amount, remote) = recv_socket.recv_from(&mut recv_buffer).unwrap();
         assert_eq!(amount, 1);
         assert_ne!(remote_addr, remote);
+        assert_eq!(local_addr, remote);
         assert_eq!(recv_buffer, vec![0; 1]);
     });
 

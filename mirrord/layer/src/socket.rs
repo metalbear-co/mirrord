@@ -153,6 +153,15 @@ pub(crate) enum SocketKind {
     Udp(c_int),
 }
 
+impl SocketKind {
+    pub(crate) const fn is_udp(&self) -> bool {
+        match self {
+            SocketKind::Tcp(_) => false,
+            SocketKind::Udp(_) => true,
+        }
+    }
+}
+
 impl TryFrom<c_int> for SocketKind {
     type Error = Bypass;
 

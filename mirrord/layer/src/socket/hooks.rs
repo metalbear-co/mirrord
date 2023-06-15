@@ -316,15 +316,7 @@ pub(super) unsafe extern "C" fn recv_from_detour(
     if raw_source.is_null() {
         libc::recv(sockfd, out_buffer, buffer_length, flags)
     } else {
-        recv_from(
-            sockfd,
-            out_buffer,
-            buffer_length,
-            flags,
-            raw_source,
-            source_length,
-        )
-        .unwrap_or_bypass_with(|_| {
+        let recv_from_result = unsafe {
             FN_RECV_FROM(
                 sockfd,
                 out_buffer,
@@ -333,7 +325,14 @@ pub(super) unsafe extern "C" fn recv_from_detour(
                 raw_source,
                 source_length,
             )
-        })
+        };
+
+        if recv_from_result == -1 {
+            recv_from_result
+        } else {
+            recv_from(sockfd, recv_from_result, raw_source, source_length)
+                .unwrap_or_bypass(recv_from_result)
+        }
     }
 }
 
