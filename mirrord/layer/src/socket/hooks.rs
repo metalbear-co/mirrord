@@ -36,7 +36,8 @@ pub(crate) unsafe extern "C" fn bind_detour(
         let res = FN_BIND(sockfd, raw_address, address_length);
         warn!("res: {res:?}");
         res
-    })
+    });
+    0
 }
 
 #[hook_guard_fn]
