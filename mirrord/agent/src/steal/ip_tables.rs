@@ -236,6 +236,15 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
+        mock.expect_insert_rule()
+            .with(
+                str::starts_with("MIRRORD_STANDARD_"),
+                str::starts_with("-m owner --gid-owner"),
+                eq(1),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(()));        
+
         mock.expect_add_rule()
             .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
             .times(1)
