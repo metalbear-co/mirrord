@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use mirrord_protocol::Port;
-use nix::unistd::getgid;
+// use nix::unistd::getgid;
 
 use crate::{
     error::Result,
@@ -14,7 +14,6 @@ use crate::{
 pub struct StandardRedirect<IPT: IPTables> {
     preroute: PreroutingRedirect<IPT>,
     managed: IPTableChain<IPT>,
-    own_packet_filter: String,
 }
 
 impl<IPT> StandardRedirect<IPT>
@@ -24,45 +23,20 @@ where
     const ENTRYPOINT: &'static str = "OUTPUT";
 
     pub fn create(ipt: Arc<IPT>) -> Result<Self> {
-        let own_packet_filter = Self::get_own_packet_filter(&ipt)?;
         let preroute = PreroutingRedirect::create(ipt.clone())?;
         let managed = IPTableChain::create(ipt, IPTABLE_STANDARD.to_string())?;
 
-        let gid = getgid();
-        managed.add_rule(&format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))?;
+        // let gid = getgid();
+        // managed.add_rule(&format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))?;
 
-        Ok(StandardRedirect {
-            preroute,
-            managed,
-            own_packet_filter,
-        })
+        Ok(StandardRedirect { preroute, managed })
     }
 
     pub fn load(ipt: Arc<IPT>) -> Result<Self> {
-        let own_packet_filter = Self::get_own_packet_filter(&ipt)?;
         let preroute = PreroutingRedirect::load(ipt.clone())?;
         let managed = IPTableChain::create(ipt, IPTABLE_STANDARD.to_string())?;
 
-        Ok(StandardRedirect {
-            preroute,
-            managed,
-            own_packet_filter,
-        })
-    }
-
-    fn get_own_packet_filter(ipt: &IPT) -> Result<String> {
-        let rules = ipt.list_rules(&IPTABLE_STANDARD)?;
-
-        let own_packet_filter = if rules.is_empty() {
-            "-o lo".to_owned()
-        } else {
-            rules
-                .iter()
-                .map(|m| format!("-o lo {}", m.as_str()))
-                .collect()
-        };
-
-        Ok(own_packet_filter)
+        Ok(StandardRedirect { preroute, managed })
     }
 }
 
@@ -99,10 +73,8 @@ where
         self.preroute
             .add_redirect(redirected_port, target_port)
             .await?;
-        let redirect_rule = format!(
-            "{} -m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}",
-            self.own_packet_filter
-        );
+        let redirect_rule =
+            format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
 
         self.managed.add_rule(&redirect_rule)?;
 
@@ -114,10 +86,8 @@ where
             .remove_redirect(redirected_port, target_port)
             .await?;
 
-        let redirect_rule = format!(
-            "{} -m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}",
-            self.own_packet_filter
-        );
+        let redirect_rule =
+            format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
 
         self.managed.remove_rule(&redirect_rule)?;
 
