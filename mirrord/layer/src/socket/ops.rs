@@ -516,8 +516,14 @@ pub(super) fn getpeername(
 
     fill_address(address, address_len, remote_address.try_into()?)
 }
+
 /// Resolve the fake local address to the real local address.
-#[tracing::instrument(level = "trace", skip(address, address_len))]
+///
+/// ## Port `0` special
+///
+/// When [`libc::bind`]ing on port `0`, we change the port to be the actual bound port, as this is
+/// consistent behavior with libc.
+#[tracing::instrument(level = "trace", ret, skip(address, address_len))]
 pub(super) fn getsockname(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -531,7 +537,18 @@ pub(super) fn getsockname(
                 SocketState::Connected(connected) => {
                     Detour::Success(connected.local_address.clone())
                 }
-                SocketState::Bound(bound) => Detour::Success(bound.requested_address.into()),
+                SocketState::Bound(Bound {
+                    requested_address,
+                    address,
+                }) => {
+                    if requested_address.port() == 0 {
+                        Detour::Success(
+                            SocketAddr::new(requested_address.ip(), address.port()).into(),
+                        )
+                    } else {
+                        Detour::Success(requested_address.clone().into())
+                    }
+                }
                 SocketState::Listening(bound) => Detour::Success(bound.requested_address.into()),
                 _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
@@ -810,6 +827,7 @@ pub(super) fn recv_from(
     source_length: *mut socklen_t,
 ) -> Detour<isize> {
     let source = SocketAddr::try_from_raw(raw_source as *const _, unsafe { *source_length })?;
+    debug!("source {source:?}");
 
     SOCKETS
         .get(&sockfd)
@@ -821,19 +839,22 @@ pub(super) fn recv_from(
         })
         .or_else(|| {
             // Let's try to find if `source` belongs to one of our sockets.
-            SOCKETS.iter().find_map(|socket| match socket.state {
-                SocketState::Bound(Bound {
-                    requested_address,
-                    address,
-                }) => {
-                    if source == address {
-                        Some(requested_address.into())
-                    } else {
-                        None
+            SOCKETS
+                .iter()
+                .inspect(|s| debug!("bound s {:?}", s.value()))
+                .find_map(|socket| match socket.state {
+                    SocketState::Bound(Bound {
+                        requested_address,
+                        address,
+                    }) => {
+                        if source == address {
+                            Some(SocketAddr::new(requested_address.ip(), address.port()).into())
+                        } else {
+                            None
+                        }
                     }
-                }
-                _ => None,
-            })
+                    _ => None,
+                })
         })
         .map(SocketAddress::try_into)?
         .map(|address| fill_address(raw_source, source_length, address))??;
@@ -872,6 +893,7 @@ pub(super) fn send_to(
     destination_length: socklen_t,
 ) -> Detour<isize> {
     let destination = SockAddr::try_from_raw(raw_destination, destination_length)?;
+    debug!("destination {:?}", destination.as_socket());
 
     let (_, user_socket_info) = SOCKETS
         .remove(&sockfd)
@@ -896,13 +918,21 @@ pub(super) fn send_to(
         let destination = SOCKETS
             .iter()
             .filter(|socket| socket.kind.is_udp())
+            .inspect(|s| debug!("sending s {:?}", s.value()))
             // Is the `destination` one of our sockets? If so, then we grab the actual address,
             // instead of the, possibly fake address from mirrord.
             .find_map(|receiver_socket| match &receiver_socket.state {
                 SocketState::Bound(Bound {
                     requested_address,
                     address,
-                }) => (*requested_address == destination).then_some(*address),
+                }) => {
+                    if requested_address.port() == 0 {
+                        (SocketAddr::new(requested_address.ip(), address.port()) == destination)
+                            .then_some(*address)
+                    } else {
+                        (*requested_address == destination).then_some(*address)
+                    }
+                }
                 SocketState::Connected(Connected {
                     remote_address,
                     layer_address,
