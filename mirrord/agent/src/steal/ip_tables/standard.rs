@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use mirrord_protocol::Port;
-// use nix::unistd::getgid;
+use nix::unistd::getgid;
 
 use crate::{
     error::Result,
@@ -26,8 +26,8 @@ where
         let preroute = PreroutingRedirect::create(ipt.clone())?;
         let managed = IPTableChain::create(ipt, IPTABLE_STANDARD.to_string())?;
 
-        // let gid = getgid();
-        // managed.add_rule(&format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))?;
+        let gid = getgid();
+        managed.add_rule(&format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))?;
 
         Ok(StandardRedirect { preroute, managed })
     }
