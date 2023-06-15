@@ -30,14 +30,8 @@ pub(crate) unsafe extern "C" fn bind_detour(
     raw_address: *const sockaddr,
     address_length: socklen_t,
 ) -> c_int {
-    let res = bind(sockfd, raw_address, address_length);
-    warn!("res: {res:?}");
-    res.unwrap_or_bypass_with(|_| {
-        let res = FN_BIND(sockfd, raw_address, address_length);
-        warn!("res: {res:?}");
-        res
-    });
-    0
+    bind(sockfd, raw_address, address_length)
+        .unwrap_or_bypass_with(|_| FN_BIND(sockfd, raw_address, address_length))
 }
 
 #[hook_guard_fn]
