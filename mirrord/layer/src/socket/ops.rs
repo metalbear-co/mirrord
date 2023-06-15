@@ -108,7 +108,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
     Detour::Success(socket_fd)
 }
 
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "warn", ret)]
 fn bind_port(sockfd: c_int, domain: c_int, port: u16) -> Detour<()> {
     let address = match domain {
         libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
