@@ -651,7 +651,7 @@
       ]
     },
     "MultiSteal": {
-      "description": "(Operator Only): Allows overiding port locks\n\nCan be set to either `\"continue\"` (default) or `\"override\"`.\n\n- `\"continue\"`: Continue with normal execution - `\"override\"`: If port lock detected then override it with new lock and force close the original locking connection",
+      "description": "(Operator Only): Allows overriding port locks\n\nCan be set to either `\"continue\"` (default) or `\"override\"`.\n\n- `\"continue\"`: Continue with normal execution - `\"override\"`: If port lock detected then override it with new lock and force close the original locking connection.",
       "oneOf": [
         {
           "description": "<!--${internal}--> ### override\n\nOverride any port lock and force close the original lock connection",

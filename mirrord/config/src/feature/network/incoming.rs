@@ -291,7 +291,7 @@ pub struct IncomingConfig {
 
     /// #### feature.network.incoming.filter {#feature-network-incoming-http-filter}
     pub http_filter: HttpFilterConfig,
-    
+
     /// #### feature.network.incoming.on_multi_steal {#feature-network-incoming-on_multi_steal}
     pub on_multi_steal: MultiSteal,
 }
@@ -366,13 +366,13 @@ impl FromStr for IncomingMode {
     }
 }
 
-/// (Operator Only): Allows overiding port locks
+/// (Operator Only): Allows overriding port locks
 ///
 /// Can be set to either `"continue"` (default) or `"override"`.
 ///
 /// - `"continue"`: Continue with normal execution
 /// - `"override"`: If port lock detected then override it with new lock and force close the
-///   original locking connection
+///   original locking connection.
 #[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum MultiSteal {
