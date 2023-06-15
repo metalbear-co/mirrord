@@ -182,7 +182,7 @@ pub(super) struct ExecArgs {
     #[arg(long)]
     pub capture_error_trace: bool,
 
-    /// Allows overiding port lock
+    /// Allows overriding port lock
     #[arg(long)]
     pub on_multi_steal: Option<MultiSteal>,
 }
