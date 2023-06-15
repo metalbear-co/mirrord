@@ -14,6 +14,7 @@ use crate::{
 pub struct StandardRedirect<IPT: IPTables> {
     preroute: PreroutingRedirect<IPT>,
     managed: IPTableChain<IPT>,
+    own_packet_filter: String,
 }
 
 impl<IPT> StandardRedirect<IPT>
@@ -25,18 +26,28 @@ where
     pub fn create(ipt: Arc<IPT>) -> Result<Self> {
         let preroute = PreroutingRedirect::create(ipt.clone())?;
         let managed = IPTableChain::create(ipt, IPTABLE_STANDARD.to_string())?;
+        let own_packet_filter = "-o lo".to_owned();
 
         let gid = getgid();
         managed.add_rule(&format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))?;
 
-        Ok(StandardRedirect { preroute, managed })
+        Ok(StandardRedirect {
+            preroute,
+            managed,
+            own_packet_filter,
+        })
     }
 
     pub fn load(ipt: Arc<IPT>) -> Result<Self> {
         let preroute = PreroutingRedirect::load(ipt.clone())?;
         let managed = IPTableChain::create(ipt, IPTABLE_STANDARD.to_string())?;
+        let own_packet_filter = "-o lo".to_owned();
 
-        Ok(StandardRedirect { preroute, managed })
+        Ok(StandardRedirect {
+            preroute,
+            managed,
+            own_packet_filter,
+        })
     }
 }
 
@@ -73,8 +84,10 @@ where
         self.preroute
             .add_redirect(redirected_port, target_port)
             .await?;
-        let redirect_rule =
-            format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
+        let redirect_rule = format!(
+            "{} -m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}",
+            self.own_packet_filter
+        );
 
         self.managed.add_rule(&redirect_rule)?;
 
@@ -86,8 +99,10 @@ where
             .remove_redirect(redirected_port, target_port)
             .await?;
 
-        let redirect_rule =
-            format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
+        let redirect_rule = format!(
+            "{} -m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}",
+            self.own_packet_filter
+        );
 
         self.managed.remove_rule(&redirect_rule)?;
 
