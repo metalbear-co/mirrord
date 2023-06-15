@@ -111,6 +111,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .http_header_filter
                     .unwrap_or_default()
                     .generate_config()?,
+                http_filter: advanced.http_filter.unwrap_or_default().generate_config()?,
                 port_mapping: advanced
                     .port_mapping
                     .map(|m| m.into_iter().collect())
@@ -177,6 +178,13 @@ pub struct IncomingAdvancedFileConfig {
     ///
     /// See [`filter`](##filter) for details.
     pub http_header_filter: Option<ToggleableConfig<http_filter::HttpHeaderFilterFileConfig>>,
+
+    /// ### HTTP Filter
+    ///
+    /// Sets up the HTTP traffic filter (currently, only useful when `incoming: steal`).
+    ///
+    /// See [`filter`](##filter) for details.
+    pub http_filter: Option<ToggleableConfig<http_filter::HttpFilterFileConfig>>,
 
     /// ### port_mapping
     ///
@@ -281,6 +289,9 @@ pub struct IncomingConfig {
     /// #### feature.network.incoming.filter {#feature-network-incoming-filter}
     pub http_header_filter: HttpHeaderFilterConfig,
 
+    /// #### feature.network.incoming.filter {#feature-network-incoming-http-filter}
+    pub http_filter: HttpFilterConfig,
+    
     /// #### feature.network.incoming.on_multi_steal {#feature-network-incoming-on_multi_steal}
     pub on_multi_steal: MultiSteal,
 }

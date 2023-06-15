@@ -203,8 +203,10 @@ impl TcpHandler for TcpMirrorHandler {
         self.apply_port_mapping(&mut listen);
         let request_port = listen.requested_port;
 
-        if !self.ports_mut().insert(listen) {
-            info!("Port {request_port} already listening, might be on different address",);
+        if self.ports_mut().replace(listen).is_some() {
+            // This can also be because we currently don't inform the tcp handler when an app closes
+            // a socket (stops listening).
+            info!("Received listen hook message for port {request_port} while already listening. Might be on different address",);
             return Ok(());
         }
 

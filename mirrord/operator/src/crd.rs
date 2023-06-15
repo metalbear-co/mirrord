@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use chrono::{serde::ts_milliseconds, DateTime, NaiveDate, Utc};
 use kube::CustomResource;
 use mirrord_config::target::{Target, TargetConfig};
 use schemars::JsonSchema;
@@ -68,11 +68,35 @@ pub struct MirrordOperatorSpec {
     pub operator_version: String,
     pub default_namespace: String,
     pub license: LicenseInfoOwned,
+    pub telemetry_exports: Option<MirrordOperatorTelemetryReports>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatus {
     pub sessions: Vec<Session>,
+    pub statistics: Option<MirrordOperatorStatusStatistics>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct MirrordOperatorTelemetryReports {
+    pub id: String,
+    pub reports: Vec<MirrordOperatorTelemetryReport>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct MirrordOperatorTelemetryReport {
+    #[serde(
+        serialize_with = "ts_milliseconds::serialize",
+        deserialize_with = "ts_milliseconds::deserialize"
+    )]
+    pub timestamp: DateTime<Utc>,
+    pub report: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct MirrordOperatorStatusStatistics {
+    pub dau: usize,
+    pub mau: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

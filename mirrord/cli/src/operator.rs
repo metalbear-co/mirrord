@@ -6,7 +6,7 @@ use mirrord_kube::{api::kubernetes::create_kube_api, error::KubeApiError};
 use mirrord_operator::{
     client::OperatorApiError,
     crd::{LicenseInfoOwned, MirrordOperatorCrd, MirrordOperatorSpec, OPERATOR_STATUS_NAME},
-    setup::{Operator, OperatorNamespace, OperatorSetup},
+    setup::{Operator, OperatorNamespace, OperatorSetup, SetupOptions},
 };
 use mirrord_progress::{Progress, TaskProgress};
 use prettytable::{row, Table};
@@ -25,6 +25,7 @@ async fn operator_setup(
     file: Option<PathBuf>,
     namespace: OperatorNamespace,
     license: Option<String>,
+    offline: bool,
 ) -> Result<()> {
     if !accept_tos {
         eprintln!("Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS");
@@ -38,7 +39,11 @@ async fn operator_setup(
             namespace.name()
         );
 
-        let operator = Operator::new(license, namespace);
+        let operator = Operator::new(SetupOptions {
+            license,
+            namespace,
+            offline,
+        });
 
         match file {
             Some(path) => {
@@ -53,9 +58,7 @@ async fn operator_setup(
     Ok(())
 }
 
-async fn operator_status(config: Option<String>) -> Result<()> {
-    let progress = TaskProgress::new("Operator Status").fail_on_drop(true);
-
+async fn get_status_api(config: Option<String>) -> Result<Api<MirrordOperatorCrd>> {
     let kube_api = if let Some(config_path) = config {
         let config = LayerFileConfig::from_path(config_path)?.generate_config()?;
         create_kube_api(config.accept_invalid_certificates, config.kubeconfig)
@@ -65,7 +68,13 @@ async fn operator_status(config: Option<String>) -> Result<()> {
     .await
     .map_err(CliError::KubernetesApiFailed)?;
 
-    let status_api: Api<MirrordOperatorCrd> = Api::all(kube_api);
+    Ok(Api::all(kube_api))
+}
+
+async fn operator_status(config: Option<String>) -> Result<()> {
+    let progress = TaskProgress::new("Operator Status").fail_on_drop(true);
+
+    let status_api = get_status_api(config).await?;
 
     let status_progress = progress.subtask("fetching status");
 
@@ -98,6 +107,7 @@ async fn operator_status(config: Option<String>) -> Result<()> {
                 expire_at,
                 ..
             },
+        ..
     } = mirrord_status.spec;
 
     let expire_at = expire_at.format("%e-%b-%Y");
@@ -113,22 +123,46 @@ Operator License
 "#
     );
 
+    let Some(status) = mirrord_status.status else {
+        return Ok(());
+    };
+
+    if let Some(statistics) = status.statistics {
+        println!("Operator Daily Users: {}", statistics.dau);
+        println!("Operator Monthly Users: {}", statistics.mau);
+    }
+
     let mut sessions = Table::new();
 
     sessions.add_row(row!["Session ID", "Target", "User", "Session Duration"]);
 
-    if let Some(status) = mirrord_status.status {
-        for session in &status.sessions {
-            sessions.add_row(row![
-                session.id.as_deref().unwrap_or(""),
-                &session.target,
-                &session.user,
-                humantime::format_duration(Duration::from_secs(session.duration_secs)),
-            ]);
-        }
+    for session in &status.sessions {
+        sessions.add_row(row![
+            session.id.as_deref().unwrap_or(""),
+            &session.target,
+            &session.user,
+            humantime::format_duration(Duration::from_secs(session.duration_secs)),
+        ]);
     }
 
     sessions.printstd();
+
+    Ok(())
+}
+
+async fn operator_telemetry_export(config: Option<String>) -> Result<()> {
+    let status_api = get_status_api(config).await?;
+
+    let status = status_api
+        .get_subresource("telemetry-export", OPERATOR_STATUS_NAME)
+        .await
+        .map_err(KubeApiError::KubeError)
+        .map_err(OperatorApiError::KubeApiError)
+        .map_err(CliError::OperatorConnectionFailed)?;
+
+    if let Some(exports) = status.spec.telemetry_exports {
+        println!("{}", serde_json::to_string(&exports)?);
+    }
 
     Ok(())
 }
@@ -142,6 +176,7 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             namespace,
             license_key,
             license_path,
+            offline,
         } => {
             let license = match license_path {
                 Some(path) => fs::read_to_string(&path)
@@ -153,8 +188,11 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
                 None => license_key,
             };
 
-            operator_setup(accept_tos, file, namespace, license).await
+            operator_setup(accept_tos, file, namespace, license, offline).await
         }
         OperatorCommand::Status { config_file } => operator_status(config_file).await,
+        OperatorCommand::TelemetryExport { config_file } => {
+            operator_telemetry_export(config_file).await
+        }
     }
 }

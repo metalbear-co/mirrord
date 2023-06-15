@@ -1880,7 +1880,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.45.2"
+version = "3.46.0"
 dependencies = [
  "libc",
 ]
@@ -1929,21 +1929,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
-name = "foreign-types"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6f339eb8adc052cd2ca78910fda869aefa38d22d5cb648e6485e4d3fc06f3b1"
-dependencies = [
- "foreign-types-shared",
-]
-
-[[package]]
-name = "foreign-types-shared"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
-
-[[package]]
 name = "form_urlencoded"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1961,7 +1946,7 @@ checksum = "6c2141d6d6c8512188a7891b4b01590a45f6dac67afb4f255c4124dbb86d4eaa"
 [[package]]
 name = "frida-build"
 version = "0.2.1"
-source = "git+https://github.com/metalbear-co/frida-rust?branch=capstone_remove#71e3b18b943a0b0ddd390fa007b33665daffc77f"
+source = "git+https://github.com/metalbear-co/frida-rust?branch=capstone_remove#bbeeef8a52b5fe09ea758456cbb97caa7d38103a"
 dependencies = [
  "reqwest",
  "tar",
@@ -1971,7 +1956,7 @@ dependencies = [
 [[package]]
 name = "frida-gum"
 version = "0.12.0"
-source = "git+https://github.com/metalbear-co/frida-rust?branch=capstone_remove#71e3b18b943a0b0ddd390fa007b33665daffc77f"
+source = "git+https://github.com/metalbear-co/frida-rust?branch=capstone_remove#bbeeef8a52b5fe09ea758456cbb97caa7d38103a"
 dependencies = [
  "cstr_core",
  "frida-gum-sys",
@@ -1984,7 +1969,7 @@ dependencies = [
 [[package]]
 name = "frida-gum-sys"
 version = "0.7.1"
-source = "git+https://github.com/metalbear-co/frida-rust?branch=capstone_remove#71e3b18b943a0b0ddd390fa007b33665daffc77f"
+source = "git+https://github.com/metalbear-co/frida-rust?branch=capstone_remove#bbeeef8a52b5fe09ea758456cbb97caa7d38103a"
 dependencies = [
  "bindgen",
  "frida-build",
@@ -2456,19 +2441,6 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tokio-io-timeout",
-]
-
-[[package]]
-name = "hyper-tls"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6183ddfa99b85da61a140bea0efc93fdf56ceaa041b37d553518030827f9905"
-dependencies = [
- "bytes",
- "hyper 0.14.26",
- "native-tls",
- "tokio",
- "tokio-native-tls",
 ]
 
 [[package]]
@@ -3124,7 +3096,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.45.2"
+version = "3.46.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -3163,7 +3135,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.45.2"
+version = "3.46.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -3213,7 +3185,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.45.2"
+version = "3.46.0"
 dependencies = [
  "chrono",
  "fs4",
@@ -3222,6 +3194,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "pem 2.0.1",
+ "reqwest",
  "serde",
  "serde_yaml",
  "thiserror",
@@ -3231,7 +3204,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.45.2"
+version = "3.46.0"
 dependencies = [
  "bimap",
  "mirrord-config-derive",
@@ -3247,7 +3220,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.45.2"
+version = "3.46.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -3257,7 +3230,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.45.2"
+version = "3.46.0"
 dependencies = [
  "axum",
  "futures",
@@ -3274,7 +3247,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.45.2"
+version = "3.46.0"
 dependencies = [
  "actix-codec",
  "base64 0.21.1",
@@ -3297,7 +3270,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.45.2"
+version = "3.46.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -3309,6 +3282,7 @@ dependencies = [
  "ctor",
  "dashmap",
  "errno 0.3.1",
+ "exec",
  "fancy-regex",
  "frida-gum",
  "futures",
@@ -3348,7 +3322,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.45.2"
+version = "3.46.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3357,7 +3331,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.45.2"
+version = "3.46.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -3367,7 +3341,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.45.2"
+version = "3.46.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -3400,7 +3374,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.45.2"
+version = "3.46.0"
 dependencies = [
  "atty",
  "serde",
@@ -3410,7 +3384,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -3432,7 +3406,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.45.2"
+version = "3.46.0"
 dependencies = [
  "apple-codesign",
  "memchr",
@@ -3476,24 +3450,6 @@ name = "multimap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
-
-[[package]]
-name = "native-tls"
-version = "0.2.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07226173c32f2926027b63cce4bcd8076c3552846cbe7925f3aaffeac0a3b92e"
-dependencies = [
- "lazy_static",
- "libc",
- "log",
- "openssl",
- "openssl-probe",
- "openssl-sys",
- "schannel",
- "security-framework",
- "security-framework-sys",
- "tempfile",
-]
 
 [[package]]
 name = "nix"
@@ -3738,48 +3694,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7e5500299e16ebb147ae15a00a942af264cf3688f47923b8fc2cd5858f23ad3"
 
 [[package]]
-name = "openssl"
-version = "0.10.54"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69b3f656a17a6cbc115b5c7a40c616947d213ba182135b014d6051b73ab6f019"
-dependencies = [
- "bitflags",
- "cfg-if",
- "foreign-types",
- "libc",
- "once_cell",
- "openssl-macros",
- "openssl-sys",
-]
-
-[[package]]
-name = "openssl-macros"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a948666b637a0f465e8564c73e89d4dde00d72d4d473cc972f390fc3dcee7d9c"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.16",
-]
-
-[[package]]
 name = "openssl-probe"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
-
-[[package]]
-name = "openssl-sys"
-version = "0.9.88"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2ce0f250f34a308dcfdbb351f511359857d4ed2134ba715a4eadd46e1ffd617"
-dependencies = [
- "cc",
- "libc",
- "pkg-config",
- "vcpkg",
-]
 
 [[package]]
 name = "ordered-float"
@@ -3803,7 +3721,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.45.2"
+version = "3.46.0"
 
 [[package]]
 name = "outref"
@@ -4425,7 +4343,7 @@ dependencies = [
 name = "recv_from"
 version = "0.1.0"
 dependencies = [
- "socket2 0.4.9",
+ "socket2 0.5.3",
 ]
 
 [[package]]
@@ -4505,12 +4423,10 @@ dependencies = [
  "http-body 0.4.5",
  "hyper 0.14.26",
  "hyper-rustls 0.24.0",
- "hyper-tls",
  "ipnet",
  "js-sys",
  "log",
  "mime",
- "native-tls",
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
@@ -4520,7 +4436,6 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "tokio",
- "tokio-native-tls",
  "tokio-rustls 0.24.0",
  "tower-service",
  "url",
@@ -4605,21 +4520,21 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.45.2"
+version = "3.46.0"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.45.2"
+version = "3.46.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.45.2"
+version = "3.46.0"
 dependencies = [
  "tokio",
 ]
@@ -5582,16 +5497,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tokio-native-tls"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbae76ab933c85776efabc971569dd6119c580d8f5d448769dec1764bf796ef2"
-dependencies = [
- "native-tls",
- "tokio",
-]
-
-[[package]]
 name = "tokio-rustls"
 version = "0.23.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6085,12 +5990,6 @@ name = "valuable"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
-
-[[package]]
-name = "vcpkg"
-version = "0.2.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "version_check"

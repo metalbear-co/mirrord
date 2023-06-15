@@ -195,6 +195,10 @@ pub(crate) enum LayerError {
         supported IP or unix socket address."
     )]
     UnsupportedSocketType,
+
+    #[cfg(target_os = "macos")]
+    #[error("Exec failed with error {0:?}, please report this error!")]
+    ExecFailed(exec::Error),
 }
 
 impl From<SerializationError> for LayerError {

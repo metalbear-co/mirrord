@@ -1,1 +1,0 @@
-fix macos build script to use directory's toolchain

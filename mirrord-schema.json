@@ -449,13 +449,48 @@
         }
       ]
     },
+    "HttpFilterFileConfig": {
+      "description": "Filter configuration for the HTTP traffic stealer feature.\n\nAllows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic feature only captures HTTP requests that match the specified filter, forwarding unmatched requests to their original destinations.\n\nOnly does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is set as `\"steal\"`, ignored otherwise.\n\nfor example, to filter based on header: ```json { \"header_filter\": \"host: api\\..+\", } ```\n\nfor example, to filter based on path ```json { \"path_filter\": \"host: api\\..+\", } ```",
+      "type": "object",
+      "properties": {
+        "header_filter": {
+          "title": "feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}",
+          "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nThe HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`, case-insensitive.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path_filter": {
+          "title": "feature.network.incoming.http_filter.path_filter {#feature-network-incoming-http-path-filter}",
+          "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nCase insensitive.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ports": {
+          "title": "feature.network.incoming.http_header_filter.ports {#feature-network-incoming-http_header_filter-ports}",
+          "description": "Activate the HTTP traffic filter only for these ports.\n\nOther ports will still be stolen (when `\"steal`\" is being used), they're just not checked for HTTP filtering.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PortList"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "HttpHeaderFilterFileConfig": {
-      "description": "Filter configuration for the HTTP traffic stealer feature.\n\nAllows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic feature only captures HTTP requests that match the specified filter, forwarding unmatched requests to their original destinations.\n\nOnly does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is set as `\"steal\"`, ignored otherwise.\n\n```json { \"filter\": \"host: api\\..+\", \"ports\": [80, 8080] } ```",
+      "description": "Filter configuration for the HTTP traffic stealer feature.\n\nDEPRECATED - USE http_filter instead, unless using old operator/agent version (pre 3.46.0) Allows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic feature only captures HTTP requests that match the specified filter, forwarding unmatched requests to their original destinations.\n\nOnly does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is set as `\"steal\"`, ignored otherwise.\n\n```json { \"filter\": \"host: api\\..+\", \"ports\": [80, 8080] } ```",
       "type": "object",
       "properties": {
         "filter": {
           "title": "feature.network.incoming.http_header_filter.filter {#feature-network-incoming-http_header_filter-filter}",
-          "description": "Used to match against the requests captured by the mirrord-agent pod.\n\nSupports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nThe HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`, case-insensitive.",
+          "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nThe HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`, case-insensitive.",
           "type": [
             "string",
             "null"
@@ -481,6 +516,18 @@
       "description": "Advanced user configuration for network incoming traffic.",
       "type": "object",
       "properties": {
+        "http_filter": {
+          "title": "HTTP Filter",
+          "description": "Sets up the HTTP traffic filter (currently, only useful when `incoming: steal`).\n\nSee [`filter`](##filter) for details.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToggleableConfig_for_HttpFilterFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "http_header_filter": {
           "title": "filter",
           "description": "Sets up the HTTP traffic filter (currently, only useful when `incoming: steal`).\n\nSee [`filter`](##filter) for details.",
@@ -804,6 +851,16 @@
         },
         {
           "$ref": "#/definitions/FsUserConfig"
+        }
+      ]
+    },
+    "ToggleableConfig_for_HttpFilterFileConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/HttpFilterFileConfig"
         }
       ]
     },
