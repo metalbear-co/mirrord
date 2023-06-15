@@ -214,13 +214,11 @@ pub(super) fn bind(
     // Listen port was specified
     if let Some(port) = listen_port {
         bind_port(sockfd, socket.domain, port)
-    } else if let Detour::Error(e) = bind_port(sockfd, socket.domain, requested_address.port()) {
-        warn!(
-                "bind -> first `bind` failed on port {listen_port:?} with {e:?}, trying to bind to a random port"
-            );
-        bind_port(sockfd, socket.domain, 0)
     } else {
-        Detour::Success(())
+        bind_port(sockfd, socket.domain, requested_address.port()).or_else(| e | {
+            warn!("bind -> first `bind` failed on port {listen_port:?} with {e:?}, trying to bind to a random port");
+            bind_port(sockfd, socket.domain, 0)
+        })
     }?;
 
     // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
@@ -247,6 +245,8 @@ pub(super) fn bind(
 
     SOCKETS.insert(sockfd, socket);
 
+    // node reads errno to check if bind was successful and doesn't care about the return value
+    // (???)
     errno::set_errno(errno::Errno(0));
     Detour::Success(0)
 }

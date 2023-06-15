@@ -333,14 +333,14 @@ impl<S> Detour<S> {
         }
     }
 
-    // #[inline]
-    // pub fn or_else<O: FnOnce(HookError) -> Detour<S>>(self, op: O) -> Detour<S> {
-    //     match self {
-    //         Detour::Success(s) => Detour::Success(s),
-    //         Detour::Bypass(b) => Detour::Bypass(b),
-    //         Detour::Error(e) => op(e),
-    //     }
-    // }
+    #[inline]
+    pub fn or_else<O: FnOnce(HookError) -> Detour<S>>(self, op: O) -> Detour<S> {
+        match self {
+            Detour::Success(s) => Detour::Success(s),
+            Detour::Bypass(b) => Detour::Bypass(b),
+            Detour::Error(e) => op(e),
+        }
+    }
 }
 
 impl<S> Detour<S>
