@@ -546,7 +546,7 @@ pub(super) fn getsockname(
                             SocketAddr::new(requested_address.ip(), address.port()).into(),
                         )
                     } else {
-                        Detour::Success(*requested_address.into())
+                        Detour::Success((*requested_address).into())
                     }
                 }
                 SocketState::Listening(bound) => Detour::Success(bound.requested_address.into()),
