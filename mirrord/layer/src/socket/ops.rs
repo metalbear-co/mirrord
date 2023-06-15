@@ -126,7 +126,7 @@ fn bind_port(sockfd: c_int, domain: c_int, port: u16) -> Detour<()> {
 
     let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
     if bind_result != 0 {
-        return Err(io::Error::last_os_error())?;
+        return Detour::Error(io::Error::last_os_error().into());
     }
 
     Detour::Success(())
@@ -214,13 +214,13 @@ pub(super) fn bind(
     // Listen port was specified
     if let Some(port) = listen_port {
         bind_port(sockfd, socket.domain, port)
-    } else {
-        bind_port(sockfd, socket.domain, requested_address.port()).or_else(|e| {
-            warn!(
+    } else if let Detour::Error(e) = bind_port(sockfd, socket.domain, requested_address.port()) {
+        warn!(
                 "bind -> first `bind` failed on port {listen_port:?} with {e:?}, trying to bind to a random port"
             );
-            bind_port(sockfd, socket.domain, 0)
-        })
+        bind_port(sockfd, socket.domain, 0)
+    } else {
+        Detour::Success(())
     }?;
 
     // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
