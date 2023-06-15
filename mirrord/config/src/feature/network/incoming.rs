@@ -94,8 +94,10 @@ impl MirrordConfig for IncomingFileConfig {
                     .transpose()?
                     .unwrap_or_default(),
                 http_header_filter: HttpHeaderFilterFileConfig::default().generate_config()?,
-                on_multi_steal: FromEnv::new("MIRRORD_OPERATOR_ON_MULTI_STEAL")
-                    .layer(|layer| Unstable::new("IncomingFileConfig", "on_multi_steal", layer))
+                on_concurrent_steal: FromEnv::new("MIRRORD_OPERATOR_ON_MULTI_STEAL")
+                    .layer(|layer| {
+                        Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer)
+                    })
                     .source_value()
                     .transpose()?
                     .unwrap_or_default(),
@@ -126,9 +128,11 @@ impl MirrordConfig for IncomingFileConfig {
                     .source_value()
                     .transpose()?
                     .unwrap_or_default(),
-                on_multi_steal: FromEnv::new("MIRRORD_OPERATOR_ON_MULTI_STEAL")
-                    .or(advanced.on_multi_steal)
-                    .layer(|layer| Unstable::new("IncomingFileConfig", "on_multi_steal", layer))
+                on_concurrent_steal: FromEnv::new("MIRRORD_OPERATOR_ON_MULTI_STEAL")
+                    .or(advanced.on_concurrent_steal)
+                    .layer(|layer| {
+                        Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer)
+                    })
                     .source_value()
                     .transpose()?
                     .unwrap_or_default(),
@@ -144,15 +148,15 @@ impl MirrordToggleableConfig for IncomingFileConfig {
             .source_value()
             .unwrap_or_else(|| Ok(Default::default()))?;
 
-        let on_multi_steal = FromEnv::new("MIRRORD_OPERATOR_ON_MULTI_STEAL")
-            .layer(|layer| Unstable::new("IncomingFileConfig", "on_multi_steal", layer))
+        let on_concurrent_steal = FromEnv::new("MIRRORD_OPERATOR_ON_MULTI_STEAL")
+            .layer(|layer| Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer))
             .source_value()
             .transpose()?
             .unwrap_or_default();
 
         Ok(IncomingConfig {
             mode,
-            on_multi_steal,
+            on_concurrent_steal,
             http_header_filter: HttpHeaderFilterFileConfig::disabled_config()?,
             ..Default::default()
         })
@@ -206,11 +210,11 @@ pub struct IncomingAdvancedFileConfig {
     /// used locally only.
     pub ignore_ports: Option<Vec<u16>>,
 
-    /// ### on_multi_steal
+    /// ### on_concurrent_steal
     ///
     /// (Operator Only): if value of override is passed then current later will override any
     /// PortLocks and force close other connections
-    pub on_multi_steal: Option<MultiSteal>,
+    pub on_concurrent_steal: Option<ConcurrentSteal>,
 }
 
 /// Controls the incoming TCP traffic feature.
@@ -292,8 +296,8 @@ pub struct IncomingConfig {
     /// #### feature.network.incoming.filter {#feature-network-incoming-http-filter}
     pub http_filter: HttpFilterConfig,
 
-    /// #### feature.network.incoming.on_multi_steal {#feature-network-incoming-on_multi_steal}
-    pub on_multi_steal: MultiSteal,
+    /// #### feature.network.incoming.on_concurrent_steal {#feature-network-incoming-on_concurrent_steal}
+    pub on_concurrent_steal: ConcurrentSteal,
 }
 
 impl IncomingConfig {
@@ -366,16 +370,16 @@ impl FromStr for IncomingMode {
     }
 }
 
-/// (Operator Only): Allows overriding port locks
+/// (Operator Only): Allows overiding port locks
 ///
 /// Can be set to either `"continue"` (default) or `"override"`.
 ///
 /// - `"continue"`: Continue with normal execution
 /// - `"override"`: If port lock detected then override it with new lock and force close the
-///   original locking connection.
+///   original locking connection
 #[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
-pub enum MultiSteal {
+pub enum ConcurrentSteal {
     /// <!--${internal}-->
     /// ### override
     ///
@@ -385,31 +389,38 @@ pub enum MultiSteal {
     /// ### continue
     ///
     /// Continue with normal execution
-    #[default]
     Continue,
+    /// <!--${internal}-->
+    /// ### abort
+    ///
+    /// Abort Execution
+    #[default]
+    Abort,
 }
 
 #[derive(Error, Debug)]
-#[error("could not parse MultiSteal from string, values continue/override")]
-pub struct MultiStealParseError;
+#[error("could not parse ConcurrentSteal from string, values continue/override")]
+pub struct ConcurrentStealParseError;
 
-impl FromStr for MultiSteal {
-    type Err = MultiStealParseError;
+impl FromStr for ConcurrentSteal {
+    type Err = ConcurrentStealParseError;
 
     fn from_str(val: &str) -> Result<Self, Self::Err> {
         match val {
-            "override" => Ok(Self::Override),
+            "abort" => Ok(Self::Abort),
             "continue" => Ok(Self::Continue),
-            _ => Err(MultiStealParseError),
+            "override" => Ok(Self::Override),
+            _ => Err(ConcurrentStealParseError),
         }
     }
 }
 
-impl fmt::Display for MultiSteal {
+impl fmt::Display for ConcurrentSteal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Override => write!(f, "override"),
+            Self::Abort => write!(f, "abort"),
             Self::Continue => write!(f, "continue"),
+            Self::Override => write!(f, "override"),
         }
     }
 }

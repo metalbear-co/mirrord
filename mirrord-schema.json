@@ -281,6 +281,32 @@
       },
       "additionalProperties": false
     },
+    "ConcurrentSteal": {
+      "description": "(Operator Only): Allows overiding port locks\n\nCan be set to either `\"continue\"` (default) or `\"override\"`.\n\n- `\"continue\"`: Continue with normal execution - `\"override\"`: If port lock detected then override it with new lock and force close the original locking connection",
+      "oneOf": [
+        {
+          "description": "<!--${internal}--> ### override\n\nOverride any port lock and force close the original lock connection",
+          "type": "string",
+          "enum": [
+            "override"
+          ]
+        },
+        {
+          "description": "<!--${internal}--> ### continue\n\nContinue with normal execution",
+          "type": "string",
+          "enum": [
+            "continue"
+          ]
+        },
+        {
+          "description": "<!--${internal}--> ### abort\n\nAbort Execution",
+          "type": "string",
+          "enum": [
+            "abort"
+          ]
+        }
+      ]
+    },
     "DeploymentTarget": {
       "description": "<!--${internal}--> Mirror the deployment specified by [`DeploymentTarget::deployment`].",
       "type": "object",
@@ -573,12 +599,12 @@
             }
           ]
         },
-        "on_multi_steal": {
-          "title": "on_multi_steal",
+        "on_concurrent_steal": {
+          "title": "on_concurrent_steal",
           "description": "(Operator Only): if value of override is passed then current later will override any PortLocks and force close other connections",
           "anyOf": [
             {
-              "$ref": "#/definitions/MultiSteal"
+              "$ref": "#/definitions/ConcurrentSteal"
             },
             {
               "type": "null"
@@ -646,25 +672,6 @@
           "type": "string",
           "enum": [
             "steal"
-          ]
-        }
-      ]
-    },
-    "MultiSteal": {
-      "description": "(Operator Only): Allows overriding port locks\n\nCan be set to either `\"continue\"` (default) or `\"override\"`.\n\n- `\"continue\"`: Continue with normal execution - `\"override\"`: If port lock detected then override it with new lock and force close the original locking connection.",
-      "oneOf": [
-        {
-          "description": "<!--${internal}--> ### override\n\nOverride any port lock and force close the original lock connection",
-          "type": "string",
-          "enum": [
-            "override"
-          ]
-        },
-        {
-          "description": "<!--${internal}--> ### continue\n\nContinue with normal execution",
-          "type": "string",
-          "enum": [
-            "continue"
           ]
         }
       ]

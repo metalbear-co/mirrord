@@ -145,10 +145,10 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
         std::env::set_var("MIRRORD_CAPTURE_ERROR_TRACE", "true");
     }
 
-    if let Some(on_multi_steal) = &args.on_multi_steal {
+    if let Some(on_concurrent_steal) = &args.on_concurrent_steal {
         std::env::set_var(
             "MIRRORD_OPERATOR_ON_MULTI_STEAL",
-            on_multi_steal.to_string(),
+            on_concurrent_steal.to_string(),
         );
     }
 

@@ -50,7 +50,7 @@ pub struct OperatorApi {
     target_api: Api<TargetCrd>,
     version_api: Api<MirrordOperatorCrd>,
     target_config: TargetConfig,
-    on_multi_steal: MultiSteal,
+    on_concurrent_steal: MultiSteal,
 }
 
 impl OperatorApi {
@@ -117,7 +117,7 @@ impl OperatorApi {
 
     async fn new(config: &LayerConfig) -> Result<Self> {
         let target_config = config.target.clone();
-        let on_multi_steal = config.feature.network.incoming.on_multi_steal.clone();
+        let on_concurrent_steal = config.feature.network.incoming.on_concurrent_steal.clone();
 
         let client = create_kube_api(
             config.accept_invalid_certificates,
@@ -142,7 +142,7 @@ impl OperatorApi {
             target_api,
             version_api,
             target_config,
-            on_multi_steal,
+            on_concurrent_steal,
         })
     }
 
@@ -172,10 +172,10 @@ impl OperatorApi {
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
         let mut builder = Request::builder()
             .uri(format!(
-                "{}/{}?on_multi_steal={}&connect=true",
+                "{}/{}?on_concurrent_steal={}&connect=true",
                 self.target_api.resource_url(),
                 target.name(),
-                self.on_multi_steal
+                self.on_concurrent_steal
             ))
             .header("x-session-id", Self::session_id());
 

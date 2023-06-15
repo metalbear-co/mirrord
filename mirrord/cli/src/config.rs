@@ -184,7 +184,7 @@ pub(super) struct ExecArgs {
 
     /// Allows overriding port lock
     #[arg(long)]
-    pub on_multi_steal: Option<MultiSteal>,
+    pub on_concurrent_steal: Option<MultiSteal>,
 }
 
 #[derive(Args, Debug)]
