@@ -8,6 +8,43 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.46.0](https://github.com/metalbear-co/mirrord/tree/3.46.0) - 2023-06-14
+
+
+### Added
+
+- Add support for HTTP Path filtering
+  [#1512](https://github.com/metalbear-co/mirrord/issues/1512)
+
+
+### Changed
+
+- Refactor vscode-ext code to be more modular
+
+
+### Fixed
+
+- Fixed bogus warnings in the VS Code extension.
+  [#1504](https://github.com/metalbear-co/mirrord/issues/1504)
+- Mirroring/stealing a port for a second time after the user application closed
+  it once. [#1526](https://github.com/metalbear-co/mirrord/issues/1526)
+- fixed using dotnet debugger on VSCode
+  [#1529](https://github.com/metalbear-co/mirrord/issues/1529)
+- Properly detecting and ignoring localhost port used by Rider's debugger.
+- fix vscode SIP patch not working
+
+
+### Internal
+
+- Add a state Persistent Volume Claim to operator deployment setup.
+- Bring the style guide into the repo.
+- Fix vscode e2e job not running
+- Remove OpenSSL dependency again
+- Switch to new licensing and operator authenticaion flow.
+- fix launch json for vscode extension
+- fix macos build script to use directory's toolchain
+
+
 ## [3.45.2](https://github.com/metalbear-co/mirrord/tree/3.45.2) - 2023-06-12
 
 
