@@ -13,7 +13,7 @@ use mirrord_protocol::{
     ClientMessage, Port, ResponseError,
 };
 use tokio::{net::TcpStream, sync::mpsc::Sender};
-use tracing::{debug, error, log::trace};
+use tracing::{debug, error, info, log::trace};
 
 use crate::{
     detour::DetourGuard,
@@ -88,7 +88,21 @@ pub(crate) trait TcpHandler {
     async fn handle_daemon_message(&mut self, message: DaemonTcp) -> Result<(), LayerError> {
         let handled = match message {
             DaemonTcp::NewConnection(tcp_connection) => {
-                self.handle_new_connection(tcp_connection).await
+                let res = self.handle_new_connection(tcp_connection).await;
+                if let Err(LayerError::NewConnectionAfterSocketClose(connection_id)) = res {
+                    // This can happen and is valid:
+                    // 1. User app closes socket.
+                    // 2. mirrord sends `PortUnsubscribe` to agent.
+                    // 3. Agent sniffs new incoming connection and sends it to the layer.
+                    // 4. Agent receives `PortUnsubscribe`.
+                    info!(
+                        "Got incoming tcp connection (id: {connection_id}) after app already \
+                        closed the connection."
+                    );
+                    Ok(())
+                } else {
+                    res
+                }
             }
             DaemonTcp::Data(tcp_data) => self.handle_new_data(tcp_data).await,
             DaemonTcp::Close(tcp_close) => self.handle_close(tcp_close),
@@ -147,10 +161,9 @@ pub(crate) trait TcpHandler {
             })
             .unwrap_or(tcp_connection.destination_port);
 
-        let listen = self
-            .ports()
-            .get(&remote_destination_port)
-            .ok_or(LayerError::PortNotFound(remote_destination_port))?;
+        let listen = self.ports().get(&remote_destination_port).ok_or(
+            LayerError::NewConnectionAfterSocketClose(tcp_connection.connection_id),
+        )?;
 
         let addr: SocketAddr = listen.into();
 

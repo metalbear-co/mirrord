@@ -334,10 +334,9 @@ impl TcpStealHandler {
         &mut self,
         http_request: HttpRequest,
     ) -> Result<(), LayerError> {
-        let listen = self
-            .ports()
-            .get(&http_request.port)
-            .ok_or(LayerError::PortNotFound(http_request.port))?;
+        let listen = self.ports().get(&http_request.port).ok_or(
+            LayerError::NewConnectionAfterSocketClose(http_request.connection_id),
+        )?;
         let addr: SocketAddr = listen.into();
         let connection_id = http_request.connection_id;
         let port = http_request.port;
