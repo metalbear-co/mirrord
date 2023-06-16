@@ -261,12 +261,16 @@ impl TcpHandler for TcpStealHandler {
         port: Port,
         tx: &Sender<ClientMessage>,
     ) -> Result<(), LayerError> {
-        self.ports_mut().remove(&port);
-        tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(
-            port,
-        )))
-        .await
-        .map_err(From::from)
+        if self.ports_mut().remove(&port) {
+            tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(
+                port,
+            )))
+            .await
+            .map_err(From::from)
+        } else {
+            // was not listening on closed socket, could be an outgoing socket.
+            Ok(())
+        }
     }
 }
 

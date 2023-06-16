@@ -234,9 +234,13 @@ impl TcpHandler for TcpMirrorHandler {
         port: Port,
         tx: &Sender<ClientMessage>,
     ) -> std::result::Result<(), LayerError> {
-        self.ports_mut().remove(&port);
-        tx.send(ClientMessage::Tcp(LayerTcp::PortUnsubscribe(port)))
-            .await
-            .map_err(From::from)
+        if self.ports_mut().remove(&port) {
+            tx.send(ClientMessage::Tcp(LayerTcp::PortUnsubscribe(port)))
+                .await
+                .map_err(From::from)
+        } else {
+            // was not listening on closed socket, could be an outgoing socket.
+            Ok(())
+        }
     }
 }
