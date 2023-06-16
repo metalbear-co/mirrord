@@ -126,7 +126,7 @@ jobs:
       - run: rm rust-toolchain.toml
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: nightly-2023-03-29
+          toolchain: nightly-2023-04-19
           components: rustfmt, clippy
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
       - run: python3 -m pip install cargo-zigbuild
@@ -151,7 +151,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           # TODO(alex): update this when https://github.com/rust-lang/rust/issues/109631 is fixed
-          toolchain: nightly-2023-01-31
+          toolchain: nightly-2023-04-19
       - run: cargo doc --document-private-items
 
   lint_macos:
@@ -166,7 +166,7 @@ jobs:
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
-          toolchain: nightly-2023-03-29
+          toolchain: nightly-2023-04-19
       # only mirrord, mirrord-sip contain macOS specific, so run clippy on that.
       - run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
       - run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
@@ -275,7 +275,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{matrix.target}}
-          toolchain: nightly-2023-03-29
+          toolchain: nightly-2023-04-19
       # For now, just verify it compiles.
       - run: cargo build -p mirrord-layer -p mirrord --target=${{matrix.target}}
 
