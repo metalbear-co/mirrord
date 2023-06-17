@@ -1,10 +1,6 @@
-# Basic set up for three package managers
-
 version: 2
 updates:
-
-  # Maintain dependencies for GitHub Actions
-  - package-ecosystem: "cargo"
-    directory: "/mirrord/protocol"
+  - package-ecosystem: 'npm'
+    directory: '/'
     schedule:
-      interval: "daily"
+      interval: 'daily'

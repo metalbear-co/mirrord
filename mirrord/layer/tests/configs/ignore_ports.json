@@ -1,9 +1,0 @@
-{
-    "feature": {
-        "network": {
-            "incoming": {
-                "ignore_ports": [21232]
-            }
-        }
-    }
-}
