@@ -56,9 +56,10 @@ use http_filter::*;
 ///           "filter": "host: api\..+",
 ///           "ports": [80, 8080]
 ///         },
-///         "port_mapping": [[ 7777: 8888 ]],
+///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
 ///         "ignore_ports": [9999, 10000]
+///         "listen_ports": [[80, 8111]]
 ///       }
 ///     }
 ///   }
@@ -69,7 +70,7 @@ use http_filter::*;
 #[serde(untagged, rename_all = "lowercase")]
 pub enum IncomingFileConfig {
     Simple(Option<IncomingMode>),
-    Advanced(IncomingAdvancedFileConfig),
+    Advanced(Box<IncomingAdvancedFileConfig>),
 }
 
 impl Default for IncomingFileConfig {
@@ -120,6 +121,10 @@ impl MirrordConfig for IncomingFileConfig {
                     .layer(|layer| Unstable::new("IncomingFileConfig", "ignore_localhost", layer))
                     .source_value()
                     .transpose()?
+                    .unwrap_or_default(),
+                listen_ports: advanced
+                    .listen_ports
+                    .map(|m| m.into_iter().collect())
                     .unwrap_or_default(),
             },
         };
@@ -187,6 +192,22 @@ pub struct IncomingAdvancedFileConfig {
     /// Ports to ignore when mirroring/stealing traffic. Useful if you want specific ports to be
     /// used locally only.
     pub ignore_ports: Option<Vec<u16>>,
+
+    /// ### listen_ports
+    ///
+    /// Mapping for local ports to actually used local ports.
+    /// When application listens on a port while steal/mirror is active
+    /// we fallback to random ports to avoid port conflicts.
+    /// Using this configuration will always use the specified port.
+    /// If this configuration doesn't exist, mirrord will try to listen on the original port
+    /// and if it fails it will assign a random port
+    ///
+    /// This is useful when you want to access ports exposed by your service locally
+    /// For example, if you have a service that listens on port `80` and you want to access it,
+    /// you probably can't listen on `80` without sudo, so you can use `[[80, 4480]]`
+    /// then access it on `4480` while getting traffic from remote `80`.
+    /// The value of `port_mapping` doesn't affect this.
+    pub listen_ports: Option<Vec<(u16, u16)>>,
 }
 
 /// Controls the incoming TCP traffic feature.
@@ -230,6 +251,7 @@ pub struct IncomingAdvancedFileConfig {
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
 ///         "ignore_ports": [9999, 10000]
+///         "listen_ports": [[80, 8111]]
 ///       }
 ///     }
 ///   }
@@ -267,6 +289,22 @@ pub struct IncomingConfig {
 
     /// #### feature.network.incoming.filter {#feature-network-incoming-http-filter}
     pub http_filter: HttpFilterConfig,
+
+    /// #### feature.network.incoming.listen_ports {#feature-network-incoming-listen_ports}
+    ///
+    /// Mapping for local ports to actually used local ports.
+    /// When application listens on a port while steal/mirror is active
+    /// we fallback to random ports to avoid port conflicts.
+    /// Using this configuration will always use the specified port.
+    /// If this configuration doesn't exist, mirrord will try to listen on the original port
+    /// and if it fails it will assign a random port
+    ///
+    /// This is useful when you want to access ports exposed by your service locally
+    /// For example, if you have a service that listens on port `80` and you want to access it,
+    /// you probably can't listen on `80` without sudo, so you can use `[[80, 4480]]`
+    /// then access it on `4480` while getting traffic from remote `80`.
+    /// The value of `port_mapping` doesn't affect this.
+    pub listen_ports: BiMap<u16, u16>,
 }
 
 impl IncomingConfig {
