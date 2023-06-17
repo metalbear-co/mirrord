@@ -43,34 +43,10 @@ class MirrordExecution {
 
 // API to interact with the mirrord CLI, runs in the "ext" mode
 export class MirrordAPI {
-    context: vscode.ExtensionContext;
     cliPath: string;
 
-    constructor(context: vscode.ExtensionContext) {
-        this.context = context;
-        // for easier debugging, use the local mirrord cli if we're in development mode
-        if (context.extensionMode === vscode.ExtensionMode.Development) {
-            const universalApplePath = path.join(path.dirname(this.context.extensionPath), "target", "universal-apple-darwin", "debug", "mirrord");
-            if (process.platform === "darwin" && fs.existsSync(universalApplePath)) {
-                this.cliPath = universalApplePath;
-            } else {
-                const debugPath = path.join(path.dirname(this.context.extensionPath), "target", "debug");
-                this.cliPath = path.join(debugPath, "mirrord");
-            }
-        } else {
-            if (process.platform === "darwin") { // macos binary is universal for all architectures
-                this.cliPath = path.join(context.extensionPath, 'bin', process.platform, 'mirrord');
-            } else if (process.platform === "linux") {
-                this.cliPath = path.join(context.extensionPath, 'bin', process.platform, process.arch, 'mirrord');
-            } else if (vscode.extensions.getExtension('MetalBear.mirrord')?.extensionKind === vscode.ExtensionKind.Workspace) {
-                throw new Error("Unsupported platform: " + process.platform + " " + process.arch);
-            } else {
-                console.log("Running in Windows.");
-                this.cliPath = '';
-                return;
-            }
-            fs.chmodSync(this.cliPath, 0o755);
-        }
+    constructor(cliPath: string) {
+        this.cliPath = cliPath
     }
 
     // Return environment for the spawned mirrord cli processes.
@@ -130,6 +106,15 @@ export class MirrordAPI {
     // used for reading/interacting while process still runs.
     private spawn(args: string[]): ChildProcessWithoutNullStreams {
         return spawn(this.cliPath, args, { env: MirrordAPI.getEnv() });
+    }
+
+    /**
+     * Runs mirrord --version and returns the version string.
+     */
+    async getBinaryVersion(): Promise<string | undefined> {
+        const stdout = await this.exec(["--version"]);
+        // parse mirrord x.y.z
+        return stdout.split(" ")[1].trim();
     }
 
     /// Uses `mirrord ls` to get a list of all targets.
