@@ -9,6 +9,7 @@ mod steal {
     use kube::Client;
     use reqwest::{header::HeaderMap, Url};
     use rstest::*;
+    use tokio::time::sleep;
     use tokio_tungstenite::connect_async;
 
     use crate::utils::{
@@ -92,6 +93,68 @@ mod steal {
             .unwrap();
 
         application.assert(&process);
+    }
+
+    /// Test the app continues running with mirrord and traffic is no longer stolen after the app
+    /// closes a socket.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    async fn close_socket(
+        #[future] service: KubeService,
+        #[future] kube_client: Client,
+        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
+    ) {
+        let application = Application::PythonCloseSocket;
+        // Start the test app with mirrord
+        let service = service.await;
+        let kube_client = kube_client.await;
+        let mut flags = vec!["--steal"];
+        if let Some(flag) = agent.flag() {
+            flags.extend(flag)
+        }
+        let mut process = application
+            .run(&service.target, Some(&service.namespace), Some(flags), None)
+            .await;
+
+        // Verify that we hooked the socket operations and the agent started stealing.
+        process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+
+        // Wait for the test app to close the socket and tell us about it.
+        process.wait_for_line(Duration::from_secs(40), "Closed socket");
+
+        // Flake-proofing the test:
+        // If we connect to the service between the time the test application had closed its socket
+        // and the agent was informed about it, our connection would still get stolen at first, but
+        // then reset without response data once the agent learns the socket was closed.
+        //
+        // To try to prevent this from happening in the test, we wait after the app closes the
+        // socket, to make sure mirrord has time to handle the close, before we send a request.
+        // Because things could go slow on GitHub Actions, we wait for 3 full seconds.
+        //
+        // In order to make this test deterministic, we could make the agent send a confirmation
+        // once it's done handling the `PortUnsubscribe`, but that would require adding a new
+        // message to the protocol, which we only do on major protocol version bumps.
+        sleep(Duration::from_secs(3)).await;
+
+        // Send HTTP request and verify it is handled by the REMOTE app - NOT STOLEN.
+        let url = get_service_url(kube_client.clone(), &service).await;
+        let client = reqwest::Client::new();
+        let req_builder = client.get(url);
+        eprintln!("Sending request to remote service");
+        send_request(
+            req_builder,
+            Some("OK - GET: Request completed\n"),
+            Default::default(),
+        )
+        .await;
+
+        process
+            .write_to_stdin(b"Hey test app, please stop running and just exit successfuly.\n")
+            .await;
+
+        eprintln!("Waiting for test app to exit successfully.");
+        process.wait_assert_success().await;
     }
 
     /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`

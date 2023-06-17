@@ -40,7 +40,7 @@ mod utils {
     use serde_json::json;
     use tempfile::{tempdir, TempDir};
     use tokio::{
-        io::{AsyncReadExt, BufReader},
+        io::{AsyncReadExt, AsyncWriteExt, BufReader},
         process::{Child, Command},
         sync::oneshot::{self, Sender},
     };
@@ -104,6 +104,7 @@ mod utils {
         Go19HTTP,
         Go20HTTP,
         CurlToKubeApi,
+        PythonCloseSocket,
     }
 
     #[derive(Debug)]
@@ -164,6 +165,11 @@ mod utils {
             assert!(!self.stderr.lock().unwrap().contains("FAILED"));
         }
 
+        pub async fn wait_assert_success(self) {
+            let output = self.child.wait_with_output().await.unwrap();
+            assert!(output.status.success());
+        }
+
         pub fn wait_for_line(&self, timeout: Duration, line: &str) {
             let now = std::time::Instant::now();
             while now.elapsed() < timeout {
@@ -173,6 +179,14 @@ mod utils {
                 }
             }
             panic!("Timeout waiting for line: {line}");
+        }
+
+        pub async fn write_to_stdin(&mut self, data: &[u8]) {
+            if let Some(ref mut stdin) = self.child.stdin {
+                stdin.write(data).await.unwrap();
+            } else {
+                panic!("Can't write to test app's stdin!");
+            }
         }
 
         pub fn from_child(mut child: Child, tempdir: TempDir) -> TestProcess {
@@ -238,6 +252,9 @@ mod utils {
                         "--app-dir=./python-e2e/",
                         "app_fastapi:app",
                     ]
+                }
+                Application::PythonCloseSocket => {
+                    vec!["python3", "-u", "python-e2e/close_socket.py"]
                 }
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
                 Application::NodeHTTP2 => {
@@ -415,6 +432,7 @@ mod utils {
         let server = Command::new(path)
             .args(args.clone())
             .envs(base_env)
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
