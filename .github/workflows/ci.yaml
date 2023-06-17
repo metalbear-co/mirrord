@@ -13,9 +13,6 @@ concurrency:
   group: ${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
-env:
-  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-
 jobs:
   towncrier_check:
     runs-on: ubuntu-latest
@@ -27,7 +24,7 @@ jobs:
         run: pip install towncrier
       - name: verify newsfragment exist
         run: towncrier check
-  
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -38,7 +35,7 @@ jobs:
       - run: |
           npm install --no-package-lock --no-save eslint
           npm run lint
-  
+
   e2e:
     runs-on: ubuntu-latest
     env:
@@ -79,12 +76,7 @@ jobs:
     name: ci
     # We want this to run even if some of the required jobs got skipped
     if: always()
-    needs:
-      [
-        towncrier_check,
-        e2e,
-        lint,
-      ]
+    needs: [towncrier_check, e2e, lint]
     runs-on: ubuntu-latest
     steps:
       - name: CI succeeded

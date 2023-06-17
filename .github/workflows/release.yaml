@@ -8,177 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build_binaries_aarch64-unknown-linux-gnu:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cross
-      # building layer and cli together leads to weird situation where embedded layer is x64, so split.
-      - name: build mirrord-layer
-        run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord-layer --target=aarch64-unknown-linux-gnu
-      - name: build mirrord cli
-        env:
-          MIRRORD_LAYER_FILE: ../../../target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
-        run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord --target=aarch64-unknown-linux-gnu
-      - uses: actions/upload-artifact@v3
-        with:
-          name: aarch64-unknown-linux-gnu
-          path: |
-            target/aarch64-unknown-linux-gnu/release/mirrord
-            target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
-          if-no-files-found: error
-  build_binaries_x86_64-unknown-linux-gnu:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cross
-      - name: build mirrord-layer and cli
-        run: cross build --release -p mirrord -p mirrord-layer --target=x86_64-unknown-linux-gnu
-      - uses: actions/upload-artifact@v3
-        with:
-          name: x86_64-unknown-linux-gnu
-          path: |
-            target/x86_64-unknown-linux-gnu/release/mirrord
-            target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so
-          if-no-files-found: error
-  build_binaries_macos:
-    runs-on: macos-12
-    steps:
-      - uses: actions/checkout@v3
-      - run: rm rust-toolchain.toml
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          target: x86_64-apple-darwin,aarch64-apple-darwin
-          toolchain: nightly-2023-01-31
-      - name: Import Code-Signing Certificates
-        uses: Apple-Actions/import-codesign-certs@8f3fb608891dd2244cdab3d69cd68c0d37a7fe93
-        with:
-          # The certificates in a PKCS12 file encoded as a base64 string
-          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
-          # The password used to import the PKCS12 file.
-          p12-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
-      - name: Install gon via HomeBrew for code signing and app notarization
-        run: |
-          brew tap mitchellh/gon
-          brew install mitchellh/gon/gon
-      - name: build mirrord-layer x86-64
-        run: cargo +nightly-2023-01-31 build --release -p mirrord-layer --target=x86_64-apple-darwin
-      - name: build mirrord-layer macOS arm/arm64e
-        # Editing the arm64 binary, since arm64e can be loaded into both arm64 & arm64e
-        # >> target/debug/libmirrord_layer.dylib: Mach-O 64-bit dynamically linked shared library arm64
-        # >> magic bits: 0000000 facf feed 000c 0100 0000 0000 0006 0000
-        # >> After editing using dd -
-        # >> magic bits: 0000000 facf feed 000c 0100 0002 0000 0006 0000
-        # >> target/debug/libmirrord_layer.dylib: Mach-O 64-bit dynamically linked shared library arm64e
-        run: |
-          cargo +nightly-2023-01-31 build --release -p mirrord-layer --target=aarch64-apple-darwin
-          cp target/aarch64-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/libmirrord_layer_arm64e.dylib
-          printf '\x02' | dd of=target/aarch64-apple-darwin/release/libmirrord_layer_arm64e.dylib bs=1 seek=8 count=1 conv=notrunc
-      - name: Sign layer binaries
-        env:
-          AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
-          AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: gon -log-level=debug -log-json .github/workflows/arch_dylib_sign.json
-      - name: create universal target dir
-        run: mkdir -p /tmp/target/universal-apple-darwin/release
-      - name: create universal dylib
-        run: lipo -create -output /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/libmirrord_layer.dylib target/x86_64-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/libmirrord_layer_arm64e.dylib
-      - name: Sign layer universal
-        env:
-          AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
-          AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: gon -log-level=debug -log-json .github/workflows/universal_dylib_sign.json
-      - name: build macOS arm cli with universal dylib
-        env:
-          MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
-        run: cargo +nightly-2023-01-31 build --release -p mirrord --target=aarch64-apple-darwin
-      - name: build macOS x86-64 cli with universal dylib
-        env:
-          MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
-        run: cargo +nightly-2023-01-31 build --release -p mirrord --target=x86_64-apple-darwin
-      - name: Sign cli binaries
-        env:
-          AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
-          AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: gon -log-level=debug -log-json .github/workflows/arch_cli_sign.json
-      - name: create universal macOS cli
-        run: lipo -create -output /tmp/target/universal-apple-darwin/release/mirrord target/aarch64-apple-darwin/release/mirrord target/x86_64-apple-darwin/release/mirrord
-      - name: Sign universal cli
-        env:
-          AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
-          AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: gon -log-level=debug -log-json .github/workflows/universal_cli_sign.json
-      - name: adjust directory layout for upload
-        run: cp -rf /tmp/target .
-      - uses: actions/upload-artifact@v3
-        with:
-          name: universal-apple-darwin
-          path: |
-            target/universal-apple-darwin/release/mirrord
-            target/universal-apple-darwin/release/libmirrord_layer.dylib
-          if-no-files-found: error
-
-  release_docker_image:
-    runs-on: ubuntu-latest
-    permissions:
-      packages: write
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: Set up QEMU
-        id: qemu
-        uses: docker/setup-qemu-action@v2
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Get release version
-        run: |
-          echo "version=$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"')" >> $GITHUB_OUTPUT
-        id: version
-
-      - name: Build and push (test)
-        if: github.event_name == 'workflow_dispatch'
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          file: mirrord/agent/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/metalbear-co/mirrord-staging:${{ github.sha }}
-
-      - name: Build and push (final/release)
-        if: github.event_name != 'workflow_dispatch'
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          file: mirrord/agent/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/metalbear-co/mirrord:latest
-            ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}
-
-  release_vscode_ext:
-    needs:
-      [
-        build_binaries_aarch64-unknown-linux-gnu,
-        build_binaries_x86_64-unknown-linux-gnu,
-        build_binaries_macos,
-        release_docker_image,
-      ]
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -186,41 +16,23 @@ jobs:
         with:
           node-version: 17
           cache: "npm"
-          cache-dependency-path: vscode-ext/package-lock.json
-      # This downloads all artifacts of the job
-      - uses: actions/download-artifact@v3
-        with:
-          path: /tmp/artifacts
+          cache-dependency-path: package-lock.json
       - name: Get release version
         # VSCode doesn't support pre release versions https://github.com/microsoft/vsmarketplace/issues/50#issuecomment-990764201
         run: |
-          echo "version=$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)" >> $GITHUB_OUTPUT
+          echo "version=$(cat package.json | jq -r '.version')" >> $GITHUB_OUTPUT
         id: version
       # TypeScript set at 4.7.4 because @kubernetes/client-node 0.16.3 (and 0.17.0) breaks with version 4.8.2+
       - run: npm install -g vsce typescript@4.7.4 esbuild
       - run: mkdir -p /tmp/vscode-ext
-
       - run: |
-          mkdir -p vscode-ext/bin/linux/arm64
-          mkdir -p vscode-ext/bin/linux/x64
-          mkdir -p vscode-ext/bin/darwin
-      - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord vscode-ext/bin/linux/x64/mirrord
-      - run: cp /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord vscode-ext/bin/linux/arm64/mirrord
-      - run: cp /tmp/artifacts/universal-apple-darwin/mirrord vscode-ext/bin/darwin/mirrord
-      # Package a patched Delve with our VS Code extension. The patched version bypasses an issue where we can't be injected into platform binaries.
-      - run: wget https://github.com/metalbear-co/delve/releases/download/1.20.1/delve_darwin_amd64 -O vscode-ext/bin/darwin/dlv-amd64 && chmod +x vscode-ext/bin/darwin/dlv-amd64
-      - run: wget https://github.com/metalbear-co/delve/releases/download/1.20.1/delve_darwin_arm64 -O vscode-ext/bin/darwin/dlv-arm64 && chmod +x vscode-ext/bin/darwin/dlv-arm64
-
-      - run: |
-          cd vscode-ext
           npm install
           tsc && vsce package -o /tmp/vscode-ext
       - name: Publish vscode-ext
         if: github.event_name != 'workflow_dispatch'
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: cd vscode-ext && vsce publish ${{ steps.version.outputs.version }}
-
+        run: vsce publish ${{ steps.version.outputs.version }}
       - uses: actions/upload-artifact@v3
         with:
           name: vscode-ext
@@ -228,71 +40,8 @@ jobs:
             /tmp/vscode-ext
           if-no-files-found: error
 
-  release_intellij_plugin:
-    needs:
-      [
-        build_binaries_aarch64-unknown-linux-gnu,
-        build_binaries_x86_64-unknown-linux-gnu,
-        build_binaries_macos,
-        release_docker_image,
-      ]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-        id: version
-      - name: get custom delve
-        run: |
-          mkdir -p intellij-ext/bin/macos/arm64
-          mkdir -p intellij-ext/bin/macos/x86-64
-          wget https://github.com/metalbear-co/delve/releases/download/1.20.1/delve_darwin_arm64 -O intellij-ext/bin/macos/arm64/dlv
-          wget https://github.com/metalbear-co/delve/releases/download/1.20.1/delve_darwin_amd64 -O intellij-ext/bin/macos/x86-64/dlv
-      - uses: actions/download-artifact@v3
-        with:
-          path: /tmp/artifacts
-      - name: Setup Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: zulu
-          java-version: 11
-      - run: |
-          mkdir -p intellij-ext/bin/linux/arm64
-          mkdir -p intellij-ext/bin/linux/x86-64
-          mkdir -p intellij-ext/bin/macos
-      - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord intellij-ext/bin/linux/x86-64/mirrord
-      - run: cp /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord intellij-ext/bin/linux/arm64/mirrord
-      - run: cp /tmp/artifacts/universal-apple-darwin/mirrord intellij-ext/bin/macos/mirrord
-      - name: Build Plugin
-        run: |
-          cd intellij-ext
-          chmod +x ./gradlew
-          ./gradlew buildPlugin
-      - name: Publish Plugin
-        if: github.event_name != 'workflow_dispatch'
-        env:
-          PUBLISH_TOKEN: ${{ secrets.INTELLIJ_PUBLISH_TOKEN }}
-          CERTIFICATE_CHAIN: ${{ secrets.INTELLIJ_CERTIFICATE_CHAIN }}
-          PRIVATE_KEY: ${{ secrets.INTELLIJ_PRIVATE_KEY }}
-          PRIVATE_KEY_PASSWORD: ${{ secrets.INTELLIJ_PRIVATE_KEY_PASSWORD }}
-        run: |
-          cd intellij-ext
-          chmod +x ./gradlew
-          ./gradlew publishPlugin
-      - uses: actions/upload-artifact@v3
-        with:
-          name: intellij-ext
-          path: intellij-ext/build/distributions/*.zip
-          if-no-files-found: error
-
   release_gh:
-    needs:
-      [
-        build_binaries_aarch64-unknown-linux-gnu,
-        build_binaries_x86_64-unknown-linux-gnu,
-        build_binaries_macos,
-        release_docker_image,
-        release_vscode_ext,
-        release_intellij_plugin,
-      ]
+    needs: [release_vscode_ext]
     runs-on: ubuntu-latest
     if: github.event_name != 'workflow_dispatch'
     permissions:
@@ -306,93 +55,16 @@ jobs:
         with:
           path: /tmp/artifacts
       - uses: montudor/action-zip@v1
-      - name: Create mirrord linux-x64 zip file
-        run: |
-          zip mirrord_linux_x86_64.zip mirrord
-          shasum -a 256 mirrord_linux_x86_64.zip > mirrord_linux_x86_64.shasum256
-        working-directory: /tmp/artifacts/x86_64-unknown-linux-gnu
-      - name: Create mirrord linux-aarch64 zip file
-        run: |
-          zip mirrord_linux_aarch64.zip mirrord
-          shasum -a 256 mirrord_linux_aarch64.zip > mirrord_linux_aarch64.shasum256
-        working-directory: /tmp/artifacts/aarch64-unknown-linux-gnu
-      - name: Create mirrord macos zip file
-        run: |
-          zip mirrord_mac_universal.zip mirrord
-          shasum -a 256 mirrord_mac_universal.zip > mirrord_mac_universal.shasum256
-        working-directory: /tmp/artifacts/universal-apple-darwin
-      # used for the homebrew formula
-      - uses: actions/upload-artifact@v3
-        with:
-          name: shasum
-          path: |
-            /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256
-            /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256
-            /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256
-          if-no-files-found: error
       - name: Prepare binaries for upload
         run: |
           mkdir /tmp/release
-          mv /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so /tmp/release/libmirrord_layer_linux_x86_64.so
-          mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord /tmp/release/mirrord_linux_x86_64
-          mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.zip /tmp/release/mirrord_linux_x86_64.zip
-          mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256 /tmp/release/mirrord_linux_x86_64.shasum256
-
-          mv /tmp/artifacts/aarch64-unknown-linux-gnu/libmirrord_layer.so /tmp/release/libmirrord_layer_linux_aarch64.so
-          mv /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord /tmp/release/mirrord_linux_aarch64
-          mv /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.zip /tmp/release/mirrord_linux_aarch64.zip
-          mv /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256 /tmp/release/mirrord_linux_aarch64.shasum256
-
-          mv /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib /tmp/release/libmirrord_layer_mac_universal.dylib          
-          mv /tmp/artifacts/universal-apple-darwin/mirrord /tmp/release/mirrord_mac_universal
-          mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip /tmp/release/mirrord_mac_universal.zip
-          mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
-
           mv /tmp/artifacts/vscode-ext/* /tmp/release/
-          mv /tmp/artifacts/intellij-ext/* /tmp/release/
 
       # Consider to add changelog generation..
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
           files: /tmp/release/**
-
-  release_homebrew:
-    needs: release_gh
-    runs-on: ubuntu-latest
-    if: github.event_name != 'workflow_dispatch'
-    steps:
-      - uses: actions/download-artifact@v3
-        with:
-          path: /tmp/artifacts
-      - uses: actions/checkout@v3
-      - name: Get release version and hashes
-        run: |
-          echo "version=$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)" >> $GITHUB_ENV
-          echo "sha256_mac=$(cat /tmp/artifacts/shasum/universal-apple-darwin/mirrord_mac_universal.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
-          echo "sha256_linux_aarch64=$(cat /tmp/artifacts/shasum/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
-          echo "sha256_linux_x86_64=$(cat /tmp/artifacts/shasum/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
-      - name: Checkout into homebrew-mirrord
-        uses: actions/checkout@v3
-        with:
-          repository: metalbear-co/homebrew-mirrord
-          path: ./
-          token: ${{ secrets.BREW_GITHUB_PAT }}
-      - name: Update hashes and urls
-        run: |
-          sed -i -e 's/\([0-9]\+\.[0-9]\+\.[0-9]\+\)/${{ env.version }}/g' mirrord.rb
-          sed -z -i -e 's/[0-9a-f]\{64\}/${{ env.sha256_mac }}/1' mirrord.rb       
-          sed -z -i -e 's/[0-9a-f]\{64\}/${{ env.sha256_linux_aarch64 }}/2' mirrord.rb
-          sed -z -i -e 's/[0-9a-f]\{64\}/${{ env.sha256_linux_x86_64 }}/3' mirrord.rb
-      - name: Display formula (For debugging purposes only)
-        run: cat mirrord.rb
-      - name: Commit to metalbear-co/homebrew-mirrord
-        run: |
-          git config --global user.email "eyal@metalbear.co"
-          git config --global user.name "Eyal Bukchin"
-          git add .
-          git commit -m "Update to ${{ env.version }}"
-          git push
 
   update_latest:
     needs: release_homebrew
