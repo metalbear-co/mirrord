@@ -947,7 +947,10 @@ pub(crate) fn close_layer_fd(fd: c_int) {
                         // agent about the closed connection from there.
                         SocketState::Connected(_) => {}
                         _ => {
-                            // TODO: can we do anything with this result?
+                            // Ignoring errors here. We continue running, potentially without
+                            // informing the layer's and agent's TCP handlers about the socket
+                            // close. The agent might try to continue sending incoming
+                            // connections/data.
                             let _ = blocking_send_hook_message(HookMessage::Tcp(
                                 tcp::TcpIncoming::Close(port),
                             ));
