@@ -940,18 +940,21 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         if let Some(port) = socket.get_port() {
             match socket.kind {
                 SocketKind::Tcp(_) => {
-                    let SocketState::Connected(_) = socket.state else {
-                        // if the socket state is connected, then closing its fd is closing the one 
-                        // connection, not the whole listening socket. We will no about this close
-                        // from the mirrord layer's side of the socket and will inform the agent
-                        // about the closed connection from there.
-                        // TODO: can we do anything with this result?
-                        let _ =
-                            blocking_send_hook_message(HookMessage::Tcp(tcp::TcpIncoming::Close(port)));
-                        return;
-                    };
+                    match socket.state {
+                        // if the socket state is connected, then closing its fd is closing the
+                        // one connection, not the whole listening socket. We will know about this
+                        // close from the mirrord layer's side of the socket and will inform the
+                        // agent about the closed connection from there.
+                        SocketState::Connected(_) => {}
+                        _ => {
+                            // TODO: can we do anything with this result?
+                            let _ = blocking_send_hook_message(HookMessage::Tcp(
+                                tcp::TcpIncoming::Close(port),
+                            ));
+                        }
+                    }
                 }
-                // TODO: I think we don't need to notify the agent about a udp socket close, right?
+                // We don't do incoming UDP, so no need to notify anyone about this.
                 SocketKind::Udp(_) => {}
             }
         }
