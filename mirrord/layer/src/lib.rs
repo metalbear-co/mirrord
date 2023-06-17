@@ -122,7 +122,7 @@ use crate::{
     debugger_ports::DebuggerPorts,
     file::{filter::FILE_FILTER, FileHandler},
     load::LoadType,
-    socket::{SocketKind, CONNECTION_QUEUE},
+    socket::{SocketKind, SocketState, CONNECTION_QUEUE},
 };
 
 mod common;
@@ -940,9 +940,16 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         if let Some(port) = socket.get_port() {
             match socket.kind {
                 SocketKind::Tcp(_) => {
-                    // TODO: can we do anything with this result?
-                    let _ =
-                        blocking_send_hook_message(HookMessage::Tcp(tcp::TcpIncoming::Close(port)));
+                    let SocketState::Connected(_) = socket.state else {
+                        // if the socket state is connected, then closing its fd is closing the one 
+                        // connection, not the whole listening socket. We will no about this close
+                        // from the mirrord layer's side of the socket and will inform the agent
+                        // about the closed connection from there.
+                        // TODO: can we do anything with this result?
+                        let _ =
+                            blocking_send_hook_message(HookMessage::Tcp(tcp::TcpIncoming::Close(port)));
+                        return;
+                    };
                 }
                 // TODO: I think we don't need to notify the agent about a udp socket close, right?
                 SocketKind::Udp(_) => {}
