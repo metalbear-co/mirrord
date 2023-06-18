@@ -10,12 +10,23 @@ const mirrordBinaryEndpoint = 'https://version.mirrord.dev/v1/version';
 const binaryCheckInterval = 1000 * 60 * 3;
 
 
+function getExtensionMirrordPath(): Uri {
+    return Utils.joinPath(globalContext.globalStorageUri, 'mirrord');
+}
+
+
 /**
  * Returns path to mirrord binary
  */
 export async function getMirrordBinaryPath(): Promise<string | undefined> {
+    const extensionMirrordPath = getExtensionMirrordPath();
+
     const latestVersion = await getLatestSupportedVersion();
+
+
+    // See if maybe we have it installed already, in correct version.
     const foundMirrord = await which("mirrord");
+
     if (foundMirrord) {
         const api = new MirrordAPI(foundMirrord);
         const installedVersion = await api.getBinaryVersion();
@@ -23,8 +34,8 @@ export async function getMirrordBinaryPath(): Promise<string | undefined> {
             return foundMirrord;
         }
     }
-    const extensionMirrordPath = Utils.joinPath(globalContext.extensionUri, 'mirrord');
-    
+
+    // Check if we previously installed latest version.
     let binaryExists = false;
     try {
         await workspace.fs.stat(extensionMirrordPath)
@@ -41,7 +52,9 @@ export async function getMirrordBinaryPath(): Promise<string | undefined> {
         }
     }
     
+    await downloadMirrordBinary(extensionMirrordPath, latestVersion);
     
+    return extensionMirrordPath.fsPath;
 }
 
 /**
@@ -66,7 +79,19 @@ async function getLatestSupportedVersion(): Promise<string> {
 }
 
 function getMirrordDownloadUrl(version: string): string {
-    
+    if (process.platform === "darwin") {
+        return `https://github.com/metalbear-co/mirrord/releases/download/${version}/mirrord_mac_universal`
+    } else if (process.platform === "linux") {
+        switch (process.arch) {
+            case 'x64':
+                return `https://github.com/metalbear-co/mirrord/releases/download/${version}/mirrord_linux_x86_64`
+            case 'arm64':
+                return `https://github.com/metalbear-co/mirrord/releases/download/${version}/mirrord_linux_aarch64`
+            default:
+                break;
+        }
+    }
+    throw new Error(`Unsupported platform ${process.platform} ${process.arch}`);
 }
 
 /**
@@ -74,9 +99,8 @@ function getMirrordDownloadUrl(version: string): string {
  * @param dest_path Path to download the binary to
  */
 async function downloadMirrordBinary(dest_path: Uri, version: string): Promise<void> {
-    fs.chmodSync(dest_path.fsPath, 0o755);
     const response = await axios.get(
-        url);
-    https://github.com/metalbear-co/mirrord/releases/download/$version/mirrord_$OS\_$ARCH
-    workspace.fs.writeFile();
+        getMirrordDownloadUrl(version));
+    await workspace.fs.writeFile(dest_path, response.data);
+    fs.chmodSync(dest_path.fsPath, 0o755);
 }

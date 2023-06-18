@@ -4,6 +4,8 @@ import { globalContext } from './extension';
 import { configFilePath, isTargetInFile } from './config';
 import { LAST_TARGET_KEY, MirrordAPI, TARGETLESS_TARGET_NAME, mirrordFailure } from './api';
 import { updateTelemetries } from './versionCheck';
+import { getMirrordBinaryPath } from './binarymanager';
+
 
 /// Get the name of the field that holds the exectuable in a debug configuration of the given type.
 function getExecutableFieldName(config: vscode.DebugConfiguration): keyof vscode.DebugConfiguration {
@@ -27,6 +29,13 @@ function getExecutableFieldName(config: vscode.DebugConfiguration): keyof vscode
 
 }
 
+function getLastActiveMirrordPath(): string | null {
+	return globalContext.globalState.get('binaryPath', null)
+}
+
+function setLastActiveMirrordPath(path: string) {
+	globalContext.globalState.update('binaryPath', path)
+}
 
 export class ConfigurationProvider implements vscode.DebugConfigurationProvider {
 	async resolveDebugConfiguration(folder: vscode.WorkspaceFolder | undefined, config: vscode.DebugConfiguration, token: vscode.CancellationToken): Promise<vscode.DebugConfiguration | null | undefined> {
@@ -42,14 +51,21 @@ export class ConfigurationProvider implements vscode.DebugConfigurationProvider 
 
 		updateTelemetries();
 
-		let mirrordApi = new MirrordAPI(globalContext);
+		//TODO: add progress bar maybe ?
+
+		let cliPath = await getMirrordBinaryPath();
+		if (!cliPath) {
+			mirrordFailure(`mirrord preparation failed: ${err}`);
+			return null;
+		}
+		let mirrordApi = new MirrordAPI(cliPath);
 
 		config.env ||= {};
 		let target = null;
 
 		let configPath = await configFilePath();
 		// If target wasn't specified in the config file, let user choose pod from dropdown
-		if (!await isTargetInFile()) {			
+		if (!await isTargetInFile()) {
 			let targets;
 			try {
 				targets = await mirrordApi.listTargets(configPath);
