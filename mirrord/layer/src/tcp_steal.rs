@@ -111,6 +111,8 @@ pub struct TcpStealHandler {
 }
 
 impl TcpHandler for TcpStealHandler {
+    const IS_STEAL: bool = true;
+
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_new_connection(
         &mut self,

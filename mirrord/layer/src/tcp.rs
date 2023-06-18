@@ -1,3 +1,4 @@
+use std::io::ErrorKind::ConnectionRefused;
 /// Tcp Traffic management, common code for stealing & mirroring
 use std::{
     borrow::Borrow,
@@ -13,7 +14,7 @@ use mirrord_protocol::{
     ClientMessage, Port, ResponseError,
 };
 use tokio::{net::TcpStream, sync::mpsc::Sender};
-use tracing::{debug, error, info, log::trace};
+use tracing::{debug, error, info, log::trace, warn};
 
 use crate::{
     detour::DetourGuard,
@@ -70,6 +71,7 @@ impl From<&Listen> for SocketAddr {
 }
 
 pub(crate) trait TcpHandler {
+    const IS_STEAL: bool;
     fn ports(&self) -> &HashSet<Listen>;
     fn ports_mut(&mut self) -> &mut HashSet<Listen>;
     fn port_mapping_ref(&self) -> &BiMap<u16, u16>;
@@ -83,27 +85,41 @@ pub(crate) trait TcpHandler {
         }
     }
 
+    /// Handle a potential [`LayerError::NewConnectionAfterSocketClose`] error.
+    fn check_connection_handling_result(res: Result<(), LayerError>) -> Result<(), LayerError> {
+        if let Err(LayerError::NewConnectionAfterSocketClose(connection_id)) = res {
+            // This can happen and is valid:
+            // 1. User app closes socket.
+            // 2. mirrord sends `PortUnsubscribe` to agent.
+            // 3. Agent sniffs new incoming connection and sends it to the layer.
+            // 4. Agent receives `PortUnsubscribe`.
+            // Step 2 could even happen after 4.
+            if Self::IS_STEAL {
+                warn!(
+                    "Got incoming tcp connection (mirrord connection id: {connection_id}) after \
+                    the application already closed the socket. The connection will not be handled \
+                    and will be reset once the agent is informed about the application closing the \
+                    socket."
+                )
+            } else {
+                info!(
+                    "Got incoming tcp connection (mirrord connection id: {connection_id}) after \
+                    the application already closed the socket."
+                );
+            }
+            Ok(())
+        } else {
+            res
+        }
+    }
+
     /// Returns true to let caller know to keep running
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_daemon_message(&mut self, message: DaemonTcp) -> Result<(), LayerError> {
         let handled = match message {
-            DaemonTcp::NewConnection(tcp_connection) => {
-                let res = self.handle_new_connection(tcp_connection).await;
-                if let Err(LayerError::NewConnectionAfterSocketClose(connection_id)) = res {
-                    // This can happen and is valid:
-                    // 1. User app closes socket.
-                    // 2. mirrord sends `PortUnsubscribe` to agent.
-                    // 3. Agent sniffs new incoming connection and sends it to the layer.
-                    // 4. Agent receives `PortUnsubscribe`.
-                    info!(
-                        "Got incoming tcp connection (id: {connection_id}) after app already \
-                        closed the connection."
-                    );
-                    Ok(())
-                } else {
-                    res
-                }
-            }
+            DaemonTcp::NewConnection(tcp_connection) => Self::check_connection_handling_result(
+                self.handle_new_connection(tcp_connection).await,
+            ),
             DaemonTcp::Data(tcp_data) => self.handle_new_data(tcp_data).await,
             DaemonTcp::Close(tcp_close) => self.handle_close(tcp_close),
             DaemonTcp::SubscribeResult(Ok(port)) => {
@@ -162,6 +178,8 @@ pub(crate) trait TcpHandler {
             .unwrap_or(tcp_connection.destination_port);
 
         let listen = self.ports().get(&remote_destination_port).ok_or(
+            // New connection arrived after user app closed the socket and the layer removed it
+            // from its listening ports.
             LayerError::NewConnectionAfterSocketClose(tcp_connection.connection_id),
         )?;
 
@@ -178,7 +196,15 @@ pub(crate) trait TcpHandler {
         #[allow(clippy::let_and_return)]
         let tcp_stream = {
             let _ = DetourGuard::new();
-            TcpStream::connect(addr).await.map_err(From::from)
+            TcpStream::connect(addr).await.map_err(|err| {
+                if err.kind() == ConnectionRefused {
+                    // A new connection was sent from the agent after the user app already closed
+                    // the socket, but before the layer handled the close.
+                    LayerError::NewConnectionAfterSocketClose(tcp_connection.connection_id)
+                } else {
+                    LayerError::from(err)
+                }
+            })
         };
 
         tcp_stream

@@ -129,6 +129,8 @@ impl TcpMirrorHandler {
 }
 
 impl TcpHandler for TcpMirrorHandler {
+    const IS_STEAL: bool = false;
+
     /// Handle NewConnection messages
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_new_connection(&mut self, tcp_connection: NewTcpConnection) -> Result<()> {

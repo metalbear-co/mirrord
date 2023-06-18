@@ -221,8 +221,12 @@ impl UserSocket {
     pub(crate) fn get_port(&self) -> Option<u16> {
         match &self.state {
             SocketState::Initialized => None,
-            SocketState::Bound(Bound { address, .. })
-            | SocketState::Listening(Bound { address, .. }) => Some(address.port()),
+            SocketState::Bound(Bound {
+                requested_address, ..
+            })
+            | SocketState::Listening(Bound {
+                requested_address, ..
+            }) => Some(requested_address.port()),
             SocketState::Connected(Connected {
                 local_address: address,
                 ..
