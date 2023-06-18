@@ -57,6 +57,7 @@ impl From<TargetCrd> for TargetConfig {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct TargetPortLock {
+    pub target_hash: String,
     pub port: u16,
 }
 
