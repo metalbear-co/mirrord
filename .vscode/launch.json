@@ -5,92 +5,15 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "type": "lldb",
-      "request": "launch",
-      "name": "cargo test",
-      "program": "target/debug/deps/mirrord_layer-8583c201705cdf75",
       "args": [
-        "test_include_complex_configuration"
-      ],
-      "cwd": "${workspaceFolder}",
-      "sourceMap": {},
-      "sourceLanguages": [
-        "rust"
-      ],
-    },
-    {
-      "name": "Launch golang file",
-      "type": "go",
-      "request": "launch",
-      "mode": "debug",
-      "program": "${file}"
-    },
-    {
-      "name": "Launch index.ts",
-      "type": "node",
-      "request": "launch",
-      "runtimeArgs": [
-        "-r",
-        "ts-node/register"
-      ],
-      "args": [
-        "${workspaceFolder}/cli/src/index.ts",
-        "nginx-deployment-66b6c48dd5-zshg9"
-      ],
-      "cwd": "${workspaceFolder}/cli"
-    },
-    {
-      "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/vscode-ext"
+        "--extensionDevelopmentPath=${workspaceFolder}"
       ],
       "name": "Launch Extension",
       "outFiles": [
-        "${workspaceFolder}/vscode-ext/dist/*.js"
+        "${workspaceFolder}/dist/*.js"
       ],
       "request": "launch",
       "type": "extensionHost"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "app.mjs: Debug mirrord-layer",
-      "program": "node",
-      "args": [
-        "${workspaceFolder}/sample/node/app.mjs"
-      ],
-      "sourceMap": {},
-      "env": {
-        "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
-        "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
-        "RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
-        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_FILE_OPS": "true",
-        "MIRRORD_REMOTE_DNS": "true",
-        "RUST_BACKTRACE": "short"
-      }
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "sample.rs: Debug mirrord-layer",
-      "program": "${workspaceFolder}/target/debug/sample-rust",
-      "args": [],
-      "cwd": "${workspaceFolder}",
-      "sourceMap": {},
-      "sourceLanguages": [
-        "rust"
-      ],
-      "env": {
-        "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
-        "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",
-        "RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_AGENT_IMPERSONATED_POD_NAME": "",
-        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_FILE_OPS": "true",
-        "MIRRORD_REMOTE_DNS": "true",
-        "RUST_BACKTRACE": "short"
-      }
     },
     {
       "name": "Debug UI Tests",

@@ -30,11 +30,11 @@ function getExecutableFieldName(config: vscode.DebugConfiguration): keyof vscode
 }
 
 function getLastActiveMirrordPath(): string | null {
-	return globalContext.globalState.get('binaryPath', null)
+	return globalContext.globalState.get('binaryPath', null);
 }
 
 function setLastActiveMirrordPath(path: string) {
-	globalContext.globalState.update('binaryPath', path)
+	globalContext.globalState.update('binaryPath', path);
 }
 
 export class ConfigurationProvider implements vscode.DebugConfigurationProvider {
@@ -52,12 +52,19 @@ export class ConfigurationProvider implements vscode.DebugConfigurationProvider 
 		updateTelemetries();
 
 		//TODO: add progress bar maybe ?
-
-		let cliPath = await getMirrordBinaryPath();
-		if (!cliPath) {
-			mirrordFailure(`mirrord preparation failed: ${err}`);
-			return null;
+		let cliPath;
+		
+		try {
+			cliPath = await getMirrordBinaryPath();
+		} catch (err) {
+			cliPath = getLastActiveMirrordPath();
+			if (!cliPath) {
+				mirrordFailure(`Couldn't download mirrord binaries ${err}.`);
+				return null;
+			}
 		}
+		setLastActiveMirrordPath(cliPath);
+		
 		let mirrordApi = new MirrordAPI(cliPath);
 
 		config.env ||= {};

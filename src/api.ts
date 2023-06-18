@@ -46,7 +46,7 @@ export class MirrordAPI {
     cliPath: string;
 
     constructor(cliPath: string) {
-        this.cliPath = cliPath
+        this.cliPath = cliPath;
     }
 
     // Return environment for the spawned mirrord cli processes.

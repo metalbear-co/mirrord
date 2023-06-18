@@ -2,7 +2,7 @@ import axios from 'axios';
 import which from 'which';
 import { globalContext } from './extension';
 import { MirrordAPI } from './api';
-import { Utils } from 'vscode-uri'
+import { Utils } from 'vscode-uri';
 import * as fs from 'node:fs';
 import { Uri, workspace } from 'vscode';
 
@@ -18,7 +18,7 @@ function getExtensionMirrordPath(): Uri {
 /**
  * Returns path to mirrord binary
  */
-export async function getMirrordBinaryPath(): Promise<string | undefined> {
+export async function getMirrordBinaryPath(): Promise<string> {
     const extensionMirrordPath = getExtensionMirrordPath();
 
     const latestVersion = await getLatestSupportedVersion();
@@ -38,7 +38,7 @@ export async function getMirrordBinaryPath(): Promise<string | undefined> {
     // Check if we previously installed latest version.
     let binaryExists = false;
     try {
-        await workspace.fs.stat(extensionMirrordPath)
+        await workspace.fs.stat(extensionMirrordPath);
         binaryExists = true;
     } catch (e) {
         // that's okay
@@ -80,13 +80,13 @@ async function getLatestSupportedVersion(): Promise<string> {
 
 function getMirrordDownloadUrl(version: string): string {
     if (process.platform === "darwin") {
-        return `https://github.com/metalbear-co/mirrord/releases/download/${version}/mirrord_mac_universal`
+        return `https://github.com/metalbear-co/mirrord/releases/download/${version}/mirrord_mac_universal`;
     } else if (process.platform === "linux") {
         switch (process.arch) {
             case 'x64':
-                return `https://github.com/metalbear-co/mirrord/releases/download/${version}/mirrord_linux_x86_64`
+                return `https://github.com/metalbear-co/mirrord/releases/download/${version}/mirrord_linux_x86_64`;
             case 'arm64':
-                return `https://github.com/metalbear-co/mirrord/releases/download/${version}/mirrord_linux_aarch64`
+                return `https://github.com/metalbear-co/mirrord/releases/download/${version}/mirrord_linux_aarch64`;
             default:
                 break;
         }
@@ -96,11 +96,11 @@ function getMirrordDownloadUrl(version: string): string {
 
 /**
  * 
- * @param dest_path Path to download the binary to
+ * @param destPath Path to download the binary to
  */
-async function downloadMirrordBinary(dest_path: Uri, version: string): Promise<void> {
+async function downloadMirrordBinary(destPath: Uri, version: string): Promise<void> {
     const response = await axios.get(
         getMirrordDownloadUrl(version));
-    await workspace.fs.writeFile(dest_path, response.data);
-    fs.chmodSync(dest_path.fsPath, 0o755);
+    await workspace.fs.writeFile(destPath, response.data);
+    fs.chmodSync(destPath.fsPath, 0o755);
 }
