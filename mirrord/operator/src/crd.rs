@@ -69,6 +69,7 @@ pub struct MirrordOperatorSpec {
     pub default_namespace: String,
     pub license: LicenseInfoOwned,
     pub telemetry_exports: Option<MirrordOperatorTelemetryReports>,
+    pub port_locks: Option<Vec<MirrordOperatorPortLock>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -91,6 +92,11 @@ pub struct MirrordOperatorTelemetryReport {
     )]
     pub timestamp: DateTime<Utc>,
     pub report: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct MirrordOperatorPortLock {
+    pub port: u16,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
