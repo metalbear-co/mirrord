@@ -43,6 +43,8 @@ pub enum OperatorApiError {
     DaemonReceiverDropped,
     #[error(transparent)]
     Authentication(#[from] AuthenticationError),
+    #[error("Can't start proccess because other locks exist on requested target")]
+    CurrentStealAbort,
 }
 
 type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
@@ -172,6 +174,23 @@ impl OperatorApi {
         target: TargetCrd,
         credential_name: Option<String>,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+        if self.on_concurrent_steal == ConcurrentSteal::Abort {
+            let lock_target = self
+                .target_api
+                .get_subresource("port-locks", &target.name())
+                .await
+                .map_err(KubeApiError::KubeError)?;
+
+            if lock_target
+                .spec
+                .port_locks
+                .map(|locks| !locks.is_empty())
+                .unwrap_or(false)
+            {
+                return Err(OperatorApiError::CurrentStealAbort);
+            }
+        }
+
         let mut builder = Request::builder()
             .uri(format!(
                 "{}/{}?on_concurrent_steal={}&connect=true",
