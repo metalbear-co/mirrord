@@ -3,7 +3,9 @@ use futures::{SinkExt, StreamExt};
 use http::request::Request;
 use kube::{error::ErrorResponse, Api, Client};
 use mirrord_auth::{credential_store::CredentialStoreSync, error::AuthenticationError};
-use mirrord_config::{feature::network::incoming::MultiSteal, target::TargetConfig, LayerConfig};
+use mirrord_config::{
+    feature::network::incoming::ConcurrentSteal, target::TargetConfig, LayerConfig,
+};
 use mirrord_kube::{
     api::{get_k8s_resource_api, kubernetes::create_kube_api},
     error::KubeApiError,
@@ -50,7 +52,7 @@ pub struct OperatorApi {
     target_api: Api<TargetCrd>,
     version_api: Api<MirrordOperatorCrd>,
     target_config: TargetConfig,
-    on_concurrent_steal: MultiSteal,
+    on_concurrent_steal: ConcurrentSteal,
 }
 
 impl OperatorApi {

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use email_address::EmailAddress;
-use mirrord_config::feature::network::incoming::MultiSteal;
+use mirrord_config::feature::network::incoming::ConcurrentSteal;
 use mirrord_operator::setup::OperatorNamespace;
 
 #[derive(Parser)]
@@ -184,7 +184,7 @@ pub(super) struct ExecArgs {
 
     /// Allows overriding port lock
     #[arg(long)]
-    pub on_concurrent_steal: Option<MultiSteal>,
+    pub on_concurrent_steal: Option<ConcurrentSteal>,
 }
 
 #[derive(Args, Debug)]
