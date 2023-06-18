@@ -17,6 +17,7 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 pub struct TargetSpec {
     /// None when targetless.
     pub target: Option<Target>,
+    pub port_locks: Option<Vec<TargetPortLock>>,
 }
 
 impl TargetCrd {
@@ -54,6 +55,11 @@ impl From<TargetCrd> for TargetConfig {
     }
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct TargetPortLock {
+    pub port: u16,
+}
+
 pub static OPERATOR_STATUS_NAME: &str = "operator";
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -69,7 +75,6 @@ pub struct MirrordOperatorSpec {
     pub default_namespace: String,
     pub license: LicenseInfoOwned,
     pub telemetry_exports: Option<MirrordOperatorTelemetryReports>,
-    pub port_locks: Option<Vec<MirrordOperatorPortLock>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -92,11 +97,6 @@ pub struct MirrordOperatorTelemetryReport {
     )]
     pub timestamp: DateTime<Utc>,
     pub report: String,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct MirrordOperatorPortLock {
-    pub port: u16,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
