@@ -43,8 +43,8 @@ pub enum OperatorApiError {
     DaemonReceiverDropped,
     #[error(transparent)]
     Authentication(#[from] AuthenticationError),
-    #[error("Can't start proccess because other locks exist on requested target")]
-    CurrentStealAbort,
+    #[error("Can't start proccess because other locks exist on target")]
+    ConcurrentStealAbort,
 }
 
 type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
@@ -187,7 +187,7 @@ impl OperatorApi {
                 .map(|locks| !locks.is_empty())
                 .unwrap_or(false)
             {
-                return Err(OperatorApiError::CurrentStealAbort);
+                return Err(OperatorApiError::ConcurrentStealAbort);
             }
         }
 
