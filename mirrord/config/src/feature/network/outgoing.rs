@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
@@ -47,6 +49,9 @@ pub struct OutgoingConfig {
     // Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702
     #[config(unstable, default = false)]
     pub ignore_localhost: bool,
+
+    pub remote: HashSet<String>,
+    pub local: HashSet<String>,
 
     /// #### feature.network.outgoing.unix_streams {#feature.network.outgoing.unix_streams}
     ///
