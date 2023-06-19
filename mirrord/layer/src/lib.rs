@@ -79,6 +79,7 @@ use std::{
     sync::{LazyLock, OnceLock},
 };
 
+use bimap::BiMap;
 use common::ResponseChannel;
 use ctor::ctor;
 use dns::GetAddrInfo;
@@ -241,6 +242,9 @@ pub(crate) static INCOMING_IGNORE_PORTS: OnceLock<HashSet<u16>> = OnceLock::new(
 
 /// Ports to ignore because they are used by the IDE debugger
 pub(crate) static DEBUGGER_IGNORED_PORTS: OnceLock<DebuggerPorts> = OnceLock::new();
+
+/// Mapping of ports to use for binding local sockets created by us for intercepting.
+pub(crate) static LISTEN_PORTS: OnceLock<BiMap<u16, u16>> = OnceLock::new();
 
 /// Check if we're running in NixOS or Devbox.
 ///
@@ -465,6 +469,10 @@ fn layer_start(config: LayerConfig) {
     DEBUGGER_IGNORED_PORTS
         .set(DebuggerPorts::from_env())
         .expect("Setting DEBUGGER_IGNORED_PORTS failed");
+
+    LISTEN_PORTS
+        .set(config.feature.network.incoming.listen_ports.clone())
+        .expect("Setting LISTEN_PORTS failed");
 
     enable_hooks(
         file_mode.is_active(),
