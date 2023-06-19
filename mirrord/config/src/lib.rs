@@ -585,15 +585,16 @@ mod tests {
                 network: Some(ToggleableConfig::Config(NetworkFileConfig {
                     dns: Some(false),
                     incoming: Some(ToggleableConfig::Config(IncomingFileConfig::Advanced(
-                        IncomingAdvancedFileConfig {
+                        Box::new(IncomingAdvancedFileConfig {
                             mode: Some(IncomingMode::Mirror),
                             http_header_filter: None,
                             http_filter: None,
                             port_mapping: None,
                             ignore_localhost: None,
                             ignore_ports: None,
+                            listen_ports: None,
                             on_concurrent_steal: None,
-                        },
+                        }),
                     ))),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {
                         tcp: Some(true),

@@ -57,7 +57,7 @@ fn generate_local_set() -> RegexSet {
         r"^/bin/.*$",
         r"^/sbin/.*$",
         r"^/dev/.*$",
-        r"^/opt/.*$",
+        r"^/opt(/|$)",
         r"^/home/.*$",
         r"^/tmp(/|$)",
         r"^/snap/.*$",

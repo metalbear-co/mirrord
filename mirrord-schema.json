@@ -587,6 +587,31 @@
             "minimum": 0.0
           }
         },
+        "listen_ports": {
+          "title": "listen_ports",
+          "description": "Mapping for local ports to actually used local ports. When application listens on a port while steal/mirror is active we fallback to random ports to avoid port conflicts. Using this configuration will always use the specified port. If this configuration doesn't exist, mirrord will try to listen on the original port and if it fails it will assign a random port\n\nThis is useful when you want to access ports exposed by your service locally For example, if you have a service that listens on port `80` and you want to access it, you probably can't listen on `80` without sudo, so you can use `[[80, 4480]]` then access it on `4480` while getting traffic from remote `80`. The value of `port_mapping` doesn't affect this.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "array",
+            "items": [
+              {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0.0
+              },
+              {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0.0
+              }
+            ],
+            "maxItems": 2,
+            "minItems": 2
+          }
+        },
         "mode": {
           "title": "mode",
           "description": "Allows selecting between mirrorring or stealing traffic.\n\nSee [`mode`](##mode (incoming)) for details.",
@@ -640,7 +665,7 @@
     },
     "IncomingFileConfig": {
       "title": "incoming (network)",
-      "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it to the local process, see [`steal`](##steal);\n\n### Minimal `incoming` config\n\n```json { \"feature\": { \"network\": { \"incoming\": \"steal\" } } } ```\n\n### Advanced `incoming` config\n\n```json { \"feature\": { \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_header_filter\": { \"filter\": \"host: api\\..+\", \"ports\": [80, 8080] }, \"port_mapping\": [[ 7777: 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] } } } } ```",
+      "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it to the local process, see [`steal`](##steal);\n\n### Minimal `incoming` config\n\n```json { \"feature\": { \"network\": { \"incoming\": \"steal\" } } } ```\n\n### Advanced `incoming` config\n\n```json { \"feature\": { \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_header_filter\": { \"filter\": \"host: api\\..+\", \"ports\": [80, 8080] }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] \"listen_ports\": [[80, 8111]] } } } } ```",
       "anyOf": [
         {
           "anyOf": [
