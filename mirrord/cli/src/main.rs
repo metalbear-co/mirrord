@@ -145,13 +145,6 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
         std::env::set_var("MIRRORD_CAPTURE_ERROR_TRACE", "true");
     }
 
-    if let Some(on_concurrent_steal) = &args.on_concurrent_steal {
-        std::env::set_var(
-            "MIRRORD_OPERATOR_ON_MULTI_STEAL",
-            on_concurrent_steal.to_string(),
-        );
-    }
-
     let sub_progress = progress.subtask("preparing to launch process");
 
     let config = LayerConfig::from_env()?;
