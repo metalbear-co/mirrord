@@ -365,6 +365,9 @@ jobs:
           cargo build
       - run: |
           cd mirrord/layer/tests/apps/dns_resolve
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/listen_ports
           cargo build          
       - name: download layer # Download layer lib built in the `build_mirrord` job.
         uses: actions/download-artifact@v3

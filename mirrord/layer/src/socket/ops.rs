@@ -28,7 +28,7 @@ use crate::{
     is_debugger_port,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
     tcp::{Listen, TcpIncoming},
-    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_LOCALHOST,
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_LOCALHOST, LISTEN_PORTS,
     OUTGOING_IGNORE_LOCALHOST, REMOTE_UNIX_STREAMS, TARGETLESS,
 };
 
@@ -108,6 +108,30 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
     Detour::Success(socket_fd)
 }
 
+#[tracing::instrument(level = "warn", ret)]
+fn bind_port(sockfd: c_int, domain: c_int, port: u16) -> Detour<()> {
+    let address = match domain {
+        libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            port,
+        ))),
+        libc::AF_INET6 => Ok(SockAddr::from(SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+            port,
+        ))),
+        invalid => Err(Bypass::Domain(invalid)),
+    }?;
+
+    trace!("bind -> {address:#?}");
+
+    let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
+    if bind_result != 0 {
+        Detour::Error(io::Error::last_os_error().into())
+    } else {
+        Detour::Success(())
+    }
+}
+
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state.
 #[tracing::instrument(level = "trace", ret, skip(raw_address))]
@@ -166,20 +190,6 @@ pub(super) fn bind(
         return Detour::Bypass(Bypass::BindWhenTargetless);
     }
 
-    let unbound_address = match socket.domain {
-        libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::LOCALHOST),
-            0,
-        ))),
-        libc::AF_INET6 => Ok(SockAddr::from(SocketAddr::new(
-            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            0,
-        ))),
-        invalid => Err(Bypass::Domain(invalid)),
-    }?;
-
-    trace!("bind -> unbound_address {:#?}", unbound_address);
-
     // Check if the user's requested address isn't already in use, even though it's not actually
     // bound, as we bind to a different address, but if we don't check for this then we're
     // changing normal socket behavior (see issue #1123).
@@ -192,16 +202,27 @@ pub(super) fn bind(
         Err(HookError::AddressAlreadyBound(requested_address))?;
     }
 
-    let bind_result = unsafe { FN_BIND(sockfd, unbound_address.as_ptr(), unbound_address.len()) };
-    if bind_result != 0 {
-        error!(
-            "listen -> Failed `bind` sockfd {:#?} to address {:#?} with errno {:#?}!",
-            sockfd,
-            unbound_address,
-            errno::errno()
-        );
-        return Err(io::Error::last_os_error())?;
-    }
+    // Try to bind a port from listen ports, if no configuration
+    // try to bind the requested port, if not available get a random port
+    // if there's configuration and binding fails with the requested port
+    // we return address not available and not fallback to a random port.
+    let listen_port = LISTEN_PORTS
+        .get()
+        .expect("`LISTEN_PORTS` not set. Please report a bug")
+        .get_by_left(&requested_address.port())
+        .cloned();
+
+    // Listen port was specified
+    if let Some(port) = listen_port {
+        bind_port(sockfd, socket.domain, port)
+    } else {
+        bind_port(sockfd, socket.domain, requested_address.port())
+            .or_else(|e| {
+                warn!("bind -> first `bind` failed on port {listen_port:?} with {e:?}, trying to bind to a random port");
+                bind_port(sockfd, socket.domain, 0)
+            }
+        )
+    }?;
 
     // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
     // connect to.
@@ -227,7 +248,10 @@ pub(super) fn bind(
 
     SOCKETS.insert(sockfd, socket);
 
-    Detour::Success(bind_result)
+    // node reads errno to check if bind was successful and doesn't care about the return value
+    // (???)
+    errno::set_errno(errno::Errno(0));
+    Detour::Success(0)
 }
 
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will

@@ -752,6 +752,7 @@ pub enum Application {
     RustIssue1458PortNot53,
     RustDnsResolve,
     RustRecvFrom,
+    RustListenPorts,
     // For running applications with the executable and arguments determined at runtime.
     // Compiled only on macos just because it's currently only used there, but could be used also
     // on Linux.
@@ -845,6 +846,13 @@ impl Application {
                     "../../target/debug/recv_from"
                 )
             }
+            Application::RustListenPorts => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/listen_ports"
+                )
+            }
             #[cfg(target_os = "macos")]
             Application::DynamicApp(exe, _args) => exe.clone(),
         }
@@ -919,6 +927,7 @@ impl Application {
             | Application::RustIssue1458PortNot53
             | Application::RustDnsResolve
             | Application::RustRecvFrom
+            | Application::RustListenPorts
             | Application::EnvBashCat
             | Application::BashShebang
             | Application::Go19SelfOpen
@@ -980,6 +989,7 @@ impl Application {
             | Application::RustOutgoingTcp
             | Application::RustIssue1458
             | Application::RustIssue1458PortNot53
+            | Application::RustListenPorts
             | Application::RustRecvFrom => unimplemented!("shouldn't get here"),
             #[cfg(target_os = "macos")]
             Application::DynamicApp(_, _) => unimplemented!("shouldn't get here"),
