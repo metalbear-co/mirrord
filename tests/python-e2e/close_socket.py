@@ -7,7 +7,6 @@ import fileinput
 
 from sys import stderr
 
-TEST_DATA = b"test"
 LISTEN_ADDR = ("127.0.0.1", 80)
 
 

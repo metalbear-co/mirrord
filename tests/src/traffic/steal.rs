@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod steal {
     use std::{
-        io::{BufRead, BufReader, Write},
+        io::{BufRead, BufReader, Read, Write},
         net::{SocketAddr, TcpStream},
         time::Duration,
     };
@@ -155,6 +155,89 @@ mod steal {
 
         eprintln!("Waiting for test app to exit successfully.");
         process.wait_assert_success().await;
+    }
+
+    /// Test that when we close a listening socket any connected sockets accepted from that sockets
+    /// continue working, and that once the connected sockets are closed, we stop stealing.
+    ///
+    /// 1. Test app creates socket.
+    /// 2. Test app binds, listens, and accepts a connection.
+    /// 3. This test connects to the test app.
+    /// 4. The test app closes the original socket (but not the connection's socket).
+    /// 5. This test sends data to the test app.
+    /// 6. The test app sends the data back, in upper case.
+    /// 7. The test app closes also the connection's socket.
+    /// 8. This test tells the test app to exit.
+    /// 9. This test sends a request to the service and verifies it's not stolen.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    async fn close_socket_keep_connection(
+        #[future] service: KubeService,
+        #[future] kube_client: Client,
+        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
+    ) {
+        let application = Application::PythonCloseSocketKeepConnection;
+        // Start the test app with mirrord
+        let service = service.await;
+        let kube_client = kube_client.await;
+        let mut flags = vec!["--steal"];
+        if let Some(flag) = agent.flag() {
+            flags.extend(flag)
+        }
+        let mut process = application
+            .run(
+                &service.target,
+                Some(&service.namespace),
+                Some(flags),
+                Some(vec![
+                    ("RUST_LOG", "mirrord=trace"),
+                    ("MIRRORD_AGENT_RUST_LOG", "mirrord=trace"),
+                    ("MIRRORD_AGENT_TTL", "30"),
+                ]),
+            )
+            .await;
+
+        let (addr, port) = get_service_host_and_port(kube_client.clone(), &service).await;
+
+        // Wait for the app to start listening for stolen data before connecting.
+        process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+
+        let mut tcp_stream = TcpStream::connect((addr, port as u16)).unwrap();
+
+        // Wait for the test app to close the socket and tell us about it.
+        process.wait_for_line(Duration::from_secs(40), "Closed socket.");
+
+        const DATA: &[u8; 16] = b"upper me please\n";
+
+        tcp_stream.write_all(DATA).unwrap();
+
+        let mut response = [0u8; DATA.len()];
+        tcp_stream.read_exact(&mut response).unwrap();
+
+        process
+            .write_to_stdin(b"Hey test app, please stop running and just exit successfuly.\n")
+            .await;
+
+        assert_eq!(
+            response,
+            String::from_utf8_lossy(DATA).to_uppercase().as_bytes()
+        );
+
+        eprintln!("Waiting for test app to exit successfully.");
+        process.wait_assert_success().await;
+
+        // Send HTTP request and verify it is handled by the REMOTE app - NOT STOLEN.
+        let url = get_service_url(kube_client.clone(), &service).await;
+        let client = reqwest::Client::new();
+        let req_builder = client.get(url);
+        eprintln!("Sending request to remote service");
+        send_request(
+            req_builder,
+            Some("OK - GET: Request completed\n"),
+            Default::default(),
+        )
+        .await;
     }
 
     /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`

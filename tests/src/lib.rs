@@ -105,6 +105,7 @@ mod utils {
         Go20HTTP,
         CurlToKubeApi,
         PythonCloseSocket,
+        PythonCloseSocketKeepConnection,
     }
 
     #[derive(Debug)]
@@ -255,6 +256,13 @@ mod utils {
                 }
                 Application::PythonCloseSocket => {
                     vec!["python3", "-u", "python-e2e/close_socket.py"]
+                }
+                Application::PythonCloseSocketKeepConnection => {
+                    vec![
+                        "python3",
+                        "-u",
+                        "python-e2e/close_socket_keep_connection.py",
+                    ]
                 }
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
                 Application::NodeHTTP2 => {
