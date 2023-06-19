@@ -40,17 +40,6 @@
       "cwd": "${workspaceFolder}/cli"
     },
     {
-      "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/vscode-ext"
-      ],
-      "name": "Launch Extension",
-      "outFiles": [
-        "${workspaceFolder}/vscode-ext/dist/*.js"
-      ],
-      "request": "launch",
-      "type": "extensionHost"
-    },
-    {
       "type": "lldb",
       "request": "launch",
       "name": "app.mjs: Debug mirrord-layer",
@@ -90,21 +79,6 @@
         "MIRRORD_FILE_OPS": "true",
         "MIRRORD_REMOTE_DNS": "true",
         "RUST_BACKTRACE": "short"
-      }
-    },
-    {
-      "name": "Debug UI Tests",
-      "type": "node",
-      "request": "launch",
-      "program": "${workspaceFolder}/vscode-ext/node_modules/vscode-extension-tester/out/cli.js",
-      "args": [
-        "setup-and-run",
-        "${workspaceFolder}/vscode-ext/out/tests/runTests.js",
-      ],
-      "console": "integratedTerminal",
-      "runtimeExecutable": "node",
-      "env": {
-        "POD_TO_SELECT": "py-serv-deployment-pod"
       }
     }
   ]
