@@ -108,7 +108,7 @@ jobs:
           echo ${{ steps.changed-vscode.outputs.any_changed }};
           echo ${{ steps.changed-vscode.outputs.all_changed_files }};
           echo ${{ steps.changed-markdown.outputs.any_changed }};
-          echo ${{ steps.changed-markdown.outputs.all_changed_files }};    
+          echo ${{ steps.changed-markdown.outputs.all_changed_files }};
           echo ${{ steps.changed-ci.outputs.any_changed }};
           echo ${{ steps.changed-ci.outputs.all_changed_files }};
           echo ${{ steps.changed-protocol.outputs.any_changed }};
@@ -216,7 +216,7 @@ jobs:
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     container:
-      image: ghcr.io/metalbear-co/ci-agent-build:latest
+      image: ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32
     steps:
       - uses: actions/checkout@v3
       - uses: arduino/setup-protoc@v1
@@ -362,7 +362,7 @@ jobs:
           cargo build
       - run: |
           cd mirrord/layer/tests/apps/listen_ports
-          cargo build          
+          cargo build
       - name: download layer # Download layer lib built in the `build_mirrord` job.
         uses: actions/download-artifact@v3
         with:
@@ -416,7 +416,7 @@ jobs:
           cargo build
       - run: |
           cd mirrord/layer/tests/apps/dns_resolve
-          cargo build                    
+          cargo build
       - uses: actions/setup-node@v3
         with:
           node-version: 14
@@ -516,7 +516,7 @@ jobs:
         with:
           node-version: 18
       - run: |
-          cd vscode-ext 
+          cd vscode-ext
           npm install --no-package-lock --no-save eslint
           npm run lint
 
@@ -556,10 +556,10 @@ jobs:
         with:
           container-runtime: docker
       - run: |
-          minikube image load /tmp/test.tar                    
-          kubectl apply -f sample/kubernetes/app.yaml          
+          minikube image load /tmp/test.tar
+          kubectl apply -f sample/kubernetes/app.yaml
           echo "POD_TO_SELECT=$(kubectl get pods -o=name | head -n 1)" >> "$GITHUB_ENV"
-          kubectl wait --for=condition=ready --timeout=30s $(kubectl get pods -o=name | head -n 1)          
+          kubectl wait --for=condition=ready --timeout=30s $(kubectl get pods -o=name | head -n 1)
           KUBE_SERVICE=$(minikube service list --output=json | jq -r '.[] | select(.Name == "py-serv") | .URLs[0]')
           echo "$KUBE_SERVICE"
           echo "KUBE_SERVICE=$KUBE_SERVICE" >> "$GITHUB_ENV"
@@ -609,7 +609,7 @@ jobs:
         with:
           config: "markdownlint-config.json"
           args: "README.md"
-   
+
   # We need some "accummulation" job here because bors fails (timeouts) to
   # listen on matrix builds.
   # Hence, we have some kind of dummy here that bors can listen on
