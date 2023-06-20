@@ -1,1 +1,0 @@
-Moved VSCode extension to its own repository and versioning https://github.com/metalbear-co/mirrord-vscode
