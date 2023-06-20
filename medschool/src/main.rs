@@ -137,7 +137,11 @@ impl Ord for PartialType {
 impl Ord for PartialField {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // primitive types < custom types (usually)
-        self.ty.len().cmp(&other.ty.len())
+        self.ty
+            .len()
+            .cmp(&other.ty.len())
+            // both field types have the same length, so sort alphabetically
+            .then_with(|| self.ty.cmp(&other.ty))
     }
 }
 
