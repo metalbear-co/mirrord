@@ -23,7 +23,7 @@ pub trait Redirect {
 }
 
 pub struct PreroutingRedirect<IPT: IPTables> {
-    pub managed: IPTableChain<IPT>,
+    managed: IPTableChain<IPT>,
 }
 
 impl<IPT> PreroutingRedirect<IPT>
