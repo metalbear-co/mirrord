@@ -4,7 +4,6 @@
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 
 use rstest::rstest;
-
 mod common;
 
 pub use common::*;
@@ -150,6 +149,7 @@ async fn listen_on_same_port_again(dylib_path: &PathBuf) {
                 ("MIRRORD_REMOTE_DNS", "true"),
                 // prevent npm from opening a browser window.
                 ("BROWSER", "none"),
+                ("RUST_LOG", "mirrord=trace"), // TODO: remove
             ],
             None,
         )
@@ -226,14 +226,21 @@ async fn listen_on_same_port_again(dylib_path: &PathBuf) {
                             ))))
                             .await
                             .unwrap();
+                        eprintln!("Replied Ok");
 
                         layer_connection
-                            .expect_get_addr(HashMap::from([("localhost", "127.0.0.1")]))
+                            .spool_to_get_addr(HashMap::from([("localhost", "127.0.0.1")]))
                             .await;
 
                         eprintln!("Waiting for react app to compile and be ready.");
                         app_ready_receiver.wait_for(|ready| *ready).await.unwrap();
                         eprintln!("React app ready! sending TcpSteal messages.");
+
+                        // Discard all messages from before the app was ready.
+                        // The app subscribes and unsubscribes a bunch of times before it's ready.
+                        // Once it says it's ready it's the final subscribe, so skip over all
+                        // (un)subscribes and send TCP daemon messages.
+                        layer_connection.drain_ready();
 
                         layer_connection
                             .send_connection_then_data::<true>(
@@ -250,6 +257,25 @@ async fn listen_on_same_port_again(dylib_path: &PathBuf) {
 
                         layer_connection
                             .print_all_subsequent_messages("After TCP: ")
+                            .await;
+                    }
+                    ClientMessage::Ping => {
+                        let msg = loop {
+                            layer_connection
+                                .codec
+                                .send(DaemonMessage::Pong)
+                                .await
+                                .unwrap();
+                            if let Some(res) = layer_connection.codec.next().await {
+                                let msg = res.unwrap();
+                                let ClientMessage::Ping = msg else {
+                                    break msg
+                                };
+                            }
+                        };
+                        eprintln!("After Ping: {msg:?}");
+                        layer_connection
+                            .print_all_subsequent_messages("After Ping: ")
                             .await;
                     }
                     other_message => {

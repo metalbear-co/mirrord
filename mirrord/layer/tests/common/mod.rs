@@ -11,7 +11,7 @@ use std::{
 use actix_codec::Framed;
 use chrono::{Timelike, Utc};
 use fancy_regex::Regex;
-use futures::{SinkExt, StreamExt};
+use futures::{FutureExt, SinkExt, StreamExt};
 use mirrord_protocol::{
     dns::{self, DnsLookup, GetAddrInfoResponse, LookupRecord},
     file::{
@@ -172,6 +172,13 @@ pub struct LayerConnection {
 }
 
 impl LayerConnection {
+    /// Read all ready items in `self.codec` until.
+    pub fn drain_ready(&mut self) {
+        while let Some(Some(Ok(msg))) = self.codec.next().now_or_never() {
+            eprintln!("Skipping message: {msg:?}");
+        }
+    }
+
     /// Accept a connection from the layer
     /// Return the codec of the accepted stream.
     async fn accept_library_connection(listener: &TcpListener) -> Framed<TcpStream, DaemonCodec> {
@@ -404,13 +411,18 @@ impl LayerConnection {
         let new_connection_id = self.send_new_connection::<STEAL>(port).await;
         self.send_tcp_data::<STEAL>(message_data, new_connection_id)
             .await;
+        eprintln!("~~~~~~~~~~~~ sent tcp data");
         if STEAL {
             // Expect response data.
+            eprintln!("~~~~~~~~~~~ waiting for response data to stolen connection.");
             let next_message = self.codec.next().await.unwrap().unwrap();
+            eprintln!("~~~~~~~~~~~ got response data to stolen connection.");
             let TcpSteal(LayerTcpSteal::Data(TcpData{ connection_id, .. })) = next_message else { panic!("Unexpected message from layer in test - expected TcpResponse got {next_message:?}") };
             assert_eq!(connection_id, new_connection_id)
         }
+        eprintln!("~~~~~~~~~~~ Sending connection close.");
         self.send_close::<STEAL>(new_connection_id).await;
+        eprintln!("~~~~~~~~~~~ sent connection close.");
     }
 
     /// Verify layer hooks an `open` of file `file_name` with only read flag set. Send back answer
@@ -748,6 +760,26 @@ impl LayerConnection {
     pub async fn expect_get_addr(&mut self, name_to_addr: HashMap<&str, &str>) {
         let next_message = self.codec.next().await.unwrap().unwrap();
         let GetAddrInfoRequest(dns::GetAddrInfoRequest { node: name }) = next_message else {panic!("expected GetAddrInfoRequest, got {next_message:?}")};
+        let ip = name_to_addr
+            .get(name.as_str())
+            .expect("Unexpected node in GetAddrInfoRequest")
+            .parse()
+            .unwrap();
+        self.codec
+            .send(DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(Ok(
+                DnsLookup(vec![LookupRecord { name, ip }]),
+            ))))
+            .await
+            .unwrap();
+    }
+
+    pub async fn spool_to_get_addr(&mut self, name_to_addr: HashMap<&str, &str>) {
+        let name = loop {
+            let next_message = self.codec.next().await.unwrap().unwrap();
+            if let GetAddrInfoRequest(dns::GetAddrInfoRequest { node }) = next_message {
+                break node;
+            }
+        };
         let ip = name_to_addr
             .get(name.as_str())
             .expect("Unexpected node in GetAddrInfoRequest")
