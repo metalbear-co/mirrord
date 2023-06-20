@@ -80,6 +80,7 @@ use std::{
     sync::{LazyLock, OnceLock},
 };
 
+use bimap::BiMap;
 use common::ResponseChannel;
 use ctor::ctor;
 use dns::GetAddrInfo;
@@ -90,10 +91,7 @@ use libc::c_int;
 use mirrord_config::{
     feature::{
         fs::{FsConfig, FsModeConfig},
-        network::{
-            incoming::{http_filter::HttpHeaderFilterConfig, IncomingConfig},
-            NetworkConfig,
-        },
+        network::{incoming::IncomingConfig, NetworkConfig},
         FeatureConfig,
     },
     util::VecOrSingle,
@@ -135,7 +133,7 @@ mod detour;
 mod dns;
 mod error;
 #[cfg(target_os = "macos")]
-mod exec;
+mod exec_utils;
 mod file;
 mod hooks;
 mod load;
@@ -246,6 +244,9 @@ pub(crate) static INCOMING_IGNORE_PORTS: OnceLock<HashSet<u16>> = OnceLock::new(
 /// Ports to ignore because they are used by the IDE debugger
 pub(crate) static DEBUGGER_IGNORED_PORTS: OnceLock<DebuggerPorts> = OnceLock::new();
 
+/// Mapping of ports to use for binding local sockets created by us for intercepting.
+pub(crate) static LISTEN_PORTS: OnceLock<BiMap<u16, u16>> = OnceLock::new();
+
 /// Check if we're running in NixOS or Devbox.
 ///
 /// - If so, add `sh` to the skip list because of
@@ -303,6 +304,21 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         .clone()
         .map(|x| x.to_vec())
         .unwrap_or_default();
+
+    // SIP Patch the process' binary then re-execute it. Needed
+    // for https://github.com/metalbear-co/mirrord/issues/1529
+    #[cfg(target_os = "macos")]
+    if given_process.ends_with("dotnet") {
+        if let Ok(path) = std::env::current_exe() {
+            if let Ok(Some(binary)) =
+                mirrord_sip::sip_patch(path.to_str().unwrap(), &patch_binaries)
+            {
+                let err = exec::execvp(binary, std::env::args());
+                error!("Couldn't execute {:?}", err);
+                return Err(LayerError::ExecFailed(err));
+            }
+        }
+    }
 
     match load::load_type(given_process, config) {
         LoadType::Full(config) => layer_start(*config),
@@ -455,6 +471,10 @@ fn layer_start(config: LayerConfig) {
         .set(DebuggerPorts::from_env())
         .expect("Setting DEBUGGER_IGNORED_PORTS failed");
 
+    LISTEN_PORTS
+        .set(config.feature.network.incoming.listen_ports.clone())
+        .expect("Setting LISTEN_PORTS failed");
+
     enable_hooks(
         file_mode.is_active(),
         config.feature.network.dns,
@@ -474,7 +494,7 @@ fn layer_start(config: LayerConfig) {
 fn sip_only_layer_start(patch_binaries: Vec<String>) {
     let mut hook_manager = HookManager::default();
 
-    unsafe { exec::enable_execve_hook(&mut hook_manager, patch_binaries) };
+    unsafe { exec_utils::enable_execve_hook(&mut hook_manager, patch_binaries) };
 }
 
 /// Acts as an API to the various features of mirrord-layer, holding the actual feature handler
@@ -554,10 +574,12 @@ impl Layer {
         let (http_response_sender, http_response_receiver) = channel(1024);
         let steal = incoming.is_steal();
         let IncomingConfig {
-            http_header_filter: HttpHeaderFilterConfig { filter, ports },
+            http_header_filter,
+            http_filter,
             port_mapping,
             ..
         } = incoming;
+
         Self {
             tx,
             rx,
@@ -568,10 +590,9 @@ impl Layer {
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
             tcp_steal_handler: TcpStealHandler::new(
-                filter,
-                ports.into(),
                 http_response_sender,
                 port_mapping,
+                (http_filter, http_header_filter).into(),
             ),
             http_response_receiver,
             steal,
@@ -883,7 +904,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
 
     #[cfg(target_os = "macos")]
     unsafe {
-        exec::enable_execve_hook(&mut hook_manager, patch_binaries)
+        exec_utils::enable_execve_hook(&mut hook_manager, patch_binaries)
     };
 
     if enabled_file_ops {

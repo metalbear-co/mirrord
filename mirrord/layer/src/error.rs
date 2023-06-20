@@ -195,6 +195,10 @@ pub(crate) enum LayerError {
         supported IP or unix socket address."
     )]
     UnsupportedSocketType,
+
+    #[cfg(target_os = "macos")]
+    #[error("Exec failed with error {0:?}, please report this error!")]
+    ExecFailed(exec::Error),
 }
 
 impl From<SerializationError> for LayerError {
@@ -227,12 +231,15 @@ pub(crate) type HookResult<T, E = HookError> = std::result::Result<T, E>;
 impl From<HookError> for i64 {
     fn from(fail: HookError) -> Self {
         match fail {
-            HookError::ResponseError(ResponseError::NotFound(_))
-            | HookError::ResponseError(ResponseError::NotFile(_))
-            | HookError::ResponseError(ResponseError::NotDirectory(_))
-            | HookError::ResponseError(ResponseError::Remote(_))
-            | HookError::ResponseError(ResponseError::RemoteIO(_))
-            | HookError::ResponseError(ResponseError::DnsLookup(_)) => {
+            HookError::AddressAlreadyBound(_)
+            | HookError::ResponseError(
+                ResponseError::NotFound(_)
+                | ResponseError::NotFile(_)
+                | ResponseError::NotDirectory(_)
+                | ResponseError::Remote(_)
+                | ResponseError::RemoteIO(_)
+                | ResponseError::DnsLookup(_),
+            ) => {
                 info!("libc error (doesn't indicate a problem) >> {fail:#?}")
             }
             HookError::IO(ref e) if (is_ignored_code(e.raw_os_error())) => {

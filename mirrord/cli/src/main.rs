@@ -39,19 +39,6 @@ mod operator;
 
 pub(crate) use error::{CliError, Result};
 
-const PAUSE_WITHOUT_STEAL_WARNING: &str =
-    "--pause specified without --steal: Incoming requests to the application will
-                                           not be handled. The target container running the deployed application is paused,
-                                           and responses from the local application are dropped.
-
-                                           Attention: if network based liveness/readiness probes are defined for the
-                                           target, they will fail under this configuration.
-
-                                           To have the local application handle incoming requests you can run again with
-                                           `--steal`. To have the deployed application handle requests, run again without
-                                           specifying `--pause`.
-    ";
-
 async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     if !args.no_telemetry {
         prompt_outdated_version().await;
@@ -161,16 +148,6 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     let sub_progress = progress.subtask("preparing to launch process");
 
     let config = LayerConfig::from_env()?;
-
-    if config.pause {
-        if config.agent.ephemeral {
-            error!("Pausing is not yet supported together with an ephemeral agent container.");
-            panic!("Mutually exclusive arguments `--pause` and `--ephemeral-container` passed together.");
-        }
-        if !config.feature.network.incoming.is_steal() {
-            warn!("{PAUSE_WITHOUT_STEAL_WARNING}");
-        }
-    }
 
     #[cfg(target_os = "macos")]
     let execution_info =
