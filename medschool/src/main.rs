@@ -125,23 +125,31 @@ impl PartialOrd for PartialField {
 
 impl Ord for PartialType {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        if other.fields.iter().any(|field| field.ty == self.ident) {
+        let result = if other.fields.iter().any(|field| field.ty == self.ident) {
             // `other` has a field that is of type `self`, so it "belongs" to `self`
             std::cmp::Ordering::Greater
+        // } else if self.fields.iter().any(|field| field.ty == other.ident) {
         } else {
+            // std::cmp::Ordering::Equal
             std::cmp::Ordering::Less
-        }
+        };
+        println!("{:?} {result:?} {:?}", self.ident, other.ident);
+
+        result
     }
 }
 
 impl Ord for PartialField {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // String
+        // if self.ty.len() > 6 {}
         // primitive types < custom types (usually)
         self.ty
             .len()
             .cmp(&other.ty.len())
             // both field types have the same length, so sort alphabetically
-            .then_with(|| self.ty.cmp(&other.ty))
+            .then_with(|| self.ident.cmp(&other.ident))
+        // self.ident.cmp(&other.ident)
     }
 }
 
@@ -257,10 +265,10 @@ fn pretty_docs(mut docs: Vec<String>) -> String {
     [docs.concat(), "\n".to_string()].concat()
 }
 
-/// Parses all files in the [`glob::glob`] pattern defined within, in the current directory.
-//
 // TODO(alex): Support specifying a path.
-fn parse_files() -> Result<Vec<syn::File>, DocsError> {
+/// Converts all files in the [`glob::glob`] pattern defined within, in the current directory, into
+/// a `Vec<String>`.
+fn files_to_string() -> Result<Vec<String>, DocsError> {
     let paths = glob::glob("./src/**/*.rs")?;
 
     Ok(paths
@@ -279,9 +287,16 @@ fn parse_files() -> Result<Vec<syn::File>, DocsError> {
             Ok::<_, DocsError>(String::from(file_read))
         })
         .filter_map(Result::ok)
+        .collect())
+}
+
+/// Parses the `files` into a collection of [`syn::File`].
+fn parse_string_files(files: Vec<String>) -> Vec<syn::File> {
+    files
+        .into_iter()
         .map(|raw_contents| syn::parse_file(&raw_contents))
         .filter_map(Result::ok)
-        .collect::<Vec<_>>())
+        .collect::<Vec<_>>()
 }
 
 /// Look into the [`syn::Attribute`]s of whatever item we're handling, and extract its doc strings.
@@ -324,8 +339,8 @@ fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
         .collect()
 }
 
-fn main() -> Result<(), DocsError> {
-    let type_docs = parse_files()?
+fn parse_docs_into_tree(files: Vec<syn::File>) -> Result<BTreeSet<PartialType>, DocsError> {
+    let type_docs = files
         .into_iter()
         // go through each `File` extracting the types into a hierarchical tree based on which types
         // belong to other types
@@ -357,24 +372,25 @@ fn main() -> Result<(), DocsError> {
                         }
                     }
                     syn::Item::Struct(item) => {
-                        let mut fields = item
+                        let fields = item
                             .fields
                             .into_iter()
                             .filter_map(PartialField::new)
                             .collect::<HashSet<_>>()
                             .into_iter()
                             .collect::<Vec<_>>();
-                        fields.sort();
 
                         let thing_docs_untreated = docs_from_attributes(item.attrs);
                         let is_internal = thing_docs_untreated
                             .iter()
                             .any(|doc| doc.contains(r"<!--${internal}-->"));
 
-                        let public_fields = fields
+                        let mut public_fields = fields
                             .into_iter()
                             .filter(|field| !field.docs.contains(&r"<!--${internal}-->".into()))
                             .collect::<Vec<_>>();
+
+                        public_fields.sort();
 
                         // We only care about types that have docs.
                         if !thing_docs_untreated.is_empty()
@@ -395,6 +411,10 @@ fn main() -> Result<(), DocsError> {
         })
         .collect::<BTreeSet<_>>();
 
+    Ok(type_docs)
+}
+
+fn depth_first_build_new_types(type_docs: BTreeSet<PartialType>) -> Vec<PartialType> {
     // The types that have been rebuild after following each field "reference".
     let mut new_types = Vec::with_capacity(8);
 
@@ -449,6 +469,7 @@ fn main() -> Result<(), DocsError> {
             }
         }
 
+        // new_fields.sort();
         // Now let's build a type with the mega fields we just built.
         let new_type = PartialType {
             ident: type_.ident.clone(),
@@ -458,22 +479,43 @@ fn main() -> Result<(), DocsError> {
         new_types.push(new_type);
     }
 
-    // If all goes well, the first type should hold the root type.
-    let the_mega_type = new_types.first().unwrap().clone();
+    new_types.sort();
 
-    let type_docs = pretty_docs(the_mega_type.docs);
+    new_types
+}
+
+fn get_root_type(types: Vec<PartialType>) -> PartialType {
+    types.first().unwrap().clone()
+}
+
+fn produce_docs_from_root_type(root: PartialType) -> String {
+    let type_docs = pretty_docs(root.docs);
 
     // Concat all the docs!
     let final_docs = [
         type_docs,
-        the_mega_type
-            .fields
+        root.fields
             .into_iter()
             .map(|field| pretty_docs(field.docs))
             .collect::<Vec<_>>()
             .concat(),
     ]
     .concat();
+
+    final_docs
+}
+
+fn main() -> Result<(), DocsError> {
+    let files = files_to_string()?;
+    let files = parse_string_files(files);
+
+    let type_docs = parse_docs_into_tree(files)?;
+    let new_types = depth_first_build_new_types(type_docs);
+
+    // If all goes well, the first type should hold the root type.
+    let the_mega_type = get_root_type(new_types);
+
+    let final_docs = produce_docs_from_root_type(the_mega_type);
 
     // TODO(alex): Support specifying a path.
     fs::write("./configuration.md", final_docs).unwrap();
@@ -552,3 +594,230 @@ struct D {
     z: i32,
 }
 */
+
+#[cfg(test)]
+mod test {
+    #![allow(dead_code)]
+    #![allow(non_camel_case_types)]
+    use std::path::PathBuf;
+
+    use super::*;
+
+    const EXPECTED: &'static str =
+    "# Root\n\nRoot - 1l\n\nRoot - 2l\n\n## Root - root_field\n\nRoot - edge - root_field\n\n## Root - b_field\nRoot_B_Node - 1l\n\nRoot_B_Node - 2l\n\n### Root_B_Node - root_b_node_field\n\nRoot_B_Node - edge - root_b_node_field\n\n### Root_B_Node - c_field\nRoot_B_C_Node - 1l\n\nRoot_B_C_Node - 2l\n\n### Root_B_C_Node - root_b_c_node_field\n\nRoot_B_C_Node - edge - root_b_c_node_field\n\n### Root_B_C_Node - d_field\nRoot_B_C_D_Edge - 1l\n\nRoot_B_C_D_Edge - 2l\n\n#### Root_B_C_D_Edge - c_field\n\nRoot_B_C_D_Edge - edge - c_field\n\n#### Root_B_C_D_Edge - d_field\n\nRoot_B_C_D_Edge - edge - d_field\n\n## Root - e_field\nRoot_E_Edge - 1l\n\nRoot_E_Edge - 2l\n\n## Root_E_Edge - f_field\n\nRoot_E_Edge - edge - f_field\n\n## Root_E_Edge - e_field\n\nRoot_E_Edge - edge - e_field\n\n";
+
+    const FILES: [&'static str; 5] = [
+        r#"
+    /// Root_B_C_Node - 1l
+    ///
+    /// Root_B_C_Node - 2l
+    struct Root_B_C_Node {
+        /// <!--${internal}-->
+        /// ### Root_B_C_Node - internal
+        internal: i32,
+
+        /// ### Root_B_C_Node - d_field
+        d_field: Vec<Root_B_C_D_Edge>,
+
+        /// ### Root_B_C_Node - root_b_c_node_field
+        ///
+        /// Root_B_C_Node - edge - root_b_c_node_field
+        root_b_c_node_field: Option<Vec<String>>,
+    }
+"#,
+        r#"
+    /// # Root
+    ///
+    /// Root - 1l
+    ///
+    /// Root - 2l
+    struct Root {
+        /// ## Root - e_field
+        e_field: Root_E_Edge,
+        
+        /// ## Root - root_field
+        ///
+        /// Root - edge - root_field
+        root_field: i32,
+
+        /// ## Root - b_field
+        b_field: Option<Vec<Root_B_Node>>,
+    }
+"#,
+        r#"
+    /// Root_B_Node - 1l
+    ///
+    /// Root_B_Node - 2l
+    struct Root_B_Node {
+        /// ### Root_B_Node - c_field
+        c_field: Vec<Root_B_C_Node>,
+
+        /// ### Root_B_Node - root_b_node_field
+        ///
+        /// Root_B_Node - edge - root_b_node_field
+        root_b_node_field: Option<String>,
+    }
+"#,
+        r#"
+    /// Root_B_C_D_Edge - 1l
+    ///
+    /// Root_B_C_D_Edge - 2l
+    struct Root_B_C_D_Edge {
+        /// #### Root_B_C_D_Edge - d_field
+        ///
+        /// Root_B_C_D_Edge - edge - d_field
+        d_field: Vec<Option<Vec<PathBuf>>>,
+
+        /// #### Root_B_C_D_Edge - c_field
+        ///
+        /// Root_B_C_D_Edge - edge - c_field
+        c_field: i32,
+    }
+"#,
+        r#"
+    /// Root_E_Edge - 1l
+    ///
+    /// Root_E_Edge - 2l
+    struct Root_E_Edge {
+        /// ## Root_E_Edge - f_field
+        ///
+        /// Root_E_Edge - edge - f_field
+        f_field: i32,
+
+        /// ## Root_E_Edge - e_field
+        ///
+        /// Root_E_Edge - edge - e_field
+        e_field: String,
+    }
+"#,
+    ];
+
+    /// Basic test that determines we're getting the [`EXPECTED`] result, under _ideal-ish_
+    /// conditions.
+    #[test]
+    fn basic_markdown_from_sample_works() {
+        let files = parse_string_files(FILES.map(ToString::to_string).to_vec());
+
+        let type_docs = super::parse_docs_into_tree(files).unwrap();
+        println!("parsed {type_docs:#?}");
+
+        let new_types = depth_first_build_new_types(type_docs);
+        println!("new_types {new_types:#?}");
+
+        let mega_type = get_root_type(new_types);
+        println!("mega_type {mega_type:#?}");
+
+        let final_docs = produce_docs_from_root_type(mega_type);
+        println!("final_docs {final_docs:#?}");
+
+        assert_eq!(final_docs, EXPECTED);
+    }
+
+    /// Randomizes the _file_ order, so we can test that we get [`EXPECTED`] under more realistic
+    /// conditions (where we can't force an order for the real files).
+    #[test]
+    fn randomish_markdown_from_sample_works() {
+        let files = parse_string_files(FILES.map(ToString::to_string).to_vec());
+
+        for i in 0..32 {
+            let mut files = files.clone();
+            files.sort_unstable_by(|_, _| rand::random::<i32>().cmp(&rand::random()));
+
+            let type_docs = super::parse_docs_into_tree(files.clone()).unwrap();
+            let new_types = depth_first_build_new_types(type_docs.clone());
+            let mega_type = get_root_type(new_types.clone());
+            let final_docs = produce_docs_from_root_type(mega_type.clone());
+
+            assert_eq!(
+                final_docs, EXPECTED,
+                "files{files:#?}\ntype_docs {type_docs:#?}\nnew_types {new_types:#?}\nmega_type{mega_type:#?}\nfina_docs {final_docs:#?}\nindex {i:?}"
+            );
+        }
+    }
+
+    /// # Root_B_C_Node
+    ///
+    /// Root_B_C_Node - 1l
+    ///
+    /// Root_B_C_Node - 2l
+    struct Root_B_C_Node {
+        /// <!--${internal}-->
+        /// ## Root_B_C_Node - internal
+        internal: i32,
+
+        /// ## Root_B_C_Node - d_field
+        d_field: Vec<Root_B_C_D_Edge>,
+
+        /// ## Root_B_C_Node - root_b_c_node_field
+        ///
+        /// Root_B_C_Node - edge - root_b_c_node_field
+        root_b_c_node_field: Option<Vec<String>>,
+    }
+
+    /// # Root
+    ///
+    /// Root - 1l
+    ///
+    /// Root - 2l
+    struct Root {
+        /// ## Root - e_field
+        e_field: Root_E_Edge,
+
+        /// ## Root - root_field
+        ///
+        /// Root - edge - root_field
+        root_field: i32,
+
+        /// ## Root - b_field
+        b_field: Option<Vec<Root_B_Node>>,
+    }
+
+    /// # Root_B_Node
+    ///
+    /// Root_B_Node - 1l
+    ///
+    /// Root_B_Node - 2l
+    struct Root_B_Node {
+        /// ## Root_B_Node - c_field
+        c_field: Vec<Root_B_C_Node>,
+
+        /// ## Root_B_Node - root_b_node_field
+        ///
+        /// Root_B_Node - edge - root_b_node_field
+        root_b_node_field: Option<String>,
+    }
+
+    /// # Root_B_C_D_Edge
+    ///
+    /// Root_B_C_D_Edge - 1l
+    ///
+    /// Root_B_C_D_Edge - 2l
+    struct Root_B_C_D_Edge {
+        /// ## Root_B_C_D_Edge - d_field
+        ///
+        /// Root_B_C_D_Edge - edge - d_field
+        d_field: Vec<Option<Vec<PathBuf>>>,
+
+        /// ## Root_B_C_D_Edge - c_field
+        ///
+        /// Root_B_C_D_Edge - edge - c_field
+        c_field: i32,
+    }
+
+    /// # Root_E_Edge
+    ///
+    /// Root_E_Edge - 1l
+    ///
+    /// Root_E_Edge - 2l
+    struct Root_E_Edge {
+        /// ## Root_E_Edge - f_field
+        ///
+        /// Root_E_Edge - edge - f_field
+        f_field: i32,
+
+        /// ## Root_E_Edge - e_field
+        ///
+        /// Root_E_Edge - edge - e_field
+        e_field: String,
+    }
+}

@@ -19,3 +19,6 @@ edition.workspace = true
 glob = "0.3"
 syn = { version = "2", features = ["full", "extra-traits"]}
 thiserror = "1"
+
+[dev-dependencies]
+rand = "0.8"

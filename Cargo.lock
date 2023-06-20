@@ -2967,6 +2967,7 @@ name = "medschool"
 version = "0.1.0"
 dependencies = [
  "glob",
+ "rand",
  "syn 2.0.16",
  "thiserror",
 ]
