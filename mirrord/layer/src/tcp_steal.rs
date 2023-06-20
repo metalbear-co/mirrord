@@ -264,6 +264,9 @@ impl TcpHandler for TcpStealHandler {
         tx: &Sender<ClientMessage>,
     ) -> Result<(), LayerError> {
         if self.ports_mut().remove(&port) {
+            // There is a known issue - https://github.com/metalbear-co/mirrord/issues/1575 - where
+            // the agent is currently not able to keep ongoing connections, so once we send this
+            // message, any ongoing connections are going to be interrupted.
             tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(
                 port,
             )))

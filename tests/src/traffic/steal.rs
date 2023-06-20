@@ -170,8 +170,9 @@ mod steal {
     /// 8. This test tells the test app to exit.
     /// 9. This test sends a request to the service and verifies it's not stolen.
     ///
-    /// This test is ignored: it's a known issue: when the user application closes a socket, we stop
-    /// stealing existing connections.
+    /// This test is ignored: it's a
+    /// [known issue](https://github.com/metalbear-co/mirrord/issues/1575): when the user
+    /// application closes a socket, we stop stealing existing connections.
     #[ignore]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
