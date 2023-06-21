@@ -312,6 +312,7 @@ mod traffic {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(120))]
     pub async fn gethostname_remote_result(#[future] hostname_service: KubeService) {
         let service = hostname_service.await;
         let node_command = vec!["python3", "-u", "python-e2e/hostname.py"];
