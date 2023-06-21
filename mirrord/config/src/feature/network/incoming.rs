@@ -95,7 +95,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .transpose()?
                     .unwrap_or_default(),
                 http_header_filter: HttpHeaderFilterFileConfig::default().generate_config()?,
-                on_concurrent_steal: FromEnv::new("MIRRORD_OPERATOR_ON_MULTI_STEAL")
+                on_concurrent_steal: FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
                     .layer(|layer| {
                         Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer)
                     })
@@ -133,7 +133,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .listen_ports
                     .map(|m| m.into_iter().collect())
                     .unwrap_or_default(),
-                on_concurrent_steal: FromEnv::new("MIRRORD_OPERATOR_ON_MULTI_STEAL")
+                on_concurrent_steal: FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
                     .or(advanced.on_concurrent_steal)
                     .layer(|layer| {
                         Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer)
@@ -153,7 +153,7 @@ impl MirrordToggleableConfig for IncomingFileConfig {
             .source_value()
             .unwrap_or_else(|| Ok(Default::default()))?;
 
-        let on_concurrent_steal = FromEnv::new("MIRRORD_OPERATOR_ON_MULTI_STEAL")
+        let on_concurrent_steal = FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
             .layer(|layer| Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer))
             .source_value()
             .transpose()?
@@ -406,13 +406,13 @@ impl FromStr for IncomingMode {
     }
 }
 
-/// (Operator Only): Allows overiding port locks
+/// (Operator Only): Allows overriding port locks
 ///
-/// Can be set to either `"continue"` (default) or `"override"`.
+/// Can be set to either `"continue"` or `"override"`.
 ///
 /// - `"continue"`: Continue with normal execution
 /// - `"override"`: If port lock detected then override it with new lock and force close the
-///   original locking connection
+///   original locking connection.
 #[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ConcurrentSteal {
@@ -429,7 +429,8 @@ pub enum ConcurrentSteal {
     /// <!--${internal}-->
     /// ### abort
     ///
-    /// Abort Execution
+    /// Abort Execution when trying to steal traffic from a target whose traffic is already being
+    /// stolen.
     #[default]
     Abort,
 }
