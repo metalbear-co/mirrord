@@ -3,7 +3,9 @@ use futures::{SinkExt, StreamExt};
 use http::request::Request;
 use kube::{error::ErrorResponse, Api, Client};
 use mirrord_auth::{credential_store::CredentialStoreSync, error::AuthenticationError};
-use mirrord_config::{target::TargetConfig, LayerConfig};
+use mirrord_config::{
+    feature::network::incoming::ConcurrentSteal, target::TargetConfig, LayerConfig,
+};
 use mirrord_kube::{
     api::{get_k8s_resource_api, kubernetes::create_kube_api},
     error::KubeApiError,
@@ -41,6 +43,8 @@ pub enum OperatorApiError {
     DaemonReceiverDropped,
     #[error(transparent)]
     Authentication(#[from] AuthenticationError),
+    #[error("Can't start proccess because other locks exist on target")]
+    ConcurrentStealAbort,
 }
 
 type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
@@ -50,6 +54,7 @@ pub struct OperatorApi {
     target_api: Api<TargetCrd>,
     version_api: Api<MirrordOperatorCrd>,
     target_config: TargetConfig,
+    on_concurrent_steal: ConcurrentSteal,
 }
 
 impl OperatorApi {
@@ -116,6 +121,7 @@ impl OperatorApi {
 
     async fn new(config: &LayerConfig) -> Result<Self> {
         let target_config = config.target.clone();
+        let on_concurrent_steal = config.feature.network.incoming.on_concurrent_steal.clone();
 
         let client = create_kube_api(
             config.accept_invalid_certificates,
@@ -140,6 +146,7 @@ impl OperatorApi {
             target_api,
             version_api,
             target_config,
+            on_concurrent_steal,
         })
     }
 
@@ -167,11 +174,23 @@ impl OperatorApi {
         target: TargetCrd,
         credential_name: Option<String>,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+        if self.on_concurrent_steal == ConcurrentSteal::Abort && let Ok(lock_target) = self
+                .target_api
+                .get_subresource("port-locks", &target.name())
+                .await && lock_target
+                .spec
+                .port_locks
+                .map(|locks| !locks.is_empty())
+                .unwrap_or(false) {
+            return Err(OperatorApiError::ConcurrentStealAbort);
+        }
+
         let mut builder = Request::builder()
             .uri(format!(
-                "{}/{}?connect=true",
+                "{}/{}?on_concurrent_steal={}&connect=true",
                 self.target_api.resource_url(),
-                target.name()
+                target.name(),
+                self.on_concurrent_steal
             ))
             .header("x-session-id", Self::session_id());
 
