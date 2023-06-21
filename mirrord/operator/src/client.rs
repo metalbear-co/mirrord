@@ -174,7 +174,7 @@ impl OperatorApi {
         target: TargetCrd,
         credential_name: Option<String>,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        if  self.on_concurrent_steal == ConcurrentSteal::Abort &&
+        if self.on_concurrent_steal == ConcurrentSteal::Abort &&
             let Ok(lock_target) = self
                 .target_api
                 .get_subresource("port-locks", &target.name())
