@@ -174,20 +174,15 @@ impl OperatorApi {
         target: TargetCrd,
         credential_name: Option<String>,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        if self.on_concurrent_steal == ConcurrentSteal::Abort &&
-            let Ok(lock_target) = self
+        if self.on_concurrent_steal == ConcurrentSteal::Abort && let Ok(lock_target) = self
                 .target_api
                 .get_subresource("port-locks", &target.name())
-                .await
-        {
-            if lock_target
+                .await && lock_target
                 .spec
                 .port_locks
                 .map(|locks| !locks.is_empty())
-                .unwrap_or(false)
-            {
-                return Err(OperatorApiError::ConcurrentStealAbort);
-            }
+                .unwrap_or(false) {
+            return Err(OperatorApiError::ConcurrentStealAbort);
         }
 
         let mut builder = Request::builder()
