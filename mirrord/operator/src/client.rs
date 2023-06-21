@@ -174,13 +174,12 @@ impl OperatorApi {
         target: TargetCrd,
         credential_name: Option<String>,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        if self.on_concurrent_steal == ConcurrentSteal::Abort {
-            let lock_target = self
+        if  self.on_concurrent_steal == ConcurrentSteal::Abort &&
+            let Ok(lock_target) = self
                 .target_api
                 .get_subresource("port-locks", &target.name())
                 .await
-                .map_err(KubeApiError::KubeError)?;
-
+        {
             if lock_target
                 .spec
                 .port_locks
