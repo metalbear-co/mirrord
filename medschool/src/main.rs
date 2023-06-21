@@ -23,6 +23,7 @@ use std::{
 
 use syn::{Attribute, Expr, Ident, Type, TypePath};
 use thiserror::Error;
+use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 /// We just _eat_ some of these errors (turn them into `None`).
 #[derive(Debug, Error)]
@@ -90,6 +91,7 @@ struct PartialField {
 impl PartialField {
     /// Converts a [`syn::Field`] into [`PartialField`], using
     /// [`get_ident_from_field_skipping_generics`] to get the field type.
+    #[tracing::instrument(level = "trace", ret)]
     fn new(field: syn::Field) -> Option<Self> {
         let type_ident = match field.ty {
             Type::Path(type_path) => {
@@ -125,17 +127,12 @@ impl PartialOrd for PartialField {
 
 impl Ord for PartialType {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        let result = if other.fields.iter().any(|field| field.ty == self.ident) {
+        if other.fields.iter().any(|field| field.ty == self.ident) {
             // `other` has a field that is of type `self`, so it "belongs" to `self`
             std::cmp::Ordering::Greater
-        // } else if self.fields.iter().any(|field| field.ty == other.ident) {
         } else {
-            // std::cmp::Ordering::Equal
             std::cmp::Ordering::Less
-        };
-        println!("{:?} {result:?} {:?}", self.ident, other.ident);
-
-        result
+        }
     }
 }
 
@@ -217,6 +214,7 @@ impl Display for PartialField {
 ///
 /// Doesn't handle generics of generics though, so if your field is `baz: Option<T>` we're going to
 /// be assigning this field type to be the string `"T"` (which is probably not what you wanted).
+#[tracing::instrument(level = "trace", ret)]
 fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> {
     // welp, this path probably contains generics
     let segment = type_path.path.segments.last()?;
@@ -249,6 +247,7 @@ fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> 
 /// Glues all the `Vec<String>` docs into one big `String`.
 ///
 /// It can also be used to filter out docs with meta comments, such as `${internal}`.
+#[tracing::instrument(level = "trace", ret)]
 fn pretty_docs(mut docs: Vec<String>) -> String {
     for doc in docs.iter_mut() {
         // removes docs that we don't want in `configuration.md`
@@ -268,6 +267,7 @@ fn pretty_docs(mut docs: Vec<String>) -> String {
 // TODO(alex): Support specifying a path.
 /// Converts all files in the [`glob::glob`] pattern defined within, in the current directory, into
 /// a `Vec<String>`.
+#[tracing::instrument(level = "trace", ret)]
 fn files_to_string() -> Result<Vec<String>, DocsError> {
     let paths = glob::glob("./src/**/*.rs")?;
 
@@ -291,6 +291,7 @@ fn files_to_string() -> Result<Vec<String>, DocsError> {
 }
 
 /// Parses the `files` into a collection of [`syn::File`].
+#[tracing::instrument(level = "trace", ret)]
 fn parse_string_files(files: Vec<String>) -> Vec<syn::File> {
     files
         .into_iter()
@@ -300,6 +301,7 @@ fn parse_string_files(files: Vec<String>) -> Vec<syn::File> {
 }
 
 /// Look into the [`syn::Attribute`]s of whatever item we're handling, and extract its doc strings.
+#[tracing::instrument(level = "trace", ret)]
 fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
     attributes
         .into_iter()
@@ -341,6 +343,7 @@ fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
 
 /// Converts a list of [`syn::File`] into a [`BTreeSet`] of our own [`PartialType`] types, so we can
 /// get a root node (see the [`Ord`] implementation of `PartialType`).
+#[tracing::instrument(level = "trace", ret)]
 fn parse_docs_into_tree(files: Vec<syn::File>) -> Result<BTreeSet<PartialType>, DocsError> {
     let type_docs = files
         .into_iter()
@@ -449,6 +452,7 @@ fn parse_docs_into_tree(files: Vec<syn::File>) -> Result<BTreeSet<PartialType>, 
 ///     y: i32,
 /// }
 /// ```
+#[tracing::instrument(level = "trace", ret)]
 fn depth_first_build_new_types(type_docs: BTreeSet<PartialType>) -> Vec<PartialType> {
     // The types that have been rebuild after following each field "reference".
     let mut new_types = Vec::with_capacity(8);
@@ -521,6 +525,7 @@ fn depth_first_build_new_types(type_docs: BTreeSet<PartialType>) -> Vec<PartialT
 
 /// Gets the element with the most number of [`PartialField`], which at this point should be our
 /// root [`PartialType`].
+#[tracing::instrument(level = "trace", ret)]
 fn get_root_type(types: Vec<PartialType>) -> PartialType {
     types
         .into_iter()
@@ -529,6 +534,7 @@ fn get_root_type(types: Vec<PartialType>) -> PartialType {
 }
 
 /// Turns the `root` [`PartialType`] documentation into one big `String`.
+#[tracing::instrument(level = "trace", ret)]
 fn produce_docs_from_root_type(root: PartialType) -> String {
     let type_docs = pretty_docs(root.docs);
 
@@ -544,14 +550,30 @@ fn produce_docs_from_root_type(root: PartialType) -> String {
     .concat()
 }
 
+/// # Attention when using `RUST_LOG`
+///
+/// Every function here supports our usual [`tracing::instrument`] setup, with default
+/// `log_level = "trace`, but if you dare run with `RUST_LOG=trace` you're going to have a bad time!
+///
+/// The logging is put in place so you can quickly change whatever function you need to
+/// `log_level = "debug"` (or whatever).
+///
+/// tl;dr: do **NOT** use `RUST_LOG=trace`!
 fn main() -> Result<(), DocsError> {
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_span_events(FmtSpan::ACTIVE)
+                .pretty(),
+        )
+        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
     let files = files_to_string()?;
     let files = parse_string_files(files);
 
     let type_docs = parse_docs_into_tree(files)?;
     let new_types = depth_first_build_new_types(type_docs);
-
-    println!("new types \n{new_types:#?}");
 
     // If all goes well, the first type should hold the root type.
     let the_mega_type = get_root_type(new_types);
@@ -563,78 +585,6 @@ fn main() -> Result<(), DocsError> {
 
     Ok(())
 }
-
-// TODO(alex): Leaving this here as it can be useful for writing tests (and just verifying the
-// tool in general).
-/*
-/// B - 1 line
-///
-/// B - 2 line
-struct B {
-    /// ### B - x
-    ///
-    /// B - x field
-    x: i32,
-
-    /// ### B - c
-    c: C,
-}
-
-/// E - 1 line
-///
-/// E - 2 line
-struct E {
-    /// ### E - w
-    ///
-    /// E - w field
-    w: i32,
-}
-
-/// # A
-///
-/// A - 1 line
-///
-/// A - 2 line
-struct A {
-    /// ## A - a
-    ///
-    /// A - a field
-    a: i32,
-
-    /// ## A - b
-    b: Option<Vec<B>>,
-
-    /// ## A - d
-    d: D,
-
-    /// ## A - e
-    e: Option<E>,
-}
-
-
-/// C - 1 line
-///
-/// C - 2 line
-struct C {
-    /// #### C - y
-    ///
-    /// C - y field
-    y: i32,
-
-    /// #### C - d
-    d: D,
-}
-
-/// D - 1 line
-///
-/// D - 2 line
-struct D {
-    /// #### D - z
-    ///
-    /// D - z field
-    z: i32,
-}
-*/
 
 #[cfg(test)]
 mod test {
