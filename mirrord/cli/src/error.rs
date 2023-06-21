@@ -53,10 +53,10 @@ pub(crate) enum CliError {
     {GENERAL_HELP}"#
     ))]
     OperatorConnectionFailed(#[from] OperatorApiError),
-    #[error("Failed to connect to the operator. Someone else is performing network stealing on requested target")]
+    #[error("Failed to connect to the operator. Someone else is stealing traffic from the requested target")]
     #[diagnostic(help(
         r#"
-    There exists a port-lock on target, if you want to run anyway please set the following:
+    If you want to run anyway please set the following:
     
     {{
       "feature": {{
