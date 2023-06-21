@@ -138,8 +138,6 @@ impl Ord for PartialType {
 
 impl Ord for PartialField {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // String
-        // if self.ty.len() > 6 {}
         // primitive types < custom types (usually)
         self.ty
             .len()
