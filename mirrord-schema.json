@@ -626,7 +626,7 @@
         },
         "on_concurrent_steal": {
           "title": "on_concurrent_steal",
-          "description": "(Operator Only): if value of override is passed then current later will override any PortLocks and force close other connections",
+          "description": "(Operator Only): if value of override will force close any other connections on requested target",
           "anyOf": [
             {
               "$ref": "#/definitions/ConcurrentSteal"

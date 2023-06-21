@@ -232,8 +232,8 @@ pub struct IncomingAdvancedFileConfig {
     pub listen_ports: Option<Vec<(u16, u16)>>,
     /// ### on_concurrent_steal
     ///
-    /// (Operator Only): if value of override is passed then current later will override any
-    /// PortLocks and force close other connections
+    /// (Operator Only): if value of override will force close any other connections on requested
+    /// target
     pub on_concurrent_steal: Option<ConcurrentSteal>,
 }
 
