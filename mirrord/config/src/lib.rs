@@ -593,6 +593,7 @@ mod tests {
                             ignore_localhost: None,
                             ignore_ports: None,
                             listen_ports: None,
+                            on_concurrent_steal: None,
                         }),
                     ))),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {

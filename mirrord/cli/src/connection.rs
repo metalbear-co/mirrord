@@ -1,9 +1,8 @@
 use std::time::Duration;
 
-use miette::IntoDiagnostic;
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
-use mirrord_operator::client::OperatorApi;
+use mirrord_operator::client::{OperatorApi, OperatorApiError};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
@@ -26,33 +25,37 @@ pub(crate) struct AgentConnection {
 pub(crate) async fn connect_operator<P>(
     config: &LayerConfig,
     progress: &P,
-) -> Option<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)>
+) -> Result<Option<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)>, CliError>
 where
     P: Progress + Send + Sync,
 {
     let sub_progress = progress.subtask("checking operator");
 
-    match OperatorApi::discover(config, progress)
-        .await
-        .map_err(CliError::OperatorConnectionFailed)
-        .into_diagnostic()
-    {
+    match OperatorApi::discover(config, progress).await {
         Ok(Some(connection)) => {
             sub_progress.done_with("connected to operator");
 
-            Some(connection)
+            Ok(Some(connection))
         }
         Ok(None) => {
             sub_progress.done_with("no operator detected");
 
-            None
+            Ok(None)
+        }
+        Err(OperatorApiError::ConcurrentStealAbort) => {
+            sub_progress.fail_with("operator concurrent port steal lock");
+
+            Err(CliError::OperatorConcurrentSteal)
         }
         Err(err) => {
-            sub_progress.done_with("unable to check if operator exists, probably due to RBAC");
+            sub_progress.fail_with("unable to check if operator exists, probably due to RBAC");
 
-            trace!("{err}");
+            trace!(
+                "{}",
+                miette::Error::from(CliError::OperatorConnectionFailed(err))
+            );
 
-            None
+            Ok(None)
         }
     }
 }
@@ -65,7 +68,7 @@ pub(crate) async fn create_and_connect<P>(
 where
     P: Progress + Send + Sync,
 {
-    if config.operator && let Some((sender, receiver)) = connect_operator(config, progress).await {
+    if config.operator && let Some((sender, receiver)) = connect_operator(config, progress).await? {
         Ok((
             AgentConnectInfo::Operator,
             AgentConnection { sender, receiver },
