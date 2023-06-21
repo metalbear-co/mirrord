@@ -339,6 +339,8 @@ fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
         .collect()
 }
 
+/// Converts a list of [`syn::File`] into a [`BTreeSet`] of our own [`PartialType`] types, so we can
+/// get a root node (see the [`Ord`] implementation of `PartialType`).
 fn parse_docs_into_tree(files: Vec<syn::File>) -> Result<BTreeSet<PartialType>, DocsError> {
     let type_docs = files
         .into_iter()
@@ -414,6 +416,39 @@ fn parse_docs_into_tree(files: Vec<syn::File>) -> Result<BTreeSet<PartialType>, 
     Ok(type_docs)
 }
 
+/// Digs into the [`PartialTypes`] building new types that inline the types of their
+/// [`PartialField`]s, turning something like:
+///
+/// ```no_run
+/// /// A struct
+/// struct A {
+///     /// x field
+///     x: i32,
+///     /// b field
+///     b: B,
+/// }
+///
+/// /// B struct
+/// struct B {
+///     /// y field
+///     y: i32,
+/// }
+/// ```
+///
+/// Into:
+///
+/// ```no_run
+/// /// A struct
+/// struct A {
+///     /// x field
+///     x: i32,
+///
+///     /// b field
+///     /// B struct
+///     /// y field
+///     y: i32,
+/// }
+/// ```
 fn depth_first_build_new_types(type_docs: BTreeSet<PartialType>) -> Vec<PartialType> {
     // The types that have been rebuild after following each field "reference".
     let mut new_types = Vec::with_capacity(8);
@@ -484,15 +519,21 @@ fn depth_first_build_new_types(type_docs: BTreeSet<PartialType>) -> Vec<PartialT
     new_types
 }
 
+/// Gets the element with the most number of [`PartialField`], which at this point should be our
+/// root [`PartialType`].
 fn get_root_type(types: Vec<PartialType>) -> PartialType {
-    types.first().unwrap().clone()
+    types
+        .into_iter()
+        .max_by(|a, b| a.fields.len().cmp(&b.fields.len()))
+        .expect("If we have no elements here, the tool failed!")
 }
 
+/// Turns the `root` [`PartialType`] documentation into one big `String`.
 fn produce_docs_from_root_type(root: PartialType) -> String {
     let type_docs = pretty_docs(root.docs);
 
     // Concat all the docs!
-    let final_docs = [
+    [
         type_docs,
         root.fields
             .into_iter()
@@ -500,9 +541,7 @@ fn produce_docs_from_root_type(root: PartialType) -> String {
             .collect::<Vec<_>>()
             .concat(),
     ]
-    .concat();
-
-    final_docs
+    .concat()
 }
 
 fn main() -> Result<(), DocsError> {
@@ -511,6 +550,8 @@ fn main() -> Result<(), DocsError> {
 
     let type_docs = parse_docs_into_tree(files)?;
     let new_types = depth_first_build_new_types(type_docs);
+
+    println!("new types \n{new_types:#?}");
 
     // If all goes well, the first type should hold the root type.
     let the_mega_type = get_root_type(new_types);
