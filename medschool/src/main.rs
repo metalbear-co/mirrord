@@ -146,7 +146,6 @@ impl Ord for PartialField {
             .cmp(&other.ty.len())
             // both field types have the same length, so sort alphabetically
             .then_with(|| self.ident.cmp(&other.ident))
-        // self.ident.cmp(&other.ident)
     }
 }
 
