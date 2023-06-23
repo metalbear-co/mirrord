@@ -95,7 +95,12 @@ impl SocketInformation {
 
 #[derive(Debug)]
 pub struct Connected {
-    /// Remote address we're (supposedly) connected to.
+    /// The address requested by the user that we're "connected" to.
+    ///
+    /// Whenever the user calls [`libc::getpeername`], this is the address we return to them.
+    ///
+    /// For the _outgoing_ feature, we actually connect to the `layer_address` interceptor socket,
+    /// but use this address in the [`libc::recvfrom`] handling of [`fill_address`].
     remote_address: SocketAddress,
 
     /// Local address (pod-wise)
@@ -113,7 +118,8 @@ pub struct Connected {
     /// port.
     local_address: SocketAddress,
 
-    /// The address of the interceptor socket (this is what we're really connected to).
+    /// The address of the interceptor socket, this is what we're really connected to in the
+    /// outgoing feature.
     layer_address: Option<SocketAddress>,
 }
 
