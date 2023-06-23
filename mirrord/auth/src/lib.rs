@@ -1,6 +1,6 @@
 #![doc = include_str!("../README.md")]
 #![feature(result_option_inspect)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 
 pub use pem;
 pub use x509_certificate;

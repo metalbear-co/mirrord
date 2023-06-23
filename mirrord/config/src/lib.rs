@@ -1,5 +1,5 @@
 #![feature(slice_concat_trait)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(result_option_inspect)]
 #![warn(clippy::indexing_slicing)]
 //! <!--${internal}-->
