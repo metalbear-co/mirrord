@@ -171,63 +171,6 @@ jobs:
             ghcr.io/metalbear-co/mirrord:latest
             ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}
 
-  release_vscode_ext:
-    needs:
-      [
-        build_binaries_aarch64-unknown-linux-gnu,
-        build_binaries_x86_64-unknown-linux-gnu,
-        build_binaries_macos,
-        release_docker_image,
-      ]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 17
-          cache: "npm"
-          cache-dependency-path: vscode-ext/package-lock.json
-      # This downloads all artifacts of the job
-      - uses: actions/download-artifact@v3
-        with:
-          path: /tmp/artifacts
-      - name: Get release version
-        # VSCode doesn't support pre release versions https://github.com/microsoft/vsmarketplace/issues/50#issuecomment-990764201
-        run: |
-          echo "version=$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)" >> $GITHUB_OUTPUT
-        id: version
-      # TypeScript set at 4.7.4 because @kubernetes/client-node 0.16.3 (and 0.17.0) breaks with version 4.8.2+
-      - run: npm install -g vsce typescript@4.7.4 esbuild
-      - run: mkdir -p /tmp/vscode-ext
-
-      - run: |
-          mkdir -p vscode-ext/bin/linux/arm64
-          mkdir -p vscode-ext/bin/linux/x64
-          mkdir -p vscode-ext/bin/darwin
-      - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord vscode-ext/bin/linux/x64/mirrord
-      - run: cp /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord vscode-ext/bin/linux/arm64/mirrord
-      - run: cp /tmp/artifacts/universal-apple-darwin/mirrord vscode-ext/bin/darwin/mirrord
-      # Package a patched Delve with our VS Code extension. The patched version bypasses an issue where we can't be injected into platform binaries.
-      - run: wget https://github.com/metalbear-co/delve/releases/download/1.20.1/delve_darwin_amd64 -O vscode-ext/bin/darwin/dlv-amd64 && chmod +x vscode-ext/bin/darwin/dlv-amd64
-      - run: wget https://github.com/metalbear-co/delve/releases/download/1.20.1/delve_darwin_arm64 -O vscode-ext/bin/darwin/dlv-arm64 && chmod +x vscode-ext/bin/darwin/dlv-arm64
-
-      - run: |
-          cd vscode-ext
-          npm install
-          tsc && vsce package -o /tmp/vscode-ext
-      - name: Publish vscode-ext
-        if: github.event_name != 'workflow_dispatch'
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: cd vscode-ext && vsce publish ${{ steps.version.outputs.version }}
-
-      - uses: actions/upload-artifact@v3
-        with:
-          name: vscode-ext
-          path: |
-            /tmp/vscode-ext
-          if-no-files-found: error
-
   release_intellij_plugin:
     needs:
       [
@@ -290,7 +233,6 @@ jobs:
         build_binaries_x86_64-unknown-linux-gnu,
         build_binaries_macos,
         release_docker_image,
-        release_vscode_ext,
         release_intellij_plugin,
       ]
     runs-on: ubuntu-latest
@@ -348,7 +290,6 @@ jobs:
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip /tmp/release/mirrord_mac_universal.zip
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
 
-          mv /tmp/artifacts/vscode-ext/* /tmp/release/
           mv /tmp/artifacts/intellij-ext/* /tmp/release/
 
       # Consider to add changelog generation..

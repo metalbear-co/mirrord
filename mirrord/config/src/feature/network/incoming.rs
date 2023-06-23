@@ -1,8 +1,8 @@
-use std::{collections::HashSet, str::FromStr};
+use std::{collections::HashSet, fmt, str::FromStr};
 
 use bimap::BiMap;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
@@ -95,6 +95,13 @@ impl MirrordConfig for IncomingFileConfig {
                     .transpose()?
                     .unwrap_or_default(),
                 http_header_filter: HttpHeaderFilterFileConfig::default().generate_config()?,
+                on_concurrent_steal: FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
+                    .layer(|layer| {
+                        Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer)
+                    })
+                    .source_value()
+                    .transpose()?
+                    .unwrap_or_default(),
                 ..Default::default()
             },
             IncomingFileConfig::Advanced(advanced) => IncomingConfig {
@@ -126,6 +133,14 @@ impl MirrordConfig for IncomingFileConfig {
                     .listen_ports
                     .map(|m| m.into_iter().collect())
                     .unwrap_or_default(),
+                on_concurrent_steal: FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
+                    .or(advanced.on_concurrent_steal)
+                    .layer(|layer| {
+                        Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer)
+                    })
+                    .source_value()
+                    .transpose()?
+                    .unwrap_or_default(),
             },
         };
 
@@ -138,8 +153,15 @@ impl MirrordToggleableConfig for IncomingFileConfig {
             .source_value()
             .unwrap_or_else(|| Ok(Default::default()))?;
 
+        let on_concurrent_steal = FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
+            .layer(|layer| Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer))
+            .source_value()
+            .transpose()?
+            .unwrap_or_default();
+
         Ok(IncomingConfig {
             mode,
+            on_concurrent_steal,
             http_header_filter: HttpHeaderFilterFileConfig::disabled_config()?,
             ..Default::default()
         })
@@ -208,6 +230,11 @@ pub struct IncomingAdvancedFileConfig {
     /// then access it on `4480` while getting traffic from remote `80`.
     /// The value of `port_mapping` doesn't affect this.
     pub listen_ports: Option<Vec<(u16, u16)>>,
+    /// ### on_concurrent_steal
+    ///
+    /// (Operator Only): if value of override will force close any other connections on requested
+    /// target
+    pub on_concurrent_steal: Option<ConcurrentSteal>,
 }
 
 /// Controls the incoming TCP traffic feature.
@@ -305,6 +332,8 @@ pub struct IncomingConfig {
     /// then access it on `4480` while getting traffic from remote `80`.
     /// The value of `port_mapping` doesn't affect this.
     pub listen_ports: BiMap<u16, u16>,
+    /// #### feature.network.incoming.on_concurrent_steal {#feature-network-incoming-on_concurrent_steal}
+    pub on_concurrent_steal: ConcurrentSteal,
 }
 
 impl IncomingConfig {
@@ -373,6 +402,62 @@ impl FromStr for IncomingMode {
                 "mirror" => Ok(Self::Mirror),
                 _ => Err(IncomingConfigParseError),
             },
+        }
+    }
+}
+
+/// (Operator Only): Allows overriding port locks
+///
+/// Can be set to either `"continue"` or `"override"`.
+///
+/// - `"continue"`: Continue with normal execution
+/// - `"override"`: If port lock detected then override it with new lock and force close the
+///   original locking connection.
+#[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ConcurrentSteal {
+    /// <!--${internal}-->
+    /// ### override
+    ///
+    /// Override any port lock and force close the original lock connection
+    Override,
+    /// <!--${internal}-->
+    /// ### continue
+    ///
+    /// Continue with normal execution
+    Continue,
+    /// <!--${internal}-->
+    /// ### abort
+    ///
+    /// Abort Execution when trying to steal traffic from a target whose traffic is already being
+    /// stolen.
+    #[default]
+    Abort,
+}
+
+#[derive(Error, Debug)]
+#[error("could not parse ConcurrentSteal from string, values continue/override")]
+pub struct ConcurrentStealParseError;
+
+impl FromStr for ConcurrentSteal {
+    type Err = ConcurrentStealParseError;
+
+    fn from_str(val: &str) -> Result<Self, Self::Err> {
+        match val {
+            "abort" => Ok(Self::Abort),
+            "continue" => Ok(Self::Continue),
+            "override" => Ok(Self::Override),
+            _ => Err(ConcurrentStealParseError),
+        }
+    }
+}
+
+impl fmt::Display for ConcurrentSteal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Abort => write!(f, "abort"),
+            Self::Continue => write!(f, "continue"),
+            Self::Override => write!(f, "override"),
         }
     }
 }

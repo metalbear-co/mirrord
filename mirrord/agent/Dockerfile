@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:latest as build-env
+FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32 as build-env
 ARG TARGETARCH
 WORKDIR /app
 

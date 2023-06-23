@@ -49,7 +49,7 @@ use crate::{
         connection::TcpConnectionStealer,
         ip_tables::{
             SafeIpTables, IPTABLE_MESH, IPTABLE_MESH_ENV, IPTABLE_PREROUTING,
-            IPTABLE_PREROUTING_ENV,
+            IPTABLE_PREROUTING_ENV, IPTABLE_STANDARD, IPTABLE_STANDARD_ENV,
         },
         StealerCommand,
     },
@@ -656,6 +656,7 @@ async fn start_iptable_guard() -> Result<()> {
 
     std::env::set_var(IPTABLE_PREROUTING_ENV, IPTABLE_PREROUTING.as_str());
     std::env::set_var(IPTABLE_MESH_ENV, IPTABLE_MESH.as_str());
+    std::env::set_var(IPTABLE_STANDARD_ENV, IPTABLE_STANDARD.as_str());
 
     let result = spawn_child_agent();
 

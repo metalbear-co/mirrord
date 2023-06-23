@@ -17,6 +17,7 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 pub struct TargetSpec {
     /// None when targetless.
     pub target: Option<Target>,
+    pub port_locks: Option<Vec<TargetPortLock>>,
 }
 
 impl TargetCrd {
@@ -52,6 +53,12 @@ impl From<TargetCrd> for TargetConfig {
             namespace: crd.metadata.namespace,
         }
     }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct TargetPortLock {
+    pub target_hash: String,
+    pub port: u16,
 }
 
 pub static OPERATOR_STATUS_NAME: &str = "operator";
