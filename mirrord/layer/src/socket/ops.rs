@@ -16,7 +16,7 @@ use mirrord_protocol::{
 };
 use socket2::SockAddr;
 use tokio::sync::oneshot;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace};
 
 use super::{hooks::*, *};
 use crate::{
@@ -108,7 +108,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
     Detour::Success(socket_fd)
 }
 
-#[tracing::instrument(level = "warn", ret)]
+#[tracing::instrument(level = "trace", ret)]
 fn bind_port(sockfd: c_int, domain: c_int, port: u16) -> Detour<()> {
     let address = match domain {
         libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
@@ -218,7 +218,7 @@ pub(super) fn bind(
     } else {
         bind_port(sockfd, socket.domain, requested_address.port())
             .or_else(|e| {
-                warn!("bind -> first `bind` failed on port {listen_port:?} with {e:?}, trying to bind to a random port");
+                info!("bind -> first `bind` failed on port {listen_port:?} with {e:?}, trying to bind to a random port");
                 bind_port(sockfd, socket.domain, 0)
             }
         )
