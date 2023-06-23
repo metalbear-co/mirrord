@@ -93,6 +93,9 @@ impl SocketInformation {
     }
 }
 
+/// Contains the addresses of a mirrord connected socket.
+///
+/// - `layer_address` is only used for the outgoing feature.
 #[derive(Debug)]
 pub struct Connected {
     /// The address requested by the user that we're "connected" to.
