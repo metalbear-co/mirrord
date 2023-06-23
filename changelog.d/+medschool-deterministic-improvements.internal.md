@@ -1,0 +1,1 @@
+Improve medschool to produce more deterministic configuration.md, and (mostly) fixes it dropping some configuration docs during processing.
