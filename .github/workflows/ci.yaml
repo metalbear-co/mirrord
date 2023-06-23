@@ -34,7 +34,6 @@ jobs:
     if: github.event.pull_request.draft == false
     outputs:
       rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
-      intellij_changed: ${{ steps.changed-intellij.outputs.any_changed }}
       markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
       ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
@@ -62,12 +61,6 @@ jobs:
             rust-toolchain.toml
             rustfmt.toml
             .cargo/**
-      - name: get intellij changes
-        id: changed-intellij
-        uses: tj-actions/changed-files@v36
-        with:
-          files: |
-            intellij-ext/**
       - name: get markdown changes
         id: changed-markdown
         uses: tj-actions/changed-files@v36
@@ -96,8 +89,6 @@ jobs:
         run: |
           echo ${{ steps.changed-rs.outputs.any_changed }};
           echo ${{ steps.changed-rs.outputs.all_changed_files }};
-          echo ${{ steps.changed-intellij.outputs.any_changed }};
-          echo ${{ steps.changed-intellij.outputs.all_changed_files }};
           echo ${{ steps.changed-markdown.outputs.any_changed }};
           echo ${{ steps.changed-markdown.outputs.all_changed_files }};
           echo ${{ steps.changed-ci.outputs.any_changed }};
@@ -544,7 +535,6 @@ jobs:
         test_mirrord_config,
         test_mirrord_protocol,
         test_mirrord_sip,
-        build_intellij_plugin,
         lint_markdown,
       ]
     runs-on: ubuntu-latest
@@ -567,6 +557,5 @@ jobs:
             (needs.test_mirrord_config.result == 'success' || needs.test_mirrord_config.result == 'skipped') &&
             (needs.test_mirrord_protocol.result == 'success' || needs.test_mirrord_protocol.result == 'skipped') &&
             (needs.test_mirrord_sip.result == 'success' || needs.test_mirrord_sip.result == 'skipped') &&
-            (needs.build_intellij_plugin.result == 'success' || needs.build_intellij_plugin.result == 'skipped') &&
             (needs.lint_markdown.result == 'success' || needs.lint_markdown.result == 'skipped') }}
         run: echo $CI_SUCCESS && if [ "$CI_SUCCESS" == "true" ]; then echo "SUCCESS" && exit 0; else echo "Failure" && exit 1; fi
