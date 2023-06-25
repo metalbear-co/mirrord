@@ -239,17 +239,20 @@ async fn get_kube_deployments(
 ) -> Result<impl Iterator<Item = String>> {
     let api: Api<Deployment> = get_k8s_resource_api(client, namespace);
     let deployments = api
-        .list(
-            &ListParams::default()
-                .labels("app!=mirrord")
-                .fields("status.phase=Running"),
-        )
+        .list(&ListParams::default().labels("app!=mirrord"))
         .await
         .map_err(KubeApiError::from)
         .map_err(CliError::KubernetesApiFailed)?;
 
     Ok(deployments
         .into_iter()
+        .filter(|deployment| {
+            deployment
+                .status
+                .as_ref()
+                .map(|status| status.available_replicas >= Some(1))
+                .unwrap_or(false)
+        })
         .filter_map(|deployment| deployment.metadata.name))
 }
 
