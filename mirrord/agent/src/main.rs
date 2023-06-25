@@ -1,11 +1,10 @@
 #![feature(result_option_inspect)]
 #![feature(hash_drain_filter)]
-#![feature(once_cell)]
-#![feature(is_some_and)]
 #![feature(let_chains)]
 #![feature(type_alias_impl_trait)]
 #![feature(tcp_quickack)]
 #![feature(async_fn_in_trait)]
+#![feature(lazy_cell)]
 #![allow(incomplete_features)]
 #![warn(clippy::indexing_slicing)]
 

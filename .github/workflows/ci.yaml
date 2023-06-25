@@ -34,7 +34,6 @@ jobs:
     if: github.event.pull_request.draft == false
     outputs:
       rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
-      intellij_changed: ${{ steps.changed-intellij.outputs.any_changed }}
       markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
       ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
@@ -62,12 +61,6 @@ jobs:
             rust-toolchain.toml
             rustfmt.toml
             .cargo/**
-      - name: get intellij changes
-        id: changed-intellij
-        uses: tj-actions/changed-files@v36
-        with:
-          files: |
-            intellij-ext/**
       - name: get markdown changes
         id: changed-markdown
         uses: tj-actions/changed-files@v36
@@ -96,8 +89,6 @@ jobs:
         run: |
           echo ${{ steps.changed-rs.outputs.any_changed }};
           echo ${{ steps.changed-rs.outputs.all_changed_files }};
-          echo ${{ steps.changed-intellij.outputs.any_changed }};
-          echo ${{ steps.changed-intellij.outputs.all_changed_files }};
           echo ${{ steps.changed-markdown.outputs.any_changed }};
           echo ${{ steps.changed-markdown.outputs.all_changed_files }};
           echo ${{ steps.changed-ci.outputs.any_changed }};
@@ -117,7 +108,7 @@ jobs:
       - run: rm rust-toolchain.toml
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: nightly-2023-03-29
+          toolchain: nightly-2023-04-19
           components: rustfmt, clippy
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
       - run: python3 -m pip install cargo-zigbuild
@@ -142,7 +133,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           # TODO(alex): update this when https://github.com/rust-lang/rust/issues/109631 is fixed
-          toolchain: nightly-2023-01-31
+          toolchain: nightly-2023-04-19
       - run: cargo doc --document-private-items
 
   lint_macos:
@@ -157,7 +148,7 @@ jobs:
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
-          toolchain: nightly-2023-03-29
+          toolchain: nightly-2023-04-19
       # only mirrord, mirrord-sip contain macOS specific, so run clippy on that.
       - run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
       - run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
@@ -266,7 +257,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{matrix.target}}
-          toolchain: nightly-2023-03-29
+          toolchain: nightly-2023-04-19
       # For now, just verify it compiles.
       - run: cargo build -p mirrord-layer -p mirrord --target=${{matrix.target}}
 
@@ -310,6 +301,12 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/issue1054
           rustc issue1054.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue1458
+          rustc issue1458.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue1458portnot53
+          rustc issue1458portnot53.rs --out-dir target
       - uses: actions/setup-node@v3 # For http mirroring test.
         with:
           node-version: 14
@@ -367,6 +364,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_TEST_USE_EXISTING_LIB: ../../target/debug/libmirrord_layer.dylib
+      RUST_LOG: warn,mirrord=trace
     steps:
       - uses: actions/checkout@v3 # Checkout the mirrord repo.
       - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install Rust.
@@ -378,6 +376,12 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/issue1054
           rustc issue1054.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue1458
+          rustc issue1458.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue1458portnot53
+          rustc issue1458portnot53.rs --out-dir target
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
           go-version: "1.18"
@@ -497,31 +501,6 @@ jobs:
           kubectl describe pods
           docker exec minikube find /var/log/pods -print -exec cat {} \;
 
-  build_intellij_plugin:
-    runs-on: ubuntu-latest
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.intellij_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    steps:
-      - uses: actions/checkout@v3
-      - name: Setup Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: zulu
-          java-version: 11
-      - name: Build Plugin
-        env:
-          CI_BUILD_PLUGIN: true
-        run: |
-          cd intellij-ext
-          chmod +x ./gradlew
-          ./gradlew buildPlugin
-      - name: Run plugin verifier
-        env:
-          CI_BUILD_PLUGIN: true
-        run: |
-          cd intellij-ext
-          ./gradlew runPluginVerifier
-
   lint_markdown:
     runs-on: ubuntu-latest
     needs: changed_files
@@ -556,7 +535,6 @@ jobs:
         test_mirrord_config,
         test_mirrord_protocol,
         test_mirrord_sip,
-        build_intellij_plugin,
         lint_markdown,
       ]
     runs-on: ubuntu-latest
@@ -579,6 +557,5 @@ jobs:
             (needs.test_mirrord_config.result == 'success' || needs.test_mirrord_config.result == 'skipped') &&
             (needs.test_mirrord_protocol.result == 'success' || needs.test_mirrord_protocol.result == 'skipped') &&
             (needs.test_mirrord_sip.result == 'success' || needs.test_mirrord_sip.result == 'skipped') &&
-            (needs.build_intellij_plugin.result == 'success' || needs.build_intellij_plugin.result == 'skipped') &&
             (needs.lint_markdown.result == 'success' || needs.lint_markdown.result == 'skipped') }}
         run: echo $CI_SUCCESS && if [ "$CI_SUCCESS" == "true" ]; then echo "SUCCESS" && exit 0; else echo "Failure" && exit 1; fi
