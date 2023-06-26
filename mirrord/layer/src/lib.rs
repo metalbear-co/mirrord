@@ -118,11 +118,11 @@ use tracing::{error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
-    common::{blocking_send_hook_message, HookMessage},
+    common::HookMessage,
     debugger_ports::DebuggerPorts,
     file::{filter::FILE_FILTER, FileHandler},
     load::LoadType,
-    socket::{SocketKind, SocketState, CONNECTION_QUEUE},
+    socket::CONNECTION_QUEUE,
 };
 
 mod common;
@@ -937,30 +937,7 @@ pub(crate) fn close_layer_fd(fd: c_int) {
 
         // Closed file is a socket, so if it's already bound to a port - notify agent to stop
         // mirroring/stealing that port.
-        if let Some(port) = socket.get_port() {
-            match socket.kind {
-                SocketKind::Tcp(_) => {
-                    match socket.state {
-                        // if the socket state is connected, then closing its fd is closing the
-                        // one connection, not the whole listening socket. We will know about this
-                        // close from the mirrord layer's side of the socket and will inform the
-                        // agent about the closed connection from there.
-                        SocketState::Connected(_) => {}
-                        _ => {
-                            // Ignoring errors here. We continue running, potentially without
-                            // informing the layer's and agent's TCP handlers about the socket
-                            // close. The agent might try to continue sending incoming
-                            // connections/data.
-                            let _ = blocking_send_hook_message(HookMessage::Tcp(
-                                tcp::TcpIncoming::Close(port),
-                            ));
-                        }
-                    }
-                }
-                // We don't do incoming UDP, so no need to notify anyone about this.
-                SocketKind::Udp(_) => {}
-            }
-        }
+        socket.close();
     } else if file_mode_active {
         OPEN_FILES.remove(&fd);
     }
