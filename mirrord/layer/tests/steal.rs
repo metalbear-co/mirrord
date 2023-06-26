@@ -61,7 +61,7 @@ async fn listen_on_same_port_again(dylib_path: &PathBuf) {
             vec![
                 // Disable fs and outgoing because they are not being tested here.
                 ("MIRRORD_FILE_MODE", "local"),
-                // ("MIRRORD_UDP_OUTGOING", "false"),
+                ("MIRRORD_UDP_OUTGOING", "false"),
                 // Steal mode, so that we get an answer response data back from the layer.
                 ("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", "true"),
                 // For some reason the app fails to resolve "localhost" when we don't resolve dns

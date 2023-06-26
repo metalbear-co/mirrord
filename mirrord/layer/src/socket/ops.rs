@@ -309,12 +309,14 @@ const UDP: ConnectType = !TCP;
 /// interception procedure.
 /// This returns errno so we can restore the correct errno in case result is -1 (until we get
 /// back to the hook we might call functions that will corrupt errno)
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "warn", ret)]
 fn connect_outgoing<const TYPE: ConnectType, const CALL_CONNECT: bool>(
     sockfd: RawFd,
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
 ) -> Detour<ConnectResult> {
+    warn!("######### is udp: {TYPE}, CALL_CONNECT: {CALL_CONNECT}");
+
     // Prepare this socket to be intercepted.
     let (mirror_tx, mirror_rx) = oneshot::channel();
 
@@ -481,6 +483,7 @@ pub(super) fn connect(
 
     match user_socket_info.kind {
         SocketKind::Udp(_) if enabled_udp_outgoing => {
+            warn!("######### enabled_udp_outgoing is true!");
             connect_outgoing::<UDP, true>(sockfd, remote_address, user_socket_info)
         }
         SocketKind::Tcp(_) => match user_socket_info.state {
@@ -885,7 +888,7 @@ pub(super) fn recv_from(
 ///
 /// See [`recv_from`] for more information.
 #[tracing::instrument(
-    level = "trace",
+    level = "warn",
     ret,
     skip(raw_message, raw_destination, destination_length)
 )]
@@ -898,7 +901,7 @@ pub(super) fn send_to(
     destination_length: socklen_t,
 ) -> Detour<isize> {
     let destination = SockAddr::try_from_raw(raw_destination, destination_length)?;
-    debug!("destination {:?}", destination.as_socket());
+    warn!("destination {:?}", destination.as_socket());
 
     let (_, user_socket_info) = SOCKETS
         .remove(&sockfd)
@@ -971,7 +974,9 @@ pub(super) fn send_to(
             )
         }
     } else {
+        warn!("########### BEFORE connect_outgoing");
         connect_outgoing::<UDP, false>(sockfd, destination, user_socket_info)?;
+        warn!("########### AFTER connect_outgoing");
 
         let layer_address: SockAddr = SOCKETS
             .get(&sockfd)
@@ -980,6 +985,7 @@ pub(super) fn send_to(
                 _ => unreachable!(),
             })
             .map(SocketAddress::try_into)??;
+        warn!("########### layer_address: {layer_address:?}");
 
         let raw_interceptor_address = layer_address.as_ptr();
         let raw_interceptor_length = layer_address.len();

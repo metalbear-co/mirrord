@@ -198,7 +198,7 @@ impl UdpOutgoingHandler {
     ///
     /// - `UdpOutgoing::Write`: sends a `UdpOutgoingRequest::Write` message to (agent) with the data
     ///   that our interceptor socket intercepted.
-    #[tracing::instrument(level = "trace", ret, skip(self, tx))]
+    #[tracing::instrument(level = "warn", ret, skip(self, tx))]
     pub(crate) async fn handle_hook_message(
         &mut self,
         message: UdpOutgoing,
@@ -216,7 +216,7 @@ impl UdpOutgoingHandler {
                 //
                 // Have to be careful, as this is rather finnicky behavior when the user wants to
                 // make a request to their own local address.
-                trace!("Connect -> remote_address {:#?}", remote_address);
+                warn!("Connect -> remote_address {:#?}", remote_address);
 
                 // TODO: We could be losing track of the proper order to respond to these (aviram
                 // suggests using a `HashMap`).
