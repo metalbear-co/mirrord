@@ -70,8 +70,7 @@ impl From<&Listen> for SocketAddr {
     }
 }
 
-pub(crate) trait TcpHandler {
-    const IS_STEAL: bool;
+pub(crate) trait TcpHandler<const IS_STEAL: bool> {
     fn ports(&self) -> &HashSet<Listen>;
     fn ports_mut(&mut self) -> &mut HashSet<Listen>;
     fn port_mapping_ref(&self) -> &BiMap<u16, u16>;
@@ -94,7 +93,7 @@ pub(crate) trait TcpHandler {
             // 3. Agent sniffs new incoming connection and sends it to the layer.
             // 4. Agent receives `PortUnsubscribe`.
             // Step 2 could even happen after 4.
-            if Self::IS_STEAL {
+            if IS_STEAL {
                 warn!(
                     "Got incoming tcp connection (mirrord connection id: {connection_id}) after \
                     the application already closed the socket. The connection will not be handled."

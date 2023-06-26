@@ -110,9 +110,7 @@ pub struct TcpStealHandler {
     port_mapping: BiMap<u16, u16>,
 }
 
-impl TcpHandler for TcpStealHandler {
-    const IS_STEAL: bool = true;
-
+impl TcpHandler<true> for TcpStealHandler {
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_new_connection(
         &mut self,
