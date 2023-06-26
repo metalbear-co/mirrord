@@ -88,7 +88,7 @@ pub(crate) trait TcpHandler {
     /// Handle a potential [`LayerError::NewConnectionAfterSocketClose`] error.
     fn check_connection_handling_result(res: Result<(), LayerError>) -> Result<(), LayerError> {
         if let Err(LayerError::NewConnectionAfterSocketClose(connection_id)) = res {
-            // This can happen and is valid:
+            // This can happen:
             // 1. User app closes socket.
             // 2. mirrord sends `PortUnsubscribe` to agent.
             // 3. Agent sniffs new incoming connection and sends it to the layer.
@@ -97,9 +97,7 @@ pub(crate) trait TcpHandler {
             if Self::IS_STEAL {
                 warn!(
                     "Got incoming tcp connection (mirrord connection id: {connection_id}) after \
-                    the application already closed the socket. The connection will not be handled \
-                    and will be reset once the agent is informed about the application closing the \
-                    socket."
+                    the application already closed the socket. The connection will not be handled."
                 )
             } else {
                 info!(
