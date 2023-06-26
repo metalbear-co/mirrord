@@ -16,6 +16,7 @@ use trust_dns_resolver::config::Protocol;
 
 use self::id::SocketId;
 use crate::{
+    common::{blocking_send_hook_message, HookMessage},
     detour::{Bypass, Detour, OptionExt},
     error::{HookError, HookResult},
     INCOMING_IGNORE_PORTS,
@@ -211,6 +212,44 @@ impl UserSocket {
             protocol,
             state,
             kind,
+        }
+    }
+
+    /// Return the local (requested) port a bound/listening (NOT CONNECTED) user socket is
+    /// conceptually bound to.
+    ///
+    /// So if the app tried to bind port 80, return `Some(80)` (even if we actually mapped it to
+    /// some other port).
+    ///
+    /// `None` if socket is not bound yet, or if this socket is a connection socket.
+    fn get_bound_port(&self) -> Option<u16> {
+        match &self.state {
+            SocketState::Bound(Bound {
+                requested_address, ..
+            })
+            | SocketState::Listening(Bound {
+                requested_address, ..
+            }) => Some(requested_address.port()),
+            _ => None,
+        }
+    }
+
+    /// Inform TCP handler about closing a bound/listening port.
+    pub(crate) fn close(&self) {
+        if let Some(port) = self.get_bound_port() {
+            match self.kind {
+                SocketKind::Tcp(_) => {
+                    // Ignoring errors here. We continue running, potentially without
+                    // informing the layer's and agent's TCP handlers about the socket
+                    // close. The agent might try to continue sending incoming
+                    // connections/data.
+                    let _ = blocking_send_hook_message(HookMessage::Tcp(
+                        super::tcp::TcpIncoming::Close(port),
+                    ));
+                }
+                // We don't do incoming UDP, so no need to notify anyone about this.
+                SocketKind::Udp(_) => {}
+            }
         }
     }
 }
