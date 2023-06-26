@@ -16,6 +16,7 @@ use trust_dns_resolver::config::Protocol;
 
 use self::id::SocketId;
 use crate::{
+    common::{blocking_send_hook_message, HookMessage},
     detour::{Bypass, Detour, OptionExt},
     error::{HookError, HookResult},
     INCOMING_IGNORE_PORTS,
@@ -43,7 +44,7 @@ pub static CONNECTION_QUEUE: LazyLock<ConnectionQueue> = LazyLock::new(Connectio
 
 /// Struct sent over the socket once created to pass metadata to the hook
 #[derive(Debug)]
-pub struct SocketInformation {
+pub(super) struct SocketInformation {
     /// Address of the incoming peer
     pub remote_address: SocketAddr,
 
@@ -93,9 +94,17 @@ impl SocketInformation {
     }
 }
 
+/// Contains the addresses of a mirrord connected socket.
+///
+/// - `layer_address` is only used for the outgoing feature.
 #[derive(Debug)]
 pub struct Connected {
-    /// Remote address we're connected to.
+    /// The address requested by the user that we're "connected" to.
+    ///
+    /// Whenever the user calls [`libc::getpeername`], this is the address we return to them.
+    ///
+    /// For the _outgoing_ feature, we actually connect to the `layer_address` interceptor socket,
+    /// but use this address in the [`libc::recvfrom`] handling of [`fill_address`].
     remote_address: SocketAddress,
 
     /// Local address (pod-wise)
@@ -105,13 +114,17 @@ pub struct Connected {
     /// ```sh
     /// $ kubectl get pod -o wide
     ///
-    /// NAME             READY   STATUS    IP       
+    /// NAME             READY   STATUS    IP
     /// impersonated-pod 0/1     Running   1.2.3.4
     /// ```
     ///
     /// We would set this ip as `1.2.3.4:{port}` in [`bind`], where `{port}` is the user requested
     /// port.
     local_address: SocketAddress,
+
+    /// The address of the interceptor socket, this is what we're really connected to in the
+    /// outgoing feature.
+    layer_address: Option<SocketAddress>,
 }
 
 /// Represents a [`SocketState`] where the user made a [`libc::bind`] call, and we intercepted it.
@@ -148,6 +161,15 @@ pub enum SocketState {
 pub(crate) enum SocketKind {
     Tcp(c_int),
     Udp(c_int),
+}
+
+impl SocketKind {
+    pub(crate) const fn is_udp(&self) -> bool {
+        match self {
+            SocketKind::Tcp(_) => false,
+            SocketKind::Udp(_) => true,
+        }
+    }
 }
 
 impl TryFrom<c_int> for SocketKind {
@@ -190,6 +212,44 @@ impl UserSocket {
             protocol,
             state,
             kind,
+        }
+    }
+
+    /// Return the local (requested) port a bound/listening (NOT CONNECTED) user socket is
+    /// conceptually bound to.
+    ///
+    /// So if the app tried to bind port 80, return `Some(80)` (even if we actually mapped it to
+    /// some other port).
+    ///
+    /// `None` if socket is not bound yet, or if this socket is a connection socket.
+    fn get_bound_port(&self) -> Option<u16> {
+        match &self.state {
+            SocketState::Bound(Bound {
+                requested_address, ..
+            })
+            | SocketState::Listening(Bound {
+                requested_address, ..
+            }) => Some(requested_address.port()),
+            _ => None,
+        }
+    }
+
+    /// Inform TCP handler about closing a bound/listening port.
+    pub(crate) fn close(&self) {
+        if let Some(port) = self.get_bound_port() {
+            match self.kind {
+                SocketKind::Tcp(_) => {
+                    // Ignoring errors here. We continue running, potentially without
+                    // informing the layer's and agent's TCP handlers about the socket
+                    // close. The agent might try to continue sending incoming
+                    // connections/data.
+                    let _ = blocking_send_hook_message(HookMessage::Tcp(
+                        super::tcp::TcpIncoming::Close(port),
+                    ));
+                }
+                // We don't do incoming UDP, so no need to notify anyone about this.
+                SocketKind::Udp(_) => {}
+            }
         }
     }
 }
@@ -257,7 +317,9 @@ impl ProtocolExt for Protocol {
     }
 }
 
+/// Trait that expands `std` and `socket2` sockets.
 pub(crate) trait SocketAddrExt {
+    /// Converts a raw [`sockaddr`] pointer into a more _Rusty_ type
     fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<Self>
     where
         Self: Sized;

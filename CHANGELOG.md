@@ -8,6 +8,59 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.47.0](https://github.com/metalbear-co/mirrord/tree/3.47.0) - 2023-06-20
+
+
+### Added
+
+- Added `listen_ports` to `incoming` config to control what port is actually
+  being used locally
+  so mirrored/stolen ports can still be accessed locally via those. If port
+  provided by `listen_ports`
+  isn't available, application will receive `EADDRINUSE`.
+  Example configuration:
+  ```json
+  {
+      "feature":
+      {
+          "incoming": {
+              "listen_ports": [[80, 7111]]
+          }
+      }
+  }
+  ```
+  will make port 80 available on 7111 locally, while stealing/mirroring port
+  80. [#1554](https://github.com/metalbear-co/mirrord/issues/1554)
+
+
+### Changed
+
+- Changed the logic of choosing local port to use for intercepting mirror/steal
+  sockets
+  now instead of assigning a random port always, we try to use the original one
+  and if we fail we assign random port.
+  This only happens if `listen_ports` isn't used.
+  [#1554](https://github.com/metalbear-co/mirrord/issues/1554)
+- The path `/opt` itself is read locally by default (up until now paths inside
+  that directory were read locally by default, but not the directory itself).
+  [#1570](https://github.com/metalbear-co/mirrord/issues/1570)
+- Changed back required IntelliJ version to 222+ from 223+
+- Moved VSCode extension to its own repository and versioning
+  https://github.com/metalbear-co/mirrord-vscode
+
+
+### Fixed
+
+- Running python with mirrord on apple CPUs.
+  [#1570](https://github.com/metalbear-co/mirrord/issues/1570)
+
+
+### Internal
+
+- Use tagged version of ci-agent-build, so we can update Rust and the agent
+  independently. [#1457](https://github.com/metalbear-co/mirrord/issues/1457)
+
+
 ## [3.46.0](https://github.com/metalbear-co/mirrord/tree/3.46.0) - 2023-06-14
 
 

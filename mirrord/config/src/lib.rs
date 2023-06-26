@@ -1,5 +1,5 @@
 #![feature(slice_concat_trait)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(result_option_inspect)]
 #![warn(clippy::indexing_slicing)]
 //! <!--${internal}-->
@@ -593,6 +593,7 @@ mod tests {
                             ignore_localhost: None,
                             ignore_ports: None,
                             listen_ports: None,
+                            on_concurrent_steal: None,
                         }),
                     ))),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {

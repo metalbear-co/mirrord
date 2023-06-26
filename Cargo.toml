@@ -17,7 +17,7 @@ members = [
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.46.0"
+version = "3.47.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -52,7 +52,7 @@ tokio-util = { version = "0.7", features = ["net", "codec"] }
 rand = "0.8"
 streammap-ext = "0.1"
 num-traits = "0.2"
-regex = "1"
+regex = { version = "1", features = ["unicode-case"] }
 miette = "5"
 fancy-regex = { version = "0.10" }
 

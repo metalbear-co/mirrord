@@ -110,7 +110,7 @@ pub struct TcpStealHandler {
     port_mapping: BiMap<u16, u16>,
 }
 
-impl TcpHandler for TcpStealHandler {
+impl TcpHandler<true> for TcpStealHandler {
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_new_connection(
         &mut self,
@@ -222,9 +222,12 @@ impl TcpHandler for TcpStealHandler {
         let request_port = listen.requested_port;
 
         if self.ports_mut().replace(listen).is_some() {
-            // This can also be because we currently don't inform the tcp handler when an app closes
-            // a socket (stops listening).
-            info!("Received listen hook message for port {request_port} while already listening. Might be on different address",);
+            // Since this struct identifies listening sockets by their port (#1558), we can only
+            // forward the incoming traffic to one socket with that port.
+            info!(
+                "Received listen hook message for port {request_port} while already listening. \
+                Might be on different address. Sending all incoming traffic to newest socket."
+            );
             return Ok(());
         }
 
@@ -251,6 +254,26 @@ impl TcpHandler for TcpStealHandler {
         )))
         .await
         .map_err(From::from)
+    }
+
+    async fn handle_server_side_socket_close(
+        &mut self,
+        port: Port,
+        tx: &Sender<ClientMessage>,
+    ) -> Result<(), LayerError> {
+        if self.ports_mut().remove(&port) {
+            // There is a known issue - https://github.com/metalbear-co/mirrord/issues/1575 - where
+            // the agent is currently not able to keep ongoing connections, so once we send this
+            // message, any ongoing connections are going to be interrupted.
+            tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(
+                port,
+            )))
+            .await
+            .map_err(From::from)
+        } else {
+            // was not listening on closed socket, could be an outgoing socket.
+            Ok(())
+        }
     }
 }
 
@@ -314,10 +337,9 @@ impl TcpStealHandler {
         &mut self,
         http_request: HttpRequest,
     ) -> Result<(), LayerError> {
-        let listen = self
-            .ports()
-            .get(&http_request.port)
-            .ok_or(LayerError::PortNotFound(http_request.port))?;
+        let listen = self.ports().get(&http_request.port).ok_or(
+            LayerError::NewConnectionAfterSocketClose(http_request.connection_id),
+        )?;
         let addr: SocketAddr = listen.into();
         let connection_id = http_request.connection_id;
         let port = http_request.port;

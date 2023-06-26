@@ -25,6 +25,15 @@ pub enum SocketAddress {
     Unix(UnixAddr),
 }
 
+impl SocketAddress {
+    pub fn get_port(&self) -> Option<u16> {
+        match self {
+            SocketAddress::Ip(address) => Some(address.port()),
+            SocketAddress::Unix(_) => None,
+        }
+    }
+}
+
 /// A unix socket address type with rust member types (not libc stuff).
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum UnixAddr {

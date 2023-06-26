@@ -1,5 +1,0 @@
-<idea-plugin>
-    <extensions defaultExtensionNs="com.intellij">
-        <runConfigurationExtension implementation="com.metalbear.mirrord.products.idea.IdeaRunConfigurationExtension" id="mirrordIdea"/>
-    </extensions>
-</idea-plugin>

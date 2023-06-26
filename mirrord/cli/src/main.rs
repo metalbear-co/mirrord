@@ -1,5 +1,5 @@
 #![feature(let_chains)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(result_option_inspect)]
 #![warn(clippy::indexing_slicing)]
 
@@ -12,7 +12,7 @@ use exec::execvp;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
-use k8s_openapi::api::core::v1::Pod;
+use k8s_openapi::api::{apps::v1::Deployment, core::v1::Pod};
 use kube::{api::ListParams, Api};
 use miette::JSONReportHandler;
 use mirrord_config::{config::MirrordConfig, LayerConfig, LayerFileConfig};
@@ -195,14 +195,10 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 /// Returns a list of (pod name, [container names]) pairs.
 /// Filtering mesh side cars
 async fn get_kube_pods(
-    namespace: Option<String>,
-    accept_invalid_certificates: bool,
-    kubeconfig: Option<String>,
+    namespace: Option<&str>,
+    client: &kube::Client,
 ) -> Result<HashMap<String, Vec<String>>> {
-    let client = create_kube_api(accept_invalid_certificates, kubeconfig)
-        .await
-        .map_err(CliError::KubernetesApiFailed)?;
-    let api: Api<Pod> = get_k8s_resource_api(&client, namespace.as_deref());
+    let api: Api<Pod> = get_k8s_resource_api(client, namespace);
     let pods = api
         .list(
             &ListParams::default()
@@ -237,6 +233,29 @@ async fn get_kube_pods(
     Ok(pod_containers_map)
 }
 
+async fn get_kube_deployments(
+    namespace: Option<&str>,
+    client: &kube::Client,
+) -> Result<impl Iterator<Item = String>> {
+    let api: Api<Deployment> = get_k8s_resource_api(client, namespace);
+    let deployments = api
+        .list(&ListParams::default().labels("app!=mirrord"))
+        .await
+        .map_err(KubeApiError::from)
+        .map_err(CliError::KubernetesApiFailed)?;
+
+    Ok(deployments
+        .into_iter()
+        .filter(|deployment| {
+            deployment
+                .status
+                .as_ref()
+                .map(|status| status.available_replicas >= Some(1))
+                .unwrap_or(false)
+        })
+        .filter_map(|deployment| deployment.metadata.name))
+}
+
 /// Lists all possible target paths for pods.
 /// Example: ```[
 ///  "pod/metalbear-deployment-85c754c75f-982p5",
@@ -256,12 +275,17 @@ async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
             (false, None, None)
         };
 
-    let pods = get_kube_pods(
-        args.namespace.clone().or(namespace),
-        accept_invalid_certificates,
-        kubeconfig,
-    )
-    .await?;
+    let client = create_kube_api(accept_invalid_certificates, kubeconfig)
+        .await
+        .map_err(CliError::KubernetesApiFailed)?;
+
+    let namespace = args.namespace.as_deref().or(namespace.as_deref());
+
+    let (pods, deployments) = futures::try_join!(
+        get_kube_pods(namespace, &client),
+        get_kube_deployments(namespace, &client)
+    )?;
+
     let mut target_vector = pods
         .iter()
         .flat_map(|(pod, containers)| {
@@ -274,6 +298,7 @@ async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
                     .collect::<Vec<String>>()
             }
         })
+        .chain(deployments.map(|deployment| format!("deployment/{deployment}")))
         .collect::<Vec<String>>();
 
     target_vector.sort();

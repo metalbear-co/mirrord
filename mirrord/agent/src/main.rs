@@ -1,11 +1,10 @@
 #![feature(result_option_inspect)]
 #![feature(hash_drain_filter)]
-#![feature(once_cell)]
-#![feature(is_some_and)]
 #![feature(let_chains)]
 #![feature(type_alias_impl_trait)]
 #![feature(tcp_quickack)]
 #![feature(async_fn_in_trait)]
+#![feature(lazy_cell)]
 #![allow(incomplete_features)]
 #![warn(clippy::indexing_slicing)]
 
@@ -50,7 +49,7 @@ use crate::{
         connection::TcpConnectionStealer,
         ip_tables::{
             SafeIpTables, IPTABLE_MESH, IPTABLE_MESH_ENV, IPTABLE_PREROUTING,
-            IPTABLE_PREROUTING_ENV,
+            IPTABLE_PREROUTING_ENV, IPTABLE_STANDARD, IPTABLE_STANDARD_ENV,
         },
         StealerCommand,
     },
@@ -657,6 +656,7 @@ async fn start_iptable_guard() -> Result<()> {
 
     std::env::set_var(IPTABLE_PREROUTING_ENV, IPTABLE_PREROUTING.as_str());
     std::env::set_var(IPTABLE_MESH_ENV, IPTABLE_MESH.as_str());
+    std::env::set_var(IPTABLE_STANDARD_ENV, IPTABLE_STANDARD.as_str());
 
     let result = spawn_child_agent();
 

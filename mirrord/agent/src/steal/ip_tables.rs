@@ -9,7 +9,8 @@ use crate::{
     steal::ip_tables::{
         flush_connections::FlushConnections,
         mesh::{MeshRedirect, MeshVendor},
-        redirect::{PreroutingRedirect, Redirect},
+        redirect::Redirect,
+        standard::StandardRedirect,
     },
 };
 
@@ -17,6 +18,7 @@ pub(crate) mod chain;
 pub(crate) mod flush_connections;
 pub(crate) mod mesh;
 pub(crate) mod redirect;
+pub(crate) mod standard;
 
 pub static IPTABLE_PREROUTING_ENV: &str = "MIRRORD_IPTABLE_PREROUTING_NAME";
 pub static IPTABLE_PREROUTING: LazyLock<String> = LazyLock::new(|| {
@@ -33,6 +35,16 @@ pub static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_MESH_ENV).unwrap_or_else(|_| {
         format!(
             "MIRRORD_OUTPUT_{}",
+            Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
+        )
+    })
+});
+
+pub static IPTABLE_STANDARD_ENV: &str = "MIRRORD_IPTABLE_STANDARD_NAME";
+pub static IPTABLE_STANDARD: LazyLock<String> = LazyLock::new(|| {
+    std::env::var(IPTABLE_STANDARD_ENV).unwrap_or_else(|_| {
+        format!(
+            "MIRRORD_STANDARD_{}",
             Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
         )
     })
@@ -99,7 +111,7 @@ impl IPTables for iptables::IPTables {
 
 #[enum_dispatch(Redirect)]
 pub enum Redirects<IPT: IPTables + Send + Sync> {
-    Standard(PreroutingRedirect<IPT>),
+    Standard(StandardRedirect<IPT>),
     Mesh(MeshRedirect<IPT>),
     FlushConnections(FlushConnections<Redirects<IPT>>),
 }
@@ -122,7 +134,7 @@ where
         let mut redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
             Redirects::Mesh(MeshRedirect::create(Arc::new(ipt), vendor)?)
         } else {
-            Redirects::Standard(PreroutingRedirect::create(Arc::new(ipt))?)
+            Redirects::Standard(StandardRedirect::create(Arc::new(ipt))?)
         };
 
         if flush_connections {
@@ -138,7 +150,7 @@ where
         let mut redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
             Redirects::Mesh(MeshRedirect::load(Arc::new(ipt), vendor)?)
         } else {
-            Redirects::Standard(PreroutingRedirect::load(Arc::new(ipt))?)
+            Redirects::Standard(StandardRedirect::load(Arc::new(ipt))?)
         };
 
         if flush_connections {
@@ -210,8 +222,36 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
+        mock.expect_create_chain()
+            .with(str::starts_with("MIRRORD_STANDARD_"))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        mock.expect_insert_rule()
+            .with(
+                str::starts_with("MIRRORD_STANDARD_"),
+                str::starts_with("-m owner --gid-owner"),
+                eq(1),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        mock.expect_insert_rule()
+            .with(
+                str::starts_with("MIRRORD_STANDARD_"),
+                eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                eq(2),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
         mock.expect_add_rule()
             .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_add_rule()
+            .with(eq("OUTPUT"), str::starts_with("-j MIRRORD_STANDARD_"))
             .times(1)
             .returning(|_, _| Ok(()));
 
@@ -224,12 +264,30 @@ mod tests {
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_rule()
+            .with(
+                str::starts_with("MIRRORD_STANDARD_"),
+                eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+            )
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_remove_rule()
             .with(eq("PREROUTING"), str::starts_with("-j MIRRORD_INPUT_"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        mock.expect_remove_rule()
+            .with(eq("OUTPUT"), str::starts_with("-j MIRRORD_STANDARD_"))
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_chain()
             .with(str::starts_with("MIRRORD_INPUT_"))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        mock.expect_remove_chain()
+            .with(str::starts_with("MIRRORD_STANDARD_"))
             .times(1)
             .returning(|_| Ok(()));
 

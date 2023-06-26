@@ -1,6 +1,6 @@
 #![feature(let_chains)]
-#![feature(once_cell)]
 #![feature(async_fn_in_trait)]
+#![feature(lazy_cell)]
 #![allow(incomplete_features)]
 #![warn(clippy::indexing_slicing)]
 

@@ -1,5 +1,4 @@
 #![feature(c_variadic)]
-#![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![feature(const_trait_impl)]
 #![feature(naked_functions)]
@@ -12,7 +11,7 @@
 #![feature(trait_alias)]
 #![feature(c_size_t)]
 #![feature(pointer_byte_offsets)]
-#![feature(is_some_and)]
+#![feature(lazy_cell)]
 #![feature(async_fn_in_trait)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![allow(incomplete_features)]
@@ -935,6 +934,10 @@ pub(crate) fn close_layer_fd(fd: c_int) {
     // Remove from sockets, also removing the `ConnectionQueue` associated with the socket.
     if let Some((_, socket)) = SOCKETS.remove(&fd) {
         CONNECTION_QUEUE.remove(socket.id);
+
+        // Closed file is a socket, so if it's already bound to a port - notify agent to stop
+        // mirroring/stealing that port.
+        socket.close();
     } else if file_mode_active {
         OPEN_FILES.remove(&fd);
     }
