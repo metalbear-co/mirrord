@@ -83,7 +83,7 @@ pub(crate) trait TcpHandler {
     }
 
     /// Returns true to let caller know to keep running
-    #[tracing::instrument(level = "debug", ret, skip(self))]
+    #[tracing::instrument(level = "trace", ret, skip(self))]
     async fn handle_daemon_message(&mut self, message: DaemonTcp) -> Result<(), LayerError> {
         match message {
             DaemonTcp::NewConnection(tcp_connection) => {
