@@ -281,8 +281,11 @@ async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
 
     let namespace = args.namespace.as_deref().or(namespace.as_deref());
 
-    let (pods, deployments) = futures::try_join!(get_kube_pods(namespace, &client), get_kube_deployments(namespace, &client))?;
-    
+    let (pods, deployments) = futures::try_join!(
+        get_kube_pods(namespace, &client),
+        get_kube_deployments(namespace, &client)
+    )?;
+
     let mut target_vector = pods
         .iter()
         .flat_map(|(pod, containers)| {
