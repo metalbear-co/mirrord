@@ -83,9 +83,9 @@ pub(crate) trait TcpHandler {
     }
 
     /// Returns true to let caller know to keep running
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "debug", ret, skip(self))]
     async fn handle_daemon_message(&mut self, message: DaemonTcp) -> Result<(), LayerError> {
-        let handled = match message {
+        match message {
             DaemonTcp::NewConnection(tcp_connection) => {
                 self.handle_new_connection(tcp_connection).await
             }
@@ -107,11 +107,7 @@ pub(crate) trait TcpHandler {
             DaemonTcp::HttpRequest(request) => {
                 self.handle_http_request(request).await.map_err(From::from)
             }
-        };
-
-        debug!("handle_incoming_message -> handled {:#?}", handled);
-
-        handled
+        }
     }
 
     #[tracing::instrument(level = "trace", skip(self, tx))]

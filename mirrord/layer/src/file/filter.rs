@@ -96,6 +96,9 @@ fn generate_local_set() -> RegexSet {
         r"^/System",
         #[cfg(target_os = "macos")]
         r"^/var/run/com.apple",
+        // pycharm + gunicorn
+        r"^/usr$",
+        r"^/home$",
         &format!("^{}", temp_dir.to_string_lossy()),
         &format!("^.*{}.*$", current_dir.to_string_lossy()),
         &format!("^.*{}.*$", current_binary.to_string_lossy()),

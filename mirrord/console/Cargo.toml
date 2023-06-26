@@ -26,6 +26,7 @@ axum = { version = "0.6", features = ["default", "ws"], optional = true }
 log = { version = "0.4", features = ["std", "serde"] }
 miette = "5"
 tungstenite = "0.18"
+regex.workspace = true
 
 futures.workspace = true
 thiserror.workspace = true
