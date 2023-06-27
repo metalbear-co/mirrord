@@ -101,7 +101,14 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
         Ok(socket_result)
     }?;
 
-    let new_socket = UserSocket::new(domain, type_, protocol, Default::default(), socket_kind);
+    let new_socket = UserSocket::new(
+        socket_fd,
+        domain,
+        type_,
+        protocol,
+        Default::default(),
+        socket_kind,
+    );
 
     SOCKETS.insert(socket_fd, Arc::new(new_socket));
 
@@ -388,6 +395,8 @@ pub(super) fn connect(
     let remote_address = SockAddr::try_from_raw(raw_address, address_length)?;
     let optional_ip_address = remote_address.as_socket();
 
+    // TODO(alex) [high] 2023-06-26: Try to extract the functionalities into separate handlers, so
+    // we can get rid of branching check for unix socket vs normal socket.
     let unix_streams = REMOTE_UNIX_STREAMS
         .get()
         .expect("Should be set during initialization!");
@@ -398,55 +407,12 @@ pub(super) fn connect(
             .ok_or(Bypass::LocalFdNotFound(sockfd))?
     };
 
-    if let Some(ip_address) = optional_ip_address.as_ref() {
-        let ignore_localhost = OUTGOING_IGNORE_LOCALHOST
-            .get()
-            .copied()
-            .expect("Should be set during initialization!");
-
+    if let Some(ip_address) = optional_ip_address {
         if ip_address.ip().is_loopback() {
-            if ignore_localhost {
-                return Detour::Bypass(Bypass::IgnoreLocalhost(ip_address.port()));
-            }
-            if let Some(res) =
-                // Iterate through sockets, if any of them has the requested port that the
-                // application is now trying to connect to - then don't forward this connection
-                // to the agent, and instead of connecting to the requested address, connect to
-                // the actual address where the application is locally listening.
-                SOCKETS.iter().find_map(|entry| {
-                    let socket = entry.value();
-                    if let SocketState::Listening(Bound {
-                        requested_address,
-                        address,
-                    }) = socket.state
-                    {
-                        if requested_address.port() == ip_address.port()
-                            && socket.protocol == user_socket_info.protocol
-                        {
-                            let rawish_remote_address = SockAddr::from(address);
-                            let result = unsafe {
-                                FN_CONNECT(
-                                    sockfd,
-                                    rawish_remote_address.as_ptr(),
-                                    rawish_remote_address.len(),
-                                )
-                            };
-
-                            return Some(if result != 0 {
-                                Detour::Error(io::Error::last_os_error().into())
-                            } else {
-                                Detour::Success(result.into())
-                            });
-                        }
-                    }
-                    None
-                })
-            {
-                return res;
-            }
+            return user_socket_info.connect_to_local_address(ip_address);
         }
 
-        if is_ignored_port(ip_address) || is_debugger_port(ip_address) {
+        if is_ignored_port(&ip_address) || is_debugger_port(&ip_address) {
             return Detour::Bypass(Bypass::Port(ip_address.port()));
         }
     } else if remote_address.is_unix() {
@@ -457,6 +423,7 @@ pub(super) fn connect(
                 .as_abstract_namespace()
                 .map(String::from_utf8_lossy))
             .map(String::from);
+
         if !address.as_ref().is_some_and(|address_name| {
             unix_streams
                 .as_ref()
@@ -623,7 +590,7 @@ pub(super) fn accept(
         local_address,
         layer_address: None,
     });
-    let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into()?);
+    let new_socket = UserSocket::new(new_fd, domain, type_, protocol, state, type_.try_into()?);
 
     fill_address(address, address_len, remote_address.try_into()?)?;
 
