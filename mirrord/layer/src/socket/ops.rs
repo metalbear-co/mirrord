@@ -101,14 +101,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
         Ok(socket_result)
     }?;
 
-    let new_socket = UserSocket::new(
-        socket_fd,
-        domain,
-        type_,
-        protocol,
-        Default::default(),
-        socket_kind,
-    );
+    let new_socket = UserSocket::new(domain, type_, protocol, Default::default(), socket_kind);
 
     SOCKETS.insert(socket_fd, Arc::new(new_socket));
 
@@ -377,6 +370,54 @@ fn connect_outgoing<const TYPE: ConnectType, const CALL_CONNECT: bool>(
     Detour::Success(connect_result)
 }
 
+/// Iterate through sockets, if any of them has the requested port that the application is now
+/// trying to connect to - then don't forward this connection to the agent, and instead of
+/// connecting to the requested address, connect to the actual address where the application
+/// is locally listening.
+fn connect_to_local_address(
+    sockfd: RawFd,
+    user_socket_info: &UserSocket,
+    ip_address: SocketAddr,
+) -> Detour<ConnectResult> {
+    let ignore_localhost = OUTGOING_IGNORE_LOCALHOST
+        .get()
+        .copied()
+        .expect("Should be set during initialization!");
+
+    if ignore_localhost {
+        return Detour::Bypass(Bypass::IgnoreLocalhost(ip_address.port()));
+    }
+
+    SOCKETS.iter().find_map(|socket| match socket.state {
+        SocketState::Listening(Bound {
+            requested_address,
+            address,
+        }) => {
+            if requested_address.port() == ip_address.port()
+                && socket.protocol == user_socket_info.protocol
+            {
+                let rawish_remote_address = SockAddr::from(address);
+                let result = unsafe {
+                    FN_CONNECT(
+                        sockfd,
+                        rawish_remote_address.as_ptr(),
+                        rawish_remote_address.len(),
+                    )
+                };
+
+                Some(if result != 0 {
+                    Detour::Error(io::Error::last_os_error().into())
+                } else {
+                    Detour::Success(result.into())
+                })
+            } else {
+                None
+            }
+        }
+        _ => None,
+    })?
+}
+
 /// Handles 3 different cases, depending if the outgoing traffic feature is enabled or not:
 ///
 /// 1. Outgoing traffic is **disabled**: this just becomes a normal `libc::connect` call, removing
@@ -409,7 +450,7 @@ pub(super) fn connect(
 
     if let Some(ip_address) = optional_ip_address {
         if ip_address.ip().is_loopback() {
-            return user_socket_info.connect_to_local_address(ip_address);
+            return connect_to_local_address(sockfd, &user_socket_info, ip_address);
         }
 
         if is_ignored_port(&ip_address) || is_debugger_port(&ip_address) {
@@ -590,7 +631,7 @@ pub(super) fn accept(
         local_address,
         layer_address: None,
     });
-    let new_socket = UserSocket::new(new_fd, domain, type_, protocol, state, type_.try_into()?);
+    let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into()?);
 
     fill_address(address, address_len, remote_address.try_into()?)?;
 

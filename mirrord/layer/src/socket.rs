@@ -14,12 +14,12 @@ use socket2::SockAddr;
 use tracing::warn;
 use trust_dns_resolver::config::Protocol;
 
-use self::{hooks::FN_CONNECT, id::SocketId, ops::ConnectResult};
+use self::id::SocketId;
 use crate::{
     common::{blocking_send_hook_message, HookMessage},
     detour::{Bypass, Detour, OptionExt},
     error::{HookError, HookResult},
-    INCOMING_IGNORE_PORTS, OUTGOING_IGNORE_LOCALHOST,
+    INCOMING_IGNORE_PORTS,
 };
 
 pub(super) mod hooks;
@@ -186,11 +186,14 @@ impl TryFrom<c_int> for SocketKind {
     }
 }
 
+// TODO(alex): We could treat `sockfd` as being the same as `&self` for socket ops, we currently
+// can't do that due to how `dup` interacts directly with our `Arc<UserSocket>`, because we just
+// `clone` the arc, we end up with exact duplicates, but `dup` generates a new fd that we have no
+// way of putting inside the duplicated `UserSocket`.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub(crate) struct UserSocket {
     pub(crate) id: SocketId,
-    fd: RawFd,
     domain: c_int,
     type_: c_int,
     protocol: c_int,
@@ -200,7 +203,6 @@ pub(crate) struct UserSocket {
 
 impl UserSocket {
     pub(crate) fn new(
-        fd: RawFd,
         domain: c_int,
         type_: c_int,
         protocol: c_int,
@@ -209,7 +211,6 @@ impl UserSocket {
     ) -> Self {
         Self {
             id: Default::default(),
-            fd,
             domain,
             type_,
             protocol,
@@ -254,48 +255,6 @@ impl UserSocket {
                 SocketKind::Udp(_) => {}
             }
         }
-    }
-
-    fn connect_to_local_address(&self, address: SocketAddr) -> Detour<ConnectResult> {
-        let ignore_localhost = OUTGOING_IGNORE_LOCALHOST
-            .get()
-            .copied()
-            .expect("Should be set during initialization!");
-
-        if ignore_localhost {
-            return Detour::Bypass(Bypass::IgnoreLocalhost(address.port()));
-        }
-
-        // Iterate through sockets, if any of them has the requested port that the
-        // application is now trying to connect to - then don't forward this connection
-        // to the agent, and instead of connecting to the requested address, connect to
-        // the actual address where the application is locally listening.
-        SOCKETS.iter().find_map(|socket| match socket.state {
-            SocketState::Listening(Bound {
-                requested_address,
-                address,
-            }) => {
-                if requested_address.port() == address.port() && socket.protocol == self.protocol {
-                    let rawish_remote_address = SockAddr::from(address);
-                    let result = unsafe {
-                        FN_CONNECT(
-                            self.fd,
-                            rawish_remote_address.as_ptr(),
-                            rawish_remote_address.len(),
-                        )
-                    };
-
-                    Some(if result != 0 {
-                        Detour::Error(std::io::Error::last_os_error().into())
-                    } else {
-                        Detour::Success(result.into())
-                    })
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        })?
     }
 }
 
