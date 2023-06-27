@@ -518,6 +518,9 @@ impl TcpConnectionStealer {
         };
         if port_unsubscribed {
             // No remaining subscribers on this port.
+
+            // If there are ongoing connections, this will interrupt them. This is a known issue
+            // https://github.com/metalbear-co/mirrord/issues/1575
             self.iptables()?
                 .remove_redirect(port, self.stealer.local_addr()?.port())
                 .await?;

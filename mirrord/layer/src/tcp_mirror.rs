@@ -8,7 +8,7 @@ use std::{
 use bimap::BiMap;
 use mirrord_protocol::{
     tcp::{HttpRequest, LayerTcp, NewTcpConnection, TcpClose, TcpData},
-    ClientMessage, ConnectionId,
+    ClientMessage, ConnectionId, Port,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -128,7 +128,7 @@ impl TcpMirrorHandler {
     }
 }
 
-impl TcpHandler for TcpMirrorHandler {
+impl TcpHandler<false> for TcpMirrorHandler {
     /// Handle NewConnection messages
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_new_connection(&mut self, tcp_connection: NewTcpConnection) -> Result<()> {
@@ -204,9 +204,12 @@ impl TcpHandler for TcpMirrorHandler {
         let request_port = listen.requested_port;
 
         if self.ports_mut().replace(listen).is_some() {
-            // This can also be because we currently don't inform the tcp handler when an app closes
-            // a socket (stops listening).
-            info!("Received listen hook message for port {request_port} while already listening. Might be on different address",);
+            // Since this struct identifies listening sockets by their port (#1558), we can only
+            // forward the incoming traffic to one socket with that port.
+            info!(
+                "Received listen hook message for port {request_port} while already listening. \
+                Might be on different address. Sending all incoming traffic to newest socket."
+            );
             return Ok(());
         }
 
@@ -224,5 +227,20 @@ impl TcpHandler for TcpMirrorHandler {
         error!("Error: Mirror handler received http request.");
         debug_assert!(false);
         Ok(())
+    }
+
+    async fn handle_server_side_socket_close(
+        &mut self,
+        port: Port,
+        tx: &Sender<ClientMessage>,
+    ) -> std::result::Result<(), LayerError> {
+        if self.ports_mut().remove(&port) {
+            tx.send(ClientMessage::Tcp(LayerTcp::PortUnsubscribe(port)))
+                .await
+                .map_err(From::from)
+        } else {
+            // was not listening on closed socket, could be an outgoing socket.
+            Ok(())
+        }
     }
 }
