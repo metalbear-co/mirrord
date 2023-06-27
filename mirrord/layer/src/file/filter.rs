@@ -53,12 +53,12 @@ fn generate_local_set() -> RegexSet {
         r"^/sys/.*$",
         r"^/lib/.*$",
         r"^/etc/.*$",
-        r"^/usr/.*$",
+        r"^/usr(/|$).*$",
+        r"^/home(/|$).*$",
         r"^/bin/.*$",
         r"^/sbin/.*$",
         r"^/dev/.*$",
         r"^/opt(/|$)",
-        r"^/home/.*$",
         r"^/tmp(/|$)",
         r"^/snap/.*$",
         // support for nixOS.
@@ -96,9 +96,6 @@ fn generate_local_set() -> RegexSet {
         r"^/System",
         #[cfg(target_os = "macos")]
         r"^/var/run/com.apple",
-        // pycharm + gunicorn
-        r"^/usr$",
-        r"^/home$",
         &format!("^{}", temp_dir.to_string_lossy()),
         &format!("^.*{}.*$", current_dir.to_string_lossy()),
         &format!("^.*{}.*$", current_binary.to_string_lossy()),
