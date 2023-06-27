@@ -4,12 +4,14 @@ use std::{
     collections::VecDeque,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
+    str::FromStr,
     sync::{Arc, LazyLock},
 };
 
 use dashmap::DashMap;
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::outgoing::SocketAddress;
+use regex::{bytes::RegexBuilder, Regex, RegexBuilder};
 use socket2::SockAddr;
 use tracing::warn;
 use trust_dns_resolver::config::Protocol;
@@ -18,7 +20,7 @@ use self::id::SocketId;
 use crate::{
     common::{blocking_send_hook_message, HookMessage},
     detour::{Bypass, Detour, OptionExt},
-    error::{HookError, HookResult},
+    error::{HookError, HookResult, LayerError},
     INCOMING_IGNORE_PORTS,
 };
 
@@ -50,6 +52,67 @@ pub(super) struct SocketInformation {
 
     /// Address of the local peer (our IP)
     pub local_address: SocketAddr,
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum OutgoingProtocol {
+    #[default]
+    Any,
+    Tcp,
+    Udp,
+}
+
+impl FromStr for OutgoingProtocol {
+    type Err = LayerError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let lowercase = s.to_lowercase();
+
+        match lowercase.as_str() {
+            "any" => Ok(Self::Any),
+            "tcp" => Ok(Self::Tcp),
+            "udp" => Ok(Self::Udp),
+            _ => Err(LayerError::NoProcessFound),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct OutgoingConnection {
+    protocol: OutgoingProtocol,
+    address: (),
+    subnet: (),
+    port: u16,
+}
+
+impl FromStr for OutgoingConnection {
+    type Err = LayerError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        // Input: "tcp://1.2.3.4/56:7777"
+
+        // tcp
+        let (protocol, rest) = value.split_once("://").unwrap_or(("any", value));
+        let protocol = protocol.parse()?;
+
+        // 1.2.3.4
+        let (address, rest) = rest
+            .split_once("/")
+            .unwrap_or_else(|| rest.split_once(":").unwrap_or(("", rest)));
+        // TODO(alex) [high] 2023-06-27: Convert to rust address.
+
+        let (subnet, rest) = rest.split_once(":").unwrap_or(("", rest));
+        // TODO(alex) [high] 2023-06-27: Convert to something.
+
+        let port = rest.parse().unwrap();
+
+        Ok(Self {
+            protocol,
+            address: todo!(),
+            subnet: todo!(),
+            port,
+        })
+    }
 }
 
 /// poll_agent loop inserts connection data into this queue, and accept reads it.
