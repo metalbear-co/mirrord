@@ -3276,6 +3276,7 @@ dependencies = [
  "futures",
  "log",
  "miette",
+ "regex",
  "serde",
  "serde_json",
  "thiserror",

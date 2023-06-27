@@ -111,9 +111,9 @@ pub(crate) trait TcpHandler<const IS_STEAL: bool> {
     }
 
     /// Returns true to let caller know to keep running
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", ret, skip(self))]
     async fn handle_daemon_message(&mut self, message: DaemonTcp) -> Result<(), LayerError> {
-        let handled = match message {
+        match message {
             DaemonTcp::NewConnection(tcp_connection) => Self::check_connection_handling_result(
                 self.handle_new_connection(tcp_connection).await,
             ),
@@ -135,11 +135,7 @@ pub(crate) trait TcpHandler<const IS_STEAL: bool> {
             DaemonTcp::HttpRequest(request) => {
                 self.handle_http_request(request).await.map_err(From::from)
             }
-        };
-
-        debug!("handle_incoming_message -> handled {:#?}", handled);
-
-        handled
+        }
     }
 
     #[tracing::instrument(level = "trace", skip(self, tx))]
