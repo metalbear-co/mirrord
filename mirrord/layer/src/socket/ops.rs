@@ -122,8 +122,6 @@ fn bind_port(sockfd: c_int, domain: c_int, port: u16) -> Detour<()> {
         invalid => Err(Bypass::Domain(invalid)),
     }?;
 
-    trace!("bind -> {address:#?}");
-
     let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
     if bind_result != 0 {
         Detour::Error(io::Error::last_os_error().into())
@@ -218,7 +216,7 @@ pub(super) fn bind(
     } else {
         bind_port(sockfd, socket.domain, requested_address.port())
             .or_else(|e| {
-                info!("bind -> first `bind` failed on port {listen_port:?} with {e:?}, trying to bind to a random port");
+                info!("bind -> first `bind` failed on port {:?} with {e:?}, trying to bind to a random port", requested_address.port());
                 bind_port(sockfd, socket.domain, 0)
             }
         )
@@ -379,7 +377,7 @@ fn connect_outgoing<const TYPE: ConnectType, const CALL_CONNECT: bool>(
 /// that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request interception procedure.
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "trace", ret, skip(raw_address))]
 pub(super) fn connect(
     sockfd: RawFd,
     raw_address: *const sockaddr,
@@ -578,7 +576,7 @@ pub(super) fn getsockname(
             })?
     };
 
-    debug!("getsockname -> local_address {:#?}", local_address);
+    trace!("getsockname -> local_address {:#?}", local_address);
 
     fill_address(address, address_len, local_address.try_into()?)
 }
@@ -587,7 +585,7 @@ pub(super) fn getsockname(
 /// connection to be set in our lock.
 ///
 /// This enables us to have a safe way to get "remote" information (remote ip, port, etc).
-#[tracing::instrument(level = "trace", skip(address, address_len))]
+#[tracing::instrument(level = "trace", ret, skip(address, address_len))]
 pub(super) fn accept(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -683,7 +681,7 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
 ///
 /// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
 /// for the equivalent of this function).
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "trace", ret)]
 pub(super) fn getaddrinfo(
     rawish_node: Option<&CStr>,
     rawish_service: Option<&CStr>,
@@ -898,7 +896,7 @@ pub(super) fn send_to(
     destination_length: socklen_t,
 ) -> Detour<isize> {
     let destination = SockAddr::try_from_raw(raw_destination, destination_length)?;
-    debug!("destination {:?}", destination.as_socket());
+    trace!("destination {:?}", destination.as_socket());
 
     let (_, user_socket_info) = SOCKETS
         .remove(&sockfd)
@@ -923,7 +921,6 @@ pub(super) fn send_to(
         let destination = SOCKETS
             .iter()
             .filter(|socket| socket.kind.is_udp())
-            .inspect(|s| debug!("sending s {:?}", s.value()))
             // Is the `destination` one of our sockets? If so, then we grab the actual address,
             // instead of the, possibly fake address from mirrord.
             .find_map(|receiver_socket| match &receiver_socket.state {

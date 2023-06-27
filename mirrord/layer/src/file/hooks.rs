@@ -68,7 +68,8 @@ unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, mode: c_int) ->
 
 /// Hook for `libc::open`.
 ///
-/// **Bypassed** by `raw_path`s that match `IGNORE_FILES` regex.
+/// **Bypassed** by `raw_path`s that match what's in the `generate_local_set` regex, see
+/// [`super::filter`].
 #[hook_fn]
 pub(super) unsafe extern "C" fn open_detour(
     raw_path: *const c_char,
@@ -89,8 +90,6 @@ pub(super) unsafe extern "C" fn open_detour(
 }
 
 /// Hook for `libc::open$NOCANCEL`.
-///
-/// **Bypassed** by `raw_path`s that match `IGNORE_FILES` regex.
 #[hook_fn]
 pub(super) unsafe extern "C" fn _open_nocancel_detour(
     raw_path: *const c_char,
