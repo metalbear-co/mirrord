@@ -86,7 +86,7 @@ use dns::GetAddrInfo;
 use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
 use hooks::HookManager;
-use libc::c_int;
+use libc::{c_int, pid_t};
 use mirrord_config::{
     feature::{
         fs::{FsConfig, FsModeConfig},
@@ -120,6 +120,7 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use crate::{
     common::HookMessage,
     debugger_ports::DebuggerPorts,
+    detour::DetourGuard,
     file::{filter::FILE_FILTER, FileHandler},
     load::LoadType,
     socket::CONNECTION_QUEUE,
@@ -186,6 +187,8 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
 /// You probably don't want to use this directly, instead prefer calling
 /// [`blocking_send_hook_message`](common::blocking_send_hook_message) to send internal messages.
 pub(crate) static HOOK_SENDER: OnceLock<Sender<HookMessage>> = OnceLock::new();
+
+pub(crate) static LAYER_INITIALIZED: OnceLock<()> = OnceLock::new();
 
 /// Holds the file operations configuration, as specified by [`FsConfig`].
 ///
@@ -369,31 +372,38 @@ fn mirrord_layer_entry_point() {
 ///
 /// 5. Starts the main mirrord-layer thread.
 fn layer_start(config: LayerConfig) {
-    if config.feature.capture_error_trace {
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_writer(tracing_util::file_tracing_writer())
-                    .with_ansi(false)
-                    .with_thread_ids(true)
-                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE),
-            )
-            .with(tracing_subscriber::EnvFilter::new("mirrord=trace"))
-            .init();
-    } else if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
-        mirrord_console::init_logger(&console_addr).expect("logger initialization failed");
-    } else {
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_thread_ids(true)
-                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-                    .compact()
-                    .with_writer(std::io::stderr),
-            )
-            .with(tracing_subscriber::EnvFilter::from_default_env())
-            .init();
-    };
+    let _detour_guard = DetourGuard::new();
+    // does not need to be atomic because on the first call there are never other threads.
+    // Will be false when manually called from fork hook.
+    let first_call = LAYER_INITIALIZED.get().is_none();
+    if first_call {
+        let _ = LAYER_INITIALIZED.set(());
+        if config.feature.capture_error_trace {
+            tracing_subscriber::registry()
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(tracing_util::file_tracing_writer())
+                        .with_ansi(false)
+                        .with_thread_ids(true)
+                        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE),
+                )
+                .with(tracing_subscriber::EnvFilter::new("mirrord=trace"))
+                .init();
+        } else if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
+            mirrord_console::init_logger(&console_addr).expect("logger initialization failed");
+        } else {
+            tracing_subscriber::registry()
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_thread_ids(true)
+                        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+                        .compact()
+                        .with_writer(std::io::stderr),
+                )
+                .with(tracing_subscriber::EnvFilter::from_default_env())
+                .init();
+        };
+    }
 
     info!("Initializing mirrord-layer!");
     let exe_path = std::env::current_exe()
@@ -411,6 +421,8 @@ fn layer_start(config: LayerConfig) {
         .expect("layer loaded without proxy address to connect to")
         .parse()
         .expect("couldn't parse proxy address");
+
+    debug!("connecting to proxy on address {address:?}");
 
     let (tx, rx) = RUNTIME.block_on(connection::connect_to_proxy(address));
 
@@ -896,7 +908,9 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
                 FnUv_fs_close,
                 FN_UV_FS_CLOSE
             );
-        }
+        };
+
+        replace!(&mut hook_manager, "fork", fork_detour, FnFork, FN_FORK);
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut hook_manager, enabled_remote_dns) };
@@ -957,6 +971,21 @@ pub(crate) fn close_layer_fd(fd: c_int) {
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     let res = FN_CLOSE(fd);
     close_layer_fd(fd);
+    res
+}
+
+/// Hook for `libc::fork`.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
+    let pid = std::process::id();
+    debug!("Process {pid} forking!.");
+    let res = FN_FORK();
+    if res == 0 {
+        debug!("Child process initializing layer.");
+        mirrord_layer_entry_point()
+    } else {
+        debug!("Child process id is {res}.");
+    }
     res
 }
 
