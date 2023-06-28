@@ -21,7 +21,7 @@ mod ignore_codes {
     /// Error codes from [`libc`] that are **not** hard errors, meaning the operation may progress.
     ///
     /// Prefer using [`is_ignored_code`] instead of relying on this constant.
-    const IGNORE_ERROR_CODES: [i32; 2] = [libc::EINPROGRESS, libc::EAFNOSUPPORT];
+    const IGNORE_ERROR_CODES: [i32; 2] = [libc::EINPROGRESS, libc::EAFNOSUPPORT, libc::EADDRINUSE];
 
     /// Checks if an error code from some [`libc`] function should be treated as a hard error, or
     /// not.
