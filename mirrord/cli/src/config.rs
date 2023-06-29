@@ -222,7 +222,7 @@ pub(super) enum OperatorCommand {
         #[arg(long)]
         license_key: Option<String>,
 
-        /// Path to a file containing a mirrord for Teams license key
+        /// Path to a file containing a mirrord for Teams license certificate
         #[arg(long)]
         license_path: Option<PathBuf>,
 
