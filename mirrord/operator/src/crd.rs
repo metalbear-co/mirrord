@@ -85,22 +85,6 @@ pub struct MirrordOperatorStatus {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct MirrordOperatorTelemetryReports {
-    pub id: String,
-    pub reports: Vec<MirrordOperatorTelemetryReport>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct MirrordOperatorTelemetryReport {
-    #[serde(
-        serialize_with = "ts_milliseconds::serialize",
-        deserialize_with = "ts_milliseconds::deserialize"
-    )]
-    pub timestamp: DateTime<Utc>,
-    pub report: String,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatusStatistics {
     pub dau: usize,
     pub mau: usize,

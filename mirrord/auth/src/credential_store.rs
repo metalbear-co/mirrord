@@ -12,6 +12,7 @@ use tokio::{
     fs,
     io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt, SeekFrom},
 };
+use tracing::info;
 
 use crate::{
     credentials::Credentials,
@@ -114,7 +115,7 @@ impl CredentialStoreSync {
     {
         let mut store = CredentialStore::load(store_file)
             .await
-            .inspect_err(|err| eprintln!("CredentialStore Load Error {err:?}"))
+            .inspect_err(|err| info!("CredentialStore Load Error {err:?}"))
             .unwrap_or_default();
 
         let certificate_der = store

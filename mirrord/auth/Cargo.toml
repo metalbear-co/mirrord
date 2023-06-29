@@ -42,3 +42,4 @@ thiserror = "1"
 x509-certificate = "0.19"
 # not direct dependency, but if we don't put it here it'll use openssl :(
 reqwest = { workspace = true, features=["json", "rustls-tls"], default-features = false, optional = true }
+tracing.workspace = true
