@@ -77,12 +77,15 @@ impl FromStr for OutgoingProtocol {
     }
 }
 
+// TODO(alex) [high] 2023-06-27: Looks like this should be turned into a builder pattern, so we can
+// deal with optional stuff in here, and then create a fully non-optional version that is used in
+// `connect`.
 #[derive(Debug)]
 pub(super) struct OutgoingConnection {
-    protocol: OutgoingProtocol,
+    protocol: Option<OutgoingProtocol>,
     address: (),
     subnet: (),
-    port: u16,
+    port: Option<u16>,
 }
 
 impl FromStr for OutgoingConnection {
