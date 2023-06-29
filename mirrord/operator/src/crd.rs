@@ -75,7 +75,6 @@ pub struct MirrordOperatorSpec {
     pub operator_version: String,
     pub default_namespace: String,
     pub license: LicenseInfoOwned,
-    pub telemetry_exports: Option<MirrordOperatorTelemetryReports>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
