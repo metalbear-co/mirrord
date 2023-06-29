@@ -245,15 +245,6 @@ pub(super) enum OperatorCommand {
         #[arg(short = 'f')]
         config_file: Option<String>,
     },
-    /// Print telemtry export for offline operators
-    #[command(
-        override_usage = "mirrord operator telemetry-export [OPTIONS] > telemetry-export.json"
-    )]
-    TelemetryExport {
-        /// Specify config file to use
-        #[arg(short = 'f')]
-        config_file: Option<String>,
-    },
 }
 
 #[derive(ValueEnum, Clone, Debug)]
