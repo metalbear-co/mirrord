@@ -74,9 +74,10 @@ extern crate core;
 
 use std::{
     collections::{HashSet, VecDeque},
+    mem,
     net::SocketAddr,
     panic,
-    sync::{LazyLock, OnceLock},
+    sync::{LazyLock, Mutex, OnceLock},
 };
 
 use bimap::BiMap;
@@ -149,10 +150,21 @@ mod tracing_util;
 #[cfg(target_arch = "x86_64")]
 mod go_hooks;
 
+fn build_runtime() -> Runtime {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .on_thread_start(detour::detour_bypass_on)
+        .on_thread_stop(detour::detour_bypass_off)
+        .build()
+        .unwrap()
+}
+
+// TODO: might need to update docs.
 /// Main tokio [`Runtime`] for mirrord-layer async tasks.
 ///
 /// Apart from some pre-initialization steps, mirrord-layer mostly runs inside this runtime with
 /// `RUNTIME.block_on`.
+/// This is static because it needs to continue living as long as the process is running.
 ///
 /// ## Usage
 ///
@@ -167,14 +179,7 @@ mod go_hooks;
 /// To prevent us from intercepting neccessary (local) syscalls (like creating a socket), we use
 /// [`detour::detour_bypass_on`] `on_thread_start`, and [`detour::detour_bypass_off`]
 /// `on_thread_stop`.
-static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .on_thread_start(detour::detour_bypass_on)
-        .on_thread_stop(detour::detour_bypass_off)
-        .build()
-        .unwrap()
-});
+static mut RUNTIME: Option<Runtime> = None;
 
 /// [`Sender`] for the [`HookMessage`]s that are handled internally, and converted (when applicable)
 /// to [`ClientMessage`]s.
@@ -186,7 +191,8 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
 ///
 /// You probably don't want to use this directly, instead prefer calling
 /// [`blocking_send_hook_message`](common::blocking_send_hook_message) to send internal messages.
-pub(crate) static HOOK_SENDER: OnceLock<Sender<HookMessage>> = OnceLock::new();
+// TODO: RwLock?
+pub(crate) static HOOK_SENDER: OnceLock<Mutex<Sender<HookMessage>>> = OnceLock::new();
 
 pub(crate) static LAYER_INITIALIZED: OnceLock<()> = OnceLock::new();
 
@@ -354,6 +360,34 @@ fn mirrord_layer_entry_point() {
     }
 }
 
+fn init_tracing(config: &LayerConfig) {
+    if config.feature.capture_error_trace {
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(tracing_util::file_tracing_writer())
+                    .with_ansi(false)
+                    .with_thread_ids(true)
+                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE),
+            )
+            .with(tracing_subscriber::EnvFilter::new("mirrord=trace"))
+            .init();
+    } else if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
+        mirrord_console::init_logger(&console_addr).expect("logger initialization failed");
+    } else {
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_thread_ids(true)
+                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+                    .compact()
+                    .with_writer(std::io::stderr),
+            )
+            .with(tracing_subscriber::EnvFilter::from_default_env())
+            .init();
+    };
+}
+
 /// Occurs after [`layer_pre_initialization`] has succeeded.
 ///
 /// Starts the main parts of mirrord-layer.
@@ -378,34 +412,11 @@ fn layer_start(config: LayerConfig) {
     let first_call = LAYER_INITIALIZED.get().is_none();
     if first_call {
         let _ = LAYER_INITIALIZED.set(());
-        if config.feature.capture_error_trace {
-            tracing_subscriber::registry()
-                .with(
-                    tracing_subscriber::fmt::layer()
-                        .with_writer(tracing_util::file_tracing_writer())
-                        .with_ansi(false)
-                        .with_thread_ids(true)
-                        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE),
-                )
-                .with(tracing_subscriber::EnvFilter::new("mirrord=trace"))
-                .init();
-        } else if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
-            mirrord_console::init_logger(&console_addr).expect("logger initialization failed");
-        } else {
-            tracing_subscriber::registry()
-                .with(
-                    tracing_subscriber::fmt::layer()
-                        .with_thread_ids(true)
-                        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-                        .compact()
-                        .with_writer(std::io::stderr),
-                )
-                .with(tracing_subscriber::EnvFilter::from_default_env())
-                .init();
-        };
+        init_tracing(&config);
     }
 
-    info!("Initializing mirrord-layer!");
+    let pid = std::process::id();
+    info!("Initializing mirrord-layer! pid {pid}");
     let exe_path = std::env::current_exe()
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_default();
@@ -422,81 +433,101 @@ fn layer_start(config: LayerConfig) {
         .parse()
         .expect("couldn't parse proxy address");
 
-    debug!("connecting to proxy on address {address:?}");
+    debug!("forgetting old runtime");
+    // TODO: safety?
+    let old_runtime = unsafe { RUNTIME.take() };
+    old_runtime.map(|runtime| mem::forget(runtime));
 
-    let (tx, rx) = RUNTIME.block_on(connection::connect_to_proxy(address));
+    debug!("creating new runtime");
+    let new_runtime = build_runtime();
+
+    debug!("connecting to proxy on address {address:?}");
+    let (tx, rx) = new_runtime.block_on(connection::connect_to_proxy(address));
 
     let (sender, receiver) = channel::<HookMessage>(1000);
-    HOOK_SENDER
-        .set(sender)
-        .expect("Setting HOOK_SENDER singleton");
+    let pid = std::process::id();
+    debug!("pid {pid} hook sender: {sender:?}");
+    debug!("pid {pid} hook receiver: {receiver:?}");
+    if first_call {
+        HOOK_SENDER
+            .set(Mutex::new(sender))
+            .expect("Setting HOOK_SENDER singleton");
+        debug!("pid {pid} HOOK_SENDER: {HOOK_SENDER:?}");
+    } else {
+        let mut mutex = HOOK_SENDER.get().unwrap().lock().unwrap();
+        *mutex = sender;
+    }
 
-    let file_mode = FILE_MODE.get_or_init(|| config.feature.fs.clone());
-    ENABLED_TCP_OUTGOING
-        .set(config.feature.network.outgoing.tcp)
-        .expect("Setting ENABLED_TCP_OUTGOING singleton");
-    ENABLED_UDP_OUTGOING
-        .set(config.feature.network.outgoing.udp)
-        .expect("Setting ENABLED_UDP_OUTGOING singleton");
-    REMOTE_UNIX_STREAMS
-        .set(
+    if first_call {
+        let file_mode = FILE_MODE.get_or_init(|| config.feature.fs.clone());
+        ENABLED_TCP_OUTGOING
+            .set(config.feature.network.outgoing.tcp)
+            .expect("Setting ENABLED_TCP_OUTGOING singleton");
+        ENABLED_UDP_OUTGOING
+            .set(config.feature.network.outgoing.udp)
+            .expect("Setting ENABLED_UDP_OUTGOING singleton");
+        REMOTE_UNIX_STREAMS
+            .set(
+                config
+                    .feature
+                    .network
+                    .outgoing
+                    .unix_streams
+                    .clone()
+                    .map(|vec_or_single| vec_or_single.to_vec())
+                    .map(RegexSet::new)
+                    .transpose()
+                    .expect("Invalid unix stream regex set."),
+            )
+            .expect("Setting REMOTE_UNIX_STREAMS failed.");
+
+        OUTGOING_IGNORE_LOCALHOST
+            .set(config.feature.network.outgoing.ignore_localhost)
+            .expect("Setting OUTGOING_IGNORE_LOCALHOST singleton");
+
+        INCOMING_IGNORE_LOCALHOST
+            .set(config.feature.network.incoming.ignore_localhost)
+            .expect("Setting INCOMING_IGNORE_LOCALHOST singleton");
+
+        let targetless = config.target.path.is_none();
+        TARGETLESS
+            .set(targetless)
+            .expect("Setting TARGETLESS singleton");
+
+        INCOMING_IGNORE_PORTS
+            .set(config.feature.network.incoming.ignore_ports.clone())
+            .expect("Setting INCOMING_IGNORE_PORTS failed");
+
+        FILE_FILTER.get_or_init(|| {
+            let mut fs_config = config.feature.fs.clone();
+            if targetless {
+                fs_config.mode = FsModeConfig::LocalWithOverrides;
+            }
+            FileFilter::new(fs_config)
+        });
+
+        DEBUGGER_IGNORED_PORTS
+            .set(DebuggerPorts::from_env())
+            .expect("Setting DEBUGGER_IGNORED_PORTS failed");
+
+        LISTEN_PORTS
+            .set(config.feature.network.incoming.listen_ports.clone())
+            .expect("Setting LISTEN_PORTS failed");
+
+        enable_hooks(
+            file_mode.is_active(),
+            config.feature.network.dns,
             config
-                .feature
-                .network
-                .outgoing
-                .unix_streams
+                .sip_binaries
                 .clone()
-                .map(|vec_or_single| vec_or_single.to_vec())
-                .map(RegexSet::new)
-                .transpose()
-                .expect("Invalid unix stream regex set."),
-        )
-        .expect("Setting REMOTE_UNIX_STREAMS failed.");
+                .map(|x| x.to_vec())
+                .unwrap_or_default(),
+        );
+    }
 
-    OUTGOING_IGNORE_LOCALHOST
-        .set(config.feature.network.outgoing.ignore_localhost)
-        .expect("Setting OUTGOING_IGNORE_LOCALHOST singleton");
+    new_runtime.block_on(start_layer_thread(tx, rx, receiver, config));
 
-    INCOMING_IGNORE_LOCALHOST
-        .set(config.feature.network.incoming.ignore_localhost)
-        .expect("Setting INCOMING_IGNORE_LOCALHOST singleton");
-
-    let targetless = config.target.path.is_none();
-    TARGETLESS
-        .set(targetless)
-        .expect("Setting TARGETLESS singleton");
-
-    INCOMING_IGNORE_PORTS
-        .set(config.feature.network.incoming.ignore_ports.clone())
-        .expect("Setting INCOMING_IGNORE_PORTS failed");
-
-    FILE_FILTER.get_or_init(|| {
-        let mut fs_config = config.feature.fs.clone();
-        if targetless {
-            fs_config.mode = FsModeConfig::LocalWithOverrides;
-        }
-        FileFilter::new(fs_config)
-    });
-
-    DEBUGGER_IGNORED_PORTS
-        .set(DebuggerPorts::from_env())
-        .expect("Setting DEBUGGER_IGNORED_PORTS failed");
-
-    LISTEN_PORTS
-        .set(config.feature.network.incoming.listen_ports.clone())
-        .expect("Setting LISTEN_PORTS failed");
-
-    enable_hooks(
-        file_mode.is_active(),
-        config.feature.network.dns,
-        config
-            .sip_binaries
-            .clone()
-            .map(|x| x.to_vec())
-            .unwrap_or_default(),
-    );
-
-    RUNTIME.block_on(start_layer_thread(tx, rx, receiver, config));
+    unsafe { RUNTIME = Some(new_runtime) }
 }
 
 /// We need to hook execve syscall to allow mirrord-layer to be loaded with sip patch when loading
