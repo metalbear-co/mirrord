@@ -275,6 +275,11 @@ impl From<HookError> for i64 {
                 ResponseError::DnsLookup(dns_fail) => {
                     return match dns_fail.kind {
                         mirrord_protocol::ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
+                        // prevents an infinite loop that used to happen in some apps, don't know if
+                        // this is the correct mapping.
+                        mirrord_protocol::ResolveErrorKindInternal::NoRecordsFound(_) => {
+                            libc::EAI_NONAME
+                        }
                         _ => libc::EAI_FAIL,
                         // TODO: Add more error kinds, next time we break protocol compatibility.
                     } as _;
