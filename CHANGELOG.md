@@ -8,6 +8,49 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.48.0](https://github.com/metalbear-co/mirrord/tree/3.48.0) - 2023-06-29
+
+
+### Added
+
+- Added Deployment to list of targets returnd from `mirrord ls`.
+  [#1503](https://github.com/metalbear-co/mirrord/issues/1503)
+
+
+### Changed
+
+- Bump rust nightly to 2023-04-19 (latest nightly with support for const std
+  traits). [#1457](https://github.com/metalbear-co/mirrord/issues/1457)
+- Change loglevel of warnings to info of logs that were mistakenly warning
+- Moved IntelliJ to its own repository and versioning
+
+
+### Fixed
+
+- Hook send_to and recv_from, leveraging our existing UDP interceptor mechanism
+  to manually resolve DNS (as expected by netty, especially relevant for
+  macos). [#1458](https://github.com/metalbear-co/mirrord/issues/1458)
+- Add new rule to the OUTPUT chain of iptables in agent to support kubectl
+  port-forward [#1479](https://github.com/metalbear-co/mirrord/issues/1479)
+- If the local user application closes a socket but continues running, we now
+  also stop mirroring/stealing from the target.
+  [#1530](https://github.com/metalbear-co/mirrord/issues/1530)
+- Add /home and /usr to the default file filter.
+  [#1582](https://github.com/metalbear-co/mirrord/issues/1582)
+- Fixed reporting EADDRINUSE as an error
+
+
+### Internal
+
+- (Operator only) Add `feature.network.incoming.on_concurrent_steal` option to
+  allow overriding port locks.
+- Improve medschool to produce more deterministic configuration.md, and
+  (mostly) fixes it dropping some configuration docs during processing.
+- Make mirrord ls deployment fetch parallel.
+- Remove unused CRD for operator and don't error on missing operator
+  credentials
+
+
 ## [3.47.0](https://github.com/metalbear-co/mirrord/tree/3.47.0) - 2023-06-20
 
 

@@ -1,1 +1,0 @@
-Remove unused CRD for operator and don't error on missing operator credentials
