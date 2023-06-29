@@ -230,8 +230,8 @@ pub(super) enum OperatorCommand {
         #[arg(short, long)]
         file: Option<PathBuf>,
 
-        /// Namespace to create the operator in (this doesn't limit the namespaces the operator will
-        /// be able to access)
+        /// Namespace to create the operator in (this doesn't limit the namespaces the operator
+        /// will be able to access)
         #[arg(short, long, default_value = "mirrord")]
         namespace: OperatorNamespace,
 
