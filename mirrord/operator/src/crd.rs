@@ -1,4 +1,4 @@
-use chrono::{serde::ts_milliseconds, DateTime, NaiveDate, Utc};
+use chrono::NaiveDate;
 use kube::CustomResource;
 use mirrord_config::target::{Target, TargetConfig};
 use schemars::JsonSchema;
