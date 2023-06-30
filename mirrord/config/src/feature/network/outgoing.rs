@@ -158,7 +158,8 @@ struct OutgoingFilter {
     address: OutgoingAddress,
 }
 
-/// It's dangerous to go alone! Take [this](https://github.com/rust-bakery/nom/blob/main/doc/choosing_a_combinator.md).
+/// It's dangerous to go alone!
+/// Take [this](https://github.com/rust-bakery/nom/blob/main/doc/choosing_a_combinator.md).
 mod parser {
     use nom::{
         branch::alt,
@@ -214,9 +215,6 @@ mod parser {
 
         Ok((input, port))
     }
-
-    #[cfg(test)]
-    mod tests {}
 }
 
 impl FromStr for OutgoingFilter {
@@ -475,5 +473,14 @@ mod tests {
     #[case(port_only(), port_only_converted())]
     fn valid_filters(#[case] input: &'static str, #[case] converted: OutgoingFilter) {
         assert_eq!(OutgoingFilter::from_str(input).unwrap(), converted);
+    }
+
+    #[rstest]
+    #[case(name_with_subnet())]
+    #[case(port_protocol())]
+    #[case(fake_protocol())]
+    #[should_panic]
+    fn invalid_filters(#[case] input: &'static str) {
+        OutgoingFilter::from_str(input).unwrap();
     }
 }
