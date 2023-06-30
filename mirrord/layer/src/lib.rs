@@ -465,15 +465,25 @@ fn set_globals(config: &LayerConfig) {
 ///
 /// 5. Starts the main mirrord-layer thread.
 fn layer_start(config: LayerConfig) {
-    let _detour_guard = DetourGuard::new();
     // does not need to be atomic because on the first call there are never other threads.
     // Will be false when manually called from fork hook.
     let first_call = LAYER_INITIALIZED.get().is_none();
     if first_call {
         let _ = LAYER_INITIALIZED.set(());
         init_tracing(&config);
+        set_globals(&config);
+        enable_hooks(
+            config.feature.fs.is_active(),
+            config.feature.network.dns,
+            config
+                .sip_binaries
+                .clone()
+                .map(|x| x.to_vec())
+                .unwrap_or_default(),
+        );
     }
 
+    let _detour_guard = DetourGuard::new();
     let pid = std::process::id();
     info!("Initializing mirrord-layer! pid {pid}");
     let exe_path = std::env::current_exe()
@@ -492,7 +502,6 @@ fn layer_start(config: LayerConfig) {
         .parse()
         .expect("couldn't parse proxy address");
 
-    debug!("forgetting old runtime");
     // TODO: safety?
     let old_runtime = unsafe { RUNTIME.take() };
     old_runtime.map(|runtime| mem::forget(runtime));
@@ -507,6 +516,7 @@ fn layer_start(config: LayerConfig) {
     let pid = std::process::id();
     debug!("pid {pid} hook sender: {sender:?}");
     debug!("pid {pid} hook receiver: {receiver:?}");
+
     if first_call {
         HOOK_SENDER
             .set(Mutex::new(sender))
@@ -515,19 +525,6 @@ fn layer_start(config: LayerConfig) {
     } else {
         let mut mutex = HOOK_SENDER.get().unwrap().lock().unwrap();
         *mutex = sender;
-    }
-
-    if first_call {
-        set_globals(&config);
-        enable_hooks(
-            config.feature.fs.is_active(),
-            config.feature.network.dns,
-            config
-                .sip_binaries
-                .clone()
-                .map(|x| x.to_vec())
-                .unwrap_or_default(),
-        );
     }
 
     new_runtime.block_on(start_layer_thread(tx, rx, receiver, config));
