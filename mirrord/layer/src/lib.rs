@@ -77,7 +77,7 @@ use std::{
     mem,
     net::SocketAddr,
     panic,
-    sync::{Mutex, OnceLock},
+    sync::{OnceLock, RwLock},
 };
 
 use bimap::BiMap;
@@ -159,7 +159,6 @@ fn build_runtime() -> Runtime {
         .unwrap()
 }
 
-// TODO: might need to update docs.
 /// Main tokio [`Runtime`] for mirrord-layer async tasks.
 ///
 /// Apart from some pre-initialization steps, mirrord-layer mostly runs inside this runtime with
@@ -181,6 +180,14 @@ fn build_runtime() -> Runtime {
 /// `on_thread_stop`.
 static mut RUNTIME: Option<Runtime> = None;
 
+// TODO: We don't really need a lock, we just need a type that:
+//  1. Can be initialized as static (with a const constructor or whatever)
+//  2. Is `Sync` (because shared static vars have to be).
+//  3. Can replace the held `Sender` with a different one (because we need to reset it on `fork`).
+//  We only ever set it in the ctor or in the `fork` hook (in the child process), and in both cases
+//  there are no other threads yet in that process, so we don't need write synchronization.
+//  Assuming it's safe to call `send` simultaneously from two threads, on two references to the
+//  same `Sender` (is it), we also don't need read synchronization.
 /// [`Sender`] for the [`HookMessage`]s that are handled internally, and converted (when applicable)
 /// to [`ClientMessage`]s.
 ///
@@ -191,8 +198,7 @@ static mut RUNTIME: Option<Runtime> = None;
 ///
 /// You probably don't want to use this directly, instead prefer calling
 /// [`blocking_send_hook_message`](common::blocking_send_hook_message) to send internal messages.
-// TODO: RwLock?
-pub(crate) static HOOK_SENDER: OnceLock<Mutex<Sender<HookMessage>>> = OnceLock::new();
+pub(crate) static HOOK_SENDER: OnceLock<RwLock<Sender<HookMessage>>> = OnceLock::new();
 
 pub(crate) static LAYER_INITIALIZED: OnceLock<()> = OnceLock::new();
 
@@ -467,8 +473,8 @@ fn set_globals(config: &LayerConfig) {
 fn layer_start(config: LayerConfig) {
     // does not need to be atomic because on the first call there are never other threads.
     // Will be false when manually called from fork hook.
-    let first_call = LAYER_INITIALIZED.get().is_none();
-    if first_call {
+    if LAYER_INITIALIZED.get().is_none() {
+        // If we're here it's not a fork, we're in the ctor.
         let _ = LAYER_INITIALIZED.set(());
         init_tracing(&config);
         set_globals(&config);
@@ -501,30 +507,35 @@ fn layer_start(config: LayerConfig) {
         .parse()
         .expect("couldn't parse proxy address");
 
-    // TODO: safety?
-    let old_runtime = unsafe { RUNTIME.take() };
-    old_runtime.map(|runtime| mem::forget(runtime));
-
-    let new_runtime = build_runtime();
+    // SAFETY: This function runs once per process, `RUNTIME` is not used anywhere else but this
+    // function, so there are no other threads using `RUNTIME`, so it's safe to mutate it here.
+    let new_runtime = unsafe {
+        // leak the old runtime if there is one (on fork there is).
+        RUNTIME.take().map(|runtime| mem::forget(runtime));
+        RUNTIME = Some(build_runtime());
+        RUNTIME.as_ref().unwrap() // unwrap: we set it in the line above
+    };
 
     let (tx, rx) = new_runtime.block_on(connection::connect_to_proxy(address));
     let (sender, receiver) = channel::<HookMessage>(1000);
 
-    if let Some(mutex) = HOOK_SENDER.get() {
+    if let Some(lock) = HOOK_SENDER.get() {
+        // HOOK_SENDER is already set, we're currently on a fork detour.
+
         // `expect`: `lock` returns error if another thread panicked while holding the lock, but
         // when this code runs there are still no other threads in the process, because it's called
         // either from the ctor, or from the child in a `fork` hook, before execution is returned to
         // the user application.
-        *(mutex.lock().expect("Could not reset HOOK_SENDER")) = sender;
+        *(lock.write().expect("Could not reset HOOK_SENDER")) = sender;
     } else {
+        // First call to this func, we're in the ctor.
+
         HOOK_SENDER
-            .set(Mutex::new(sender))
+            .set(RwLock::new(sender))
             .expect("Setting HOOK_SENDER singleton");
     }
 
     new_runtime.block_on(start_layer_thread(tx, rx, receiver, config));
-
-    unsafe { RUNTIME = Some(new_runtime) }
 }
 
 /// We need to hook execve syscall to allow mirrord-layer to be loaded with sip patch when loading

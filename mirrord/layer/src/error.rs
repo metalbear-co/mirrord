@@ -57,8 +57,8 @@ pub(crate) enum HookError {
     #[error("mirrord-layer: IO failed with `{0}`!")]
     IO(#[from] std::io::Error),
 
-    #[error("mirrord-layer: HOOK_SENDER is `None`!")]
-    EmptyHookSender,
+    #[error("mirrord-layer: Could not get HOOK_SENDER, can't send a hook message!")]
+    CannotGetHookSender,
 
     #[error("mirrord-layer: Converting int failed with `{0}`!")]
     TryFromInt(#[from] std::num::TryFromIntError),
@@ -258,7 +258,7 @@ impl From<HookError> for i64 {
             HookError::RecvError(_) => libc::EBADMSG,
             HookError::Null(_) => libc::EINVAL,
             HookError::TryFromInt(_) => libc::EINVAL,
-            HookError::EmptyHookSender => libc::EINVAL,
+            HookError::CannotGetHookSender => libc::EINVAL,
             HookError::IO(io_fail) => io_fail.raw_os_error().unwrap_or(libc::EIO),
             HookError::LockError => libc::EINVAL,
             HookError::ResponseError(response_fail) => match response_fail {
