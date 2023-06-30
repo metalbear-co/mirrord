@@ -518,7 +518,9 @@ fn layer_start(config: LayerConfig) {
     // function, so there are no other threads using `RUNTIME`, so it's safe to mutate it here.
     let new_runtime = unsafe {
         // leak the old runtime if there is one (on fork there is).
-        RUNTIME.take().map(mem::forget);
+        if let Some(old_runtime) = RUNTIME.take() {
+            mem::forget(old_runtime);
+        }
         RUNTIME = Some(build_runtime());
         RUNTIME.as_ref().unwrap() // unwrap: we set it in the line above
     };
