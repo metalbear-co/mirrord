@@ -366,6 +366,8 @@ fn mirrord_layer_entry_point() {
     }
 }
 
+/// Initialize logger. Set the logs to go according to the layer's config either to a trace file, to
+/// mirrord-console or to stderr.
 fn init_tracing(config: &LayerConfig) {
     if config.feature.capture_error_trace {
         tracing_subscriber::registry()
@@ -394,6 +396,11 @@ fn init_tracing(config: &LayerConfig) {
     };
 }
 
+/// Set the shared static variables according to the layer's configuration.
+/// These have to be global because they have to be accessed from hooks (which are called by user
+/// code in user threads).
+///
+/// Would panic if any of the variables is already set. This should never be the case.
 fn set_globals(config: &LayerConfig) {
     FILE_MODE
         .set(config.feature.fs.clone())
