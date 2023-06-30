@@ -484,14 +484,13 @@ fn layer_start(config: LayerConfig) {
     }
 
     let _detour_guard = DetourGuard::new();
-    let pid = std::process::id();
-    info!("Initializing mirrord-layer! pid {pid}");
-    let exe_path = std::env::current_exe()
-        .map(|path| path.to_string_lossy().to_string())
-        .unwrap_or_default();
+    info!("Initializing mirrord-layer!");
     trace!(
-        "Loaded into executable: {}, with args: {:?}",
-        &exe_path,
+        "Loaded into executable: {}, on pid {}, with args: {:?}",
+        std::env::current_exe()
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        std::process::id(),
         std::env::args()
     );
 
@@ -506,25 +505,21 @@ fn layer_start(config: LayerConfig) {
     let old_runtime = unsafe { RUNTIME.take() };
     old_runtime.map(|runtime| mem::forget(runtime));
 
-    debug!("creating new runtime");
     let new_runtime = build_runtime();
 
-    debug!("connecting to proxy on address {address:?}");
     let (tx, rx) = new_runtime.block_on(connection::connect_to_proxy(address));
-
     let (sender, receiver) = channel::<HookMessage>(1000);
-    let pid = std::process::id();
-    debug!("pid {pid} hook sender: {sender:?}");
-    debug!("pid {pid} hook receiver: {receiver:?}");
 
-    if first_call {
+    if let Some(mutex) = HOOK_SENDER.get() {
+        // `expect`: `lock` returns error if another thread panicked while holding the lock, but
+        // when this code runs there are still no other threads in the process, because it's called
+        // either from the ctor, or from the child in a `fork` hook, before execution is returned to
+        // the user application.
+        *(mutex.lock().expect("Could not reset HOOK_SENDER")) = sender;
+    } else {
         HOOK_SENDER
             .set(Mutex::new(sender))
             .expect("Setting HOOK_SENDER singleton");
-        debug!("pid {pid} HOOK_SENDER: {HOOK_SENDER:?}");
-    } else {
-        let mut mutex = HOOK_SENDER.get().unwrap().lock().unwrap();
-        *mutex = sender;
     }
 
     new_runtime.block_on(start_layer_thread(tx, rx, receiver, config));
