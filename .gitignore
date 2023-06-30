@@ -13,6 +13,9 @@ build/
 ### go tests ###
 *.go_test_app
 
+### other test apps ###
+*.test_app
+
 ### VSCode ###
 vscode-ext/bin
 

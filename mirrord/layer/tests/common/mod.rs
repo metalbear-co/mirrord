@@ -753,6 +753,7 @@ pub enum Application {
     RustDnsResolve,
     RustRecvFrom,
     RustListenPorts,
+    Fork,
     // For running applications with the executable and arguments determined at runtime.
     // Compiled only on macos just because it's currently only used there, but could be used also
     // on Linux.
@@ -788,6 +789,7 @@ impl Application {
             | Application::PythonDontLoad
             | Application::PythonListen => Self::get_python3_executable().await,
             Application::PythonFastApiHTTP => String::from("uvicorn"),
+            Application::Fork => String::from("tests/apps/fork/fork.test_app"),
             Application::NodeHTTP => String::from("node"),
             Application::Go19HTTP => String::from("tests/apps/app_go/19.go_test_app"),
             Application::Go20HTTP => String::from("tests/apps/app_go/20.go_test_app"),
@@ -920,6 +922,7 @@ impl Application {
             | Application::Go20FAccessAt
             | Application::Go19FAccessAt
             | Application::Go18FAccessAt
+            | Application::Fork
             | Application::RustFileOps
             | Application::RustIssue1123
             | Application::RustIssue1054
@@ -965,6 +968,7 @@ impl Application {
             | Application::NodeFileOps
             | Application::NodeSpawn
             | Application::BashShebang
+            | Application::Fork
             | Application::Go20Issue834
             | Application::Go19Issue834
             | Application::Go18Issue834

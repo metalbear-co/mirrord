@@ -352,6 +352,9 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/listen_ports
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/fork
+          gcc fork.c -o fork.test_app
       - name: download layer # Download layer lib built in the `build_mirrord` job.
         uses: actions/download-artifact@v3
         with:
@@ -413,6 +416,9 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/dns_resolve
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/fork
+          gcc fork.c -o fork.test_app
       - uses: actions/setup-node@v3
         with:
           node-version: 14
