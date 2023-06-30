@@ -218,20 +218,20 @@ pub(super) enum OperatorCommand {
         #[arg(long)]
         accept_tos: bool,
 
-        /// License key to be stored in mirrord-operator-license secret
+        /// A mirrord for Teams license key
         #[arg(long)]
         license_key: Option<String>,
 
-        /// License key file path to be stored in mirrord-operator-license secret
+        /// Path to a file containing a mirrord for Teams license certificate
         #[arg(long)]
         license_path: Option<PathBuf>,
 
-        /// Output to kubernetes specs to file instead of stdout and piping to kubectl
+        /// Output Kubernetes specs to file instead of stdout
         #[arg(short, long)]
         file: Option<PathBuf>,
 
-        /// Set namespace to setup operator in (this doesn't limit the namespaces the operator will
-        /// be able to access)
+        /// Namespace to create the operator in (this doesn't limit the namespaces the operator
+        /// will be able to access)
         #[arg(short, long, default_value = "mirrord")]
         namespace: OperatorNamespace,
 

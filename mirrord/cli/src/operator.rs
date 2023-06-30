@@ -35,7 +35,7 @@ async fn operator_setup(
 
     if let Some(license) = license {
         eprintln!(
-            "Intalling mirrord operator with namespace: {}",
+            "Installing mirrord operator with namespace: {}",
             namespace.name()
         );
 
