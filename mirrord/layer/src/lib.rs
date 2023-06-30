@@ -115,7 +115,7 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
     time::{sleep, Duration},
 };
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -1025,8 +1025,7 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 /// Hook for `libc::fork`.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
-    let pid = std::process::id();
-    debug!("Process {pid} forking!.");
+    debug!("Process {} forking!.", std::process::id());
     let res = FN_FORK();
     if res == 0 {
         debug!("Child process initializing layer.");
