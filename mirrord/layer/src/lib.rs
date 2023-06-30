@@ -77,7 +77,7 @@ use std::{
     mem,
     net::SocketAddr,
     panic,
-    sync::{LazyLock, Mutex, OnceLock},
+    sync::{Mutex, OnceLock},
 };
 
 use bimap::BiMap;
@@ -388,6 +388,65 @@ fn init_tracing(config: &LayerConfig) {
     };
 }
 
+fn set_globals(config: &LayerConfig) {
+    FILE_MODE
+        .set(config.feature.fs.clone())
+        .expect("Setting FILE_MODE failed.");
+    ENABLED_TCP_OUTGOING
+        .set(config.feature.network.outgoing.tcp)
+        .expect("Setting ENABLED_TCP_OUTGOING singleton");
+    ENABLED_UDP_OUTGOING
+        .set(config.feature.network.outgoing.udp)
+        .expect("Setting ENABLED_UDP_OUTGOING singleton");
+    REMOTE_UNIX_STREAMS
+        .set(
+            config
+                .feature
+                .network
+                .outgoing
+                .unix_streams
+                .clone()
+                .map(|vec_or_single| vec_or_single.to_vec())
+                .map(RegexSet::new)
+                .transpose()
+                .expect("Invalid unix stream regex set."),
+        )
+        .expect("Setting REMOTE_UNIX_STREAMS failed.");
+
+    OUTGOING_IGNORE_LOCALHOST
+        .set(config.feature.network.outgoing.ignore_localhost)
+        .expect("Setting OUTGOING_IGNORE_LOCALHOST singleton");
+
+    INCOMING_IGNORE_LOCALHOST
+        .set(config.feature.network.incoming.ignore_localhost)
+        .expect("Setting INCOMING_IGNORE_LOCALHOST singleton");
+
+    let targetless = config.target.path.is_none();
+    TARGETLESS
+        .set(targetless)
+        .expect("Setting TARGETLESS singleton");
+
+    INCOMING_IGNORE_PORTS
+        .set(config.feature.network.incoming.ignore_ports.clone())
+        .expect("Setting INCOMING_IGNORE_PORTS failed");
+
+    FILE_FILTER.get_or_init(|| {
+        let mut fs_config = config.feature.fs.clone();
+        if targetless {
+            fs_config.mode = FsModeConfig::LocalWithOverrides;
+        }
+        FileFilter::new(fs_config)
+    });
+
+    DEBUGGER_IGNORED_PORTS
+        .set(DebuggerPorts::from_env())
+        .expect("Setting DEBUGGER_IGNORED_PORTS failed");
+
+    LISTEN_PORTS
+        .set(config.feature.network.incoming.listen_ports.clone())
+        .expect("Setting LISTEN_PORTS failed");
+}
+
 /// Occurs after [`layer_pre_initialization`] has succeeded.
 ///
 /// Starts the main parts of mirrord-layer.
@@ -459,63 +518,9 @@ fn layer_start(config: LayerConfig) {
     }
 
     if first_call {
-        let file_mode = FILE_MODE.get_or_init(|| config.feature.fs.clone());
-        ENABLED_TCP_OUTGOING
-            .set(config.feature.network.outgoing.tcp)
-            .expect("Setting ENABLED_TCP_OUTGOING singleton");
-        ENABLED_UDP_OUTGOING
-            .set(config.feature.network.outgoing.udp)
-            .expect("Setting ENABLED_UDP_OUTGOING singleton");
-        REMOTE_UNIX_STREAMS
-            .set(
-                config
-                    .feature
-                    .network
-                    .outgoing
-                    .unix_streams
-                    .clone()
-                    .map(|vec_or_single| vec_or_single.to_vec())
-                    .map(RegexSet::new)
-                    .transpose()
-                    .expect("Invalid unix stream regex set."),
-            )
-            .expect("Setting REMOTE_UNIX_STREAMS failed.");
-
-        OUTGOING_IGNORE_LOCALHOST
-            .set(config.feature.network.outgoing.ignore_localhost)
-            .expect("Setting OUTGOING_IGNORE_LOCALHOST singleton");
-
-        INCOMING_IGNORE_LOCALHOST
-            .set(config.feature.network.incoming.ignore_localhost)
-            .expect("Setting INCOMING_IGNORE_LOCALHOST singleton");
-
-        let targetless = config.target.path.is_none();
-        TARGETLESS
-            .set(targetless)
-            .expect("Setting TARGETLESS singleton");
-
-        INCOMING_IGNORE_PORTS
-            .set(config.feature.network.incoming.ignore_ports.clone())
-            .expect("Setting INCOMING_IGNORE_PORTS failed");
-
-        FILE_FILTER.get_or_init(|| {
-            let mut fs_config = config.feature.fs.clone();
-            if targetless {
-                fs_config.mode = FsModeConfig::LocalWithOverrides;
-            }
-            FileFilter::new(fs_config)
-        });
-
-        DEBUGGER_IGNORED_PORTS
-            .set(DebuggerPorts::from_env())
-            .expect("Setting DEBUGGER_IGNORED_PORTS failed");
-
-        LISTEN_PORTS
-            .set(config.feature.network.incoming.listen_ports.clone())
-            .expect("Setting LISTEN_PORTS failed");
-
+        set_globals(&config);
         enable_hooks(
-            file_mode.is_active(),
+            config.feature.fs.is_active(),
             config.feature.network.dns,
             config
                 .sip_binaries
