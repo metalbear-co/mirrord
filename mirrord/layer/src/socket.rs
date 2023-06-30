@@ -1,7 +1,7 @@
 //! We implement each hook function in a safe function as much as possible, having the unsafe do the
 //! absolute minimum
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
     str::FromStr,
@@ -10,6 +10,7 @@ use std::{
 
 use dashmap::DashMap;
 use libc::{c_int, sockaddr, socklen_t};
+use mirrord_config::feature::network::outgoing::OutgoingFilter;
 use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
 use tracing::warn;
@@ -20,7 +21,7 @@ use crate::{
     common::{blocking_send_hook_message, HookMessage},
     detour::{Bypass, Detour, OptionExt},
     error::{HookError, HookResult, LayerError},
-    INCOMING_IGNORE_PORTS,
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_PORTS,
 };
 
 pub(super) mod hooks;
@@ -279,6 +280,81 @@ impl UserSocket {
                 SocketKind::Udp(_) => {}
             }
         }
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct OutgoingSelector {
+    remote: HashSet<OutgoingFilter>,
+    local: HashSet<OutgoingFilter>,
+}
+
+impl OutgoingSelector {
+    pub(crate) fn new(remote: HashSet<OutgoingFilter>, local: HashSet<OutgoingFilter>) -> Self {
+        use mirrord_config::feature::network::outgoing::*;
+
+        let enabled_tcp = ENABLED_TCP_OUTGOING
+            .get()
+            .expect("ENABLED_TCP_OUTGOING should be set before initializing OutgoingSelector!")
+            .clone();
+
+        let enabled_udp = ENABLED_UDP_OUTGOING
+            .get()
+            .expect("ENABLED_TCP_OUTGOING should be set before initializing OutgoingSelector!")
+            .clone();
+
+        let convert_any_into_tcp_udp =
+            |mut acc: HashSet<OutgoingFilter>, OutgoingFilter { protocol, address }| match protocol
+            {
+                ProtocolFilter::Any => {
+                    if enabled_tcp {
+                        acc.insert(OutgoingFilter {
+                            protocol: ProtocolFilter::Tcp,
+                            address: address.clone(),
+                        });
+                    }
+
+                    if enabled_udp {
+                        acc.insert(OutgoingFilter {
+                            protocol: ProtocolFilter::Udp,
+                            address,
+                        });
+                    }
+                    acc
+                }
+                _ => {
+                    acc.insert(OutgoingFilter { protocol, address });
+                    acc
+                }
+            };
+
+        let remote_length = remote.len();
+        let remote = remote
+            .into_iter()
+            .filter(|OutgoingFilter { protocol, .. }| match protocol {
+                ProtocolFilter::Any => enabled_tcp || enabled_udp,
+                ProtocolFilter::Tcp => enabled_tcp,
+                ProtocolFilter::Udp => enabled_udp,
+            })
+            .fold(
+                HashSet::with_capacity(remote_length),
+                convert_any_into_tcp_udp,
+            );
+
+        let local_length = local.len();
+        let local = local
+            .into_iter()
+            .filter(|OutgoingFilter { protocol, .. }| match protocol {
+                ProtocolFilter::Any => enabled_tcp || enabled_udp,
+                ProtocolFilter::Tcp => enabled_tcp,
+                ProtocolFilter::Udp => enabled_udp,
+            })
+            .fold(
+                HashSet::with_capacity(local_length),
+                convert_any_into_tcp_udp,
+            );
+
+        Self { remote, local }
     }
 }
 

@@ -90,7 +90,7 @@ impl MirrordToggleableConfig for OutgoingFileConfig {
 }
 
 #[derive(Debug, Error)]
-enum OutgoingFilterError {
+pub enum OutgoingFilterError {
     #[error("Nom: failed parsing with {0}!")]
     Nom2(nom::Err<nom::error::Error<Vec<u8>>>),
 
@@ -122,8 +122,8 @@ impl From<nom::Err<nom::error::Error<&[u8]>>> for OutgoingFilterError {
     }
 }
 
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum ProtocolFilter {
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ProtocolFilter {
     #[default]
     Any,
     Tcp,
@@ -145,17 +145,17 @@ impl FromStr for ProtocolFilter {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum OutgoingAddress {
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum OutgoingAddress {
     Socket(SocketAddr),
     Name((String, u16)),
     Subnet((ipnet::IpNet, u16)),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct OutgoingFilter {
-    protocol: ProtocolFilter,
-    address: OutgoingAddress,
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OutgoingFilter {
+    pub protocol: ProtocolFilter,
+    pub address: OutgoingAddress,
 }
 
 /// It's dangerous to go alone!
