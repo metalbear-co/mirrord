@@ -171,61 +171,6 @@ jobs:
             ghcr.io/metalbear-co/mirrord:latest
             ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}
 
-  release_intellij_plugin:
-    needs:
-      [
-        build_binaries_aarch64-unknown-linux-gnu,
-        build_binaries_x86_64-unknown-linux-gnu,
-        build_binaries_macos,
-        release_docker_image,
-      ]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-        id: version
-      - name: get custom delve
-        run: |
-          mkdir -p intellij-ext/bin/macos/arm64
-          mkdir -p intellij-ext/bin/macos/x86-64
-          wget https://github.com/metalbear-co/delve/releases/download/1.20.1/delve_darwin_arm64 -O intellij-ext/bin/macos/arm64/dlv
-          wget https://github.com/metalbear-co/delve/releases/download/1.20.1/delve_darwin_amd64 -O intellij-ext/bin/macos/x86-64/dlv
-      - uses: actions/download-artifact@v3
-        with:
-          path: /tmp/artifacts
-      - name: Setup Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: zulu
-          java-version: 11
-      - run: |
-          mkdir -p intellij-ext/bin/linux/arm64
-          mkdir -p intellij-ext/bin/linux/x86-64
-          mkdir -p intellij-ext/bin/macos
-      - run: cp /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord intellij-ext/bin/linux/x86-64/mirrord
-      - run: cp /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord intellij-ext/bin/linux/arm64/mirrord
-      - run: cp /tmp/artifacts/universal-apple-darwin/mirrord intellij-ext/bin/macos/mirrord
-      - name: Build Plugin
-        run: |
-          cd intellij-ext
-          chmod +x ./gradlew
-          ./gradlew buildPlugin
-      - name: Publish Plugin
-        if: github.event_name != 'workflow_dispatch'
-        env:
-          PUBLISH_TOKEN: ${{ secrets.INTELLIJ_PUBLISH_TOKEN }}
-          CERTIFICATE_CHAIN: ${{ secrets.INTELLIJ_CERTIFICATE_CHAIN }}
-          PRIVATE_KEY: ${{ secrets.INTELLIJ_PRIVATE_KEY }}
-          PRIVATE_KEY_PASSWORD: ${{ secrets.INTELLIJ_PRIVATE_KEY_PASSWORD }}
-        run: |
-          cd intellij-ext
-          chmod +x ./gradlew
-          ./gradlew publishPlugin
-      - uses: actions/upload-artifact@v3
-        with:
-          name: intellij-ext
-          path: intellij-ext/build/distributions/*.zip
-          if-no-files-found: error
-
   release_gh:
     needs:
       [
@@ -233,7 +178,6 @@ jobs:
         build_binaries_x86_64-unknown-linux-gnu,
         build_binaries_macos,
         release_docker_image,
-        release_intellij_plugin,
       ]
     runs-on: ubuntu-latest
     if: github.event_name != 'workflow_dispatch'
@@ -289,8 +233,6 @@ jobs:
           mv /tmp/artifacts/universal-apple-darwin/mirrord /tmp/release/mirrord_mac_universal
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip /tmp/release/mirrord_mac_universal.zip
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
-
-          mv /tmp/artifacts/intellij-ext/* /tmp/release/
 
       # Consider to add changelog generation..
       - name: Release
