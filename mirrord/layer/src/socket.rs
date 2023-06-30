@@ -11,7 +11,6 @@ use std::{
 use dashmap::DashMap;
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_protocol::outgoing::SocketAddress;
-use regex::{bytes::RegexBuilder, Regex, RegexBuilder};
 use socket2::SockAddr;
 use tracing::warn;
 use trust_dns_resolver::config::Protocol;
@@ -74,47 +73,6 @@ impl FromStr for OutgoingProtocol {
             "udp" => Ok(Self::Udp),
             _ => Err(LayerError::NoProcessFound),
         }
-    }
-}
-
-// TODO(alex) [high] 2023-06-27: Looks like this should be turned into a builder pattern, so we can
-// deal with optional stuff in here, and then create a fully non-optional version that is used in
-// `connect`.
-#[derive(Debug)]
-pub(super) struct OutgoingConnection {
-    protocol: Option<OutgoingProtocol>,
-    address: (),
-    subnet: (),
-    port: Option<u16>,
-}
-
-impl FromStr for OutgoingConnection {
-    type Err = LayerError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        // Input: "tcp://1.2.3.4/56:7777"
-
-        // tcp
-        let (protocol, rest) = value.split_once("://").unwrap_or(("any", value));
-        let protocol = protocol.parse()?;
-
-        // 1.2.3.4
-        let (address, rest) = rest
-            .split_once("/")
-            .unwrap_or_else(|| rest.split_once(":").unwrap_or(("", rest)));
-        // TODO(alex) [high] 2023-06-27: Convert to rust address.
-
-        let (subnet, rest) = rest.split_once(":").unwrap_or(("", rest));
-        // TODO(alex) [high] 2023-06-27: Convert to something.
-
-        let port = rest.parse().unwrap();
-
-        Ok(Self {
-            protocol,
-            address: todo!(),
-            subnet: todo!(),
-            port,
-        })
     }
 }
 
