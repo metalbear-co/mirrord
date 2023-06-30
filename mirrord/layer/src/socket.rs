@@ -303,32 +303,6 @@ impl OutgoingSelector {
             .expect("ENABLED_TCP_OUTGOING should be set before initializing OutgoingSelector!")
             .clone();
 
-        let convert_any_into_tcp_udp =
-            |mut acc: HashSet<OutgoingFilter>, OutgoingFilter { protocol, address }| match protocol
-            {
-                ProtocolFilter::Any => {
-                    if enabled_tcp {
-                        acc.insert(OutgoingFilter {
-                            protocol: ProtocolFilter::Tcp,
-                            address: address.clone(),
-                        });
-                    }
-
-                    if enabled_udp {
-                        acc.insert(OutgoingFilter {
-                            protocol: ProtocolFilter::Udp,
-                            address,
-                        });
-                    }
-                    acc
-                }
-                _ => {
-                    acc.insert(OutgoingFilter { protocol, address });
-                    acc
-                }
-            };
-
-        let remote_length = remote.len();
         let remote = remote
             .into_iter()
             .filter(|OutgoingFilter { protocol, .. }| match protocol {
@@ -336,12 +310,8 @@ impl OutgoingSelector {
                 ProtocolFilter::Tcp => enabled_tcp,
                 ProtocolFilter::Udp => enabled_udp,
             })
-            .fold(
-                HashSet::with_capacity(remote_length),
-                convert_any_into_tcp_udp,
-            );
+            .collect();
 
-        let local_length = local.len();
         let local = local
             .into_iter()
             .filter(|OutgoingFilter { protocol, .. }| match protocol {
@@ -349,10 +319,7 @@ impl OutgoingSelector {
                 ProtocolFilter::Tcp => enabled_tcp,
                 ProtocolFilter::Udp => enabled_udp,
             })
-            .fold(
-                HashSet::with_capacity(local_length),
-                convert_any_into_tcp_udp,
-            );
+            .collect();
 
         Self { remote, local }
     }
