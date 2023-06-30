@@ -58,14 +58,10 @@ pub(crate) type ResponseChannel<T> = oneshot::Sender<RemoteResult<T>>;
 pub(crate) fn blocking_send_hook_message(message: HookMessage) -> HookResult<()> {
     HOOK_SENDER
         .get()
-        .ok_or(HookError::EmptyHookSender)
-        .and_then(|hook_sender| {
-            hook_sender
-                .lock()
-                .unwrap() // TODO:?
-                .blocking_send(message)
-                .map_err(Into::into)
-        })
+        .ok_or(HookError::EmptyHookSender)?
+        .lock()?
+        .blocking_send(message)
+        .map_err(Into::into)
 }
 
 /// These messages are handled internally by the layer, and become `ClientMessage`s sent to
