@@ -363,7 +363,6 @@ impl LayerConfig {
 impl CollectAnalytics for LayerConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("pause", self.pause);
-        analytics.add("ephemeral", self.agent.ephemeral);
         analytics.add(
             "accept_invalid_certificates",
             self.accept_invalid_certificates,

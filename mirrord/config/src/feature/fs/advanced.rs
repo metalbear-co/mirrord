@@ -1,3 +1,4 @@
+use mirrord_analytics::{CollectAnalytics, AnalyticValue};
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
@@ -121,6 +122,22 @@ impl FsConfig {
     }
 }
 
+impl From<FsModeConfig> for AnalyticValue {
+    fn from(mode: FsModeConfig) -> Self {
+        match mode {
+            FsModeConfig::Local => Self::Number(0),
+            FsModeConfig::LocalWithOverrides => Self::Number(1),
+            FsModeConfig::Read => Self::Number(2),
+            FsModeConfig::Write => Self::Number(3),
+        }
+    }
+}
+
+impl CollectAnalytics for FsConfig {
+    fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
+        analytics.add("mode", self.mode)
+    }
+}
 #[cfg(test)]
 mod tests {
     use rstest::rstest;

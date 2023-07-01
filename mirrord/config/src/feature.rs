@@ -1,3 +1,4 @@
+use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
@@ -84,4 +85,13 @@ pub struct FeatureConfig {
     /// ## feature.network {#feature-network}
     #[config(nested, toggleable)]
     pub network: NetworkConfig,
+}
+
+
+impl CollectAnalytics for FeatureConfig {
+    fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
+        analytics.add("env", self.env);
+        analytics.add("fs", self.fs);
+        analytics.add("network", self.network);
+    }
 }
