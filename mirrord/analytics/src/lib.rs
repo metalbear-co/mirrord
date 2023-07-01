@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 #[serde(untagged)]
 pub enum AnalyticValue {
     Bool(bool),
-    Mode(u32),
+    Number(u32),
     Nested(Analytics),
 }
 
@@ -27,8 +27,7 @@ pub enum AnalyticValue {
 /// }
 /// ```
 /// ```
-/// use mirrord_analytics::Analytics;
-/// use mirrord_analytics::CollectAnalytics;
+/// use mirrord_analytics::{Analytics, CollectAnalytics};
 /// let mut analytics = Analytics::default();
 /// analytics.add("a", true);
 /// analytics.add("b", false);
@@ -78,7 +77,7 @@ impl From<bool> for AnalyticValue {
 
 impl From<u32> for AnalyticValue {
     fn from(mode: u32) -> Self {
-        AnalyticValue::Mode(mode)
+        AnalyticValue::Number(mode)
     }
 }
 

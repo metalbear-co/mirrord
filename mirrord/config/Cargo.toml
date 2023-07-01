@@ -25,6 +25,7 @@ serde_yaml = "0.9"
 toml = "0.7"
 schemars = { version = "0.8.11" }
 bimap.workspace = true
+bitflags = "2"
 
 [dev-dependencies]
 rstest = "0.17"

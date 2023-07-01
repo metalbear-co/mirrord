@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use mirrord_analytics::CollectAnalytics;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -254,6 +255,43 @@ impl FromSplit for DeploymentTarget {
                 FAIL_PARSE_DEPLOYMENT_OR_POD.to_string(),
             )),
         }
+    }
+}
+
+bitflags::bitflags! {
+    #[repr(C)]
+    #[derive(Debug, PartialEq, Eq)]
+    pub struct TargetAnalyticFlags: u32 {
+        const NAMESPACE = 1;
+        const POD = 2;
+        const DEPLOYMENT = 4;
+        const CONTAINER = 8;
+    }
+}
+
+impl CollectAnalytics for TargetConfig {
+    fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
+        let mut flags = TargetAnalyticFlags::empty();
+        if self.namespace.is_some() {
+            flags |= TargetAnalyticFlags::NAMESPACE;
+        }
+        if let Some(path) = &self.path {
+            match path {
+                Target::Pod(pod) => {
+                    flags |= TargetAnalyticFlags::POD;
+                    if pod.container.is_some() {
+                        flags |= TargetAnalyticFlags::CONTAINER;
+                    }
+                }
+                Target::Deployment(deployment) => {
+                    flags |= TargetAnalyticFlags::DEPLOYMENT;
+                    if deployment.container.is_some() {
+                        flags |= TargetAnalyticFlags::CONTAINER;
+                    }
+                }
+            }
+        }
+        analytics.add("target_mode", flags.bits())
     }
 }
 

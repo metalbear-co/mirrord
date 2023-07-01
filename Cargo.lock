@@ -3267,6 +3267,7 @@ name = "mirrord-config"
 version = "3.48.0"
 dependencies = [
  "bimap",
+ "bitflags 2.3.2",
  "mirrord-analytics",
  "mirrord-config-derive",
  "rstest",

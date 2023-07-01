@@ -14,9 +14,10 @@ pub mod feature;
 pub mod target;
 pub mod util;
 
-use std::{collections::HashMap, path::Path};
+use std::path::Path;
 
 use config::{ConfigError, MirrordConfig};
+use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use tracing::warn;
@@ -357,22 +358,20 @@ impl LayerConfig {
         }
         Ok(())
     }
+}
 
-    /// Return analytics about configuration
-    pub fn analytics(&self) -> HashMap<String, AnalyticValue> {
-        let mut map = HashMap::new();
-        map.insert("pause".to_string(), self.pause.into());
-        map.insert("ephemeral".to_string(), self.agent.ephemeral.into());
-        map.insert(
-            "accept_invalid_certificates".to_string(),
-            self.accept_invalid_certificates.into(),
+impl CollectAnalytics for LayerConfig {
+    fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
+        analytics.add("pause", self.pause);
+        analytics.add("ephemeral", self.agent.ephemeral);
+        analytics.add(
+            "accept_invalid_certificates",
+            self.accept_invalid_certificates,
         );
-        map.insert(
-            "use_kubeconfig".to_string(),
-            self.kubeconfig.is_some().into(),
-        );
-
-        map
+        analytics.add("use_kubeconfig", self.kubeconfig.is_some());
+        self.target.collect_analytics(analytics);
+        self.agent.collect_analytics(analytics);
+        self.feature.collect_analytics(analytics);
     }
 }
 
