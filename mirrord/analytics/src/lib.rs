@@ -104,7 +104,6 @@ impl<T: CollectAnalytics> From<T> for AnalyticValue {
     }
 }
 
-
 #[derive(Debug, Serialize, Deserialize)]
 struct AnalyticsReport {
     event_properties: Analytics,
@@ -120,7 +119,7 @@ pub async fn send_analytics(analytics: Analytics, duration: u32, operator: bool)
         platform: std::env::consts::OS.to_string(),
         version: CURRENT_VERSION.to_string(),
         duration,
-        operator
+        operator,
     };
 
     let client = reqwest::Client::new();

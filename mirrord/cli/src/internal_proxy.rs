@@ -156,7 +156,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
         send_analytics(
             (&config).into(),
             started.elapsed().as_secs().try_into().unwrap_or(u32::MAX),
-            operator
+            operator,
         )
         .await;
     }
@@ -168,7 +168,11 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
 /// sending the first message
 async fn connect_and_ping(
     config: &LayerConfig,
-) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>, bool)> {
+) -> Result<(
+    mpsc::Sender<ClientMessage>,
+    mpsc::Receiver<DaemonMessage>,
+    bool,
+)> {
     let (mut sender, mut receiver, operator) = connect(config).await?;
     ping(&mut sender, &mut receiver).await?;
     Ok((sender, receiver, operator))
@@ -198,7 +202,11 @@ async fn ping(
 /// Returns the tx/rx and whether oeprator is used.
 async fn connect(
     config: &LayerConfig,
-) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>, bool)> {
+) -> Result<(
+    mpsc::Sender<ClientMessage>,
+    mpsc::Receiver<DaemonMessage>,
+    bool,
+)> {
     if let Some(address) = &config.connect_tcp {
         let stream = TcpStream::connect(address)
             .await
@@ -214,6 +222,9 @@ async fn connect(
         Ok((connection, false))
     } else {
         let connection = OperatorApi::discover(config, &NoProgress).await?;
-        Ok((connection.ok_or(InternalProxyError::OperatorConnectionError)?, true))
+        Ok((
+            connection.ok_or(InternalProxyError::OperatorConnectionError)?,
+            true,
+        ))
     }
 }
