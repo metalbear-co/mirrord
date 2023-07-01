@@ -1,4 +1,4 @@
-use mirrord_analytics::{CollectAnalytics, AnalyticValue};
+use mirrord_analytics::{AnalyticValue, CollectAnalytics};
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 

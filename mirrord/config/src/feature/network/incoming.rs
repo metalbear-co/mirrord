@@ -1,6 +1,7 @@
 use std::{collections::HashSet, fmt, str::FromStr};
 
 use bimap::BiMap;
+use mirrord_analytics::{AnalyticValue, Analytics, CollectAnalytics};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -459,5 +460,36 @@ impl fmt::Display for ConcurrentSteal {
             Self::Continue => write!(f, "continue"),
             Self::Override => write!(f, "override"),
         }
+    }
+}
+
+impl From<&IncomingMode> for AnalyticValue {
+    fn from(value: &IncomingMode) -> Self {
+        match value {
+            IncomingMode::Mirror => AnalyticValue::Number(0),
+            IncomingMode::Steal => AnalyticValue::Number(1),
+        }
+    }
+}
+
+impl From<&ConcurrentSteal> for AnalyticValue {
+    fn from(value: &ConcurrentSteal) -> Self {
+        match value {
+            ConcurrentSteal::Override => AnalyticValue::Number(0),
+            ConcurrentSteal::Continue => AnalyticValue::Number(1),
+            ConcurrentSteal::Abort => AnalyticValue::Number(2),
+        }
+    }
+}
+
+impl CollectAnalytics for IncomingConfig {
+    fn collect_analytics(&self, analytics: &mut Analytics) {
+        analytics.add("mode", &self.mode);
+        analytics.add("concurrent_steal", &self.on_concurrent_steal);
+        analytics.add("port_mapping_count", self.port_mapping.len());
+        analytics.add("listen_ports_count", self.listen_ports.len());
+        analytics.add("ignore_localhost", self.ignore_localhost);
+        analytics.add("ignore_ports_count", self.ignore_ports.len());
+        analytics.add("http", self.http_filter);
     }
 }

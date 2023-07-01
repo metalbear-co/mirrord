@@ -17,6 +17,7 @@ use std::{
 };
 
 use futures::{stream::StreamExt, SinkExt};
+use mirrord_analytics::send_analytics;
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
 use mirrord_operator::client::OperatorApi;
@@ -104,6 +105,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
     // This makes the process not to receive signals from the "mirrord" process or it's parent
     // terminal fixes some side effects such as https://github.com/metalbear-co/mirrord/issues/1232
     nix::unistd::setsid().map_err(InternalProxyError::SetSidError)?;
+    let started = std::time::Instant::now();
     // Let it assign port for us then print it for the user.
     let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
         .await
@@ -148,6 +150,13 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
                 }
             }
         }
+    }
+    if config.telemetry {
+        send_analytics(
+            (&config).into(),
+            started.elapsed().as_secs().try_into().unwrap_or(u32::MAX),
+        )
+        .await;
     }
     Ok(())
 }

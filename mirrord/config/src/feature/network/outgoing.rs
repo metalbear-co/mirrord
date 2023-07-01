@@ -1,3 +1,4 @@
+use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
@@ -82,6 +83,20 @@ impl MirrordToggleableConfig for OutgoingFileConfig {
     }
 }
 
+impl CollectAnalytics for OutgoingConfig {
+    fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
+        analytics.add("tcp", self.tcp);
+        analytics.add("udp", self.udp);
+        analytics.add("ignore_localhost", self.ignore_localhost);
+        analytics.add(
+            "unix_streams",
+            self.unix_streams
+                .as_ref()
+                .map(|v| v.len())
+                .unwrap_or_default(),
+        );
+    }
+}
 #[cfg(test)]
 mod tests {
     use rstest::rstest;

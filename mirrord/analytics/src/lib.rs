@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use tracing::info;
+
+const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Possible values for analytic data
 /// This is strict so we won't send sensitive data by accident.
@@ -76,8 +79,14 @@ impl From<bool> for AnalyticValue {
 }
 
 impl From<u32> for AnalyticValue {
-    fn from(mode: u32) -> Self {
-        AnalyticValue::Number(mode)
+    fn from(n: u32) -> Self {
+        AnalyticValue::Number(n)
+    }
+}
+
+impl From<usize> for AnalyticValue {
+    fn from(n: usize) -> Self {
+        AnalyticValue::Number(u32::try_from(n).unwrap_or(u32::MAX))
     }
 }
 
@@ -92,6 +101,33 @@ impl<T: CollectAnalytics> From<T> for AnalyticValue {
         let mut holder = Analytics::default();
         analytics.collect_analytics(&mut holder);
         holder.into()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AnalyticsReport {
+    event_properties: Analytics,
+    platform: String,
+    duration: u32,
+    version: String,
+}
+
+pub async fn send_analytics(analytics: Analytics, duration: u32) {
+    let report = AnalyticsReport {
+        event_properties: analytics,
+        platform: std::env::consts::OS.to_string(),
+        version: CURRENT_VERSION.to_string(),
+        duration,
+    };
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post("https://analytics.metalbear.co/api/v1/event")
+        .json(&report)
+        .send()
+        .await;
+    if let Err(e) = res {
+        info!("Failed to send analytics: {e}");
     }
 }
 

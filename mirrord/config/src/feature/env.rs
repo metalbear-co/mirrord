@@ -85,9 +85,27 @@ impl MirrordToggleableConfig for EnvFileConfig {
 
 impl CollectAnalytics for EnvConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
-        analytics.add("include_count", self.include.as_ref().map(|v| v.len() as u32).unwrap_or_default());
-        analytics.add("exclude_count", self.exclude.as_ref().map(|v| v.len() as u32).unwrap_or_default());
-        analytics.add("overrides_count", self.overrides.as_ref().map(|v| v.len() as u32).unwrap_or_default());
+        analytics.add(
+            "include_count",
+            self.include
+                .as_ref()
+                .map(|v| v.len() as u32)
+                .unwrap_or_default(),
+        );
+        analytics.add(
+            "exclude_count",
+            self.exclude
+                .as_ref()
+                .map(|v| v.len() as u32)
+                .unwrap_or_default(),
+        );
+        analytics.add(
+            "overrides_count",
+            self.overrides
+                .as_ref()
+                .map(|v| v.len() as u32)
+                .unwrap_or_default(),
+        );
     }
 }
 

@@ -3159,6 +3159,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "miette",
+ "mirrord-analytics",
  "mirrord-auth",
  "mirrord-config",
  "mirrord-console",
@@ -3238,8 +3239,10 @@ name = "mirrord-analytics"
 version = "3.48.0"
 dependencies = [
  "assert-json-diff",
+ "reqwest",
  "serde",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
