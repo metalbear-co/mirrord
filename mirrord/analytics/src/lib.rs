@@ -110,14 +110,16 @@ struct AnalyticsReport {
     platform: String,
     duration: u32,
     version: String,
+    operator: bool,
 }
 
-pub async fn send_analytics(analytics: Analytics, duration: u32) {
+pub async fn send_analytics(analytics: Analytics, duration: u32, operator: bool) {
     let report = AnalyticsReport {
         event_properties: analytics,
         platform: std::env::consts::OS.to_string(),
         version: CURRENT_VERSION.to_string(),
         duration,
+        operator
     };
 
     let client = reqwest::Client::new();

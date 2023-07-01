@@ -77,7 +77,7 @@ impl MirrordToggleableConfig for NetworkFileConfig {
     }
 }
 
-impl CollectAnalytics for NetworkConfig {
+impl CollectAnalytics for &NetworkConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("incoming", self.incoming);
         analytics.add("outgoing", self.outgoing);

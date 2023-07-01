@@ -177,7 +177,7 @@ pub struct AgentConfig {
     pub test_error: bool,
 }
 
-impl CollectAnalytics for AgentConfig {
+impl CollectAnalytics for &AgentConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("ephemeral", self.ephemeral);
     }

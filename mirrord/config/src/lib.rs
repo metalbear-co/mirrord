@@ -360,7 +360,7 @@ impl LayerConfig {
     }
 }
 
-impl CollectAnalytics for LayerConfig {
+impl CollectAnalytics for &LayerConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("pause", self.pause);
         analytics.add(

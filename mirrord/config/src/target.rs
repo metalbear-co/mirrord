@@ -269,7 +269,7 @@ bitflags::bitflags! {
     }
 }
 
-impl CollectAnalytics for TargetConfig {
+impl CollectAnalytics for &TargetConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         let mut flags = TargetAnalyticFlags::empty();
         if self.namespace.is_some() {

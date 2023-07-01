@@ -482,7 +482,7 @@ impl From<&ConcurrentSteal> for AnalyticValue {
     }
 }
 
-impl CollectAnalytics for IncomingConfig {
+impl CollectAnalytics for &IncomingConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
         analytics.add("mode", &self.mode);
         analytics.add("concurrent_steal", &self.on_concurrent_steal);

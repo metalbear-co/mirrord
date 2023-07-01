@@ -133,11 +133,15 @@ impl From<FsModeConfig> for AnalyticValue {
     }
 }
 
-impl CollectAnalytics for FsConfig {
+impl CollectAnalytics for &FsConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
-        analytics.add("mode", self.mode)
+        analytics.add("mode", self.mode);
+        analytics.add("local_paths", self.local.as_ref().map(|v| v.len()).unwrap_or_default());
+        analytics.add("read_write_paths", self.read_write.as_ref().map(|v| v.len()).unwrap_or_default());
+        analytics.add("read_only_paths", self.read_only.as_ref().map(|v| v.len()).unwrap_or_default());
     }
 }
+
 #[cfg(test)]
 mod tests {
     use rstest::rstest;

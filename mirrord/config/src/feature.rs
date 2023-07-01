@@ -87,7 +87,7 @@ pub struct FeatureConfig {
     pub network: NetworkConfig,
 }
 
-impl CollectAnalytics for FeatureConfig {
+impl CollectAnalytics for &FeatureConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("env", self.env);
         analytics.add("fs", self.fs);

@@ -175,7 +175,7 @@ impl From<PortList> for HashSet<u16> {
     }
 }
 
-impl CollectAnalytics for HttpFilterConfig {
+impl CollectAnalytics for &HttpFilterConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("header_filter", self.header_filter.is_some());
         analytics.add("path_filter", self.path_filter.is_some());

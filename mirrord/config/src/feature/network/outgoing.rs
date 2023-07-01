@@ -83,7 +83,7 @@ impl MirrordToggleableConfig for OutgoingFileConfig {
     }
 }
 
-impl CollectAnalytics for OutgoingConfig {
+impl CollectAnalytics for &OutgoingConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("tcp", self.tcp);
         analytics.add("udp", self.udp);
