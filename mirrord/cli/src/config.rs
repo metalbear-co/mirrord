@@ -173,6 +173,10 @@ pub(super) struct ExecArgs {
     #[arg(long)]
     pub no_telemetry: bool,
 
+    #[arg(long)]
+    /// Disable version check on startup.
+    pub disable_version_check: bool,
+
     /// Load config from config file
     #[arg(short = 'f', long)]
     pub config_file: Option<PathBuf>,

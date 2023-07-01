@@ -1,16 +1,42 @@
 # Telemetry
 
-mirrord sends anonymous usage statistics to our systems. The information sent is:
-1. mirrord version.
-2. cli/extension.
-3. platform (linux, macos).
-
+mirrord sends anonymous usage statistics to our systems.
 In our databases, we don't store IP, and we don't create any unique identifier for the user.
 
-## Disabling
+Currently, there are version check telemetries, controlled from CLI and IDE and analytics, controlled via config file or cli.
 
-### CLI
-You can disable telemetry by specifying `--no-telemetry`.
+## Version Checks
 
-### Extension
-In the settings of the extension.
+mirrord checks for version update for cli/IDE.
+
+The information sent is:
+1. mirrord version.
+2. cli/extension - if IntelliJ - product type (GoLand, PyCharm, etc.).
+3. platform (linux, macos).
+
+### Disabling
+
+#### CLI
+
+You can disable version checks by --disable-version-check.
+
+#### IntelliJ
+
+The check is opt-in on first use and can also be controlled from settings.
+
+#### VSCode
+
+We use the [VSCode API](https://code.visualstudio.com/docs/getstarted/telemetry) to check if we can send telemetries (as recommended by them).
+
+
+## Analytics
+
+This feature sends session duration, what features were used (steal/mirror/fs mode, etc).
+This enables us to improve the product and understand the userbase better.
+
+### Disabling 
+
+Can be disabled by specifying in mirrord confile file
+```json
+{"telemetry": false}
+```

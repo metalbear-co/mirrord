@@ -14,7 +14,7 @@ pub mod feature;
 pub mod target;
 pub mod util;
 
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
 use config::{ConfigError, MirrordConfig};
 use mirrord_config_derive::MirrordConfig;
@@ -125,6 +125,7 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///   "operator": true,
 ///   "kubeconfig": "~/.kube/config",
 ///   "sip_binaries": "bash"
+///   "telemetry": true,
 /// }
 /// ```
 ///
@@ -262,6 +263,14 @@ pub struct LayerConfig {
     /// # feature {#root-feature}
     #[config(nested)]
     pub feature: FeatureConfig,
+
+    /// ## telemetry {#root-telemetry}
+    /// Controls whether or not mirrord sends telemetry data to MetalBear cloud.
+    /// Telemetry sent doesn't contain personal identifiers or any data that
+    /// should be considered sensitive. It is used to improve the product.
+    /// [For more information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md)
+    #[config(env = "MIRRORD_TELEMETRY", default = true)]
+    pub telemetry: bool,
 }
 
 impl LayerConfig {
@@ -347,6 +356,23 @@ impl LayerConfig {
             }
         }
         Ok(())
+    }
+
+    /// Return analytics about configuration
+    pub fn analytics(&self) -> HashMap<String, AnalyticValue> {
+        let mut map = HashMap::new();
+        map.insert("pause".to_string(), self.pause.into());
+        map.insert("ephemeral".to_string(), self.agent.ephemeral.into());
+        map.insert(
+            "accept_invalid_certificates".to_string(),
+            self.accept_invalid_certificates.into(),
+        );
+        map.insert(
+            "use_kubeconfig".to_string(),
+            self.kubeconfig.is_some().into(),
+        );
+
+        map
     }
 }
 
