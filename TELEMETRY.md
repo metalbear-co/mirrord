@@ -33,6 +33,11 @@ We use the [VSCode API](https://code.visualstudio.com/docs/getstarted/telemetry)
 
 This feature sends session duration, what features were used (steal/mirror/fs mode, etc).
 This enables us to improve the product and understand the userbase better.
+Types of data sent:
+1. Feature on/off
+2. Feature enum value (steal/mirror, read/write)
+3. Feature count (how many ports in listen_ports)
+
 
 ### Disabling 
 
