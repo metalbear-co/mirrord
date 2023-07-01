@@ -490,6 +490,6 @@ impl CollectAnalytics for &IncomingConfig {
         analytics.add("listen_ports_count", self.listen_ports.len());
         analytics.add("ignore_localhost", self.ignore_localhost);
         analytics.add("ignore_ports_count", self.ignore_ports.len());
-        analytics.add("http", self.http_filter);
+        analytics.add("http", &self.http_filter);
     }
 }

@@ -97,12 +97,13 @@ impl From<Analytics> for AnalyticValue {
 }
 
 impl<T: CollectAnalytics> From<T> for AnalyticValue {
-    fn from(analytics: T) -> Self {
-        let mut holder = Analytics::default();
-        analytics.collect_analytics(&mut holder);
-        holder.into()
+    fn from(other: T) -> Self {
+        let mut analytics = Analytics::default();
+        other.collect_analytics(&mut analytics);
+        analytics.into()
     }
 }
+
 
 #[derive(Debug, Serialize, Deserialize)]
 struct AnalyticsReport {

@@ -89,8 +89,8 @@ pub struct FeatureConfig {
 
 impl CollectAnalytics for &FeatureConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
-        analytics.add("env", self.env);
-        analytics.add("fs", self.fs);
-        analytics.add("network", self.network);
+        analytics.add("env", &self.env);
+        analytics.add("fs", &self.fs);
+        analytics.add("network", &self.network);
     }
 }

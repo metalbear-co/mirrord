@@ -83,7 +83,7 @@ impl MirrordToggleableConfig for EnvFileConfig {
     }
 }
 
-impl CollectAnalytics for EnvConfig {
+impl CollectAnalytics for &EnvConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add(
             "include_count",
