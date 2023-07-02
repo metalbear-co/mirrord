@@ -41,7 +41,7 @@ Types of data sent:
 
 ### Disabling 
 
-Can be disabled by specifying in mirrord confile file
+Can be disabled by specifying in the mirrord config file
 ```json
 {"telemetry": false}
 ```
