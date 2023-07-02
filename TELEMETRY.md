@@ -3,8 +3,8 @@
 mirrord sends anonymous usage statistics to our systems.
 We don't store IP addresses, and we don't create any unique identifier for the user.
 
-Data collected is session duration, what features were used (steal/mirror/fs mode, etc).
-This enables us to improve the product and understand the userbase better.
+Data collected is session duration and what features were used (steal/mirror/fs mode, etc).
+This helps us to improve the product and by better understanding our users.
 Types of data sent:
 1. Feature on/off
 2. Feature enum value (steal/mirror, read/write)
@@ -12,7 +12,7 @@ Types of data sent:
 
 ## Disabling
 
-Can be disabled by specifying in the mirrord config file
+Telemetry can be disabled by specifying the following in the mirrord config file:
 ```json
 {"telemetry": false}
 ```
