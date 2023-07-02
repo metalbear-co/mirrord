@@ -169,7 +169,7 @@ pub(super) struct ExecArgs {
     #[arg(long)]
     pub no_udp_outgoing: bool,
 
-    /// Disable telemetry - this also disables version check. See https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md
+    /// Disable telemetry. See https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md
     #[arg(long)]
     pub no_telemetry: bool,
 

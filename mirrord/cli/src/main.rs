@@ -40,7 +40,7 @@ mod operator;
 pub(crate) use error::{CliError, Result};
 
 async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
-    if !(args.no_telemetry || args.disable_version_check) {
+    if !args.disable_version_check {
         prompt_outdated_version().await;
     }
     info!(
