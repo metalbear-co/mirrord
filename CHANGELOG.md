@@ -8,6 +8,20 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.49.0](https://github.com/metalbear-co/mirrord/tree/3.49.0) - 2023-07-03
+
+
+### Added
+
+- Added new analytics, see TELEMETRY.md for more details.
+
+
+### Internal
+
+- Fix some text in the operator documentation and progress reporting
+- Remove IDE instructions from CONTRIBUTING.md
+
+
 ## [3.48.0](https://github.com/metalbear-co/mirrord/tree/3.48.0) - 2023-06-29
 
 
