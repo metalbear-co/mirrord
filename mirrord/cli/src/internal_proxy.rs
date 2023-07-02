@@ -199,7 +199,7 @@ async fn ping(
 ///   using [`KubernetesAPI];
 ///
 /// - None of the above: uses the [`OperatorApi`] to establish the connection.
-/// Returns the tx/rx and whether oeprator is used.
+/// Returns the tx/rx and whether the operator is used.
 async fn connect(
     config: &LayerConfig,
 ) -> Result<(

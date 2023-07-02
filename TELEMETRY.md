@@ -1,7 +1,7 @@
 # Telemetry
 
 mirrord sends anonymous usage statistics to our systems.
-In our databases, we don't store IP, and we don't create any unique identifier for the user.
+We don't store IP addresses, and we don't create any unique identifier for the user.
 
 Currently, there are version check telemetries, controlled from CLI and IDE and analytics, controlled via config file or cli.
 
