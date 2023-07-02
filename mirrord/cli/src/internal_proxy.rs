@@ -17,7 +17,7 @@ use std::{
 };
 
 use futures::{stream::StreamExt, SinkExt};
-use mirrord_analytics::{send_analytics, Analytics};
+use mirrord_analytics::{send_analytics, Analytics, CollectAnalytics};
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
 use mirrord_operator::client::OperatorApi;
@@ -126,7 +126,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
 
     let mut active_connections = JoinSet::new();
 
-    let agent_connection = connect_and_ping(&config).await?;
+    let (agent_connection, _) = connect_and_ping(&config).await?;
     active_connections.spawn(connection_task(stream, agent_connection));
 
     loop {
@@ -134,7 +134,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
             res = listener.accept() => {
                 match res {
                     Ok((stream, _)) => {
-                        let agent_connection = connect_and_ping(&config).await?;
+                        let (agent_connection, _) = connect_and_ping(&config).await?;
                         active_connections.spawn(connection_task(stream, agent_connection));
                     },
                     Err(err) => {
@@ -151,10 +151,11 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
             }
         }
     }
-    let analytics = Analytics::default();
+    let mut analytics = Analytics::default();
+    (&config).collect_analytics(&mut analytics);
     if config.telemetry {
         send_analytics(
-            (&config).into(),
+            analytics,
             started.elapsed().as_secs().try_into().unwrap_or(u32::MAX),
             operator,
         )
@@ -169,13 +170,12 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
 async fn connect_and_ping(
     config: &LayerConfig,
 ) -> Result<(
-    mpsc::Sender<ClientMessage>,
-    mpsc::Receiver<DaemonMessage>,
+    (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
     bool,
 )> {
-    let (mut sender, mut receiver, operator) = connect(config).await?;
+    let ((mut sender, mut receiver), operator) = connect(config).await?;
     ping(&mut sender, &mut receiver).await?;
-    Ok((sender, receiver, operator))
+    Ok(((sender, receiver), operator))
 }
 
 /// Sends a ping the connection and expects a pong.
@@ -203,8 +203,7 @@ async fn ping(
 async fn connect(
     config: &LayerConfig,
 ) -> Result<(
-    mpsc::Sender<ClientMessage>,
-    mpsc::Receiver<DaemonMessage>,
+    (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
     bool,
 )> {
     if let Some(address) = &config.connect_tcp {
@@ -213,7 +212,7 @@ async fn connect(
             .map_err(InternalProxyError::TcpConnectError)?;
         Ok((wrap_raw_connection(stream), false))
     } else if let (Some(agent_name), Some(port)) =
-        (&config.connect_agent_name, config.connect_agent_port, false)
+        (&config.connect_agent_name, config.connect_agent_port)
     {
         let k8s_api = KubernetesAPI::create(config).await?;
         let connection = k8s_api

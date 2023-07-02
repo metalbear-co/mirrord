@@ -68,7 +68,7 @@ impl Analytics {
 
 /// Structs that collect analytics about themselves should implement this trait
 pub trait CollectAnalytics {
-    ///
+    /// Write analytics data to the given `Analytics` struct
     fn collect_analytics(&self, analytics: &mut Analytics);
 }
 
