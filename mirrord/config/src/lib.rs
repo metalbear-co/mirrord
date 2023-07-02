@@ -577,6 +577,7 @@ mod tests {
             accept_invalid_certificates: Some(false),
             pause: Some(false),
             kubeconfig: None,
+            telemetry: None,
             connect_agent_name: None,
             connect_agent_port: None,
             target: Some(TargetFileConfig::Advanced {
