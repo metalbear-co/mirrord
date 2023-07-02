@@ -75,6 +75,20 @@ impl<T> VecOrSingle<T> {
             VecOrSingle::Multiple(vals) => vals,
         }
     }
+
+    pub fn len(&self) -> usize {
+        match self {
+            VecOrSingle::Single(_) => 1,
+            VecOrSingle::Multiple(vals) => vals.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            VecOrSingle::Single(_) => false,
+            VecOrSingle::Multiple(vals) => vals.is_empty(),
+        }
+    }
 }
 
 impl<T: Hash + Eq> From<VecOrSingle<T>> for HashSet<T> {

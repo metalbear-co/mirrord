@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
@@ -79,6 +80,32 @@ impl MirrordToggleableConfig for EnvFileConfig {
                 .or_else(|| Some(VecOrSingle::Single("*".to_owned()))),
             overrides: None,
         })
+    }
+}
+
+impl CollectAnalytics for &EnvConfig {
+    fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
+        analytics.add(
+            "include_count",
+            self.include
+                .as_ref()
+                .map(|v| v.len() as u32)
+                .unwrap_or_default(),
+        );
+        analytics.add(
+            "exclude_count",
+            self.exclude
+                .as_ref()
+                .map(|v| v.len() as u32)
+                .unwrap_or_default(),
+        );
+        analytics.add(
+            "overrides_count",
+            self.overrides
+                .as_ref()
+                .map(|v| v.len() as u32)
+                .unwrap_or_default(),
+        );
     }
 }
 

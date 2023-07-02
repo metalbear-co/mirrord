@@ -40,7 +40,7 @@ mod operator;
 pub(crate) use error::{CliError, Result};
 
 async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
-    if !args.no_telemetry {
+    if !args.disable_version_check {
         prompt_outdated_version().await;
     }
     info!(
@@ -54,6 +54,10 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 
     if let Some(target) = &args.target {
         std::env::set_var("MIRRORD_IMPERSONATED_TARGET", target);
+    }
+
+    if args.no_telemetry {
+        std::env::set_var("MIRRORD_TELEMETRY", "false");
     }
 
     if let Some(skip_processes) = &args.skip_processes {

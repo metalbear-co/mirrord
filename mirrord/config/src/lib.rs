@@ -17,6 +17,7 @@ pub mod util;
 use std::path::Path;
 
 use config::{ConfigError, MirrordConfig};
+use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use tracing::warn;
@@ -125,6 +126,7 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///   "operator": true,
 ///   "kubeconfig": "~/.kube/config",
 ///   "sip_binaries": "bash"
+///   "telemetry": true,
 /// }
 /// ```
 ///
@@ -262,6 +264,14 @@ pub struct LayerConfig {
     /// # feature {#root-feature}
     #[config(nested)]
     pub feature: FeatureConfig,
+
+    /// ## telemetry {#root-telemetry}
+    /// Controls whether or not mirrord sends telemetry data to MetalBear cloud.
+    /// Telemetry sent doesn't contain personal identifiers or any data that
+    /// should be considered sensitive. It is used to improve the product.
+    /// [For more information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md)
+    #[config(env = "MIRRORD_TELEMETRY", default = true)]
+    pub telemetry: bool,
 }
 
 impl LayerConfig {
@@ -347,6 +357,20 @@ impl LayerConfig {
             }
         }
         Ok(())
+    }
+}
+
+impl CollectAnalytics for &LayerConfig {
+    fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
+        analytics.add("pause", self.pause);
+        analytics.add(
+            "accept_invalid_certificates",
+            self.accept_invalid_certificates,
+        );
+        analytics.add("use_kubeconfig", self.kubeconfig.is_some());
+        (&self.target).collect_analytics(analytics);
+        (&self.agent).collect_analytics(analytics);
+        (&self.feature).collect_analytics(analytics);
     }
 }
 
@@ -553,6 +577,7 @@ mod tests {
             accept_invalid_certificates: Some(false),
             pause: Some(false),
             kubeconfig: None,
+            telemetry: None,
             connect_agent_name: None,
             connect_agent_port: None,
             target: Some(TargetFileConfig::Advanced {

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
@@ -174,6 +175,12 @@ pub struct AgentConfig {
     #[cfg(all(debug_assertions, not(test)))] // not(test) so that it's not included in the schema json.
     #[config(env = "MIRRORD_AGENT_TEST_ERROR", default = false, unstable)]
     pub test_error: bool,
+}
+
+impl CollectAnalytics for &AgentConfig {
+    fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
+        analytics.add("ephemeral", self.ephemeral);
+    }
 }
 
 #[cfg(test)]
