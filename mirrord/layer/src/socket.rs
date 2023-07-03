@@ -2,7 +2,7 @@
 //! absolute minimum
 use std::{
     collections::{HashSet, VecDeque},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
     os::unix::io::RawFd,
     str::FromStr,
     sync::{Arc, LazyLock},
@@ -13,7 +13,7 @@ use libc::{c_int, sockaddr, socklen_t};
 use mirrord_config::feature::network::outgoing::OutgoingFilter;
 use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
-use tracing::warn;
+use tracing::{debug, error, warn};
 use trust_dns_resolver::config::Protocol;
 
 use self::id::SocketId;
@@ -27,6 +27,12 @@ use crate::{
 pub(super) mod hooks;
 pub(crate) mod id;
 pub(crate) mod ops;
+
+// TODO(alex): Should be an enum, but to do so requires the `adt_const_params` feature, which also
+// requires enabling `incomplete_features`.
+type ConnectProtocol = bool;
+const TCP: ConnectProtocol = false;
+const UDP: ConnectProtocol = !TCP;
 
 pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock::new(DashMap::new);
 
@@ -324,8 +330,45 @@ impl OutgoingSelector {
         Self { remote, local }
     }
 
-    fn connect_remote(&self, address: SocketAddr) -> bool {
-        true
+    #[tracing::instrument(level = "debug", ret)]
+    fn connect_remote<const PROTOCOL: ConnectProtocol>(&self, address: SocketAddr) -> bool {
+        use mirrord_config::feature::network::outgoing::{OutgoingAddress, ProtocolFilter};
+
+        let filter_protocol = |outgoing: &&OutgoingFilter| match outgoing.protocol {
+            ProtocolFilter::Any => true,
+            ProtocolFilter::Tcp if PROTOCOL == TCP => true,
+            ProtocolFilter::Udp if PROTOCOL == UDP => true,
+            _ => false,
+        };
+
+        let any_address = |outgoing: &OutgoingFilter| match outgoing.address {
+            OutgoingAddress::Socket(select_address) => {
+                if select_address.ip().is_unspecified()
+                    || select_address.port() == 0
+                    || select_address == address
+                {
+                    true
+                } else {
+                    false
+                }
+            }
+            OutgoingAddress::Name((ref name, port)) => format!("{name}:{port}")
+                .to_socket_addrs()
+                .inspect(|resolved| debug!("resolved addresses {resolved:#?}"))
+                .inspect_err(|fail| error!("resolved addresses  failed {fail:#?}"))
+                .map(|mut resolved| resolved.any(|resolved_address| resolved_address == address))
+                .unwrap_or_default(),
+            OutgoingAddress::Subnet((subnet, port)) => {
+                if subnet.contains(&address.ip()) && (port == 0 || port == address.port()) {
+                    true
+                } else {
+                    false
+                }
+            }
+        };
+
+        self.remote.iter().filter(filter_protocol).any(any_address)
+            || !self.local.iter().filter(filter_protocol).any(any_address)
     }
 }
 

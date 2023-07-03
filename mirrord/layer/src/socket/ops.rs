@@ -295,12 +295,6 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
     }
 }
 
-// TODO(alex): Should be an enum, but to do so requires the `adt_const_params` feature, which also
-// requires enabling `incomplete_features`.
-type ConnectType = bool;
-const TCP: ConnectType = false;
-const UDP: ConnectType = !TCP;
-
 /// Common logic between Tcp/Udp `connect`, when used for the outgoing traffic feature.
 ///
 /// Sends a hook message that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request
@@ -308,7 +302,7 @@ const UDP: ConnectType = !TCP;
 /// This returns errno so we can restore the correct errno in case result is -1 (until we get
 /// back to the hook we might call functions that will corrupt errno)
 #[tracing::instrument(level = "trace", ret)]
-fn connect_outgoing<const TYPE: ConnectType, const CALL_CONNECT: bool>(
+fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
     sockfd: RawFd,
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
@@ -323,9 +317,14 @@ fn connect_outgoing<const TYPE: ConnectType, const CALL_CONNECT: bool>(
     //
     // ADD(alex) [mid] 2023-07-03: I think we might need to call `getaddrinfo` ourselves, and sort
     // of "manually" resolve DNS, instead of relying on `ToSocketAddrs`.
+    //
+    // Should look into what happens if the user passes a name to be resolved here, and how it
+    // interacts with the selector only allowing certain addresses (and not allowing the remote DNS
+    // resolver to do it's thing).
     OUTGOING_SELECTOR
         .get()?
-        .connect_remote(remote_address.as_socket()?);
+        .connect_remote::<PROTOCOL>(remote_address.as_socket()?)
+        .then_some(())?;
 
     // Prepare this socket to be intercepted.
     let (mirror_tx, mirror_rx) = oneshot::channel();
@@ -335,7 +334,7 @@ fn connect_outgoing<const TYPE: ConnectType, const CALL_CONNECT: bool>(
         channel_tx: mirror_tx,
     };
 
-    let hook_message = match TYPE {
+    let hook_message = match PROTOCOL {
         TCP => {
             let connect_hook = TcpOutgoing::Connect(connect);
             HookMessage::TcpOutgoing(connect_hook)
@@ -448,8 +447,6 @@ pub(super) fn connect(
     let remote_address = SockAddr::try_from_raw(raw_address, address_length)?;
     let optional_ip_address = remote_address.as_socket();
 
-    // TODO(alex) [high] 2023-06-26: Try to extract the functionalities into separate handlers, so
-    // we can get rid of branching check for unix socket vs normal socket.
     let unix_streams = REMOTE_UNIX_STREAMS
         .get()
         .expect("Should be set during initialization!");

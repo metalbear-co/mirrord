@@ -168,7 +168,7 @@ mod parser {
         character::complete::{alphanumeric1, digit1},
         combinator::opt,
         multi::many1,
-        sequence::{preceded, terminated},
+        sequence::{delimited, preceded, terminated},
         IResult,
     };
 
@@ -179,15 +179,25 @@ mod parser {
         Ok((input, protocol))
     }
 
-    // TODO(alex) [low] 2023-06-28: I would like this whole thing to live in `/config`, but I think
-    // it can't be done due to `ToSocketAddrs` trying to resolve DNS, it would resolve the wrong
-    // address, if it lived before the layer is running.
-    //
-    // Should check if this is a problem or not.
+    /// We try to parse 3 different kinds of values here:
+    ///
+    /// 1. `name.with.dots`;
+    /// 2. `1.2.3.4.5.6`;
+    /// 3. `[dad:1337:fa57::0]`
+    ///
+    /// Where 1 and 2 are handled by `dotted_address`.
+    ///
+    /// The parser is not interested in only eating correct values here for hostnames, ip addresses,
+    /// etc., it just tries to get a good enough string that could be parsed by
+    /// [`SocketAddr::parse`], or [`IpNet::parse`].
     pub(super) fn address(input: &[u8]) -> nom::IResult<&[u8], Vec<u8>> {
-        let alphanum_or_dot = alt((alphanumeric1, tag(b".")));
-        let dotted_address = many1(alphanum_or_dot);
-        let (input, address) = opt(dotted_address)(input)?;
+        let ipv6 = many1(alt((alphanumeric1, tag(b":"))));
+        let ipv6_host = delimited(tag(b"["), ipv6, tag(b"]"));
+
+        let name_or_ipv4 = alt((alphanumeric1, tag(b"-"), tag(b"_"), tag(b".")));
+        let dotted_address = many1(name_or_ipv4);
+
+        let (input, address) = opt(alt((dotted_address, ipv6_host)))(input)?;
 
         let address = address
             .map(|addr| addr.concat())
@@ -242,14 +252,20 @@ impl FromStr for OutgoingFilter {
         let subnet = subnet.map(|s| String::from_utf8(s)).transpose()?;
         let port = str::from_utf8(&port)?.parse::<u16>()?;
 
+        println!("{address:#?} {port:#?}");
+
         let address = subnet
             .map(|subnet| format!("{address}/{subnet}").parse::<ipnet::IpNet>())
             .transpose()?
             .map_or_else(
+                // Try to parse as an IPv4 address.
                 || {
                     format!("{address}:{port}")
                         .parse::<SocketAddr>()
+                        // Try again as IPv6.
+                        .or_else(|_| format!("[{address}]:{port}").parse())
                         .map(OutgoingAddress::Socket)
+                        // Neither IPv4 nor IPv6, it's probably a name.
                         .unwrap_or(OutgoingAddress::Name((address.to_string(), port)))
                 },
                 |subnet| OutgoingAddress::Subnet((subnet, port)),
@@ -358,6 +374,21 @@ mod tests {
     }
 
     #[fixture]
+    fn ipv6() -> &'static str {
+        "tcp://[2800:3f0:4001:81e::2004]:7777"
+    }
+
+    #[fixture]
+    fn ipv6_converted() -> OutgoingFilter {
+        OutgoingFilter {
+            protocol: ProtocolFilter::Tcp,
+            address: OutgoingAddress::Socket(
+                SocketAddr::from_str("[2800:3f0:4001:81e::2004]:7777").unwrap(),
+            ),
+        }
+    }
+
+    #[fixture]
     fn protocol_only() -> &'static str {
         "tcp://"
     }
@@ -385,14 +416,14 @@ mod tests {
 
     #[fixture]
     fn name_only() -> &'static str {
-        "google.com"
+        "rust-lang.org"
     }
 
     #[fixture]
     fn name_only_converted() -> OutgoingFilter {
         OutgoingFilter {
             protocol: ProtocolFilter::Any,
-            address: OutgoingAddress::Name(("google.com".to_string(), 0)),
+            address: OutgoingAddress::Name(("rust-lang.org".to_string(), 0)),
         }
     }
 
@@ -479,6 +510,7 @@ mod tests {
 
     #[rstest]
     #[case(full(), full_converted())]
+    #[case(ipv6(), ipv6_converted())]
     #[case(protocol_only(), protocol_only_converted())]
     #[case(name(), name_converted())]
     #[case(name_only(), name_only_converted())]
