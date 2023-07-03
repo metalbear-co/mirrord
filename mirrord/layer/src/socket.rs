@@ -299,15 +299,13 @@ impl OutgoingSelector {
     pub(crate) fn new(remote: HashSet<OutgoingFilter>, local: HashSet<OutgoingFilter>) -> Self {
         use mirrord_config::feature::network::outgoing::*;
 
-        let enabled_tcp = ENABLED_TCP_OUTGOING
+        let enabled_tcp = *ENABLED_TCP_OUTGOING
             .get()
-            .expect("ENABLED_TCP_OUTGOING should be set before initializing OutgoingSelector!")
-            .clone();
+            .expect("ENABLED_TCP_OUTGOING should be set before initializing OutgoingSelector!");
 
-        let enabled_udp = ENABLED_UDP_OUTGOING
+        let enabled_udp = *ENABLED_UDP_OUTGOING
             .get()
-            .expect("ENABLED_TCP_OUTGOING should be set before initializing OutgoingSelector!")
-            .clone();
+            .expect("ENABLED_TCP_OUTGOING should be set before initializing OutgoingSelector!");
 
         let remote = remote
             .into_iter()
@@ -343,14 +341,9 @@ impl OutgoingSelector {
 
         let any_address = |outgoing: &OutgoingFilter| match outgoing.address {
             OutgoingAddress::Socket(select_address) => {
-                if select_address.ip().is_unspecified()
+                select_address.ip().is_unspecified()
                     || select_address.port() == 0
                     || select_address == address
-                {
-                    true
-                } else {
-                    false
-                }
             }
             OutgoingAddress::Name((ref name, port)) => format!("{name}:{port}")
                 .to_socket_addrs()
@@ -359,11 +352,7 @@ impl OutgoingSelector {
                 .map(|mut resolved| resolved.any(|resolved_address| resolved_address == address))
                 .unwrap_or_default(),
             OutgoingAddress::Subnet((subnet, port)) => {
-                if subnet.contains(&address.ip()) && (port == 0 || port == address.port()) {
-                    true
-                } else {
-                    false
-                }
+                subnet.contains(&address.ip()) && (port == 0 || port == address.port())
             }
         };
 

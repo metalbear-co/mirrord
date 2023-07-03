@@ -249,7 +249,7 @@ impl FromStr for OutgoingFilter {
         // Stringify and convert to proper types.
         let protocol = str::from_utf8(protocol)?.parse()?;
         let address = str::from_utf8(&address)?;
-        let subnet = subnet.map(|s| String::from_utf8(s)).transpose()?;
+        let subnet = subnet.map(String::from_utf8).transpose()?;
         let port = str::from_utf8(&port)?.parse::<u16>()?;
 
         println!("{address:#?} {port:#?}");

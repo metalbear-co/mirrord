@@ -78,7 +78,7 @@ use std::{
     net::SocketAddr,
     panic,
     str::FromStr,
-    sync::{LazyLock, OnceLock, RwLock},
+    sync::{OnceLock, RwLock},
 };
 
 use bimap::BiMap;
@@ -431,7 +431,7 @@ fn set_globals(config: &LayerConfig) {
             .outgoing
             .remote
             .iter()
-            .map(|filter| OutgoingFilter::from_str(&filter).expect("Invalid filter string!"))
+            .map(|filter| OutgoingFilter::from_str(filter).expect("Invalid filter string!"))
             .collect();
 
         let outgoing_local = config
@@ -440,7 +440,7 @@ fn set_globals(config: &LayerConfig) {
             .outgoing
             .local
             .iter()
-            .map(|filter| OutgoingFilter::from_str(&filter).expect("Invalid filter string!"))
+            .map(|filter| OutgoingFilter::from_str(filter).expect("Invalid filter string!"))
             .collect();
 
         // This will crash the app if it comes before `ENABLED_(TCP|UDP)_OUTGOING`!
