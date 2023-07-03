@@ -86,8 +86,9 @@ impl<'a> HookManager<'a> {
         let function = Module::find_symbol_by_name(module, symbol)
             .ok_or_else(|| LayerError::NoSymbolName(symbol.to_string()))?;
 
+        // on Go we use `replace_fast` since we don't use the original function.
         self.interceptor
-            .replace(function, NativePointer(detour), NativePointer(null_mut()))
+            .replace_fast(function, NativePointer(detour))
             .map_err(Into::into)
     }
 
