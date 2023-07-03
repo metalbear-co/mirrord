@@ -19,7 +19,7 @@ use tokio::net::TcpStream;
 /// Start an application (and load the layer into it) that listens on a port that is configured to
 /// be ignored, and verify that no messages are sent to the agent.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn listen_ports(
     #[values(Application::RustListenPorts)] application: Application,
