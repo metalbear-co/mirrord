@@ -305,13 +305,18 @@ impl FileManager {
             .and_then(|remote_file| {
                 if let RemoteFile::File(file) = remote_file {
                     let mut buffer = vec![0; buffer_size as usize];
-                    let read_amount =
-                        file.read(&mut buffer).map(|read_amount| ReadFileResponse {
-                            bytes: buffer,
-                            read_amount: read_amount as u64,
-                        })?;
+                    let read_amount = file.read(&mut buffer)?;
 
-                    Ok(read_amount)
+                    // Truncate the buffer based on the actual number of bytes read
+                    buffer.truncate(read_amount);
+
+                    // Create the response with the read bytes and the read amount
+                    let response = ReadFileResponse {
+                        bytes: buffer,
+                        read_amount: read_amount as u64,
+                    };
+
+                    Ok(response)
                 } else {
                     Err(ResponseError::NotFile(fd))
                 }
@@ -376,16 +381,20 @@ impl FileManager {
                 if let RemoteFile::File(file) = remote_file {
                     let mut buffer = vec![0; buffer_size as usize];
 
-                    let read_result = file.read_at(&mut buffer, start_from).map(|read_amount| {
-                        // We handle the extra bytes in the `pread` hook, so here we can just
-                        // return the full buffer.
-                        ReadFileResponse {
-                            bytes: buffer,
-                            read_amount: read_amount as u64,
-                        }
-                    })?;
+                    let read_amount = file.read_at(&mut buffer, start_from)?;
 
-                    Ok(read_result)
+                    // Truncate the buffer based on the actual number of bytes read
+                    buffer.truncate(read_amount);
+
+                    // Further optimization: Create the response with the read bytes and the read
+                    // amount We will no longer send entire buffer filled with
+                    // zeroes
+                    let response = ReadFileResponse {
+                        bytes: buffer,
+                        read_amount: read_amount as u64,
+                    };
+
+                    Ok(response)
                 } else {
                     Err(ResponseError::NotFile(fd))
                 }
