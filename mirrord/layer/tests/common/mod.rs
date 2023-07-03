@@ -336,7 +336,12 @@ impl LayerConnection {
     }
 
     pub async fn is_ended(&mut self) -> bool {
-        self.codec.next().await.is_none()
+        if let Some(msg) = self.codec.next().await {
+            println!("Got unexpected message: {msg:?}");
+            false
+        } else {
+            true
+        }
     }
 
     /// Send the layer a message telling it the target got a new incoming connection.
