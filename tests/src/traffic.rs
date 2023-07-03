@@ -11,8 +11,8 @@ mod traffic {
     use rstest::*;
 
     use crate::utils::{
-        hostname_service, kube_client, run_exec, service, udp_logger_service, KubeService,
-        CONTAINER_NAME,
+        hostname_service, kube_client, run_exec_with_target, service, udp_logger_service,
+        KubeService, CONTAINER_NAME,
     };
 
     #[rstest]
@@ -24,7 +24,8 @@ mod traffic {
             "node",
             "node-e2e/remote_dns/test_remote_dns_enabled_works.mjs",
         ];
-        let mut process = run_exec(node_command, &service.target, None, None, None).await;
+        let mut process =
+            run_exec_with_target(node_command, &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -39,7 +40,8 @@ mod traffic {
             "node",
             "node-e2e/remote_dns/test_remote_dns_lookup_google.mjs",
         ];
-        let mut process = run_exec(node_command, &service.target, None, None, None).await;
+        let mut process =
+            run_exec_with_target(node_command, &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -56,7 +58,8 @@ mod traffic {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
         ];
-        let mut process = run_exec(node_command, &service.target, None, None, None).await;
+        let mut process =
+            run_exec_with_target(node_command, &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -71,7 +74,8 @@ mod traffic {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request_ipv6.mjs",
         ];
-        let mut process = run_exec(node_command, &service.target, None, None, None).await;
+        let mut process =
+            run_exec_with_target(node_command, &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -86,7 +90,7 @@ mod traffic {
             "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
         ];
         let mirrord_args = vec!["--no-outgoing"];
-        let mut process = run_exec(
+        let mut process = run_exec_with_target(
             node_command,
             &service.target,
             None,
@@ -107,7 +111,8 @@ mod traffic {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_make_request_after_listen.mjs",
         ];
-        let mut process = run_exec(node_command, &service.target, None, None, None).await;
+        let mut process =
+            run_exec_with_target(node_command, &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
     }
@@ -120,7 +125,8 @@ mod traffic {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_make_request_localhost.mjs",
         ];
-        let mut process = run_exec(node_command, &service.target, None, None, None).await;
+        let mut process =
+            run_exec_with_target(node_command, &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
     }
@@ -163,7 +169,7 @@ mod traffic {
         // mirrord forwarding outgoing UDP traffic via the target pod.
         // If this verification fails, the test itself is invalid.
         let mirrord_no_outgoing = vec!["--no-outgoing"];
-        let mut process = run_exec(
+        let mut process = run_exec_with_target(
             node_command.clone(),
             &target_service.target,
             Some(&target_service.namespace),
@@ -178,7 +184,7 @@ mod traffic {
         assert_eq!(logs.unwrap(), "");
 
         // Run mirrord with outgoing enabled.
-        let mut process = run_exec(
+        let mut process = run_exec_with_target(
             node_command,
             &target_service.target,
             Some(&target_service.namespace),
@@ -221,7 +227,7 @@ mod traffic {
             &port,
         ];
         let mirrord_args = vec!["--no-outgoing"];
-        let mut process = run_exec(
+        let mut process = run_exec_with_target(
             node_command,
             &service.target,
             None,
@@ -242,7 +248,7 @@ mod traffic {
 
     pub async fn test_go(service: impl Future<Output = KubeService>, command: Vec<&str>) {
         let service = service.await;
-        let mut process = run_exec(command, &service.target, None, None, None).await;
+        let mut process = run_exec_with_target(command, &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
     }
@@ -250,14 +256,14 @@ mod traffic {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn go18_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
-        let command = vec!["go-e2e-outgoing/18"];
+        let command = vec!["go-e2e-outgoing/18.go_test_app"];
         test_go(service, command).await;
     }
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn go19_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
-        let command = vec!["go-e2e-outgoing/19"];
+        let command = vec!["go-e2e-outgoing/19.go_test_app"];
         test_go(service, command).await;
     }
 
@@ -265,7 +271,7 @@ mod traffic {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
     pub async fn go20_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
-        let command = vec!["go-e2e-outgoing/20"];
+        let command = vec!["go-e2e-outgoing/20.go_test_app"];
         test_go(service, command).await;
     }
 
@@ -273,7 +279,7 @@ mod traffic {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
     pub async fn go18_dns_lookup(#[future] service: KubeService) {
-        let command = vec!["go-e2e-dns/18"];
+        let command = vec!["go-e2e-dns/18.go_test_app"];
         test_go(service, command).await;
     }
 
@@ -281,7 +287,7 @@ mod traffic {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
     pub async fn go19_dns_lookup(#[future] service: KubeService) {
-        let command = vec!["go-e2e-dns/19"];
+        let command = vec!["go-e2e-dns/19.go_test_app"];
         test_go(service, command).await;
     }
 
@@ -289,7 +295,7 @@ mod traffic {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
     pub async fn go20_dns_lookup(#[future] service: KubeService) {
-        let command = vec!["go-e2e-dns/20"];
+        let command = vec!["go-e2e-dns/20.go_test_app"];
         test_go(service, command).await;
     }
 
@@ -298,17 +304,20 @@ mod traffic {
     pub async fn listen_localhost(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec!["node", "node-e2e/listen/test_listen_localhost.mjs"];
-        let mut process = run_exec(node_command, &service.target, None, None, None).await;
+        let mut process =
+            run_exec_with_target(node_command, &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
     }
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(120))]
     pub async fn gethostname_remote_result(#[future] hostname_service: KubeService) {
         let service = hostname_service.await;
         let node_command = vec!["python3", "-u", "python-e2e/hostname.py"];
-        let mut process = run_exec(node_command, &service.target, None, None, None).await;
+        let mut process =
+            run_exec_with_target(node_command, &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -346,7 +355,7 @@ mod traffic {
             "MIRRORD_OUTGOING_REMOTE_UNIX_STREAMS",
             "/app/unix-socket-server.sock",
         )]);
-        let mut process = run_exec(executable, &service.target, None, None, env).await;
+        let mut process = run_exec_with_target(executable, &service.target, None, None, env).await;
         let res = process.child.wait().await.unwrap();
 
         // The test application panics if it does not successfully connect to the socket, send data,
@@ -368,7 +377,7 @@ mod traffic {
             .to_string();
         let executable = vec![app_path.as_str()];
 
-        let mut process = run_exec(executable, &service.target, None, None, None).await;
+        let mut process = run_exec_with_target(executable, &service.target, None, None, None).await;
         let res = process.child.wait().await.unwrap();
 
         // The test application panics if it does not successfully connect to the socket, send data,

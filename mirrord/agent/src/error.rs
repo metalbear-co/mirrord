@@ -97,8 +97,8 @@ pub enum AgentError {
     #[error("DNS response receive failed with `{0}`")]
     DnsResponseReceiveError(#[from] tokio::sync::oneshot::error::RecvError),
 
-    #[error("Pause was set, but container id or runtime is missing.")]
-    MissingContainerInfo,
+    #[error("Failed to fetch container info with `{0}`")]
+    MissingContainerInfo(String),
 
     #[error("Ran out of connections, dropping new connection")]
     ConnectionLimitReached,
@@ -141,6 +141,12 @@ pub enum AgentError {
 
     #[error("Container Runtime Error while trying to pause: {0}")]
     PauseRuntimeError(String),
+
+    #[error("Requested pause, but there is no target container.")]
+    PauseAbsentTarget,
+
+    #[error("Pause feature is not supported with ephemeral agent.")]
+    PauseEphemeralAgent,
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;

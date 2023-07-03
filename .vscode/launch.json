@@ -9,11 +9,14 @@
       "request": "launch",
       "name": "cargo test",
       "program": "target/debug/deps/mirrord_layer-8583c201705cdf75",
-      "args": ["test_include_complex_configuration"],
+      "args": [
+        "test_include_complex_configuration"
+      ],
       "cwd": "${workspaceFolder}",
       "sourceMap": {},
-      "sourceLanguages": ["rust"],
-      
+      "sourceLanguages": [
+        "rust"
+      ],
     },
     {
       "name": "Launch golang file",
@@ -26,7 +29,10 @@
       "name": "Launch index.ts",
       "type": "node",
       "request": "launch",
-      "runtimeArgs": ["-r", "ts-node/register"],
+      "runtimeArgs": [
+        "-r",
+        "ts-node/register"
+      ],
       "args": [
         "${workspaceFolder}/cli/src/index.ts",
         "nginx-deployment-66b6c48dd5-zshg9"
@@ -34,18 +40,13 @@
       "cwd": "${workspaceFolder}/cli"
     },
     {
-      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
-      "name": "Launch Extension",
-      "outFiles": ["${workspaceFolder}/vscode-ext/out/**/*.js"],
-      "request": "launch",
-      "type": "extensionHost"
-    },
-    {
       "type": "lldb",
       "request": "launch",
       "name": "app.mjs: Debug mirrord-layer",
       "program": "node",
-      "args": ["${workspaceFolder}/sample/node/app.mjs"],
+      "args": [
+        "${workspaceFolder}/sample/node/app.mjs"
+      ],
       "sourceMap": {},
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
@@ -66,7 +67,9 @@
       "args": [],
       "cwd": "${workspaceFolder}",
       "sourceMap": {},
-      "sourceLanguages": ["rust"],
+      "sourceLanguages": [
+        "rust"
+      ],
       "env": {
         "DYLD_INSERT_LIBRARIES": "${workspaceFolder}/target/debug/libmirrord_layer.dylib",
         "LD_PRELOAD": "${workspaceFolder}/target/debug/libmirrord_layer.so",

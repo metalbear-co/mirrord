@@ -8,6 +8,471 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.49.0](https://github.com/metalbear-co/mirrord/tree/3.49.0) - 2023-07-03
+
+
+### Added
+
+- Added new analytics, see TELEMETRY.md for more details.
+
+
+### Internal
+
+- Fix some text in the operator documentation and progress reporting
+- Remove IDE instructions from CONTRIBUTING.md
+
+
+## [3.48.0](https://github.com/metalbear-co/mirrord/tree/3.48.0) - 2023-06-29
+
+
+### Added
+
+- Added Deployment to list of targets returnd from `mirrord ls`.
+  [#1503](https://github.com/metalbear-co/mirrord/issues/1503)
+
+
+### Changed
+
+- Bump rust nightly to 2023-04-19 (latest nightly with support for const std
+  traits). [#1457](https://github.com/metalbear-co/mirrord/issues/1457)
+- Change loglevel of warnings to info of logs that were mistakenly warning
+- Moved IntelliJ to its own repository and versioning
+
+
+### Fixed
+
+- Hook send_to and recv_from, leveraging our existing UDP interceptor mechanism
+  to manually resolve DNS (as expected by netty, especially relevant for
+  macos). [#1458](https://github.com/metalbear-co/mirrord/issues/1458)
+- Add new rule to the OUTPUT chain of iptables in agent to support kubectl
+  port-forward [#1479](https://github.com/metalbear-co/mirrord/issues/1479)
+- If the local user application closes a socket but continues running, we now
+  also stop mirroring/stealing from the target.
+  [#1530](https://github.com/metalbear-co/mirrord/issues/1530)
+- Add /home and /usr to the default file filter.
+  [#1582](https://github.com/metalbear-co/mirrord/issues/1582)
+- Fixed reporting EADDRINUSE as an error
+
+
+### Internal
+
+- (Operator only) Add `feature.network.incoming.on_concurrent_steal` option to
+  allow overriding port locks.
+- Improve medschool to produce more deterministic configuration.md, and
+  (mostly) fixes it dropping some configuration docs during processing.
+- Make mirrord ls deployment fetch parallel.
+- Remove unused CRD for operator and don't error on missing operator
+  credentials
+
+
+## [3.47.0](https://github.com/metalbear-co/mirrord/tree/3.47.0) - 2023-06-20
+
+
+### Added
+
+- Added `listen_ports` to `incoming` config to control what port is actually
+  being used locally
+  so mirrored/stolen ports can still be accessed locally via those. If port
+  provided by `listen_ports`
+  isn't available, application will receive `EADDRINUSE`.
+  Example configuration:
+  ```json
+  {
+      "feature":
+      {
+          "incoming": {
+              "listen_ports": [[80, 7111]]
+          }
+      }
+  }
+  ```
+  will make port 80 available on 7111 locally, while stealing/mirroring port
+  80. [#1554](https://github.com/metalbear-co/mirrord/issues/1554)
+
+
+### Changed
+
+- Changed the logic of choosing local port to use for intercepting mirror/steal
+  sockets
+  now instead of assigning a random port always, we try to use the original one
+  and if we fail we assign random port.
+  This only happens if `listen_ports` isn't used.
+  [#1554](https://github.com/metalbear-co/mirrord/issues/1554)
+- The path `/opt` itself is read locally by default (up until now paths inside
+  that directory were read locally by default, but not the directory itself).
+  [#1570](https://github.com/metalbear-co/mirrord/issues/1570)
+- Changed back required IntelliJ version to 222+ from 223+
+- Moved VSCode extension to its own repository and versioning
+  https://github.com/metalbear-co/mirrord-vscode
+
+
+### Fixed
+
+- Running python with mirrord on apple CPUs.
+  [#1570](https://github.com/metalbear-co/mirrord/issues/1570)
+
+
+### Internal
+
+- Use tagged version of ci-agent-build, so we can update Rust and the agent
+  independently. [#1457](https://github.com/metalbear-co/mirrord/issues/1457)
+
+
+## [3.46.0](https://github.com/metalbear-co/mirrord/tree/3.46.0) - 2023-06-14
+
+
+### Added
+
+- Add support for HTTP Path filtering
+  [#1512](https://github.com/metalbear-co/mirrord/issues/1512)
+
+
+### Changed
+
+- Refactor vscode-ext code to be more modular
+
+
+### Fixed
+
+- Fixed bogus warnings in the VS Code extension.
+  [#1504](https://github.com/metalbear-co/mirrord/issues/1504)
+- Mirroring/stealing a port for a second time after the user application closed
+  it once. [#1526](https://github.com/metalbear-co/mirrord/issues/1526)
+- fixed using dotnet debugger on VSCode
+  [#1529](https://github.com/metalbear-co/mirrord/issues/1529)
+- Properly detecting and ignoring localhost port used by Rider's debugger.
+- fix vscode SIP patch not working
+
+
+### Internal
+
+- Add a state Persistent Volume Claim to operator deployment setup.
+- Bring the style guide into the repo.
+- Fix vscode e2e job not running
+- Remove OpenSSL dependency again
+- Switch to new licensing and operator authenticaion flow.
+- fix launch json for vscode extension
+- fix macos build script to use directory's toolchain
+
+
+## [3.45.2](https://github.com/metalbear-co/mirrord/tree/3.45.2) - 2023-06-12
+
+
+### Internal
+
+- Remove frida openSSL dependency
+
+
+## [3.45.1](https://github.com/metalbear-co/mirrord/tree/3.45.1) - 2023-06-11
+
+
+### Fixed
+
+- Installation script now does not use `sudo` when not needed. This enbables
+  installing mirrord in a `RUN` step in an ubuntu docker container, without
+  installing `sudo` in an earlier step.
+  [#1514](https://github.com/metalbear-co/mirrord/issues/1514)
+- fix crio on openshift
+  [#1534](https://github.com/metalbear-co/mirrord/issues/1534)
+- Skipping `gcc` when debugging Go in VS Code extension.
+
+
+### Internal
+
+- change `mirrord-protocol` to have its own versioning. add `mirrord-macros`
+  and `protocol_break` attribute to mark places we want to break on major
+  updates.
+  Add CI to verify that if protocol is changed, `Cargo.toml` is changed as well
+  (to force bumps)
+  Fix some of the structs being `OS` controlled, potentially breaking the
+  protocol between different OS's.
+  (`GetDEnts64(RemoteResult<GetDEnts64Response>),`)
+  [#1355](https://github.com/metalbear-co/mirrord/issues/1355)
+- Partial refactor towards 1512
+  [#1512](https://github.com/metalbear-co/mirrord/issues/1512)
+- Add integration test for DNS resolution
+- Bumped versions of some VS Code extension dependencies.
+- Frida bump and other dependencies
+- Integration test for recv_from
+- Reorganize dev docs
+- Update our socket2 dependency, since the code we pushed there was released.
+
+
+## [3.45.0](https://github.com/metalbear-co/mirrord/tree/3.45.0) - 2023-06-05
+
+
+### Added
+
+- Rider is now supported by the IntelliJ plugin.
+  [#1012](https://github.com/metalbear-co/mirrord/issues/1012)
+
+
+### Fixed
+
+- Chagned agent to not return errors on reading from outgoing sockets, and
+  layer to not crash in that case anyway
+
+
+### Internal
+
+- Use one thread for namespaced runtimes
+  [#1287](https://github.com/metalbear-co/mirrord/issues/1287)
+- Better timeformatting in e2e and maybe reduce flakiness?
+- Fix nodejs deprecation warnings in CI
+- Set MIRRORD_AGENT_IMAGE for vscode e2e
+
+
+## [3.44.2](https://github.com/metalbear-co/mirrord/tree/3.44.2) - 2023-06-01
+
+
+### Changed
+
+- Change phrasing on version mismatch warning.
+- Add `/Volumes` to default local on macOS
+- Change Ping interval from 60s down to 30s.
+- Changed local read defaults - list now includes `^/sbin(/|$)` and
+  `^/var/run/com.apple`.
+
+
+### Fixed
+
+- Running postman with mirrord works.
+  [#1445](https://github.com/metalbear-co/mirrord/issues/1445)
+- Return valid error code when dns lookup fails, instead of -1.
+
+
+### Internal
+
+- Add E2E tests for vscode extension
+  [#201](https://github.com/metalbear-co/mirrord/issues/201)
+- Fixed flaky integration tests.
+  [#1452](https://github.com/metalbear-co/mirrord/issues/1452)
+- Fixed e2e tests' flakiness in the CI.
+  [#1453](https://github.com/metalbear-co/mirrord/issues/1453)
+- Change CI log level to be debug instead of trace
+- Hooking `_NSGetExecutablePath` on macOS to strip the `mirrord-bin` temp dir
+  off the path.
+- Introduce a tool to extract config docs into a markdown file. Update docs to
+  match whats in mirrord-dev.
+- On macOS, if we path a binary for SIP and it is in a path that is inside a
+  directory that has a name that ends with `.app`, we add the frameworks
+  directory to `DYLD_FALLBACK_FRAMEWORK_PATH`.
+- Provide buffer for `IndexAllocator` to avoid re-use of indices too fast
+
+
+## [3.44.1](https://github.com/metalbear-co/mirrord/tree/3.44.1) - 2023-05-26
+
+
+### Changed
+
+- Never importing `RUST_LOG` environment variable from the cluster, regardless
+  of configuration.
+
+
+### Fixed
+
+- Provide helpful error messages on errors in IDEs.
+  [#1392](https://github.com/metalbear-co/mirrord/issues/1392)
+- Log level control when running targetless.
+  [#1446](https://github.com/metalbear-co/mirrord/issues/1446)
+- Change to sticky balloon on warnings in intelliJ
+  [#1456](https://github.com/metalbear-co/mirrord/issues/1456)
+- Setting the namespace via the configuration was not possible in the IDE
+  without also setting a target in the configuration file.
+  [#1461](https://github.com/metalbear-co/mirrord/issues/1461)
+- fixed IntelliJ failing silently when error happened on listing pods
+
+
+### Internal
+
+- Fix the test of reading from the SIP patch dir, that was not testing
+  anything.
+- Make the path field of `TargetConfig` an `Option`.
+
+
+## [3.44.0](https://github.com/metalbear-co/mirrord/tree/3.44.0) - 2023-05-24
+
+
+### Added
+
+- Changed agent's pause feature. Now the pause is requested dynamically by CLI
+  during setup and the agent keeps the target container paused until exit or
+  the unpause request was received.
+  [#1408](https://github.com/metalbear-co/mirrord/issues/1408)
+- Added support for NPM run configuration on JetBrains products.
+  [#1418](https://github.com/metalbear-co/mirrord/issues/1418)
+
+
+### Changed
+
+- Change mirrord ls to show only pods that are in running state (not
+  crashing,starting,etc)
+  [#1436](https://github.com/metalbear-co/mirrord/issues/1436)
+- Change fs mode to be local with overrides when targetless is used
+- Make progress text consitently lowercase.
+
+
+### Fixed
+
+- Fix misalignment on IntelliJ not accepting complex path in target
+  [#1441](https://github.com/metalbear-co/mirrord/issues/1441)
+- Add impersonate permissions for GCP specific RBAC in operator
+
+
+### Internal
+
+- Fix node spawn test flakiness on macOS
+  [#1431](https://github.com/metalbear-co/mirrord/issues/1431)
+
+
+## [3.43.0](https://github.com/metalbear-co/mirrord/tree/3.43.0) - 2023-05-22
+
+
+### Added
+
+- Support for targetless execution: when not specifying any target for the
+  agent, mirrord now spins up an independent agent. This can be useful e.g. if
+  you are just interested in getting the cluster's DNS resolution and outgoing
+  connectivity but don't want any pod's incoming traffic or FS.
+  [#574](https://github.com/metalbear-co/mirrord/issues/574)
+- Support for targetless mode in IntelliJ based IDEs.
+  [#1375](https://github.com/metalbear-co/mirrord/issues/1375)
+- Support for targetless mode in vscode.
+  [#1376](https://github.com/metalbear-co/mirrord/issues/1376)
+
+
+### Changed
+
+- If a user application tries to read paths inside mirrord's temp dir, we hook
+  that and read the path outside instead.
+  [#1403](https://github.com/metalbear-co/mirrord/issues/1403)
+- Don't print error if we fail checking for operator
+
+
+### Fixed
+
+- Added better detection for protected binaries, fixes not loading into Go
+  binary [#1397](https://github.com/metalbear-co/mirrord/issues/1397)
+- Disallow binding on the same address:port twice. Solves part of issue 1123.
+  [#1123](https://github.com/metalbear-co/mirrord/issues/1123)
+- Fix the lost update bug with config dropdown for intelliJ
+  Fix the lost update bug with config dropdown for intelliJ.
+  [#1420](https://github.com/metalbear-co/mirrord/issues/1420)
+- Fix intelliJ compatability issue by implementing missing
+  createPopupActionGroup
+
+
+### Internal
+
+- Run IntelliJ Plugin Verifier on CI
+  [#1417](https://github.com/metalbear-co/mirrord/issues/1417)
+- Remove bors.toml since we use GH merge queue now
+- Upgrade k8s dependencies and rustls, remove ugly feature ip patch
+
+
+## [3.42.0](https://github.com/metalbear-co/mirrord/tree/3.42.0) - 2023-05-15
+
+
+### Added
+
+- mirrord config dropdown for intelliJ.
+  [#1030](https://github.com/metalbear-co/mirrord/issues/1030)
+- Log agent version when initializing the agent.
+
+
+### Changed
+
+- Remove quotes in InvalidTarget' target error message
+
+
+### Fixed
+
+- Use ProgressManager for mirrord progress on intelliJ
+  [#1337](https://github.com/metalbear-co/mirrord/issues/1337)
+- Fixed `go run` failing because of reading remote files by maing paths under
+  /private and /var/folders read locally by default.
+  [#1397](https://github.com/metalbear-co/mirrord/issues/1397)
+- Fix not loading into Go because of SIP by adding into default patched
+  binaries
+
+
+## [3.41.1](https://github.com/metalbear-co/mirrord/tree/3.41.1) - 2023-05-07
+
+
+### Fixed
+
+- Fixed regression in GoLand and NodeJS causing a crash
+  [#1389](https://github.com/metalbear-co/mirrord/issues/1389)
+
+
+## [3.41.0](https://github.com/metalbear-co/mirrord/tree/3.41.0) - 2023-05-06
+
+
+### Added
+
+- Last selected target is now remembered in IntelliJ extension and shown first
+  in the target selection dialog.
+  [#1347](https://github.com/metalbear-co/mirrord/issues/1347)
+- Warn user when their mirrord version doesn't match the operator version.
+
+
+### Changed
+
+- mirrord loading progress is displayed in the staus indicator on IntelliJ,
+  replacing the singleton notifier
+  [#1337](https://github.com/metalbear-co/mirrord/issues/1337)
+
+
+### Fixed
+
+- Fix crash on unexpected LogMessage
+  [#1380](https://github.com/metalbear-co/mirrord/issues/1380)
+- Added hook for recvfrom to support cases where caller expects the messages to
+  be from address they were sent to.
+  [#1386](https://github.com/metalbear-co/mirrord/issues/1386)
+
+
+### Internal
+
+- Add x-session-id to operator request, that is persistent across child
+  processes in a single mirrord exec.
+- Improve metadata for VSCode extension
+- Remove unnecessary DNS resolve on agent addr when incluster feature is
+  enabled in mirrord-kube.
+
+
+## [3.40.0](https://github.com/metalbear-co/mirrord/tree/3.40.0) - 2023-05-01
+
+
+### Added
+
+- Add a message informing users of the operator when they impersonate
+  deployments with mirrord.
+  [#add-operator-message](https://github.com/metalbear-co/mirrord/issues/add-operator-message)
+- Last selected target is now remembered in VS Code and shown first in the
+  quick pick widget.
+  [#1348](https://github.com/metalbear-co/mirrord/issues/1348)
+
+
+### Fixed
+
+- PyCharm plugin now detects `pydevd` debugger and properly excludes its port.
+  [#1020](https://github.com/metalbear-co/mirrord/issues/1020)
+- VS Code extension now detects `debugpy` debugger and properly excludes its
+  port. [#1145](https://github.com/metalbear-co/mirrord/issues/1145)
+- Fixed delve patch not working on GoLand macOS when running go tests
+  [#1364](https://github.com/metalbear-co/mirrord/issues/1364)
+- Fixed issues when importing some packages in Python caused by PYTHONPATH to
+  be used from the remote pod (add it to exclude)
+
+
+### Internal
+
+- Added Clippy lint for slicing and indexing.
+  [#1049](https://github.com/metalbear-co/mirrord/issues/1049)
+- Eliminate unused variable warnings for E2E tests on macOS.
+
+
 ## [3.39.1](https://github.com/metalbear-co/mirrord/tree/3.39.1) - 2023-04-21
 
 

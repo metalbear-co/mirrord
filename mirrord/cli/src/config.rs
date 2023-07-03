@@ -41,9 +41,6 @@ pub(super) enum Commands {
 
     #[command(hide = true)]
     Extract { path: String },
-    #[allow(dead_code)]
-    #[command(skip)]
-    Login(LoginArgs),
     /// Operator commands eg. setup
     #[command(hide = true)]
     Operator(Box<OperatorArgs>),
@@ -86,12 +83,7 @@ impl ToString for FsMode {
 }
 
 #[derive(Args, Debug)]
-#[command(group(
-    ArgGroup::new("exec")
-        .required(true)
-        .multiple(true)
-        .args(&["target", "config_file"]),
-))]
+#[command(group(ArgGroup::new("exec")))]
 pub(super) struct ExecArgs {
     /// Target name to mirror.    
     /// Target can either be a deployment or a pod.
@@ -177,9 +169,13 @@ pub(super) struct ExecArgs {
     #[arg(long)]
     pub no_udp_outgoing: bool,
 
-    /// Disable telemetry - this also disables version check. See https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md
+    /// Disable telemetry. See https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md
     #[arg(long)]
     pub no_telemetry: bool,
+
+    #[arg(long)]
+    /// Disable version check on startup.
+    pub disable_version_check: bool,
 
     /// Load config from config file
     #[arg(short = 'f', long)]
@@ -226,19 +222,28 @@ pub(super) enum OperatorCommand {
         #[arg(long)]
         accept_tos: bool,
 
-        /// License key to be stored in mirrord-operator-license secret
+        /// A mirrord for Teams license key
         #[arg(long)]
         license_key: Option<String>,
 
-        /// Output to kubernetes specs to file instead of stdout and piping to kubectl
+        /// Path to a file containing a mirrord for Teams license certificate
+        #[arg(long)]
+        license_path: Option<PathBuf>,
+
+        /// Output Kubernetes specs to file instead of stdout
         #[arg(short, long)]
         file: Option<PathBuf>,
 
-        /// Set namespace to setup operator in (this doesn't limit the namespaces the operator will
-        /// be able to access)
+        /// Namespace to create the operator in (this doesn't limit the namespaces the operator
+        /// will be able to access)
         #[arg(short, long, default_value = "mirrord")]
         namespace: OperatorNamespace,
+
+        /// Setup operator for offline telemetry collection
+        #[arg(long, hide = true)]
+        offline: bool,
     },
+    /// Print operator status
     Status {
         /// Specify config file to use
         #[arg(short = 'f')]

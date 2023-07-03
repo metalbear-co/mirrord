@@ -8,17 +8,19 @@ mod whitespace;
 mod main {
     use std::{
         collections::HashSet,
-        env::temp_dir,
+        env,
         io::{self, Read},
         os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
         path::{Path, PathBuf},
     };
 
+    use apple_codesign::{CodeSignatureFlags, MachFile};
     use object::{
         macho::{self, FatHeader, MachHeader64},
         read::macho::{FatArch, MachHeader},
         Architecture, Endianness, FileKind,
     };
+    use once_cell::sync::Lazy;
     use tracing::trace;
     use which::which;
 
@@ -31,6 +33,39 @@ mod main {
 
     /// Where patched files are stored, relative to the temp dir (`/tmp/mirrord-bin/...`).
     pub const MIRRORD_PATCH_DIR: &str = "mirrord-bin";
+
+    pub const FRAMEWORKS_ENV_VAR_NAME: &str = "DYLD_FALLBACK_FRAMEWORK_PATH";
+
+    /// The path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
+    /// scripts.
+    pub static MIRRORD_TEMP_BIN_DIR_PATH_BUF: Lazy<PathBuf> =
+        Lazy::new(|| env::temp_dir().join(MIRRORD_PATCH_DIR));
+
+    /// Get the `PathBuf` of the `mirrord-bin` dir, and return a `String` prefix to remove, without
+    /// a trailing `/`, so that the stripped path starts with a `/`
+    fn get_temp_bin_str_prefix(path: &Path) -> String {
+        // lossy: we assume our temp dir path does not contain non-unicode chars.
+        path.to_string_lossy()
+            .to_string()
+            .trim_end_matches('/')
+            .to_string()
+    }
+
+    /// The string path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
+    /// scripts, without a trailing `/`.
+    pub static MIRRORD_TEMP_BIN_DIR_STRING: Lazy<String> =
+        Lazy::new(|| get_temp_bin_str_prefix(&MIRRORD_TEMP_BIN_DIR_PATH_BUF));
+
+    /// Canonicalized version of `MIRRORD_TEMP_BIN_DIR`.
+    pub static MIRRORD_TEMP_BIN_DIR_CANONIC_STRING: Lazy<String> = Lazy::new(|| {
+        MIRRORD_TEMP_BIN_DIR_PATH_BUF
+            // Resolve symbolic links! (specifically /var -> private/var).
+            .canonicalize()
+            .as_deref()
+            .map(get_temp_bin_str_prefix)
+            // If canonicalization fails, we use the uncanonicalized path string.
+            .unwrap_or(MIRRORD_TEMP_BIN_DIR_STRING.to_string())
+    });
 
     /// Check if a cpu subtype (already parsed with the correct endianness) is arm64e, given its
     /// main cpu type is arm64. We only consider the lowest byte in the check.
@@ -269,6 +304,31 @@ mod main {
         NoSIP,
     }
 
+    /// Checks if binary is signed with either `RUNTIME` or `RESTRICTED` flags.
+    /// The code ignores error to allow smoother fallbacks.
+    fn is_code_signed(path: &PathBuf) -> bool {
+        let data = match std::fs::read(path) {
+            Ok(data) => data,
+            Err(_) => return false,
+        };
+
+        if let Ok(mach) = MachFile::parse(data.as_ref()) {
+            for macho in mach.into_iter() {
+                if let Ok(Some(signature)) = macho.code_signature() {
+                    if let Ok(Some(blob)) = signature.code_directory() {
+                        if blob
+                            .flags
+                            .intersects(CodeSignatureFlags::RESTRICT | CodeSignatureFlags::RUNTIME)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
     /// Determine status recursively, keep seen_paths, and return an error if there is a cyclical
     /// reference.
     fn get_sip_status_rec(
@@ -283,6 +343,16 @@ mod main {
         }
         let canonical_path = complete_path.canonicalize()?;
 
+        // If the binary is in our temp bin dir, it's not SIP protected.
+        // unwrap_or_default because path might be non-existent yet.
+        if MIRRORD_TEMP_BIN_DIR_PATH_BUF
+            .canonicalize()
+            .map(|x| canonical_path.starts_with(x))
+            .unwrap_or_default()
+        {
+            return Ok(SipStatus::NoSIP);
+        }
+
         // TODO: Don't recursively follow the shebangs, instead only read the first one because on
         //  macOS a shebang cannot lead to a script only to a binary. Then there should be no danger
         //  of recursing over a cycle of shebangs until a stack overflow, so this check and keeping
@@ -295,6 +365,10 @@ mod main {
         // Patch binary if it is in the list of binaries to patch.
         // See `ends_with` docs for understanding better when it returns true.
         if patch_binaries.iter().any(|x| complete_path.ends_with(x)) {
+            return Ok(SipStatus::SomeSIP(complete_path, None));
+        }
+
+        if is_code_signed(&complete_path) {
             return Ok(SipStatus::SomeSIP(complete_path, None));
         }
 
@@ -323,23 +397,52 @@ mod main {
         get_sip_status_rec(path, &mut seen_paths, patch_binaries)
     }
 
+    /// When patching a bundled mac application, it try to load libraries from its frameworks
+    /// directory. The patch might cause it to search under the `mirrord-bin` temp dir.
+    ///
+    /// To make sure it can find the libraries, we set (or add to) the
+    /// `DYLD_FALLBACK_FRAMEWORK_PATH` env var.
+    ///
+    /// Example, if we're running `/Applications/Postman.app/Contents/MacOS/Postman`, we'll add
+    /// `/Applications/Postman.app/Contents/Frameworks` to that env var.
+    fn set_fallback_frameworks_path_if_mac_app(path: &Path) {
+        for ancestor in path.ancestors() {
+            if ancestor
+                .extension()
+                .map(|ext| ext == "app")
+                .unwrap_or_default()
+            {
+                let frameworks_dir = ancestor
+                    .join("Contents/Frameworks")
+                    .to_string_lossy()
+                    .to_string();
+                let new_value = if let Ok(existing_value) = env::var(FRAMEWORKS_ENV_VAR_NAME) {
+                    format!("{existing_value}:{frameworks_dir}")
+                } else {
+                    frameworks_dir
+                };
+                env::set_var(FRAMEWORKS_ENV_VAR_NAME, new_value);
+                break;
+            }
+        }
+    }
+
     /// Only call this function on a file that is SomeSIP.
     /// Patch shebang scripts recursively and patch final binary.
-    fn patch_some_sip(
-        path: &PathBuf,
-        shebang_target: Option<Box<SipStatus>>,
-        tmp_dir: PathBuf,
-    ) -> Result<String> {
+    fn patch_some_sip(path: &PathBuf, shebang_target: Option<Box<SipStatus>>) -> Result<String> {
         // TODO: Change output to be with hash of the contents, so that old versions of changed
         //       files do not get used. (Also change back existing file logic to always use.)
 
-        // if which does not work, just use the given path as is.
-        let complete_path =
-            which(path.to_string_lossy().to_string()).unwrap_or_else(|_| path.to_owned());
+        trace!(
+            "Using temp dir: {} for sip patches",
+            MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()
+        );
+
+        set_fallback_frameworks_path_if_mac_app(path);
 
         // Strip root path from binary path, as when joined it will clear the previous.
-        let output = &tmp_dir.join(
-            complete_path.strip_prefix("/").unwrap_or(&complete_path), // No prefix - no problem.
+        let output = MIRRORD_TEMP_BIN_DIR_PATH_BUF.join(
+            path.strip_prefix("/").unwrap_or(path), // No prefix - no problem.
         );
 
         // A string of the path of new created file to run instead of the SIPed file.
@@ -393,7 +496,7 @@ mod main {
                         path,
                         patched_path_string,
                     );
-                    let new_target = patch_some_sip(&target_path, shebang_target, tmp_dir)?;
+                    let new_target = patch_some_sip(&target_path, shebang_target)?;
                     patch_script(path, output, &new_target)?;
                     Ok(patched_path_string)
                 } else {
@@ -414,9 +517,7 @@ mod main {
     pub fn sip_patch(binary_path: &str, patch_binaries: &Vec<String>) -> Result<Option<String>> {
         match get_sip_status(binary_path, patch_binaries) {
             Ok(SipStatus::SomeSIP(path, shebang_target)) => {
-                let tmp_dir = temp_dir().join(MIRRORD_PATCH_DIR);
-                trace!("Using temp dir: {:?} for sip patches", &tmp_dir);
-                Some(patch_some_sip(&path, shebang_target, tmp_dir)).transpose()
+                Some(patch_some_sip(&path, shebang_target)).transpose()
             }
             Ok(SipStatus::NoSIP) => {
                 trace!("No SIP detected on {:?}", binary_path);
@@ -521,7 +622,8 @@ mod main {
         #[test]
         fn patch_script_with_shebang() {
             let mut original_file = tempfile::NamedTempFile::new().unwrap();
-            let patched_path = temp_dir().join(original_file.path().strip_prefix("/").unwrap());
+            let patched_path =
+                env::temp_dir().join(original_file.path().strip_prefix("/").unwrap());
             original_file
                 .write_all("#!/usr/bin/env bash\n".as_ref())
                 .unwrap();
@@ -596,6 +698,27 @@ mod main {
             script.flush().unwrap();
             let res = sip_patch(script.path().to_str().unwrap(), &Vec::new());
             assert!(matches!(res, Ok(None)));
+        }
+
+        #[test]
+        fn set_fallback_frameworks_path() {
+            let example_path = "/Applications/Postman.app/Contents/MacOS/Postman";
+            let frameworks_path = "/Applications/Postman.app/Contents/Frameworks";
+            let is_frameworks_path = |&path: &'_ &str| path == frameworks_path;
+
+            // Verify that the path was not there before.
+            assert!(!env::var(FRAMEWORKS_ENV_VAR_NAME)
+                .map(|value| value.split(":").find(is_frameworks_path).is_some())
+                .unwrap_or_default());
+
+            set_fallback_frameworks_path_if_mac_app(Path::new(example_path));
+
+            // Verify that the path is there after.
+            assert!(env::var(FRAMEWORKS_ENV_VAR_NAME)
+                .unwrap()
+                .split(":")
+                .find(is_frameworks_path)
+                .is_some());
         }
     }
 }

@@ -15,8 +15,8 @@ edition.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-containerd-client = {git = "https://github.com/containerd/rust-extensions", rev="16e9695e80bb8da47b5db44fd4a22821c54a2f67"}
-tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "macros", "fs", "process"] }
+containerd-client = {git = "https://github.com/containerd/rust-extensions", rev="35a97f17d55753bb1ef04c28cd7c3203993932b0"}
+tokio = { workspace = true, features = ["rt", "net", "macros", "fs", "process"] }
 serde.workspace = true
 serde_json.workspace = true
 pnet = "0.33"
@@ -41,7 +41,7 @@ bytes = "1.2"
 regex = "1"
 socket2.workspace = true
 wildmatch = "2"
-enum_dispatch = "0.3.8"
+enum_dispatch = "0.3"
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["full"] }
 httparse = "1"
@@ -50,14 +50,16 @@ dashmap = { version = "5" }
 pin-project = "1"
 oci-spec = "0.6.0"
 async-trait = "0.1"
-k8s-cri = "0.6"
-tonic = "0.8"
+tonic = "0.9"
 tower = "0.4"
 http = "0.2"
+k8s-cri = "0.7"
+once_cell.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 iptables = "0.5"
 rawsocket = {git = "https://github.com/metalbear-co/rawsocket.git"}
+
 
 [dev-dependencies]
 mockall = "0.11.2" # 0.11.3 is broken

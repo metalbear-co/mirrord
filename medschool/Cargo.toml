@@ -1,0 +1,27 @@
+[package]
+name = "medschool"
+version = "0.1.0"
+authors.workspace = true
+description = "Extract documentation from Rust crate."
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+glob = "0.3"
+syn = { version = "2", features = ["full", "extra-traits"]}
+thiserror = "1"
+tracing.workspace = true
+tracing-subscriber.workspace = true
+regex.workspace = true
+
+[dev-dependencies]
+rand = "0.8"

@@ -15,7 +15,7 @@ mod pause {
 
     use crate::utils::{
         get_service_url, http_log_requester_service, http_logger_service, kube_client,
-        random_namespace_self_deleting_service, run_exec, KubeService,
+        random_namespace_self_deleting_service, run_exec_with_target, KubeService,
     };
 
     /// http_logger_service is a service that logs strings from the uri of incoming http requests.
@@ -96,7 +96,7 @@ mod pause {
         assert_eq!(first_log, hi_from_deployed_app);
 
         println!("Running local app with mirrord.");
-        let mut process = run_exec(
+        let mut process = run_exec_with_target(
             command.clone(),
             &requester_service.target,
             Some(&requester_service.namespace),
@@ -150,7 +150,7 @@ mod pause {
         let jobs: Api<Job> = Api::namespaced(kube_client.clone(), &service.namespace);
 
         println!("Running local app with mirrord.");
-        let mut process = run_exec(
+        let mut process = run_exec_with_target(
             // not specifying so grep waits on stdin.
             vec!["grep", "nothing"],
             &service.target,

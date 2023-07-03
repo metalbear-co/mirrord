@@ -33,6 +33,8 @@ impl EnvFilter {
                 WildMatch::new("CLASSPATH"),
                 WildMatch::new("JAVA_EXE"),
                 WildMatch::new("JAVA_HOME"),
+                WildMatch::new("PYTHONPATH"),
+                WildMatch::new("RUST_LOG"),
             ];
 
             for selector in &filter_env_vars {

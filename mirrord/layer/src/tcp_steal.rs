@@ -8,8 +8,8 @@ use futures::TryFutureExt;
 use hyper::{body::Incoming, Response, StatusCode};
 use mirrord_protocol::{
     tcp::{
-        Filter, HttpRequest, HttpResponse, LayerTcpSteal, NewTcpConnection,
-        StealType::{All, FilteredHttp},
+        Filter, HttpFilter, HttpRequest, HttpResponse, LayerTcpSteal, NewTcpConnection,
+        StealType::{All, FilteredHttp, FilteredHttpEx},
         TcpClose, TcpData,
     },
     ClientMessage, ConnectionId, Port, RequestId,
@@ -32,6 +32,7 @@ use crate::{
 
 pub(crate) mod http_forwarding;
 
+use self::http::{HttpFilterSettings, LayerHttpFilter};
 use crate::tcp_steal::http_forwarding::HttpForwarderError;
 
 mod http;
@@ -102,17 +103,14 @@ pub struct TcpStealHandler {
     /// This sender is cloned and moved into those tasks.
     http_response_sender: Sender<HttpResponse>,
 
-    /// A string with a header regex to filter HTTP requests by.
-    http_filter: Option<String>,
-
-    /// These ports would be filtered with the `http_filter`, if it's Some.
-    http_ports: Vec<u16>,
+    /// HTTP filter settings
+    http_filter_settings: HttpFilterSettings,
 
     /// LocalPort:RemotePort mapping.
     port_mapping: BiMap<u16, u16>,
 }
 
-impl TcpHandler for TcpStealHandler {
+impl TcpHandler<true> for TcpStealHandler {
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_new_connection(
         &mut self,
@@ -223,13 +221,30 @@ impl TcpHandler for TcpStealHandler {
         self.apply_port_mapping(&mut listen);
         let request_port = listen.requested_port;
 
-        if !self.ports_mut().insert(listen) {
-            info!("Port {request_port} already listening, might be on different address");
+        if self.ports_mut().replace(listen).is_some() {
+            // Since this struct identifies listening sockets by their port (#1558), we can only
+            // forward the incoming traffic to one socket with that port.
+            info!(
+                "Received listen hook message for port {request_port} while already listening. \
+                Might be on different address. Sending all incoming traffic to newest socket."
+            );
             return Ok(());
         }
 
-        let steal_type = if self.http_ports.contains(&original_port) && let Some(filter_str) = self.http_filter.take() {
-            FilteredHttp(request_port, Filter::new(filter_str)?)
+        let steal_type = if self.http_filter_settings.ports.contains(&original_port) {
+            match self.http_filter_settings.filter {
+                LayerHttpFilter::None => All(request_port),
+                LayerHttpFilter::HeaderDeprecated(ref header) => {
+                    FilteredHttp(request_port, Filter::new(header.clone())?)
+                }
+                LayerHttpFilter::Header(ref header) => FilteredHttpEx(
+                    request_port,
+                    HttpFilter::Header(Filter::new(header.clone())?),
+                ),
+                LayerHttpFilter::Path(ref path) => {
+                    FilteredHttpEx(request_port, HttpFilter::Path(Filter::new(path.clone())?))
+                }
+            }
         } else {
             All(request_port)
         };
@@ -240,14 +255,33 @@ impl TcpHandler for TcpStealHandler {
         .await
         .map_err(From::from)
     }
+
+    async fn handle_server_side_socket_close(
+        &mut self,
+        port: Port,
+        tx: &Sender<ClientMessage>,
+    ) -> Result<(), LayerError> {
+        if self.ports_mut().remove(&port) {
+            // There is a known issue - https://github.com/metalbear-co/mirrord/issues/1575 - where
+            // the agent is currently not able to keep ongoing connections, so once we send this
+            // message, any ongoing connections are going to be interrupted.
+            tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(
+                port,
+            )))
+            .await
+            .map_err(From::from)
+        } else {
+            // was not listening on closed socket, could be an outgoing socket.
+            Ok(())
+        }
+    }
 }
 
 impl TcpStealHandler {
     pub(crate) fn new(
-        http_filter: Option<String>,
-        http_ports: Vec<u16>,
         http_response_sender: Sender<HttpResponse>,
         port_mapping: BiMap<u16, u16>,
+        http_filter_settings: HttpFilterSettings,
     ) -> Self {
         Self {
             ports: Default::default(),
@@ -255,8 +289,7 @@ impl TcpStealHandler {
             read_streams: Default::default(),
             http_request_senders: Default::default(),
             http_response_sender,
-            http_filter,
-            http_ports,
+            http_filter_settings,
             port_mapping,
         }
     }
@@ -304,10 +337,9 @@ impl TcpStealHandler {
         &mut self,
         http_request: HttpRequest,
     ) -> Result<(), LayerError> {
-        let listen = self
-            .ports()
-            .get(&http_request.port)
-            .ok_or(LayerError::PortNotFound(http_request.port))?;
+        let listen = self.ports().get(&http_request.port).ok_or(
+            LayerError::NewConnectionAfterSocketClose(http_request.connection_id),
+        )?;
         let addr: SocketAddr = listen.into();
         let connection_id = http_request.connection_id;
         let port = http_request.port;

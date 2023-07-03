@@ -53,6 +53,27 @@ pub(crate) enum CliError {
     {GENERAL_HELP}"#
     ))]
     OperatorConnectionFailed(#[from] OperatorApiError),
+    #[error("Failed to connect to the operator. Someone else is stealing traffic from the requested target")]
+    #[diagnostic(help(
+        r#"
+    If you want to run anyway please set the following:
+    
+    {{
+      "feature": {{
+        "network": {{
+          "incoming": {{
+            ...
+            "on_concurrent_steal": "continue" // or "override"
+          }}
+        }}
+      }}
+    }}
+
+    More info (https://mirrord.dev/docs/overview/configuration/#feature-network-incoming-on_concurrent_steal)
+
+    {GENERAL_HELP}"#
+    ))]
+    OperatorConcurrentSteal,
     #[error("Failed to create Kubernetes API. {0:#?}")]
     #[diagnostic(help(
         r#"
@@ -102,11 +123,11 @@ pub(crate) enum CliError {
         "This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"
     ))]
     InvalidMessage(String),
-    #[error("Timeout waiting for remote environment variables.")]
+    #[error("Initial communication with the agent failed. {0:#?}")]
     #[diagnostic(help(
         "Please make sure the agent is running and the logs are not showing any errors.{GENERAL_HELP}"
     ))]
-    GetEnvironmentTimeout,
+    InitialCommFailed(&'static str),
     #[error("Failed to execute binary `{0:#?}` with args `{1:#?}`")]
     #[diagnostic(help(
         r#"
@@ -145,18 +166,11 @@ pub(crate) enum CliError {
         "Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}",
     ))]
     ConfigFilePathError(PathBuf, std::io::Error),
-    #[error("License Error: `{0:#?}`")]
-    #[diagnostic(help(
-        r#"Check if license is valid and make sure you have working network connection{GENERAL_HELP}"#
-    ))]
-    LicenseError(reqwest::Error),
     #[error("Creating kubernetes manifest yaml file failed with err : {0:#?}")]
     #[diagnostic(help(
         r#"Check if you have permissions to write to the file and/or directory exists{GENERAL_HELP}"#
     ))]
     ManifestFileError(std::io::Error),
-    #[error("Authentication issue: `{0:#?}`")]
-    AuthError(#[from] mirrord_auth::AuthenticationError),
     #[cfg(target_os = "macos")]
     #[error("SIP Error: `{0:#?}`")]
     #[diagnostic(help(

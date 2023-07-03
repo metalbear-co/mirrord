@@ -6,6 +6,7 @@ mod file_ops;
 mod http;
 mod pause;
 mod target;
+mod targetless;
 mod traffic;
 
 #[cfg(test)]
@@ -14,19 +15,20 @@ mod utils {
         collections::HashMap,
         fmt::Debug,
         net::Ipv4Addr,
+        path::PathBuf,
         process::Stdio,
         sync::{Arc, Condvar, Mutex},
         time::Duration,
     };
 
-    use chrono::Utc;
+    use chrono::{Timelike, Utc};
     use futures_util::stream::TryStreamExt;
     use k8s_openapi::api::{
         apps::v1::Deployment,
         core::v1::{Namespace, Pod, Service},
     };
     use kube::{
-        api::{DeleteParams, ListParams, PostParams},
+        api::{DeleteParams, ListParams, PostParams, WatchParams},
         core::WatchEvent,
         runtime::wait::{await_condition, conditions::is_pod_running},
         Api, Client, Config, Error,
@@ -38,7 +40,7 @@ mod utils {
     use serde_json::json;
     use tempfile::{tempdir, TempDir};
     use tokio::{
-        io::{AsyncReadExt, BufReader},
+        io::{AsyncReadExt, AsyncWriteExt, BufReader},
         process::{Child, Command},
         sync::oneshot::{self, Sender},
     };
@@ -59,7 +61,7 @@ mod utils {
         api: &Api<K>,
         name: &str,
     ) {
-        let params = ListParams::default()
+        let params = WatchParams::default()
             .fields(&format!("metadata.name={name}"))
             .timeout(10);
         let stream = api.watch(&params, "0").await.unwrap();
@@ -85,6 +87,12 @@ mod utils {
             .to_ascii_lowercase()
     }
 
+    /// Returns string with time format of hh:mm:ss
+    fn format_time() -> String {
+        let now = Utc::now();
+        format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
+    }
+
     #[derive(Debug)]
     #[allow(dead_code)]
     pub enum Application {
@@ -95,6 +103,9 @@ mod utils {
         Go18HTTP,
         Go19HTTP,
         Go20HTTP,
+        CurlToKubeApi,
+        PythonCloseSocket,
+        PythonCloseSocketKeepConnection,
     }
 
     #[derive(Debug)]
@@ -155,6 +166,11 @@ mod utils {
             assert!(!self.stderr.lock().unwrap().contains("FAILED"));
         }
 
+        pub async fn wait_assert_success(self) {
+            let output = self.child.wait_with_output().await.unwrap();
+            assert!(output.status.success());
+        }
+
         pub fn wait_for_line(&self, timeout: Duration, line: &str) {
             let now = std::time::Instant::now();
             while now.elapsed() < timeout {
@@ -164,6 +180,14 @@ mod utils {
                 }
             }
             panic!("Timeout waiting for line: {line}");
+        }
+
+        pub async fn write_to_stdin(&mut self, data: &[u8]) {
+            if let Some(ref mut stdin) = self.child.stdin {
+                stdin.write(data).await.unwrap();
+            } else {
+                panic!("Can't write to test app's stdin!");
+            }
         }
 
         pub fn from_child(mut child: Child, tempdir: TempDir) -> TestProcess {
@@ -185,7 +209,7 @@ mod utils {
                     }
 
                     let string = String::from_utf8_lossy(&buf[..n]);
-                    eprintln!("stderr {:?} {pid}: {}", Utc::now(), string);
+                    eprintln!("stderr {} {pid}: {}", format_time(), string);
                     {
                         stderr_data_reader.lock().unwrap().push_str(&string);
                     }
@@ -200,7 +224,7 @@ mod utils {
                         break;
                     }
                     let string = String::from_utf8_lossy(&buf[..n]);
-                    println!("stdout {:?} {pid}: {}", Utc::now(), string);
+                    print!("stdout {} {pid}: {}", format_time(), string);
                     {
                         stdout_data_reader.lock().unwrap().push_str(&string);
                     }
@@ -230,14 +254,36 @@ mod utils {
                         "app_fastapi:app",
                     ]
                 }
+                Application::PythonCloseSocket => {
+                    vec!["python3", "-u", "python-e2e/close_socket.py"]
+                }
+                Application::PythonCloseSocketKeepConnection => {
+                    vec![
+                        "python3",
+                        "-u",
+                        "python-e2e/close_socket_keep_connection.py",
+                    ]
+                }
                 Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
                 Application::NodeHTTP2 => {
                     vec!["node", "node-e2e/http2/test_http2_traffic_steal.mjs"]
                 }
-                Application::Go18HTTP => vec!["go-e2e/18"],
-                Application::Go19HTTP => vec!["go-e2e/19"],
-                Application::Go20HTTP => vec!["go-e2e/20"],
+                Application::Go18HTTP => vec!["go-e2e/18.go_test_app"],
+                Application::Go19HTTP => vec!["go-e2e/19.go_test_app"],
+                Application::Go20HTTP => vec!["go-e2e/20.go_test_app"],
+                Application::CurlToKubeApi => {
+                    vec!["curl", "https://kubernetes/api", "--insecure"]
+                }
             }
+        }
+
+        pub async fn run_targetless(
+            &self,
+            namespace: Option<&str>,
+            args: Option<Vec<&str>>,
+            env: Option<Vec<(&str, &str)>>,
+        ) -> TestProcess {
+            run_exec_targetless(self.get_cmd(), namespace, args, env).await
         }
 
         pub async fn run(
@@ -247,7 +293,7 @@ mod utils {
             args: Option<Vec<&str>>,
             env: Option<Vec<(&str, &str)>>,
         ) -> TestProcess {
-            run_exec(self.get_cmd(), target, namespace, args, env).await
+            run_exec_with_target(self.get_cmd(), target, namespace, args, env).await
         }
 
         pub fn assert(&self, process: &TestProcess) {
@@ -281,9 +327,9 @@ mod utils {
                 }
                 #[cfg(target_os = "linux")]
                 FileOps::Rust => vec!["../target/debug/rust-e2e-fileops"],
-                FileOps::GoDir18 => vec!["go-e2e-dir/18"],
-                FileOps::GoDir19 => vec!["go-e2e-dir/19"],
-                FileOps::GoDir20 => vec!["go-e2e-dir/20"],
+                FileOps::GoDir18 => vec!["go-e2e-dir/18.go_test_app"],
+                FileOps::GoDir19 => vec!["go-e2e-dir/19.go_test_app"],
+                FileOps::GoDir20 => vec!["go-e2e-dir/20.go_test_app"],
             }
         }
 
@@ -299,9 +345,9 @@ mod utils {
     impl EnvApp {
         pub fn command(&self) -> Vec<&str> {
             match self {
-                Self::Go18 => vec!["go-e2e-env/18"],
-                Self::Go19 => vec!["go-e2e-env/19"],
-                Self::Go20 => vec!["go-e2e-env/20"],
+                Self::Go18 => vec!["go-e2e-env/18.go_test_app"],
+                Self::Go19 => vec!["go-e2e-env/19.go_test_app"],
+                Self::Go20 => vec!["go-e2e-env/20.go_test_app"],
                 Self::Bash => vec!["bash", "bash-e2e/env.sh"],
                 Self::BashInclude => vec!["bash", "bash-e2e/env.sh", "include"],
                 Self::BashExclude => vec!["bash", "bash-e2e/env.sh", "exclude"],
@@ -325,9 +371,32 @@ mod utils {
         }
     }
 
-    pub async fn run_exec(
+    /// Run `mirrord exec` without specifying a target, to run in targetless mode.
+    pub async fn run_exec_targetless(
+        process_cmd: Vec<&str>,
+        namespace: Option<&str>,
+        args: Option<Vec<&str>>,
+        env: Option<Vec<(&str, &str)>>,
+    ) -> TestProcess {
+        run_exec(process_cmd, None, namespace, args, env).await
+    }
+
+    /// See [`run_exec`].
+    pub async fn run_exec_with_target(
         process_cmd: Vec<&str>,
         target: &str,
+        namespace: Option<&str>,
+        args: Option<Vec<&str>>,
+        env: Option<Vec<(&str, &str)>>,
+    ) -> TestProcess {
+        run_exec(process_cmd, Some(target), namespace, args, env).await
+    }
+
+    /// Run `mirrord exec` with the given cmd, optional target (`None` for targetless), namespace,
+    /// mirrord args, and env vars.
+    pub async fn run_exec(
+        process_cmd: Vec<&str>,
+        target: Option<&str>,
         namespace: Option<&str>,
         args: Option<Vec<&str>>,
         env: Option<Vec<(&str, &str)>>,
@@ -337,7 +406,10 @@ mod utils {
             Some(binary_path) => binary_path,
         };
         let temp_dir = tempdir().unwrap();
-        let mut mirrord_args = vec!["exec", "--target", target, "-c"];
+        let mut mirrord_args = vec!["exec", "-c"];
+        if let Some(target) = target {
+            mirrord_args.extend(["--target", target].into_iter());
+        }
         if let Some(namespace) = namespace {
             mirrord_args.extend(["--target-namespace", namespace].into_iter());
         }
@@ -355,9 +427,9 @@ mod utils {
         let mut base_env = HashMap::new();
         base_env.insert("MIRRORD_AGENT_IMAGE", "test");
         base_env.insert("MIRRORD_CHECK_VERSION", "false");
-        base_env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=trace");
+        base_env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
         base_env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
-        base_env.insert("RUST_LOG", "warn,mirrord=trace");
+        base_env.insert("RUST_LOG", "warn,mirrord=debug");
 
         if let Some(env) = env {
             for (key, value) in env {
@@ -368,6 +440,7 @@ mod utils {
         let server = Command::new(path)
             .args(args.clone())
             .envs(base_env)
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -513,10 +586,9 @@ mod utils {
         #[future] kube_client: Client,
     ) -> KubeService {
         let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
-
         println!(
-            "{:?} creating service {service_name:?} in namespace {namespace:?}",
-            Utc::now()
+            "{} creating service {service_name:?} in namespace {namespace:?}",
+            format_time()
         );
 
         let kube_client = kube_client.await;
@@ -937,5 +1009,13 @@ mod utils {
             headers.clone(),
         )
         .await;
+    }
+
+    #[fixture]
+    #[once]
+    pub fn config_dir() -> PathBuf {
+        let mut config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        config_path.push("configs");
+        config_path
     }
 }

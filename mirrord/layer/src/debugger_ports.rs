@@ -22,9 +22,48 @@ pub const MIRRORD_DETECT_DEBUGGER_PORT_ENV: &str = "MIRRORD_DETECT_DEBUGGER_PORT
 pub const MIRRORD_IGNORE_DEBUGGER_PORTS_ENV: &str = "MIRRORD_IGNORE_DEBUGGER_PORTS";
 
 /// Type of debugger which is used to run the user's processes.
+/// Determines the way we parse the command line arguments the debugger's port.
+/// Logic of processing the arguments is based on examples taken from the IDEs.
 #[derive(Debug, Clone, Copy)]
 pub enum DebuggerType {
+    /// An implementation of the [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) for Python 3.
+    /// Used in VS Code.
+    ///
+    /// Command used to invoke this debugger looked like
+    /// `/path/to/python /path/to/vscode/extensions/debugpy --connect 127.0.0.1:57141
+    /// --configure-qt none --adapter-access-token
+    /// c2d745556a5a571d09dbf9c14af2898b3d6c174597d6b7198d9d30c105d5ab24 /path/to/script.py`
+    ///
+    /// Port would not be extracted from a command like `/path/to/python /path/to/script.py ...`
+    /// (debugger name missing) or `/path/to/python /path/to/vscode/extensions/debugpy
+    /// /path/to/script.py` (socket missing).
     DebugPy,
+    /// Used in PyCharm.
+    ///
+    /// Command used to invoke this debugger looked like
+    /// `/path/to/python /path/to/pycharm/plugins/pydevd.py --multiprocess --qt-support=auto
+    /// --client 127.0.0.1 --port 32845 --file /path/to/script.py`
+    ///
+    /// Port would not be extracted from a command like `/path/to/python /path/to/script.py ...`
+    /// (debugger name missing) or `/path/to/pycharm/plugins/pydevd.py ...` (python invokation
+    /// missing) or `/path/to/python /path/to/pycharm/plugins/pydevd.py --client 127.0.0.1 ...`
+    /// (port missing).
+    PyDevD,
+    /// Used in Rider.
+    ///
+    /// Command used to invoke this debugger looked like
+    /// `/path/to/rider/lib/ReSharperHost/linux-x64/dotnet/dotnet exec
+    /// /path/to/rider/lib/ReSharperHost/JetBrains.Debugger.Worker.exe --mode=client
+    /// --frontend-port=36977 ...`.
+    ///
+    /// Port would not be extracted from a command like
+    /// `/some/executable exec /path/to/rider/lib/ReSharperHost/JetBrains.Debugger.Worker.exe
+    /// --mode=client --frontend-port=36977 ...` (dotnet executable missing) or
+    /// `/path/to/rider/lib/ ReSharperHost/linux-x64/dotnet/dotnet exec --mode=client
+    /// --frontend-port=36977 ...` (debugger missing) or
+    /// `/path/to/rider/lib/ReSharperHost/linux-x64/dotnet/dotnet exec /path/to/rider/lib/
+    /// ReSharperHost/JetBrains.Debugger.Worker.exe --mode=client ...` (port missing).
+    ReSharper,
 }
 
 impl FromStr for DebuggerType {
@@ -33,6 +72,8 @@ impl FromStr for DebuggerType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "debugpy" => Ok(Self::DebugPy),
+            "pydevd" => Ok(Self::PyDevD),
+            "resharper" => Ok(Self::ReSharper),
             _ => Err(format!("invalid debugger type: {s}")),
         }
     }
@@ -40,27 +81,52 @@ impl FromStr for DebuggerType {
 
 impl DebuggerType {
     /// Retrieves the port used by debugger of this type from the command.
-    /// Logic of processing the command is based on examples taken from the IDEs.
-    /// For example, command used by VS Code to invoke the Python debugger looked like
-    /// `/path/to/python /path/to/vscode/extensions/debugpy --connect 127.0.0.1:57141 --configure-qt
-    /// none --adapter-access-token c2d745556a5a571d09dbf9c14af2898b3d6c174597d6b7198d9d30c105d5ab24
-    /// /path/to/script.py`
-    /// Port would not be extracted from a command like `/path/to/python /path/to/script.py
-    /// --connect 127.0.0.1:57141` (debugger name missing) or `/path/to/python
-    /// /path/to/vscode/extensions/debugpy /path/to/script.py` (socket missing).
     fn get_port(self, args: &[String]) -> Option<u16> {
         match self {
             Self::DebugPy => {
                 let is_python = args.first()?.rsplit('/').next()?.starts_with("py");
                 let runs_debugpy = args.get(1)?.ends_with("debugpy");
-                if is_python && runs_debugpy {
-                    args.windows(2).find_map(|window| match window {
-                        [opt, val] if opt == "--connect" => val.parse::<SocketAddr>().ok(),
-                        _ => None,
-                    })
-                } else {
-                    None
+
+                if !is_python || !runs_debugpy {
+                    None?
                 }
+
+                args.windows(2).find_map(|window| match window {
+                    [opt, val] if opt == "--connect" => val.parse::<SocketAddr>().ok(),
+                    _ => None,
+                })
+            }
+            Self::PyDevD => {
+                let is_python = args.first()?.rsplit('/').next()?.starts_with("py");
+                let runs_pydevd = args.get(1)?.rsplit('/').next()?.contains("pydevd");
+
+                if !is_python || !runs_pydevd {
+                    None?
+                }
+
+                let client = args.windows(2).find_map(|window| match window {
+                    [opt, val] if opt == "--client" => val.parse::<IpAddr>().ok(),
+                    _ => None,
+                })?;
+                let port = args.windows(2).find_map(|window| match window {
+                    [opt, val] if opt == "--port" => val.parse::<u16>().ok(),
+                    _ => None,
+                })?;
+
+                SocketAddr::new(client, port).into()
+            }
+            Self::ReSharper => {
+                let is_dotnet = args.first()?.ends_with("dotnet");
+                let runs_debugger = args.get(2)?.contains("Debugger");
+
+                if !is_dotnet || !runs_debugger {
+                    None?
+                }
+
+                args.iter()
+                    .find_map(|arg| arg.strip_prefix("--frontend-port="))
+                    .and_then(|port| port.parse::<u16>().ok())
+                    .map(|port| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
             }
         }
         .and_then(|addr| match addr.ip() {
@@ -176,6 +242,38 @@ mod test {
                     .collect::<Vec<_>>()
             ),
             Some(57141),
+        )
+    }
+
+    #[test]
+    fn detect_pydevd_port() {
+        let debugger = DebuggerType::PyDevD;
+        let command = "/path/to/python /path/to/pycharm/plugins/pydevd.py --multiprocess --qt-support=auto --client 127.0.0.1 --port 32845 --file /path/to/script.py";
+
+        assert_eq!(
+            debugger.get_port(
+                &command
+                    .split_ascii_whitespace()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+            ),
+            Some(32845),
+        )
+    }
+
+    #[test]
+    fn detect_resharper_port() {
+        let debugger = DebuggerType::ReSharper;
+        let command = "/path/to/rider/lib/ReSharperHost/linux-x64/dotnet/dotnet exec /path/to/rider/lib/ReSharperHost/JetBrains.Debugger.Worker.exe --mode=client --frontend-port=40905 --plugins=/path/to/rider/plugins/rider-unity/dotnetDebuggerWorker;/path/to/rider/plugins/dpa/DotFiles/JetBrains.DPA.DebugInjector.dll --etw-collect-flags=2 --backend-pid=222222 --handle=333";
+
+        assert_eq!(
+            debugger.get_port(
+                &command
+                    .split_ascii_whitespace()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+            ),
+            Some(40905)
         )
     }
 

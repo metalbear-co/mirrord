@@ -6,22 +6,23 @@ use std::{
 use actix_codec::{Decoder, Encoder};
 use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
+use mirrord_macros::protocol_break;
 
-#[cfg(target_os = "linux")]
-use crate::file::{GetDEnts64Request, GetDEnts64Response};
 use crate::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     file::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, FdOpenDirRequest,
-        OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenRelativeFileRequest,
-        ReadDirRequest, ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
-        SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
-        WriteLimitedFileRequest, XstatFsRequest, XstatFsResponse, XstatRequest, XstatResponse,
+        GetDEnts64Request, GetDEnts64Response, OpenDirResponse, OpenFileRequest, OpenFileResponse,
+        OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
+        ReadFileResponse, ReadLimitedFileRequest, SeekFileRequest, SeekFileResponse,
+        WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest, XstatFsRequest,
+        XstatFsResponse, XstatRequest, XstatResponse,
     },
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
+    pause::DaemonPauseTarget,
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     ResponseError,
 };
@@ -76,7 +77,6 @@ pub enum FileRequest {
     FdOpenDir(FdOpenDirRequest),
     ReadDir(ReadDirRequest),
     CloseDir(CloseDirRequest),
-    #[cfg(target_os = "linux")]
     GetDEnts64(GetDEnts64Request),
 }
 
@@ -92,6 +92,8 @@ pub enum ClientMessage {
     GetEnvVarsRequest(GetEnvVarsRequest),
     Ping,
     GetAddrInfoRequest(GetAddrInfoRequest),
+    /// Whether to pause or unpause the target container.
+    PauseTargetRequest(bool),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
@@ -110,11 +112,12 @@ pub enum FileResponse {
     XstatFs(RemoteResult<XstatFsResponse>),
     ReadDir(RemoteResult<ReadDirResponse>),
     OpenDir(RemoteResult<OpenDirResponse>),
-    #[cfg(target_os = "linux")]
     GetDEnts64(RemoteResult<GetDEnts64Response>),
 }
+
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[protocol_break(2)]
 pub enum DaemonMessage {
     Close(String),
     Tcp(DaemonTcp),
@@ -127,6 +130,7 @@ pub enum DaemonMessage {
     /// NOTE: can remove `RemoteResult` when we break protocol compatibility.
     GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
     GetAddrInfoResponse(GetAddrInfoResponse),
+    PauseTarget(DaemonPauseTarget),
 }
 
 pub struct ClientCodec {

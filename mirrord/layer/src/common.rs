@@ -3,6 +3,8 @@ use std::{collections::VecDeque, ffi::CStr, path::PathBuf};
 
 use libc::c_char;
 use mirrord_protocol::{file::OpenOptionsInternal, RemoteResult};
+#[cfg(target_os = "macos")]
+use mirrord_sip::{MIRRORD_TEMP_BIN_DIR_CANONIC_STRING, MIRRORD_TEMP_BIN_DIR_STRING};
 use tokio::sync::oneshot;
 use tracing::warn;
 
@@ -121,8 +123,28 @@ impl CheckedInto<String> for *const c_char {
 }
 
 impl CheckedInto<PathBuf> for *const c_char {
+    /// Do the checked conversion to str, bypass if the str starts with temp dir's path, construct
+    /// a `PathBuf` out of the str.
     fn checked_into(self) -> Detour<PathBuf> {
-        CheckedInto::<&str>::checked_into(self).map(From::from)
+        let str_det = CheckedInto::<&str>::checked_into(self);
+        #[cfg(target_os = "macos")]
+        let str_det = str_det.and_then(|path_str| {
+            let optional_stripped_path = path_str
+                .strip_prefix(MIRRORD_TEMP_BIN_DIR_STRING.as_str())
+                .or_else(|| path_str.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()));
+            if let Some(stripped_path) = optional_stripped_path {
+                // actually stripped, so bypass and provide a pointer to after the temp dir.
+                // `stripped_path` is a reference to a later character in the same string as
+                // `path_str`, `stripped_path.as_ptr()` returns a pointer to a later index
+                // in the same string owned by the caller (the hooked program).
+                Detour::Bypass(Bypass::FileOperationInMirrordBinTempDir(
+                    stripped_path.as_ptr() as _,
+                ))
+            } else {
+                Detour::Success(path_str) // strip is None, path not in temp dir.
+            }
+        });
+        str_det.map(From::from)
     }
 }
 

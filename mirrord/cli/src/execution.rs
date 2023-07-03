@@ -5,7 +5,9 @@ use std::{
 
 use mirrord_config::LayerConfig;
 use mirrord_progress::Progress;
-use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
+use mirrord_protocol::{
+    pause::DaemonPauseTarget, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
+};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
 use serde::Serialize;
@@ -13,10 +15,10 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::{Child, Command},
 };
-use tracing::trace;
+use tracing::{info, trace};
 
 use crate::{
-    connection::{create_and_connect, AgentConnectInfo},
+    connection::{create_and_connect, AgentConnectInfo, AgentConnection},
     error::CliError,
     extract::extract_library,
     Result,
@@ -52,6 +54,7 @@ impl MirrordExecution {
     where
         P: Progress + Send + Sync,
     {
+        config.verify()?;
         let lib_path = extract_library(None, progress, true)?;
         let mut env_vars = HashMap::new();
         let (connect_info, mut connection) = create_and_connect(config, progress).await?;
@@ -77,33 +80,30 @@ impl MirrordExecution {
             (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
         };
 
-        if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
-            // TODO: Handle this error. We're just ignoring it here and letting -layer crash later.
-            let _codec_result = connection
-                .sender
-                .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
-                    env_vars_filter: env_vars_exclude,
-                    env_vars_select: env_vars_include,
-                }))
-                .await;
+        let communication_timeout =
+            Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into());
 
-            match tokio::time::timeout(
-                Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into()),
-                connection.receiver.recv(),
+        if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
+            let remote_env = tokio::time::timeout(
+                communication_timeout,
+                Self::get_remote_env(&mut connection, env_vars_exclude, env_vars_include),
             )
             .await
-            {
-                Ok(Some(DaemonMessage::GetEnvVarsResponse(Ok(remote_env)))) => {
-                    trace!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env.len());
+            .map_err(|_| {
+                CliError::InitialCommFailed("Timeout waiting for remote environment variables.")
+            })??;
+            env_vars.extend(remote_env);
+            if let Some(overrides) = &config.feature.env.overrides {
+                env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
+            }
+        }
 
-                    env_vars.extend(remote_env);
-                    if let Some(overrides) = &config.feature.env.overrides {
-                        env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
-                    }
-                }
-                Err(_) => return Err(CliError::GetEnvironmentTimeout),
-                Ok(x) => return Err(CliError::InvalidMessage(format!("{x:#?}"))),
-            };
+        if config.pause {
+            tokio::time::timeout(communication_timeout, Self::request_pause(&mut connection))
+                .await
+                .map_err(|_| {
+                    CliError::InitialCommFailed("Timeout requesting for target container pause.")
+                })??;
         }
 
         let lib_path: String = lib_path.to_string_lossy().into();
@@ -187,6 +187,59 @@ impl MirrordExecution {
             child: proxy_process,
             patched_path,
         })
+    }
+
+    /// Retrieve remote environment from the connected agent.
+    async fn get_remote_env(
+        connection: &mut AgentConnection,
+        env_vars_filter: HashSet<String>,
+        env_vars_select: HashSet<String>,
+    ) -> Result<HashMap<String, String>> {
+        connection
+            .sender
+            .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
+                env_vars_filter,
+                env_vars_select,
+            }))
+            .await
+            .map_err(|_| {
+                CliError::InitialCommFailed("Failed to request remote environment variables.")
+            })?;
+
+        match connection.receiver.recv().await {
+            Some(DaemonMessage::GetEnvVarsResponse(Ok(remote_env))) => {
+                trace!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env.len());
+                Ok(remote_env)
+            }
+            msg => Err(CliError::InvalidMessage(format!("{msg:#?}"))),
+        }
+    }
+
+    /// Request target container pause from the connected agent.
+    async fn request_pause(connection: &mut AgentConnection) -> Result<()> {
+        info!("Requesting target container pause from the agent");
+        connection
+            .sender
+            .send(ClientMessage::PauseTargetRequest(true))
+            .await
+            .map_err(|_| {
+                CliError::InitialCommFailed("Failed to request target container pause.")
+            })?;
+
+        match connection.receiver.recv().await {
+            Some(DaemonMessage::PauseTarget(DaemonPauseTarget::PauseResponse {
+                changed,
+                container_paused: true,
+            })) => {
+                if changed {
+                    info!("Target container is now paused.");
+                } else {
+                    info!("Target container was already paused.");
+                }
+                Ok(())
+            }
+            msg => Err(CliError::InvalidMessage(format!("{msg:#?}"))),
+        }
     }
 
     /// Wait for the internal proxy to exit.

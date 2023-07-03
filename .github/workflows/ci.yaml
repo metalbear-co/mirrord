@@ -14,7 +14,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  MIRRORD_TELEMETRY: false
 
 jobs:
   towncrier_check:
@@ -34,15 +35,22 @@ jobs:
     if: github.event.pull_request.draft == false
     outputs:
       rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
-      intellij_changed: ${{ steps.changed-intellij.outputs.any_changed }}
       markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
+      ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
+      protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
     steps:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
+      - name: get CI changes
+        id: changed-ci
+        uses: tj-actions/changed-files@v36
+        with:
+          files: |
+            .github/workflows/ci.yaml
       - name: get changed rs files
         id: changed-rs
-        uses: tj-actions/changed-files@v32
+        uses: tj-actions/changed-files@v36
         with:
           files: |
             **/*.rs
@@ -54,31 +62,44 @@ jobs:
             rust-toolchain.toml
             rustfmt.toml
             .cargo/**
-            .github/workflows/ci.yaml
-      - name: get intellij changes
-        id: changed-intellij
-        uses: tj-actions/changed-files@v32
-        with:
-          files: |
-            intellij-ext/**
       - name: get markdown changes
         id: changed-markdown
-        uses: tj-actions/changed-files@v32
+        uses: tj-actions/changed-files@v36
         with:
           files: |
             README.md
+      - name: get protocol changes
+        id: changed-protocol
+        uses: tj-actions/changed-files@v36
+        with:
+          files: |
+            mirrord/protocol/**
+      - name: get protocol toml changes
+        id: changed-protocol-toml
+        uses: tj-actions/changed-files@v36
+        with:
+          files: |
+            mirrord/protocol/Cargo.toml
+      - name: verify protocol bump
+        run: |
+          if [ "${{ steps.changed-protocol.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-protocol-toml.outputs.any_changed }}" != "true" ]; then
+            echo "Error: Protocol has changed but Cargo.toml has not. Please update Cargo.toml."
+            exit 1
+          fi
       - name: output test
         run: |
           echo ${{ steps.changed-rs.outputs.any_changed }};
           echo ${{ steps.changed-rs.outputs.all_changed_files }};
-          echo ${{ steps.changed-intellij.outputs.any_changed }};
-          echo ${{ steps.changed-intellij.outputs.all_changed_files }};
           echo ${{ steps.changed-markdown.outputs.any_changed }};
           echo ${{ steps.changed-markdown.outputs.all_changed_files }};
+          echo ${{ steps.changed-ci.outputs.any_changed }};
+          echo ${{ steps.changed-ci.outputs.all_changed_files }};
+          echo ${{ steps.changed-protocol.outputs.any_changed }};
+          echo ${{ steps.changed-protocol-toml.outputs.any_changed }};
   lint:
     runs-on: ubuntu-latest
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
       - uses: arduino/setup-protoc@v1
@@ -88,7 +109,7 @@ jobs:
       - run: rm rust-toolchain.toml
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: nightly-2023-03-29
+          toolchain: nightly-2023-04-19
           components: rustfmt, clippy
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
       - run: python3 -m pip install cargo-zigbuild
@@ -101,7 +122,7 @@ jobs:
   check-rust-docs:
     runs-on: ubuntu-latest
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       # enables the creation of a workspace index.html page.
       RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
@@ -112,14 +133,14 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          # TODO(alex): update this when https://github.com/rust-lang/rust/issues/109631 is fixed 
-          toolchain: nightly-2023-01-31 
+          # TODO(alex): update this when https://github.com/rust-lang/rust/issues/109631 is fixed
+          toolchain: nightly-2023-04-19
       - run: cargo doc --document-private-items
 
   lint_macos:
     runs-on: macos-latest
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
       # the setup rust toolchain action ignores the input if file exists.. so remove it
@@ -128,7 +149,7 @@ jobs:
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
-          toolchain: nightly-2023-03-29
+          toolchain: nightly-2023-04-19
       # only mirrord, mirrord-sip contain macOS specific, so run clippy on that.
       - run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
       - run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
@@ -136,7 +157,7 @@ jobs:
   test_mirrord_protocol:
     runs-on: ubuntu-latest
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -146,7 +167,7 @@ jobs:
   test_mirrord_config:
     runs-on: ubuntu-latest
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -156,7 +177,7 @@ jobs:
   test_mirrord_kube:
     runs-on: ubuntu-latest
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -166,7 +187,7 @@ jobs:
   test_mirrord_sip:
     runs-on: macos-latest
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -176,9 +197,9 @@ jobs:
   test_agent:
     runs-on: ubuntu-latest
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     container:
-      image: ghcr.io/metalbear-co/ci-agent-build:latest
+      image: ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32
     steps:
       - uses: actions/checkout@v3
       - uses: arduino/setup-protoc@v1
@@ -190,7 +211,7 @@ jobs:
   test_agent_image:
     runs-on: ubuntu-latest
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
     steps:
       - uses: actions/checkout@v3
       - uses: docker/setup-buildx-action@v2
@@ -204,14 +225,14 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: upload image
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: test
           path: /tmp/test.tar
 
   test_mirrord_layer_cli:
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-12, macos-11]
@@ -237,7 +258,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{matrix.target}}
-          toolchain: nightly-2023-03-29
+          toolchain: nightly-2023-04-19
       # For now, just verify it compiles.
       - run: cargo build -p mirrord-layer -p mirrord --target=${{matrix.target}}
 
@@ -245,7 +266,7 @@ jobs:
     runs-on: ubuntu-latest
     name: build mirrord
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
       - uses: arduino/setup-protoc@v1
@@ -258,14 +279,16 @@ jobs:
       - name: upload layer
         uses: actions/upload-artifact@v3
         with:
-          name: layer-lib
-          path: target/debug/libmirrord_layer.so
+          name: mirrord-artifacts
+          path: |
+            target/debug/libmirrord_layer.so
+            target/debug/mirrord
           if-no-files-found: error
 
   integration_tests:
     runs-on: ubuntu-latest
     needs: [build_mirrord, changed_files]
-    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_TEST_USE_EXISTING_LIB: /home/runner/work/mirrord/mirrord/target/debug/libmirrord_layer.so
     steps:
@@ -273,6 +296,18 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install rust.
         with:
           target: x86_64-unknown-linux-gnu
+      - run: |
+          cd mirrord/layer/tests/apps/issue1123
+          rustc issue1123.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue1054
+          rustc issue1054.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue1458
+          rustc issue1458.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue1458portnot53
+          rustc issue1458portnot53.rs --out-dir target
       - uses: actions/setup-node@v3 # For http mirroring test.
         with:
           node-version: 14
@@ -286,137 +321,97 @@ jobs:
           go-version: "1.20.0-rc.3"
       - run: |
           go version
-      - run: |
-          cd mirrord/layer/tests/apps/self_open
-          go build -o 20
-      - run: |
-          cd mirrord/layer/tests/apps/fileops/go
-          go build -o 20
-      - run: |
-          cd mirrord/layer/tests/apps/issue834
-          go build -o 20
-      - run: |
-          cd mirrord/layer/tests/apps/dir_go
-          go build -o 20
-      - run: |
-          cd mirrord/layer/tests/apps/dir_go_bypass
-          go build -o 20
-      - run: |
-          cd mirrord/layer/tests/apps/read_go
-          go build -o 20
-      - run: |
-          cd mirrord/layer/tests/apps/write_go
-          go build -o 20
-      - run: |
-          cd mirrord/layer/tests/apps/lseek_go
-          go build -o 20
-      - run: |
-          cd mirrord/layer/tests/apps/faccessat_go
-          go build -o 20
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 20
       - uses: actions/setup-go@v3
         with:
           go-version: "1.19.5"
       - run: |
-          cd mirrord/layer/tests/apps/self_open
-          go build -o 19
-      - run: |
-          cd mirrord/layer/tests/apps/fileops/go
-          go build -o 19
-      - run: |
-          cd mirrord/layer/tests/apps/issue834
-          go build -o 19
-      - run: |
-          cd mirrord/layer/tests/apps/dir_go
-          go build -o 19
-      - run: |
-          cd mirrord/layer/tests/apps/dir_go_bypass
-          go build -o 19
-      - run: |
-          cd mirrord/layer/tests/apps/read_go
-          go build -o 19
-      - run: |
-          cd mirrord/layer/tests/apps/write_go
-          go build -o 19
-      - run: |
-          cd mirrord/layer/tests/apps/lseek_go
-          go build -o 19
-      - run: |
-          cd mirrord/layer/tests/apps/faccessat_go
-          go build -o 19
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 19
       - uses: actions/setup-go@v3
         with:
           go-version: "1.18.10"
       - run: |
-          cd mirrord/layer/tests/apps/issue834
-          go build -o 18
-      - run: |
-          cd mirrord/layer/tests/apps/read_go
-          go build -o 18
-      - run: |
-          cd mirrord/layer/tests/apps/write_go
-          go build -o 18
-      - run: |
-          cd mirrord/layer/tests/apps/lseek_go
-          go build -o 18
-      - run: |
-          cd mirrord/layer/tests/apps/faccessat_go
-          go build -o 18
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 18
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
       - run: |
           cd mirrord/layer/tests/apps/outgoing
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/recv_from
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/dns_resolve
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/listen_ports
+          cargo build
       - name: download layer # Download layer lib built in the `build_mirrord` job.
         uses: actions/download-artifact@v3
         with:
-          name: layer-lib
+          name: mirrord-artifacts
           path: target/debug/
       - run: cargo test -p mirrord-layer
 
   integration_tests_macos:
     runs-on: macos-12
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_TEST_USE_EXISTING_LIB: ../../target/debug/libmirrord_layer.dylib
+      RUST_LOG: warn,mirrord=trace
     steps:
       - uses: actions/checkout@v3 # Checkout the mirrord repo.
       - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install Rust.
         with:
           target: x86_64-apple-darwin
+      - run: |
+          cd mirrord/layer/tests/apps/issue1123
+          rustc issue1123.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue1054
+          rustc issue1054.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue1458
+          rustc issue1458.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue1458portnot53
+          rustc issue1458portnot53.rs --out-dir target
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
           go-version: "1.18"
+      - run: |
+          go version
       - run: | # Build Go test apps.
-          cd mirrord/layer/tests/apps/read_go
-          for go_app in read_go write_go lseek_go faccessat_go
-          do
-          cd ../$go_app
-          go build -o 18
-          done
+          ./scripts/build_go_apps.sh 18
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
           go-version: "1.19"
+      - run: |
+          go version
       - run: | # Build Go test apps.
-          cd mirrord/layer/tests/apps/self_open
-          for go_app in self_open app_go dir_go dir_go_bypass read_go write_go lseek_go faccessat_go
-          do
-          cd ../$go_app
-          go build -o 19
-          done
+          ./scripts/build_go_apps.sh 19
       - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
         with:
           go-version: "1.20.0-rc.3"
-      - run: | # Build Go app to test http mirroring with.
-          cd mirrord/layer/tests/apps/self_open
-          for go_app in self_open app_go dir_go dir_go_bypass read_go write_go lseek_go faccessat_go
-          do
-          cd ../$go_app
-          go build -o 20
-          done
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 20
       - run: |
           cd mirrord/layer/tests/apps/fileops
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/recv_from
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/dns_resolve
           cargo build
       - uses: actions/setup-node@v3
         with:
@@ -427,11 +422,10 @@ jobs:
       - run: pip3 install fastapi # For http mirroring test with FastAPI.
       - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
       - run: cargo build -p mirrord-layer # Build layer lib. The tests load it into the apps.
-      - run: cargo test -p mirrord-layer
       - uses: actions/setup-node@v3 # version 19 spawns processes with `posix_spawn`, so test that also.
         with:
           node-version: 19
-      - run: cargo test -p mirrord-layer --test spawn
+      - run: cargo test -p mirrord-layer
 
   e2e:
     runs-on: ubuntu-latest
@@ -440,7 +434,7 @@ jobs:
         container-runtime: ["docker", "containerd"]
     name: e2e
     needs: [build_mirrord, test_agent_image, changed_files]
-    if: ${{needs.changed_files.outputs.rs_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
@@ -461,58 +455,23 @@ jobs:
         with:
           go-version: "1.18.0"
       - run: |
-          cd tests/go-e2e
-          go build -o 18
-      - run: |
-          cd tests/go-e2e-env
-          go build -o 18
-      - run: |
-          cd tests/go-e2e-outgoing
-          go build -o 18
-      - run: |
-          cd tests/go-e2e-dns
-          go build -o 18
-      - run: |
-          cd tests/go-e2e-dir
-          go build -o 18
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 18
       - uses: actions/setup-go@v3
         with:
           go-version: "1.19.0"
       - run: |
-          cd tests/go-e2e
-          go build -o 19
-      - run: |
-          cd tests/go-e2e-env
-          go build -o 19
-      - run: |
-          cd tests/go-e2e-outgoing
-          go build -o 19
-      - run: |
-          cd tests/go-e2e-dns
-          go build -o 19
-      - run: |
-          cd tests/go-e2e-dir
-          go build -o 19
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 19
       - uses: actions/setup-go@v3
         with:
           go-version: "1.20.0-rc.3"
       - run: |
           go version
-      - run: |
-          cd tests/go-e2e
-          go build -o 20
-      - run: |
-          cd tests/go-e2e-env
-          go build -o 20
-      - run: |
-          cd tests/go-e2e-outgoing
-          go build -o 20
-      - run: |
-          cd tests/go-e2e-dns
-          go build -o 20
-      - run: |
-          cd tests/go-e2e-dir
-          go build -o 20
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 20
       - run: |
           cd tests/rust-e2e-fileops
           cargo build
@@ -523,7 +482,7 @@ jobs:
           cd tests/rust-bypassed-unix-socket
           cargo build
       - name: download image
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: test
           path: /tmp
@@ -532,43 +491,28 @@ jobs:
         with:
           container-runtime: ${{matrix.container-runtime}}
       - run: minikube image load /tmp/test.tar
-      - name: cargo test containerd
-        run: cargo test -p tests
+      # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
+      - name: Run targetless E2E test.
+        run: cargo test -p tests targetless
+      - name: Run all E2E test
+        run: cargo test -p tests -- --test-threads=6
       - name: Collect logs
         if: ${{ failure() }}
         run: |
           kubectl describe pods
           docker exec minikube find /var/log/pods -print -exec cat {} \;
 
-  build_intellij_plugin:
-    runs-on: ubuntu-latest
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.intellij_changed == 'true'}}
-    steps:
-      - uses: actions/checkout@v3
-      - name: Setup Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: zulu
-          java-version: 11
-      - name: Build Plugin
-        env:
-          CI_BUILD_PLUGIN: true
-        run: |
-          cd intellij-ext
-          chmod +x ./gradlew
-          ./gradlew buildPlugin
-
   lint_markdown:
     runs-on: ubuntu-latest
     needs: changed_files
-    if: ${{needs.changed_files.outputs.markdown_changed == 'true'}}
+    if: ${{needs.changed_files.outputs.markdown_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
       - uses: avto-dev/markdown-lint@v1
         with:
           config: "markdownlint-config.json"
           args: "README.md"
+
   # We need some "accummulation" job here because bors fails (timeouts) to
   # listen on matrix builds.
   # Hence, we have some kind of dummy here that bors can listen on
@@ -592,7 +536,6 @@ jobs:
         test_mirrord_config,
         test_mirrord_protocol,
         test_mirrord_sip,
-        build_intellij_plugin,
         lint_markdown,
       ]
     runs-on: ubuntu-latest
@@ -615,6 +558,5 @@ jobs:
             (needs.test_mirrord_config.result == 'success' || needs.test_mirrord_config.result == 'skipped') &&
             (needs.test_mirrord_protocol.result == 'success' || needs.test_mirrord_protocol.result == 'skipped') &&
             (needs.test_mirrord_sip.result == 'success' || needs.test_mirrord_sip.result == 'skipped') &&
-            (needs.build_intellij_plugin.result == 'success' || needs.build_intellij_plugin.result == 'skipped') &&
             (needs.lint_markdown.result == 'success' || needs.lint_markdown.result == 'skipped') }}
         run: echo $CI_SUCCESS && if [ "$CI_SUCCESS" == "true" ]; then echo "SUCCESS" && exit 0; else echo "Failure" && exit 1; fi

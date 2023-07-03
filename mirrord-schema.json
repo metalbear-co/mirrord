@@ -1,18 +1,19 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "LayerFileConfig",
-  "description": "Main struct for mirrord-layer's configuration\n\n## Examples\n\n- Run mirrord with read-only file operations, mirroring traffic, skipping unwanted processes:\n\n```toml # mirrord-config.toml\n\ntarget = \"pod/sample-pod-1234\" skip_processes = [\"ide-debugger\", \"ide-service\"] # we don't want mirrord to hook into these\n\n[agent] log_level = \"debug\" ttl = 1024 # seconds\n\n[feature] fs = \"read\" # default\n\n[feature.network] incoming = \"mirror\" # default ```\n\n- Run mirrord with read-write file operations, stealing traffic, accept local TLS certificates, use a custom mirrord-agent image:\n\n```toml # mirrord-config.toml\n\ntarget = \"pod/sample-pod-1234\" accept_invalid_certificates = true\n\n[agent] log_level = \"trace\" ttl = 1024 # seconds image = \"registry/mirrord-agent-custom:latest\" image_pull_policy = \"Always\"\n\n[feature] fs = \"write\"\n\n[feature.network] incoming = \"steal\" ```",
+  "description": "mirrord allows for a high degree of customization when it comes to which features you want to enable, and how they should function.\n\nAll of the configuration fields have a default value, so a minimal configuration would be no configuration at all.\n\nTo help you get started, here are examples of a basic configuration file, and a complete configuration file containing all fields.\n\n### Basic `config.json` {#root-basic}\n\n```json { \"target\": \"pod/bear-pod\", \"feature\": { \"env\": true, \"fs\": \"read\", \"network\": true } } ```\n\n### Complete `config.json` {#root-complete}\n\n```json { \"accept_invalid_certificates\": false, \"skip_processes\": \"ide-debugger\", \"pause\": false, \"target\": { \"path\": \"pod/bear-pod\", \"namespace\": \"default\" }, \"connect_tcp\": null, \"agent\": { \"log_level\": \"info\", \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"network_interface\": \"eth0\", \"flush_connections\": true }, \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"overrides\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" } }, \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\.json\" , \"read_only\": [ \".+\\.yaml\", \".+important-file\\.txt\" ], \"local\": [ \".+\\.js\", \".+\\.mjs\" ] }, \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_header_filter\": { \"filter\": \"host: api\\..+\", \"ports\": [80, 8080] }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": false }, \"capture_error_trace\": false }, \"operator\": true, \"kubeconfig\": \"~/.kube/config\", \"sip_binaries\": \"bash\" \"telemetry\": true, } ```\n\n# Options {#root-options}",
   "type": "object",
   "properties": {
     "accept_invalid_certificates": {
-      "description": "Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed certificates).",
+      "title": "accept_invalid_certificates {#root-accept_invalid_certificates}",
+      "description": "Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed certificates).\n\nDefaults to `false`.",
       "type": [
         "boolean",
         "null"
       ]
     },
     "agent": {
-      "description": "Agent configuration, see [`agent::AgentFileConfig`].",
+      "title": "agent {#root-agent}",
       "anyOf": [
         {
           "$ref": "#/definitions/AgentFileConfig"
@@ -23,14 +24,14 @@
       ]
     },
     "connect_agent_name": {
-      "description": "Agent name that already exists that we can connect to.",
+      "description": "<!--${internal}-->\n\n## connect_agent_name {#root-connect_agent_name}\n\nAgent name that already exists that we can connect to.\n\nKeep in mind that the intention here is to allow reusing a long living mirrord-agent pod, and **not** to connect multiple (simultaneos) mirrord instances to a single mirrord-agent, as the later is not properly supported without the use of [mirrord-operator](https://metalbear.co/#waitlist-form).\n\n```json { \"connect_agent_name\": \"mirrord-agent-still-alive\" } ```",
       "type": [
         "string",
         "null"
       ]
     },
     "connect_agent_port": {
-      "description": "Agent listen port that already exists that we can connect to.",
+      "description": "<!--${internal}-->\n\n## connect_agent_port {#root-connect_agent_port}\n\nAgent listen port that already exists that we can connect to.\n\n```json { \"connect_agent_port\": \"8888\" } ```",
       "type": [
         "integer",
         "null"
@@ -39,14 +40,15 @@
       "minimum": 0.0
     },
     "connect_tcp": {
-      "description": "IP:PORT to connect to instead of using k8s api, for testing purposes.",
+      "title": "connect_tcp {#root-connect_tpc}",
+      "description": "IP:PORT to connect to instead of using k8s api, for testing purposes.\n\n```json { \"connect_tcp\": \"10.10.0.100:7777\" } ```",
       "type": [
         "string",
         "null"
       ]
     },
     "feature": {
-      "description": "Controls mirrord features, see [`feature::FeatureFileConfig`].",
+      "title": "feature {#root-feature}",
       "anyOf": [
         {
           "$ref": "#/definitions/FeatureFileConfig"
@@ -57,21 +59,32 @@
       ]
     },
     "kubeconfig": {
-      "description": "Path to a kubeconfig file, if not specified, will use KUBECONFIG or ~/.kube/config or the in-cluster config.",
+      "title": "kubeconfig {#root-kubeconfig}",
+      "description": "Path to a kubeconfig file, if not specified, will use `KUBECONFIG`, or `~/.kube/config`, or the in-cluster config.\n\n```json { \"kubeconfig\": \"~/bear/kube-config\" } ```",
       "type": [
         "string",
         "null"
       ]
     },
     "operator": {
-      "description": "Allow to lookup if operator is installed on cluster and use it",
+      "title": "operator {#root-operator}",
+      "description": "Allow to lookup if operator is installed on cluster and use it.\n\nDefaults to `true`.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "pause": {
+      "title": "pause {#root-pause}",
+      "description": "Controls target pause feature. Unstable.\n\nWith this feature enabled, the remote container is paused while this layer is connected to the agent.\n\nDefaults to `false`.",
       "type": [
         "boolean",
         "null"
       ]
     },
     "sip_binaries": {
-      "description": "Binaries to patch (macOS SIP). Use this when mirrord isn't loaded to protected binaries that weren't automatically patched. Runs `endswith` on the binary path (so `bash` would apply to any binary ending with `bash` while `/usr/bin/bash` would apply only for that binary).",
+      "title": "sip_binaries {#root-sip_binaries}",
+      "description": "Binaries to patch (macOS SIP).\n\nUse this when mirrord isn't loaded to protected binaries that weren't automatically patched.\n\nRuns `endswith` on the binary path (so `bash` would apply to any binary ending with `bash` while `/usr/bin/bash` would apply only for that binary).\n\n```json { \"sip_binaries\": \"bash;python\" } ```",
       "anyOf": [
         {
           "$ref": "#/definitions/VecOrSingle_for_String"
@@ -82,7 +95,8 @@
       ]
     },
     "skip_processes": {
-      "description": "Allows mirrord to skip unwanted processes.\n\nUseful when process A spawns process B, and the user wants mirrord to operate only on process B.",
+      "title": "skip_processes {#root-skip_processes}",
+      "description": "Allows mirrord to skip unwanted processes.\n\nUseful when process A spawns process B, and the user wants mirrord to operate only on process B. Accepts a single value, or multiple values separated by `;`.\n\n```json { \"skip_processes\": \"bash;node\" } ```",
       "anyOf": [
         {
           "$ref": "#/definitions/VecOrSingle_for_String"
@@ -93,7 +107,7 @@
       ]
     },
     "target": {
-      "description": "Specifies the running pod to mirror.\n\nSupports: - `pod/{sample-pod}/[container]/{sample-container}`; - `podname/{sample-pod}/[container]/{sample-container}`; - `deployment/{sample-deployment}/[container]/{sample-container}`;",
+      "title": "target {#root-target}",
       "anyOf": [
         {
           "$ref": "#/definitions/TargetFileConfig"
@@ -102,15 +116,24 @@
           "type": "null"
         }
       ]
+    },
+    "telemetry": {
+      "title": "telemetry {#root-telemetry}",
+      "description": "Controls whether or not mirrord sends telemetry data to MetalBear cloud. Telemetry sent doesn't contain personal identifiers or any data that should be considered sensitive. It is used to improve the product. [For more information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md)",
+      "type": [
+        "boolean",
+        "null"
+      ]
     }
   },
   "additionalProperties": false,
   "definitions": {
     "AdvancedFsUserConfig": {
-      "description": "Advanced user configuration for file operations.\n\nAllows the user to specify:\n\nWhat is the default behavior for file operations: 1. read - Read from the remote file system (default) 2. write - Read/Write from the remote file system. 3. local - Read from the local file system. 4. disabled - Disable file operations.\n\nBesides the default behavior, user can specify behavior for specific regex patterns. Case insensitive. 1. read_write - List of patterns that should be read/write remotely. 2. read_only - List of patterns that should be read only remotely. 3. local - List of patterns that should be read locally.\n\nThe logic for choosing the behavior is as follows: 1. Check if one of the patterns match the file path, do the corresponding action. There's no specified order if two lists match the same path, we will use the first one (and we do not guarantee what is first). Note: Specifying the same path in two lists is unsupported and can lead to undefined behaviour. 2. Check our \"special list\" - we have an internal at compile time list for different behavior based on patterns    to provide better UX. 3. If none of the above match, use the default behavior (mode).\n\n## Examples\n\n- Read `/lib` locally, `/etc` remotely and `/var/run` read write remotely. Rest local\n\n```yaml # mirrord-config.yaml\n\n[fs] mode = read read_write = [\"/var/run\"] read_only = [\"/etc\"] local = [\"/lib\"] ```",
+      "description": "Allows the user to specify the default behavior for file operations:\n\n1. `\"read\"` - Read from the remote file system (default) 2. `\"write\"` - Read/Write from the remote file system. 3. `\"local\"` - Read from the local file system. 5. `\"disable\"` - Disable file operations.\n\nBesides the default behavior, the user can specify behavior for specific regex patterns. Case insensitive.\n\n1. `\"read_write\"` - List of patterns that should be read/write remotely. 2. `\"read_only\"` - List of patterns that should be read only remotely. 3. `\"local\"` - List of patterns that should be read locally.\n\nThe logic for choosing the behavior is as follows:\n\n1. Check if one of the patterns match the file path, do the corresponding action. There's no specified order if two lists match the same path, we will use the first one (and we do not guarantee what is first).\n\n**Warning**: Specifying the same path in two lists is unsupported and can lead to undefined behaviour.\n\n2. Check our \"special list\" - we have an internal at compile time list for different behavior based on patterns to provide better UX.\n\n3. If none of the above match, use the default behavior (mode).\n\nFor more information, check the file operations [technical reference](https://mirrord.dev/docs/reference/fileops/).\n\n```json { \"feature\": { \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\.json\" , \"read_only\": [ \".+\\.yaml\", \".+important-file\\.txt\" ], \"local\": [ \".+\\.js\", \".+\\.mjs\" ] } } } ```",
       "type": "object",
       "properties": {
         "local": {
+          "title": "feature.fs.local {#feature-fs-local}",
           "description": "Specify file path patterns that if matched will be opened locally.",
           "anyOf": [
             {
@@ -122,7 +145,7 @@
           ]
         },
         "mode": {
-          "description": "File operations mode, defaults to read-only, see [`FsModeConfig`].",
+          "title": "feature.fs.mode {#feature-fs-mode}",
           "anyOf": [
             {
               "$ref": "#/definitions/FsModeConfig"
@@ -133,6 +156,7 @@
           ]
         },
         "read_only": {
+          "title": "feature.fs.read_only {#feature-fs-read_only}",
           "description": "Specify file path patterns that if matched will be read from the remote. if file matching the pattern is opened for writing or read/write it will be opened locally.",
           "anyOf": [
             {
@@ -144,6 +168,7 @@
           ]
         },
         "read_write": {
+          "title": "feature.fs.read_write {#feature-fs-read_write}",
           "description": "Specify file path patterns that if matched will be read and written to the remote.",
           "anyOf": [
             {
@@ -158,10 +183,11 @@
       "additionalProperties": false
     },
     "AgentFileConfig": {
-      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.",
+      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json { \"agent\": { \"log_level\": \"info\", \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"network_interface\": \"eth0\", \"pause\": false, \"flush_connections\": false, } } ```",
       "type": "object",
       "properties": {
         "communication_timeout": {
+          "title": "agent.communication_timeout {#agent-communication_timeout}",
           "description": "Controls how long the agent lives when there are no connections.\n\nEach connection has its own heartbeat mechanism, so even if the local application has no messages, the agent stays alive until there are no more heartbeat messages.",
           "type": [
             "integer",
@@ -171,35 +197,40 @@
           "minimum": 0.0
         },
         "ephemeral": {
-          "description": "Runs the agent as an [ephemeral container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)",
+          "title": "agent.ephemeral {#agent-ephemeral}",
+          "description": "Runs the agent as an [ephemeral container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)\n\nDefaults to `false`.",
           "type": [
             "boolean",
             "null"
           ]
         },
         "flush_connections": {
-          "description": "Flushes existing connections when starting to steal, might fix issues where connections aren't stolen (due to being already established)\n\nTemporary fix for issue [#1029](https://github.com/metalbear-co/mirrord/issues/1029).",
+          "title": "agent.flush_connections {#agent-flush_connections}",
+          "description": "Flushes existing connections when starting to steal, might fix issues where connections aren't stolen (due to being already established)\n\nDefaults to `true`.",
           "type": [
             "boolean",
             "null"
           ]
         },
         "image": {
-          "description": "Name of the agent's docker image.\n\nUseful when a custom build of mirrord-agent is required, or when using an internal registry.\n\nDefaults to the latest stable image.",
+          "title": "agent.image {#agent-image}",
+          "description": "Name of the agent's docker image.\n\nUseful when a custom build of mirrord-agent is required, or when using an internal registry.\n\nDefaults to the latest stable image `\"ghcr.io/metalbear-co/mirrord:latest\"`.\n\n```json { \"agent\": { \"image\": \"internal.repo/images/mirrord:latest\" } } ```",
           "type": [
             "string",
             "null"
           ]
         },
         "image_pull_policy": {
-          "description": "Controls when a new agent image is downloaded.\n\nSupports any valid kubernetes [image pull policy](https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy)",
+          "title": "agent.image_pull_policy {#agent-image_pull_policy}",
+          "description": "Controls when a new agent image is downloaded.\n\nSupports `\"IfNotPresent\"`, `\"Always\"`, `\"Never\"`, or any valid kubernetes [image pull policy](https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy)\n\nDefaults to `\"IfNotPresent\"`",
           "type": [
             "string",
             "null"
           ]
         },
         "image_pull_secrets": {
-          "description": "List of secrets the agent pod has access to.\n\nTakes an array of hash with the format `{ name: <secret-name> }`. Read more [here](https://kubernetes.io/docs/concepts/containers/images/).",
+          "title": "agent.image_pull_secrets {#agent-image_pull_secrets}",
+          "description": "List of secrets the agent pod has access to.\n\nTakes an array of hash with the format `{ name: <secret-name> }`.\n\nRead more [here](https://kubernetes.io/docs/concepts/containers/images/).\n\n```json { \"agent\": { \"image_pull_secrets\": [ { \"very-secret\": \"secret-key\" }, { \"very-secret\": \"keep-your-secrets\" } ] } } ```",
           "type": [
             "array",
             "null"
@@ -212,13 +243,15 @@
           }
         },
         "log_level": {
-          "description": "Log level for the agent.\n\nSupports anything that would work with `RUST_LOG`.",
+          "title": "agent.log_level {#agent-log_level}",
+          "description": "Log level for the agent.\n\nSupports `\"trace\"`, `\"debug\"`, `\"info\"`, `\"warn\"`, `\"error\"`, or any string that would work with `RUST_LOG`.\n\n```json { \"agent\": { \"log_level\": \"mirrord=debug,warn\" } } ```",
           "type": [
             "string",
             "null"
           ]
         },
         "namespace": {
+          "title": "agent.namespace {#agent-namespace}",
           "description": "Namespace where the agent shall live.\n\nDefaults to the current kubernetes namespace.",
           "type": [
             "string",
@@ -226,21 +259,16 @@
           ]
         },
         "network_interface": {
-          "description": "Which network interface to use for mirroring.\n\nThe default behavior is try to access the internet and use that interface and if that fails it uses eth0.",
+          "title": "agent.network_interface {#agent-network_interface}",
+          "description": "Which network interface to use for mirroring.\n\nThe default behavior is try to access the internet and use that interface. If that fails it uses `eth0`.",
           "type": [
             "string",
             "null"
           ]
         },
-        "pause": {
-          "description": "Controls target pause feature. Unstable.\n\nWith this feature enabled, the remote container is paused while clients are connected to the agent.",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
         "startup_timeout": {
-          "description": "Controls how long to wait for the agent to finish initialization.\n\nIf initialization takes longer than this value, mirrord exits.",
+          "title": "agent.startup_timeout {#agent-startup_timeout}",
+          "description": "Controls how long to wait for the agent to finish initialization.\n\nIf initialization takes longer than this value, mirrord exits.\n\nDefaults to `60`.",
           "type": [
             "integer",
             "null"
@@ -249,7 +277,8 @@
           "minimum": 0.0
         },
         "ttl": {
-          "description": "Controls how long the agent pod persists for after the agent exits (in seconds).\n\nCan be useful for collecting logs.",
+          "title": "agent.ttl {#agent-ttl}",
+          "description": "Controls how long the agent pod persists for after the agent exits (in seconds).\n\nCan be useful for collecting logs.\n\nDefaults to `1`.",
           "type": [
             "integer",
             "null"
@@ -260,8 +289,34 @@
       },
       "additionalProperties": false
     },
+    "ConcurrentSteal": {
+      "description": "(Operator Only): Allows overriding port locks\n\nCan be set to either `\"continue\"` or `\"override\"`.\n\n- `\"continue\"`: Continue with normal execution - `\"override\"`: If port lock detected then override it with new lock and force close the original locking connection.",
+      "oneOf": [
+        {
+          "description": "<!--${internal}--> ### override\n\nOverride any port lock and force close the original lock connection",
+          "type": "string",
+          "enum": [
+            "override"
+          ]
+        },
+        {
+          "description": "<!--${internal}--> ### continue\n\nContinue with normal execution",
+          "type": "string",
+          "enum": [
+            "continue"
+          ]
+        },
+        {
+          "description": "<!--${internal}--> ### abort\n\nAbort Execution when trying to steal traffic from a target whose traffic is already being stolen.",
+          "type": "string",
+          "enum": [
+            "abort"
+          ]
+        }
+      ]
+    },
     "DeploymentTarget": {
-      "description": "Mirror the deployment specified by [`DeploymentTarget::deployment`].",
+      "description": "<!--${internal}--> Mirror the deployment specified by [`DeploymentTarget::deployment`].",
       "type": "object",
       "required": [
         "deployment"
@@ -274,17 +329,18 @@
           ]
         },
         "deployment": {
-          "description": "Deployment to mirror.",
+          "description": "<!--${internal}--> Deployment to mirror.",
           "type": "string"
         }
       }
     },
     "EnvFileConfig": {
-      "description": "Allows the user to set or override a local process' environment variables with the ones from a remote pod.\n\nWhich environment variables to load from the remote pod are controlled by setting either `include` or `exclude`.\n\nSee the environment variables [reference](https://mirrord.dev/docs/reference/env/) for more details.\n\n## Examples\n\n- Include every environment variable from the remote pod (default):\n\n```toml # mirrord-config.toml\n\n[feature.env] include = \"*\" ```\n\nSome environment variables are excluded by default (`PATH` for example), including these requires specifying them with `include`, see `mirrord-agent::env::EnvFilter`.\n\n- Include the remote pod's environment variables \"PROJECT\", \"DATABASE\":\n\n```toml # mirrord-config.toml\n\n[feature.env] include = \"PROJECT;DATABASE\" ```\n\n- Exclude the remote pod's environment variables \"USER\", \"SECRET\", and include everything else:\n\n```toml # mirrord-config.toml\n\n[feature.env] exclude = \"USER;SECRET\" ```",
+      "description": "Allows the user to set or override the local process' environment variables with the ones from the remote pod.\n\nWhich environment variables to load from the remote pod are controlled by setting either [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).\n\nSee the environment variables [reference](https://mirrord.dev/docs/reference/env/) for more details.\n\n```json { \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"override\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" } } } } ```",
       "type": "object",
       "properties": {
         "exclude": {
-          "description": "Include the remote environment variables in the local process that are **NOT** specified by this option.\n\nValue is a list separated by \";\".",
+          "title": "feature.env.exclude {#feature-env-exclude}",
+          "description": "Include the remote environment variables in the local process that are **NOT** specified by this option.\n\nSome of the variables that are excluded by default: `PATH`, `HOME`, `HOMEPATH`, `CLASSPATH`, `JAVA_EXE`, `JAVA_HOME`, `PYTHONPATH`.\n\nValue is a list separated by \";\".",
           "anyOf": [
             {
               "$ref": "#/definitions/VecOrSingle_for_String"
@@ -295,7 +351,8 @@
           ]
         },
         "include": {
-          "description": "Include only these remote environment variables in the local process.\n\nValue is a list separated by \";\".",
+          "title": "feature.env.include {#feature-env-include}",
+          "description": "Include only these remote environment variables in the local process.\n\nValue is a list separated by \";\".\n\nSome environment variables are excluded by default (`PATH` for example), including these requires specifying them with `include`",
           "anyOf": [
             {
               "$ref": "#/definitions/VecOrSingle_for_String"
@@ -306,6 +363,7 @@
           ]
         },
         "override": {
+          "title": "feature.env.override {#feature-env-override}",
           "description": "Allows setting or overriding environment variables (locally) with a custom value.\n\nFor example, if the remote pod has an environment variable `REGION=1`, but this is an undesirable value, it's possible to use `overrides` to set `REGION=2` (locally) instead.",
           "type": [
             "object",
@@ -319,18 +377,19 @@
       "additionalProperties": false
     },
     "FeatureFileConfig": {
-      "description": "Configuration for mirrord features.\n\nFor more information, check the [technical reference](https://mirrord.dev/docs/reference/) of the feature.\n\n## Examples\n\n- Exclude \"SECRET\" environment variable, enable read-write file operations, mirror network traffic (default option), and generate a crash report (if there is any crash):\n\n```toml # mirrord-config.toml\n\n[feature] fs = \"write\" capture_error_trace = true\n\n[feature.env] exclude = \"SECRET\" ```\n\n- Include only \"DATABASE_URL\", and \"PORT\" environment variables, enable read-write file operations (only for `.txt` files), and enable both incoming and outgoing network traffic (mirror):\n\n```toml # mirrord-config.toml\n\n[feature.env] include = \"DATABASE_URL;PORT\"\n\n[feature.fs] mode = \"write\" include = \"^.*\\.txt$\"\n\n[feature.network] incoming = \"mirror\" # default, included here for effect\n\n[feature.network.outgoing] tcp = true udp = true ```",
+      "description": "Controls mirrord features.\n\nSee the [technical reference, Technical Reference](https://mirrord.dev/docs/reference/) to learn more about what each feature does.\n\nThe [`env`](#feature-env), [`fs`](#feature-fs) and [`network`](#feature-network) options have support for a shortened version, that you can see [here](#root-shortened).\n\n```json { \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"overrides\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" } }, \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\.json\" , \"read_only\": [ \".+\\.yaml\", \".+important-file\\.txt\" ], \"local\": [ \".+\\.js\", \".+\\.mjs\" ] }, \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_header_filter\": { \"filter\": \"host: api\\..+\", \"ports\": [80, 8080] }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": false }, \"capture_error_trace\": false } } ```",
       "type": "object",
       "properties": {
         "capture_error_trace": {
-          "description": "Controls the crash reporting feature.\n\nWith this feature enabled, mirrord generates a nice crash report log.",
+          "title": "feature.capture_error_trace {#feature-capture_error_trace}",
+          "description": "Controls the crash reporting feature.\n\nWith this feature enabled, mirrord generates a nice crash report log.\n\nDefaults to `false`.",
           "type": [
             "boolean",
             "null"
           ]
         },
         "env": {
-          "description": "Controls the environment variables feature, see [`EnvConfig`].\n\nFor more information, check the environment variables [technical reference](https://mirrord.dev/docs/reference/env/).",
+          "title": "feature.env {#feature-env}",
           "anyOf": [
             {
               "$ref": "#/definitions/ToggleableConfig_for_EnvFileConfig"
@@ -341,7 +400,7 @@
           ]
         },
         "fs": {
-          "description": "Controls the file operations feature, see [`FsConfig`].\n\nFor more information, check the file operations [technical reference](https://mirrord.dev/docs/reference/fileops/).",
+          "title": "feature.fs {#feature-fs}",
           "anyOf": [
             {
               "$ref": "#/definitions/ToggleableConfig_for_FsUserConfig"
@@ -352,7 +411,7 @@
           ]
         },
         "network": {
-          "description": "Controls the network feature, see [`NetworkConfig`].\n\nFor more information, check the network traffic [technical reference](https://mirrord.dev/docs/reference/traffic/).",
+          "title": "feature.network {#feature-network}",
           "anyOf": [
             {
               "$ref": "#/definitions/ToggleableConfig_for_NetworkFileConfig"
@@ -366,9 +425,10 @@
       "additionalProperties": false
     },
     "FsModeConfig": {
-      "description": "Configuration for enabling read-only and read-write file operations. These options are overriden by user specified overrides and mirrord default overrides. If you set LocalWithOverrides then somefiles can be read/write remotely based on our default/user specified. Default option for general file configuration.\n\n## Examples\n\n- Disable mirrord file operations:\n\n```yaml # mirrord-config.yaml\n\nfs = local ```\n\n- Enable mirrord read-write file operations:\n\n```yaml # mirrord-config.yaml\n\nfs = write ```",
+      "description": "Configuration for enabling read-only or read-write file operations.\n\nThese options are overriden by user specified overrides and mirrord default overrides.\n\nIf you set [`\"localwithoverrides\"`](#feature-fs-mode-localwithoverrides) then some files can be read/write remotely based on our default/user specified. Default option for general file configuration.\n\nThe accepted values are: `\"local\"`, `\"localwithoverrides`, `\"read\"`, or `\"write`.",
       "oneOf": [
         {
+          "title": "feature.fs.mode.local {#feature-fs-mode-local}",
           "description": "mirrord won't do anything fs-related, all operations will be local.",
           "type": "string",
           "enum": [
@@ -376,6 +436,7 @@
           ]
         },
         {
+          "title": "feature.fs.mode.localwithoverrides {#feature-fs-mode-localwithoverrides}",
           "description": "mirrord will run overrides on some file operations, but most will be local.",
           "type": "string",
           "enum": [
@@ -383,6 +444,7 @@
           ]
         },
         {
+          "title": "feature.fs.mode.read {#feature-fs-mode-read}",
           "description": "mirrord will read files from the remote, but won't write to them.",
           "type": "string",
           "enum": [
@@ -390,6 +452,7 @@
           ]
         },
         {
+          "title": "feature.fs.mode.write {#feature-fs-mode-write}",
           "description": "mirrord will read/write from the remote.",
           "type": "string",
           "enum": [
@@ -399,10 +462,11 @@
       ]
     },
     "FsUserConfig": {
-      "description": "Changes file operations behavior based on user configuration.\n\nDefaults to [`FsUserConfig::Simple`], with [`FsModeConfig::Read`].\n\nSee the file operations [reference](https://mirrord.dev/docs/reference/fileops/) for more details.\n\n## Examples\n\n- Read-write file operations:\n\n```toml # mirrord-config.toml\n\n[feature] fs = \"write\" ``` - Read `/lib` locally, `/etc` remotely and `/var/run` read write remotely. Rest local\n\n```yaml # mirrord-config.yaml\n\n[fs] mode = read read_write = [\"/var/run\"] read_only = [\"/etc\"] local = [\"/lib\"] ```",
+      "title": "feature.fs {#fs}",
+      "description": "Changes file operations behavior based on user configuration.\n\nSee the file operations [reference](https://mirrord.dev/docs/reference/fileops/) for more details, and [fs advanced](#fs-advanced) for more information on how to fully setup mirrord file operations.\n\n### Minimal `fs` config {#fs-minimal}\n\n```json { \"feature\": { \"fs\": \"read\" } } ```\n\n### Advanced `fs` config {#fs-advanced}\n\n```json { \"feature\": { \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\.json\" , \"read_only\": [ \".+\\.yaml\", \".+important-file\\.txt\" ], \"local\": [ \".+\\.js\", \".+\\.mjs\" ] } } } ```",
       "anyOf": [
         {
-          "description": "Basic configuration that controls the env vars `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS` (default).",
+          "description": "<!--${internal}--> Basic configuration that controls the env vars `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS` (default).",
           "allOf": [
             {
               "$ref": "#/definitions/FsModeConfig"
@@ -410,7 +474,7 @@
           ]
         },
         {
-          "description": "Allows the user to specify both [`FsModeConfig`] (as above), and configuration for the overrides.",
+          "description": "<!--${internal}--> Allows the user to specify both [`FsModeConfig`] (as above), and configuration for the overrides.",
           "allOf": [
             {
               "$ref": "#/definitions/AdvancedFsUserConfig"
@@ -419,19 +483,56 @@
         }
       ]
     },
-    "HttpHeaderFilterFileConfig": {
-      "description": "Filter configuration for the HTTP traffic stealer feature.\n\nAllows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic feature only captures HTTP requests that match the specified filter, forwarding unmatched requests to their original destinations.\n\nOnly does something when [`IncomingConfig`](super::IncomingConfig) is set as [`IncomingMode::Steal`](super::IncomingMode::Steal), ignored otherwise.",
+    "HttpFilterFileConfig": {
+      "description": "Filter configuration for the HTTP traffic stealer feature.\n\nAllows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic feature only captures HTTP requests that match the specified filter, forwarding unmatched requests to their original destinations.\n\nOnly does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is set as `\"steal\"`, ignored otherwise.\n\nfor example, to filter based on header: ```json { \"header_filter\": \"host: api\\..+\", } ```\n\nfor example, to filter based on path ```json { \"path_filter\": \"host: api\\..+\", } ```",
       "type": "object",
       "properties": {
-        "filter": {
-          "description": "Used to match against the requests captured by the mirrord-agent pod.\n\nSupports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\n## Usage\n\nThe HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`, case-insensitive.",
+        "header_filter": {
+          "title": "feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}",
+          "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nThe HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`, case-insensitive.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path_filter": {
+          "title": "feature.network.incoming.http_filter.path_filter {#feature-network-incoming-http-path-filter}",
+          "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nCase insensitive.",
           "type": [
             "string",
             "null"
           ]
         },
         "ports": {
-          "description": "Activate the HTTP traffic filter only for these ports.",
+          "title": "feature.network.incoming.http_header_filter.ports {#feature-network-incoming-http_header_filter-ports}",
+          "description": "Activate the HTTP traffic filter only for these ports.\n\nOther ports will still be stolen (when `\"steal`\" is being used), they're just not checked for HTTP filtering.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PortList"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "HttpHeaderFilterFileConfig": {
+      "description": "Filter configuration for the HTTP traffic stealer feature.\n\nDEPRECATED - USE http_filter instead, unless using old operator/agent version (pre 3.46.0) Allows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic feature only captures HTTP requests that match the specified filter, forwarding unmatched requests to their original destinations.\n\nOnly does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is set as `\"steal\"`, ignored otherwise.\n\n```json { \"filter\": \"host: api\\..+\", \"ports\": [80, 8080] } ```",
+      "type": "object",
+      "properties": {
+        "filter": {
+          "title": "feature.network.incoming.http_header_filter.filter {#feature-network-incoming-http_header_filter-filter}",
+          "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nThe HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`, case-insensitive.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ports": {
+          "title": "feature.network.incoming.http_header_filter.ports {#feature-network-incoming-http_header_filter-ports}",
+          "description": "Activate the HTTP traffic filter only for these ports.\n\nOther ports will still be stolen (when `\"steal`\" is being used), they're just not checked for HTTP filtering.",
           "anyOf": [
             {
               "$ref": "#/definitions/PortList"
@@ -445,10 +546,25 @@
       "additionalProperties": false
     },
     "IncomingAdvancedFileConfig": {
+      "title": "incoming (advanced setup)",
+      "description": "Advanced user configuration for network incoming traffic.",
       "type": "object",
       "properties": {
+        "http_filter": {
+          "title": "HTTP Filter",
+          "description": "Sets up the HTTP traffic filter (currently, only useful when `incoming: steal`).\n\nSee [`filter`](##filter) for details.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToggleableConfig_for_HttpFilterFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "http_header_filter": {
-          "description": "Sets up the HTTP traffic filter (currently, only for [`IncomingMode::Steal`]).\n\nSee [`HttpHeaderFilterConfig`] for details.",
+          "title": "filter",
+          "description": "Sets up the HTTP traffic filter (currently, only useful when `incoming: steal`).\n\nSee [`filter`](##filter) for details.",
           "anyOf": [
             {
               "$ref": "#/definitions/ToggleableConfig_for_HttpHeaderFilterFileConfig"
@@ -459,6 +575,7 @@
           ]
         },
         "ignore_localhost": {
+          "title": "ignore_localhost",
           "description": "Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702",
           "type": [
             "boolean",
@@ -466,6 +583,7 @@
           ]
         },
         "ignore_ports": {
+          "title": "ignore_ports",
           "description": "Ports to ignore when mirroring/stealing traffic. Useful if you want specific ports to be used locally only.",
           "type": [
             "array",
@@ -477,8 +595,34 @@
             "minimum": 0.0
           }
         },
+        "listen_ports": {
+          "title": "listen_ports",
+          "description": "Mapping for local ports to actually used local ports. When application listens on a port while steal/mirror is active we fallback to random ports to avoid port conflicts. Using this configuration will always use the specified port. If this configuration doesn't exist, mirrord will try to listen on the original port and if it fails it will assign a random port\n\nThis is useful when you want to access ports exposed by your service locally For example, if you have a service that listens on port `80` and you want to access it, you probably can't listen on `80` without sudo, so you can use `[[80, 4480]]` then access it on `4480` while getting traffic from remote `80`. The value of `port_mapping` doesn't affect this.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "array",
+            "items": [
+              {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0.0
+              },
+              {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0.0
+              }
+            ],
+            "maxItems": 2,
+            "minItems": 2
+          }
+        },
         "mode": {
-          "description": "Allows selecting between mirrorring or stealing traffic.\n\nSee [`IncomingMode`] for details.",
+          "title": "mode",
+          "description": "Allows selecting between mirrorring or stealing traffic.\n\nSee [`mode`](##mode (incoming)) for details.",
           "anyOf": [
             {
               "$ref": "#/definitions/IncomingMode"
@@ -488,8 +632,21 @@
             }
           ]
         },
+        "on_concurrent_steal": {
+          "title": "on_concurrent_steal",
+          "description": "(Operator Only): if value of override will force close any other connections on requested target",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConcurrentSteal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "port_mapping": {
-          "description": "Mapping for local ports to remote ports.\n\nThis is useful when you want to mirror/steal a port to a different port on the remote machine. For example, your local process listens on port 9333 and the container listens on port 80. You'd use [[9333, 80]]",
+          "title": "port_mapping",
+          "description": "Mapping for local ports to remote ports.\n\nThis is useful when you want to mirror/steal a port to a different port on the remote machine. For example, your local process listens on port `9333` and the container listens on port `80`. You'd use `[[9333, 80]]`",
           "type": [
             "array",
             "null"
@@ -515,7 +672,8 @@
       }
     },
     "IncomingFileConfig": {
-      "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it (depending on how it's configured, see [`IncomingMode::Steal`]);\n\n## Examples\n\n- Mirror any incoming traffic:\n\n```toml # mirrord-config.toml\n\n[feature.network] incoming = \"mirror\"    # for illustration purporses, it's the default ```\n\n- Steal incoming HTTP traffic, if the HTTP header matches \"Id: token.*\" (supports regex):\n\n```yaml # mirrord-config.yaml\n\n[feature.network.incoming] mode = \"steal\"\n\n[feature.network.incoming.http_header_filter] filter = \"Id: token.*\" ```",
+      "title": "incoming (network)",
+      "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it to the local process, see [`steal`](##steal);\n\n### Minimal `incoming` config\n\n```json { \"feature\": { \"network\": { \"incoming\": \"steal\" } } } ```\n\n### Advanced `incoming` config\n\n```json { \"feature\": { \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_header_filter\": { \"filter\": \"host: api\\..+\", \"ports\": [80, 8080] }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] \"listen_ports\": [[80, 8111]] } } } } ```",
       "anyOf": [
         {
           "anyOf": [
@@ -533,17 +691,17 @@
       ]
     },
     "IncomingMode": {
-      "description": "Mode of operation for the incoming TCP traffic feature.\n\nDefaults to [`IncomingMode::Mirror`].",
+      "description": "Allows selecting between mirrorring or stealing traffic.\n\nCan be set to either `\"mirror\"` (default) or `\"steal\"`.\n\n- `\"mirror\"`: Sniffs on TCP port, and send a copy of the data to listeners. - `\"steal\"`: Supports 2 modes of operation:\n\n1. Port traffic stealing: Steals all TCP data from a port, which is selected whenever the user listens in a TCP socket (enabling the feature is enough to make this work, no additional configuration is needed);\n\n2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and steals the traffic on the port if it is HTTP;",
       "oneOf": [
         {
-          "description": "Sniffs on TCP port, and send a copy of the data to listeners.",
+          "description": "<!--${internal}--> ### mirror\n\nSniffs on TCP port, and send a copy of the data to listeners.",
           "type": "string",
           "enum": [
             "mirror"
           ]
         },
         {
-          "description": "Stealer supports 2 modes of operation:\n\n1. Port traffic stealing: Steals all TCP data from a port, which is selected whenever the user listens in a TCP socket (enabling the feature is enough to make this work, no additional configuration is needed);\n\n2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and steals the traffic on the port if it is HTTP;",
+          "description": "<!--${internal}--> ### steal\n\nStealer supports 2 modes of operation:\n\n1. Port traffic stealing: Steals all TCP data from a port, which is selected whenever the user listens in a TCP socket (enabling the feature is enough to make this work, no additional configuration is needed);\n\n2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and steals the traffic on the port if it is HTTP;",
           "type": "string",
           "enum": [
             "steal"
@@ -552,18 +710,19 @@
       ]
     },
     "NetworkFileConfig": {
-      "description": "Controls mirrord network operations.\n\nSee the network traffic [reference](https://mirrord.dev/docs/reference/traffic/) for more details.\n\n## Examples\n\n- Steal incoming traffic, enable TCP outgoing traffic and DNS resolution:\n\n```toml # mirrord-config.toml\n\n[feature.network] incoming = \"steal\" dns = true # not needed, as this is the default\n\n[feature.network.outgoing] tcp = true ```",
+      "description": "Controls mirrord network operations.\n\nSee the network traffic [reference](https://mirrord.dev/docs/reference/traffic/) for more details.\n\n```json { \"feature\": { \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_header_filter\": { \"filter\": \"host: api\\..+\", \"ports\": [80, 8080] }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": false } } } ```",
       "type": "object",
       "properties": {
         "dns": {
-          "description": "Resolve DNS via the remote pod.",
+          "title": "feature.network.dns {#feature-network-dns}",
+          "description": "Resolve DNS via the remote pod.\n\nDefaults to `true`.",
           "type": [
             "boolean",
             "null"
           ]
         },
         "incoming": {
-          "description": "Handles incoming network traffic, see [`IncomingConfig`] for more details.",
+          "title": "feature.network.incoming {#feature-network-incoming}",
           "anyOf": [
             {
               "$ref": "#/definitions/ToggleableConfig_for_IncomingFileConfig"
@@ -574,7 +733,7 @@
           ]
         },
         "outgoing": {
-          "description": "Tunnel outgoing network operations through mirrord.",
+          "title": "feature.network.outgoing {#feature-network-outgoing}",
           "anyOf": [
             {
               "$ref": "#/definitions/ToggleableConfig_for_OutgoingFileConfig"
@@ -588,28 +747,35 @@
       "additionalProperties": false
     },
     "OutgoingFileConfig": {
+      "description": "Tunnel outgoing network operations through mirrord.\n\nSee the outgoing [reference](https://mirrord.dev/docs/reference/traffic/#outgoing) for more details.\n\n```json { \"feature\": { \"network\": { \"outgoing\": { \"tcp\": true, \"udp\": true, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" } } } } ```",
       "type": "object",
       "properties": {
         "ignore_localhost": {
-          "description": "Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702",
+          "title": "feature.network.outgoing.ignore_localhost {#feature.network.outgoing.ignore_localhost}",
+          "description": "Defaults to `false`.",
           "type": [
             "boolean",
             "null"
           ]
         },
         "tcp": {
+          "title": "feature.network.outgoing.tcp {#feature.network.outgoing.tcp}",
+          "description": "Defaults to `true`.",
           "type": [
             "boolean",
             "null"
           ]
         },
         "udp": {
+          "title": "feature.network.outgoing.udp {#feature.network.outgoing.udp}",
+          "description": "Defaults to `true`.",
           "type": [
             "boolean",
             "null"
           ]
         },
         "unix_streams": {
+          "title": "feature.network.outgoing.unix_streams {#feature.network.outgoing.unix_streams}",
           "description": "Connect to these unix streams remotely (and to all other paths locally).\n\nYou can either specify a single value or an array of values. Each value is interpreted as a regular expression ([Supported Syntax](https://docs.rs/regex/1.7.1/regex/index.html#syntax)).\n\nWhen your application connects to a unix socket, the target address will be converted to a string (non-utf8 bytes are replaced by a placeholder character) and matched against the set of regexes specified here. If there is a match, mirrord will connect your application with the target unix socket address on the target pod. Otherwise, it will leave the connection to happen locally on your machine.",
           "anyOf": [
             {
@@ -624,7 +790,7 @@
       "additionalProperties": false
     },
     "PodTarget": {
-      "description": "Mirror the pod specified by [`PodTarget::pod`].",
+      "description": "<!--${internal}--> Mirror the pod specified by [`PodTarget::pod`].",
       "type": "object",
       "required": [
         "pod"
@@ -637,13 +803,13 @@
           ]
         },
         "pod": {
-          "description": "Pod to mirror.",
+          "description": "<!--${internal}--> Pod to mirror.",
           "type": "string"
         }
       }
     },
     "PortList": {
-      "description": "Helper struct for setting up ports configuration (part of the HTTP traffic stealer feature).\n\nDefaults to a list of ports `[80, 8080]`.\n\n## Internal\n\nWe use this to allow implementing a custom [`Default`] initialization, as the [`MirrordConfig`] macro (currently) doesn't support more intricate expressions.",
+      "description": "<!--${internal}--> Helper struct for setting up ports configuration (part of the HTTP traffic stealer feature).\n\nDefaults to a list of ports `[80, 8080]`.\n\nWe use this to allow implementing a custom [`Default`] initialization, as the [`MirrordConfig`] macro (currently) doesn't support more intricate expressions.",
       "allOf": [
         {
           "$ref": "#/definitions/VecOrSingle_for_uint16"
@@ -651,10 +817,10 @@
       ]
     },
     "Target": {
-      "description": "Specifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `podname/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`.\n\n## Examples\n\n- Mirror pod `hello-world-abcd-1234`:\n\n```toml # mirrord-config.toml\n\ntarget = \"pod/hello-world-abcd-1234\" ```",
+      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `podname/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`.",
       "anyOf": [
         {
-          "description": "Mirror a deployment.",
+          "description": "<!--${internal}--> Mirror a deployment.",
           "allOf": [
             {
               "$ref": "#/definitions/DeploymentTarget"
@@ -662,7 +828,7 @@
           ]
         },
         {
-          "description": "Mirror a pod.",
+          "description": "<!--${internal}--> Mirror a pod.",
           "allOf": [
             {
               "$ref": "#/definitions/PodTarget"
@@ -672,7 +838,6 @@
       ]
     },
     "TargetFileConfig": {
-      "description": "Specifies the target to mirror. See [`Target`].\n\n## Examples\n\n- Mirror pod `hello-world-abcd-1234` in the `hello` namespace:\n\n```toml # mirrord-config.toml\n\n[target] path = \"pod/hello-world-abcd-1234\" namespace = \"hello\" ```",
       "anyOf": [
         {
           "anyOf": [
@@ -694,6 +859,7 @@
               ]
             },
             "path": {
+              "description": "<!--${internal}--> Path is optional so that it can also be specified via env var instead of via conf file, but it is not optional in a resulting [`TargetConfig`] object - either there is a path, or the target configuration is `None`.",
               "default": null,
               "anyOf": [
                 {
@@ -725,6 +891,16 @@
         },
         {
           "$ref": "#/definitions/FsUserConfig"
+        }
+      ]
+    },
+    "ToggleableConfig_for_HttpFilterFileConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/HttpFilterFileConfig"
         }
       ]
     },

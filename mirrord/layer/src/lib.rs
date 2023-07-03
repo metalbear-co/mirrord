@@ -1,5 +1,4 @@
 #![feature(c_variadic)]
-#![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![feature(const_trait_impl)]
 #![feature(naked_functions)]
@@ -12,7 +11,7 @@
 #![feature(trait_alias)]
 #![feature(c_size_t)]
 #![feature(pointer_byte_offsets)]
-#![feature(is_some_and)]
+#![feature(lazy_cell)]
 #![feature(async_fn_in_trait)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![allow(incomplete_features)]
@@ -80,6 +79,7 @@ use std::{
     sync::{LazyLock, OnceLock},
 };
 
+use bimap::BiMap;
 use common::ResponseChannel;
 use ctor::ctor;
 use dns::GetAddrInfo;
@@ -88,16 +88,16 @@ use file::{filter::FileFilter, OPEN_FILES};
 use hooks::HookManager;
 use libc::c_int;
 use mirrord_config::{
-    feature::FeatureConfig,
-    fs::FsConfig,
-    incoming::{http_filter::HttpHeaderFilterConfig, IncomingConfig},
-    network::NetworkConfig,
+    feature::{
+        fs::{FsConfig, FsModeConfig},
+        network::{incoming::IncomingConfig, NetworkConfig},
+        FeatureConfig,
+    },
     util::VecOrSingle,
     LayerConfig,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
-    codec::LogLevel,
     dns::{DnsLookup, GetAddrInfoRequest},
     tcp::{HttpResponse, LayerTcpSteal},
     ClientMessage, DaemonMessage,
@@ -132,7 +132,7 @@ mod detour;
 mod dns;
 mod error;
 #[cfg(target_os = "macos")]
-mod exec;
+mod exec_utils;
 mod file;
 mod hooks;
 mod load;
@@ -233,11 +233,18 @@ pub(crate) static OUTGOING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
 /// When true, localhost connections will stay local - wont mirror or steal.
 pub(crate) static INCOMING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
 
+/// Indicates this is a targetless run, so that users can be warned if their application is
+/// mirroring/stealing from a targetless agent.
+pub(crate) static TARGETLESS: OnceLock<bool> = OnceLock::new();
+
 /// Ports to ignore on listening for mirroring/stealing.
 pub(crate) static INCOMING_IGNORE_PORTS: OnceLock<HashSet<u16>> = OnceLock::new();
 
 /// Ports to ignore because they are used by the IDE debugger
 pub(crate) static DEBUGGER_IGNORED_PORTS: OnceLock<DebuggerPorts> = OnceLock::new();
+
+/// Mapping of ports to use for binding local sockets created by us for intercepting.
+pub(crate) static LISTEN_PORTS: OnceLock<BiMap<u16, u16>> = OnceLock::new();
 
 /// Check if we're running in NixOS or Devbox.
 ///
@@ -296,6 +303,21 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         .clone()
         .map(|x| x.to_vec())
         .unwrap_or_default();
+
+    // SIP Patch the process' binary then re-execute it. Needed
+    // for https://github.com/metalbear-co/mirrord/issues/1529
+    #[cfg(target_os = "macos")]
+    if given_process.ends_with("dotnet") {
+        if let Ok(path) = std::env::current_exe() {
+            if let Ok(Some(binary)) =
+                mirrord_sip::sip_patch(path.to_str().unwrap(), &patch_binaries)
+            {
+                let err = exec::execvp(binary, std::env::args());
+                error!("Couldn't execute {:?}", err);
+                return Err(LayerError::ExecFailed(err));
+            }
+        }
+    }
 
     match load::load_type(given_process, config) {
         LoadType::Full(config) => layer_start(*config),
@@ -427,15 +449,30 @@ fn layer_start(config: LayerConfig) {
         .set(config.feature.network.incoming.ignore_localhost)
         .expect("Setting INCOMING_IGNORE_LOCALHOST singleton");
 
+    let targetless = config.target.path.is_none();
+    TARGETLESS
+        .set(targetless)
+        .expect("Setting TARGETLESS singleton");
+
     INCOMING_IGNORE_PORTS
         .set(config.feature.network.incoming.ignore_ports.clone())
         .expect("Setting INCOMING_IGNORE_PORTS failed");
 
-    FILE_FILTER.get_or_init(|| FileFilter::new(config.feature.fs.clone()));
+    FILE_FILTER.get_or_init(|| {
+        let mut fs_config = config.feature.fs.clone();
+        if targetless {
+            fs_config.mode = FsModeConfig::LocalWithOverrides;
+        }
+        FileFilter::new(fs_config)
+    });
 
     DEBUGGER_IGNORED_PORTS
         .set(DebuggerPorts::from_env())
         .expect("Setting DEBUGGER_IGNORED_PORTS failed");
+
+    LISTEN_PORTS
+        .set(config.feature.network.incoming.listen_ports.clone())
+        .expect("Setting LISTEN_PORTS failed");
 
     enable_hooks(
         file_mode.is_active(),
@@ -456,7 +493,7 @@ fn layer_start(config: LayerConfig) {
 fn sip_only_layer_start(patch_binaries: Vec<String>) {
     let mut hook_manager = HookManager::default();
 
-    unsafe { exec::enable_execve_hook(&mut hook_manager, patch_binaries) };
+    unsafe { exec_utils::enable_execve_hook(&mut hook_manager, patch_binaries) };
 }
 
 /// Acts as an API to the various features of mirrord-layer, holding the actual feature handler
@@ -536,10 +573,12 @@ impl Layer {
         let (http_response_sender, http_response_receiver) = channel(1024);
         let steal = incoming.is_steal();
         let IncomingConfig {
-            http_header_filter: HttpHeaderFilterConfig { filter, ports },
+            http_header_filter,
+            http_filter,
             port_mapping,
             ..
         } = incoming;
+
         Self {
             tx,
             rx,
@@ -550,10 +589,9 @@ impl Layer {
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
             tcp_steal_handler: TcpStealHandler::new(
-                filter,
-                ports.into(),
                 http_response_sender,
                 port_mapping,
+                (http_filter, http_header_filter).into(),
             ),
             http_response_receiver,
             steal,
@@ -626,7 +664,7 @@ impl Layer {
     /// This message has no dedicated handler, and is thus handled directly here, changing the
     /// [`Self::ping`] state.
     ///
-    /// ### [`DaemonMessage::GetEnvVarsResponse`]
+    /// ### [`DaemonMessage::GetEnvVarsResponse`] and [`DaemonMessage::PauseTarget`]
     ///
     /// Handled during mirrord-layer initialization, this message should never make it this far.
     ///
@@ -638,7 +676,7 @@ impl Layer {
     ///
     /// ### [`DaemonMessage::LogMessage`]
     ///
-    /// This message has no dedicated handler, the internal message is simply logged here.
+    /// This message is handled in protocol level `wrap_raw_connection`.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_daemon_message(&mut self, daemon_message: DaemonMessage) -> Result<()> {
         match daemon_message {
@@ -679,17 +717,9 @@ impl Layer {
                 .send(get_addr_info.0)
                 .map_err(|_| LayerError::SendErrorGetAddrInfoResponse),
             DaemonMessage::Close(error_message) => Err(LayerError::AgentErrorClosed(error_message)),
-            DaemonMessage::LogMessage(log_message) => {
-                match log_message.level {
-                    LogLevel::Warn => {
-                        warn!(message = log_message.message, "Daemon sent log message")
-                    }
-                    LogLevel::Error => {
-                        error!(message = log_message.message, "Daemon sent log message")
-                    }
-                }
-
-                Ok(())
+            DaemonMessage::LogMessage(_) => Ok(()),
+            DaemonMessage::PauseTarget(_) => {
+                unreachable!("We set pausing target only on initialization, shouldn't happen")
             }
         }
     }
@@ -786,7 +816,7 @@ async fn thread_loop(
             Some(response) = layer.http_response_receiver.recv() => {
                 layer.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response))).await.unwrap();
             }
-            _ = sleep(Duration::from_secs(60)) => {
+            _ = sleep(Duration::from_secs(30)) => {
                 if !layer.ping {
                     layer.send(ClientMessage::Ping).await.unwrap();
                     trace!("sent ping to daemon");
@@ -873,7 +903,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
 
     #[cfg(target_os = "macos")]
     unsafe {
-        exec::enable_execve_hook(&mut hook_manager, patch_binaries)
+        exec_utils::enable_execve_hook(&mut hook_manager, patch_binaries)
     };
 
     if enabled_file_ops {
@@ -904,6 +934,10 @@ pub(crate) fn close_layer_fd(fd: c_int) {
     // Remove from sockets, also removing the `ConnectionQueue` associated with the socket.
     if let Some((_, socket)) = SOCKETS.remove(&fd) {
         CONNECTION_QUEUE.remove(socket.id);
+
+        // Closed file is a socket, so if it's already bound to a port - notify agent to stop
+        // mirroring/stealing that port.
+        socket.close();
     } else if file_mode_active {
         OPEN_FILES.remove(&fd);
     }

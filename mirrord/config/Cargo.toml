@@ -15,6 +15,7 @@ edition.workspace = true
 
 [dependencies]
 mirrord-config-derive = { path = "./derive"}
+mirrord-analytics = { path = "../analytics"}
 
 serde.workspace = true
 serde_json.workspace = true
@@ -24,6 +25,7 @@ serde_yaml = "0.9"
 toml = "0.7"
 schemars = { version = "0.8.11" }
 bimap.workspace = true
+bitflags = "2"
 
 [dev-dependencies]
 rstest = "0.17"

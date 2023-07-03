@@ -33,7 +33,25 @@ use crate::{
 
 #[derive(Debug, Eq, Copy, Clone)]
 pub struct TcpSessionIdentifier {
+    /// The remote address that is sending a packet to the impersonated pod.
+    ///
+    /// ## Details
+    ///
+    /// If you were to `curl {impersonated_pod_ip}:{port}`, this would be the address of whoever
+    /// is making the request.
     source_addr: Ipv4Addr,
+
+    /// Local address of the impersonated pod.
+    ///
+    /// ## Details
+    ///
+    /// You can get this IP by checking `kubectl get pod -o wide`.
+    ///
+    /// ```sh`
+    /// $ kubectl get pod -o wide
+    /// NAME        READY   STATUS    IP
+    /// happy-pod   1/1     Running   1.2.3.4   
+    /// ````
     dest_addr: Ipv4Addr,
     source_port: u16,
     dest_port: u16,
@@ -298,7 +316,7 @@ pub struct TcpConnectionSniffer {
     sessions: TCPSessionMap,
     //todo: impl drop for index allocator and connection id..
     connection_id_to_tcp_identifier: HashMap<ConnectionId, TcpSessionIdentifier>,
-    index_allocator: IndexAllocator<ConnectionId>,
+    index_allocator: IndexAllocator<ConnectionId, 100>,
 }
 
 impl TcpConnectionSniffer {

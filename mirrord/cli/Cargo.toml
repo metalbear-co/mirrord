@@ -16,13 +16,14 @@ edition.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-mirrord-auth = { path="../auth", features = ["webbrowser"] }
+mirrord-auth = { path = "../auth" }
 mirrord-operator = { path = "../operator", features = ["client", "license-fetch", "setup"] }
 mirrord-progress = { path = "../progress" }
 mirrord-kube = { path = "../kube" }
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
 mirrord-console = { path = "../console" }
+mirrord-analytics = { path = "../analytics" }
 
 actix-codec.workspace = true
 clap.workspace = true
@@ -33,11 +34,11 @@ serde.workspace = true
 tracing-subscriber.workspace = true
 futures.workspace = true
 which.workspace = true
+semver.workspace = true
 regex = "1.6.0"
-exec = "0.3"
+exec.workspace = true
 anyhow.workspace = true
 reqwest.workspace = true
-semver = "1"
 const-random = "0.1.15"
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "macros", "process"]}
 kube.workspace = true

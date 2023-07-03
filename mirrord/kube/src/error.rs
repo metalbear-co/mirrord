@@ -1,3 +1,5 @@
+use std::net::AddrParseError;
+
 use thiserror::Error;
 
 pub type Result<T, E = KubeApiError> = std::result::Result<T, E>;
@@ -57,4 +59,11 @@ pub enum KubeApiError {
 
     #[error("Port not found in port forward")]
     PortForwardFailed,
+
+    #[error("Invaild Address Conversion: {0}")]
+    InvalidAddress(#[from] AddrParseError),
+
+    /// This error should never happen, but has to exist if we don't want to unwrap.
+    #[error("mirrord-layer: None runtime data for non-targetless agent. This is a bug.")]
+    MissingRuntimeData,
 }

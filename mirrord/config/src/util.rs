@@ -1,4 +1,4 @@
-use std::{fmt, marker::PhantomData, slice::Join, str::FromStr};
+use std::{collections::HashSet, fmt, hash::Hash, marker::PhantomData, slice::Join, str::FromStr};
 
 use schemars::JsonSchema;
 use serde::{
@@ -73,6 +73,33 @@ impl<T> VecOrSingle<T> {
         match self {
             VecOrSingle::Single(val) => vec![val],
             VecOrSingle::Multiple(vals) => vals,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            VecOrSingle::Single(_) => 1,
+            VecOrSingle::Multiple(vals) => vals.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            VecOrSingle::Single(_) => false,
+            VecOrSingle::Multiple(vals) => vals.is_empty(),
+        }
+    }
+}
+
+impl<T: Hash + Eq> From<VecOrSingle<T>> for HashSet<T> {
+    fn from(value: VecOrSingle<T>) -> Self {
+        match value {
+            VecOrSingle::Single(val) => {
+                let mut set = HashSet::with_capacity(1);
+                set.insert(val);
+                set
+            }
+            VecOrSingle::Multiple(vals) => vals.into_iter().collect(),
         }
     }
 }
@@ -163,6 +190,7 @@ pub mod testing {
 
     static SERIAL_TEST: LazyLock<Mutex<()>> = LazyLock::new(Default::default);
 
+    /// <!--${internal}-->
     /// Sets environment variables to the given value for the duration of the closure.
     /// Restores the previous values when the closure completes or panics, before unwinding the
     /// panic.

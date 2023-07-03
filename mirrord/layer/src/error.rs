@@ -1,4 +1,4 @@
-use std::{env::VarError, ptr, str::ParseBoolError};
+use std::{env::VarError, net::SocketAddr, ptr, str::ParseBoolError};
 
 use errno::set_errno;
 use ignore_codes::*;
@@ -21,7 +21,7 @@ mod ignore_codes {
     /// Error codes from [`libc`] that are **not** hard errors, meaning the operation may progress.
     ///
     /// Prefer using [`is_ignored_code`] instead of relying on this constant.
-    const IGNORE_ERROR_CODES: [i32; 2] = [libc::EINPROGRESS, libc::EAFNOSUPPORT];
+    const IGNORE_ERROR_CODES: [i32; 3] = [libc::EINPROGRESS, libc::EAFNOSUPPORT, libc::EADDRINUSE];
 
     /// Checks if an error code from some [`libc`] function should be treated as a hard error, or
     /// not.
@@ -93,6 +93,9 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: Pointer argument points to an invalid address")]
     BadPointer,
+
+    #[error("mirrord-layer: Socket address `{0}` is already bound!")]
+    AddressAlreadyBound(SocketAddr),
 }
 
 /// Errors internal to mirrord-layer.
@@ -106,7 +109,7 @@ pub(crate) enum LayerError {
     ResponseError(#[from] ResponseError),
 
     #[error("mirrord-layer: Frida failed with `{0}`!")]
-    Frida(#[from] frida_gum::Error),
+    Frida(frida_gum::Error),
 
     #[error("mirrord-layer: Failed to find export for name `{0}`!")]
     NoExportName(String),
@@ -151,8 +154,10 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: No connection found for id `{0}`!")]
     NoConnectionId(ConnectionId),
 
-    #[error("mirrord-layer: Failed to find port `{0}`!")]
-    PortNotFound(u16),
+    #[error(
+        "mirrord-layer: Got new connection from daemon after layer already closed that socket."
+    )]
+    NewConnectionAfterSocketClose(ConnectionId),
 
     #[error("mirrord-layer: Unmatched pong!")]
     UnmatchedPong,
@@ -192,6 +197,10 @@ pub(crate) enum LayerError {
         supported IP or unix socket address."
     )]
     UnsupportedSocketType,
+
+    #[cfg(target_os = "macos")]
+    #[error("Exec failed with error {0:?}, please report this error!")]
+    ExecFailed(exec::Error),
 }
 
 impl From<SerializationError> for LayerError {
@@ -224,12 +233,15 @@ pub(crate) type HookResult<T, E = HookError> = std::result::Result<T, E>;
 impl From<HookError> for i64 {
     fn from(fail: HookError) -> Self {
         match fail {
-            HookError::ResponseError(ResponseError::NotFound(_))
-            | HookError::ResponseError(ResponseError::NotFile(_))
-            | HookError::ResponseError(ResponseError::NotDirectory(_))
-            | HookError::ResponseError(ResponseError::Remote(_))
-            | HookError::ResponseError(ResponseError::RemoteIO(_))
-            | HookError::ResponseError(ResponseError::DnsLookup(_)) => {
+            HookError::AddressAlreadyBound(_)
+            | HookError::ResponseError(
+                ResponseError::NotFound(_)
+                | ResponseError::NotFile(_)
+                | ResponseError::NotDirectory(_)
+                | ResponseError::Remote(_)
+                | ResponseError::RemoteIO(_)
+                | ResponseError::DnsLookup(_),
+            ) => {
                 info!("libc error (doesn't indicate a problem) >> {fail:#?}")
             }
             HookError::IO(ref e) if (is_ignored_code(e.raw_os_error())) => {
@@ -260,10 +272,13 @@ impl From<HookError> for i64 {
                     mirrord_protocol::RemoteError::ConnectTimedOut(_) => libc::ENETUNREACH,
                     _ => libc::EINVAL,
                 },
-                ResponseError::DnsLookup(dns_fail) => match dns_fail.kind {
-                    mirrord_protocol::ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
-                    _ => libc::EAI_FAIL,
-                },
+                ResponseError::DnsLookup(dns_fail) => {
+                    return match dns_fail.kind {
+                        mirrord_protocol::ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
+                        _ => libc::EAI_FAIL,
+                        // TODO: Add more error kinds, next time we break protocol compatibility.
+                    } as _;
+                }
                 // for listen, EINVAL means "socket is already connected."
                 // Will not happen, because this ResponseError is not return from any hook, so it
                 // never appears as HookError::ResponseError(PortAlreadyStolen(_)).
@@ -280,6 +295,7 @@ impl From<HookError> for i64 {
             HookError::SocketUnsuportedIpv6 => libc::EAFNOSUPPORT,
             HookError::UnsupportedSocketType => libc::EAFNOSUPPORT,
             HookError::BadPointer => libc::EFAULT,
+            HookError::AddressAlreadyBound(_) => libc::EADDRINUSE,
         };
 
         set_errno(errno::Errno(libc_error));
@@ -329,5 +345,11 @@ impl From<HookError> for *mut c_char {
         let _ = i64::from(fail);
 
         ptr::null_mut()
+    }
+}
+
+impl From<frida_gum::Error> for LayerError {
+    fn from(err: frida_gum::Error) -> Self {
+        LayerError::Frida(err)
     }
 }
