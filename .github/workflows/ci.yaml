@@ -352,6 +352,7 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/listen_ports
           cargo build
+      - run: ./scripts/build_c_apps.sh
       - name: download layer # Download layer lib built in the `build_mirrord` job.
         uses: actions/download-artifact@v3
         with:
@@ -413,6 +414,7 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/dns_resolve
           cargo build
+      - run: ./scripts/build_c_apps.sh
       - uses: actions/setup-node@v3
         with:
           node-version: 14
