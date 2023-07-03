@@ -789,7 +789,7 @@ impl Application {
             | Application::PythonDontLoad
             | Application::PythonListen => Self::get_python3_executable().await,
             Application::PythonFastApiHTTP => String::from("uvicorn"),
-            Application::Fork => String::from("tests/apps/fork/fork.test_app"),
+            Application::Fork => String::from("tests/apps/fork/out.c_test_app"),
             Application::NodeHTTP => String::from("node"),
             Application::Go19HTTP => String::from("tests/apps/app_go/19.go_test_app"),
             Application::Go20HTTP => String::from("tests/apps/app_go/20.go_test_app"),
