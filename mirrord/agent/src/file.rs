@@ -299,28 +299,28 @@ impl FileManager {
 
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn read(&mut self, fd: u64, buffer_size: u64) -> RemoteResult<ReadFileResponse> {
-    self.open_files
-        .get_mut(&fd)
-        .ok_or(ResponseError::NotFound(fd))
-        .and_then(|remote_file| {
-            if let RemoteFile::File(file) = remote_file {
-                let mut buffer = vec![0; buffer_size as usize];
-                let read_amount = file.read(&mut buffer)?;
+        self.open_files
+            .get_mut(&fd)
+            .ok_or(ResponseError::NotFound(fd))
+            .and_then(|remote_file| {
+                if let RemoteFile::File(file) = remote_file {
+                    let mut buffer = vec![0; buffer_size as usize];
+                    let read_amount = file.read(&mut buffer)?;
 
-                // Slice the buffer based on the actual number of bytes read
-                let read_bytes = buffer[..read_amount].to_vec();
+                    // Truncate the buffer based on the actual number of bytes read
+                    buffer.truncate(read_amount);
 
-                // Create the response with the read bytes and the read amount
-                let response = ReadFileResponse {
-                    bytes: read_bytes,
-                    read_amount: read_amount as u64,
-                };
+                    // Create the response with the read bytes and the read amount
+                    let response = ReadFileResponse {
+                        bytes: buffer,
+                        read_amount: read_amount as u64,
+                    };
 
-                Ok(response)
-            } else {
-                Err(ResponseError::NotFile(fd))
-            }
-        })
+                    Ok(response)
+                } else {
+                    Err(ResponseError::NotFile(fd))
+                }
+            })
     }
 
     /// Remote implementation of `fgets`.
@@ -367,37 +367,38 @@ impl FileManager {
             })
     }
 
-   #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn read_limited(
-    &mut self,
-    fd: u64,
-    buffer_size: u64,
-    start_from: u64,
+        &mut self,
+        fd: u64,
+        buffer_size: u64,
+        start_from: u64,
     ) -> RemoteResult<ReadFileResponse> {
-    self.open_files
-        .get_mut(&fd)
-        .ok_or(ResponseError::NotFound(fd))
-        .and_then(|remote_file| {
-            if let RemoteFile::File(file) = remote_file {
-                let mut buffer = vec![0; buffer_size as usize];
+        self.open_files
+            .get_mut(&fd)
+            .ok_or(ResponseError::NotFound(fd))
+            .and_then(|remote_file| {
+                if let RemoteFile::File(file) = remote_file {
+                    let mut buffer = vec![0; buffer_size as usize];
 
-                let read_amount = file.read_at(&mut buffer, start_from)?;
+                    let read_amount = file.read_at(&mut buffer, start_from)?;
 
-                // Further optimization: Slice the buffer based on the actual number of bytes read
-                let read_bytes = buffer[..read_amount].to_vec();
+                    // Truncate the buffer based on the actual number of bytes read
+                    buffer.truncate(read_amount);
 
-                // Further optimization: Create the response with the read bytes and the read amount
-                // We will no longer send entire buffer filled with zeroes
-                let response = ReadFileResponse {
-                    bytes: read_bytes,
-                    read_amount: read_amount as u64,
-                };
+                    // Further optimization: Create the response with the read bytes and the read
+                    // amount We will no longer send entire buffer filled with
+                    // zeroes
+                    let response = ReadFileResponse {
+                        bytes: buffer,
+                        read_amount: read_amount as u64,
+                    };
 
-                Ok(response)
-            } else {
-                Err(ResponseError::NotFile(fd))
-            }
-        })
+                    Ok(response)
+                } else {
+                    Err(ResponseError::NotFile(fd))
+                }
+            })
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
