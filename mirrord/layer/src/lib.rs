@@ -518,9 +518,13 @@ fn layer_start(config: LayerConfig) {
     // function, so there are no other threads using `RUNTIME`, so it's safe to mutate it here.
     let new_runtime = unsafe {
         // leak the old runtime if there is one (on fork there is).
+        // We do that because we need a new runtime for the child process, and dropping the runtime
+        // inherited from the parent process leads to errors.
         if let Some(old_runtime) = RUNTIME.take() {
             mem::forget(old_runtime);
         }
+        // We probably don't even need to keep a global `RUNTIME` at all, we could just create it
+        // here and `mem::forget` it before it goes out of scope.
         RUNTIME = Some(build_runtime());
         RUNTIME.as_ref().unwrap() // unwrap: we set it in the line above
     };
