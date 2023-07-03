@@ -29,7 +29,7 @@ use crate::{
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
     tcp::{Listen, TcpIncoming},
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_LOCALHOST, LISTEN_PORTS,
-    OUTGOING_IGNORE_LOCALHOST, REMOTE_UNIX_STREAMS, TARGETLESS,
+    OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR, REMOTE_UNIX_STREAMS, TARGETLESS,
 };
 
 /// Hostname initialized from the agent with [`gethostname`].
@@ -313,6 +313,20 @@ fn connect_outgoing<const TYPE: ConnectType, const CALL_CONNECT: bool>(
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
 ) -> Detour<ConnectResult> {
+    // TODO(alex) [high] 2023-06-30: Check `remote_address` and `TYPE` against `OutgoingSelector`,
+    // if it's in `remote`, we proceed as normal, if it's NOT (or is in `local`), then we bypass?
+    //
+    // If the filter is "named", we should be safe to call `ToSocketAddrs` and convert it to
+    // `SocketAddr` here.
+    //
+    // Ideally we would cache the resolved address, but let's start with not.
+    //
+    // ADD(alex) [mid] 2023-07-03: I think we might need to call `getaddrinfo` ourselves, and sort
+    // of "manually" resolve DNS, instead of relying on `ToSocketAddrs`.
+    OUTGOING_SELECTOR
+        .get()?
+        .connect_remote(remote_address.as_socket()?);
+
     // Prepare this socket to be intercepted.
     let (mirror_tx, mirror_rx) = oneshot::channel();
 

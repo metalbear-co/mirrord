@@ -35,7 +35,7 @@ async fn operator_setup(
 
     if let Some(license) = license {
         eprintln!(
-            "Intalling mirrord operator with namespace: {}",
+            "Installing mirrord operator with namespace: {}",
             namespace.name()
         );
 
@@ -150,23 +150,6 @@ Operator License
     Ok(())
 }
 
-async fn operator_telemetry_export(config: Option<String>) -> Result<()> {
-    let status_api = get_status_api(config).await?;
-
-    let status = status_api
-        .get_subresource("telemetry-export", OPERATOR_STATUS_NAME)
-        .await
-        .map_err(KubeApiError::KubeError)
-        .map_err(OperatorApiError::KubeApiError)
-        .map_err(CliError::OperatorConnectionFailed)?;
-
-    if let Some(exports) = status.spec.telemetry_exports {
-        println!("{}", serde_json::to_string(&exports)?);
-    }
-
-    Ok(())
-}
-
 /// Handle commands related to the operator `mirrord operator ...`
 pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
     match args.command {
@@ -191,8 +174,5 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             operator_setup(accept_tos, file, namespace, license, offline).await
         }
         OperatorCommand::Status { config_file } => operator_status(config_file).await,
-        OperatorCommand::TelemetryExport { config_file } => {
-            operator_telemetry_export(config_file).await
-        }
     }
 }

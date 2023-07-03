@@ -17,6 +17,7 @@ use std::{
 };
 
 use futures::{stream::StreamExt, SinkExt};
+use mirrord_analytics::{send_analytics, Analytics, CollectAnalytics};
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
 use mirrord_operator::client::OperatorApi;
@@ -104,6 +105,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
     // This makes the process not to receive signals from the "mirrord" process or it's parent
     // terminal fixes some side effects such as https://github.com/metalbear-co/mirrord/issues/1232
     nix::unistd::setsid().map_err(InternalProxyError::SetSidError)?;
+    let started = std::time::Instant::now();
     // Let it assign port for us then print it for the user.
     let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
         .await
@@ -113,7 +115,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
     // Create a main connection, that will be held until proxy is closed.
     // This will guarantee agent staying alive and will enable us to
     // make the agent close on last connection close immediately (will help in tests)
-    let _main_connection = connect_and_ping(&config).await?;
+    let (_main_connection, operator) = connect_and_ping(&config).await?;
     print_port(&listener)?;
 
     // wait for first connection `FIRST_CONNECTION_TIMEOUT` seconds, or timeout.
@@ -124,7 +126,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
 
     let mut active_connections = JoinSet::new();
 
-    let agent_connection = connect_and_ping(&config).await?;
+    let (agent_connection, _) = connect_and_ping(&config).await?;
     active_connections.spawn(connection_task(stream, agent_connection));
 
     loop {
@@ -132,7 +134,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
             res = listener.accept() => {
                 match res {
                     Ok((stream, _)) => {
-                        let agent_connection = connect_and_ping(&config).await?;
+                        let (agent_connection, _) = connect_and_ping(&config).await?;
                         active_connections.spawn(connection_task(stream, agent_connection));
                     },
                     Err(err) => {
@@ -149,6 +151,16 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
             }
         }
     }
+    let mut analytics = Analytics::default();
+    (&config).collect_analytics(&mut analytics);
+    if config.telemetry {
+        send_analytics(
+            analytics,
+            started.elapsed().as_secs().try_into().unwrap_or(u32::MAX),
+            operator,
+        )
+        .await;
+    }
     Ok(())
 }
 
@@ -157,10 +169,13 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
 /// sending the first message
 async fn connect_and_ping(
     config: &LayerConfig,
-) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-    let (mut sender, mut receiver) = connect(config).await?;
+) -> Result<(
+    (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
+    bool,
+)> {
+    let ((mut sender, mut receiver), operator) = connect(config).await?;
     ping(&mut sender, &mut receiver).await?;
-    Ok((sender, receiver))
+    Ok(((sender, receiver), operator))
 }
 
 /// Sends a ping the connection and expects a pong.
@@ -184,14 +199,18 @@ async fn ping(
 ///   using [`KubernetesAPI];
 ///
 /// - None of the above: uses the [`OperatorApi`] to establish the connection.
+/// Returns the tx/rx and whether the operator is used.
 async fn connect(
     config: &LayerConfig,
-) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+) -> Result<(
+    (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
+    bool,
+)> {
     if let Some(address) = &config.connect_tcp {
         let stream = TcpStream::connect(address)
             .await
             .map_err(InternalProxyError::TcpConnectError)?;
-        Ok(wrap_raw_connection(stream))
+        Ok((wrap_raw_connection(stream), false))
     } else if let (Some(agent_name), Some(port)) =
         (&config.connect_agent_name, config.connect_agent_port)
     {
@@ -199,9 +218,12 @@ async fn connect(
         let connection = k8s_api
             .create_connection((agent_name.clone(), port))
             .await?;
-        Ok(connection)
+        Ok((connection, false))
     } else {
         let connection = OperatorApi::discover(config, &NoProgress).await?;
-        Ok(connection.ok_or(InternalProxyError::OperatorConnectionError)?)
+        Ok((
+            connection.ok_or(InternalProxyError::OperatorConnectionError)?,
+            true,
+        ))
     }
 }

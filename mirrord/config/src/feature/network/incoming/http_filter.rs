@@ -1,5 +1,6 @@
 use std::{collections::HashSet, ops::Deref, str::FromStr};
 
+use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -171,5 +172,13 @@ impl From<PortList> for Vec<u16> {
 impl From<PortList> for HashSet<u16> {
     fn from(value: PortList) -> Self {
         value.0.into()
+    }
+}
+
+impl CollectAnalytics for &HttpFilterConfig {
+    fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
+        analytics.add("header_filter", self.header_filter.is_some());
+        analytics.add("path_filter", self.path_filter.is_some());
+        analytics.add("ports", self.ports.len());
     }
 }

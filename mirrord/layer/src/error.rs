@@ -21,7 +21,7 @@ mod ignore_codes {
     /// Error codes from [`libc`] that are **not** hard errors, meaning the operation may progress.
     ///
     /// Prefer using [`is_ignored_code`] instead of relying on this constant.
-    const IGNORE_ERROR_CODES: [i32; 2] = [libc::EINPROGRESS, libc::EAFNOSUPPORT];
+    const IGNORE_ERROR_CODES: [i32; 3] = [libc::EINPROGRESS, libc::EAFNOSUPPORT, libc::EADDRINUSE];
 
     /// Checks if an error code from some [`libc`] function should be treated as a hard error, or
     /// not.
@@ -57,8 +57,8 @@ pub(crate) enum HookError {
     #[error("mirrord-layer: IO failed with `{0}`!")]
     IO(#[from] std::io::Error),
 
-    #[error("mirrord-layer: HOOK_SENDER is `None`!")]
-    EmptyHookSender,
+    #[error("mirrord-layer: Could not get HOOK_SENDER, can't send a hook message!")]
+    CannotGetHookSender,
 
     #[error("mirrord-layer: Converting int failed with `{0}`!")]
     TryFromInt(#[from] std::num::TryFromIntError),
@@ -258,7 +258,7 @@ impl From<HookError> for i64 {
             HookError::RecvError(_) => libc::EBADMSG,
             HookError::Null(_) => libc::EINVAL,
             HookError::TryFromInt(_) => libc::EINVAL,
-            HookError::EmptyHookSender => libc::EINVAL,
+            HookError::CannotGetHookSender => libc::EINVAL,
             HookError::IO(io_fail) => io_fail.raw_os_error().unwrap_or(libc::EIO),
             HookError::LockError => libc::EINVAL,
             HookError::ResponseError(response_fail) => match response_fail {
@@ -275,6 +275,11 @@ impl From<HookError> for i64 {
                 ResponseError::DnsLookup(dns_fail) => {
                     return match dns_fail.kind {
                         mirrord_protocol::ResolveErrorKindInternal::Timeout => libc::EAI_AGAIN,
+                        // prevents an infinite loop that used to happen in some apps, don't know if
+                        // this is the correct mapping.
+                        mirrord_protocol::ResolveErrorKindInternal::NoRecordsFound(_) => {
+                            libc::EAI_NONAME
+                        }
                         _ => libc::EAI_FAIL,
                         // TODO: Add more error kinds, next time we break protocol compatibility.
                     } as _;

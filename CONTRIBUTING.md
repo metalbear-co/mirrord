@@ -241,6 +241,8 @@ scripts/build_fat_mac.sh
 cargo build
 ```
 
+The binary is created at `./target/<platform>/debug/mirrord`
+
 #### Run mirrord with a local process
 
 Sample web server - `app.js` (present at `sample/node/app.mjs` in the repo)
@@ -379,74 +381,6 @@ Check the traffic was received by the local process
 OK - GET: Request completed
 ```
 
-## Building the vscode extension
-Please note you don't need to create a .vsix file and install it, in order to debug the extension. See
-[the debugging guide](DEBUGGING.md#debugging-the-vscode-extension).
-
-If for some reason you still want to build the extension, here are the instructions:
-
-```commandline
-cd vscode-ext
-```
-
-If you haven't built the mirrord binary yet, [do it now](#build-and-run-mirrord). Then copy the binary into the
-vscode-ext directory. On macOS that would be:
-```commandline
-cp ../target/universal-apple-darwin/debug/mirrord .
-```
-(Change the path on Linux to wherever the binary is)
-
-Then run
-```bash
-npm install
-npm run compile
-npm run package
-```
-
-You should see something like
-```text
-DONE  Packaged: /Users/you/Documents/projects/mirrord/vscode-ext/mirrord-3.34.0.vsix (11 files, 92.14MB)
-```
-
-## Building the JetBrains plugin
-
-First, [build the mirrord binaries](#build-and-run-mirrord) if not yet built. Then:
-
-```bash
-cd intellij-ext
-```
-
-### On macOS
-
-```bash
-cp ../target/universal-apple-darwin/debug/libmirrord_layer.dylib .
-touch libmirrord_layer.so
-cp ../target/universal-apple-darwin/debug/mirrord bin/macos/
-```
-
-### On Linux x86-64
-
-```bash
-cp ../target/debug/libmirrord_layer.so .
-touch libmirrord_layer.dylib
-cp ../target/debug/mirrord bin/linux/x86-64/mirrord
-```
-
-### In order to "cross build"
-Just include all the binaries:
-```text
-libmirrord_layer.dylib
-libmirrord_layer.so
-bin/macos/mirrord
-bin/linux/x86-64/mirrord
-bin/linux/arm64/mirrord
-```
-
-Then build the plugin:
-```bash
-./gradlew buildPlugin
-```
-
 # Debugging mirrord
 
 ## mirrord console
@@ -491,56 +425,9 @@ kubectl logs <YOUR_POD_NAME> | less -R
 
 where you would replace `<YOUR_POD_NAME>` with the name of the pod.
 
-## Debugging the vscode extension
-In order to debug the vscode extension, first [build the mirrord binary](#build-and-run-mirrord). Then run:
-```bash
-cd vscode-ext
-npm install
-npm run compile
-```
-Now you can just open the extension's code in vscode and run, using the "Launch Extension" run configuration. Another vscode window will start. You can set breakpoints
-in the extension's code in the first window, and use the extension in the second window to reach the breakpoints.
-When in debug mode, the extension will automatically use the debug mirrord binary.
 
-If you want to see the layer's logs, [use the console](#mirrord-console) by setting
-```json
-            "env": {
-                "RUST_LOG": "warn,mirrord=trace",
-                "MIRRORD_CONSOLE_ADDR": "127.0.0.1:11233"
-            }
 
-```
-in the launch configuration of the second window.
 
-## Debugging the JetBrains plugin
-
-First, [build the mirrord binaries](#build-and-run-mirrord) if not yet built. Then:
-
-```bash
-cd intellij-ext
-```
-
-### On macOS
-
-```bash
-cp ../target/universal-apple-darwin/debug/libmirrord_layer.dylib .
-touch libmirrord_layer.so
-cp ../target/universal-apple-darwin/debug/mirrord bin/macos/
-```
-
-### On Linux x86-64
-
-```bash
-cp ../target/debug/libmirrord_layer.so .
-touch libmirrord_layer.dylib
-cp ../target/debug/mirrord bin/linux/x86-64/mirrord
-```
-
-Now open the extension's code in an IntelliJ IDEA. Create a new Gradle run configuration with a `runIde` task.
-Running this configuration in debug will open a new IDE window.
-You can set breakpoints in the extension's code in the first window, and use the extension in the second window to reach the breakpoints.
-
-You can control which IDE is opened with a `PLATFORMTYPE` environment variable. For example, set `PLATFORMTYPE=IU` for IntelliJ IDEA Ultimate.
 # New Hook Guidelines
 
 Adding a feature to mirrord that introduces a new hook (file system, network) can be tricky and there are a lot of edge cases we might need to cover. 

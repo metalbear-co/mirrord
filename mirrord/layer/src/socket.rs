@@ -323,6 +323,10 @@ impl OutgoingSelector {
 
         Self { remote, local }
     }
+
+    fn connect_remote(&self, address: SocketAddr) -> bool {
+        true
+    }
 }
 
 #[inline]

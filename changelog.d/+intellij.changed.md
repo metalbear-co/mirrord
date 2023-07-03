@@ -1,1 +1,0 @@
-Moved IntelliJ to its own repository and versioning

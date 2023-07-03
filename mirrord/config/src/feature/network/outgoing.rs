@@ -1,6 +1,7 @@
 use core::str::FromStr;
 use std::{collections::HashSet, net::SocketAddr};
 
+use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use thiserror::Error;
@@ -261,6 +262,21 @@ impl FromStr for OutgoingFilter {
                 str::from_utf8(rest)?.to_string(),
             ))
         }
+    }
+}
+
+impl CollectAnalytics for &OutgoingConfig {
+    fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
+        analytics.add("tcp", self.tcp);
+        analytics.add("udp", self.udp);
+        analytics.add("ignore_localhost", self.ignore_localhost);
+        analytics.add(
+            "unix_streams",
+            self.unix_streams
+                .as_ref()
+                .map(|v| v.len())
+                .unwrap_or_default(),
+        );
     }
 }
 

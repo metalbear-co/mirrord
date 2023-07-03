@@ -13,6 +13,12 @@ build/
 ### go tests ###
 *.go_test_app
 
+### c test apps ###
+*.c_test_app
+
+### other test apps ###
+*.test_app
+
 ### VSCode ###
 vscode-ext/bin
 

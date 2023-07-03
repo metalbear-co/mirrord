@@ -23,6 +23,7 @@ mirrord-kube = { path = "../kube" }
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
 mirrord-console = { path = "../console" }
+mirrord-analytics = { path = "../analytics" }
 
 actix-codec.workspace = true
 clap.workspace = true
