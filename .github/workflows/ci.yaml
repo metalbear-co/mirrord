@@ -358,7 +358,8 @@ jobs:
         with:
           name: mirrord-artifacts
           path: target/debug/
-      - run: cargo test -p mirrord-layer
+      # running serially because some tests get flakey when run in parallel.
+      - run: cargo test -p mirrord-layer -- --test-threads=2
 
   integration_tests_macos:
     runs-on: macos-12
@@ -427,7 +428,8 @@ jobs:
       - uses: actions/setup-node@v3 # version 19 spawns processes with `posix_spawn`, so test that also.
         with:
           node-version: 19
-      - run: cargo test -p mirrord-layer
+      # running serially because some tests get flakey when run in parallel.
+      - run: cargo test -p mirrord-layer -- --test-threads=2
 
   e2e:
     runs-on: ubuntu-latest
