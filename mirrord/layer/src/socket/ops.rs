@@ -301,7 +301,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
 /// interception procedure.
 /// This returns errno so we can restore the correct errno in case result is -1 (until we get
 /// back to the hook we might call functions that will corrupt errno)
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "debug", ret)]
 fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
     sockfd: RawFd,
     remote_address: SockAddr,
@@ -325,6 +325,8 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
         .get()?
         .connect_remote::<PROTOCOL>(remote_address.as_socket()?)
         .then_some(())?;
+
+    debug!("keep going, connecting to {remote_address:#?}");
 
     // Prepare this socket to be intercepted.
     let (mirror_tx, mirror_rx) = oneshot::channel();

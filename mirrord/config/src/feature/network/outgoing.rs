@@ -53,10 +53,10 @@ pub struct OutgoingConfig {
     #[config(unstable, default = false)]
     pub ignore_localhost: bool,
 
-    #[config(default = HashSet::new())]
+    #[config(default)]
     pub remote: HashSet<String>,
 
-    #[config(default = HashSet::new())]
+    #[config(default)]
     pub local: HashSet<String>,
 
     /// #### feature.network.outgoing.unix_streams {#feature.network.outgoing.unix_streams}

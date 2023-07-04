@@ -349,15 +349,21 @@ impl OutgoingSelector {
                 .to_socket_addrs()
                 .inspect(|resolved| debug!("resolved addresses {resolved:#?}"))
                 .inspect_err(|fail| error!("resolved addresses  failed {fail:#?}"))
-                .map(|mut resolved| resolved.any(|resolved_address| resolved_address == address))
+                .map(|mut resolved| {
+                    resolved.any(|resolved_address| {
+                        resolved_address == SocketAddr::new(address.ip(), 0)
+                    })
+                })
                 .unwrap_or_default(),
             OutgoingAddress::Subnet((subnet, port)) => {
                 subnet.contains(&address.ip()) && (port == 0 || port == address.port())
             }
         };
 
-        self.remote.iter().filter(filter_protocol).any(any_address)
-            || !self.local.iter().filter(filter_protocol).any(any_address)
+        let found_remote = self.remote.iter().filter(filter_protocol).any(any_address);
+        let found_local = !self.local.iter().filter(filter_protocol).any(any_address);
+
+        found_remote || found_local
     }
 }
 
