@@ -13,7 +13,7 @@ use libc::{c_int, sockaddr, socklen_t};
 use mirrord_config::feature::network::outgoing::OutgoingFilter;
 use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
-use tracing::{debug, error, warn};
+use tracing::{error, warn};
 use trust_dns_resolver::config::Protocol;
 
 use self::id::SocketId;
