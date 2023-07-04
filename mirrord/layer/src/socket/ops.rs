@@ -307,20 +307,6 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
 ) -> Detour<ConnectResult> {
-    // TODO(alex) [high] 2023-06-30: Check `remote_address` and `TYPE` against `OutgoingSelector`,
-    // if it's in `remote`, we proceed as normal, if it's NOT (or is in `local`), then we bypass?
-    //
-    // If the filter is "named", we should be safe to call `ToSocketAddrs` and convert it to
-    // `SocketAddr` here.
-    //
-    // Ideally we would cache the resolved address, but let's start with not.
-    //
-    // ADD(alex) [mid] 2023-07-03: I think we might need to call `getaddrinfo` ourselves, and sort
-    // of "manually" resolve DNS, instead of relying on `ToSocketAddrs`.
-    //
-    // Should look into what happens if the user passes a name to be resolved here, and how it
-    // interacts with the selector only allowing certain addresses (and not allowing the remote DNS
-    // resolver to do it's thing).
     OUTGOING_SELECTOR
         .get()?
         .connect_remote::<PROTOCOL>(remote_address.as_socket()?)
