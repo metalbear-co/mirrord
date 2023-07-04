@@ -8,7 +8,7 @@ pub use common::*;
 
 /// Test that hooks work in a child process after a program calls `fork` without `execve`.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn fork(dylib_path: &PathBuf) {
     let application = Application::Fork;
@@ -30,6 +30,6 @@ async fn fork(dylib_path: &PathBuf) {
     assert!(connection_from_child_process.is_ended().await);
 
     test_process.wait_assert_success().await;
-    test_process.assert_no_error_in_stderr();
-    test_process.assert_no_error_in_stdout();
+    test_process.assert_no_error_in_stderr().await;
+    test_process.assert_no_error_in_stdout().await;
 }

@@ -19,7 +19,7 @@ use tokio::net::TcpStream;
 /// Start an application (and load the layer into it) that listens on a port that is configured to
 /// be ignored, and verify that no messages are sent to the agent.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn listen_ports(
     #[values(Application::RustListenPorts)] application: Application,
@@ -50,8 +50,16 @@ async fn listen_ports(
 
     TcpStream::connect("127.0.0.1:40000").await.unwrap();
 
+    loop {
+        match layer_connection.codec.next().await {
+            Some(Ok(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(40000)))) => {}
+            Some(Ok(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(80)))) => {}
+            None => break,
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
     assert!(layer_connection.is_ended().await);
     test_process.wait_assert_success().await;
-    test_process.assert_no_error_in_stderr();
-    test_process.assert_no_error_in_stdout();
+    test_process.assert_no_error_in_stderr().await;
+    test_process.assert_no_error_in_stdout().await;
 }

@@ -18,7 +18,7 @@ mod common;
 pub use common::*;
 
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn recv_from(
     #[values(Application::RustRecvFrom)] application: Application,
@@ -61,6 +61,6 @@ async fn recv_from(
     .unwrap();
 
     test_process.wait_assert_success().await;
-    test_process.assert_no_error_in_stderr();
-    test_process.assert_no_error_in_stdout();
+    test_process.assert_no_error_in_stderr().await;
+    test_process.assert_no_error_in_stdout().await;
 }

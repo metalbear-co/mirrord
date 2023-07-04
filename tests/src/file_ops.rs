@@ -40,7 +40,7 @@ mod file_ops {
         .await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        ops.assert(process);
+        ops.assert(process).await;
     }
 
     #[cfg(target_os = "macos")]
@@ -69,7 +69,7 @@ mod file_ops {
         .await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_python_fileops_stderr();
+        process.assert_python_fileops_stderr().await;
     }
 
     #[rstest]
@@ -102,7 +102,7 @@ mod file_ops {
         .await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_python_fileops_stderr();
+        process.assert_python_fileops_stderr().await;
     }
 
     #[rstest]
@@ -134,7 +134,7 @@ mod file_ops {
         .await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_python_fileops_stderr();
+        process.assert_python_fileops_stderr().await;
     }
 
     // Currently fails due to Layer >> AddressConversion in ci for some reason

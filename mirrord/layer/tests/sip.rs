@@ -17,7 +17,7 @@ use mirrord_sip::sip_patch;
 /// We assert `is_ended` right after the initial messages, making sure the layer does not try to
 /// read the file remotely.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(20))]
 async fn tmp_dir_read_locally(dylib_path: &Path) {
     let application = Application::BashShebang;
@@ -41,7 +41,8 @@ async fn tmp_dir_read_locally(dylib_path: &Path) {
     test_process.wait().await;
     assert!(!test_process
         .get_stdout()
+        .await
         .contains("No such file or directory"));
-    test_process.assert_no_error_in_stdout();
-    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stdout().await;
+    test_process.assert_no_error_in_stderr().await;
 }
