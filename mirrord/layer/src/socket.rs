@@ -360,10 +360,8 @@ impl OutgoingSelector {
             }
         };
 
-        let found_remote = self.remote.iter().filter(filter_protocol).any(any_address);
-        let found_local = !self.local.iter().filter(filter_protocol).any(any_address);
-
-        found_remote || found_local
+        self.remote.iter().filter(filter_protocol).any(any_address)
+            || !self.local.iter().filter(filter_protocol).any(any_address)
     }
 }
 
