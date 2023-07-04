@@ -54,8 +54,8 @@ async fn listen_ports(
         match layer_connection.codec.next().await {
             Some(Ok(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(40000)))) => {}
             Some(Ok(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(80)))) => {}
-            other => panic!("unexpected message: {:?}", other),
             None => break,
+            other => panic!("unexpected message: {:?}", other),
         }
     }
     assert!(layer_connection.is_ended().await);
