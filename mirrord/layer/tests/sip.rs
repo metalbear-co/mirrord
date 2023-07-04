@@ -17,7 +17,7 @@ use mirrord_sip::sip_patch;
 /// We assert `is_ended` right after the initial messages, making sure the layer does not try to
 /// read the file remotely.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(20))]
 async fn tmp_dir_read_locally(dylib_path: &Path) {
     let application = Application::BashShebang;

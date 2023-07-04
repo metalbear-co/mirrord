@@ -10,7 +10,7 @@ pub use common::*;
 
 /// Verify that issue [#1123](https://github.com/metalbear-co/mirrord/issues/1123) is fixed.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn test_issue1123(
     #[values(Application::RustIssue1123)] application: Application,

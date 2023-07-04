@@ -14,7 +14,7 @@ use mirrord_protocol::tcp::LayerTcp;
 /// Verify that if mirrord application connects to it own listening port it
 /// doesn't go through the layer unnecessarily.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn self_connect(dylib_path: &PathBuf) {
     let application = Application::PythonSelfConnect;

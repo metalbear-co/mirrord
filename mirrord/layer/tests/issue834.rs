@@ -12,7 +12,7 @@ pub use common::*;
 
 /// Verify that issue [#834](https://github.com/metalbear-co/mirrord/issues/834) is fixed
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn test_issue834(
     #[values(
