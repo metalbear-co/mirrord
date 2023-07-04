@@ -234,12 +234,11 @@ mod parser {
 impl FromStr for OutgoingFilter {
     type Err = OutgoingFilterError;
 
+    #[tracing::instrument(level = "trace", ret)]
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         use core::str;
 
         use crate::feature::network::outgoing::parser::*;
-
-        println!("{input:?}");
 
         let input = input.as_bytes();
 
@@ -254,8 +253,6 @@ impl FromStr for OutgoingFilter {
         let address = str::from_utf8(&address)?;
         let subnet = subnet.map(String::from_utf8).transpose()?;
         let port = str::from_utf8(&port)?.parse::<u16>()?;
-
-        println!("{address:#?} {port:#?}");
 
         let address = subnet
             .map(|subnet| format!("{address}/{subnet}").parse::<ipnet::IpNet>())

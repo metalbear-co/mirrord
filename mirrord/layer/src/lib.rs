@@ -256,15 +256,16 @@ pub(crate) static TARGETLESS: OnceLock<bool> = OnceLock::new();
 /// Ports to ignore on listening for mirroring/stealing.
 pub(crate) static INCOMING_IGNORE_PORTS: OnceLock<HashSet<u16>> = OnceLock::new();
 
-// TODO(alex) [mid] 2023-06-30: Instead of having 2 separate open lists, we should put these into a
-// struct to guarantee the order in which we check include/exclude. This struct would also help when
-// we convert a `OutgoingFilter::Name` with `ToSocketAddrs`, removing the named variant, and
-// inserting it as the resolved DNS as `OutgoingFilter::Socket`.
+// TODO(alex): To support DNS on the selector, change it to `LazyLock<Arc<Mutex>>`, so we can modify
+// the global on `OutgoingSelector::connect_remote`, converting `OutgoingAddress:Name` to however
+// many addresses we resolve into `OutgoingAddress::Socket`.
 //
-// The DNS resolving has a little bit more handling though, as we might need to resolve it remotely,
-// will `ToSocketAddrs` respect mirrord's `getaddrinfo`?
+// Also, we need a global for `REMOTE_DNS`, so we can check it in
+// `OutgoingSelector::connect_remote`, and only resolve DNS through remote if it's `true`.
+
 /// Selector for how outgoing connection will behave, either sending traffic via the remote or from
-/// local app, according to how the user set up the `remote`, and `local` filter.
+/// local app, according to how the user set up the `remote`, and `local` filter, in
+/// `feature.network.outgoing`.
 pub(crate) static OUTGOING_SELECTOR: OnceLock<OutgoingSelector> = OnceLock::new();
 
 /// Ports to ignore because they are used by the IDE debugger
@@ -417,6 +418,8 @@ fn set_globals(config: &LayerConfig) {
     FILE_MODE
         .set(config.feature.fs.clone())
         .expect("Setting FILE_MODE failed.");
+
+    // These must come before `OutgoingSelector::new`.
     ENABLED_TCP_OUTGOING
         .set(config.feature.network.outgoing.tcp)
         .expect("Setting ENABLED_TCP_OUTGOING singleton");

@@ -21,7 +21,7 @@ use crate::{
     common::{blocking_send_hook_message, HookMessage},
     detour::{Bypass, Detour, OptionExt},
     error::{HookError, HookResult, LayerError},
-    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_PORTS,
+    graceful_exit, ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_PORTS,
 };
 
 pub(super) mod hooks;
@@ -289,13 +289,26 @@ impl UserSocket {
     }
 }
 
+/// Holds the [`OutgoingFilter`]s set up by the user, after a little bit of checking, see
+/// [`OutgoingSelector::new`].
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct OutgoingSelector {
+    /// If the address from `connect` matches this, then we send the connection through the
+    /// remote pod.
     remote: HashSet<OutgoingFilter>,
+
+    /// If the address from `connect` matches this, then we send the connection from the local app.
     local: HashSet<OutgoingFilter>,
 }
 
 impl OutgoingSelector {
+    /// Builds the [`OutgoingSelector`] from a pair of [`OutgoingFilter`]s, removing filters that
+    /// would create inconsitencies, by checking if their protocol is enabled for outgoing traffic,
+    /// and thus we avoid making this check on every [`ops::connect`] call.
+    ///
+    /// It also checks for filters that are present in both `remote` and `local`, crashing if it
+    /// finds anything.
+    #[tracing::instrument(level = "debug", ret)]
     pub(crate) fn new(remote: HashSet<OutgoingFilter>, local: HashSet<OutgoingFilter>) -> Self {
         use mirrord_config::feature::network::outgoing::*;
 
@@ -314,7 +327,7 @@ impl OutgoingSelector {
                 ProtocolFilter::Tcp => enabled_tcp,
                 ProtocolFilter::Udp => enabled_udp,
             })
-            .collect();
+            .collect::<HashSet<_>>();
 
         let local = local
             .into_iter()
@@ -325,9 +338,29 @@ impl OutgoingSelector {
             })
             .collect();
 
+        if let Some(common) = remote.intersection(&local).next() {
+            error!(
+                r"
+                Outgoing filter contains the duplicate value [{common:?}]!
+                Duplicated values are not supported for this feature, please remove it from either \
+                remote or local.
+                "
+            );
+            graceful_exit!("Outgoing filter configuration value not supported!");
+        }
+
         Self { remote, local }
     }
 
+    /// Checks if the `address` matches one of the outgoing filters:
+    ///
+    /// 1. if it matches something in `Self::remote`, then we return `true`, and this connection
+    ///    shall go through the remote pod;
+    /// 2. if it matches something in `Self::local`, then we return `false`, and this connection
+    ///    shall go through the local app;
+    ///
+    /// In theory it's possible to have the same address in both `remote` and `local`, we prevent
+    /// this in [`OutgoingSelector::new`] though.
     #[tracing::instrument(level = "debug", ret)]
     fn connect_remote<const PROTOCOL: ConnectProtocol>(&self, address: SocketAddr) -> bool {
         use mirrord_config::feature::network::outgoing::{OutgoingAddress, ProtocolFilter};
@@ -339,16 +372,17 @@ impl OutgoingSelector {
             _ => false,
         };
 
+        // Closure that tries to match `address` with something in the selector set.
         let any_address = |outgoing: &OutgoingFilter| match outgoing.address {
             OutgoingAddress::Socket(select_address) => {
                 select_address.ip().is_unspecified()
                     || select_address.port() == 0
                     || select_address == address
             }
+            // TODO(alex): DNS may not trigger the filter, as the local resolved address may be
+            // different from the remote resolved.
             OutgoingAddress::Name((ref name, port)) => format!("{name}:{port}")
                 .to_socket_addrs()
-                .inspect(|resolved| debug!("resolved addresses {resolved:#?}"))
-                .inspect_err(|fail| error!("resolved addresses  failed {fail:#?}"))
                 .map(|mut resolved| {
                     resolved.any(|resolved_address| {
                         resolved_address == SocketAddr::new(address.ip(), 0)
