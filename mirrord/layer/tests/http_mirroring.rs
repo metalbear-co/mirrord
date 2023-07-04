@@ -14,7 +14,7 @@ pub use common::*;
 /// them. Tests the layer's communication with the agent, the bind hook, and the forwarding of
 /// mirrored traffic to the application.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn mirroring_with_http(
     #[values(
@@ -76,7 +76,7 @@ async fn mirroring_with_http(
 /// Run the http mirroring test only on MacOS, because of a known crash on Linux.
 #[cfg(target_os = "macos")]
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn mirroring_with_http_go(
     dylib_path: &PathBuf,

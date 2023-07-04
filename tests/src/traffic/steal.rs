@@ -20,7 +20,7 @@ mod steal {
 
     #[cfg(target_os = "linux")]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     async fn steal_http_traffic(
         #[future] service: KubeService,
@@ -56,7 +56,7 @@ mod steal {
 
     #[cfg(target_os = "linux")]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     async fn steal_http_traffic_with_flush_connections(
         #[future] service: KubeService,
@@ -98,7 +98,7 @@ mod steal {
     /// Test the app continues running with mirrord and traffic is no longer stolen after the app
     /// closes a socket.
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     async fn close_socket(
         #[future] service: KubeService,
@@ -175,7 +175,7 @@ mod steal {
     /// application closes a socket, we stop stealing existing connections.
     #[ignore]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     async fn close_socket_keep_connection(
         #[future] service: KubeService,
@@ -248,7 +248,7 @@ mod steal {
     /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_only_matching_requests(
         #[future] service: KubeService,
@@ -293,7 +293,7 @@ mod steal {
     }
 
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_only_matching_requests_new(
         config_dir: &std::path::PathBuf,
@@ -333,7 +333,7 @@ mod steal {
     }
 
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_requests_by_path(
         config_dir: &std::path::PathBuf,
@@ -388,7 +388,7 @@ mod steal {
     }
 
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     async fn test_filter_with_single_client_and_only_matching_requests_http2(
         #[future] http2_service: KubeService,
@@ -455,7 +455,7 @@ mod steal {
     /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_some_matching_requests(
         #[future] service: KubeService,
@@ -525,7 +525,7 @@ mod steal {
     /// We verify that the traffic is forwarded to- and handled by the deployed app, and the local
     /// app does not see the traffic.
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     async fn complete_passthrough(
         #[future] tcp_echo_service: KubeService,
@@ -589,7 +589,7 @@ mod steal {
     /// We verify that the traffic is forwarded to- and handled by the deployed app, and the local
     /// app does not see the traffic.
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(60))]
     async fn websocket_upgrade(
         #[future] websocket_service: KubeService,

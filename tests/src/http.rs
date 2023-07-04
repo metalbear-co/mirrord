@@ -18,7 +18,7 @@ mod http {
     #[cfg(target_os = "linux")]
     #[rstest]
     #[trace]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     async fn mirror_http_traffic(
         #[future]
@@ -67,7 +67,7 @@ mod http {
     #[cfg(target_os = "macos")]
     #[rstest]
     #[trace]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     async fn mirror_http_traffic(
         #[future]

@@ -16,7 +16,7 @@ use mirrord_protocol::{
 };
 
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn test_dns_resolve(
     #[values(Application::RustDnsResolve)] application: Application,

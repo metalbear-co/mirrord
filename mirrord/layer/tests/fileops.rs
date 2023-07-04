@@ -30,7 +30,7 @@ fn get_rw_test_file_env_vars() -> Vec<(&'static str, &'static str)> {
 
 /// Verify that mirrord doesn't open remote file if it's the same binary it's running.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(20))]
 async fn self_open(dylib_path: &PathBuf) {
     let application = Application::Go19SelfOpen;
@@ -52,7 +52,7 @@ async fn self_open(dylib_path: &PathBuf) {
 /// e.g.: app tries to read /tmp/mirrord-bin/usr/local/foo, then make it read from /usr/local/foo.
 #[cfg(target_os = "macos")]
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(20))]
 async fn read_from_mirrord_bin(dylib_path: &PathBuf) {
     let contents = "please don't flake";
@@ -95,7 +95,7 @@ async fn read_from_mirrord_bin(dylib_path: &PathBuf) {
 /// Verifies `pwrite` - if opening a file in write mode and writing to it at an offset of zero
 /// matches the expected bytes written.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn pwrite(
     #[values(Application::RustFileOps)] application: Application,
@@ -219,7 +219,7 @@ async fn pwrite(
 /// Verifies `pwrite` - if opening a file in write mode and writing to it at an offset of zero
 /// matches the expected bytes written.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn node_close(
     #[values(Application::NodeFileOps)] application: Application,
@@ -280,7 +280,7 @@ async fn node_close(
 }
 
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(60))]
 #[cfg(target_os = "linux")]
 async fn go_stat(
@@ -341,7 +341,7 @@ async fn go_stat(
 }
 
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(10))]
 #[cfg(target_os = "macos")]
 async fn go_dir(
@@ -465,7 +465,7 @@ async fn go_dir(
 }
 
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(10))]
 #[cfg(target_os = "linux")]
 async fn go_dir_on_linux(
@@ -562,7 +562,7 @@ async fn go_dir_on_linux(
 /// Have FS on, but the specific path of the dir local, so that we cover that case where the syscall
 /// is hooked, but we bypass.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn go_dir_bypass(
     #[values(Application::Go19DirBypass, Application::Go20DirBypass)] application: Application,
@@ -602,7 +602,7 @@ async fn go_dir_bypass(
 /// for a signal after calling `Close` (implicitly, by calling `ReadFile`), and the test sends the
 /// signal to the app only once the close message was verified. Only then does the test app exit.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn read_go(
     #[values(Application::Go18Read, Application::Go19Read, Application::Go20Read)]
@@ -646,7 +646,7 @@ async fn read_go(
 
 /// Test go file write.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn write_go(
     #[values(Application::Go18Write, Application::Go19Write, Application::Go20Write)]
@@ -675,7 +675,7 @@ async fn write_go(
 
 /// Test go file lseek.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn lseek_go(
     #[values(Application::Go18LSeek, Application::Go19LSeek, Application::Go20LSeek)]
@@ -708,7 +708,7 @@ async fn lseek_go(
 
 /// Test go file access.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn faccessat_go(
     #[values(

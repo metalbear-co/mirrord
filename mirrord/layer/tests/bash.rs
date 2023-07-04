@@ -25,7 +25,7 @@ use tokio_stream::StreamExt;
 /// On MacOS, this works because the executable is patched before running, and the calls to
 /// `execve` for `bash` and `cat` are hooked, and the binaries are patched.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn bash_script(dylib_path: &Path) {
     let application = Application::EnvBashCat;

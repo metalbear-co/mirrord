@@ -8,7 +8,7 @@ mod env {
     use crate::utils::{run_exec_with_target, service, EnvApp, KubeService};
 
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     pub async fn bash_remote_env_vars(
         #[future] service: KubeService,
@@ -18,7 +18,7 @@ mod env {
     }
 
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     pub async fn remote_env_vars_works(
         #[future] service: KubeService,

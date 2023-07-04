@@ -1,0 +1,1 @@
+Use Tokio current thread runtime in tests as it seems to be less flaky

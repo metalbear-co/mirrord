@@ -18,7 +18,7 @@ pub use common::*;
 
 /// Verify that issue [#1458](https://github.com/metalbear-co/mirrord/issues/1458) is fixed.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn test_issue1458(
     #[values(Application::RustIssue1458)] application: Application,
@@ -86,7 +86,7 @@ async fn test_issue1458(
 /// TODO(alex): When we fully implement proper UDP handling, this test will fail with some missing
 /// message (just delete it), you've been warned.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn test_issue1458_port_not_53(
     #[values(Application::RustIssue1458PortNot53)] application: Application,

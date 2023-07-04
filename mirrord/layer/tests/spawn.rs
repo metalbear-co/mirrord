@@ -19,7 +19,7 @@ pub use common::*;
 /// hooked the spawning and patched bash (or we're not on macOS).
 /// The app starts the process `["/bin/sh", "-c", "echo \"Hello over shell\""]`.
 #[rstest]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn node_spawn(dylib_path: &PathBuf) {
     let application = Application::NodeSpawn;
