@@ -307,10 +307,12 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
 ) -> Detour<ConnectResult> {
-    OUTGOING_SELECTOR
+    if !OUTGOING_SELECTOR
         .get()?
         .connect_remote::<PROTOCOL>(remote_address.as_socket()?)
-        .then_some(())?;
+    {
+        Detour::Bypass(Bypass::FilteredConnection)?
+    }
 
     debug!("keep going, connecting to {remote_address:#?}");
 

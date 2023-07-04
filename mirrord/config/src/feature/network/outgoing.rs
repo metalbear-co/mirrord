@@ -293,6 +293,8 @@ impl CollectAnalytics for &OutgoingConfig {
                 .map(|v| v.len())
                 .unwrap_or_default(),
         );
+        analytics.add("remote", self.remote.len());
+        analytics.add("local", self.local.len());
     }
 }
 

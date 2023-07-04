@@ -210,6 +210,10 @@ pub(crate) enum Bypass {
 
     /// Hooked a `connect` to a target that is disabled in the configuration.
     DisabledOutgoing,
+
+    /// Outgoing connection either did not match any `remote` selector, or it matched a `local`
+    /// one.
+    FilteredConnection,
 }
 
 /// [`ControlFlow`](std::ops::ControlFlow)-like enum to be used by hooks.
