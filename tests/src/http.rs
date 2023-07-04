@@ -49,12 +49,16 @@ mod http {
                 None,
             )
             .await;
-        process.wait_for_line(Duration::from_secs(120), "daemon subscribed");
+        process
+            .wait_for_line(Duration::from_secs(120), "daemon subscribed")
+            .await;
         send_requests(&url, false, Default::default()).await;
-        process.wait_for_line(Duration::from_secs(10), "GET");
-        process.wait_for_line(Duration::from_secs(10), "POST");
-        process.wait_for_line(Duration::from_secs(10), "PUT");
-        process.wait_for_line(Duration::from_secs(10), "DELETE");
+        process.wait_for_line(Duration::from_secs(10), "GET").await;
+        process.wait_for_line(Duration::from_secs(10), "POST").await;
+        process.wait_for_line(Duration::from_secs(10), "PUT").await;
+        process
+            .wait_for_line(Duration::from_secs(10), "DELETE")
+            .await;
         timeout(Duration::from_secs(40), process.child.wait())
             .await
             .unwrap()
