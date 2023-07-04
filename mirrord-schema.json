@@ -758,6 +758,26 @@
             "null"
           ]
         },
+        "local": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "remote": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
         "tcp": {
           "title": "feature.network.outgoing.tcp {#feature.network.outgoing.tcp}",
           "description": "Defaults to `true`.",
