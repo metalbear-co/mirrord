@@ -43,7 +43,7 @@ mod pause {
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
     /// Because the test runs a bash script with mirrord and that requires the universal binary.
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn pause_log_requests(
         #[future] http_logger_service: KubeService,
@@ -138,7 +138,7 @@ mod pause {
     /// 3. Wait for the agent jobs to complete.
     /// 4. Verify the target pod is unpaused.
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
     pub async fn unpause_after_error(
         #[future] random_namespace_self_deleting_service: KubeService,

@@ -8,7 +8,7 @@ mod target {
     use crate::utils::{run_ls, service, KubeService};
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn mirrord_ls(#[future] service: KubeService) {
         let service = service.await;
         let mut process = run_ls(None, None);

@@ -10,7 +10,7 @@ mod file_ops {
     #[cfg(target_os = "linux")]
     #[rstest]
     #[trace]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn file_ops(
         #[future]
@@ -46,7 +46,7 @@ mod file_ops {
     #[cfg(target_os = "macos")]
     #[rstest]
     #[trace]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn file_ops(
         #[future]
@@ -74,7 +74,7 @@ mod file_ops {
 
     #[rstest]
     #[trace]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn file_ops_ro(
         #[future]
@@ -107,7 +107,7 @@ mod file_ops {
 
     #[rstest]
     #[trace]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn statfs(
         #[future]
@@ -142,7 +142,7 @@ mod file_ops {
     #[ignore]
     #[cfg(target_os = "linux")]
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn bash_file_exists(#[future] service: KubeService) {
         let service = service.await;
@@ -160,7 +160,7 @@ mod file_ops {
     #[ignore]
     #[cfg(target_os = "linux")]
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn bash_file_read(#[future] service: KubeService) {
         let service = service.await;
@@ -175,7 +175,7 @@ mod file_ops {
     #[ignore]
     #[cfg(target_os = "linux")]
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn bash_file_write(#[future] service: KubeService) {
         let service = service.await;
@@ -193,7 +193,7 @@ mod file_ops {
     /// detour.
     #[rstest]
     #[trace]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn go_dir(
         #[future]
