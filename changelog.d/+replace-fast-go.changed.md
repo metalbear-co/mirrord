@@ -1,0 +1,1 @@
+use Frida's replace_fast in Linux Go hooks
