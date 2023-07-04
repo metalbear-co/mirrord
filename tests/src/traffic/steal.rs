@@ -564,7 +564,7 @@ mod steal {
         assert_eq!(&buf[8..], tcp_data); // The correct data was sent there and back.
 
         // Verify the data was passed through and nothing was sent to the local app.
-        let stdout_after = mirrorded_process.get_stdout();
+        let stdout_after = mirrorded_process.get_stdout().await;
         assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
 
         // Send a DELETE that should be matched and thus stolen, closing the app.
@@ -649,7 +649,7 @@ mod steal {
         assert_eq!(&read_message[8..], write_data); // The correct data was sent there and back.
 
         // Verify the data was passed through and nothing was sent to the local app.
-        let stdout_after = mirrorded_process.get_stdout();
+        let stdout_after = mirrorded_process.get_stdout().await;
         assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
 
         // Send a DELETE that should be matched and thus stolen, closing the app.

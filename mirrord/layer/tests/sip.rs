@@ -41,7 +41,8 @@ async fn tmp_dir_read_locally(dylib_path: &Path) {
     test_process.wait().await;
     assert!(!test_process
         .get_stdout()
+        .await
         .contains("No such file or directory"));
-    test_process.assert_no_error_in_stdout();
-    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stdout().await;
+    test_process.assert_no_error_in_stderr().await;
 }

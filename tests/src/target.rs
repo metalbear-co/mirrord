@@ -14,7 +14,7 @@ mod target {
         let mut process = run_ls(None, None);
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        let stdout = process.get_stdout();
+        let stdout = process.get_stdout().await;
         let targets: Vec<String> = serde_json::from_str(&stdout).unwrap();
         let re = Regex::new(r"^(pod|deployment)/.+(/container/.+)?$").unwrap();
         targets

@@ -60,6 +60,6 @@ async fn listen_ports(
     }
     assert!(layer_connection.is_ended().await);
     test_process.wait_assert_success().await;
-    test_process.assert_no_error_in_stderr();
-    test_process.assert_no_error_in_stdout();
+    test_process.assert_no_error_in_stderr().await;
+    test_process.assert_no_error_in_stdout().await;
 }
