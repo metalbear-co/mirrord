@@ -52,8 +52,9 @@ async fn listen_ports(
 
     loop {
         match layer_connection.codec.next().await {
-            ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(40000)) => _,
-            ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(80)) => _,
+            Some(Ok(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(40000)))) => {}
+            Some(Ok(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(80)))) => {}
+            other => panic!("unexpected message: {:?}", other),
             None => break,
         }
     }
