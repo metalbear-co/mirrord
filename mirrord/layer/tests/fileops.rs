@@ -89,7 +89,7 @@ async fn read_from_mirrord_bin(dylib_path: &PathBuf) {
 
     // We read the contents from <TMPDIR>/<OUR-FILE> even though the app tried to read from
     // <TMPDIR>/mirrord-bin/<TMPDIR>/<OUR-FILE>.
-    test_process.assert_stdout_contains(contents);
+    test_process.assert_stdout_contains(contents).await;
 }
 
 /// Verifies `pwrite` - if opening a file in write mode and writing to it at an offset of zero
