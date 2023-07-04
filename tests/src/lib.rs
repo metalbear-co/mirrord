@@ -12,17 +12,13 @@ mod traffic;
 #[cfg(test)]
 mod utils {
     use std::{
-        collections::HashMap,
-        fmt::Debug,
-        net::Ipv4Addr,
-        path::PathBuf,
-        process::Stdio,
-        sync::{Arc, Condvar},
+        collections::HashMap, fmt::Debug, net::Ipv4Addr, path::PathBuf, process::Stdio, sync::Arc,
         time::Duration,
     };
 
     use chrono::{Timelike, Utc};
-    use futures_util::stream::TryStreamExt;
+    use futures::FutureExt;
+    use futures_util::{future::BoxFuture, stream::TryStreamExt};
     use k8s_openapi::api::{
         apps::v1::Deployment,
         core::v1::{Namespace, Pod, Service},
@@ -42,10 +38,7 @@ mod utils {
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt, BufReader},
         process::{Child, Command},
-        sync::{
-            oneshot::{self, Sender},
-            Mutex,
-        },
+        sync::Mutex,
     };
 
     const TEXT: &'static str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
@@ -493,13 +486,13 @@ mod utils {
     }
 
     /// RAII-style guard for deleting kube resources after tests.
-    /// This guard spawns a background task to delete the kube resource.
+    /// This guard deletes the kube resource when dropped.
+    /// This guard can be configured not to delete the resource if dropped during a panic.
     struct ResourceGuard {
-        /// Used in the implementation of [`Drop`] for this struct to block until the background
-        /// task exits.
-        task_finished: Arc<(std::sync::Mutex<bool>, Condvar)>,
-        /// Used to inform the background task whether this guard was dropped during panic.
-        panic_tx: Option<Sender<bool>>,
+        /// Whether the resource should be deleted if the test has panicked.
+        delete_on_fail: bool,
+        /// This future will delete the resource once awaited.
+        deleter: Option<BoxFuture<'static, ()>>,
     }
 
     impl ResourceGuard {
@@ -513,51 +506,49 @@ mod utils {
         ) -> Result<ResourceGuard, Error> {
             api.create(&PostParams::default(), data).await?;
 
-            let (panic_tx, panic_rx) = oneshot::channel::<bool>();
-            let task_finished = Arc::new((std::sync::Mutex::new(false), Condvar::new()));
-            let finished = task_finished.clone();
-
-            tokio::spawn(async move {
-                let panic = panic_rx.await.unwrap_or(true);
-
-                if !panic || delete_on_fail {
-                    println!("Deleting resource `{name}`",);
-                    if let Err(e) = api.delete(&name, &DeleteParams::default()).await {
-                        println!("Failed to delete resource `{name}`: {e:?}");
-                    }
+            let deleter = async move {
+                println!("Deleting resource `{name}`");
+                let res = api.delete(&name, &DeleteParams::default()).await;
+                if let Err(e) = res {
+                    println!("Failed to delete resource `{name}`: {e:?}");
                 }
-
-                *finished.0.lock().expect("ResourceGuard lock poisoned") = true;
-                finished.1.notify_one();
-            });
+            };
 
             Ok(Self {
-                task_finished,
-                panic_tx: Some(panic_tx),
+                delete_on_fail,
+                deleter: Some(deleter.boxed()),
             })
+        }
+
+        /// If the underlying resource should be deleted (e.g. current thread is not panicking or
+        /// `delete_on_fail` was set), return the future to delete it. The future will
+        /// delete the resource once awaited.
+        ///
+        /// Used to run deleters from multiple [`ResourceGuard`]s on one runtime.
+        pub fn take_deleter(&mut self) -> Option<BoxFuture<'static, ()>> {
+            if !std::thread::panicking() || self.delete_on_fail {
+                self.deleter.take()
+            } else {
+                None
+            }
         }
     }
 
     impl Drop for ResourceGuard {
         fn drop(&mut self) {
-            let task_alive = self
-                .panic_tx
-                .take()
-                .expect("ResourceGuard holds empty panic_tx")
-                .send(std::thread::panicking())
-                .is_ok();
+            let Some(deleter) = self.deleter.take() else {
+                return;
+            };
 
-            if task_alive {
-                let lock = self
-                    .task_finished
-                    .0
-                    .lock()
-                    .expect("ResourceGuard lock poisoned");
-                let _lock = self
-                    .task_finished
-                    .1
-                    .wait_while(lock, |deleted| !*deleted)
-                    .expect("ResourceGuard lock poisoned");
+            if !std::thread::panicking() || self.delete_on_fail {
+                let _ = std::thread::spawn(move || {
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("failed to create tokio runtime")
+                        .block_on(deleter);
+                })
+                .join();
             }
         }
     }
@@ -569,9 +560,37 @@ mod utils {
         pub name: String,
         pub namespace: String,
         pub target: String,
-        _pod: ResourceGuard,
-        _service: ResourceGuard,
-        _namespace: Option<ResourceGuard>,
+        pod_guard: ResourceGuard,
+        service_guard: ResourceGuard,
+        namespace_guard: Option<ResourceGuard>,
+    }
+
+    impl Drop for KubeService {
+        fn drop(&mut self) {
+            let deleters = [
+                self.pod_guard.take_deleter(),
+                self.service_guard.take_deleter(),
+                self.namespace_guard
+                    .as_mut()
+                    .and_then(ResourceGuard::take_deleter),
+            ]
+            .into_iter()
+            .filter_map(std::convert::identity)
+            .collect::<Vec<_>>();
+
+            if deleters.is_empty() {
+                return;
+            }
+
+            let _ = std::thread::spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("failed to create tokio runtime")
+                    .block_on(futures::future::join_all(deleters));
+            })
+            .join();
+        }
     }
 
     /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
@@ -761,9 +780,9 @@ mod utils {
             name,
             namespace: namespace.to_string(),
             target: format!("pod/{target}/container/{CONTAINER_NAME}"),
-            _pod: pod_guard,
-            _service: service_guard,
-            _namespace: namespace_guard,
+            pod_guard,
+            service_guard,
+            namespace_guard,
         }
     }
 
