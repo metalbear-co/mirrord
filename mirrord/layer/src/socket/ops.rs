@@ -307,6 +307,12 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
 ) -> Detour<ConnectResult> {
+    debug!(
+        "connecting to {remote_address:#?} as_socket {:#?} with selector {:#?}",
+        remote_address.as_socket(),
+        OUTGOING_SELECTOR.get()
+    );
+
     if !OUTGOING_SELECTOR
         .get()?
         .connect_remote::<PROTOCOL>(remote_address.as_socket()?)
