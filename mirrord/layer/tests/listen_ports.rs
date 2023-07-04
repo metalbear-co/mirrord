@@ -50,6 +50,14 @@ async fn listen_ports(
 
     TcpStream::connect("127.0.0.1:40000").await.unwrap();
 
+    loop {
+        match layer_connection.codec.next().await {
+            Some(Ok(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(40000)))) => {}
+            Some(Ok(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(80)))) => {}
+            None => break,
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
     assert!(layer_connection.is_ended().await);
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr();
