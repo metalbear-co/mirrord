@@ -8,6 +8,31 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.49.1](https://github.com/metalbear-co/mirrord/tree/3.49.1) - 2023-07-04
+
+
+### Changed
+
+- Small optimization in file reads to avoid sending empty data
+  [#1254](https://github.com/metalbear-co/mirrord/issues/1254)
+- Changed internal proxy to close after 5s of inactivity instead of 1
+- use Frida's replace_fast in Linux Go hooks
+
+
+### Fixed
+
+- Child processes of python application would hang after a fork without an
+  exec. [#1588](https://github.com/metalbear-co/mirrord/issues/1588)
+
+
+### Internal
+
+- Change locks in test process to be async to avoid deadlocks
+- Fix listen ports flakiness by handling shutdown messages if they arrive
+- Use Tokio current thread runtime in tests as it seems to be less flaky
+- Use current thread Tokio runtime in fork integration test
+
+
 ## [3.49.0](https://github.com/metalbear-co/mirrord/tree/3.49.0) - 2023-07-03
 
 
