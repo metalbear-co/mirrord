@@ -1,0 +1,1 @@
+Changed internal proxy to close after 5s of inactivity instead of 1
