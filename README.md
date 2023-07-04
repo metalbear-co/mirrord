@@ -127,9 +127,9 @@ You can read more about it [here](https://mirrord.dev/docs/overview/introduction
 ### Additional capabilities
 
 Container run inside the pod launched by mirrord requires additional [Linux capabilities](https://man7.org/linux/man-pages/man7/capabilities.7.html):
-* `CAP_NET_ADMIN` - for modifying routing tables
-* `CAP_SYS_PTRACE` - for reading target pod environment
-* `CAP_SYS_ADMIN` - for joining target pod network namespace
+- `CAP_NET_ADMIN` - for modifying routing tables
+- `CAP_SYS_PTRACE` - for reading target pod environment
+- `CAP_SYS_ADMIN` - for joining target pod network namespace
 
 <p align="center">
   <img src="./images/how_it_works.svg" alt="How It Works"/>
