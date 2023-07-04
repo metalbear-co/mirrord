@@ -299,13 +299,13 @@ mod utils {
             run_exec_with_target(self.get_cmd(), target, namespace, args, env).await
         }
 
-        pub fn assert(&self, process: &TestProcess) {
+        pub async fn assert(&self, process: &TestProcess) {
             match self {
                 Application::PythonFastApiHTTP => {
-                    process.assert_log_level(true, "ERROR");
-                    process.assert_log_level(false, "ERROR");
-                    process.assert_log_level(true, "CRITICAL");
-                    process.assert_log_level(false, "CRITICAL");
+                    process.assert_log_level(true, "ERROR").await;
+                    process.assert_log_level(false, "ERROR").await;
+                    process.assert_log_level(true, "CRITICAL").await;
+                    process.assert_log_level(false, "CRITICAL").await;
                 }
                 _ => {}
             }
@@ -339,7 +339,7 @@ mod utils {
         #[cfg(target_os = "linux")]
         pub fn assert(&self, process: TestProcess) {
             match self {
-                FileOps::Python => process.assert_python_fileops_stderr(),
+                FileOps::Python => process.assert_python_fileops_stderr().await,
                 _ => {}
             }
         }
