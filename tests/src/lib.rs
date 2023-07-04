@@ -337,7 +337,7 @@ mod utils {
         }
 
         #[cfg(target_os = "linux")]
-        pub fn assert(&self, process: TestProcess) {
+        pub async fn assert(&self, process: TestProcess) {
             match self {
                 FileOps::Python => process.assert_python_fileops_stderr().await,
                 _ => {}
