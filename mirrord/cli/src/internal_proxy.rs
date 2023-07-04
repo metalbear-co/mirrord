@@ -144,7 +144,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
                 }
             },
             _ = active_connections.join_next(), if !active_connections.is_empty() => {},
-            _ = tokio::time::sleep(Duration::from_secs(1)) => {
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {
                 if active_connections.is_empty() {
                     break;
                 }
