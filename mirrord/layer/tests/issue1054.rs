@@ -40,6 +40,10 @@ async fn test_issue1054(
     layer_connection.send_close(new_connection_id).await;
 
     test_process.wait_assert_success().await;
-    test_process.assert_stdout_contains("test issue 1054: START");
-    test_process.assert_stdout_contains("test issue 1054: SUCCESS");
+    test_process
+        .assert_stdout_contains("test issue 1054: START")
+        .await;
+    test_process
+        .assert_stdout_contains("test issue 1054: SUCCESS")
+        .await;
 }

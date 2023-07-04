@@ -17,7 +17,7 @@ mod utils {
         net::Ipv4Addr,
         path::PathBuf,
         process::Stdio,
-        sync::{Arc, Condvar, Mutex},
+        sync::{Arc, Condvar},
         time::Duration,
     };
 
@@ -42,7 +42,10 @@ mod utils {
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt, BufReader},
         process::{Child, Command},
-        sync::oneshot::{self, Sender},
+        sync::{
+            oneshot::{self, Sender},
+            Mutex,
+        },
     };
 
     const TEXT: &'static str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
@@ -146,24 +149,24 @@ mod utils {
     }
 
     impl TestProcess {
-        pub fn get_stdout(&self) -> String {
-            self.stdout.lock().unwrap().clone()
+        pub async fn get_stdout(&self) -> String {
+            self.stdout.lock().await.clone()
         }
 
-        pub fn get_stderr(&self) -> String {
-            self.stderr.lock().unwrap().clone()
+        pub async fn get_stderr(&self) -> String {
+            self.stderr.lock().await.clone()
         }
 
-        pub fn assert_log_level(&self, stderr: bool, level: &str) {
+        pub async fn assert_log_level(&self, stderr: bool, level: &str) {
             if stderr {
-                assert!(!self.stderr.lock().unwrap().contains(level));
+                assert!(!self.stderr.lock().await.contains(level));
             } else {
-                assert!(!self.stdout.lock().unwrap().contains(level));
+                assert!(!self.stdout.lock().await.contains(level));
             }
         }
 
-        pub fn assert_python_fileops_stderr(&self) {
-            assert!(!self.stderr.lock().unwrap().contains("FAILED"));
+        pub async fn assert_python_fileops_stderr(&self) {
+            assert!(!self.stderr.lock().await.contains("FAILED"));
         }
 
         pub async fn wait_assert_success(self) {
@@ -171,10 +174,10 @@ mod utils {
             assert!(output.status.success());
         }
 
-        pub fn wait_for_line(&self, timeout: Duration, line: &str) {
+        pub async fn wait_for_line(&self, timeout: Duration, line: &str) {
             let now = std::time::Instant::now();
             while now.elapsed() < timeout {
-                let stderr = self.get_stderr();
+                let stderr = self.get_stderr().await;
                 if stderr.contains(line) {
                     return;
                 }
@@ -190,7 +193,7 @@ mod utils {
             }
         }
 
-        pub fn from_child(mut child: Child, tempdir: TempDir) -> TestProcess {
+        pub async fn from_child(mut child: Child, tempdir: TempDir) -> TestProcess {
             let stderr_data = Arc::new(Mutex::new(String::new()));
             let stdout_data = Arc::new(Mutex::new(String::new()));
             let child_stderr = child.stderr.take().unwrap();
@@ -211,7 +214,7 @@ mod utils {
                     let string = String::from_utf8_lossy(&buf[..n]);
                     eprintln!("stderr {} {pid}: {}", format_time(), string);
                     {
-                        stderr_data_reader.lock().unwrap().push_str(&string);
+                        stderr_data_reader.lock().await.push_str(&string);
                     }
                 }
             });
@@ -226,7 +229,7 @@ mod utils {
                     let string = String::from_utf8_lossy(&buf[..n]);
                     print!("stdout {} {pid}: {}", format_time(), string);
                     {
-                        stdout_data_reader.lock().unwrap().push_str(&string);
+                        stdout_data_reader.lock().await.push_str(&string);
                     }
                 }
             });
@@ -296,13 +299,13 @@ mod utils {
             run_exec_with_target(self.get_cmd(), target, namespace, args, env).await
         }
 
-        pub fn assert(&self, process: &TestProcess) {
+        pub async fn assert(&self, process: &TestProcess) {
             match self {
                 Application::PythonFastApiHTTP => {
-                    process.assert_log_level(true, "ERROR");
-                    process.assert_log_level(false, "ERROR");
-                    process.assert_log_level(true, "CRITICAL");
-                    process.assert_log_level(false, "CRITICAL");
+                    process.assert_log_level(true, "ERROR").await;
+                    process.assert_log_level(false, "ERROR").await;
+                    process.assert_log_level(true, "CRITICAL").await;
+                    process.assert_log_level(false, "CRITICAL").await;
                 }
                 _ => {}
             }
@@ -334,9 +337,9 @@ mod utils {
         }
 
         #[cfg(target_os = "linux")]
-        pub fn assert(&self, process: TestProcess) {
+        pub async fn assert(&self, process: TestProcess) {
             match self {
-                FileOps::Python => process.assert_python_fileops_stderr(),
+                FileOps::Python => process.assert_python_fileops_stderr().await,
                 _ => {}
             }
         }
@@ -450,11 +453,11 @@ mod utils {
             server.id().unwrap()
         );
         // We need to hold temp dir until the process is finished
-        TestProcess::from_child(server, temp_dir)
+        TestProcess::from_child(server, temp_dir).await
     }
 
     /// Runs `mirrord ls` command and asserts if the json matches the expected format
-    pub fn run_ls(args: Option<Vec<&str>>, namespace: Option<&str>) -> TestProcess {
+    pub async fn run_ls(args: Option<Vec<&str>>, namespace: Option<&str>) -> TestProcess {
         let path = match option_env!("MIRRORD_TESTS_USE_BINARY") {
             None => env!("CARGO_BIN_FILE_MIRRORD"),
             Some(binary_path) => binary_path,
@@ -479,7 +482,7 @@ mod utils {
             "executed mirrord with args {mirrord_args:?} pid {}",
             process.id().unwrap()
         );
-        TestProcess::from_child(process, temp_dir)
+        TestProcess::from_child(process, temp_dir).await
     }
 
     #[fixture]
@@ -494,7 +497,7 @@ mod utils {
     struct ResourceGuard {
         /// Used in the implementation of [`Drop`] for this struct to block until the background
         /// task exits.
-        task_finished: Arc<(Mutex<bool>, Condvar)>,
+        task_finished: Arc<(std::sync::Mutex<bool>, Condvar)>,
         /// Used to inform the background task whether this guard was dropped during panic.
         panic_tx: Option<Sender<bool>>,
     }
@@ -511,7 +514,7 @@ mod utils {
             api.create(&PostParams::default(), data).await?;
 
             let (panic_tx, panic_rx) = oneshot::channel::<bool>();
-            let task_finished = Arc::new((Mutex::new(false), Condvar::new()));
+            let task_finished = Arc::new((std::sync::Mutex::new(false), Condvar::new()));
             let finished = task_finished.clone();
 
             tokio::spawn(async move {

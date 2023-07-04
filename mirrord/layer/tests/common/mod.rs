@@ -1,11 +1,6 @@
 use std::{
-    assert_matches::assert_matches,
-    cmp::min,
-    collections::HashMap,
-    fmt::Debug,
-    path::PathBuf,
-    process::Stdio,
-    sync::{Arc, Mutex},
+    assert_matches::assert_matches, cmp::min, collections::HashMap, fmt::Debug, path::PathBuf,
+    process::Stdio, sync::Arc,
 };
 
 use actix_codec::Framed;
@@ -25,6 +20,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
     process::{Child, Command},
+    sync::Mutex,
 };
 
 /// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
@@ -46,23 +42,23 @@ pub struct TestProcess {
 }
 
 impl TestProcess {
-    pub fn get_stdout(&self) -> String {
-        self.stdout.lock().unwrap().clone()
+    pub async fn get_stdout(&self) -> String {
+        self.stdout.lock().await.clone()
     }
 
-    pub fn get_stderr(&self) -> String {
-        self.stderr.lock().unwrap().clone()
+    pub async fn get_stderr(&self) -> String {
+        self.stderr.lock().await.clone()
     }
 
-    pub fn assert_log_level(&self, stderr: bool, level: &str) {
+    pub async fn assert_log_level(&self, stderr: bool, level: &str) {
         if stderr {
-            assert!(!self.stderr.lock().unwrap().contains(level));
+            assert!(!self.stderr.lock().await.contains(level));
         } else {
-            assert!(!self.stdout.lock().unwrap().contains(level));
+            assert!(!self.stdout.lock().await.contains(level));
         }
     }
 
-    fn from_child(mut child: Child) -> TestProcess {
+    async fn from_child(mut child: Child) -> TestProcess {
         let stderr_data = Arc::new(Mutex::new(String::new()));
         let stdout_data = Arc::new(Mutex::new(String::new()));
         let child_stderr = child.stderr.take().unwrap();
@@ -82,7 +78,7 @@ impl TestProcess {
                 let string = String::from_utf8_lossy(&buf[..n]);
                 eprintln!("stderr {} {pid}: {}", format_time(), string);
                 {
-                    stderr_data_reader.lock().unwrap().push_str(&string);
+                    stderr_data_reader.lock().await.push_str(&string);
                 }
             }
         });
@@ -97,7 +93,7 @@ impl TestProcess {
                 let string = String::from_utf8_lossy(&buf[..n]);
                 print!("stdout {} {pid}: {}", format_time(), string);
                 {
-                    stdout_data_reader.lock().unwrap().push_str(&string);
+                    stdout_data_reader.lock().await.push_str(&string);
                 }
             }
         });
@@ -125,28 +121,28 @@ impl TestProcess {
             .spawn()
             .unwrap();
         println!("Started application.");
-        TestProcess::from_child(child)
+        TestProcess::from_child(child).await
     }
 
-    pub fn assert_stdout_contains(&self, string: &str) {
-        assert!(self.stdout.lock().unwrap().contains(string));
+    pub async fn assert_stdout_contains(&self, string: &str) {
+        assert!(self.stdout.lock().await.contains(string));
     }
 
-    pub fn assert_stderr_contains(&self, string: &str) {
-        assert!(self.stderr.lock().unwrap().contains(string));
+    pub async fn assert_stderr_contains(&self, string: &str) {
+        assert!(self.stderr.lock().await.contains(string));
     }
 
-    pub fn assert_no_error_in_stdout(&self) {
+    pub async fn assert_no_error_in_stdout(&self) {
         assert!(!self
             .error_capture
-            .is_match(&self.stdout.lock().unwrap())
+            .is_match(&self.stdout.lock().await)
             .unwrap());
     }
 
-    pub fn assert_no_error_in_stderr(&self) {
+    pub async fn assert_no_error_in_stderr(&self) {
         assert!(!self
             .error_capture
-            .is_match(&self.stderr.lock().unwrap())
+            .is_match(&self.stderr.lock().await)
             .unwrap());
     }
 

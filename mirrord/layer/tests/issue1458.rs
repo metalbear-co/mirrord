@@ -77,8 +77,12 @@ async fn test_issue1458(
         .unwrap();
 
     test_process.wait_assert_success().await;
-    test_process.assert_stdout_contains("test issue 1458: START");
-    test_process.assert_stdout_contains("test issue 1458: SUCCESS");
+    test_process
+        .assert_stdout_contains("test issue 1458: START")
+        .await;
+    test_process
+        .assert_stdout_contains("test issue 1458: SUCCESS")
+        .await;
 }
 
 /// Verify that we don't intercept UDP packets when `sendto` address' port is not `53`.
@@ -108,6 +112,10 @@ async fn test_issue1458_port_not_53(
     assert!(layer_connection.codec.try_next().await.unwrap().is_none());
 
     test_process.wait_assert_success().await;
-    test_process.assert_stdout_contains("test issue 1458 port not 53: START");
-    test_process.assert_stdout_contains("test issue 1458 port not 53: SUCCESS");
+    test_process
+        .assert_stdout_contains("test issue 1458 port not 53: START")
+        .await;
+    test_process
+        .assert_stdout_contains("test issue 1458 port not 53: SUCCESS")
+        .await;
 }

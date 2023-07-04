@@ -28,8 +28,8 @@ async fn test_issue834(
         .await;
 
     test_process.wait().await;
-    test_process.assert_stdout_contains("okay");
+    test_process.assert_stdout_contains("okay").await;
 
-    test_process.assert_no_error_in_stdout();
-    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stdout().await;
+    test_process.assert_no_error_in_stderr().await;
 }

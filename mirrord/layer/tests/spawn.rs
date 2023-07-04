@@ -68,6 +68,6 @@ async fn node_spawn(dylib_path: &PathBuf) {
     };
 
     test_process.wait_assert_success().await;
-    test_process.assert_no_error_in_stdout();
-    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stdout().await;
+    test_process.assert_no_error_in_stderr().await;
 }

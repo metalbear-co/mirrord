@@ -65,12 +65,20 @@ async fn mirroring_with_http(
         .await;
 
     test_process.wait().await;
-    test_process.assert_stdout_contains("GET: Request completed");
-    test_process.assert_stdout_contains("POST: Request completed");
-    test_process.assert_stdout_contains("PUT: Request completed");
-    test_process.assert_stdout_contains("DELETE: Request completed");
-    test_process.assert_no_error_in_stdout();
-    test_process.assert_no_error_in_stderr();
+    test_process
+        .assert_stdout_contains("GET: Request completed")
+        .await;
+    test_process
+        .assert_stdout_contains("POST: Request completed")
+        .await;
+    test_process
+        .assert_stdout_contains("PUT: Request completed")
+        .await;
+    test_process
+        .assert_stdout_contains("DELETE: Request completed")
+        .await;
+    test_process.assert_no_error_in_stdout().await;
+    test_process.assert_no_error_in_stderr().await;
 }
 
 /// Run the http mirroring test only on MacOS, because of a known crash on Linux.

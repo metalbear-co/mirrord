@@ -44,14 +44,16 @@ mod steal {
             .run(&service.target, Some(&service.namespace), Some(flags), None)
             .await;
 
-        process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+        process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
         send_requests(&url, true, Default::default()).await;
         tokio::time::timeout(Duration::from_secs(40), process.child.wait())
             .await
             .unwrap()
             .unwrap();
 
-        application.assert(&process);
+        application.assert(&process).await;
     }
 
     #[cfg(target_os = "linux")]
@@ -85,14 +87,16 @@ mod steal {
             )
             .await;
 
-        process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+        process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
         send_requests(&url, true, Default::default()).await;
         tokio::time::timeout(Duration::from_secs(40), process.child.wait())
             .await
             .unwrap()
             .unwrap();
 
-        application.assert(&process);
+        application.assert(&process).await;
     }
 
     /// Test the app continues running with mirrord and traffic is no longer stolen after the app
@@ -118,10 +122,14 @@ mod steal {
             .await;
 
         // Verify that we hooked the socket operations and the agent started stealing.
-        process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+        process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
 
         // Wait for the test app to close the socket and tell us about it.
-        process.wait_for_line(Duration::from_secs(40), "Closed socket");
+        process
+            .wait_for_line(Duration::from_secs(40), "Closed socket")
+            .await;
 
         // Flake-proofing the test:
         // If we connect to the service between the time the test application had closed its socket
@@ -206,12 +214,16 @@ mod steal {
         let (addr, port) = get_service_host_and_port(kube_client.clone(), &service).await;
 
         // Wait for the app to start listening for stolen data before connecting.
-        process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+        process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
 
         let mut tcp_stream = TcpStream::connect((addr, port as u16)).unwrap();
 
         // Wait for the test app to close the socket and tell us about it.
-        process.wait_for_line(Duration::from_secs(40), "Closed socket.");
+        process
+            .wait_for_line(Duration::from_secs(40), "Closed socket.")
+            .await;
 
         const DATA: &[u8; 16] = b"upper me please\n";
 
@@ -278,7 +290,9 @@ mod steal {
             )
             .await;
 
-        client.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+        client
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
 
         let mut headers = HeaderMap::default();
         headers.insert("x-filter", "yes".parse().unwrap());
@@ -289,7 +303,7 @@ mod steal {
             .unwrap()
             .unwrap();
 
-        application.assert(&client);
+        application.assert(&client).await;
     }
 
     #[rstest]
@@ -318,7 +332,9 @@ mod steal {
             )
             .await;
 
-        client.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+        client
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
 
         let mut headers = HeaderMap::default();
         headers.insert("x-filter", "yes".parse().unwrap());
@@ -329,7 +345,7 @@ mod steal {
             .unwrap()
             .unwrap();
 
-        application.assert(&client);
+        application.assert(&client).await;
     }
 
     #[rstest]
@@ -358,7 +374,9 @@ mod steal {
             )
             .await;
 
-        client.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+        client
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
 
         let headers = HeaderMap::default();
         // Send a GET that should go through to remote
@@ -384,7 +402,7 @@ mod steal {
             .unwrap()
             .unwrap();
 
-        application.assert(&client);
+        application.assert(&client).await;
     }
 
     #[rstest]
@@ -413,7 +431,9 @@ mod steal {
             )
             .await;
 
-        mirrored_process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+        mirrored_process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
 
         // Send a GET that should be matched and stolen.
         // And a DELETE that closes the app.
@@ -449,7 +469,7 @@ mod steal {
             .expect("Timed out waiting for mirrored_process!")
             .expect("mirrored_process failed!");
 
-        application.assert(&mirrored_process);
+        application.assert(&mirrored_process).await;
     }
 
     /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`
@@ -485,7 +505,9 @@ mod steal {
             )
             .await;
 
-        mirrorded_process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+        mirrorded_process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
 
         // Send a GET that should be matched and stolen.
         let client = reqwest::Client::new();
@@ -517,7 +539,7 @@ mod steal {
             .unwrap()
             .unwrap();
 
-        application.assert(&mirrorded_process);
+        application.assert(&mirrorded_process).await;
     }
 
     /// Test the case where running with `steal` set and an http header filter, but getting a
@@ -551,7 +573,9 @@ mod steal {
             )
             .await;
 
-        mirrorded_process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+        mirrorded_process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
 
         let addr = SocketAddr::new(host.trim().parse().unwrap(), port as u16);
         let mut stream = TcpStream::connect(addr).unwrap();
@@ -564,7 +588,7 @@ mod steal {
         assert_eq!(&buf[8..], tcp_data); // The correct data was sent there and back.
 
         // Verify the data was passed through and nothing was sent to the local app.
-        let stdout_after = mirrorded_process.get_stdout();
+        let stdout_after = mirrorded_process.get_stdout().await;
         assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
 
         // Send a DELETE that should be matched and thus stolen, closing the app.
@@ -580,7 +604,7 @@ mod steal {
             .unwrap()
             .unwrap();
 
-        application.assert(&mirrorded_process);
+        application.assert(&mirrorded_process).await;
     }
 
     /// Test the case where running with `steal` set and an http header filter, we get an HTTP
@@ -621,7 +645,9 @@ mod steal {
             )
             .await;
 
-        mirrorded_process.wait_for_line(Duration::from_secs(40), "daemon subscribed");
+        mirrorded_process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
 
         // Create a websocket connection to test the HTTP upgrade bypass.
         let host = host.trim();
@@ -649,7 +675,7 @@ mod steal {
         assert_eq!(&read_message[8..], write_data); // The correct data was sent there and back.
 
         // Verify the data was passed through and nothing was sent to the local app.
-        let stdout_after = mirrorded_process.get_stdout();
+        let stdout_after = mirrorded_process.get_stdout().await;
         assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
 
         // Send a DELETE that should be matched and thus stolen, closing the app.
@@ -665,6 +691,6 @@ mod steal {
             .unwrap()
             .unwrap();
 
-        application.assert(&mirrorded_process);
+        application.assert(&mirrorded_process).await;
     }
 }

@@ -42,8 +42,8 @@ async fn self_open(dylib_path: &PathBuf) {
     assert!(layer_connection.is_ended().await);
 
     test_process.wait_assert_success().await;
-    test_process.assert_no_error_in_stderr();
-    test_process.assert_no_error_in_stdout();
+    test_process.assert_no_error_in_stderr().await;
+    test_process.assert_no_error_in_stdout().await;
 }
 
 /// Verify that if the user's app is trying to read out of mirrord's temp bin dir for some messed up
@@ -84,12 +84,12 @@ async fn read_from_mirrord_bin(dylib_path: &PathBuf) {
     assert!(layer_connection.is_ended().await);
 
     test_process.wait_assert_success().await;
-    test_process.assert_no_error_in_stderr();
-    test_process.assert_no_error_in_stdout();
+    test_process.assert_no_error_in_stderr().await;
+    test_process.assert_no_error_in_stdout().await;
 
     // We read the contents from <TMPDIR>/<OUR-FILE> even though the app tried to read from
     // <TMPDIR>/mirrord-bin/<TMPDIR>/<OUR-FILE>.
-    test_process.assert_stdout_contains(contents);
+    test_process.assert_stdout_contains(contents).await;
 }
 
 /// Verifies `pwrite` - if opening a file in write mode and writing to it at an offset of zero
@@ -206,7 +206,7 @@ async fn pwrite(
     }
     // Assert all clear
     test_process.wait_assert_success().await;
-    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stderr().await;
 
     // Assert that fwrite flushed correclty
     let data = std::fs::read("/tmp/test_file2.txt").unwrap();
@@ -276,7 +276,7 @@ async fn node_close(
 
     // Assert all clear
     test_process.wait_assert_success().await;
-    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stderr().await;
 }
 
 #[rstest]
@@ -337,7 +337,7 @@ async fn go_stat(
         .await
         .unwrap();
     test_process.wait_assert_success().await;
-    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stderr().await;
 }
 
 #[rstest]
@@ -461,7 +461,7 @@ async fn go_dir(
     layer_connection.expect_file_close(fd).await;
 
     test_process.wait_assert_success().await;
-    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stderr().await;
 }
 
 #[rstest]
@@ -553,7 +553,7 @@ async fn go_dir_on_linux(
     layer_connection.expect_file_close(fd).await;
 
     test_process.wait_assert_success().await;
-    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stderr().await;
 }
 
 /// Test that the bypass works for reading dirs with Go.
@@ -590,7 +590,7 @@ async fn go_dir_bypass(
     assert!(layer_connection.is_ended().await);
 
     test_process.wait_assert_success().await;
-    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stderr().await;
 }
 
 /// Test go file read and close.
@@ -641,7 +641,7 @@ async fn read_go(
 
     // Assert all clear
     test_process.wait_assert_success().await;
-    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stderr().await;
 }
 
 /// Test go file write.
@@ -670,7 +670,7 @@ async fn write_go(
 
     // Assert all clear
     test_process.wait_assert_success().await;
-    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stderr().await;
 }
 
 /// Test go file lseek.
@@ -703,7 +703,7 @@ async fn lseek_go(
 
     // Assert all clear
     test_process.wait_assert_success().await;
-    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stderr().await;
 }
 
 /// Test go file access.
@@ -730,5 +730,5 @@ async fn faccessat_go(
 
     // Assert all clear
     test_process.wait_assert_success().await;
-    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stderr().await;
 }

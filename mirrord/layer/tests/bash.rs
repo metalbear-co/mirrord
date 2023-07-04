@@ -96,6 +96,6 @@ async fn bash_script(dylib_path: &Path) {
     // and that's okay - it's either file closing then process terminates or process terminates.
     // which closes the whole session in the agent
 
-    test_process.assert_no_error_in_stdout();
-    test_process.assert_no_error_in_stderr();
+    test_process.assert_no_error_in_stdout().await;
+    test_process.assert_no_error_in_stderr().await;
 }

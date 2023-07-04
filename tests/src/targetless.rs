@@ -24,7 +24,7 @@ mod targetless {
         let mut process = app.run_targetless(None, None, None).await;
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        let stdout = process.get_stdout();
+        let stdout = process.get_stdout().await;
         assert!(stdout.contains(r#""apiVersion": "v1""#))
     }
 }

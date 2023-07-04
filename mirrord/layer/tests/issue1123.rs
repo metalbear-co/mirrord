@@ -32,6 +32,10 @@ async fn test_issue1123(
     println!("Application subscribed to port, sending tcp messages.");
 
     test_process.wait_assert_success().await;
-    test_process.assert_stdout_contains("test issue 1123: START");
-    test_process.assert_stdout_contains("test issue 1123: SUCCESS");
+    test_process
+        .assert_stdout_contains("test issue 1123: START")
+        .await;
+    test_process
+        .assert_stdout_contains("test issue 1123: SUCCESS")
+        .await;
 }
