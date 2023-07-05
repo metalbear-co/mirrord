@@ -316,6 +316,7 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
     if !OUTGOING_SELECTOR
         .get()?
         .connect_remote::<PROTOCOL>(remote_address.as_socket()?)
+        && !remote_address.is_unix()
     {
         Detour::Bypass(Bypass::FilteredConnection)?
     }
