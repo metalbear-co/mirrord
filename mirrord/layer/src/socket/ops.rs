@@ -315,70 +315,69 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
         OUTGOING_SELECTOR.get()
     );
 
-    if !OUTGOING_SELECTOR
-        .get()
-        .and_then(|selector| Some(selector.connect_remote::<PROTOCOL>(remote_address.as_socket()?)))
-        .unwrap_or_default()
-        && !remote_address.is_unix()
+    if remote_address.is_unix()
+        || OUTGOING_SELECTOR
+            .get()?
+            .connect_remote::<PROTOCOL>(remote_address.as_socket()?)
     {
-        Detour::Bypass(Bypass::FilteredConnection)?
-    }
+        debug!("keep going, connecting to {remote_address:#?}");
 
-    debug!("keep going, connecting to {remote_address:#?}");
+        // Prepare this socket to be intercepted.
+        let (mirror_tx, mirror_rx) = oneshot::channel();
 
-    // Prepare this socket to be intercepted.
-    let (mirror_tx, mirror_rx) = oneshot::channel();
+        let connect = Connect {
+            remote_address: remote_address.clone(),
+            channel_tx: mirror_tx,
+        };
 
-    let connect = Connect {
-        remote_address: remote_address.clone(),
-        channel_tx: mirror_tx,
-    };
+        let hook_message = match PROTOCOL {
+            TCP => {
+                let connect_hook = TcpOutgoing::Connect(connect);
+                HookMessage::TcpOutgoing(connect_hook)
+            }
+            UDP => {
+                let connect_hook = UdpOutgoing::Connect(connect);
+                HookMessage::UdpOutgoing(connect_hook)
+            }
+        };
 
-    let hook_message = match PROTOCOL {
-        TCP => {
-            let connect_hook = TcpOutgoing::Connect(connect);
-            HookMessage::TcpOutgoing(connect_hook)
+        blocking_send_hook_message(hook_message)?;
+        let RemoteConnection {
+            layer_address,
+            user_app_address,
+        } = mirror_rx.blocking_recv()??;
+
+        // Connect to the interceptor socket that is listening.
+        let connect_result: ConnectResult = if CALL_CONNECT {
+            unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
+        } else {
+            ConnectResult {
+                result: 0,
+                error: None,
+            }
+        };
+
+        if connect_result.is_failure() {
+            error!(
+                "connect -> Failed call to libc::connect with {:#?}",
+                connect_result,
+            );
+            return Err(io::Error::last_os_error())?;
         }
-        UDP => {
-            let connect_hook = UdpOutgoing::Connect(connect);
-            HookMessage::UdpOutgoing(connect_hook)
-        }
-    };
 
-    blocking_send_hook_message(hook_message)?;
-    let RemoteConnection {
-        layer_address,
-        user_app_address,
-    } = mirror_rx.blocking_recv()??;
+        let connected = Connected {
+            remote_address: remote_address.try_into()?,
+            local_address: user_app_address.try_into()?,
+            layer_address: Some(layer_address.try_into()?),
+        };
 
-    // Connect to the interceptor socket that is listening.
-    let connect_result: ConnectResult = if CALL_CONNECT {
-        unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
+        Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
+        SOCKETS.insert(sockfd, user_socket_info);
+
+        Detour::Success(connect_result)
     } else {
-        ConnectResult {
-            result: 0,
-            error: None,
-        }
-    };
-
-    if connect_result.is_failure() {
-        error!(
-            "connect -> Failed call to libc::connect with {:#?}",
-            connect_result,
-        );
-        return Err(io::Error::last_os_error())?;
+        Detour::Bypass(Bypass::FilteredConnection)
     }
-
-    let connected = Connected {
-        remote_address: remote_address.try_into()?,
-        local_address: user_app_address.try_into()?,
-        layer_address: Some(layer_address.try_into()?),
-    };
-
-    Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
-    SOCKETS.insert(sockfd, user_socket_info);
-
-    Detour::Success(connect_result)
 }
 
 /// Iterate through sockets, if any of them has the requested port that the application is now

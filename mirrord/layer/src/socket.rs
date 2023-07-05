@@ -356,9 +356,9 @@ impl OutgoingSelector {
     /// Checks if the `address` matches one of the outgoing filters:
     ///
     /// 1. if it matches something in `Self::remote`, then we return `true`, and this connection
-    ///    shall go through the remote pod;
+    ///    shall go through the **remote** pod;
     /// 2. if it matches something in `Self::local`, then we return `false`, and this connection
-    ///    shall go through the local app;
+    ///    shall go through the **local** app;
     ///
     /// In theory it's possible to have the same address in both `remote` and `local`, we prevent
     /// this in [`OutgoingSelector::new`] though.
