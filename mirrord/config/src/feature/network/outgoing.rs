@@ -24,6 +24,8 @@ use crate::{
 ///         "tcp": true,
 ///         "udp": true,
 ///         "ignore_localhost": false,
+///         "remote": ["udp://1.1.1.0/24:1337", "1.1.5.0/24", "tcp://google.com:53", "google.com", ":53"],
+///         "local": ["localhost"],
 ///         "unix_streams": "bear.+"
 ///       }
 ///     }
@@ -53,9 +55,58 @@ pub struct OutgoingConfig {
     #[config(unstable, default = false)]
     pub ignore_localhost: bool,
 
+    /// #### feature.network.outgoing.remote {#feature.network.outgoing.remote}
+    ///
+    /// List of addresses/ports/subnets that should be sent through the remote pod.
+    ///
+    /// You may use this option to specify when outgoing traffic is sent from the remote pod (which
+    /// is the default behavior when you enable outgoing traffic).
+    ///
+    /// Takes a list of values, such as:
+    ///
+    /// - UDP traffic on subnet `1.1.1.0/24` on port 1337 will go throuh the remote pod.
+    ///
+    /// ```json
+    /// {
+    ///   "remote": ["udp://1.1.1.0/24:1337"]
+    /// }
+    ///
+    /// - UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331` will go
+    /// through the remote pod.
+    /// ```json
+    /// {
+    ///   "remote": ["google.com:1337", "google.com:7331"]
+    /// }
+    /// ```
+    /// 
+    /// Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
     #[config(default)]
     pub remote: HashSet<String>,
 
+    /// #### feature.network.outgoing.local {#feature.network.outgoing.local}
+    ///
+    /// List of addresses/ports/subnets that should be sent through the local app.
+    ///
+    /// You may use this option to specify when outgoing traffic is sent from the local app, giving
+    /// you finer grained access to which traffic should go where.
+    ///
+    /// Takes a list of values, such as:
+    ///
+    /// - TCP traffic on `localhost` on port 1337 will go throuh the local app.
+    ///
+    /// ```json
+    /// {
+    ///   "local": ["tcp://localhost:1337"]
+    /// }
+    ///
+    /// - Any outgoing traffic on port `1337` and `7331` will go through the local app.
+    /// ```json
+    /// {
+    ///   "local": [":1337", ":7331"]
+    /// }
+    /// ```
+    /// 
+    /// Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
     #[config(default)]
     pub local: HashSet<String>,
 
@@ -93,6 +144,8 @@ impl MirrordToggleableConfig for OutgoingFileConfig {
     }
 }
 
+/// <!--${internal}-->
+/// Errors related to parsing an [`OutgoingFilter`].  
 #[derive(Debug, Error)]
 pub enum OutgoingFilterError {
     #[error("Nom: failed parsing with {0}!")]
@@ -126,6 +179,8 @@ impl From<nom::Err<nom::error::Error<&[u8]>>> for OutgoingFilterError {
     }
 }
 
+/// <!--${internal}-->
+/// The protocols we support on [`OutgoingFilter`].
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ProtocolFilter {
     #[default]
@@ -149,19 +204,39 @@ impl FromStr for ProtocolFilter {
     }
 }
 
+/// <!--${internal}-->
+/// Parsed addresses can be one of these 3 variants.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum OutgoingAddress {
+    /// Just a plain old [`SocketAddr`], specified as `a.b.c.d:e`.
+    ///
+    /// We treat `0`s here as if it meant **any**, so `0.0.0.0` means we filter any IP, and `:0`
+    /// means any port.
     Socket(SocketAddr),
+
+    /// A named address, as we cannot resolve it here, specified as `name:a`.
+    ///
+    /// We can only resolve such names on the mirrord layer `connect` call, as we have to check if
+    /// the user enabled the DNS feature or not (and thus, resolve it through the remote pod, or
+    /// the local app).
     Name((String, u16)),
+
+    /// Just a plain old subnet, specified as `a.b.c.d/e:f`.
     Subnet((ipnet::IpNet, u16)),
 }
 
+/// <!--${internal}-->
+/// The parsed filter with its [`ProtocolFilter`] and [`OutgoingAddress`].
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OutgoingFilter {
+    /// Valid protocol types.
     pub protocol: ProtocolFilter,
+
+    /// Address|name|subnet we're going to filter.
     pub address: OutgoingAddress,
 }
 
+/// <!--${internal}-->
 /// It's dangerous to go alone!
 /// Take [this](https://github.com/rust-bakery/nom/blob/main/doc/choosing_a_combinator.md).
 mod parser {
@@ -175,6 +250,7 @@ mod parser {
         IResult,
     };
 
+    /// <!--${internal}-->
     pub(super) fn protocol(input: &[u8]) -> IResult<&[u8], &[u8]> {
         let (input, protocol) = opt(terminated(take_until("://"), tag("://")))(input)?;
         let protocol = protocol.unwrap_or(b"any");
@@ -182,6 +258,7 @@ mod parser {
         Ok((input, protocol))
     }
 
+    /// <!--${internal}-->
     /// We try to parse 3 different kinds of values here:
     ///
     /// 1. `name.with.dots`;
@@ -212,6 +289,7 @@ mod parser {
         Ok((input, address))
     }
 
+    /// <!--${internal}-->
     pub(super) fn subnet(input: &[u8]) -> IResult<&[u8], Option<Vec<u8>>> {
         let subnet = preceded(tag(b"/"), many1(digit1));
         let (input, subnet) = opt(subnet)(input)?;
@@ -221,6 +299,7 @@ mod parser {
         Ok((input, subnet))
     }
 
+    /// <!--${internal}-->
     pub(super) fn port(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
         let port = preceded(tag(b":"), many1(digit1));
         let (input, port) = opt(port)(input)?;
