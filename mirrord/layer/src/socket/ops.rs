@@ -465,11 +465,62 @@ pub(super) fn connect(
     };
 
     if let Some(ip_address) = optional_ip_address {
+        // if ip_address.ip().is_loopback() {
+        //     return connect_to_local_address(sockfd, &user_socket_info, ip_address);
+        // }
+
+        // if is_ignored_port(&ip_address) || is_debugger_port(&ip_address) {
+        //     return Detour::Bypass(Bypass::Port(ip_address.port()));
+        // }
+
+        let ignore_localhost = OUTGOING_IGNORE_LOCALHOST
+            .get()
+            .copied()
+            .expect("Should be set during initialization!");
+
         if ip_address.ip().is_loopback() {
-            return connect_to_local_address(sockfd, &user_socket_info, ip_address);
+            if ignore_localhost {
+                return Detour::Bypass(Bypass::IgnoreLocalhost(ip_address.port()));
+            }
+            if let Some(res) =
+                // Iterate through sockets, if any of them has the requested port that the
+                // application is now trying to connect to - then don't forward this connection
+                // to the agent, and instead of connecting to the requested address, connect to
+                // the actual address where the application is locally listening.
+                SOCKETS.iter().find_map(|entry| {
+                    let socket = entry.value();
+                    if let SocketState::Listening(Bound {
+                        requested_address,
+                        address,
+                    }) = socket.state
+                    {
+                        if requested_address.port() == ip_address.port()
+                            && socket.protocol == user_socket_info.protocol
+                        {
+                            let rawish_remote_address = SockAddr::from(address);
+                            let result = unsafe {
+                                FN_CONNECT(
+                                    sockfd,
+                                    rawish_remote_address.as_ptr(),
+                                    rawish_remote_address.len(),
+                                )
+                            };
+
+                            return Some(if result != 0 {
+                                Detour::Error(io::Error::last_os_error().into())
+                            } else {
+                                Detour::Success(result.into())
+                            });
+                        }
+                    }
+                    None
+                })
+            {
+                return res;
+            }
         }
 
-        if is_ignored_port(&ip_address) || is_debugger_port(&ip_address) {
+        if is_ignored_port(ip_address) || is_debugger_port(ip_address) {
             return Detour::Bypass(Bypass::Port(ip_address.port()));
         }
     } else if remote_address.is_unix() {
