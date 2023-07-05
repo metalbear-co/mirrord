@@ -1,0 +1,1 @@
+Cleaning kube resources after e2e tests no longer needs two runtime threads.
