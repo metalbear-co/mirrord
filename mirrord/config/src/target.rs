@@ -177,6 +177,10 @@ pub enum Target {
     /// <!--${internal}-->
     /// Mirror a pod.
     Pod(PodTarget),
+
+    /// <!--${internal}-->
+    /// Mirror a rollout.
+    Rollout(RolloutTarget),
 }
 
 impl FromStr for Target {
@@ -188,9 +192,10 @@ impl FromStr for Target {
             Some("deployment") | Some("deploy") => {
                 DeploymentTarget::from_split(&mut split).map(Target::Deployment)
             }
+            Some("rollout") => RolloutTarget::from_split(&mut split).map(Target::Rollout),
             Some("pod") => PodTarget::from_split(&mut split).map(Target::Pod),
             _ => Err(ConfigError::InvalidTarget(format!(
-                "Provided target: {target} is neither a pod or a deployment. Did you mean pod/{target} or deployment/{target}\n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
+                "Provided target: {target} is neither a pod or a deployment or a rollout. Did you mean pod/{target} or deployment/{target} or rollout/{target}\n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
             ))),
         }
     }
@@ -258,6 +263,37 @@ impl FromSplit for DeploymentTarget {
     }
 }
 
+/// <!--${internal}-->
+/// Mirror the rollout specified by [`RolloutTarget::rollout`].
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
+pub struct RolloutTarget {
+    /// <!--${internal}-->
+    /// Rollout to mirror.
+    pub rollout: String,
+    pub container: Option<String>,
+}
+
+impl FromSplit for RolloutTarget {
+    fn from_split(split: &mut std::str::Split<char>) -> Result<Self> {
+        let rollout = split
+            .next()
+            .ok_or_else(|| ConfigError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_string()))?;
+        match (split.next(), split.next()) {
+            (Some("container"), Some(container)) => Ok(Self {
+                rollout: rollout.to_string(),
+                container: Some(container.to_string()),
+            }),
+            (None, None) => Ok(Self {
+                rollout: rollout.to_string(),
+                container: None,
+            }),
+            _ => Err(ConfigError::InvalidTarget(
+                FAIL_PARSE_DEPLOYMENT_OR_POD.to_string(),
+            )),
+        }
+    }
+}
+
 bitflags::bitflags! {
     #[repr(C)]
     #[derive(Debug, PartialEq, Eq)]
@@ -266,6 +302,7 @@ bitflags::bitflags! {
         const POD = 2;
         const DEPLOYMENT = 4;
         const CONTAINER = 8;
+        const ROLLOUT = 16;
     }
 }
 
@@ -286,6 +323,12 @@ impl CollectAnalytics for &TargetConfig {
                 Target::Deployment(deployment) => {
                     flags |= TargetAnalyticFlags::DEPLOYMENT;
                     if deployment.container.is_some() {
+                        flags |= TargetAnalyticFlags::CONTAINER;
+                    }
+                }
+                Target::Rollout(rollout) => {
+                    flags |= TargetAnalyticFlags::ROLLOUT;
+                    if rollout.container.is_some() {
                         flags |= TargetAnalyticFlags::CONTAINER;
                     }
                 }
@@ -344,6 +387,17 @@ mod tests {
             namespace: Some("baz".to_string())
         }
     )] // Pod and namespace specified.
+    #[case(
+        Some("rollout/foo"),
+        None,
+        TargetConfig{
+            path: Some(Target::Rollout(RolloutTarget {
+                rollout: "foo".to_string(),
+                container: None
+            })),
+            namespace: None
+        }
+    )] // Rollout specified.
     fn default(
         #[case] path_env: Option<&str>,
         #[case] namespace_env: Option<&str>,

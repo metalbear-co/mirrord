@@ -816,6 +816,25 @@
         }
       ]
     },
+    "RolloutTarget": {
+      "description": "<!--${internal}--> Mirror the rollout specified by [`RolloutTarget::rollout`].",
+      "type": "object",
+      "required": [
+        "rollout"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rollout": {
+          "description": "<!--${internal}--> Rollout to mirror.",
+          "type": "string"
+        }
+      }
+    },
     "Target": {
       "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `podname/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`.",
       "anyOf": [
@@ -832,6 +851,14 @@
           "allOf": [
             {
               "$ref": "#/definitions/PodTarget"
+            }
+          ]
+        },
+        {
+          "description": "<!--${internal}--> Mirror a rollout.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RolloutTarget"
             }
           ]
         }
