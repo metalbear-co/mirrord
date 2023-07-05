@@ -239,6 +239,8 @@ pub struct OutgoingFilter {
 /// <!--${internal}-->
 /// It's dangerous to go alone!
 /// Take [this](https://github.com/rust-bakery/nom/blob/main/doc/choosing_a_combinator.md).
+///
+/// [`nom`] works better with `u8` slices, instead of `str`s.
 mod parser {
     use nom::{
         branch::alt,
@@ -251,6 +253,8 @@ mod parser {
     };
 
     /// <!--${internal}-->
+    ///
+    /// Parses `tcp://`, extracting the `tcp` part, and discarding the `://`.
     pub(super) fn protocol(input: &[u8]) -> IResult<&[u8], &[u8]> {
         let (input, protocol) = opt(terminated(take_until("://"), tag("://")))(input)?;
         let protocol = protocol.unwrap_or(b"any");
@@ -259,6 +263,7 @@ mod parser {
     }
 
     /// <!--${internal}-->
+    ///
     /// We try to parse 3 different kinds of values here:
     ///
     /// 1. `name.with.dots`;
@@ -270,6 +275,8 @@ mod parser {
     /// The parser is not interested in only eating correct values here for hostnames, ip addresses,
     /// etc., it just tries to get a good enough string that could be parsed by
     /// [`SocketAddr::parse`], or [`IpNet::parse`].
+    ///
+    /// Returns `0.0.0.0` if it doesn't parse anything.
     pub(super) fn address(input: &[u8]) -> nom::IResult<&[u8], Vec<u8>> {
         let ipv6 = many1(alt((alphanumeric1, tag(b":"))));
         let ipv6_host = delimited(tag(b"["), ipv6, tag(b"]"));
@@ -283,13 +290,12 @@ mod parser {
             .map(|addr| addr.concat())
             .unwrap_or(b"0.0.0.0".to_vec());
 
-        // TODO(alex) [mid] 2023-06-28: Convert this with `ToSocketAddrs` after we have parsed the
-        // whole config, and thus have access to both addr and port.
-
         Ok((input, address))
     }
 
     /// <!--${internal}-->
+    ///
+    /// Parses `/24`, extracting the `24` part, and discarding the `/`.
     pub(super) fn subnet(input: &[u8]) -> IResult<&[u8], Option<Vec<u8>>> {
         let subnet = preceded(tag(b"/"), many1(digit1));
         let (input, subnet) = opt(subnet)(input)?;
@@ -300,6 +306,10 @@ mod parser {
     }
 
     /// <!--${internal}-->
+    ///
+    /// Parses `:1337`, extracting the `1337` part, and discarding the `:`.
+    ///
+    /// Returns `0` if it doesn't parse anything.
     pub(super) fn port(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
         let port = preceded(tag(b":"), many1(digit1));
         let (input, port) = opt(port)(input)?;
