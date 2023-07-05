@@ -390,6 +390,10 @@ pub(crate) trait OptionExt {
     fn bypass(self, value: Bypass) -> Detour<Self::Opt>;
 }
 
+pub(crate) trait OptionDetourExt<T>: OptionExt {
+    fn transpose(self) -> Detour<Option<T>>;
+}
+
 impl<T> OptionExt for Option<T> {
     type Opt = T;
 
@@ -397,6 +401,17 @@ impl<T> OptionExt for Option<T> {
         match self {
             Some(v) => Detour::Success(v),
             None => Detour::Bypass(value),
+        }
+    }
+}
+
+impl<T> OptionDetourExt<T> for Option<Detour<T>> {
+    fn transpose(self) -> Detour<Option<T>> {
+        match self {
+            Some(Detour::Success(s)) => Detour::Success(Some(s)),
+            Some(Detour::Error(e)) => Detour::Error(e),
+            Some(Detour::Bypass(b)) => Detour::Bypass(b),
+            None => Detour::Success(None),
         }
     }
 }

@@ -21,7 +21,7 @@ use tracing::{debug, error, info, trace};
 use super::{hooks::*, *};
 use crate::{
     common::{blocking_send_hook_message, HookMessage},
-    detour::{Detour, OnceLockExt, OptionExt},
+    detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     dns::GetAddrInfo,
     error::HookError,
     file::{self, OPEN_FILES},
@@ -384,55 +384,49 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
 /// trying to connect to - then don't forward this connection to the agent, and instead of
 /// connecting to the requested address, connect to the actual address where the application
 /// is locally listening.
-#[allow(dead_code)]
 #[tracing::instrument(level = "debug", ret)]
 fn connect_to_local_address(
     sockfd: RawFd,
     user_socket_info: &UserSocket,
     ip_address: SocketAddr,
-) -> Detour<ConnectResult> {
+) -> Detour<Option<ConnectResult>> {
     let ignore_localhost = OUTGOING_IGNORE_LOCALHOST
         .get()
         .copied()
         .expect("Should be set during initialization!");
 
     if ignore_localhost {
-        return Detour::Bypass(Bypass::IgnoreLocalhost(ip_address.port()));
-    }
-
-    SOCKETS.iter().find_map(|socket| match socket.state {
-        SocketState::Listening(Bound {
-            requested_address,
-            address,
-        }) => {
-            info!("there is a listening socket {:#?}", socket.value());
-            if requested_address.port() == ip_address.port()
-                && socket.protocol == user_socket_info.protocol
-            {
-                let rawish_remote_address = SockAddr::from(address);
-                let result = unsafe {
-                    FN_CONNECT(
+        Detour::Bypass(Bypass::IgnoreLocalhost(ip_address.port()))
+    } else {
+        Detour::Success(
+            SOCKETS
+                .iter()
+                .find_map(|socket| match socket.state {
+                    SocketState::Listening(Bound {
+                        requested_address,
+                        address,
+                    }) => (requested_address.port() == ip_address.port()
+                        && socket.protocol == user_socket_info.protocol)
+                        .then(|| SockAddr::from(address)),
+                    _ => None,
+                })
+                .and_then(|rawish_remote_address| unsafe {
+                    Some(FN_CONNECT(
                         sockfd,
                         rawish_remote_address.as_ptr(),
                         rawish_remote_address.len(),
-                    )
-                };
-
-                Some(if result != 0 {
-                    Detour::Error(io::Error::last_os_error().into())
-                } else {
-                    Detour::Success(result.into())
+                    ))
                 })
-            } else {
-                None
-            }
-        }
-        ref other => {
-            info!("only in {other:#?} state {:#?}", socket.value());
-
-            None
-        }
-    })?
+                .map(|connect_result| {
+                    if connect_result != 0 {
+                        Detour::Error::<ConnectResult>(io::Error::last_os_error().into())
+                    } else {
+                        Detour::Success(connect_result.into())
+                    }
+                })
+                .transpose()?,
+        )
+    }
 }
 
 /// Handles 3 different cases, depending if the outgoing traffic feature is enabled or not:
@@ -466,61 +460,13 @@ pub(super) fn connect(
     };
 
     if let Some(ip_address) = optional_ip_address {
-        // if ip_address.ip().is_loopback() {
-        //     return connect_to_local_address(sockfd, &user_socket_info, ip_address);
-        // }
-
-        // if is_ignored_port(&ip_address) || is_debugger_port(&ip_address) {
-        //     return Detour::Bypass(Bypass::Port(ip_address.port()));
-        // }
-
-        let ignore_localhost = OUTGOING_IGNORE_LOCALHOST
-            .get()
-            .copied()
-            .expect("Should be set during initialization!");
-
         if ip_address.ip().is_loopback() {
-            if ignore_localhost {
-                return Detour::Bypass(Bypass::IgnoreLocalhost(ip_address.port()));
-            }
-            if let Some(res) =
-                // Iterate through sockets, if any of them has the requested port that the
-                // application is now trying to connect to - then don't forward this connection
-                // to the agent, and instead of connecting to the requested address, connect to
-                // the actual address where the application is locally listening.
-                SOCKETS.iter().find_map(|entry| {
-                    let socket = entry.value();
-                    if let SocketState::Listening(Bound {
-                        requested_address,
-                        address,
-                    }) = socket.state
-                    {
-                        if requested_address.port() == ip_address.port()
-                            && socket.protocol == user_socket_info.protocol
-                        {
-                            let rawish_remote_address = SockAddr::from(address);
-                            let result = unsafe {
-                                FN_CONNECT(
-                                    sockfd,
-                                    rawish_remote_address.as_ptr(),
-                                    rawish_remote_address.len(),
-                                )
-                            };
-
-                            return Some(if result != 0 {
-                                Detour::Error(io::Error::last_os_error().into())
-                            } else {
-                                Detour::Success(result.into())
-                            });
-                        }
-                    }
-                    None
-                })
-            {
-                return res;
+            if let Some(result) = connect_to_local_address(sockfd, &user_socket_info, ip_address)? {
+                // `result` here is always a success, as error and bypass are checked on the `?`
+                // above.
+                return Detour::Success(result);
             }
         }
-
         if is_ignored_port(&ip_address) || is_debugger_port(&ip_address) {
             return Detour::Bypass(Bypass::Port(ip_address.port()));
         }
