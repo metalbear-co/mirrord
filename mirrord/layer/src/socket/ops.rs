@@ -410,12 +410,12 @@ fn connect_to_local_address(
                         .then(|| SockAddr::from(address)),
                     _ => None,
                 })
-                .and_then(|rawish_remote_address| unsafe {
-                    Some(FN_CONNECT(
+                .map(|rawish_remote_address| unsafe {
+                    FN_CONNECT(
                         sockfd,
                         rawish_remote_address.as_ptr(),
                         rawish_remote_address.len(),
-                    ))
+                    )
                 })
                 .map(|connect_result| {
                     if connect_result != 0 {
