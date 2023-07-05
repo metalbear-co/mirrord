@@ -462,11 +462,12 @@ pub(super) fn connect(
     if let Some(ip_address) = optional_ip_address {
         if ip_address.ip().is_loopback() {
             if let Some(result) = connect_to_local_address(sockfd, &user_socket_info, ip_address)? {
-                // `result` here is always a success, as error and bypass are checked on the `?`
+                // `result` here is always a success, as error and bypass are returned on the `?`
                 // above.
                 return Detour::Success(result);
             }
         }
+
         if is_ignored_port(&ip_address) || is_debugger_port(&ip_address) {
             return Detour::Bypass(Bypass::Port(ip_address.port()));
         }

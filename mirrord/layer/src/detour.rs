@@ -390,7 +390,22 @@ pub(crate) trait OptionExt {
     fn bypass(self, value: Bypass) -> Detour<Self::Opt>;
 }
 
+/// Extends `Option<T>` with `Detour<T>` conversion methods.
 pub(crate) trait OptionDetourExt<T>: OptionExt {
+    /// Transposes an `Option` of a [`Detour`] into a [`Detour`] of an `Option`.
+    ///
+    /// - [`None`] will be mapped to `Success(None)`;
+    /// - `Some(Success)` will be mapped to `Success(Some)`;
+    /// - `Some(Error)` will be mapped to `Error`;
+    /// - `Some(Bypass)` will be mapped to `Bypass`;
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// let x: Detour<Option<i32>> = Detour::Sucess(Some(5));
+    /// let y: Option<Detour<i32>> = Some(Detour::Success(5));
+    /// assert_eq!(x, y.transpose());
+    /// ```
     fn transpose(self) -> Detour<Option<T>>;
 }
 
@@ -406,6 +421,7 @@ impl<T> OptionExt for Option<T> {
 }
 
 impl<T> OptionDetourExt<T> for Option<Detour<T>> {
+    #[inline]
     fn transpose(self) -> Detour<Option<T>> {
         match self {
             Some(Detour::Success(s)) => Detour::Success(Some(s)),
