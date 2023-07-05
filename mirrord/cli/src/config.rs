@@ -42,7 +42,6 @@ pub(super) enum Commands {
     #[command(hide = true)]
     Extract { path: String },
     /// Operator commands eg. setup
-    #[command(hide = true)]
     Operator(Box<OperatorArgs>),
 
     /// List targets/resources like pods/namespaces in json format
@@ -187,25 +186,6 @@ pub(super) struct ExecArgs {
 }
 
 #[derive(Args, Debug)]
-pub(super) struct LoginArgs {
-    /// Manualy insert token
-    #[arg(long)]
-    pub token: Option<String>,
-
-    /// Time to wait till close the connection wating for reply from identity server
-    #[arg(long, default_value_t = 120)]
-    pub timeout: u64,
-
-    /// Override identity server url
-    #[arg(long, default_value = "https://identity.metalbear.dev")]
-    pub auth_server: String,
-
-    /// Don't open web browser automatically and just print url
-    #[arg(long)]
-    pub no_open: bool,
-}
-
-#[derive(Args, Debug)]
 pub(super) struct OperatorArgs {
     #[command(subcommand)]
     pub command: OperatorCommand,
@@ -222,7 +202,7 @@ pub(super) enum OperatorCommand {
         #[arg(long)]
         accept_tos: bool,
 
-        /// A mirrord for Teams license key
+        /// A mirrord for Teams license key (online)
         #[arg(long)]
         license_key: Option<String>,
 
