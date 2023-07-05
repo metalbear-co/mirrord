@@ -79,7 +79,7 @@ impl From<ConnectResult> for i32 {
 }
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "debug", ret)]
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
     let socket_kind = type_.try_into()?;
 
@@ -132,7 +132,7 @@ fn bind_port(sockfd: c_int, domain: c_int, port: u16) -> Detour<()> {
 
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state.
-#[tracing::instrument(level = "trace", ret, skip(raw_address))]
+#[tracing::instrument(level = "debug", ret, skip(raw_address))]
 pub(super) fn bind(
     sockfd: c_int,
     raw_address: *const sockaddr,
@@ -254,7 +254,7 @@ pub(super) fn bind(
 
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
 /// later be routed to the fake local port.
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "debug", ret)]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
     let mut socket = {
         SOCKETS
@@ -288,6 +288,8 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
             });
 
             SOCKETS.insert(sockfd, socket);
+
+            info!("in listen {:#?}", SOCKETS);
 
             Detour::Success(listen_result)
         }
@@ -382,6 +384,7 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
 /// trying to connect to - then don't forward this connection to the agent, and instead of
 /// connecting to the requested address, connect to the actual address where the application
 /// is locally listening.
+#[tracing::instrument(level = "debug", ret)]
 fn connect_to_local_address(
     sockfd: RawFd,
     user_socket_info: &UserSocket,
@@ -401,6 +404,7 @@ fn connect_to_local_address(
             requested_address,
             address,
         }) => {
+            info!("there is a listening socket {:#?}", socket.value());
             if requested_address.port() == ip_address.port()
                 && socket.protocol == user_socket_info.protocol
             {
@@ -422,7 +426,11 @@ fn connect_to_local_address(
                 None
             }
         }
-        _ => None,
+        ref other => {
+            info!("only in {other:#?} state {:#?}", socket.value());
+
+            None
+        }
     })?
 }
 
@@ -435,7 +443,7 @@ fn connect_to_local_address(
 /// that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request interception procedure.
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
-#[tracing::instrument(level = "trace", ret, skip(raw_address))]
+#[tracing::instrument(level = "debug", ret, skip(raw_address))]
 pub(super) fn connect(
     sockfd: RawFd,
     raw_address: *const sockaddr,
@@ -447,6 +455,8 @@ pub(super) fn connect(
     let unix_streams = REMOTE_UNIX_STREAMS
         .get()
         .expect("Should be set during initialization!");
+
+    info!("in connect {:#?}", SOCKETS);
 
     let (_, user_socket_info) = {
         SOCKETS
@@ -601,13 +611,15 @@ pub(super) fn getsockname(
 /// connection to be set in our lock.
 ///
 /// This enables us to have a safe way to get "remote" information (remote ip, port, etc).
-#[tracing::instrument(level = "trace", ret, skip(address, address_len))]
+#[tracing::instrument(level = "debug", ret, skip(address, address_len))]
 pub(super) fn accept(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
     new_fd: RawFd,
 ) -> Detour<RawFd> {
+    info!("in accept {:#?}", SOCKETS);
+
     let (id, domain, protocol, type_) = {
         SOCKETS
             .get(&sockfd)
@@ -663,7 +675,7 @@ pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), Hoo
 ///
 /// We need this to properly handle some cases in [`fcntl`], [`dup2_detour`], and [`dup3_detour`].
 /// Extra relevant for node on macos.
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "debug", ret)]
 pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
     if let Some(socket) = SOCKETS.get(&fd).map(|entry| entry.value().clone()) {
         SOCKETS.insert(dup_fd as RawFd, socket);
@@ -899,7 +911,7 @@ pub(super) fn recv_from(
 ///
 /// See [`recv_from`] for more information.
 #[tracing::instrument(
-    level = "trace",
+    level = "debug",
     ret,
     skip(raw_message, raw_destination, destination_length)
 )]
