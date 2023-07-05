@@ -384,6 +384,7 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
 /// trying to connect to - then don't forward this connection to the agent, and instead of
 /// connecting to the requested address, connect to the actual address where the application
 /// is locally listening.
+#[allow(dead_code)]
 #[tracing::instrument(level = "debug", ret)]
 fn connect_to_local_address(
     sockfd: RawFd,
@@ -520,7 +521,7 @@ pub(super) fn connect(
             }
         }
 
-        if is_ignored_port(ip_address) || is_debugger_port(ip_address) {
+        if is_ignored_port(&ip_address) || is_debugger_port(&ip_address) {
             return Detour::Bypass(Bypass::Port(ip_address.port()));
         }
     } else if remote_address.is_unix() {
