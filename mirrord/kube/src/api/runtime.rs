@@ -8,11 +8,9 @@ use kube::{api::ListParams, Api, Client};
 use mirrord_config::target::{DeploymentTarget, PodTarget, RolloutTarget, Target};
 
 use crate::{
-    api::{container::choose_container, get_k8s_resource_api, runtime::rollout::Rollout},
+    api::{container::choose_container, get_k8s_resource_api, kubernetes::rollout::Rollout},
     error::{KubeApiError, Result},
 };
-
-mod rollout;
 
 #[derive(Debug)]
 pub enum ContainerRuntime {
