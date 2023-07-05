@@ -270,6 +270,7 @@ impl UserSocket {
     }
 
     /// Inform TCP handler about closing a bound/listening port.
+    #[tracing::instrument(level = "debug", ret)]
     pub(crate) fn close(&self) {
         if let Some(port) = self.get_bound_port() {
             match self.kind {
