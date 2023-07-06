@@ -246,7 +246,7 @@ impl UserSocket {
     }
 
     /// Inform TCP handler about closing a bound/listening port.
-    #[tracing::instrument(level = "debug", ret)]
+    #[tracing::instrument(level = "trace", ret)]
     pub(crate) fn close(&self) {
         if let Some(port) = self.get_bound_port() {
             match self.kind {
@@ -285,7 +285,7 @@ impl OutgoingSelector {
     ///
     /// It also checks for filters that are present in both `remote` and `local`, crashing if it
     /// finds anything.
-    #[tracing::instrument(level = "debug", ret)]
+    #[tracing::instrument(level = "trace", ret)]
     pub(crate) fn new(remote: HashSet<OutgoingFilter>, local: HashSet<OutgoingFilter>) -> Self {
         use mirrord_config::feature::network::outgoing::*;
 
@@ -350,7 +350,7 @@ impl OutgoingSelector {
     ///
     /// So if the user specified a selector with `0.0.0.0:0`, we're going to be always matching on
     /// it.
-    #[tracing::instrument(level = "debug", ret)]
+    #[tracing::instrument(level = "trace", ret)]
     fn connect_remote<const PROTOCOL: ConnectProtocol>(&self, address: SocketAddr) -> bool {
         use mirrord_config::feature::network::outgoing::{OutgoingAddress, ProtocolFilter};
 
