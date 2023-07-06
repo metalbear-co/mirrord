@@ -152,10 +152,6 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
         std::env::set_var("MIRRORD_CONFIG_FILE", full_path);
     }
 
-    if args.capture_error_trace {
-        std::env::set_var("MIRRORD_CAPTURE_ERROR_TRACE", "true");
-    }
-
     let sub_progress = progress.subtask("preparing to launch process");
 
     let config = LayerConfig::from_env()?;
