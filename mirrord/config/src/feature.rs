@@ -3,7 +3,6 @@ use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
 use self::{env::EnvConfig, fs::FsConfig, network::NetworkConfig};
-use crate::config::source::MirrordConfigSource;
 
 pub mod env;
 pub mod fs;
