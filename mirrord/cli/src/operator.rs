@@ -6,7 +6,7 @@ use mirrord_kube::{api::kubernetes::create_kube_api, error::KubeApiError};
 use mirrord_operator::{
     client::OperatorApiError,
     crd::{LicenseInfoOwned, MirrordOperatorCrd, MirrordOperatorSpec, OPERATOR_STATUS_NAME},
-    setup::{Operator, OperatorNamespace, OperatorSetup, SetupOptions},
+    setup::{LicenseType, Operator, OperatorNamespace, OperatorSetup, SetupOptions},
 };
 use mirrord_progress::{Progress, TaskProgress};
 use prettytable::{row, Table};
@@ -24,7 +24,8 @@ async fn operator_setup(
     accept_tos: bool,
     file: Option<PathBuf>,
     namespace: OperatorNamespace,
-    license: Option<String>,
+    license_key: Option<String>,
+    license_path: Option<PathBuf>,
     offline: bool,
 ) -> Result<()> {
     if !accept_tos {
@@ -32,6 +33,21 @@ async fn operator_setup(
 
         return Ok(());
     }
+
+    let license = match (license_key, license_path) {
+        (_, Some(license_path)) => fs::read_to_string(&license_path)
+            .await
+            .inspect_err(|err| {
+                warn!(
+                    "Unable to read license at path {}: {err}",
+                    license_path.display()
+                )
+            })
+            .ok()
+            .map(LicenseType::Offline),
+        (Some(license_key), _) => Some(LicenseType::Online(license_key)),
+        (None, None) => None,
+    };
 
     if let Some(license) = license {
         eprintln!(
@@ -161,17 +177,15 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             license_path,
             offline,
         } => {
-            let license = match license_path {
-                Some(path) => fs::read_to_string(&path)
-                    .await
-                    .inspect_err(|err| {
-                        warn!("Unable to read license at path {}: {err}", path.display())
-                    })
-                    .ok(),
-                None => license_key,
-            };
-
-            operator_setup(accept_tos, file, namespace, license, offline).await
+            operator_setup(
+                accept_tos,
+                file,
+                namespace,
+                license_key,
+                license_path,
+                offline,
+            )
+            .await
         }
         OperatorCommand::Status { config_file } => operator_status(config_file).await,
     }
