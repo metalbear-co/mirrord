@@ -607,8 +607,6 @@ pub(super) fn accept(
     address_len: *mut socklen_t,
     new_fd: RawFd,
 ) -> Detour<RawFd> {
-    info!("in accept {:#?}", SOCKETS);
-
     let (id, domain, protocol, type_) = {
         SOCKETS
             .get(&sockfd)
