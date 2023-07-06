@@ -179,10 +179,6 @@ pub(super) struct ExecArgs {
     /// Load config from config file
     #[arg(short = 'f', long)]
     pub config_file: Option<PathBuf>,
-
-    /// Create a trace file of errors for debugging.
-    #[arg(long)]
-    pub capture_error_trace: bool,
 }
 
 #[derive(Args, Debug)]

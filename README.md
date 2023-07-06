@@ -28,6 +28,7 @@ It comes as a Visual Studio Code extension, an IntelliJ plugin and a CLI tool. Y
     - [Installation](#installation-2)
     - [How To Use](#how-to-use-2)
   - [How It Works](#how-it-works)
+    - [Additional capabilities](#additional-capabilities)
   - [FAQ](#faq)
   - [Contributing](#contributing)
   - [Help and Community](#help-and-community)
@@ -118,10 +119,18 @@ mirrord exec node app.js --target pod/my-pod
 
 ## How It Works
 
-When you select a pod to impersonate, mirrord launches a privileged pod on the same node as the pod you selected.
+When you select a pod to impersonate, mirrord launches a pod on the same node as the pod you selected.
 The new pod is then used to connect your local process and the impersonated pod: it mirrors incoming traffic from the pod to your process,
 routes outgoing traffic from your process through the pod, and does the same for file reads, file writes, and environment variables.
 You can read more about it [here](https://mirrord.dev/docs/overview/introduction/).
+
+### Additional capabilities
+
+Container run inside the pod launched by mirrord requires additional [Linux capabilities](https://man7.org/linux/man-pages/man7/capabilities.7.html):
+
+- `CAP_NET_ADMIN` - for modifying routing tables
+- `CAP_SYS_PTRACE` - for reading target pod environment
+- `CAP_SYS_ADMIN` - for joining target pod network namespace
 
 <p align="center">
   <img src="./images/how_it_works.svg" alt="How It Works"/>

@@ -217,7 +217,13 @@ impl ContainerApi for JobContainer {
                                 "securityContext": targeted.then(||
                                     json!({
                                         "runAsGroup": agent_gid,
-                                        "privileged": true,
+                                        "capabilities": {
+                                            "add": [
+                                                "NET_ADMIN",
+                                                "SYS_PTRACE",
+                                                "SYS_ADMIN"
+                                            ]
+                                        }
                                     })
                                 ),
                                 "volumeMounts": targeted.then(||
@@ -242,7 +248,12 @@ impl ContainerApi for JobContainer {
                                     {
                                         "cpu": "1m",
                                         "memory": "1Mi"
-                                    }
+                                    },
+                                    "limits":
+                                    {
+                                        "cpu": "100m",
+                                        "memory": "100Mi"
+                                    },
                                 }
                             }
                         ]
@@ -342,9 +353,12 @@ impl ContainerApi for EphemeralContainer {
             "securityContext": {
                 "runAsGroup": agent_gid,
                 "capabilities": {
-                    "add": ["NET_RAW", "NET_ADMIN"],
+                    "add": [
+                        "NET_ADMIN",
+                        "SYS_PTRACE",
+                        "SYS_ADMIN"
+                    ]
                 },
-                "privileged": true,
             },
             "imagePullPolicy": agent.image_pull_policy,
             "targetContainerName": runtime_data.container_name,
