@@ -195,7 +195,7 @@ impl FromStr for Target {
             Some("rollout") => RolloutTarget::from_split(&mut split).map(Target::Rollout),
             Some("pod") => PodTarget::from_split(&mut split).map(Target::Pod),
             _ => Err(ConfigError::InvalidTarget(format!(
-                "Provided target: {target} is neither a pod or a deployment or a rollout. Did you mean pod/{target} or deployment/{target} or rollout/{target}\n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
+                "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
             ))),
         }
     }
