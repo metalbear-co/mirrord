@@ -362,6 +362,14 @@ impl OutgoingSelector {
     ///
     /// In theory it's possible to have the same address in both `remote` and `local`, we prevent
     /// this in [`OutgoingSelector::new`] though.
+    ///
+    /// The filter comparison follows these rules:
+    ///
+    /// 1. `0.0.0.0` means any ip;
+    /// 2. `:0` means any port;
+    ///
+    /// So if the user specified a selector with `0.0.0.0:0`, we're going to be always matching on
+    /// it.
     #[tracing::instrument(level = "debug", ret)]
     fn connect_remote<const PROTOCOL: ConnectProtocol>(&self, address: SocketAddr) -> bool {
         use mirrord_config::feature::network::outgoing::{OutgoingAddress, ProtocolFilter};
@@ -376,8 +384,10 @@ impl OutgoingSelector {
         // Closure that tries to match `address` with something in the selector set.
         let any_address = |outgoing: &OutgoingFilter| match outgoing.address {
             OutgoingAddress::Socket(select_address) => {
-                select_address.ip().is_unspecified()
-                    || select_address.port() == 0
+                (select_address.ip().is_unspecified() && select_address.port() == 0)
+                    || (select_address.ip().is_unspecified()
+                        && select_address.port() == address.port())
+                    || (select_address.port() == 0 && select_address.ip() == address.ip())
                     || select_address == address
             }
             // TODO(alex): DNS may not trigger the filter, as the local resolved address may be

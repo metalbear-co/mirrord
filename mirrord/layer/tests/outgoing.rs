@@ -88,12 +88,20 @@ async fn outgoing_udp(dylib_path: &PathBuf) {
 /// 2. Connects to the remote peer
 /// 3. Sends some data
 /// 4. Expects the peer to send the same data back
-#[rstest]
-#[tokio::test]
-#[timeout(Duration::from_secs(10))]
-async fn outgoing_tcp(dylib_path: &PathBuf) {
+async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &PathBuf, config_dir: &PathBuf) {
+    let config = with_config
+        .and_then(|config| {
+            let mut config_path = config_dir.clone();
+            config_path.push(config);
+            Some(config_path)
+        })
+        .unwrap_or_default();
+
+    let config = config.to_str().unwrap();
+    let config = (!config.is_empty()).then_some(config);
+
     let (mut test_process, layer_connection) = Application::RustOutgoingTcp
-        .start_process_with_layer(dylib_path, vec![], None)
+        .start_process_with_layer(dylib_path, vec![], config)
         .await;
     let mut conn = layer_connection.codec;
 
@@ -136,4 +144,27 @@ async fn outgoing_tcp(dylib_path: &PathBuf) {
     }
 
     test_process.wait_assert_success().await;
+}
+
+#[rstest]
+#[tokio::test]
+#[timeout(Duration::from_secs(10))]
+async fn outgoing_tcp(
+    #[values(None, Some("outgoing_filter.json"))] with_config: Option<&str>,
+    dylib_path: &PathBuf,
+    config_dir: &PathBuf,
+) {
+    outgoing_tcp_logic(with_config, dylib_path, config_dir).await;
+}
+
+#[rstest]
+#[tokio::test]
+#[timeout(Duration::from_secs(10))]
+#[should_panic]
+async fn outgoing_tcp_local_broken(
+    #[values(Some("outgoing_filter_local.json"))] with_config: Option<&str>,
+    dylib_path: &PathBuf,
+    config_dir: &PathBuf,
+) {
+    outgoing_tcp_logic(with_config, dylib_path, config_dir).await;
 }
