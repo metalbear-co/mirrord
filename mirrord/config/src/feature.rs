@@ -3,7 +3,6 @@ use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
 use self::{env::EnvConfig, fs::FsConfig, network::NetworkConfig};
-use crate::config::source::MirrordConfigSource;
 
 pub mod env;
 pub mod fs;
@@ -56,7 +55,6 @@ pub mod network;
 ///       },
 ///       "dns": false
 ///     },
-///     "capture_error_trace": false
 ///   }
 /// }
 /// ```
@@ -64,16 +62,6 @@ pub mod network;
 #[config(map_to = "FeatureFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct FeatureConfig {
-    /// ## feature.capture_error_trace {#feature-capture_error_trace}
-    ///
-    /// Controls the crash reporting feature.
-    ///
-    /// With this feature enabled, mirrord generates a nice crash report log.
-    ///
-    /// Defaults to `false`.
-    #[config(env = "MIRRORD_CAPTURE_ERROR_TRACE", default = false)]
-    pub capture_error_trace: bool,
-
     /// ## feature.env {#feature-env}
     #[config(nested, toggleable)]
     pub env: EnvConfig,
