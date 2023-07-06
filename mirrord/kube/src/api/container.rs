@@ -248,7 +248,12 @@ impl ContainerApi for JobContainer {
                                     {
                                         "cpu": "1m",
                                         "memory": "1Mi"
-                                    }
+                                    },
+                                    "limits":
+                                    {
+                                        "cpu": "100m",
+                                        "memory": "100Mi"
+                                    },
                                 }
                             }
                         ]
