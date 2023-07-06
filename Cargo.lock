@@ -3327,6 +3327,7 @@ dependencies = [
  "mirrord-protocol",
  "rand",
  "rstest",
+ "serde",
  "serde_json",
  "thiserror",
  "tokio",

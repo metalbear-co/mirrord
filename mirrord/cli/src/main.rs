@@ -12,12 +12,19 @@ use exec::execvp;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
-use k8s_openapi::api::{apps::v1::Deployment, core::v1::Pod};
+use k8s_openapi::{
+    api::{apps::v1::Deployment, core::v1::Pod},
+    Metadata,
+};
 use kube::{api::ListParams, Api};
 use miette::JSONReportHandler;
 use mirrord_config::{config::MirrordConfig, LayerConfig, LayerFileConfig};
 use mirrord_kube::{
-    api::{container::SKIP_NAMES, get_k8s_resource_api, kubernetes::create_kube_api},
+    api::{
+        container::SKIP_NAMES,
+        get_k8s_resource_api,
+        kubernetes::{create_kube_api, rollout::Rollout},
+    },
     error::KubeApiError,
 };
 use mirrord_progress::{Progress, ProgressMode, TaskProgress};
@@ -256,6 +263,23 @@ async fn get_kube_deployments(
         .filter_map(|deployment| deployment.metadata.name))
 }
 
+async fn get_kube_rollouts(
+    namespace: Option<&str>,
+    client: &kube::Client,
+) -> Result<impl Iterator<Item = String>> {
+    let api: Api<Rollout> = get_k8s_resource_api(client, namespace);
+
+    let rollouts = api
+        .list(&ListParams::default().labels("app!=mirrord"))
+        .await
+        .map(|rollouts| rollouts.into_iter())
+        .map_err(KubeApiError::from)
+        .map_err(CliError::KubernetesApiFailed)
+        .unwrap_or_else(|_| Vec::new().into_iter());
+
+    Ok(rollouts.filter_map(|rollout| rollout.metadata().name.clone()))
+}
+
 /// Lists all possible target paths for pods.
 /// Example: ```[
 ///  "pod/metalbear-deployment-85c754c75f-982p5",
@@ -281,9 +305,10 @@ async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
 
     let namespace = args.namespace.as_deref().or(namespace.as_deref());
 
-    let (pods, deployments) = futures::try_join!(
+    let (pods, deployments, rollouts) = futures::try_join!(
         get_kube_pods(namespace, &client),
-        get_kube_deployments(namespace, &client)
+        get_kube_deployments(namespace, &client),
+        get_kube_rollouts(namespace, &client)
     )?;
 
     let mut target_vector = pods
@@ -299,6 +324,7 @@ async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
             }
         })
         .chain(deployments.map(|deployment| format!("deployment/{deployment}")))
+        .chain(rollouts.map(|rollout| format!("rollout/{rollout}")))
         .collect::<Vec<String>>();
 
     target_vector.sort();

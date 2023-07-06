@@ -26,6 +26,8 @@ use crate::{
     error::{KubeApiError, Result},
 };
 
+pub mod rollout;
+
 pub struct KubernetesAPI {
     client: Client,
     agent: AgentConfig,
