@@ -79,8 +79,13 @@ pub trait OperatorSetup {
     fn to_writer<W: Write>(&self, writer: W) -> Result<()>;
 }
 
+pub enum LicenseType {
+    Online(String),
+    Offline(String),
+}
+
 pub struct SetupOptions {
-    pub license: String,
+    pub license: LicenseType,
     pub namespace: OperatorNamespace,
     pub offline: bool,
 }
@@ -88,12 +93,12 @@ pub struct SetupOptions {
 #[derive(Debug)]
 pub struct Operator {
     api_service: OperatorApiService,
-    namespace: OperatorNamespace,
     deployment: OperatorDeployment,
+    license_secret: Option<OperatorLicenseSecret>,
+    namespace: OperatorNamespace,
     pvc: OperatorPersistentVolumeClaim,
     role: OperatorRole,
     role_binding: OperatorRoleBinding,
-    secret: OperatorLicenseSecret,
     service: OperatorService,
     service_account: OperatorServiceAccount,
     tls_secret: OperatorTlsSecret,
@@ -107,7 +112,13 @@ impl Operator {
             offline,
         } = options;
 
-        let secret = OperatorLicenseSecret::new(&license, &namespace);
+        let (license_secret, license_key) = match license {
+            LicenseType::Offline(license_key) => (None, Some(license_key)),
+            LicenseType::Online(license) => {
+                (Some(OperatorLicenseSecret::new(&license, &namespace)), None)
+            }
+        };
+
         let service_account = OperatorServiceAccount::new(&namespace);
 
         let tls_secret = OperatorTlsSecret::new(&namespace);
@@ -115,8 +126,14 @@ impl Operator {
         let role = OperatorRole::new();
         let role_binding = OperatorRoleBinding::new(&role, &service_account);
 
-        let deployment =
-            OperatorDeployment::new(&namespace, &service_account, &secret, &tls_secret, offline);
+        let deployment = OperatorDeployment::new(
+            &namespace,
+            &service_account,
+            license_secret.as_ref(),
+            license_key,
+            &tls_secret,
+            offline,
+        );
 
         let pvc = OperatorPersistentVolumeClaim::new(&namespace);
 
@@ -127,11 +144,11 @@ impl Operator {
         Operator {
             api_service,
             deployment,
+            license_secret,
             namespace,
             pvc,
             role,
             role_binding,
-            secret,
             service,
             service_account,
             tls_secret,
@@ -143,8 +160,10 @@ impl OperatorSetup for Operator {
     fn to_writer<W: Write>(&self, mut writer: W) -> Result<()> {
         self.namespace.to_writer(&mut writer)?;
 
-        writer.write_all(b"---\n")?;
-        self.secret.to_writer(&mut writer)?;
+        if let Some(secret) = self.license_secret.as_ref() {
+            writer.write_all(b"---\n")?;
+            secret.to_writer(&mut writer)?;
+        }
 
         writer.write_all(b"---\n")?;
         self.service_account.to_writer(&mut writer)?;
@@ -206,7 +225,8 @@ impl OperatorDeployment {
     pub fn new(
         namespace: &OperatorNamespace,
         sa: &OperatorServiceAccount,
-        license_secret: &OperatorLicenseSecret,
+        license_secret: Option<&OperatorLicenseSecret>,
+        license_key: Option<String>,
         tls_secret: &OperatorTlsSecret,
         offline: bool,
     ) -> Self {
@@ -219,11 +239,6 @@ impl OperatorDeployment {
             EnvVar {
                 name: "OPERATOR_ADDR".to_owned(),
                 value: Some(format!("0.0.0.0:{OPERATOR_PORT}")),
-                value_from: None,
-            },
-            EnvVar {
-                name: "OPERATOR_LICENSE_PATH".to_owned(),
-                value: Some(format!("/license/{OPERATOR_LICENSE_SECRET_FILE_NAME}")),
                 value_from: None,
             },
             EnvVar {
@@ -243,6 +258,60 @@ impl OperatorDeployment {
             },
         ];
 
+        let mut env_from = vec![];
+
+        let mut volumes = vec![
+            Volume {
+                name: OPERATOR_TLS_VOLUME_NAME.to_owned(),
+                secret: Some(SecretVolumeSource {
+                    secret_name: Some(tls_secret.name().to_owned()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            Volume {
+                name: OPERATOR_PVC_VOLUME_NAME.to_owned(),
+                persistent_volume_claim: Some(PersistentVolumeClaimVolumeSource {
+                    claim_name: OPERATOR_PVC_NAME.to_owned(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ];
+
+        if let Some(license_secret) = license_secret {
+            envs.push(EnvVar {
+                name: "OPERATOR_LICENSE_PATH".to_owned(),
+                value: Some(format!("/license/{OPERATOR_LICENSE_SECRET_FILE_NAME}")),
+                value_from: None,
+            });
+
+            env_from.push(EnvFromSource {
+                secret_ref: Some(SecretEnvSource {
+                    name: Some(license_secret.name().to_owned()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+
+            volumes.push(Volume {
+                name: OPERATOR_LICENSE_SECRET_VOLUME_NAME.to_owned(),
+                secret: Some(SecretVolumeSource {
+                    secret_name: Some(license_secret.name().to_owned()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+        }
+
+        if let Some(license_key) = license_key {
+            envs.push(EnvVar {
+                name: "OPERATOR_LICENSE_KEY".to_owned(),
+                value: Some(license_key),
+                value_from: None,
+            });
+        }
+
         if offline {
             envs.push(EnvVar {
                 name: "OPERATOR_TELEMETRY_INGRESS_ADDR".to_owned(),
@@ -259,13 +328,7 @@ impl OperatorDeployment {
             )),
             image_pull_policy: Some("IfNotPresent".to_owned()),
             env: Some(envs),
-            env_from: Some(vec![EnvFromSource {
-                secret_ref: Some(SecretEnvSource {
-                    name: Some(license_secret.name().to_owned()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }]),
+            env_from: Some(env_from),
             ports: Some(vec![ContainerPort {
                 name: Some("https".to_owned()),
                 container_port: OPERATOR_PORT,
@@ -304,32 +367,7 @@ impl OperatorDeployment {
         let pod_spec = PodSpec {
             containers: vec![container],
             service_account_name: Some(sa.name().to_owned()),
-            volumes: Some(vec![
-                Volume {
-                    name: OPERATOR_LICENSE_SECRET_VOLUME_NAME.to_owned(),
-                    secret: Some(SecretVolumeSource {
-                        secret_name: Some(license_secret.name().to_owned()),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                },
-                Volume {
-                    name: OPERATOR_TLS_VOLUME_NAME.to_owned(),
-                    secret: Some(SecretVolumeSource {
-                        secret_name: Some(tls_secret.name().to_owned()),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                },
-                Volume {
-                    name: OPERATOR_PVC_VOLUME_NAME.to_owned(),
-                    persistent_volume_claim: Some(PersistentVolumeClaimVolumeSource {
-                        claim_name: OPERATOR_PVC_NAME.to_owned(),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                },
-            ]),
+            volumes: Some(volumes),
             ..Default::default()
         };
 
