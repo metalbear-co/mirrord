@@ -121,7 +121,6 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///       },
 ///       "dns": false
 ///     },
-///     "capture_error_trace": false
 ///   },
 ///   "operator": true,
 ///   "kubeconfig": "~/.kube/config",
@@ -627,7 +626,6 @@ mod tests {
                         ..Default::default()
                     })),
                 })),
-                capture_error_trace: None,
             }),
             connect_tcp: None,
             operator: None,

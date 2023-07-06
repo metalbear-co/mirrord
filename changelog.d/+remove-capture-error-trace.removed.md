@@ -1,0 +1,1 @@
+Removed error capture error trace feature
