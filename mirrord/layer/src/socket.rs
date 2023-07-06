@@ -363,6 +363,10 @@ impl OutgoingSelector {
     /// In theory it's possible to have the same address in both `remote` and `local`, we prevent
     /// this in [`OutgoingSelector::new`] though.
     ///
+    /// In case the user specifies something that could be  matched against both `remote` and
+    /// `local`, such as `remote = [":7777"], local = [":0"]`, precedence is given to the
+    /// `remote` match.
+    ///
     /// The filter comparison follows these rules:
     ///
     /// 1. `0.0.0.0` means any ip;
