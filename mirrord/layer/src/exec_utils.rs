@@ -60,6 +60,7 @@ pub(crate) unsafe fn enable_execve_hook(
         Fn_nsget_executable_path,
         FN__NSGET_EXECUTABLE_PATH
     );
+    replace!(hook_manager, "dlopen", dlopen_detour, FnDlopen, FN_DLOPEN);
 }
 
 /// Check if the file that is to be executed has SIP and patch it if it does.
@@ -291,4 +292,21 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
         }
     }
     res
+}
+
+/// Just strip the sip patch dir out of the path if there.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn dlopen_detour(
+    raw_path: *const c_char,
+    mode: c_int,
+) -> *const c_void {
+    let detour: Detour<PathBuf> = raw_path.checked_into();
+    let raw_path = if let Bypass(FileOperationInMirrordBinTempDir(ptr)) = detour {
+        trace!("dlopen called with a path inside our patch dir, switching with fixed pointer.");
+        ptr
+    } else {
+        trace!("dlopen called on path {detour:?}.");
+        raw_path
+    };
+    FN_DLOPEN(raw_path, mode)
 }
