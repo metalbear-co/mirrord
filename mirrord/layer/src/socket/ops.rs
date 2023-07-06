@@ -289,8 +289,6 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
 
             SOCKETS.insert(sockfd, socket);
 
-            info!("in listen {:#?}", SOCKETS);
-
             Detour::Success(listen_result)
         }
         _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
@@ -309,19 +307,11 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
 ) -> Detour<ConnectResult> {
-    debug!(
-        "connecting to {remote_address:#?} as_socket {:#?} with selector {:#?}",
-        remote_address.as_socket(),
-        OUTGOING_SELECTOR.get()
-    );
-
     if remote_address.is_unix()
         || OUTGOING_SELECTOR
             .get()?
             .connect_remote::<PROTOCOL>(remote_address.as_socket()?)
     {
-        debug!("keep going, connecting to {remote_address:#?}");
-
         // Prepare this socket to be intercepted.
         let (mirror_tx, mirror_rx) = oneshot::channel();
 
