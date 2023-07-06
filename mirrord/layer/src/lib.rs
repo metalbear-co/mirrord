@@ -144,7 +144,6 @@ mod socket;
 mod tcp;
 mod tcp_mirror;
 mod tcp_steal;
-mod tracing_util;
 
 #[cfg(target_os = "linux")]
 #[cfg(target_arch = "x86_64")]
@@ -369,18 +368,7 @@ fn mirrord_layer_entry_point() {
 /// Initialize logger. Set the logs to go according to the layer's config either to a trace file, to
 /// mirrord-console or to stderr.
 fn init_tracing(config: &LayerConfig) {
-    if config.feature.capture_error_trace {
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_writer(tracing_util::file_tracing_writer())
-                    .with_ansi(false)
-                    .with_thread_ids(true)
-                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE),
-            )
-            .with(tracing_subscriber::EnvFilter::new("mirrord=trace"))
-            .init();
-    } else if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
+    if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
         mirrord_console::init_logger(&console_addr).expect("logger initialization failed");
     } else {
         tracing_subscriber::registry()
@@ -813,8 +801,6 @@ impl Layer {
 ///
 /// - Handle the heartbeat mechanism (Ping/Pong feature), sending a [`ClientMessage::Ping`] if all
 ///   the other channels received nothing for a while (60 seconds);
-///
-/// - Write log file if `FeatureConfig::capture_error_trace` is set.
 async fn thread_loop(
     mut receiver: Receiver<HookMessage>,
     tx: Sender<ClientMessage>,
@@ -825,7 +811,6 @@ async fn thread_loop(
         feature:
             FeatureConfig {
                 network: NetworkConfig { incoming, .. },
-                capture_error_trace,
                 ..
             },
         ..
@@ -890,10 +875,6 @@ async fn thread_loop(
                 }
             }
         }
-    }
-
-    if capture_error_trace {
-        tracing_util::print_support_message();
     }
     graceful_exit!("mirrord has encountered an error and is now exiting.");
 }
