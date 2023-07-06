@@ -4,7 +4,6 @@ use std::{
     collections::{HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
     os::unix::io::RawFd,
-    str::FromStr,
     sync::{Arc, LazyLock},
 };
 
@@ -20,7 +19,7 @@ use self::id::SocketId;
 use crate::{
     common::{blocking_send_hook_message, HookMessage},
     detour::{Bypass, Detour, OptionExt},
-    error::{HookError, HookResult, LayerError},
+    error::{HookError, HookResult},
     graceful_exit, ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_PORTS,
 };
 
@@ -58,29 +57,6 @@ pub(super) struct SocketInformation {
 
     /// Address of the local peer (our IP)
     pub local_address: SocketAddr,
-}
-
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum OutgoingProtocol {
-    #[default]
-    Any,
-    Tcp,
-    Udp,
-}
-
-impl FromStr for OutgoingProtocol {
-    type Err = LayerError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let lowercase = s.to_lowercase();
-
-        match lowercase.as_str() {
-            "any" => Ok(Self::Any),
-            "tcp" => Ok(Self::Tcp),
-            "udp" => Ok(Self::Udp),
-            _ => Err(LayerError::NoProcessFound),
-        }
-    }
 }
 
 /// poll_agent loop inserts connection data into this queue, and accept reads it.
