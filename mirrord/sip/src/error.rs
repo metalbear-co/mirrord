@@ -10,6 +10,9 @@ pub enum SipError {
     #[error("Signing failed statuscode: `{0}`, output: `{1}`")]
     Sign(i32, String),
 
+    #[error("Adding Rpaths failed with statuscode: `{0}`, output: `{1}`")]
+    AddingRpathsFailed(i32, String),
+
     #[error("Can't patch file format `{0}`")]
     UnsupportedFileFormat(String),
 
@@ -32,4 +35,7 @@ pub enum SipError {
 
     #[error("Can't perform SIP check - there is a cycle in the shebang graph, found at `{0}`")]
     CyclicShebangs(String),
+
+    #[error("Got invalid string.")]
+    NonUtf8Str(#[from] std::str::Utf8Error),
 }

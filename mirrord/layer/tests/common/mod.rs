@@ -15,6 +15,8 @@ use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse,
 };
+#[cfg(target_os = "macos")]
+use mirrord_sip::sip_patch;
 use rstest::fixture;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
@@ -721,6 +723,7 @@ pub enum Application {
     RustFileOps,
     Go19FileOps,
     Go20FileOps,
+    JavaTemurinSip,
     EnvBashCat,
     NodeFileOps,
     NodeSpawn,
@@ -792,6 +795,10 @@ impl Application {
             Application::PythonFastApiHTTP => String::from("uvicorn"),
             Application::Fork => String::from("tests/apps/fork/out.c_test_app"),
             Application::NodeHTTP => String::from("node"),
+            Application::JavaTemurinSip => format!(
+                "{}/.sdkman/candidates/java/17.0.6-tem/bin/java",
+                std::env::var("HOME").unwrap(),
+            ),
             Application::Go19HTTP => String::from("tests/apps/app_go/19.go_test_app"),
             Application::Go20HTTP => String::from("tests/apps/app_go/20.go_test_app"),
             Application::Go19FileOps => String::from("tests/apps/fileops/go/19.go_test_app"),
@@ -865,6 +872,10 @@ impl Application {
         let mut app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         app_path.push("tests/apps/");
         match self {
+            Application::JavaTemurinSip => {
+                app_path.push("java_temurin_sip/src/Main.java");
+                vec![app_path.to_string_lossy().to_string()]
+            }
             Application::PythonFlaskHTTP => {
                 app_path.push("app_flask.py");
                 println!("using flask server from {app_path:?}");
@@ -965,6 +976,7 @@ impl Application {
             Application::PythonDontLoad
             | Application::RustFileOps
             | Application::RustDnsResolve
+            | Application::JavaTemurinSip
             | Application::EnvBashCat
             | Application::NodeFileOps
             | Application::NodeSpawn
@@ -1003,8 +1015,12 @@ impl Application {
     }
 
     /// Start the test process with the given env.
-    async fn get_test_process(&self, env: HashMap<&str, &str>) -> TestProcess {
+    pub async fn get_test_process(&self, env: HashMap<&str, &str>) -> TestProcess {
         let executable = self.get_executable().await;
+        #[cfg(target_os = "macos")]
+        let executable = sip_patch(&executable, &Vec::new())
+            .unwrap()
+            .unwrap_or(executable);
         println!("Using executable: {}", &executable);
         println!("Using args: {:?}", self.get_args());
         TestProcess::start_process(executable, self.get_args(), env).await
