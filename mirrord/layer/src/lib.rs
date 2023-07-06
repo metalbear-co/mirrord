@@ -367,7 +367,7 @@ fn mirrord_layer_entry_point() {
 
 /// Initialize logger. Set the logs to go according to the layer's config either to a trace file, to
 /// mirrord-console or to stderr.
-fn init_tracing(config: &LayerConfig) {
+fn init_tracing() {
     if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
         mirrord_console::init_logger(&console_addr).expect("logger initialization failed");
     } else {
@@ -471,7 +471,7 @@ fn layer_start(config: LayerConfig) {
     if LAYER_INITIALIZED.get().is_none() {
         // If we're here it's not a fork, we're in the ctor.
         let _ = LAYER_INITIALIZED.set(());
-        init_tracing(&config);
+        init_tracing();
         set_globals(&config);
         enable_hooks(
             config.feature.fs.is_active(),
