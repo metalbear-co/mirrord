@@ -1,3 +1,4 @@
+#![doc = include_str!("../readme.md")]
 //! `medschool` will extract the docs from the current directory, and build a nice
 //! `configuration.md` file.
 //!
@@ -9,7 +10,6 @@
 //! ```
 //!
 //! It'll look into `rust-project/src` and produce `rust-project/configuration.md`.
-
 #![feature(const_trait_impl)]
 #![deny(clippy::missing_docs_in_private_items)]
 #![deny(missing_docs)]
@@ -19,6 +19,7 @@ use std::{
     fs::{self, File},
     hash::Hash,
     io::Read,
+    path::PathBuf,
 };
 
 use syn::{Attribute, Expr, Ident, Type, TypePath};
@@ -265,8 +266,8 @@ fn pretty_docs(mut docs: Vec<String>) -> String {
 /// Converts all files in the [`glob::glob`] pattern defined within, in the current directory, into
 /// a `Vec<String>`.
 #[tracing::instrument(level = "trace", ret)]
-fn files_to_string() -> Result<Vec<String>, DocsError> {
-    let paths = glob::glob("./src/**/*.rs")?;
+fn files_to_string(path: PathBuf) -> Result<Vec<String>, DocsError> {
+    let paths = glob::glob(&format!("{}/**/*.rs", path.to_string_lossy()))?;
 
     Ok(paths
         .into_iter()
@@ -547,6 +548,27 @@ fn produce_docs_from_root_type(root: PartialType) -> String {
     .concat()
 }
 
+/// Extracts the documentation from Rust source into a markdown file.
+#[derive(clap::Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct ToolArgs {
+    /// Adds the file contents as a header to the generated markdown.
+    #[arg(short, long)]
+    prepend: Option<PathBuf>,
+
+    /// Path to the `src` folder you want to generate documentation for.
+    ///
+    /// Defaults to `./src`.
+    #[arg(short, long)]
+    input: Option<PathBuf>,
+
+    /// Output file for the generated markdown.
+    ///
+    /// Defaults to `./configuration.md`.
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+}
+
 /// # Attention when using `RUST_LOG`
 ///
 /// Every function here supports our usual [`tracing::instrument`] setup, with default
@@ -566,7 +588,13 @@ fn main() -> Result<(), DocsError> {
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let files = files_to_string()?;
+    let ToolArgs {
+        prepend,
+        output,
+        input,
+    } = <ToolArgs as clap::Parser>::parse();
+
+    let files = files_to_string(input.unwrap_or_else(|| PathBuf::from("./src")))?;
     let files = parse_string_files(files);
 
     let type_docs = parse_docs_into_tree(files)?;
@@ -577,8 +605,16 @@ fn main() -> Result<(), DocsError> {
 
     let final_docs = produce_docs_from_root_type(the_mega_type);
 
-    // TODO(alex): Support specifying a path.
-    fs::write("./configuration.md", final_docs).unwrap();
+    let final_docs = match prepend {
+        Some(header) => {
+            let header = std::fs::read_to_string(&header)?;
+            format!("{header}\n{final_docs}")
+        }
+        None => final_docs,
+    };
+
+    let output = output.unwrap_or_else(|| PathBuf::from("./configuration.md"));
+    fs::write(&output, final_docs).unwrap();
 
     Ok(())
 }
