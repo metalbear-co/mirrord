@@ -422,22 +422,15 @@ fn set_globals(config: &LayerConfig) {
         .set(config.feature.network.incoming.ignore_localhost)
         .expect("Setting INCOMING_IGNORE_LOCALHOST singleton");
 
-    let targetless = config.target.path.is_none();
     TARGETLESS
-        .set(targetless)
+        .set(config.target.path.is_none())
         .expect("Setting TARGETLESS singleton");
 
     INCOMING_IGNORE_PORTS
         .set(config.feature.network.incoming.ignore_ports.clone())
         .expect("Setting INCOMING_IGNORE_PORTS failed");
 
-    FILE_FILTER.get_or_init(|| {
-        let mut fs_config = config.feature.fs.clone();
-        if targetless {
-            fs_config.mode = FsModeConfig::LocalWithOverrides;
-        }
-        FileFilter::new(fs_config)
-    });
+    FILE_FILTER.get_or_init(|| FileFilter::new(config.feature.fs.clone()));
 
     DEBUGGER_IGNORED_PORTS
         .set(DebuggerPorts::from_env())
@@ -465,7 +458,12 @@ fn set_globals(config: &LayerConfig) {
 /// 4. Replaces the [`libc`] calls with our hooks with [`enable_hooks`];
 ///
 /// 5. Starts the main mirrord-layer thread.
-fn layer_start(config: LayerConfig) {
+fn layer_start(mut config: LayerConfig) {
+    if config.target.path.is_none() {
+        // Use localwithoverrides on targetless regardless of user config.
+        config.feature.fs.mode = FsModeConfig::LocalWithOverrides;
+    }
+
     // does not need to be atomic because on the first call there are never other threads.
     // Will be false when manually called from fork hook.
     if LAYER_INITIALIZED.get().is_none() {
