@@ -8,6 +8,41 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.50.0](https://github.com/metalbear-co/mirrord/tree/3.50.0) - 2023-07-07
+
+
+### Removed
+
+- Removed error capture error trace feature
+
+
+### Added
+
+- Add support for Argo rollout target.
+  [#1593](https://github.com/metalbear-co/mirrord/issues/1593)
+
+
+### Changed
+
+- Agent container is no longer privileged. Instead, it is given a specific set
+  of Linux capabilities: `CAP_NET_ADMIN`, `CAP_SYS_PTRACE`, `CAP_SYS_ADMIN`.
+  [#1615](https://github.com/metalbear-co/mirrord/issues/1615)
+- Changed agent job definition to include limits
+  [#1621](https://github.com/metalbear-co/mirrord/issues/1621)
+
+
+### Fixed
+
+- Running java 17.0.6-tem with mirrord.
+  [#1459](https://github.com/metalbear-co/mirrord/issues/1459)
+
+
+### Internal
+
+- Add support for installing operator with online license key.
+- Cleaning kube resources after e2e tests no longer needs two runtime threads.
+
+
 ## [3.49.1](https://github.com/metalbear-co/mirrord/tree/3.49.1) - 2023-07-04
 
 
