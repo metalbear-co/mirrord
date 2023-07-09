@@ -26,7 +26,6 @@ async fn operator_setup(
     namespace: OperatorNamespace,
     license_key: Option<String>,
     license_path: Option<PathBuf>,
-    offline: bool,
 ) -> Result<()> {
     if !accept_tos {
         eprintln!("Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS");
@@ -55,11 +54,7 @@ async fn operator_setup(
             namespace.name()
         );
 
-        let operator = Operator::new(SetupOptions {
-            license,
-            namespace,
-            offline,
-        });
+        let operator = Operator::new(SetupOptions { license, namespace });
 
         match file {
             Some(path) => {
@@ -175,18 +170,7 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             namespace,
             license_key,
             license_path,
-            offline,
-        } => {
-            operator_setup(
-                accept_tos,
-                file,
-                namespace,
-                license_key,
-                license_path,
-                offline,
-            )
-            .await
-        }
+        } => operator_setup(accept_tos, file, namespace, license_key, license_path).await,
         OperatorCommand::Status { config_file } => operator_status(config_file).await,
     }
 }
