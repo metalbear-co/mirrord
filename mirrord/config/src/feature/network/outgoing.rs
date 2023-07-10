@@ -256,10 +256,10 @@ mod parser {
     ///
     /// Parses `tcp://`, extracting the `tcp` part, and discarding the `://`.
     pub(super) fn protocol(input: &[u8]) -> IResult<&[u8], &[u8]> {
-        let (input, protocol) = opt(terminated(take_until("://"), tag("://")))(input)?;
+        let (rest, protocol) = opt(terminated(take_until("://"), tag("://")))(input)?;
         let protocol = protocol.unwrap_or(b"any");
 
-        Ok((input, protocol))
+        Ok((rest, protocol))
     }
 
     /// <!--${internal}-->
@@ -284,13 +284,13 @@ mod parser {
         let name_or_ipv4 = alt((alphanumeric1, tag(b"-"), tag(b"_"), tag(b".")));
         let dotted_address = many1(name_or_ipv4);
 
-        let (input, address) = opt(alt((dotted_address, ipv6_host)))(input)?;
+        let (rest, address) = opt(alt((dotted_address, ipv6_host)))(input)?;
 
         let address = address
             .map(|addr| addr.concat())
             .unwrap_or(b"0.0.0.0".to_vec());
 
-        Ok((input, address))
+        Ok((rest, address))
     }
 
     /// <!--${internal}-->
@@ -298,11 +298,11 @@ mod parser {
     /// Parses `/24`, extracting the `24` part, and discarding the `/`.
     pub(super) fn subnet(input: &[u8]) -> IResult<&[u8], Option<Vec<u8>>> {
         let subnet = preceded(tag(b"/"), many1(digit1));
-        let (input, subnet) = opt(subnet)(input)?;
+        let (rest, subnet) = opt(subnet)(input)?;
 
         let subnet = subnet.map(|s| s.concat());
 
-        Ok((input, subnet))
+        Ok((rest, subnet))
     }
 
     /// <!--${internal}-->
@@ -312,11 +312,11 @@ mod parser {
     /// Returns `0` if it doesn't parse anything.
     pub(super) fn port(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
         let port = preceded(tag(b":"), many1(digit1));
-        let (input, port) = opt(port)(input)?;
+        let (rest, port) = opt(port)(input)?;
 
         let port = port.map(|p| p.concat()).unwrap_or(b"0".to_vec());
 
-        Ok((input, port))
+        Ok((rest, port))
     }
 }
 
