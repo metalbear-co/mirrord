@@ -274,7 +274,7 @@ mod parser {
     ///
     /// The parser is not interested in only eating correct values here for hostnames, ip addresses,
     /// etc., it just tries to get a good enough string that could be parsed by
-    /// [`SocketAddr::parse`], or [`IpNet::parse`].
+    /// `SocketAddr::parse`, or `IpNet::parse`.
     ///
     /// Returns `0.0.0.0` if it doesn't parse anything.
     pub(super) fn address(input: &[u8]) -> nom::IResult<&[u8], Vec<u8>> {
