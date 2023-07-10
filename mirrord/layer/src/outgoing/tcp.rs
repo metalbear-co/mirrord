@@ -5,7 +5,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
-use futures::TryFutureExt;
+use futures::{FutureExt, TryFutureExt};
 use mirrord_protocol::{
     outgoing::{
         tcp::*, DaemonConnect, DaemonRead, LayerClose, LayerConnect, LayerWrite, SocketAddress,
@@ -16,13 +16,14 @@ use rand::{distributions::Alphanumeric, Rng};
 use socket2::{Domain, Socket, Type};
 use tokio::{
     fs::create_dir_all,
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    io,
+    io::{copy_bidirectional, split, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf},
     net::{TcpStream, UnixStream},
-    select,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::mpsc::Sender,
     task,
 };
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use tokio_stream::{StreamExt, StreamMap};
+use tokio_util::io::ReaderStream;
 use tracing::{debug, error, info, trace, warn};
 
 use super::*;
@@ -42,53 +43,41 @@ pub(crate) enum TcpOutgoing {
 /// Responsible for handling hook and daemon messages for the outgoing traffic feature.
 #[derive(Debug)]
 pub(crate) struct TcpOutgoingHandler {
+    // TODO: docs
     /// Holds the channels used to send daemon messages to the interceptor socket, for the case
     /// where (agent) received data from the remote host, and sent it to (layer), to finally be
     /// passed all the way back to the user.
-    mirrors: HashMap<ConnectionId, ConnectionMirror>,
+    data_txs: HashMap<ConnectionId, WriteHalf<DuplexStream>>,
+
+    // TODO: docs
+    // TODO: if we want to send the forward shutdowns from the user to the agent, we can wrap the
+    //      `StreamMap` with a `StreamNotifyClose`, and send a write message with an empty vec.
+    data_rxs: StreamMap<ConnectionId, ReaderStream<ReadHalf<DuplexStream>>>,
 
     /// Holds the connection requests from the `connect` hook. It's main use is to reply back with
     /// the `SocketAddr` of the socket that'll be used to intercept the user's socket operations.
     connect_queue: ResponseDeque<RemoteConnection>,
-
-    /// Channel used to pass messages (currently only `Write`) from an intercepted socket to the
-    /// main `layer` loop.
-    ///
-    /// This is sent from `interceptor_task`.
-    layer_tx: Sender<LayerTcpOutgoing>,
-    layer_rx: Receiver<LayerTcpOutgoing>,
 }
 
 impl Default for TcpOutgoingHandler {
     fn default() -> Self {
-        let (layer_tx, layer_rx) = channel(1000);
-
         Self {
-            mirrors: Default::default(),
+            data_txs: Default::default(),
+            data_rxs: Default::default(),
             connect_queue: Default::default(),
-            layer_tx,
-            layer_rx,
         }
     }
 }
 
 impl TcpOutgoingHandler {
+    // TODO: docs
     /// # Arguments
     ///
-    /// * `layer_tx` - A channel for sending data from the local app to the main task (to be
-    ///   forwarded to the agent).
     /// * `layer_socket` - A bound and listening socket that the user application will connect to
     ///   (instead of to its actual remote target).
     /// * `remote_rx` - A channel for reading incoming data that was forwarded from the remote peer.
-    #[tracing::instrument(level = "trace", skip(layer_tx, layer_socket, remote_rx))]
-    async fn interceptor_task(
-        layer_tx: Sender<LayerTcpOutgoing>,
-        connection_id: ConnectionId,
-        layer_socket: Socket,
-        remote_rx: Receiver<Vec<u8>>,
-    ) {
-        let remote_stream = ReceiverStream::new(remote_rx);
-
+    #[tracing::instrument(level = "trace", skip_all)]
+    async fn interceptor_task(layer_socket: Socket, mut data_stream: DuplexStream) {
         // Accepts the user's socket connection, and finally becomes the interceptor socket.
         let (mirror_stream, _) = layer_socket
             .accept()
@@ -104,122 +93,22 @@ impl TcpOutgoingHandler {
         // succeed.
         let local_addr = mirror_stream.local_addr().unwrap();
         if local_addr.is_unix() {
-            let mirror_stream = UnixStream::from_std(mirror_stream.into())
+            let mut mirror_stream = UnixStream::from_std(mirror_stream.into())
                 .map_err(|err| error!("Invalid unix stream socket address: {err:?}"))
                 .unwrap();
-            Self::forward_bidirectionally(layer_tx, connection_id, mirror_stream, remote_stream)
-                .await;
+            // TODO: eliminate duplication
+            copy_bidirectional(&mut mirror_stream, &mut data_stream)
+                .await
+                .ok(); // TODO: handle error.
         } else if local_addr.is_ipv6() || local_addr.is_ipv4() {
-            let mirror_stream = TcpStream::from_std(mirror_stream.into())
+            let mut mirror_stream = TcpStream::from_std(mirror_stream.into())
                 .map_err(|err| error!("Invalid IP socket address: {err:?}"))
                 .unwrap();
-            Self::forward_bidirectionally(layer_tx, connection_id, mirror_stream, remote_stream)
-                .await;
+            copy_bidirectional(&mut mirror_stream, &mut data_stream)
+                .await
+                .ok(); // TODO: handle error.
         } else {
             error!("Unsupported socket address family, not intercepting.")
-        }
-    }
-
-    /// Forward in both directions data between the user application and the main layer task (that
-    /// forwards it to the agent, that sends it to the remote target).
-    ///
-    /// ```
-    ///      layer_tx ◄──────
-    ///                     layer_to_user_stream ◄───────► user app
-    /// remote_stream ───────►
-    /// ```
-    ///
-    /// # Arguments
-    ///
-    /// * `layer_tx` - A channel for sending data from the local app to the main layer task (to be
-    ///   forwarded to the agent).
-    /// * `layer_to_user_stream` - An outgoing stream (could be UNIX, TCP/IP, or anything that's
-    ///   async read and write) between the user app and the layer.
-    /// * `remote_stream` - A [`ReceiverStream`] to read the response data forwarded from the agent
-    ///   (to be forwarded to `layer_to_user_stream`).
-    async fn forward_bidirectionally<T: AsyncRead + AsyncWrite + Unpin>(
-        layer_tx: Sender<LayerTcpOutgoing>,
-        connection_id: ConnectionId,
-        mut layer_to_user_stream: T,
-        mut remote_stream: ReceiverStream<Vec<u8>>,
-    ) {
-        // Sends a message to close the remote stream in `agent`, when it's
-        // being closed in `layer`.
-        //
-        // This happens when the `mirror_stream` has no more data to receive, or when it fails
-        // `read`ing.
-        let close_remote_stream = |layer_tx: Sender<_>| async move {
-            let close = LayerClose { connection_id };
-            let outgoing_close = LayerTcpOutgoing::Close(close);
-
-            if let Err(fail) = layer_tx.send(outgoing_close).await {
-                error!("Failed sending close message with {:#?}!", fail);
-            }
-        };
-
-        let mut buffer = vec![0; 1024];
-
-        loop {
-            select! {
-                biased; // To allow local socket to be read before being closed
-
-                // Reads data that the user is sending from their socket to mirrord's interceptor
-                // socket.
-                read = layer_to_user_stream.read(&mut buffer) => {
-                    match read {
-                        Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
-                            continue;
-                        },
-                        Err(fail) => {
-                            info!("Failed reading mirror_stream with {:#?}", fail);
-                            close_remote_stream(layer_tx.clone()).await;
-
-                            break;
-                        }
-                        Ok(read_amount) if read_amount == 0 => {
-                            trace!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
-                            close_remote_stream(layer_tx.clone()).await;
-
-                            break;
-                        },
-                        Ok(read_amount) => {
-                            // Sends the message that the user wrote to our interceptor socket to
-                            // be handled on the `agent`, where it'll be forwarded to the remote.
-                            let write = LayerWrite {
-                                connection_id,
-                                bytes: buffer
-                                    .get(..read_amount)
-                                    .expect("read returned more bytes than the buffer can hold")
-                                    .to_vec(),
-                            };
-                            let outgoing_write = LayerTcpOutgoing::Write(write);
-
-                            if let Err(fail) = layer_tx.send(outgoing_write).await {
-                                error!("Failed sending write message with {:#?}!", fail);
-
-                                break;
-                            }
-                        }
-                    }
-                },
-                bytes = remote_stream.next() => {
-                    match bytes {
-                        Some(bytes) => {
-                            // Writes the data sent by `agent` (that came from the actual remote
-                            // stream) to our interceptor socket. When the user tries to read the
-                            // remote data, this'll be what they receive.
-                            if let Err(fail) = layer_to_user_stream.write_all(&bytes).await {
-                                trace!("Failed writing to mirror_stream with {:#?}!", fail);
-                                break;
-                            }
-                        },
-                        None => {
-                            warn!("interceptor_task -> exiting due to remote stream closed!");
-                            break;
-                        }
-                    }
-                },
-            }
         }
     }
 
@@ -337,6 +226,7 @@ impl TcpOutgoingHandler {
                     )
                     .await
                     .and_then(|(connection_id, socket, user_app_address)| {
+                        // TODO: update these docs.
                         // Incoming remote channel (in the direction of agent -> layer).
                         // When the layer gets data from the agent, it writes it in via the
                         // remote_tx end. the interceptor_task then reads
@@ -344,21 +234,20 @@ impl TcpOutgoingHandler {
                         // mirror_stream.
                         // Agent ----> layer --> remote_tx=====remote_rx --> interceptor -->
                         // mirror_stream
-                        let (remote_tx, remote_rx) = channel::<Vec<u8>>(1000);
+
+                        let (main_task_side, interceptor_task_side) = io::duplex(1024);
+                        let (rx, tx) = split(main_task_side);
+                        self.data_rxs.insert(connection_id, ReaderStream::new(rx));
+                        self.data_txs.insert(connection_id, tx);
 
                         let _ = DetourGuard::new();
                         let layer_address = socket.local_addr()?;
 
-                        self.mirrors
-                            .insert(connection_id, ConnectionMirror(remote_tx));
-
                         // `user` and `interceptor` sockets are not yet connected to each other,
-                        // spawn a new task to `accept` the conncetion and pair their reads/writes.
+                        // spawn a new task to `accept` the connection and pair their reads/writes.
                         task::spawn(TcpOutgoingHandler::interceptor_task(
-                            self.layer_tx.clone(),
-                            connection_id,
                             socket,
-                            remote_rx,
+                            interceptor_task_side,
                         ));
 
                         Ok(RemoteConnection {
@@ -381,17 +270,26 @@ impl TcpOutgoingHandler {
                         connection_id,
                         bytes,
                     }) => {
-                        let sender = self
-                            .mirrors
+                        let writer = self
+                            .data_txs
                             .get_mut(&connection_id)
                             .ok_or(LayerError::NoConnectionId(connection_id))?;
 
-                        sender.send(bytes).await.unwrap_or_else(|_| {
-                            warn!(
-                                "Got new data from agent after application closed socket. \
-                            connection_id: {connection_id}"
-                            );
-                        });
+                        if bytes.is_empty() {
+                            writer.shutdown().await.unwrap_or_else(|err| {
+                                warn!(
+                                    "Could not shutdown mirrord's writer to the outgoing \
+                                    interceptor task. Error: {err}"
+                                );
+                            });
+                        } else {
+                            writer.write_all(&bytes[..]).await.unwrap_or_else(|_| {
+                                warn!(
+                                    "Got new data from agent after application closed socket. \
+                                    connection_id: {connection_id}"
+                                );
+                            });
+                        }
                     }
                     // We need connection id with these errors to actually do something
                     // pending protocol change
@@ -403,10 +301,9 @@ impl TcpOutgoingHandler {
                 Ok(())
             }
             DaemonTcpOutgoing::Close(connection_id) => {
-                // (agent) failed to perform some operation.
                 trace!("Close -> connection_id {:?}", connection_id);
-                self.mirrors.remove(&connection_id);
-
+                self.data_txs.remove(&connection_id);
+                self.data_rxs.remove(&connection_id);
                 Ok(())
             }
         }
@@ -415,6 +312,23 @@ impl TcpOutgoingHandler {
     /// Helper function to access the channel of messages that are to be passed directly as
     /// `ClientMessage` from `layer`.
     pub(crate) fn recv(&mut self) -> impl Future<Output = Option<LayerTcpOutgoing>> + '_ {
-        self.layer_rx.recv()
+        self.data_rxs.next().map(|option| {
+            option.map(|(connection_id, bytes)| {
+                match bytes {
+                    Err(err) => {
+                        info!("Could not read outgoing data. Error: {:#?}", err);
+                        LayerTcpOutgoing::Close(LayerClose { connection_id })
+                    }
+                    Ok(bytes) => {
+                        // Sends the message that the user wrote to our interceptor socket to
+                        // be handled on the `agent`, where it'll be forwarded to the remote.
+                        LayerTcpOutgoing::Write(LayerWrite {
+                            connection_id,
+                            bytes: bytes.to_vec(),
+                        })
+                    }
+                }
+            })
+        })
     }
 }
