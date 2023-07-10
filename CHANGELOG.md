@@ -8,6 +8,35 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.50.2](https://github.com/metalbear-co/mirrord/tree/3.50.2) - 2023-07-10
+
+
+### Changed
+
+- Changed agent job definition to tolerate everything
+  [#1634](https://github.com/metalbear-co/mirrord/issues/1634)
+
+
+### Internal
+
+- Fix a critical typo in operator setup added in 3.50.1.
+  [#setup-hotfix](https://github.com/metalbear-co/mirrord/issues/setup-hotfix)
+
+
+## [3.50.1](https://github.com/metalbear-co/mirrord/tree/3.50.1) - 2023-07-09
+
+
+### Fixed
+
+- Small fix to operator setup command.
+
+
+### Internal
+
+- We were overriding the fs mode only for the file filter, but not for the rest
+  of the config.
+
+
 ## [3.50.0](https://github.com/metalbear-co/mirrord/tree/3.50.0) - 2023-07-07
 
 

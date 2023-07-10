@@ -209,6 +209,11 @@ impl ContainerApi for JobContainer {
                             ]
                         )),
                         "imagePullSecrets": agent.image_pull_secrets,
+                        "tolerations": [
+                            {
+                                "operator": "Exists"
+                            }
+                        ],
                         "containers": [
                             {
                                 "name": "mirrord-agent",
