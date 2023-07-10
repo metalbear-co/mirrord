@@ -19,6 +19,7 @@ edition.workspace = true
 glob = "0.3"
 syn = { version = "2", features = ["full", "extra-traits"]}
 thiserror = "1"
+clap = { version = "4", features = ["derive"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 regex.workspace = true
