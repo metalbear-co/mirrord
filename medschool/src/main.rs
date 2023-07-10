@@ -607,14 +607,14 @@ fn main() -> Result<(), DocsError> {
 
     let final_docs = match prepend {
         Some(header) => {
-            let header = std::fs::read_to_string(&header)?;
+            let header = std::fs::read_to_string(header)?;
             format!("{header}\n{final_docs}")
         }
         None => final_docs,
     };
 
     let output = output.unwrap_or_else(|| PathBuf::from("./configuration.md"));
-    fs::write(&output, final_docs).unwrap();
+    fs::write(output, final_docs).unwrap();
 
     Ok(())
 }
