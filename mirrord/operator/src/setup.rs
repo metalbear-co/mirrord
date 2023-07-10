@@ -108,8 +108,8 @@ impl Operator {
         let SetupOptions { license, namespace } = options;
 
         let (license_secret, license_key) = match license {
-            LicenseType::Offline(license_key) => (None, Some(license_key)),
-            LicenseType::Online(license) => {
+            LicenseType::Online(license_key) => (None, Some(license_key)),
+            LicenseType::Offline(license) => {
                 (Some(OperatorLicenseSecret::new(&license, &namespace)), None)
             }
         };
