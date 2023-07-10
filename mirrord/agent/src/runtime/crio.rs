@@ -47,7 +47,7 @@ impl CriOContainer {
                 Request::builder()
                     .method("GET")
                     .header("Host", "localhost")
-                    .uri(format!("http://localhost/{}", path.to_string().trim_start_matches('/')))
+                    .uri(format!("http://localhost{}", path))
                     .body(Empty::<Bytes>::new())?,
             )
             .await
@@ -95,7 +95,7 @@ impl ContainerRuntime for CriOContainer {
     }
 
     async fn pause(&self) -> Result<()> {
-        let path = format!("pause/{}", self.container_id);
+        let path = format!("/pause/{}", self.container_id);
         let response = Self::api_get(&path).await?;
 
         if !response.status().is_success() {
@@ -111,7 +111,7 @@ impl ContainerRuntime for CriOContainer {
     }
 
     async fn unpause(&self) -> Result<()> {
-        let path = format!("unpause/{}", self.container_id);
+        let path = format!("/unpause/{}", self.container_id);
 
         let response = Self::api_get(&path).await?;
 
