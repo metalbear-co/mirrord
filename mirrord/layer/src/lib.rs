@@ -78,7 +78,7 @@ use std::{
     net::SocketAddr,
     panic,
     str::FromStr,
-    sync::{OnceLock, RwLock},
+    sync::{Arc, LazyLock, OnceLock, RwLock},
 };
 
 use bimap::BiMap;
@@ -255,17 +255,14 @@ pub(crate) static TARGETLESS: OnceLock<bool> = OnceLock::new();
 /// Ports to ignore on listening for mirroring/stealing.
 pub(crate) static INCOMING_IGNORE_PORTS: OnceLock<HashSet<u16>> = OnceLock::new();
 
-// TODO(alex): To support DNS on the selector, change it to `LazyLock<Arc<Mutex>>`, so we can modify
-// the global on `OutgoingSelector::connect_remote`, converting `OutgoingAddress:Name` to however
-// many addresses we resolve into `OutgoingAddress::Socket`.
-//
-// Also, we need a global for `REMOTE_DNS`, so we can check it in
-// `OutgoingSelector::connect_remote`, and only resolve DNS through remote if it's `true`.
+/// Whether to resolve DNS locally or through the remote pod.
+pub(crate) static REMOTE_DNS: OnceLock<bool> = OnceLock::new();
 
 /// Selector for how outgoing connection will behave, either sending traffic via the remote or from
 /// local app, according to how the user set up the `remote`, and `local` filter, in
 /// `feature.network.outgoing`.
-pub(crate) static OUTGOING_SELECTOR: OnceLock<OutgoingSelector> = OnceLock::new();
+pub(crate) static OUTGOING_SELECTOR: LazyLock<Arc<RwLock<OutgoingSelector>>> =
+    LazyLock::new(|| Arc::default());
 
 /// Ports to ignore because they are used by the IDE debugger
 pub(crate) static DEBUGGER_IGNORED_PORTS: OnceLock<DebuggerPorts> = OnceLock::new();
@@ -415,6 +412,10 @@ fn set_globals(config: &LayerConfig) {
         .set(config.feature.network.outgoing.udp)
         .expect("Setting ENABLED_UDP_OUTGOING singleton");
 
+    REMOTE_DNS
+        .set(config.feature.network.dns)
+        .expect("Setting REMOTE_DNS singleton");
+
     {
         let outgoing_remote = config
             .feature
@@ -436,9 +437,9 @@ fn set_globals(config: &LayerConfig) {
 
         // This will crash the app if it comes before `ENABLED_(TCP|UDP)_OUTGOING`!
         let outgoing_selector = OutgoingSelector::new(outgoing_remote, outgoing_local);
-        OUTGOING_SELECTOR
-            .set(outgoing_selector)
-            .expect("Setting OUTGOING_SELECTOR singleton");
+        *OUTGOING_SELECTOR
+            .write()
+            .expect("Initializing outgoing selector should not fail!") = outgoing_selector;
     }
 
     REMOTE_UNIX_STREAMS

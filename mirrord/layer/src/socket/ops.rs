@@ -307,9 +307,15 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
 ) -> Detour<ConnectResult> {
+    {
+        let mut selector = OUTGOING_SELECTOR.write()?;
+        selector.resolve_dns();
+    }
+
     if remote_address.is_unix()
         || OUTGOING_SELECTOR
-            .get()?
+            .read()
+            .unwrap()
             .connect_remote::<PROTOCOL>(remote_address.as_socket()?)
     {
         // Prepare this socket to be intercepted.

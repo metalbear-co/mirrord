@@ -1,16 +1,18 @@
 //! We implement each hook function in a safe function as much as possible, having the unsafe do the
 //! absolute minimum
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::VecDeque,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
     os::unix::io::RawFd,
     sync::{Arc, LazyLock},
 };
 
 use dashmap::DashMap;
+use hashbrown::hash_set::{HashSet, IntoIter};
 use libc::{c_int, sockaddr, socklen_t};
-use mirrord_config::feature::network::outgoing::OutgoingFilter;
+use mirrord_config::feature::network::outgoing::{OutgoingFilter, ProtocolFilter};
 use mirrord_protocol::outgoing::SocketAddress;
+use rand::seq::index::IndexVecIntoIter;
 use socket2::SockAddr;
 use tracing::{error, warn};
 use trust_dns_resolver::config::Protocol;
@@ -20,7 +22,7 @@ use crate::{
     common::{blocking_send_hook_message, HookMessage},
     detour::{Bypass, Detour, OptionExt},
     error::{HookError, HookResult},
-    graceful_exit, ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_PORTS,
+    graceful_exit, ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_PORTS, REMOTE_DNS,
 };
 
 pub(super) mod hooks;
@@ -370,16 +372,11 @@ impl OutgoingSelector {
                     || (select_address.port() == 0 && select_address.ip() == address.ip())
                     || select_address == address
             }
-            // TODO(alex): DNS may not trigger the filter, as the local resolved address may be
-            // different from the remote resolved.
-            OutgoingAddress::Name((ref name, port)) => format!("{name}:{port}")
-                .to_socket_addrs()
-                .map(|mut resolved| {
-                    resolved.any(|resolved_address| {
-                        resolved_address == SocketAddr::new(address.ip(), 0)
-                    })
-                })
-                .unwrap_or_default(),
+            // TODO(alex): We could enforce this at the type level, by converting `OutgoingWhatever`
+            // to a type that doesn't have `OutgoingAddress::Name`.
+            OutgoingAddress::Name(_) => {
+                unreachable!("Names should've been converted into addresses by now!")
+            }
             OutgoingAddress::Subnet((subnet, port)) => {
                 subnet.contains(&address.ip()) && (port == 0 || port == address.port())
             }
@@ -387,6 +384,61 @@ impl OutgoingSelector {
 
         self.remote.iter().filter(filter_protocol).any(any_address)
             || !self.local.iter().filter(filter_protocol).any(any_address)
+    }
+
+    // #[tracing::instrument(level = "debug", ret)]
+    fn resolve_dns(&mut self) -> HookResult<()> {
+        use mirrord_config::feature::network::outgoing::OutgoingAddress;
+
+        // Closure that tries to match `address` with something in the selector set.
+        let name = |outgoing: &OutgoingFilter| match outgoing.address {
+            OutgoingAddress::Name(_) => true,
+            _ => false,
+        };
+
+        let to_name_and_port = |outgoing: OutgoingFilter| match outgoing.address {
+            OutgoingAddress::Name((name, port)) => (outgoing.protocol, name, port),
+            _ => unreachable!("Filter went wrong, we should only have named addresses here!"),
+        };
+
+        let resolve = |unresolved: HashSet<(ProtocolFilter, String, u16)>| {
+            let mut unresolved = unresolved.into_iter();
+
+            let resolved = if *REMOTE_DNS.get().expect("REMOTE_DNS should be set by now!") {
+                // TODO(alex) [high] 2023-07-10: Now implement the custom calling for resolving
+                // using our `getaddrinfo` to get the address through the remote.
+                HashSet::new().into_iter()
+            } else {
+                unresolved
+                    .try_fold(
+                        HashSet::with_capacity(8),
+                        |mut resolved: HashSet<OutgoingFilter>, (protocol, name, port)| {
+                            let addresses = name.to_socket_addrs()?.map(|address| OutgoingFilter {
+                                protocol,
+                                address: OutgoingAddress::Socket(SocketAddr::new(
+                                    address.ip(),
+                                    port,
+                                )),
+                            });
+
+                            resolved.extend(addresses);
+                            Ok::<_, HookError>(resolved)
+                        },
+                    )?
+                    .into_iter()
+            };
+
+            Ok::<_, HookError>(resolved)
+        };
+
+        let resolved_remote =
+            resolve(self.remote.extract_if(name).map(to_name_and_port).collect())?;
+        self.remote.extend(resolved_remote);
+
+        let resolved_local = resolve(self.local.extract_if(name).map(to_name_and_port).collect())?;
+        self.local.extend(resolved_local);
+
+        Ok(())
     }
 }
 
