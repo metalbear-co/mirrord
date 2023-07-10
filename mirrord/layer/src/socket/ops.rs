@@ -691,6 +691,9 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
     Ok(())
 }
 
+// TODO: split this into 2:
+// 1. only the addr resolution, returning socketaddrs;
+// 2. the c part for hook.
 /// Retrieves the result of calling `getaddrinfo` from a remote host (resolves remote DNS),
 /// converting the result into a `Box` allocated raw pointer of `libc::addrinfo` (which is basically
 /// a linked list of such type).
