@@ -40,7 +40,7 @@ mod operator {
         let temp_dir = tempdir().unwrap();
 
         let validate = Command::new("kubectl")
-            .args(vec!["apply", "--dry-run=server", "-f", "-"])
+            .args(vec!["apply", "--dry-run=client", "-f", "-"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -61,7 +61,7 @@ mod operator {
 
     async fn check_install_file_result(file_path: String, temp_dir: TempDir) {
         let validate = Command::new("kubectl")
-            .args(vec!["apply", "--dry-run=server", "-f", &file_path])
+            .args(vec!["apply", "--dry-run=client", "-f", &file_path])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
