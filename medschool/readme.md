@@ -24,7 +24,12 @@ It'll look into `rust-project/src` and produce `rust-project/configuration.md`.
 To generate the `configuration.md` that you see in the 
 [docs page](https://mirrord.dev/docs/overview/configuration/) we use the `medschool` tool as such:
 
-1. `cd` into `mirrod/mirrod/config`;
-2. run `medschool` (from wherever the tool is built, for example `./target/release/medschool`);
-3. add the page header to the generated file (`title`, `date`, etc);
-4. copy the new `configuration.md` to mirrord.dev `content/docs/overview`;
+```sh
+cargo run -p medschool -- --input ./mirrord/config/src --output ./configuration.md
+```
+
+You can also use the `--prepend` arg to include a file at the start of the generated markdown file. 
+
+```sh
+cargo run -p medschool -- --prepend ./header.txt --input ./mirrord/config/src --output [path to mirrord.dev docs page]
+```
