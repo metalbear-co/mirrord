@@ -22,7 +22,9 @@ use crate::{
     common::{blocking_send_hook_message, HookMessage},
     detour::{Bypass, Detour, OptionExt},
     error::{HookError, HookResult},
-    graceful_exit, ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_PORTS, REMOTE_DNS,
+    graceful_exit,
+    socket::ops::remote_getaddrinfo,
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_PORTS, REMOTE_DNS,
 };
 
 pub(super) mod hooks;
@@ -386,7 +388,7 @@ impl OutgoingSelector {
             || !self.local.iter().filter(filter_protocol).any(any_address)
     }
 
-    // #[tracing::instrument(level = "debug", ret)]
+    #[tracing::instrument(level = "debug", ret)]
     fn resolve_dns(&mut self) -> HookResult<()> {
         use mirrord_config::feature::network::outgoing::OutgoingAddress;
 
@@ -405,9 +407,26 @@ impl OutgoingSelector {
             let mut unresolved = unresolved.into_iter();
 
             let resolved = if *REMOTE_DNS.get().expect("REMOTE_DNS should be set by now!") {
-                // TODO(alex) [high] 2023-07-10: Now implement the custom calling for resolving
-                // using our `getaddrinfo` to get the address through the remote.
-                HashSet::new().into_iter()
+                unresolved
+                    .try_fold(
+                        HashSet::with_capacity(8),
+                        |mut resolved: HashSet<OutgoingFilter>, (protocol, name, port)| {
+                            let addresses =
+                                remote_getaddrinfo(name, port)?
+                                    .into_iter()
+                                    .map(|(_, address)| OutgoingFilter {
+                                        protocol,
+                                        address: OutgoingAddress::Socket(SocketAddr::new(
+                                            address.ip(),
+                                            port,
+                                        )),
+                                    });
+
+                            resolved.extend(addresses);
+                            Ok::<_, HookError>(resolved)
+                        },
+                    )?
+                    .into_iter()
             } else {
                 unresolved
                     .try_fold(

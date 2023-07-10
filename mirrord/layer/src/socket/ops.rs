@@ -691,9 +691,27 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
     Ok(())
 }
 
-// TODO: split this into 2:
-// 1. only the addr resolution, returning socketaddrs;
-// 2. the c part for hook.
+#[tracing::instrument(level = "debug", ret)]
+pub(super) fn remote_getaddrinfo(
+    node: String,
+    service: u16,
+) -> HookResult<Vec<(String, SocketAddr)>> {
+    let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
+    let hook = GetAddrInfo {
+        node,
+        hook_channel_tx,
+    };
+
+    blocking_send_hook_message(HookMessage::GetAddrinfo(hook))?;
+
+    let addr_info_list = hook_channel_rx.blocking_recv()??;
+
+    Ok(addr_info_list
+        .into_iter()
+        .map(|LookupRecord { name, ip }| (name, SocketAddr::from((ip, service))))
+        .collect())
+}
+
 /// Retrieves the result of calling `getaddrinfo` from a remote host (resolves remote DNS),
 /// converting the result into a `Box` allocated raw pointer of `libc::addrinfo` (which is basically
 /// a linked list of such type).
@@ -748,23 +766,14 @@ pub(super) fn getaddrinfo(
         ..
     } = raw_hints;
 
-    let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
-    let hook = GetAddrInfo {
-        node,
-        hook_channel_tx,
-    };
-
-    blocking_send_hook_message(HookMessage::GetAddrinfo(hook))?;
-
-    let addr_info_list = hook_channel_rx.blocking_recv()??;
-
     // Convert `service` into a port.
     let service = service.map_or(0, |s| s.parse().unwrap_or_default());
+
     // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
-    let result = addr_info_list
+    let result = remote_getaddrinfo(node, service)?
         .into_iter()
-        .map(|LookupRecord { name, ip }| (name, SockAddr::from(SocketAddr::from((ip, service)))))
-        .map(|(name, rawish_sock_addr)| {
+        .map(|(name, address)| {
+            let rawish_sock_addr = SockAddr::from(address);
             let ai_addrlen = rawish_sock_addr.len();
             let ai_family = rawish_sock_addr.family() as _;
 
