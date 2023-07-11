@@ -140,7 +140,7 @@ where
 
             match StandardRedirect::create(ipt.clone()) {
                 Err(err) => {
-                    warn!("Uable to create StandardRedirect chain: {err}");
+                    warn!("Unable to create StandardRedirect chain: {err}");
 
                     Redirects::PrerouteFallback(PreroutingRedirect::create(ipt)?)
                 }
@@ -165,7 +165,7 @@ where
 
             match StandardRedirect::load(ipt.clone()) {
                 Err(err) => {
-                    warn!("Uable to load StandardRedirect chain: {err}");
+                    warn!("Unable to load StandardRedirect chain: {err}");
 
                     Redirects::PrerouteFallback(PreroutingRedirect::load(ipt)?)
                 }

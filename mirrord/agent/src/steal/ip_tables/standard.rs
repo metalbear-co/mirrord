@@ -33,7 +33,7 @@ where
         managed
             .add_rule(&format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))
             .inspect_err(|_| {
-                warn!("Uable to create iptable rule with \"--gid-owner {gid}\" filter")
+                warn!("Unable to create iptable rule with \"--gid-owner {gid}\" filter")
             })?;
 
         Ok(StandardRedirect {
