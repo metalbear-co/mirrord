@@ -1,1 +1,0 @@
-Add --prepend --input and --output args when running medschool.
