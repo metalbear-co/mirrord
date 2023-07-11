@@ -149,19 +149,10 @@ impl MirrordToggleableConfig for OutgoingFileConfig {
 #[derive(Debug, Error)]
 pub enum OutgoingFilterError {
     #[error("Nom: failed parsing with {0}!")]
-    Nom2(nom::Err<nom::error::Error<Vec<u8>>>),
-
-    #[error("IO: failed IO operation with {0}!")]
-    IO(#[from] std::io::Error),
+    Nom2(nom::Err<nom::error::Error<String>>),
 
     #[error("Subnet: Failed parsing with {0}!")]
     Subnet(#[from] ipnet::AddrParseError),
-
-    #[error("Utf8: Failed converting value from UTF8 with {0}!")]
-    Utf8(#[from] std::str::Utf8Error),
-
-    #[error("FromUtf8: Failed converting value from UTF8 with {0}!")]
-    FromUtf8(#[from] std::string::FromUtf8Error),
 
     #[error("ParseInt: Failed converting string into `u16` with {0}!")]
     ParseInt(#[from] std::num::ParseIntError),
@@ -173,8 +164,8 @@ pub enum OutgoingFilterError {
     TrailingValue(String),
 }
 
-impl From<nom::Err<nom::error::Error<&[u8]>>> for OutgoingFilterError {
-    fn from(value: nom::Err<nom::error::Error<&[u8]>>) -> Self {
+impl From<nom::Err<nom::error::Error<&str>>> for OutgoingFilterError {
+    fn from(value: nom::Err<nom::error::Error<&str>>) -> Self {
         Self::Nom2(value.to_owned())
     }
 }
@@ -255,9 +246,9 @@ mod parser {
     /// <!--${internal}-->
     ///
     /// Parses `tcp://`, extracting the `tcp` part, and discarding the `://`.
-    pub(super) fn protocol(input: &[u8]) -> IResult<&[u8], &[u8]> {
+    pub(super) fn protocol(input: &str) -> IResult<&str, &str> {
         let (rest, protocol) = opt(terminated(take_until("://"), tag("://")))(input)?;
-        let protocol = protocol.unwrap_or(b"any");
+        let protocol = protocol.unwrap_or("any");
 
         Ok((rest, protocol))
     }
@@ -277,18 +268,18 @@ mod parser {
     /// `SocketAddr::parse`, or `IpNet::parse`.
     ///
     /// Returns `0.0.0.0` if it doesn't parse anything.
-    pub(super) fn address(input: &[u8]) -> nom::IResult<&[u8], Vec<u8>> {
-        let ipv6 = many1(alt((alphanumeric1, tag(b":"))));
-        let ipv6_host = delimited(tag(b"["), ipv6, tag(b"]"));
+    pub(super) fn address(input: &str) -> IResult<&str, String> {
+        let ipv6 = many1(alt((alphanumeric1, tag(":"))));
+        let ipv6_host = delimited(tag("["), ipv6, tag("]"));
 
-        let host_char = alt((alphanumeric1, tag(b"-"), tag(b"_"), tag(b".")));
+        let host_char = alt((alphanumeric1, tag("-"), tag("_"), tag(".")));
         let dotted_address = many1(host_char);
 
         let (rest, address) = opt(alt((dotted_address, ipv6_host)))(input)?;
 
         let address = address
             .map(|addr| addr.concat())
-            .unwrap_or(b"0.0.0.0".to_vec());
+            .unwrap_or(String::from("0.0.0.0"));
 
         Ok((rest, address))
     }
@@ -296,8 +287,8 @@ mod parser {
     /// <!--${internal}-->
     ///
     /// Parses `/24`, extracting the `24` part, and discarding the `/`.
-    pub(super) fn subnet(input: &[u8]) -> IResult<&[u8], Option<&[u8]>> {
-        let subnet_parser = preceded(tag(b"/"), digit1);
+    pub(super) fn subnet(input: &str) -> IResult<&str, Option<&str>> {
+        let subnet_parser = preceded(tag("/"), digit1);
         let (rest, subnet) = opt(subnet_parser)(input)?;
 
         Ok((rest, subnet))
@@ -308,11 +299,11 @@ mod parser {
     /// Parses `:1337`, extracting the `1337` part, and discarding the `:`.
     ///
     /// Returns `0` if it doesn't parse anything.
-    pub(super) fn port(input: &[u8]) -> IResult<&[u8], &[u8]> {
-        let port_parser = preceded(tag(b":"), digit1);
+    pub(super) fn port(input: &str) -> IResult<&str, &str> {
+        let port_parser = preceded(tag(":"), digit1);
         let (rest, port) = opt(port_parser)(input)?;
 
-        let port = port.unwrap_or(b"0");
+        let port = port.unwrap_or("0");
 
         Ok((rest, port))
     }
@@ -323,11 +314,7 @@ impl FromStr for OutgoingFilter {
 
     #[tracing::instrument(level = "trace", ret)]
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        use core::str;
-
         use crate::feature::network::outgoing::parser::*;
-
-        let input = input.as_bytes();
 
         // Perform the basic parsing.
         let (rest, protocol) = protocol(input)?;
@@ -336,10 +323,8 @@ impl FromStr for OutgoingFilter {
         let (rest, port) = port(rest)?;
 
         // Stringify and convert to proper types.
-        let protocol = str::from_utf8(protocol)?.parse()?;
-        let address = str::from_utf8(&address)?;
-        let subnet = subnet.map(Vec::from).map(String::from_utf8).transpose()?;
-        let port = str::from_utf8(port)?.parse::<u16>()?;
+        let protocol = protocol.parse()?;
+        let port = port.parse::<u16>()?;
 
         let address = subnet
             .map(|subnet| format!("{address}/{subnet}").parse::<ipnet::IpNet>())
@@ -361,9 +346,7 @@ impl FromStr for OutgoingFilter {
         if rest.is_empty() {
             Ok(Self { protocol, address })
         } else {
-            Err(OutgoingFilterError::TrailingValue(
-                str::from_utf8(rest)?.to_string(),
-            ))
+            Err(OutgoingFilterError::TrailingValue(rest.to_string()))
         }
     }
 }
