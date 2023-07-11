@@ -297,6 +297,17 @@ impl OutgoingSelector {
             .get()
             .expect("ENABLED_TCP_OUTGOING should be set before initializing OutgoingSelector!");
 
+        if !remote.is_empty() && !local.is_empty() {
+            error!(
+                r"
+                Specifying both `remote` and `local` for the `outgoing` config is not supported! 
+
+                - Try removing either `remote` or `local` from `feature.network.outgoing`.
+                "
+            );
+            graceful_exit!("Outgoing filter configuration value not supported!");
+        }
+
         let remote = remote
             .into_iter()
             .filter(|OutgoingFilter { protocol, .. }| match protocol {
@@ -314,17 +325,6 @@ impl OutgoingSelector {
                 ProtocolFilter::Udp => enabled_udp,
             })
             .collect();
-
-        if let Some(common) = remote.intersection(&local).next() {
-            error!(
-                r"
-                Outgoing filter contains the duplicate value [{common:?}]!
-                Duplicated values are not supported for this feature, please remove it from either \
-                remote or local.
-                "
-            );
-            graceful_exit!("Outgoing filter configuration value not supported!");
-        }
 
         Self { remote, local }
     }
