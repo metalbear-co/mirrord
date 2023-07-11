@@ -3,6 +3,7 @@ use std::sync::{Arc, LazyLock};
 use enum_dispatch::enum_dispatch;
 use mirrord_protocol::Port;
 use rand::distributions::{Alphanumeric, DistString};
+use tracing::warn;
 
 use crate::{
     error::{AgentError, Result},
@@ -138,7 +139,11 @@ where
             let ipt = Arc::new(ipt);
 
             match StandardRedirect::create(ipt.clone()) {
-                Err(_) => Redirects::PrerouteFallback(PreroutingRedirect::create(ipt)?),
+                Err(err) => {
+                    warn!("Uable to create StandardRedirect chain: {err}");
+
+                    Redirects::PrerouteFallback(PreroutingRedirect::create(ipt)?)
+                }
                 Ok(standard) => Redirects::Standard(standard),
             }
         };
@@ -156,7 +161,16 @@ where
         let mut redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
             Redirects::Mesh(MeshRedirect::load(Arc::new(ipt), vendor)?)
         } else {
-            Redirects::Standard(StandardRedirect::load(Arc::new(ipt))?)
+            let ipt = Arc::new(ipt);
+
+            match StandardRedirect::load(ipt.clone()) {
+                Err(err) => {
+                    warn!("Uable to load StandardRedirect chain: {err}");
+
+                    Redirects::PrerouteFallback(PreroutingRedirect::load(ipt)?)
+                }
+                Ok(standard) => Redirects::Standard(standard),
+            }
         };
 
         if flush_connections {
