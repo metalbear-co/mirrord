@@ -41,7 +41,7 @@ pub(crate) enum TcpOutgoing {
 }
 
 /// Responsible for handling hook and daemon messages for the outgoing traffic feature.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct TcpOutgoingHandler {
     // TODO: docs
     /// Holds the channels used to send daemon messages to the interceptor socket, for the case
@@ -57,16 +57,6 @@ pub(crate) struct TcpOutgoingHandler {
     /// Holds the connection requests from the `connect` hook. It's main use is to reply back with
     /// the `SocketAddr` of the socket that'll be used to intercept the user's socket operations.
     connect_queue: ResponseDeque<RemoteConnection>,
-}
-
-impl Default for TcpOutgoingHandler {
-    fn default() -> Self {
-        Self {
-            data_txs: Default::default(),
-            data_rxs: Default::default(),
-            connect_queue: Default::default(),
-        }
-    }
 }
 
 impl TcpOutgoingHandler {
