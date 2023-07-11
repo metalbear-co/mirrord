@@ -301,6 +301,17 @@ impl OutgoingSelector {
             .get()
             .expect("ENABLED_TCP_OUTGOING should be set before initializing OutgoingSelector!");
 
+        if !remote.is_empty() && !local.is_empty() {
+            error!(
+                r"
+                Specifying both `remote` and `local` for the `outgoing` config is not supported!
+
+                - Try removing either `remote` or `local` from `feature.network.outgoing`.
+                "
+            );
+            graceful_exit!("Outgoing filter configuration value not supported!");
+        }
+
         let remote = remote
             .into_iter()
             .filter(|OutgoingFilter { protocol, .. }| match protocol {
@@ -318,17 +329,6 @@ impl OutgoingSelector {
                 ProtocolFilter::Udp => enabled_udp,
             })
             .collect();
-
-        if let Some(common) = remote.intersection(&local).next() {
-            error!(
-                r"
-                Outgoing filter contains the duplicate value [{common:?}]!
-                Duplicated values are not supported for this feature, please remove it from either \
-                remote or local.
-                "
-            );
-            graceful_exit!("Outgoing filter configuration value not supported!");
-        }
 
         Self { remote, local }
     }
@@ -356,7 +356,7 @@ impl OutgoingSelector {
     /// it.
     #[tracing::instrument(level = "trace", ret)]
     fn connect_remote<const PROTOCOL: ConnectProtocol>(&self, address: SocketAddr) -> bool {
-        use mirrord_config::feature::network::outgoing::{OutgoingAddress, ProtocolFilter};
+        use mirrord_config::feature::network::outgoing::{AddressFilter, ProtocolFilter};
 
         let filter_protocol = |outgoing: &&OutgoingFilter| match outgoing.protocol {
             ProtocolFilter::Any => true,
@@ -367,7 +367,7 @@ impl OutgoingSelector {
 
         // Closure that tries to match `address` with something in the selector set.
         let any_address = |outgoing: &OutgoingFilter| match outgoing.address {
-            OutgoingAddress::Socket(select_address) => {
+            AddressFilter::Socket(select_address) => {
                 (select_address.ip().is_unspecified() && select_address.port() == 0)
                     || (select_address.ip().is_unspecified()
                         && select_address.port() == address.port())
@@ -375,11 +375,11 @@ impl OutgoingSelector {
                     || select_address == address
             }
             // TODO(alex): We could enforce this at the type level, by converting `OutgoingWhatever`
-            // to a type that doesn't have `OutgoingAddress::Name`.
-            OutgoingAddress::Name(_) => {
+            // to a type that doesn't have `AddressFilter::Name`.
+            AddressFilter::Name(_) => {
                 unreachable!("Names should've been converted into addresses by now!")
             }
-            OutgoingAddress::Subnet((subnet, port)) => {
+            AddressFilter::Subnet((subnet, port)) => {
                 subnet.contains(&address.ip()) && (port == 0 || port == address.port())
             }
         };
@@ -390,16 +390,16 @@ impl OutgoingSelector {
 
     #[tracing::instrument(level = "debug", ret)]
     fn resolve_dns(&mut self) -> HookResult<()> {
-        use mirrord_config::feature::network::outgoing::OutgoingAddress;
+        use mirrord_config::feature::network::outgoing::AddressFilter;
 
         // Closure that tries to match `address` with something in the selector set.
         let name = |outgoing: &OutgoingFilter| match outgoing.address {
-            OutgoingAddress::Name(_) => true,
+            AddressFilter::Name(_) => true,
             _ => false,
         };
 
         let to_name_and_port = |outgoing: OutgoingFilter| match outgoing.address {
-            OutgoingAddress::Name((name, port)) => (outgoing.protocol, name, port),
+            AddressFilter::Name((name, port)) => (outgoing.protocol, name, port),
             _ => unreachable!("Filter went wrong, we should only have named addresses here!"),
         };
 
@@ -416,7 +416,7 @@ impl OutgoingSelector {
                                     .into_iter()
                                     .map(|(_, address)| OutgoingFilter {
                                         protocol,
-                                        address: OutgoingAddress::Socket(SocketAddr::new(
+                                        address: AddressFilter::Socket(SocketAddr::new(
                                             address.ip(),
                                             port,
                                         )),
@@ -434,10 +434,7 @@ impl OutgoingSelector {
                         |mut resolved: HashSet<OutgoingFilter>, (protocol, name, port)| {
                             let addresses = name.to_socket_addrs()?.map(|address| OutgoingFilter {
                                 protocol,
-                                address: OutgoingAddress::Socket(SocketAddr::new(
-                                    address.ip(),
-                                    port,
-                                )),
+                                address: AddressFilter::Socket(SocketAddr::new(address.ip(), port)),
                             });
 
                             resolved.extend(addresses);

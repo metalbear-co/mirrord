@@ -47,7 +47,7 @@ impl CriOContainer {
                 Request::builder()
                     .method("GET")
                     .header("Host", "localhost")
-                    .uri(format!("http://localhost/{}", path))
+                    .uri(format!("http://localhost{}", path))
                     .body(Empty::<Bytes>::new())?,
             )
             .await

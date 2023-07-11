@@ -3,13 +3,14 @@ use std::sync::{Arc, LazyLock};
 use enum_dispatch::enum_dispatch;
 use mirrord_protocol::Port;
 use rand::distributions::{Alphanumeric, DistString};
+use tracing::warn;
 
 use crate::{
     error::{AgentError, Result},
     steal::ip_tables::{
         flush_connections::FlushConnections,
         mesh::{MeshRedirect, MeshVendor},
-        redirect::Redirect,
+        redirect::{PreroutingRedirect, Redirect},
         standard::StandardRedirect,
     },
 };
@@ -114,6 +115,7 @@ pub enum Redirects<IPT: IPTables + Send + Sync> {
     Standard(StandardRedirect<IPT>),
     Mesh(MeshRedirect<IPT>),
     FlushConnections(FlushConnections<Redirects<IPT>>),
+    PrerouteFallback(PreroutingRedirect<IPT>),
 }
 
 /// Wrapper struct for IPTables so it flushes on drop.
@@ -134,7 +136,16 @@ where
         let mut redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
             Redirects::Mesh(MeshRedirect::create(Arc::new(ipt), vendor)?)
         } else {
-            Redirects::Standard(StandardRedirect::create(Arc::new(ipt))?)
+            let ipt = Arc::new(ipt);
+
+            match StandardRedirect::create(ipt.clone()) {
+                Err(err) => {
+                    warn!("Unable to create StandardRedirect chain: {err}");
+
+                    Redirects::PrerouteFallback(PreroutingRedirect::create(ipt)?)
+                }
+                Ok(standard) => Redirects::Standard(standard),
+            }
         };
 
         if flush_connections {
@@ -150,7 +161,16 @@ where
         let mut redirect = if let Some(vendor) = MeshVendor::detect(&ipt)? {
             Redirects::Mesh(MeshRedirect::load(Arc::new(ipt), vendor)?)
         } else {
-            Redirects::Standard(StandardRedirect::load(Arc::new(ipt))?)
+            let ipt = Arc::new(ipt);
+
+            match StandardRedirect::load(ipt.clone()) {
+                Err(err) => {
+                    warn!("Unable to load StandardRedirect chain: {err}");
+
+                    Redirects::PrerouteFallback(PreroutingRedirect::load(ipt)?)
+                }
+                Ok(standard) => Redirects::Standard(standard),
+            }
         };
 
         if flush_connections {
