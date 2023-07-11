@@ -339,7 +339,7 @@ impl FromStr for OutgoingFilter {
         let protocol = str::from_utf8(protocol)?.parse()?;
         let address = str::from_utf8(&address)?;
         let subnet = subnet.map(Vec::from).map(String::from_utf8).transpose()?;
-        let port = str::from_utf8(&port)?.parse::<u16>()?;
+        let port = str::from_utf8(port)?.parse::<u16>()?;
 
         let address = subnet
             .map(|subnet| format!("{address}/{subnet}").parse::<ipnet::IpNet>())
