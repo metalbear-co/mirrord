@@ -329,19 +329,23 @@ impl OutgoingSelector {
         Self { remote, local }
     }
 
-    /// Checks if the `address` matches one of the outgoing filters:
+    /// Checks if the `address` matches the specified outgoing filter, and returns a `bool`
+    /// indicating if this connection should go through the remote pod, or from the local app.
     ///
-    /// 1. if it matches something in `Self::remote`, then we return `true`, and this connection
-    ///    shall go through the **remote** pod;
-    /// 2. if it matches something in `Self::local`, then we return `false`, and this connection
-    ///    shall go through the **local** app;
+    /// ## `remote`
     ///
-    /// In theory it's possible to have the same address in both `remote` and `local`, we prevent
-    /// this in [`OutgoingSelector::new`] though.
+    /// When the user specifies something like `remote = [":7777"]`, we're going to check if
+    /// the `address` has `port == 7777`. The same idea can be extrapolated to the other accepted
+    /// values for this config, such as subnet, hostname, ip (and combinations of those).
     ///
-    /// In case the user specifies something that could be  matched against both `remote` and
-    /// `local`, such as `remote = [":7777"], local = [":0"]`, precedence is given to the
-    /// `remote` match.
+    /// ## `local`
+    ///
+    /// Basically the same thing as `remote`, but the result is reversed, meaning that, if
+    /// `address` matches something specified in `local = [":7777"]`, then _negate_ it and return
+    /// `false`, meaning we return "do not connect remote" (or "connect local" if you prefer
+    /// positive thinking).
+    ///
+    /// ## Filter rules
     ///
     /// The filter comparison follows these rules:
     ///
@@ -386,7 +390,8 @@ impl OutgoingSelector {
         };
 
         self.remote.iter().filter(filter_protocol).any(any_address)
-            || !self.local.iter().filter(filter_protocol).any(any_address)
+            || (!self.local.is_empty()
+                && !self.local.iter().filter(filter_protocol).any(any_address))
     }
 }
 

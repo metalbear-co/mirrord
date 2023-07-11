@@ -16,6 +16,8 @@ use crate::{
 /// See the outgoing [reference](https://mirrord.dev/docs/reference/traffic/#outgoing) for more
 /// details.
 ///
+/// The `remote` and `local` config for this feature are **mutually** exclusive.
+///
 /// ```json
 /// {
 ///   "feature": {
@@ -25,7 +27,6 @@ use crate::{
 ///         "udp": true,
 ///         "ignore_localhost": false,
 ///         "remote": ["udp://1.1.1.0/24:1337", "1.1.5.0/24", "tcp://google.com:53", "google.com", ":53"],
-///         "local": ["localhost"],
 ///         "unix_streams": "bear.+"
 ///       }
 ///     }
@@ -64,15 +65,15 @@ pub struct OutgoingConfig {
     ///
     /// Takes a list of values, such as:
     ///
-    /// - UDP traffic on subnet `1.1.1.0/24` on port 1337 will go throuh the remote pod.
+    /// - Only UDP traffic on subnet `1.1.1.0/24` on port 1337 will go throuh the remote pod.
     ///
     /// ```json
     /// {
     ///   "remote": ["udp://1.1.1.0/24:1337"]
     /// }
     ///
-    /// - UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331` will go
-    /// through the remote pod.
+    /// - Only UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331`
+    /// will go through the remote pod.
     /// ```json
     /// {
     ///   "remote": ["google.com:1337", "google.com:7331"]
@@ -80,6 +81,8 @@ pub struct OutgoingConfig {
     /// ```
     /// 
     /// Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
+    ///
+    /// Mutually exclusive with [`local`](#feature.network.outgoing.local).
     #[config(default)]
     pub remote: HashSet<String>,
 
@@ -92,14 +95,15 @@ pub struct OutgoingConfig {
     ///
     /// Takes a list of values, such as:
     ///
-    /// - TCP traffic on `localhost` on port 1337 will go throuh the local app.
+    /// - Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will
+    ///   be emmited remotely in the cluster.
     ///
     /// ```json
     /// {
     ///   "local": ["tcp://localhost:1337"]
     /// }
     ///
-    /// - Any outgoing traffic on port `1337` and `7331` will go through the local app.
+    /// - Only outgoing traffic on port `1337` and `7331` will go through the local app.
     /// ```json
     /// {
     ///   "local": [":1337", ":7331"]
@@ -107,6 +111,8 @@ pub struct OutgoingConfig {
     /// ```
     /// 
     /// Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
+    ///
+    /// Mutually exclusive with [`remote`](#feature.network.outgoing.remote).
     #[config(default)]
     pub local: HashSet<String>,
 
