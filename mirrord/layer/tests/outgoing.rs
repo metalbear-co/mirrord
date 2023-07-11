@@ -161,7 +161,7 @@ async fn outgoing_tcp(
 /// Tries to go through the [`outgoing_tcp_logic`] flow, except that outgoing traffic is configured
 /// to go from the local app, which means that the daemon handler won't be triggered, thus this
 /// send will hang (with the whole test hanging) and crashing on timeout, verifying that, indeed,
-/// the connection was attempted from the local app, and not from the agent.
+/// the connection was not relayed to the agent.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
