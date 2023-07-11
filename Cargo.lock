@@ -2009,7 +2009,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2eeb4ed9e12f43b7fa0baae3f9cdda28352770132ef2e09a23760c29cae8bd47"
 dependencies = [
  "async-trait",
- "rustix 0.38.3",
+ "rustix 0.38.4",
  "tokio",
  "windows-sys 0.48.0",
 ]
@@ -2627,7 +2627,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb0889898416213fab133e1d33a0e5858a48177452750691bde3666d0fdbaf8b"
 dependencies = [
  "hermit-abi 0.3.2",
- "rustix 0.38.3",
+ "rustix 0.38.4",
  "windows-sys 0.48.0",
 ]
 
@@ -4313,8 +4313,7 @@ dependencies = [
 [[package]]
 name = "rasn"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "417c93c4470c2637fd27307f046653c70a957f374caae89cb5c9fb35a5fdf147"
+source = "git+https://github.com/XAMPPRocky/rasn?tag=v0.6.1#9d5c7f537ea689580e33a19519cbb50ab4f0abcb"
 dependencies = [
  "bitvec",
  "bytes",
@@ -4330,8 +4329,7 @@ dependencies = [
 [[package]]
 name = "rasn-derive"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e1c39006ee96ffe7c83f656a5d20269366098a3feb35ad4a7c022e3784643cb"
+source = "git+https://github.com/XAMPPRocky/rasn?tag=v0.6.1#9d5c7f537ea689580e33a19519cbb50ab4f0abcb"
 dependencies = [
  "itertools",
  "proc-macro2",
@@ -4689,9 +4687,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.38.3"
+version = "0.38.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac5ffa1efe7548069688cd7028f32591853cd7b5b756d41bcffd2353e4fc75b4"
+checksum = "0a962918ea88d644592894bc6dc55acc6c0956488adcebbfb6e273506b7fd6e5"
 dependencies = [
  "bitflags 2.3.3",
  "errno 0.3.1",
