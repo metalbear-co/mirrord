@@ -12,7 +12,7 @@ use tracing::{error, warn};
 /// [`DebuggerType`]. Used when injecting the layer through IDE, because the debugger port is chosen
 /// dynamically.
 ///
-/// When a debugger port is detected this way, the layer removed this variable and sets
+/// When a debugger port is detected this way, the layer removes this variable and sets
 /// [`MIRRORD_IGNORE_DEBUGGER_PORTS_ENV`] for child processes.
 pub const MIRRORD_DETECT_DEBUGGER_PORT_ENV: &str = "MIRRORD_DETECT_DEBUGGER_PORT";
 
