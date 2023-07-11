@@ -14,7 +14,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
-use tracing::{trace, warn};
+use tracing::{error, trace, warn};
 
 use crate::{
     error::Result,
@@ -103,7 +103,12 @@ async fn layer_recv(
                 .get_mut(&connection_id)
                 .ok_or(ResponseError::NotFound(connection_id))
             {
-                Ok(writer) => writer.write_all(&bytes).await.map_err(ResponseError::from),
+                Ok(writer) => if bytes.is_empty() {
+                    writer.shutdown().await
+                } else {
+                    writer.write_all(&bytes).await
+                }
+                .map_err(ResponseError::from),
                 Err(fail) => Err(fail),
             };
 
