@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use mirrord_protocol::Port;
-use nix::unistd::getgid;
+use nix::unistd::{getgid, getpid};
+use tracing::warn;
 
 use crate::{
     error::Result,
@@ -29,7 +30,17 @@ where
         let own_packet_filter = "-o lo".to_owned();
 
         let gid = getgid();
-        managed.add_rule(&format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))?;
+        if let Err(err) = managed.add_rule(&format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))
+        {
+            warn!("Uable to create iptable rule with --gid-owner filter trying with --pid-owner: {err}");
+
+            let pid = getpid();
+            managed
+                .add_rule(&format!("-m owner --pid-owner {pid} -p tcp -j RETURN"))
+                .inspect_err(|err| {
+                    warn!("Uable to create iptable rule with --pid-owner filter: {err}")
+                })?;
+        }
 
         Ok(StandardRedirect {
             preroute,
