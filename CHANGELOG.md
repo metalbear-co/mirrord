@@ -8,6 +8,25 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.50.3](https://github.com/metalbear-co/mirrord/tree/3.50.3) - 2023-07-11
+
+
+### Fixed
+
+- Fixed double slash in uri path on `pause/unpause` requests in agent
+  [#1638](https://github.com/metalbear-co/mirrord/issues/1638)
+- Fix agent steal crash by adding fallback to using only `PREROUTING` iptable
+  chain. [#1640](https://github.com/metalbear-co/mirrord/issues/1640)
+
+
+### Internal
+
+- Add test for operator setup command that checks that the setup passes with
+  `mirrord operator setup ... | kubectl apply --dry-run=client -f -`.
+  [#create-operator-setup-test](https://github.com/metalbear-co/mirrord/issues/create-operator-setup-test)
+- Add --prepend --input and --output args when running medschool.
+
+
 ## [3.50.2](https://github.com/metalbear-co/mirrord/tree/3.50.2) - 2023-07-10
 
 
