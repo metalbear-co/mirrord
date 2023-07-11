@@ -207,7 +207,7 @@ impl FromStr for ProtocolFilter {
 /// <!--${internal}-->
 /// Parsed addresses can be one of these 3 variants.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum OutgoingAddress {
+pub enum AddressFilter {
     /// Just a plain old [`SocketAddr`], specified as `a.b.c.d:e`.
     ///
     /// We treat `0`s here as if it meant **any**, so `0.0.0.0` means we filter any IP, and `:0`
@@ -221,19 +221,19 @@ pub enum OutgoingAddress {
     /// the local app).
     Name((String, u16)),
 
-    /// Just a plain old subnet, specified as `a.b.c.d/e:f`.
+    /// Just a plain old subnet and a port, specified as `a.b.c.d/e:f`.
     Subnet((ipnet::IpNet, u16)),
 }
 
 /// <!--${internal}-->
-/// The parsed filter with its [`ProtocolFilter`] and [`OutgoingAddress`].
+/// The parsed filter with its [`ProtocolFilter`] and [`AddressFilter`].
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OutgoingFilter {
     /// Valid protocol types.
     pub protocol: ProtocolFilter,
 
     /// Address|name|subnet we're going to filter.
-    pub address: OutgoingAddress,
+    pub address: AddressFilter,
 }
 
 /// <!--${internal}-->
@@ -281,8 +281,8 @@ mod parser {
         let ipv6 = many1(alt((alphanumeric1, tag(b":"))));
         let ipv6_host = delimited(tag(b"["), ipv6, tag(b"]"));
 
-        let name_or_ipv4 = alt((alphanumeric1, tag(b"-"), tag(b"_"), tag(b".")));
-        let dotted_address = many1(name_or_ipv4);
+        let host_char = alt((alphanumeric1, tag(b"-"), tag(b"_"), tag(b".")));
+        let dotted_address = many1(host_char);
 
         let (rest, address) = opt(alt((dotted_address, ipv6_host)))(input)?;
 
@@ -296,11 +296,9 @@ mod parser {
     /// <!--${internal}-->
     ///
     /// Parses `/24`, extracting the `24` part, and discarding the `/`.
-    pub(super) fn subnet(input: &[u8]) -> IResult<&[u8], Option<Vec<u8>>> {
-        let subnet = preceded(tag(b"/"), many1(digit1));
-        let (rest, subnet) = opt(subnet)(input)?;
-
-        let subnet = subnet.map(|s| s.concat());
+    pub(super) fn subnet(input: &[u8]) -> IResult<&[u8], Option<&[u8]>> {
+        let subnet_parser = preceded(tag(b"/"), digit1);
+        let (rest, subnet) = opt(subnet_parser)(input)?;
 
         Ok((rest, subnet))
     }
@@ -310,11 +308,11 @@ mod parser {
     /// Parses `:1337`, extracting the `1337` part, and discarding the `:`.
     ///
     /// Returns `0` if it doesn't parse anything.
-    pub(super) fn port(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
-        let port = preceded(tag(b":"), many1(digit1));
-        let (rest, port) = opt(port)(input)?;
+    pub(super) fn port(input: &[u8]) -> IResult<&[u8], &[u8]> {
+        let port_parser = preceded(tag(b":"), digit1);
+        let (rest, port) = opt(port_parser)(input)?;
 
-        let port = port.map(|p| p.concat()).unwrap_or(b"0".to_vec());
+        let port = port.unwrap_or(b"0");
 
         Ok((rest, port))
     }
@@ -340,7 +338,7 @@ impl FromStr for OutgoingFilter {
         // Stringify and convert to proper types.
         let protocol = str::from_utf8(protocol)?.parse()?;
         let address = str::from_utf8(&address)?;
-        let subnet = subnet.map(String::from_utf8).transpose()?;
+        let subnet = subnet.map(Vec::from).map(String::from_utf8).transpose()?;
         let port = str::from_utf8(&port)?.parse::<u16>()?;
 
         let address = subnet
@@ -353,11 +351,11 @@ impl FromStr for OutgoingFilter {
                         .parse::<SocketAddr>()
                         // Try again as IPv6.
                         .or_else(|_| format!("[{address}]:{port}").parse())
-                        .map(OutgoingAddress::Socket)
+                        .map(AddressFilter::Socket)
                         // Neither IPv4 nor IPv6, it's probably a name.
-                        .unwrap_or(OutgoingAddress::Name((address.to_string(), port)))
+                        .unwrap_or(AddressFilter::Name((address.to_string(), port)))
                 },
-                |subnet| OutgoingAddress::Subnet((subnet, port)),
+                |subnet| AddressFilter::Subnet((subnet, port)),
             );
 
         if rest.is_empty() {
@@ -460,7 +458,7 @@ mod tests {
     fn full_converted() -> OutgoingFilter {
         OutgoingFilter {
             protocol: ProtocolFilter::Tcp,
-            address: OutgoingAddress::Subnet((IpNet::from_str("1.2.3.0/24").unwrap(), 7777)),
+            address: AddressFilter::Subnet((IpNet::from_str("1.2.3.0/24").unwrap(), 7777)),
         }
     }
 
@@ -473,7 +471,7 @@ mod tests {
     fn ipv6_converted() -> OutgoingFilter {
         OutgoingFilter {
             protocol: ProtocolFilter::Tcp,
-            address: OutgoingAddress::Socket(
+            address: AddressFilter::Socket(
                 SocketAddr::from_str("[2800:3f0:4001:81e::2004]:7777").unwrap(),
             ),
         }
@@ -488,7 +486,7 @@ mod tests {
     fn protocol_only_converted() -> OutgoingFilter {
         OutgoingFilter {
             protocol: ProtocolFilter::Tcp,
-            address: OutgoingAddress::Socket(SocketAddr::from_str("0.0.0.0:0").unwrap()),
+            address: AddressFilter::Socket(SocketAddr::from_str("0.0.0.0:0").unwrap()),
         }
     }
 
@@ -501,7 +499,7 @@ mod tests {
     fn name_converted() -> OutgoingFilter {
         OutgoingFilter {
             protocol: ProtocolFilter::Tcp,
-            address: OutgoingAddress::Name(("google.com".to_string(), 7777)),
+            address: AddressFilter::Name(("google.com".to_string(), 7777)),
         }
     }
 
@@ -514,7 +512,7 @@ mod tests {
     fn name_only_converted() -> OutgoingFilter {
         OutgoingFilter {
             protocol: ProtocolFilter::Any,
-            address: OutgoingAddress::Name(("rust-lang.org".to_string(), 0)),
+            address: AddressFilter::Name(("rust-lang.org".to_string(), 0)),
         }
     }
 
@@ -527,7 +525,7 @@ mod tests {
     fn localhost_converted() -> OutgoingFilter {
         OutgoingFilter {
             protocol: ProtocolFilter::Any,
-            address: OutgoingAddress::Name(("localhost".to_string(), 0)),
+            address: AddressFilter::Name(("localhost".to_string(), 0)),
         }
     }
 
@@ -540,7 +538,7 @@ mod tests {
     fn subnet_port_converted() -> OutgoingFilter {
         OutgoingFilter {
             protocol: ProtocolFilter::Any,
-            address: OutgoingAddress::Subnet((IpNet::from_str("1.2.3.0/24").unwrap(), 7777)),
+            address: AddressFilter::Subnet((IpNet::from_str("1.2.3.0/24").unwrap(), 7777)),
         }
     }
 
@@ -553,7 +551,7 @@ mod tests {
     fn subnet_only_converted() -> OutgoingFilter {
         OutgoingFilter {
             protocol: ProtocolFilter::Any,
-            address: OutgoingAddress::Subnet((IpNet::from_str("1.2.3.0/24").unwrap(), 0)),
+            address: AddressFilter::Subnet((IpNet::from_str("1.2.3.0/24").unwrap(), 0)),
         }
     }
 
@@ -566,7 +564,7 @@ mod tests {
     fn protocol_port_converted() -> OutgoingFilter {
         OutgoingFilter {
             protocol: ProtocolFilter::Udp,
-            address: OutgoingAddress::Socket(SocketAddr::from_str("0.0.0.0:7777").unwrap()),
+            address: AddressFilter::Socket(SocketAddr::from_str("0.0.0.0:7777").unwrap()),
         }
     }
 
@@ -579,7 +577,7 @@ mod tests {
     fn port_only_converted() -> OutgoingFilter {
         OutgoingFilter {
             protocol: ProtocolFilter::Any,
-            address: OutgoingAddress::Socket(SocketAddr::from_str("0.0.0.0:7777").unwrap()),
+            address: AddressFilter::Socket(SocketAddr::from_str("0.0.0.0:7777").unwrap()),
         }
     }
 

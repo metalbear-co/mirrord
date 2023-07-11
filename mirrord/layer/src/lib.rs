@@ -256,8 +256,8 @@ pub(crate) static TARGETLESS: OnceLock<bool> = OnceLock::new();
 pub(crate) static INCOMING_IGNORE_PORTS: OnceLock<HashSet<u16>> = OnceLock::new();
 
 // TODO(alex): To support DNS on the selector, change it to `LazyLock<Arc<Mutex>>`, so we can modify
-// the global on `OutgoingSelector::connect_remote`, converting `OutgoingAddress:Name` to however
-// many addresses we resolve into `OutgoingAddress::Socket`.
+// the global on `OutgoingSelector::connect_remote`, converting `AddressFilter:Name` to however
+// many addresses we resolve into `AddressFilter::Socket`.
 //
 // Also, we need a global for `REMOTE_DNS`, so we can check it in
 // `OutgoingSelector::connect_remote`, and only resolve DNS through remote if it's `true`.

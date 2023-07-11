@@ -352,7 +352,7 @@ impl OutgoingSelector {
     /// it.
     #[tracing::instrument(level = "trace", ret)]
     fn connect_remote<const PROTOCOL: ConnectProtocol>(&self, address: SocketAddr) -> bool {
-        use mirrord_config::feature::network::outgoing::{OutgoingAddress, ProtocolFilter};
+        use mirrord_config::feature::network::outgoing::{AddressFilter, ProtocolFilter};
 
         let filter_protocol = |outgoing: &&OutgoingFilter| match outgoing.protocol {
             ProtocolFilter::Any => true,
@@ -363,7 +363,7 @@ impl OutgoingSelector {
 
         // Closure that tries to match `address` with something in the selector set.
         let any_address = |outgoing: &OutgoingFilter| match outgoing.address {
-            OutgoingAddress::Socket(select_address) => {
+            AddressFilter::Socket(select_address) => {
                 (select_address.ip().is_unspecified() && select_address.port() == 0)
                     || (select_address.ip().is_unspecified()
                         && select_address.port() == address.port())
@@ -372,7 +372,7 @@ impl OutgoingSelector {
             }
             // TODO(alex): DNS may not trigger the filter, as the local resolved address may be
             // different from the remote resolved.
-            OutgoingAddress::Name((ref name, port)) => format!("{name}:{port}")
+            AddressFilter::Name((ref name, port)) => format!("{name}:{port}")
                 .to_socket_addrs()
                 .map(|mut resolved| {
                     resolved.any(|resolved_address| {
@@ -380,7 +380,7 @@ impl OutgoingSelector {
                     })
                 })
                 .unwrap_or_default(),
-            OutgoingAddress::Subnet((subnet, port)) => {
+            AddressFilter::Subnet((subnet, port)) => {
                 subnet.contains(&address.ip()) && (port == 0 || port == address.port())
             }
         };
