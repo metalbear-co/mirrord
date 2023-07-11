@@ -4,6 +4,7 @@
 mod env;
 mod file_ops;
 mod http;
+mod operator;
 mod pause;
 mod target;
 mod targetless;
@@ -388,6 +389,29 @@ mod utils {
         run_exec(process_cmd, Some(target), namespace, args, env).await
     }
 
+    pub async fn run_mirrord(args: Vec<&str>, env: HashMap<&str, &str>) -> TestProcess {
+        let path = match option_env!("MIRRORD_TESTS_USE_BINARY") {
+            None => env!("CARGO_BIN_FILE_MIRRORD"),
+            Some(binary_path) => binary_path,
+        };
+        let temp_dir = tempdir().unwrap();
+
+        let server = Command::new(path)
+            .args(&args)
+            .envs(env)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        println!(
+            "executed mirrord with args {args:?} pid {}",
+            server.id().unwrap()
+        );
+        // We need to hold temp dir until the process is finished
+        TestProcess::from_child(server, temp_dir).await
+    }
+
     /// Run `mirrord exec` with the given cmd, optional target (`None` for targetless), namespace,
     /// mirrord args, and env vars.
     pub async fn run_exec(
@@ -397,11 +421,6 @@ mod utils {
         args: Option<Vec<&str>>,
         env: Option<Vec<(&str, &str)>>,
     ) -> TestProcess {
-        let path = match option_env!("MIRRORD_TESTS_USE_BINARY") {
-            None => env!("CARGO_BIN_FILE_MIRRORD"),
-            Some(binary_path) => binary_path,
-        };
-        let temp_dir = tempdir().unwrap();
         let mut mirrord_args = vec!["exec", "-c"];
         if let Some(target) = target {
             mirrord_args.extend(["--target", target].into_iter());
@@ -433,29 +452,11 @@ mod utils {
             }
         }
 
-        let server = Command::new(path)
-            .args(args.clone())
-            .envs(base_env)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        println!(
-            "executed mirrord with args {args:?} pid {}",
-            server.id().unwrap()
-        );
-        // We need to hold temp dir until the process is finished
-        TestProcess::from_child(server, temp_dir).await
+        run_mirrord(args, base_env).await
     }
 
     /// Runs `mirrord ls` command and asserts if the json matches the expected format
     pub async fn run_ls(args: Option<Vec<&str>>, namespace: Option<&str>) -> TestProcess {
-        let path = match option_env!("MIRRORD_TESTS_USE_BINARY") {
-            None => env!("CARGO_BIN_FILE_MIRRORD"),
-            Some(binary_path) => binary_path,
-        };
-        let temp_dir = tempdir().unwrap();
         let mut mirrord_args = vec!["ls"];
         if let Some(args) = args {
             mirrord_args.extend(args);
@@ -464,18 +465,7 @@ mod utils {
             mirrord_args.extend(vec!["--namespace", namespace]);
         }
 
-        let process = Command::new(path)
-            .args(mirrord_args.clone())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-
-        println!(
-            "executed mirrord with args {mirrord_args:?} pid {}",
-            process.id().unwrap()
-        );
-        TestProcess::from_child(process, temp_dir).await
+        run_mirrord(mirrord_args, Default::default()).await
     }
 
     #[fixture]
