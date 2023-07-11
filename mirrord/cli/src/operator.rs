@@ -138,11 +138,6 @@ Operator License
         return Ok(());
     };
 
-    if let Some(statistics) = status.statistics {
-        println!("Operator Daily Users: {}", statistics.dau);
-        println!("Operator Monthly Users: {}", statistics.mau);
-    }
-
     let mut sessions = Table::new();
 
     sessions.add_row(row!["Session ID", "Target", "User", "Session Duration"]);
