@@ -11,6 +11,9 @@ use tracing::{error, warn};
 /// port used by the given debugger. Value passed through this variable should parse into
 /// [`DebuggerType`]. Used when injecting the layer through IDE, because the debugger port is chosen
 /// dynamically.
+///
+/// When a debugger port is detected this way, the layer removed this variable and sets
+/// [`MIRRORD_IGNORE_DEBUGGER_PORTS_ENV`] for child processes.
 pub const MIRRORD_DETECT_DEBUGGER_PORT_ENV: &str = "MIRRORD_DETECT_DEBUGGER_PORT";
 
 /// Environment variable used to tell the layer that it should ignore certain local ports that may
@@ -172,6 +175,8 @@ impl DebuggerPorts {
             })
             .and_then(|d| d.get_port(&std::env::args().collect::<Vec<_>>()));
         if let Some(port) = detected {
+            env::set_var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV, port.to_string());
+            env::remove_var(MIRRORD_DETECT_DEBUGGER_PORT_ENV);
             return Self::Detected(port);
         }
 
