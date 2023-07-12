@@ -3,7 +3,7 @@ use std::time::Duration;
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
 use mirrord_operator::client::{OperatorApi, OperatorApiError};
-use mirrord_progress::Progress;
+use mirrord_progress::{MessageKind, Progress};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
 use tracing::trace;
@@ -64,7 +64,6 @@ where
 pub(crate) async fn create_and_connect<P>(
     config: &LayerConfig,
     progress: &P,
-    warnings: &P,
 ) -> Result<(AgentConnectInfo, AgentConnection)>
 where
     P: Progress + Send + Sync,
@@ -76,15 +75,15 @@ where
         ))
     } else {
         if matches!(config.target, mirrord_config::target::TargetConfig{ path: Some(mirrord_config::target::Target::Deployment{..}), ..}) {
-            warnings.subtask("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.\n \
-                      Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.\n \
-                      To try it out, join the waitlist with `mirrord waitlist <email address>`, or at this link: https://metalbear.co/#waitlist-form").done();
+            progress.subtask("Warning!").print_message(MessageKind::Warning, Some("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.\n \
+                Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.\n \
+                To try it out, join the waitlist with `mirrord waitlist <email address>`, or at this link: https://metalbear.co/#waitlist-form"));
         }
         let k8s_api = KubernetesAPI::create(config)
             .await
             .map_err(CliError::KubernetesApiFailed)?;
 
-        k8s_api.detect_openshift(warnings).await?;
+        // k8s_api.detect_openshift(progress).await?;
 
         let (pod_agent_name, agent_port) = tokio::time::timeout(
             Duration::from_secs(config.agent.startup_timeout),

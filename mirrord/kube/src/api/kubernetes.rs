@@ -8,7 +8,7 @@ use kube::{
     Api, Client, Config, Discovery,
 };
 use mirrord_config::{agent::AgentConfig, target::TargetConfig, LayerConfig};
-use mirrord_progress::Progress;
+use mirrord_progress::{MessageKind, Progress};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use rand::Rng;
 #[cfg(feature = "incluster")]
@@ -57,7 +57,7 @@ impl KubernetesAPI {
         }
     }
 
-    pub async fn detect_openshift<P>(&self, warnings: &P) -> Result<()>
+    pub async fn detect_openshift<P>(&self, progress: &P) -> Result<()>
     where
         P: Progress + Send + Sync,
     {
@@ -66,7 +66,7 @@ impl KubernetesAPI {
             .await
             .map(|discovery| {
                 if discovery.has_group("route.openshift.io") {
-                    warnings.subtask("WARNING: mirrord is running on openshift, due to default PSP of openshift, mirrord may not be able to create the agent. Please refer to https://mirrord.dev/docs/overview/faq/").done()
+                    progress.subtask("warning").print_message(MessageKind::Warning, Some("WARNING: mirrord is running on openshift, due to default PSP of openshift, mirrord may not be able to create the agent. Please refer to https://mirrord.dev/docs/overview/faq/"))
                 }
         })?)
     }
