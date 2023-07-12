@@ -1,15 +1,18 @@
 use core::str::FromStr;
-use std::{collections::HashSet, net::SocketAddr};
+use std::net::SocketAddr;
 
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use thiserror::Error;
 
+use self::filter::OutgoingFilterConfig;
 use crate::{
     config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
     util::{MirrordToggleableConfig, VecOrSingle},
 };
+
+pub mod filter;
 
 /// Tunnel outgoing network operations through mirrord.
 ///
@@ -83,9 +86,7 @@ pub struct OutgoingConfig {
     /// Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
     ///
     /// Mutually exclusive with [`local`](#feature.network.outgoing.local).
-    #[config(default)]
-    pub remote: HashSet<String>,
-
+    ///
     /// #### feature.network.outgoing.local {#feature.network.outgoing.local}
     ///
     /// List of addresses/ports/subnets that should be sent through the local app.
@@ -97,7 +98,6 @@ pub struct OutgoingConfig {
     ///
     /// - Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will
     ///   be emmited remotely in the cluster.
-    ///
     /// ```json
     /// {
     ///   "local": ["tcp://localhost:1337"]
@@ -109,12 +109,12 @@ pub struct OutgoingConfig {
     ///   "local": [":1337", ":7331"]
     /// }
     /// ```
-    /// 
+    ///
     /// Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
     ///
     /// Mutually exclusive with [`remote`](#feature.network.outgoing.remote).
     #[config(default)]
-    pub local: HashSet<String>,
+    pub filter: OutgoingFilterConfig,
 
     /// #### feature.network.outgoing.unix_streams {#feature.network.outgoing.unix_streams}
     ///
@@ -369,8 +369,16 @@ impl CollectAnalytics for &OutgoingConfig {
                 .map(|v| v.len())
                 .unwrap_or_default(),
         );
-        analytics.add("remote", self.remote.len());
-        analytics.add("local", self.local.len());
+
+        match &self.filter {
+            OutgoingFilterConfig::Unfiltered => analytics.add("outgoing_filter_unfiltered", 0usize),
+            OutgoingFilterConfig::Remote(remote) => {
+                analytics.add("outgoing_filter_remote", remote.len())
+            }
+            OutgoingFilterConfig::Local(local) => {
+                analytics.add("outgoing_filter_local", local.len())
+            }
+        }
     }
 }
 

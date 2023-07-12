@@ -4,23 +4,27 @@ use std::{
     collections::{HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
     os::unix::io::RawFd,
+    str::FromStr,
     sync::{Arc, LazyLock},
 };
 
 use dashmap::DashMap;
 use libc::{c_int, sockaddr, socklen_t};
-use mirrord_config::feature::network::outgoing::OutgoingFilter;
+use mirrord_config::{
+    feature::network::outgoing::{filter::OutgoingFilterConfig, OutgoingFilter},
+    util::VecOrSingle,
+};
 use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
-use tracing::{error, warn};
+use tracing::warn;
 use trust_dns_resolver::config::Protocol;
 
 use self::id::SocketId;
 use crate::{
     common::{blocking_send_hook_message, HookMessage},
     detour::{Bypass, Detour, OptionExt},
-    error::{HookError, HookResult},
-    graceful_exit, ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_PORTS,
+    error::{HookError, HookResult, LayerError},
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_PORTS,
 };
 
 pub(super) mod hooks;
@@ -269,24 +273,25 @@ impl UserSocket {
 /// Holds the [`OutgoingFilter`]s set up by the user, after a little bit of checking, see
 /// [`OutgoingSelector::new`].
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub(crate) struct OutgoingSelector {
+pub(crate) enum OutgoingSelector {
+    #[default]
+    Unfiltered,
     /// If the address from `connect` matches this, then we send the connection through the
     /// remote pod.
-    remote: HashSet<OutgoingFilter>,
-
+    Remote(HashSet<OutgoingFilter>),
     /// If the address from `connect` matches this, then we send the connection from the local app.
-    local: HashSet<OutgoingFilter>,
+    Local(HashSet<OutgoingFilter>),
 }
 
-impl OutgoingSelector {
-    /// Builds the [`OutgoingSelector`] from a pair of [`OutgoingFilter`]s, removing filters that
-    /// would create inconsitencies, by checking if their protocol is enabled for outgoing traffic,
-    /// and thus we avoid making this check on every [`ops::connect`] call.
+impl TryFrom<OutgoingFilterConfig> for OutgoingSelector {
+    type Error = LayerError;
+
+    /// Builds the [`OutgoingSelector`] from the user config (list of filters), removing filters
+    /// that would create inconsitencies, by checking if their protocol is enabled for outgoing
+    /// traffic, and thus we avoid making this check on every [`ops::connect`] call.
     ///
-    /// It also checks for filters that are present in both `remote` and `local`, crashing if it
-    /// finds anything.
-    #[tracing::instrument(level = "trace", ret)]
-    pub(crate) fn new(remote: HashSet<OutgoingFilter>, local: HashSet<OutgoingFilter>) -> Self {
+    /// It also removes duplicated filters, by putting them into a [`HashSet`].
+    fn try_from(value: OutgoingFilterConfig) -> Result<Self, Self::Error> {
         use mirrord_config::feature::network::outgoing::*;
 
         let enabled_tcp = *ENABLED_TCP_OUTGOING
@@ -297,38 +302,38 @@ impl OutgoingSelector {
             .get()
             .expect("ENABLED_TCP_OUTGOING should be set before initializing OutgoingSelector!");
 
-        if !remote.is_empty() && !local.is_empty() {
-            error!(
-                r"
-                Specifying both `remote` and `local` for the `outgoing` config is not supported! 
+        let build_selector = |list: VecOrSingle<String>| {
+            Ok::<_, LayerError>(
+                list.to_vec()
+                    .into_iter()
+                    .map(|filter| OutgoingFilter::from_str(&filter))
+                    .collect::<Result<HashSet<_>, _>>()?
+                    .into_iter()
+                    .filter(|OutgoingFilter { protocol, .. }| match protocol {
+                        ProtocolFilter::Any => enabled_tcp || enabled_udp,
+                        ProtocolFilter::Tcp => enabled_tcp,
+                        ProtocolFilter::Udp => enabled_udp,
+                    })
+                    .collect::<HashSet<_>>(),
+            )
+        };
 
-                - Try removing either `remote` or `local` from `feature.network.outgoing`.
-                "
-            );
-            graceful_exit!("Outgoing filter configuration value not supported!");
+        match value {
+            OutgoingFilterConfig::Unfiltered => Ok(Self::Unfiltered),
+            OutgoingFilterConfig::Remote(list) | OutgoingFilterConfig::Local(list)
+                if list.is_empty() =>
+            {
+                Err(LayerError::MissingConfigValue(
+                    "outgoing filter".to_string(),
+                ))
+            }
+            OutgoingFilterConfig::Remote(list) => Ok(Self::Remote(build_selector(list)?)),
+            OutgoingFilterConfig::Local(list) => Ok(Self::Local(build_selector(list)?)),
         }
-
-        let remote = remote
-            .into_iter()
-            .filter(|OutgoingFilter { protocol, .. }| match protocol {
-                ProtocolFilter::Any => enabled_tcp || enabled_udp,
-                ProtocolFilter::Tcp => enabled_tcp,
-                ProtocolFilter::Udp => enabled_udp,
-            })
-            .collect::<HashSet<_>>();
-
-        let local = local
-            .into_iter()
-            .filter(|OutgoingFilter { protocol, .. }| match protocol {
-                ProtocolFilter::Any => enabled_tcp || enabled_udp,
-                ProtocolFilter::Tcp => enabled_tcp,
-                ProtocolFilter::Udp => enabled_udp,
-            })
-            .collect();
-
-        Self { remote, local }
     }
+}
 
+impl OutgoingSelector {
     /// Checks if the `address` matches the specified outgoing filter, and returns a `bool`
     /// indicating if this connection should go through the remote pod, or from the local app.
     ///
@@ -389,9 +394,11 @@ impl OutgoingSelector {
             }
         };
 
-        self.remote.iter().filter(filter_protocol).any(any_address)
-            || (!self.local.is_empty()
-                && !self.local.iter().filter(filter_protocol).any(any_address))
+        match self {
+            OutgoingSelector::Unfiltered => true,
+            OutgoingSelector::Remote(list) => list.iter().filter(filter_protocol).any(any_address),
+            OutgoingSelector::Local(list) => !list.iter().filter(filter_protocol).any(any_address),
+        }
     }
 }
 
