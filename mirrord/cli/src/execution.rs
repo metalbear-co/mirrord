@@ -49,6 +49,7 @@ impl MirrordExecution {
         // We only need the executable on macos, for SIP handling.
         #[cfg(target_os = "macos")] executable: Option<&str>,
         progress: &P,
+        warnings: &P,
         timeout: Option<u64>,
     ) -> Result<Self>
     where
@@ -57,7 +58,7 @@ impl MirrordExecution {
         config.verify()?;
         let lib_path = extract_library(None, progress, true)?;
         let mut env_vars = HashMap::new();
-        let (connect_info, mut connection) = create_and_connect(config, progress).await?;
+        let (connect_info, mut connection) = create_and_connect(config, progress, warnings).await?;
         let (env_vars_exclude, env_vars_include) = match (
             config
                 .feature

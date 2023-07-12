@@ -156,9 +156,11 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 
     let config = LayerConfig::from_env()?;
 
+    let warnings = progress.subtask("checking for warnings");
+
     #[cfg(target_os = "macos")]
     let execution_info =
-        MirrordExecution::start(&config, Some(&args.binary), progress, None).await?;
+        MirrordExecution::start(&config, Some(&args.binary), progress, &warnings, None).await?;
     #[cfg(not(target_os = "macos"))]
     let execution_info = MirrordExecution::start(&config, progress, None).await?;
 

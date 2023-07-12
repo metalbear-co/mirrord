@@ -5,7 +5,7 @@ use std::{net::SocketAddr, time::Duration};
 use k8s_openapi::api::core::v1::Pod;
 use kube::{
     config::{KubeConfigOptions, Kubeconfig},
-    Api, Client, Config,
+    Api, Client, Config, Discovery,
 };
 use mirrord_config::{agent::AgentConfig, target::TargetConfig, LayerConfig};
 use mirrord_progress::Progress;
@@ -14,7 +14,7 @@ use rand::Rng;
 #[cfg(feature = "incluster")]
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tracing::{info, trace};
+use tracing::{info, trace, warn};
 
 use crate::{
     api::{
@@ -29,7 +29,7 @@ use crate::{
 pub mod rollout;
 
 pub struct KubernetesAPI {
-    pub client: Client,
+    client: Client,
     agent: AgentConfig,
     target: TargetConfig,
 }
@@ -55,6 +55,20 @@ impl KubernetesAPI {
             agent,
             target,
         }
+    }
+
+    pub async fn detect_openshift<P>(&self, warnings: &P) -> Result<()>
+    where
+        P: Progress + Send + Sync,
+    {
+        Ok(Discovery::new(self.client.clone())
+            .run()
+            .await
+            .map(|discovery| {
+                if discovery.has_group("route.openshift.io") {
+                    warnings.subtask("WARNING: mirrord is running on openshift, due to default PSP of openshift, mirrord may not be able to create the agent. Please refer to https://mirrord.dev/docs/overview/faq/").done()
+                }
+        })?)
     }
 }
 

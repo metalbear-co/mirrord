@@ -29,9 +29,16 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs, progress: &TaskProgr
 
     // extension needs more timeout since it might need to build
     // or run tasks before actually launching.
+    let warnings = progress.subtask("checking for warnings");
     #[cfg(target_os = "macos")]
-    let mut execution_info =
-        MirrordExecution::start(&config, args.executable.as_deref(), &progress, Some(60)).await?;
+    let mut execution_info = MirrordExecution::start(
+        &config,
+        args.executable.as_deref(),
+        &progress,
+        &warnings,
+        Some(60),
+    )
+    .await?;
     #[cfg(not(target_os = "macos"))]
     let mut execution_info = MirrordExecution::start(&config, &progress, Some(60)).await?;
 

@@ -1,14 +1,12 @@
 use std::time::Duration;
 
-
-use kube::Discovery;
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
 use mirrord_operator::client::{OperatorApi, OperatorApiError};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
-use tracing::trace;
+use tracing::{log::warn, trace};
 
 use crate::{CliError, Result};
 
@@ -66,6 +64,7 @@ where
 pub(crate) async fn create_and_connect<P>(
     config: &LayerConfig,
     progress: &P,
+    warnings: &P,
 ) -> Result<(AgentConnectInfo, AgentConnection)>
 where
     P: Progress + Send + Sync,
@@ -77,15 +76,16 @@ where
         ))
     } else {
         if matches!(config.target, mirrord_config::target::TargetConfig{ path: Some(mirrord_config::target::Target::Deployment{..}), ..}) {
-            // progress.subtask("text").done_with("text");
-            eprintln!("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.\n \
+            warnings.subtask("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.\n \
                       Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.\n \
-                      To try it out, join the waitlist with `mirrord waitlist <email address>`, or at this link: https://metalbear.co/#waitlist-form");
+                      To try it out, join the waitlist with `mirrord waitlist <email address>`, or at this link: https://metalbear.co/#waitlist-form").done();
         }
         let k8s_api = KubernetesAPI::create(config)
             .await
             .map_err(CliError::KubernetesApiFailed)?;
-        detect_openshift(&k8s_api).await?;
+
+        k8s_api.detect_openshift(warnings).await?;
+
         let (pod_agent_name, agent_port) = tokio::time::timeout(
             Duration::from_secs(config.agent.startup_timeout),
             k8s_api.create_agent(progress),
@@ -104,17 +104,4 @@ where
             AgentConnection { sender, receiver },
         ))
     }
-}
-
-async fn detect_openshift(k8s_api: &KubernetesAPI) -> Result<()> {
-    let client = &k8s_api.client;
-    Discovery::new(client.clone())
-        .run()
-        .await
-        .map(|discovery| {
-            if discovery.has_group("route.openshift.io") {
-                eprintln!("WARNING: mirrord is running on openshift, due to default PSP of openshift, mirrord may not be able to create the agent. Please refer to https://mirrord.dev/docs/overview/faq/");
-            }
-    })
-        .map_err(|err| CliError::KubernetesApiFailed(err.into()))
 }
