@@ -62,7 +62,9 @@ pub struct OutgoingConfig {
     pub ignore_localhost: bool,
 
     /// #### feature.network.outgoing.filter {#feature.network.outgoing.filter}
-    #[config(default)]
+    ///
+    /// Unstable: the precise syntax of this config is subject to change.
+    #[config(default, unstable)]
     pub filter: OutgoingFilterConfig,
 
     /// #### feature.network.outgoing.unix_streams {#feature.network.outgoing.unix_streams}
