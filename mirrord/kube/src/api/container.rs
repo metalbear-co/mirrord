@@ -225,6 +225,7 @@ impl ContainerApi for JobContainer {
                                         "capabilities": {
                                             "add": [
                                                 "NET_ADMIN",
+                                                "NET_RAW",
                                                 "SYS_PTRACE",
                                                 "SYS_ADMIN"
                                             ]
@@ -360,6 +361,7 @@ impl ContainerApi for EphemeralContainer {
                 "capabilities": {
                     "add": [
                         "NET_ADMIN",
+                        "NET_RAW",
                         "SYS_PTRACE",
                         "SYS_ADMIN"
                     ]
