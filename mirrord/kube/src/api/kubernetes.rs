@@ -1,6 +1,6 @@
-use std::path::Path;
 #[cfg(feature = "incluster")]
-use std::{net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
+use std::{path::Path, time::Duration};
 
 use k8s_openapi::api::core::v1::Pod;
 use kube::{
@@ -138,27 +138,32 @@ impl AgentManagment for KubernetesAPI {
         let agent_gid: u16 = rand::thread_rng().gen_range(3000..u16::MAX);
         info!("Using group-id `{agent_gid:?}`");
 
-        let pod_agent_name = if self.agent.ephemeral {
-            EphemeralContainer::create_agent(
-                &self.client,
-                &self.agent,
-                runtime_data,
-                agent_port,
-                progress,
-                agent_gid,
-            )
-            .await?
-        } else {
-            JobContainer::create_agent(
-                &self.client,
-                &self.agent,
-                runtime_data,
-                agent_port,
-                progress,
-                agent_gid,
-            )
-            .await?
-        };
+        let pod_agent_name =
+            tokio::time::timeout(Duration::from_millis(self.agent.startup_timeout), async {
+                if self.agent.ephemeral {
+                    EphemeralContainer::create_agent(
+                        &self.client,
+                        &self.agent,
+                        runtime_data,
+                        agent_port,
+                        progress,
+                        agent_gid,
+                    )
+                    .await
+                } else {
+                    JobContainer::create_agent(
+                        &self.client,
+                        &self.agent,
+                        runtime_data,
+                        agent_port,
+                        progress,
+                        agent_gid,
+                    )
+                    .await
+                }
+            })
+            .await
+            .map_err(|_| KubeApiError::AgentReadyTimeout)??;
 
         Ok((pod_agent_name, agent_port))
     }

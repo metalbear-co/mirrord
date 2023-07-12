@@ -291,11 +291,12 @@ impl ContainerApi for JobContainer {
 
         while let Some(Ok(pod)) = stream.next().await {
             if let Some(status) = &pod.status && let Some(phase) = &status.phase {
-                        debug!("Pod Phase = {phase:?}");
-                    if phase == "Running" {
-                        break;
-                    }
+                debug!("Pod Phase = {phase:?}");
+
+                if phase == "Running" {
+                    break;
                 }
+            }
         }
 
         let pods = pod_api
