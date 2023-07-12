@@ -14,7 +14,7 @@ use rand::Rng;
 #[cfg(feature = "incluster")]
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tracing::{info, trace, warn};
+use tracing::{info, trace};
 
 use crate::{
     api::{
