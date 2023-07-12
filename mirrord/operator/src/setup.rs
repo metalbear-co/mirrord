@@ -19,10 +19,10 @@ use k8s_openapi::{
         APIService, APIServiceSpec, ServiceReference,
     },
 };
-use kube::{Resource};
+use kube::Resource;
 use thiserror::Error;
 
-use crate::crd::{TargetCrd};
+use crate::crd::TargetCrd;
 
 static OPERATOR_NAME: &str = "mirrord-operator";
 static OPERATOR_PORT: i32 = 3000;
