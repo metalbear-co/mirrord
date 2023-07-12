@@ -67,7 +67,7 @@ mod traffic {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(240))]
+    #[timeout(Duration::from_secs(120))]
     pub async fn outgoing_traffic_many_requests(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec![
