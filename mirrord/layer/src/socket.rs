@@ -324,7 +324,7 @@ impl TryFrom<OutgoingFilterFileConfig> for OutgoingSelector {
                 if list.is_empty() =>
             {
                 Err(LayerError::MissingConfigValue(
-                    "outgoing filter".to_string(),
+                    "Outgoing traffic filter cannot be empty!".to_string(),
                 ))
             }
             OutgoingFilterFileConfig::Remote(list) => Ok(Self::Remote(build_selector(list)?)),

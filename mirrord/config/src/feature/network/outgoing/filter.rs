@@ -80,18 +80,36 @@ impl MirrordConfig for OutgoingFilterFileConfig {
     type Generated = OutgoingFilterConfig;
 
     fn generate_config(self) -> Result<Self::Generated, ConfigError> {
-        if let Some(remote) = FromEnv::new("MIRRORD_OUTGOING_TRAFFIC_FILTER_REMOTE")
-            .source_value()
-            .transpose()?
+        if let Some(remote) =
+            FromEnv::<VecOrSingle<String>>::new("MIRRORD_OUTGOING_TRAFFIC_FILTER_REMOTE")
+                .source_value()
+                .transpose()?
         {
-            Ok(OutgoingFilterConfig(OutgoingFilterFileConfig::Remote(
-                remote,
-            )))
-        } else if let Some(local) = FromEnv::new("MIRRORD_OUTGOING_TRAFFIC_FILTER_LOCAL")
-            .source_value()
-            .transpose()?
+            if remote.is_empty() {
+                Err(ConfigError::ValueNotProvided(
+                    "outgoing.filter",
+                    "remote",
+                    None,
+                ))
+            } else {
+                Ok(OutgoingFilterConfig(OutgoingFilterFileConfig::Remote(
+                    remote,
+                )))
+            }
+        } else if let Some(local) =
+            FromEnv::<VecOrSingle<String>>::new("MIRRORD_OUTGOING_TRAFFIC_FILTER_LOCAL")
+                .source_value()
+                .transpose()?
         {
-            Ok(OutgoingFilterConfig(OutgoingFilterFileConfig::Local(local)))
+            if local.is_empty() {
+                Err(ConfigError::ValueNotProvided(
+                    "outgoing.filter",
+                    "local",
+                    None,
+                ))
+            } else {
+                Ok(OutgoingFilterConfig(OutgoingFilterFileConfig::Local(local)))
+            }
         } else {
             Ok(OutgoingFilterConfig(OutgoingFilterFileConfig::Unfiltered))
         }
