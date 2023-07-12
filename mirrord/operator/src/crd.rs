@@ -1,3 +1,4 @@
+
 use chrono::NaiveDate;
 use kube::CustomResource;
 use mirrord_config::target::{Target, TargetConfig};
@@ -81,6 +82,13 @@ pub struct MirrordOperatorSpec {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatus {
     pub sessions: Vec<Session>,
+    pub statistics: Option<MirrordOperatorStatusStatistics>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct MirrordOperatorStatusStatistics {
+    pub dau: usize,
+    pub mau: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

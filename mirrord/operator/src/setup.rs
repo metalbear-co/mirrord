@@ -19,10 +19,10 @@ use k8s_openapi::{
         APIService, APIServiceSpec, ServiceReference,
     },
 };
-use kube::Resource;
+use kube::{Resource};
 use thiserror::Error;
 
-use crate::crd::TargetCrd;
+use crate::crd::{TargetCrd};
 
 static OPERATOR_NAME: &str = "mirrord-operator";
 static OPERATOR_PORT: i32 = 3000;
@@ -50,8 +50,8 @@ static RESOURCE_REQUESTS: LazyLock<BTreeMap<String, Quantity>> = LazyLock::new(|
 macro_rules! writer_impl {
     ($ident:ident) => {
         impl OperatorSetup for $ident {
-            fn to_writer<W: Write>(&self, mut writer: W) -> Result<()> {
-                serde_yaml::to_writer(&mut writer, &self.0).map_err(SetupError::from)
+            fn to_writer<W: Write>(&self, writer: W) -> Result<()> {
+                serde_yaml::to_writer(writer, &self.0).map_err(SetupError::from)
             }
         }
     };
