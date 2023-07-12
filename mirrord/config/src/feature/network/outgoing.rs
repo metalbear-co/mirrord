@@ -29,7 +29,9 @@ pub mod filter;
 ///         "tcp": true,
 ///         "udp": true,
 ///         "ignore_localhost": false,
-///         "remote": ["udp://1.1.1.0/24:1337", "1.1.5.0/24", "tcp://google.com:53", "google.com", ":53"],
+///         "filter": {
+///           "local": ["tcp://1.1.1.0/24:1337", "1.1.5.0/24", "google.com", ":53"],
+///         },
 ///         "unix_streams": "bear.+"
 ///       }
 ///     }
@@ -59,60 +61,7 @@ pub struct OutgoingConfig {
     #[config(unstable, default = false)]
     pub ignore_localhost: bool,
 
-    /// #### feature.network.outgoing.remote {#feature.network.outgoing.remote}
-    ///
-    /// List of addresses/ports/subnets that should be sent through the remote pod.
-    ///
-    /// You may use this option to specify when outgoing traffic is sent from the remote pod (which
-    /// is the default behavior when you enable outgoing traffic).
-    ///
-    /// Takes a list of values, such as:
-    ///
-    /// - Only UDP traffic on subnet `1.1.1.0/24` on port 1337 will go throuh the remote pod.
-    ///
-    /// ```json
-    /// {
-    ///   "remote": ["udp://1.1.1.0/24:1337"]
-    /// }
-    ///
-    /// - Only UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331`
-    /// will go through the remote pod.
-    /// ```json
-    /// {
-    ///   "remote": ["google.com:1337", "google.com:7331"]
-    /// }
-    /// ```
-    /// 
-    /// Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
-    ///
-    /// Mutually exclusive with [`local`](#feature.network.outgoing.local).
-    ///
-    /// #### feature.network.outgoing.local {#feature.network.outgoing.local}
-    ///
-    /// List of addresses/ports/subnets that should be sent through the local app.
-    ///
-    /// You may use this option to specify when outgoing traffic is sent from the local app, giving
-    /// you finer grained access to which traffic should go where.
-    ///
-    /// Takes a list of values, such as:
-    ///
-    /// - Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will
-    ///   be emmited remotely in the cluster.
-    /// ```json
-    /// {
-    ///   "local": ["tcp://localhost:1337"]
-    /// }
-    ///
-    /// - Only outgoing traffic on port `1337` and `7331` will go through the local app.
-    /// ```json
-    /// {
-    ///   "local": [":1337", ":7331"]
-    /// }
-    /// ```
-    ///
-    /// Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
-    ///
-    /// Mutually exclusive with [`remote`](#feature.network.outgoing.remote).
+    /// #### feature.network.outgoing.filter {#feature.network.outgoing.filter}
     #[config(default)]
     pub filter: OutgoingFilterConfig,
 
