@@ -17,7 +17,7 @@ members = [
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.50.2"
+version = "3.50.4"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -71,6 +71,9 @@ exec = "0.3"
 [patch.crates-io]
 tracing = { git = "https://github.com/metalbear-co/tracing", package = "tracing", branch = "worker_options_non_blocking_v1" }
 tracing-subscriber = { git = "https://github.com/metalbear-co/tracing", package = "tracing-subscriber", branch = "worker_options_non_blocking_v1" }
+
+# TODO(alex): Remove this when `apple-codesign` (used in `mirrord-sip`) updates their `rasn` version.
+rasn = { git = "https://github.com/XAMPPRocky/rasn", package = "rasn", tag = "v0.6.1" }
 
 
 [profile.release]
