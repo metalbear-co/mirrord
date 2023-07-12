@@ -12,7 +12,7 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     time::timeout,
 };
-use tokio_stream::StreamExt;
+use tokio_stream::{StreamExt, StreamNotifyClose};
 use tokio_util::io::ReaderStream;
 use tracing::{trace, warn};
 
@@ -49,7 +49,7 @@ async fn layer_recv(
     layer_message: LayerTcpOutgoing,
     allocator: &mut IndexAllocator<ConnectionId, 100>,
     writers: &mut HashMap<ConnectionId, WriteHalf<SocketStream>>,
-    readers: &mut StreamMap<ConnectionId, ReaderStream<ReadHalf<SocketStream>>>,
+    readers: &mut StreamMap<ConnectionId, StreamNotifyClose<ReaderStream<ReadHalf<SocketStream>>>>,
     daemon_tx: Sender<DaemonTcpOutgoing>,
     pid: Option<u64>,
 ) -> Result<()> {
@@ -81,7 +81,10 @@ async fn layer_recv(
                 // and writing from multiple hosts without blocking.
                 let (read_half, write_half) = split(remote_stream);
                 writers.insert(connection_id, write_half);
-                readers.insert(connection_id, ReaderStream::new(read_half));
+                readers.insert(
+                    connection_id,
+                    StreamNotifyClose::new(ReaderStream::new(read_half)),
+                );
 
                 Ok(DaemonConnect {
                     connection_id,
@@ -171,8 +174,10 @@ impl TcpOutgoingApi {
         // TODO: Right now we're manually keeping these 2 maps in sync (aviram suggested using
         // `Weak` for `writers`).
         let mut writers: HashMap<ConnectionId, WriteHalf<SocketStream>> = HashMap::default();
-        let mut readers: StreamMap<ConnectionId, ReaderStream<ReadHalf<SocketStream>>> =
-            StreamMap::default();
+        let mut readers: StreamMap<
+            ConnectionId,
+            StreamNotifyClose<ReaderStream<ReadHalf<SocketStream>>>,
+        > = StreamMap::default();
 
         loop {
             select! {
@@ -209,9 +214,10 @@ impl TcpOutgoingApi {
                         }
                         None => {
                             trace!("interceptor_task -> close connection {:#?}", connection_id);
-                            writers.remove(&connection_id);
+                            // writers.remove(&connection_id);
 
-                            let daemon_message = DaemonTcpOutgoing::Close(connection_id);
+                            // let daemon_message = DaemonTcpOutgoing::Close(connection_id);
+                            let daemon_message = DaemonTcpOutgoing::Read(Ok(DaemonRead { connection_id, bytes: Vec::new()}))
                             daemon_tx.send(daemon_message).await?
                         }
                     }
