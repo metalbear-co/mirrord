@@ -74,8 +74,15 @@ mod traffic {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
         ];
-        let mut process =
-            run_exec_with_target(node_command, &service.target, None, None, None).await;
+        let mut process = run_exec_with_target(
+            node_command,
+            &service.target,
+            None,
+            None,
+            // TODO: None
+            Some(vec![("RUST_LOG", "mirrord=trace")]),
+        )
+        .await;
 
         eprintln!("~~~~~~~~~~~~~   Waiting for test process to exit.  ~~~~~~~~~~~~~~");
 
