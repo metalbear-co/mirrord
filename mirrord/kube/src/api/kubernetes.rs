@@ -29,7 +29,7 @@ use crate::{
 pub mod rollout;
 
 pub struct KubernetesAPI {
-    client: Client,
+    pub client: Client,
     agent: AgentConfig,
     target: TargetConfig,
 }

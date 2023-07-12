@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+
+use kube::Discovery;
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
 use mirrord_operator::client::{OperatorApi, OperatorApiError};
@@ -83,6 +85,7 @@ where
         let k8s_api = KubernetesAPI::create(config)
             .await
             .map_err(CliError::KubernetesApiFailed)?;
+        detect_openshift(&k8s_api).await?;
         let (pod_agent_name, agent_port) = tokio::time::timeout(
             Duration::from_secs(config.agent.startup_timeout),
             k8s_api.create_agent(progress),
@@ -101,4 +104,17 @@ where
             AgentConnection { sender, receiver },
         ))
     }
+}
+
+async fn detect_openshift(k8s_api: &KubernetesAPI) -> Result<()> {
+    let client = &k8s_api.client;
+    Discovery::new(client.clone())
+        .run()
+        .await
+        .map(|discovery| {
+            if discovery.has_group("route.openshift.io") {
+                eprintln!("WARNING: mirrord is running on openshift, due to default PSP of openshift, mirrord may not be able to create the agent. Please refer to https://mirrord.dev/docs/overview/faq/");
+            }
+    })
+        .map_err(|err| CliError::KubernetesApiFailed(err.into()))
 }
