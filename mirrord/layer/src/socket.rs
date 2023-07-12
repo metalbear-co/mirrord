@@ -11,7 +11,7 @@ use std::{
 use dashmap::DashMap;
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_config::{
-    feature::network::outgoing::{filter::OutgoingFilterConfig, OutgoingFilter},
+    feature::network::outgoing::{filter::OutgoingFilterFileConfig, OutgoingFilter},
     util::VecOrSingle,
 };
 use mirrord_protocol::outgoing::SocketAddress;
@@ -283,7 +283,7 @@ pub(crate) enum OutgoingSelector {
     Local(HashSet<OutgoingFilter>),
 }
 
-impl TryFrom<OutgoingFilterConfig> for OutgoingSelector {
+impl TryFrom<OutgoingFilterFileConfig> for OutgoingSelector {
     type Error = LayerError;
 
     /// Builds the [`OutgoingSelector`] from the user config (list of filters), removing filters
@@ -291,7 +291,7 @@ impl TryFrom<OutgoingFilterConfig> for OutgoingSelector {
     /// traffic, and thus we avoid making this check on every [`ops::connect`] call.
     ///
     /// It also removes duplicated filters, by putting them into a [`HashSet`].
-    fn try_from(value: OutgoingFilterConfig) -> Result<Self, Self::Error> {
+    fn try_from(value: OutgoingFilterFileConfig) -> Result<Self, Self::Error> {
         use mirrord_config::feature::network::outgoing::*;
 
         let enabled_tcp = *ENABLED_TCP_OUTGOING
@@ -319,16 +319,16 @@ impl TryFrom<OutgoingFilterConfig> for OutgoingSelector {
         };
 
         match value {
-            OutgoingFilterConfig::Unfiltered => Ok(Self::Unfiltered),
-            OutgoingFilterConfig::Remote(list) | OutgoingFilterConfig::Local(list)
+            OutgoingFilterFileConfig::Unfiltered => Ok(Self::Unfiltered),
+            OutgoingFilterFileConfig::Remote(list) | OutgoingFilterFileConfig::Local(list)
                 if list.is_empty() =>
             {
                 Err(LayerError::MissingConfigValue(
                     "outgoing filter".to_string(),
                 ))
             }
-            OutgoingFilterConfig::Remote(list) => Ok(Self::Remote(build_selector(list)?)),
-            OutgoingFilterConfig::Local(list) => Ok(Self::Local(build_selector(list)?)),
+            OutgoingFilterFileConfig::Remote(list) => Ok(Self::Remote(build_selector(list)?)),
+            OutgoingFilterFileConfig::Local(list) => Ok(Self::Local(build_selector(list)?)),
         }
     }
 }

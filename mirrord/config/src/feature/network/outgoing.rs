@@ -6,7 +6,7 @@ use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use thiserror::Error;
 
-use self::filter::OutgoingFilterConfig;
+use self::filter::{OutgoingFilterConfig, OutgoingFilterFileConfig};
 use crate::{
     config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
     util::{MirrordToggleableConfig, VecOrSingle},
@@ -370,12 +370,14 @@ impl CollectAnalytics for &OutgoingConfig {
                 .unwrap_or_default(),
         );
 
-        match &self.filter {
-            OutgoingFilterConfig::Unfiltered => analytics.add("outgoing_filter_unfiltered", 0usize),
-            OutgoingFilterConfig::Remote(remote) => {
+        match &self.filter.0 {
+            OutgoingFilterFileConfig::Unfiltered => {
+                analytics.add("outgoing_filter_unfiltered", 0usize)
+            }
+            OutgoingFilterFileConfig::Remote(remote) => {
                 analytics.add("outgoing_filter_remote", remote.len())
             }
-            OutgoingFilterConfig::Local(local) => {
+            OutgoingFilterFileConfig::Local(local) => {
                 analytics.add("outgoing_filter_local", local.len())
             }
         }

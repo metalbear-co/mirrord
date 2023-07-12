@@ -420,6 +420,7 @@ fn set_globals(config: &LayerConfig) {
             .network
             .outgoing
             .filter
+            .0
             .clone()
             .try_into()
             .expect("Failed setting up outgoing traffic filter!");

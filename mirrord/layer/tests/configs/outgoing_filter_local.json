@@ -2,7 +2,9 @@
     "feature": {
         "network": {
             "outgoing": {
-                "local": [":1111"]
+                "filter": {
+                    "local": [":1111"]
+                }
             }
         }
     }
