@@ -41,7 +41,7 @@ where
             .args([
                 "--delete",
                 "--proto",
-                "TCP",
+                "tcp",
                 "--orig-port-dst",
                 &redirected_port.to_string(),
             ])
