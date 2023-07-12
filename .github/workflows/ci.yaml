@@ -512,7 +512,13 @@ jobs:
       - name: Run targetless E2E test.
         run: cargo test -p tests targetless
       - name: Run all E2E test
-        run: cargo test -p tests outgoing_traffic_many_requests -- --test-threads=6 --nocapture
+        run: |
+          cargo test -p tests outgoing_traffic_many_requests -- --test-threads=6 --nocapture
+          cargo test -p tests outgoing_traffic_many_requests -- --test-threads=6 --nocapture
+          cargo test -p tests outgoing_traffic_many_requests -- --test-threads=6 --nocapture
+          cargo test -p tests outgoing_traffic_many_requests -- --test-threads=6 --nocapture
+          cargo test -p tests outgoing_traffic_many_requests -- --test-threads=6 --nocapture
+          cargo test -p tests outgoing_traffic_many_requests -- --test-threads=6 --nocapture
       - name: Collect logs
         if: ${{ failure() }}
         run: |
