@@ -132,7 +132,7 @@ Container run inside the pod launched by mirrord requires additional [Linux capa
 - `CAP_SYS_PTRACE` - for reading target pod environment
 - `CAP_SYS_ADMIN` - for joining target pod network namespace
 
-However, you can disable any subset of those in the configuration or through an environment variable. This will limit possibly mirrord functionalities.
+However, you can disable any subset of those in the configuration or through an environment variable. This will possibly limit mirrord functionalities or even make it unusable in some setups.
 
 ```bash
 MIRRORD_AGENT_DISABLED_CAPABILITIES=CAP_NET_RAW,CAP_SYS_PTRACE mirrord exec node app.js --target pod/my-pod
