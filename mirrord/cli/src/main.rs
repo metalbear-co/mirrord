@@ -156,8 +156,6 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
 
     let config = LayerConfig::from_env()?;
 
-    // let warnings = progress.subtask("checking for warnings");
-
     #[cfg(target_os = "macos")]
     let execution_info =
         MirrordExecution::start(&config, Some(&args.binary), progress, None).await?;
@@ -374,18 +372,8 @@ async fn main() -> miette::Result<()> {
     static MAIN_PROGRESS_TASK: LazyLock<TaskProgress> =
         LazyLock::new(|| TaskProgress::new("mirrord cli starting..."));
 
-    // static WARNINGS_PROGRESS_TASK: LazyLock<TaskProgress> =
-    //     LazyLock::new(|| TaskProgress::new("checking for warnings..."));
-
     match cli.commands {
-        Commands::Exec(args) => {
-            exec(
-                &args,
-                &MAIN_PROGRESS_TASK.subtask("exec"),
-                // WARNINGS_PROGRESS_TASK.subtask("WARNING: "),
-            )
-            .await?
-        }
+        Commands::Exec(args) => exec(&args, &MAIN_PROGRESS_TASK.subtask("exec")).await?,
         Commands::Extract { path } => {
             extract_library(Some(path), &MAIN_PROGRESS_TASK.subtask("extract"), false)?;
         }
