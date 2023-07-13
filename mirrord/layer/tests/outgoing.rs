@@ -89,16 +89,12 @@ async fn outgoing_udp(dylib_path: &PathBuf) {
 /// 3. Sends some data
 /// 4. Expects the peer to send the same data back
 async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &PathBuf, config_dir: &PathBuf) {
-    let config = with_config
-        .and_then(|config| {
-            let mut config_path = config_dir.clone();
-            config_path.push(config);
-            Some(config_path)
-        })
-        .unwrap_or_default();
-
-    let config = config.to_str().unwrap();
-    let config = (!config.is_empty()).then_some(config);
+    let config = with_config.map(|config| {
+        let mut config_path = config_dir.clone();
+        config_path.push(config);
+        config_path
+    });
+    let config = config.as_ref().map(|path_buf| path_buf.to_str().unwrap());
 
     let (mut test_process, layer_connection) = Application::RustOutgoingTcp
         .start_process_with_layer(dylib_path, vec![], config)
