@@ -8,7 +8,7 @@ use kube::{
     Api, Client, Config, Discovery,
 };
 use mirrord_config::{agent::AgentConfig, target::TargetConfig, LayerConfig};
-use mirrord_progress::{MessageKind, Progress};
+use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use rand::Rng;
 #[cfg(feature = "incluster")]
