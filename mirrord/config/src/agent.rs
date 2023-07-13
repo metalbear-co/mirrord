@@ -196,7 +196,6 @@ pub struct AgentConfig {
     /// Disables specified Linux capabilities for the agent container.
     /// If nothing is disabled here, agent uses `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE` and
     /// `SYS_ADMIN`.
-    #[config(env = "MIRRORD_AGENT_DISABLED_CAPABILITIES")]
     pub disabled_capabilities: Vec<LinuxCapability>,
 
     /// <!--${internal}-->
