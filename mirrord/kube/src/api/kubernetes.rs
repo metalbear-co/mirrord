@@ -57,7 +57,7 @@ impl KubernetesAPI {
         }
     }
 
-    pub async fn detect_openshift<P>(&self) -> Result<()> {
+    pub async fn detect_openshift(&self) -> Result<()> {
         Ok(Discovery::new(self.client.clone())
             .run()
             .await
