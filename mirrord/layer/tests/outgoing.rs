@@ -154,16 +154,23 @@ async fn outgoing_tcp(
     outgoing_tcp_logic(with_config, dylib_path, config_dir).await;
 }
 
-/// Tries to go through the [`outgoing_tcp_logic`] flow, except that outgoing traffic is configured
-/// to go from the local app, which means that the daemon handler won't be triggered, thus this
-/// send will hang (with the whole test hanging) and crashing on timeout, verifying that, indeed,
-/// the connection was not relayed to the agent.
+/// 1. Tries to go through the [`outgoing_tcp_logic`] flow, except that outgoing traffic is
+/// configured to go from the local app, which means that the daemon handler won't be triggered,
+/// thus this send will hang (with the whole test hanging) and crashing on timeout, verifying that,
+/// indeed, the connection was not relayed to the agent.
+///
+/// 2. Similar to the [`outgoing_tcp`] test, but we don't add the `remote` address `3.3.3.3` to the
+/// list, thus it should go through local, and hang.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 #[should_panic]
 async fn outgoing_tcp_from_the_local_app_broken(
-    #[values(Some("outgoing_filter_local.json"))] with_config: Option<&str>,
+    #[values(
+        Some("outgoing_filter_local.json"),
+        Some("outgoing_filter_remote_incomplete.json")
+    )]
+    with_config: Option<&str>,
     dylib_path: &PathBuf,
     config_dir: &PathBuf,
 ) {
