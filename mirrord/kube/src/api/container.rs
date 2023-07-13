@@ -24,10 +24,12 @@ use crate::{
 
 /// Retrieve a list of Linux capabilities for the agent container.
 fn get_capabilities(config: &AgentConfig) -> Vec<LinuxCapability> {
+    let disabled = config.disabled_capabilities.clone().unwrap_or_default();
+
     LinuxCapability::all()
         .iter()
         .copied()
-        .filter(|c| !config.disabled_capabilities.contains(c))
+        .filter(|c| !disabled.contains(c))
         .collect()
 }
 

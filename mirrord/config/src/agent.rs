@@ -196,7 +196,7 @@ pub struct AgentConfig {
     /// Disables specified Linux capabilities for the agent container.
     /// If nothing is disabled here, agent uses `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE` and
     /// `SYS_ADMIN`.
-    pub disabled_capabilities: Vec<LinuxCapability>,
+    pub disabled_capabilities: Option<Vec<LinuxCapability>>,
 
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
