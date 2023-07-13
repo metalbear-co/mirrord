@@ -319,7 +319,7 @@ impl OperatorDeployment {
                 command: Some(vec![
                     "/bin/sh".to_owned(),
                     "-c".to_owned(),
-                    format!("curl -sS -I -k --cert /tls/{OPERATOR_TLS_CERT_FILE_NAME} --key /tls/{OPERATOR_TLS_KEY_FILE_NAME} https://localhost:${OPERATOR_PORT}/health"),
+                    format!("curl -sS -I -k --cert /tls/{OPERATOR_TLS_CERT_FILE_NAME} --key /tls/{OPERATOR_TLS_KEY_FILE_NAME} https://localhost:{OPERATOR_PORT}/health"),
                 ]),
             }),
             period_seconds: Some(5),
