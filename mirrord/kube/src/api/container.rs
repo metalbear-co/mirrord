@@ -10,7 +10,7 @@ use kube::{
     runtime::{watcher, WatchStreamExt},
     Api, Client,
 };
-use mirrord_config::agent::AgentConfig;
+use mirrord_config::agent::{AgentConfig, LinuxCapability};
 use mirrord_progress::Progress;
 use rand::distributions::{Alphanumeric, DistString};
 use serde_json::json;
@@ -21,6 +21,15 @@ use crate::{
     api::{get_k8s_resource_api, runtime::RuntimeData},
     error::{KubeApiError, Result},
 };
+
+/// Retrieve a list of Linux capabilities for the agent container.
+fn get_capabilities(config: &AgentConfig) -> Vec<LinuxCapability> {
+    LinuxCapability::all()
+        .iter()
+        .copied()
+        .filter(|c| !config.disabled_capabilities.contains(c))
+        .collect()
+}
 
 pub trait ContainerApi {
     fn agent_image(agent: &AgentConfig) -> String {
@@ -223,12 +232,7 @@ impl ContainerApi for JobContainer {
                                     json!({
                                         "runAsGroup": agent_gid,
                                         "capabilities": {
-                                            "add": [
-                                                "NET_ADMIN",
-                                                "NET_RAW",
-                                                "SYS_PTRACE",
-                                                "SYS_ADMIN"
-                                            ]
+                                            "add": get_capabilities(agent),
                                         }
                                     })
                                 ),
@@ -359,12 +363,7 @@ impl ContainerApi for EphemeralContainer {
             "securityContext": {
                 "runAsGroup": agent_gid,
                 "capabilities": {
-                    "add": [
-                        "NET_ADMIN",
-                        "NET_RAW",
-                        "SYS_PTRACE",
-                        "SYS_ADMIN"
-                    ]
+                    "add": get_capabilities(agent),
                 },
             },
             "imagePullPolicy": agent.image_pull_policy,
