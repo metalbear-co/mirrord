@@ -196,6 +196,17 @@
           "format": "uint16",
           "minimum": 0.0
         },
+        "disabled_capabilities": {
+          "title": "agent.disabled_capabilities {#agent-disabled_capabilities}",
+          "description": "Disables specified Linux capabilities for the agent container. If nothing is disabled here, agent uses `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE` and `SYS_ADMIN`.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/LinuxCapability"
+          }
+        },
         "ephemeral": {
           "title": "agent.ephemeral {#agent-ephemeral}",
           "description": "Runs the agent as an [ephemeral container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)\n\nDefaults to `false`.",
@@ -699,6 +710,15 @@
             "steal"
           ]
         }
+      ]
+    },
+    "LinuxCapability": {
+      "type": "string",
+      "enum": [
+        "SYS_ADMIN",
+        "SYS_PTRACE",
+        "NET_RAW",
+        "NET_ADMIN"
       ]
     },
     "NetworkFileConfig": {
