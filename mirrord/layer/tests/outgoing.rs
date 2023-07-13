@@ -1,5 +1,5 @@
 #![feature(assert_matches)]
-#![cfg(target_os = "linux")]
+// #![cfg(target_os = "linux")]
 #![warn(clippy::indexing_slicing)]
 
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
