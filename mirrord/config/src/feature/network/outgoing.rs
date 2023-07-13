@@ -4,15 +4,30 @@ use std::net::SocketAddr;
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
+use serde::Deserialize;
 use thiserror::Error;
 
-use self::filter::{OutgoingFilterConfig, OutgoingFilterFileConfig};
+// use self::filter::{OutgoingFilterConfig, OutgoingFilterFileConfig};
 use crate::{
     config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
-pub mod filter;
+// pub mod filter;
+
+/// <--!{$internal}-->
+/// The 3 possible variants for the outgoing traffic filter.
+#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
+#[serde(untagged, rename_all = "lowercase")]
+pub enum OutgoingFilterConfig {
+    /// Traffic that matches what's specified here will go through the remote pod, everything else
+    /// will go through local.
+    Remote(VecOrSingle<String>),
+
+    /// Traffic that matches what's specified here will go through the local app, everything else
+    /// will go through the remote pod.
+    Local(VecOrSingle<String>),
+}
 
 /// Tunnel outgoing network operations through mirrord.
 ///
@@ -65,7 +80,7 @@ pub struct OutgoingConfig {
     ///
     /// Unstable: the precise syntax of this config is subject to change.
     #[config(default, unstable)]
-    pub filter: OutgoingFilterConfig,
+    pub filter: Option<OutgoingFilterConfig>,
 
     /// #### feature.network.outgoing.unix_streams {#feature.network.outgoing.unix_streams}
     ///
@@ -321,15 +336,14 @@ impl CollectAnalytics for &OutgoingConfig {
                 .unwrap_or_default(),
         );
 
-        match &self.filter.0 {
-            OutgoingFilterFileConfig::Unfiltered => {
-                analytics.add("outgoing_filter_unfiltered", 0usize)
-            }
-            OutgoingFilterFileConfig::Remote(remote) => {
-                analytics.add("outgoing_filter_remote", remote.len())
-            }
-            OutgoingFilterFileConfig::Local(local) => {
-                analytics.add("outgoing_filter_local", local.len())
+        if let Some(filter) = self.filter.as_ref() {
+            match filter {
+                OutgoingFilterConfig::Remote(value) => {
+                    analytics.add("outgoing_filter_remote", value.len())
+                }
+                OutgoingFilterConfig::Local(value) => {
+                    analytics.add("outgoing_filter_local", value.len())
+                }
             }
         }
     }
