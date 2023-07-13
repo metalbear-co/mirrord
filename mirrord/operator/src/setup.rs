@@ -316,7 +316,7 @@ impl OperatorDeployment {
 
         let health_probe = Probe {
             http_get: Some(HTTPGetAction {
-                path: Some("/heath".to_owned()),
+                path: Some("/health".to_owned()),
                 port: IntOrString::Int(OPERATOR_PORT),
                 scheme: Some("HTTPS".to_owned()),
                 ..Default::default()
