@@ -52,7 +52,7 @@ use crate::{
 ///
 /// Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
-#[serde(untagged, rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum OutgoingFilterConfig {
     /// Traffic that matches what's specified here will go through the remote pod, everything else
     /// will go through local.
