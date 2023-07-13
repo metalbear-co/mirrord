@@ -4,7 +4,7 @@ use k8s_openapi::{
     api::{
         apps::v1::{Deployment, DeploymentSpec},
         core::v1::{
-            Container, ContainerPort, EnvVar, ExecAction, Namespace, PersistentVolumeClaim,
+            Container, ContainerPort, EnvVar, HTTPGetAction, Namespace, PersistentVolumeClaim,
             PersistentVolumeClaimSpec, PersistentVolumeClaimVolumeSource, PodSpec, PodTemplateSpec,
             Probe, ResourceRequirements, Secret, SecretVolumeSource, SecurityContext, Service,
             ServiceAccount, ServicePort, ServiceSpec, Volume, VolumeMount,
@@ -315,12 +315,11 @@ impl OperatorDeployment {
         }
 
         let health_probe = Probe {
-            exec: Some(ExecAction {
-                command: Some(vec![
-                    "/bin/sh".to_owned(),
-                    "-c".to_owned(),
-                    format!("curl -sS -I -k --cert /tls/{OPERATOR_TLS_CERT_FILE_NAME} --key /tls/{OPERATOR_TLS_KEY_FILE_NAME} https://localhost:{OPERATOR_PORT}/health"),
-                ]),
+            http_get: Some(HTTPGetAction {
+                path: Some("/heath".to_owned()),
+                port: IntOrString::Int(OPERATOR_PORT),
+                scheme: Some("HTTPS".to_owned()),
+                ..Default::default()
             }),
             period_seconds: Some(5),
             ..Default::default()
