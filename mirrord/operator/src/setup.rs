@@ -4,9 +4,9 @@ use k8s_openapi::{
     api::{
         apps::v1::{Deployment, DeploymentSpec},
         core::v1::{
-            Container, ContainerPort, EnvVar, Namespace, PersistentVolumeClaim,
+            Container, ContainerPort, EnvVar, ExecAction, Namespace, PersistentVolumeClaim,
             PersistentVolumeClaimSpec, PersistentVolumeClaimVolumeSource, PodSpec, PodTemplateSpec,
-            ResourceRequirements, Secret, SecretVolumeSource, SecurityContext, Service,
+            Probe, ResourceRequirements, Secret, SecretVolumeSource, SecurityContext, Service,
             ServiceAccount, ServicePort, ServiceSpec, Volume, VolumeMount,
         },
         rbac::v1::{ClusterRole, ClusterRoleBinding, PolicyRule, RoleRef, Subject},
@@ -314,6 +314,18 @@ impl OperatorDeployment {
             });
         }
 
+        let health_probe = Probe {
+            exec: Some(ExecAction {
+                command: Some(vec![
+                    "/bin/sh".to_owned(),
+                    "-c".to_owned(),
+                    format!("curl -sS -I -k --cert /tls/{OPERATOR_TLS_CERT_FILE_NAME} --key /tls/{OPERATOR_TLS_KEY_FILE_NAME} https://localhost:${OPERATOR_PORT}/health"),
+                ]),
+            }),
+            period_seconds: Some(5),
+            ..Default::default()
+        };
+
         let container = Container {
             name: OPERATOR_NAME.to_owned(),
             image: Some(format!(
@@ -338,6 +350,8 @@ impl OperatorDeployment {
                 requests: Some(RESOURCE_REQUESTS.clone()),
                 ..Default::default()
             }),
+            readiness_probe: Some(health_probe.clone()),
+            liveness_probe: Some(health_probe),
             ..Default::default()
         };
 
