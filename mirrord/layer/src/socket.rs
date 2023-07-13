@@ -359,7 +359,7 @@ impl OutgoingSelector {
     ///
     /// So if the user specified a selector with `0.0.0.0:0`, we're going to be always matching on
     /// it.
-    #[tracing::instrument(level = "trace", ret)]
+    #[tracing::instrument(level = "debug", ret)]
     fn connect_remote<const PROTOCOL: ConnectProtocol>(&self, address: SocketAddr) -> bool {
         use mirrord_config::feature::network::outgoing::{AddressFilter, ProtocolFilter};
 
