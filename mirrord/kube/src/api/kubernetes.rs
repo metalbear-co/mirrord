@@ -58,14 +58,15 @@ impl KubernetesAPI {
     }
 
     pub async fn detect_openshift(&self) -> Result<()> {
-        Ok(Discovery::new(self.client.clone())
+        Discovery::new(self.client.clone())
             .run()
             .await
             .map(|discovery| {
                 if discovery.has_group("route.openshift.io") {
-                    eprint!("mirrord is running on openshift, due to default PSP of openshift, mirrord may not be able to create the agent. Please refer to https://mirrord.dev/docs/overview/faq/");
+                    eprintln!("mirrord is running on openshift, due to default PSP of openshift, mirrord may not be able to create the agent. Please refer to https://mirrord.dev/docs/overview/faq/");
                 }
-        })?)
+        })?;
+        Ok(())
     }
 }
 
