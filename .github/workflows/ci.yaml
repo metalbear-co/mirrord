@@ -522,8 +522,7 @@ jobs:
       - name: Collect logs
         if: ${{ failure() }}
         run: |
-          kubectl describe pods
-          docker exec minikube find /var/log/pods -print -exec cat {} \;
+          kubectl logs -l app==mirrord --tail -1
 
 #  lint_markdown:
 #    runs-on: ubuntu-latest
