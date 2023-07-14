@@ -102,27 +102,21 @@ async fn layer_recv(
             connection_id,
             bytes,
         }) => {
-            let daemon_write = match writers
-                .get_mut(&connection_id)
-                .ok_or(ResponseError::NotFound(connection_id))
-            {
-                Ok(writer) => if bytes.is_empty() {
-                    writer.shutdown().await
-                    // TODO: remove writer? where?
-                } else {
-                    writer.write_all(&bytes).await
-                }
-                .map_err(ResponseError::from),
-                Err(fail) => Err(fail),
-            };
-
-            if let Err(fail) = daemon_write {
-                warn!("LayerTcpOutgoing::Write -> Failed with {:#?}", fail);
+            if bytes.is_empty() {
+                // Dropping the write half is like calling shutdown on the stream.
+                // Closing the stream in one direction.
                 writers.remove(&connection_id);
-                readers.remove(&connection_id);
+            } else {
+                if let Some(writer) = writers.get_mut(&connection_id) {
+                    if let Err(fail) = writer.write_all(&bytes).await {
+                        warn!("LayerTcpOutgoing::Write -> Failed with {:#?}", fail);
+                        writers.remove(&connection_id);
+                        readers.remove(&connection_id);
 
-                let daemon_message = DaemonTcpOutgoing::Close(connection_id);
-                daemon_tx.send(daemon_message).await?
+                        let daemon_message = DaemonTcpOutgoing::Close(connection_id);
+                        daemon_tx.send(daemon_message).await?
+                    }
+                }
             }
         }
         // [layer] -> [agent]
