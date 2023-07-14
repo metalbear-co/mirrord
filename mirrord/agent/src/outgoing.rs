@@ -203,6 +203,7 @@ impl TcpOutgoingApi {
                         Some(Some(Err(err))) => {
                             warn!("interceptor_task -> read connection_id {:#?} failed with {:#?}", connection_id, err);
                             writers.remove(&connection_id);
+                            readers.remove(&connection_id);
 
                             let daemon_message = DaemonTcpOutgoing::Close(connection_id);
                             daemon_tx.send(daemon_message).await?
