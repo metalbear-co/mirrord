@@ -77,8 +77,7 @@ use std::{
     mem,
     net::SocketAddr,
     panic,
-    str::FromStr,
-    sync::{Arc, LazyLock, OnceLock, RwLock},
+    sync::{OnceLock, RwLock},
 };
 
 use bimap::BiMap;
@@ -92,7 +91,7 @@ use libc::{c_int, pid_t};
 use mirrord_config::{
     feature::{
         fs::{FsConfig, FsModeConfig},
-        network::{incoming::IncomingConfig, outgoing::OutgoingFilter, NetworkConfig},
+        network::{incoming::IncomingConfig, NetworkConfig},
         FeatureConfig,
     },
     util::VecOrSingle,
@@ -417,29 +416,19 @@ fn set_globals(config: &LayerConfig) {
         .expect("Setting REMOTE_DNS singleton");
 
     {
-        let outgoing_remote = config
+        let outgoing_selector = config
             .feature
             .network
             .outgoing
-            .remote
-            .iter()
-            .map(|filter| OutgoingFilter::from_str(filter).expect("Invalid filter string!"))
-            .collect();
-
-        let outgoing_local = config
-            .feature
-            .network
-            .outgoing
-            .local
-            .iter()
-            .map(|filter| OutgoingFilter::from_str(filter).expect("Invalid filter string!"))
-            .collect();
+            .filter
+            .clone()
+            .try_into()
+            .expect("Failed setting up outgoing traffic filter!");
 
         // This will crash the app if it comes before `ENABLED_(TCP|UDP)_OUTGOING`!
-        let outgoing_selector = OutgoingSelector::new(outgoing_remote, outgoing_local);
-        *OUTGOING_SELECTOR
-            .write()
-            .expect("Initializing outgoing selector should not fail!") = outgoing_selector;
+        OUTGOING_SELECTOR
+            .set(outgoing_selector)
+            .expect("Setting OUTGOING_SELECTOR singleton");
     }
 
     REMOTE_UNIX_STREAMS

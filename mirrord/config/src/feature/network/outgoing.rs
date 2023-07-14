@@ -1,9 +1,10 @@
 use core::str::FromStr;
-use std::{collections::HashSet, net::SocketAddr};
+use std::net::SocketAddr;
 
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
+use serde::Deserialize;
 use thiserror::Error;
 
 use crate::{
@@ -11,10 +12,63 @@ use crate::{
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
+/// List of addresses/ports/subnets that should be sent through either the remote pod or local app,
+/// depending how you set this up with either `remote` or `local`.
+///
+/// You may use this option to specify when outgoing traffic is sent from the remote pod (which
+/// is the default behavior when you enable outgoing traffic), or from the local app (default when
+/// you have outgoing traffic disabled).
+///
+/// Takes a list of values, such as:
+///
+/// - Only UDP traffic on subnet `1.1.1.0/24` on port 1337 will go through the remote pod.
+///
+/// ```json
+/// {
+///   "remote": ["udp://1.1.1.0/24:1337"]
+/// }
+///
+/// - Only UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331`
+/// will go through the remote pod.
+/// ```json
+/// {
+///   "remote": ["google.com:1337", "google.com:7331"]
+/// }
+/// ```
+/// 
+/// - Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will
+///   be emmited remotely in the cluster.
+/// ```json
+/// {
+///   "local": ["tcp://localhost:1337"]
+/// }
+///
+/// - Only outgoing traffic on port `1337` and `7331` will go through the local app.
+/// ```json
+/// {
+///   "local": [":1337", ":7331"]
+/// }
+/// ```
+///
+/// Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
+#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum OutgoingFilterConfig {
+    /// Traffic that matches what's specified here will go through the remote pod, everything else
+    /// will go through local.
+    Remote(VecOrSingle<String>),
+
+    /// Traffic that matches what's specified here will go through the local app, everything else
+    /// will go through the remote pod.
+    Local(VecOrSingle<String>),
+}
+
 /// Tunnel outgoing network operations through mirrord.
 ///
 /// See the outgoing [reference](https://mirrord.dev/docs/reference/traffic/#outgoing) for more
 /// details.
+///
+/// The `remote` and `local` config for this feature are **mutually** exclusive.
 ///
 /// ```json
 /// {
@@ -24,8 +78,9 @@ use crate::{
 ///         "tcp": true,
 ///         "udp": true,
 ///         "ignore_localhost": false,
-///         "remote": ["udp://1.1.1.0/24:1337", "1.1.5.0/24", "tcp://google.com:53", "google.com", ":53"],
-///         "local": ["localhost"],
+///         "filter": {
+///           "local": ["tcp://1.1.1.0/24:1337", "1.1.5.0/24", "google.com", ":53"],
+///         },
 ///         "unix_streams": "bear.+"
 ///       }
 ///     }
@@ -55,60 +110,11 @@ pub struct OutgoingConfig {
     #[config(unstable, default = false)]
     pub ignore_localhost: bool,
 
-    /// #### feature.network.outgoing.remote {#feature.network.outgoing.remote}
+    /// #### feature.network.outgoing.filter {#feature.network.outgoing.filter}
     ///
-    /// List of addresses/ports/subnets that should be sent through the remote pod.
-    ///
-    /// You may use this option to specify when outgoing traffic is sent from the remote pod (which
-    /// is the default behavior when you enable outgoing traffic).
-    ///
-    /// Takes a list of values, such as:
-    ///
-    /// - UDP traffic on subnet `1.1.1.0/24` on port 1337 will go throuh the remote pod.
-    ///
-    /// ```json
-    /// {
-    ///   "remote": ["udp://1.1.1.0/24:1337"]
-    /// }
-    ///
-    /// - UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331` will go
-    /// through the remote pod.
-    /// ```json
-    /// {
-    ///   "remote": ["google.com:1337", "google.com:7331"]
-    /// }
-    /// ```
-    /// 
-    /// Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
-    #[config(default)]
-    pub remote: HashSet<String>,
-
-    /// #### feature.network.outgoing.local {#feature.network.outgoing.local}
-    ///
-    /// List of addresses/ports/subnets that should be sent through the local app.
-    ///
-    /// You may use this option to specify when outgoing traffic is sent from the local app, giving
-    /// you finer grained access to which traffic should go where.
-    ///
-    /// Takes a list of values, such as:
-    ///
-    /// - TCP traffic on `localhost` on port 1337 will go throuh the local app.
-    ///
-    /// ```json
-    /// {
-    ///   "local": ["tcp://localhost:1337"]
-    /// }
-    ///
-    /// - Any outgoing traffic on port `1337` and `7331` will go through the local app.
-    /// ```json
-    /// {
-    ///   "local": [":1337", ":7331"]
-    /// }
-    /// ```
-    /// 
-    /// Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
-    #[config(default)]
-    pub local: HashSet<String>,
+    /// Unstable: the precise syntax of this config is subject to change.
+    #[config(default, unstable)]
+    pub filter: Option<OutgoingFilterConfig>,
 
     /// #### feature.network.outgoing.unix_streams {#feature.network.outgoing.unix_streams}
     ///
@@ -363,8 +369,17 @@ impl CollectAnalytics for &OutgoingConfig {
                 .map(|v| v.len())
                 .unwrap_or_default(),
         );
-        analytics.add("remote", self.remote.len());
-        analytics.add("local", self.local.len());
+
+        if let Some(filter) = self.filter.as_ref() {
+            match filter {
+                OutgoingFilterConfig::Remote(value) => {
+                    analytics.add("outgoing_filter_remote", value.len())
+                }
+                OutgoingFilterConfig::Local(value) => {
+                    analytics.add("outgoing_filter_local", value.len())
+                }
+            }
+        }
     }
 }
 

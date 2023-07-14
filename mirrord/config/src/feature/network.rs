@@ -33,8 +33,9 @@ pub mod outgoing;
 ///       "outgoing": {
 ///         "tcp": true,
 ///         "udp": true,
-///         "remote": ["udp://1.1.1.0/24:1337", "1.1.5.0/24", "tcp://google.com:53", "google.com", ":53"],
-///         "local": ["localhost"],
+///         "filter": {
+///           "local": ["tcp://1.1.1.0/24:1337", "1.1.5.0/24", "google.com", ":53"],
+///         },
 ///         "ignore_localhost": false,
 ///         "unix_streams": "bear.+"
 ///       },

@@ -8,6 +8,22 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.50.5](https://github.com/metalbear-co/mirrord/tree/3.50.5) - 2023-07-13
+
+
+### Fixed
+
+- Make sure conntrack flushes the correct port.
+  [#1655](https://github.com/metalbear-co/mirrord/issues/1655)
+- Added `CAP_NET_RAW` Linux capability agent.
+
+
+### Internal
+
+- Use a patched (fixed) version of rasn, otherwise doing a cargo update breaks
+  compilation due to rasn-derive from rasn used in apple-codesign.
+
+
 ## [3.50.4](https://github.com/metalbear-co/mirrord/tree/3.50.4) - 2023-07-11
 
 
