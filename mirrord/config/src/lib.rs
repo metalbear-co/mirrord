@@ -117,7 +117,7 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///         "tcp": true,
 ///         "udp": true,
 ///         "filter": {
-///           "local": ["tcp://1.1.1.0/24:1337", "1.1.5.0/24", "google.com", ":53"],
+///           "local": ["tcp://1.1.1.0/24:1337", "1.1.5.0/24", "google.com", ":53"]
 ///         },
 ///         "ignore_localhost": false,
 ///         "unix_streams": "bear.+"
@@ -127,8 +127,8 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///   },
 ///   "operator": true,
 ///   "kubeconfig": "~/.kube/config",
-///   "sip_binaries": "bash"
-///   "telemetry": true,
+///   "sip_binaries": "bash",
+///   "telemetry": true
 /// }
 /// ```
 ///
