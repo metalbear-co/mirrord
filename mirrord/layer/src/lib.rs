@@ -77,7 +77,7 @@ use std::{
     mem,
     net::SocketAddr,
     panic,
-    sync::{OnceLock, RwLock},
+    sync::{Arc, LazyLock, OnceLock, RwLock},
 };
 
 use bimap::BiMap;
@@ -426,9 +426,9 @@ fn set_globals(config: &LayerConfig) {
             .expect("Failed setting up outgoing traffic filter!");
 
         // This will crash the app if it comes before `ENABLED_(TCP|UDP)_OUTGOING`!
-        OUTGOING_SELECTOR
-            .set(outgoing_selector)
-            .expect("Setting OUTGOING_SELECTOR singleton");
+        *OUTGOING_SELECTOR
+            .write()
+            .expect("Setting OUTGOING_SELECTOR singleton") = outgoing_selector;
     }
 
     REMOTE_UNIX_STREAMS

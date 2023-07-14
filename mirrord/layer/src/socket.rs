@@ -9,14 +9,13 @@ use std::{
 };
 
 use dashmap::DashMap;
-use hashbrown::hash_set::{HashSet, IntoIter};
+use hashbrown::hash_set::HashSet;
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_config::{
-    feature::network::outgoing::{OutgoingFilter, OutgoingFilterConfig},
+    feature::network::outgoing::{OutgoingFilter, OutgoingFilterConfig, ProtocolFilter},
     util::VecOrSingle,
 };
 use mirrord_protocol::outgoing::SocketAddress;
-use rand::seq::index::IndexVecIntoIter;
 use socket2::SockAddr;
 use tracing::warn;
 use trust_dns_resolver::config::Protocol;
@@ -26,7 +25,8 @@ use crate::{
     common::{blocking_send_hook_message, HookMessage},
     detour::{Bypass, Detour, OptionExt},
     error::{HookError, HookResult, LayerError},
-    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_PORTS,
+    socket::ops::remote_getaddrinfo,
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_PORTS, REMOTE_DNS,
 };
 
 pub(super) mod hooks;
@@ -398,6 +398,12 @@ impl OutgoingSelector {
         }
     }
 
+    /// Resolves the [`OutgoingFilter`] that are host names using either [`remote_getaddrinfo`] or
+    /// regular `getaddrinfo`, depending if the user set up the `dns` feature to resolve DNS through
+    /// the remote pod or not.
+    ///
+    /// The resolved values are put back into `self` as `AddressFilter::Socket`, while the
+    /// `AddressFilter::Name` are removed.
     #[tracing::instrument(level = "debug", ret)]
     fn resolve_dns(&mut self) -> HookResult<()> {
         use mirrord_config::feature::network::outgoing::AddressFilter;
@@ -408,19 +414,22 @@ impl OutgoingSelector {
             _ => false,
         };
 
+        // Converts `AddressFilter::Name`s into something more convenient to be used in `resolve`.
         let to_name_and_port = |outgoing: OutgoingFilter| match outgoing.address {
             AddressFilter::Name((name, port)) => (outgoing.protocol, name, port),
             _ => unreachable!("Filter went wrong, we should only have named addresses here!"),
         };
 
+        // Resolves a list of host names, depending on how the user sets the remote `dns` feature.
         let resolve = |unresolved: HashSet<(ProtocolFilter, String, u16)>| {
             let mut unresolved = unresolved.into_iter();
 
+            // Resolve DNS through the agent.
             let resolved = if *REMOTE_DNS.get().expect("REMOTE_DNS should be set by now!") {
                 unresolved
                     .try_fold(
                         HashSet::with_capacity(8),
-                        |mut resolved: HashSet<OutgoingFilter>, (protocol, name, port)| {
+                        |mut resolved, (protocol, name, port)| {
                             let addresses =
                                 remote_getaddrinfo(name, port)?
                                     .into_iter()
@@ -438,6 +447,7 @@ impl OutgoingSelector {
                     )?
                     .into_iter()
             } else {
+                // Resolve DNS locally.
                 unresolved
                     .try_fold(
                         HashSet::with_capacity(8),
@@ -457,14 +467,20 @@ impl OutgoingSelector {
             Ok::<_, HookError>(resolved)
         };
 
-        let resolved_remote =
-            resolve(self.remote.extract_if(name).map(to_name_and_port).collect())?;
-        self.remote.extend(resolved_remote);
+        // Updates the filter (remote or local) with the resolved addresses.
+        let update_filter = |filter: &mut HashSet<_>| {
+            let resolved = resolve(filter.extract_if(name).map(to_name_and_port).collect())?;
+            filter.extend(resolved);
 
-        let resolved_local = resolve(self.local.extract_if(name).map(to_name_and_port).collect())?;
-        self.local.extend(resolved_local);
+            Ok(())
+        };
 
-        Ok(())
+        match self {
+            OutgoingSelector::Unfiltered => Ok(()),
+            OutgoingSelector::Remote(filter) | OutgoingSelector::Local(filter) => {
+                update_filter(filter)
+            }
+        }
     }
 }
 
