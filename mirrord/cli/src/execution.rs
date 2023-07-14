@@ -136,7 +136,9 @@ impl MirrordExecution {
                 proxy_command.env("MIRRORD_CONNECT_AGENT", name);
                 proxy_command.env("MIRRORD_CONNECT_PORT", port.to_string());
             }
-            AgentConnectInfo::Operator => {}
+            AgentConnectInfo::Operator(session) => {
+                proxy_command.env(session.env_key(), serde_json::to_string(&session)?);
+            }
         };
 
         let mut proxy_process = proxy_command

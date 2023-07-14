@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
-use mirrord_operator::client::{OperatorApi, OperatorApiError};
+use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorSessionInformation};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
@@ -11,8 +11,7 @@ use tracing::trace;
 use crate::{CliError, Result};
 
 pub(crate) enum AgentConnectInfo {
-    /// No info is needed, operator creates on demand
-    Operator,
+    Operator(OperatorSessionInformation),
     /// Connect directly to an agent by name and port using k8s port forward.
     DirectKubernetes(String, u16),
 }
@@ -22,16 +21,23 @@ pub(crate) struct AgentConnection {
     pub receiver: mpsc::Receiver<DaemonMessage>,
 }
 
-pub(crate) async fn connect_operator<P>(
+pub(crate) async fn create_operator_session<P>(
     config: &LayerConfig,
     progress: &P,
-) -> Result<Option<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)>, CliError>
+) -> Result<
+    Option<(
+        mpsc::Sender<ClientMessage>,
+        mpsc::Receiver<DaemonMessage>,
+        OperatorSessionInformation,
+    )>,
+    CliError,
+>
 where
     P: Progress + Send + Sync,
 {
     let sub_progress = progress.subtask("checking operator");
 
-    match OperatorApi::discover(config, progress).await {
+    match OperatorApi::create_session(config, progress).await {
         Ok(Some(connection)) => {
             sub_progress.done_with("connected to operator");
 
@@ -68,9 +74,9 @@ pub(crate) async fn create_and_connect<P>(
 where
     P: Progress + Send + Sync,
 {
-    if config.operator && let Some((sender, receiver)) = connect_operator(config, progress).await? {
+    if config.operator && let Some((sender, receiver, operator_information)) = create_operator_session(config, progress).await? {
         Ok((
-            AgentConnectInfo::Operator,
+            AgentConnectInfo::Operator(operator_information),
             AgentConnection { sender, receiver },
         ))
     } else {

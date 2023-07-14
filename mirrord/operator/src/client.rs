@@ -13,15 +13,16 @@ use mirrord_kube::{
 use mirrord_progress::{MessageKind, Progress};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use semver::Version;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
-use tracing::{error, trace, warn};
+use tracing::error;
 
 use crate::crd::{MirrordOperatorCrd, TargetCrd, OPERATOR_STATUS_NAME};
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
-static MIRRORD_OPERATOR_SESSION_ID: &str = "MIRRORD_OPERATOR_SESSION_ID";
+static MIRRORD_OPERATOR_SESSION: &str = "MIRRORD_OPERATOR_SESSION";
 
 #[derive(Debug, Error)]
 pub enum OperatorApiError {
@@ -45,6 +46,8 @@ pub enum OperatorApiError {
     Authentication(#[from] AuthenticationError),
     #[error("Can't start proccess because other locks exist on target")]
     ConcurrentStealAbort,
+    #[error("Invalid operator session - this is a bug, please report it. value: `{0}` err: `{1}`")]
+    InvalidOperatorSession(String, serde_json::Error),
 }
 
 type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
@@ -57,11 +60,52 @@ pub struct OperatorApi {
     on_concurrent_steal: ConcurrentSteal,
 }
 
+/// Data we store into environment variables for the child processes to use.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct OperatorSessionInformation {
+    pub session_id: String,
+    pub target: TargetCrd,
+    pub fingerprint: Option<String>,
+}
+
+impl OperatorSessionInformation {
+    pub fn new(target: TargetCrd, fingerprint: Option<String>) -> Self {
+        Self {
+            session_id: rand::random::<u64>().to_string(),
+            target,
+            fingerprint,
+        }
+    }
+
+    /// Returns environment variable holding the information
+    pub fn env_key() -> &'static str {
+        MIRRORD_OPERATOR_SESSION
+    }
+
+    /// Loads the information from environment variables
+    pub fn from_env() -> Result<Option<Self>> {
+        std::env::var(Self::env_key())
+            .ok()
+            .map(|val| {
+                serde_json::from_str(&val)
+                    .map_err(|e| OperatorApiError::InvalidOperatorSession(val, e))
+            })
+            .transpose()
+    }
+}
+
 impl OperatorApi {
-    pub async fn discover<P>(
+    /// Creates a new operator session, setting the session information in environment variables.
+    pub async fn create_session<P>(
         config: &LayerConfig,
         progress: &P,
-    ) -> Result<Option<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)>>
+    ) -> Result<
+        Option<(
+            mpsc::Sender<ClientMessage>,
+            mpsc::Receiver<DaemonMessage>,
+            OperatorSessionInformation,
+        )>,
+    >
     where
         P: Progress + Send + Sync,
     {
@@ -88,35 +132,29 @@ impl OperatorApi {
                     progress.subtask("comparing versions").print_message(MessageKind::Warning, Some("Consider either updating your operator version to match your mirrord plugin/CLI version, or downgrading your mirrord plugin/CLI."));
                 }
             }
+            let operator_session_information =
+                OperatorSessionInformation::new(target, status.spec.license.fingerprint);
 
-            operator_api
-                .connect_target(target, status.spec.license.fingerprint)
-                .await
-                .map(Some)
+            let (sender, receiver) = operator_api
+                .connect_target(&operator_session_information)
+                .await?;
+            Ok(Some((sender, receiver, operator_session_information)))
         } else {
             // No operator found
             Ok(None)
         }
     }
 
-    /// Uses `MIRRORD_OPERATOR_SESSION_ID` to have a persistant session_id across child processes,
-    /// if env var is empty or missing random id will be generated and saved in env
-    fn session_id() -> u64 {
-        std::env::var(MIRRORD_OPERATOR_SESSION_ID)
-            .inspect_err(|_| trace!("{MIRRORD_OPERATOR_SESSION_ID} empty, creating new session"))
-            .ok()
-            .and_then(|val| {
-                val.parse()
-                    .inspect_err(|err| {
-                        warn!("Error parsing {MIRRORD_OPERATOR_SESSION_ID}, creating new session. Err: {err}")
-                    })
-                    .ok()
-            })
-            .unwrap_or_else(|| {
-                let id = rand::random();
-                std::env::set_var(MIRRORD_OPERATOR_SESSION_ID, format!("{id}"));
-                id
-            })
+    /// Connect to session using operator and session information
+    pub async fn connect(
+        config: &LayerConfig,
+        session_information: &OperatorSessionInformation,
+    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+        let operator_api = OperatorApi::new(config).await?;
+        let (sender, receiver) = operator_api
+            .connect_target(&session_information)
+            .await?;
+        Ok((sender, receiver))
     }
 
     async fn new(config: &LayerConfig) -> Result<Self> {
@@ -171,12 +209,12 @@ impl OperatorApi {
     /// Create websocket connection to operator
     async fn connect_target(
         &self,
-        target: TargetCrd,
-        credential_name: Option<String>,
+        session_information: &OperatorSessionInformation,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+        // why are we checking on client side..?
         if self.on_concurrent_steal == ConcurrentSteal::Abort && let Ok(lock_target) = self
                 .target_api
-                .get_subresource("port-locks", &target.name())
+                .get_subresource("port-locks", &session_information.target.name())
                 .await && lock_target
                 .spec
                 .port_locks
@@ -189,15 +227,15 @@ impl OperatorApi {
             .uri(format!(
                 "{}/{}?on_concurrent_steal={}&connect=true",
                 self.target_api.resource_url(),
-                target.name(),
+                session_information.target.name(),
                 self.on_concurrent_steal
             ))
-            .header("x-session-id", Self::session_id());
+            .header("x-session-id", session_information.session_id.clone());
 
-        if let Some(credential_name) = credential_name {
+        if let Some(credential_name) = &session_information.fingerprint {
             let client_credentials = CredentialStoreSync::get_client_certificate::<
                 MirrordOperatorCrd,
-            >(&self.client, credential_name)
+            >(&self.client, credential_name.to_string())
             .await
             .map(|certificate_der| general_purpose::STANDARD.encode(certificate_der))?;
 

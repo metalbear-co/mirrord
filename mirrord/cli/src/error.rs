@@ -30,8 +30,6 @@ pub(crate) enum InternalProxyError {
     FirstConnectionTimeout,
     #[error("Couldn't accept connection {0:#?}")]
     AcceptError(std::io::Error),
-    #[error("Couldn't connect to operator ")]
-    OperatorConnectionError,
     #[error("Couldn't connect to agent via TCP {0:#?}")]
     TcpConnectError(std::io::Error),
     #[error("Agent closed connection on ping/pong, image version/arch mismatch?")]
@@ -40,6 +38,8 @@ pub(crate) enum InternalProxyError {
     PingError(#[from] tokio::sync::mpsc::error::SendError<mirrord_protocol::ClientMessage>),
     #[error("Set sid failed {0:#?}, please report a bug")]
     SetSidError(nix::Error),
+    #[error("No connection method, please report a bug")]
+    NoConnectionMethod,
 }
 
 #[derive(Debug, Error, Diagnostic)]
