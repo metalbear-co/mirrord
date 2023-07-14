@@ -4,6 +4,7 @@ use std::{
 };
 
 use mirrord_config::LayerConfig;
+use mirrord_operator::client::OperatorSessionInformation;
 use mirrord_progress::Progress;
 use mirrord_protocol::{
     pause::DaemonPauseTarget, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
@@ -137,7 +138,10 @@ impl MirrordExecution {
                 proxy_command.env("MIRRORD_CONNECT_PORT", port.to_string());
             }
             AgentConnectInfo::Operator(session) => {
-                proxy_command.env(session.env_key(), serde_json::to_string(&session)?);
+                proxy_command.env(
+                    OperatorSessionInformation::env_key(),
+                    serde_json::to_string(&session)?,
+                );
             }
         };
 
