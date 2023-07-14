@@ -27,6 +27,7 @@ use crate::{
 /// {
 ///   "remote": ["udp://1.1.1.0/24:1337"]
 /// }
+/// ```
 ///
 /// - Only UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331`
 /// will go through the remote pod.
@@ -35,13 +36,15 @@ use crate::{
 ///   "remote": ["google.com:1337", "google.com:7331"]
 /// }
 /// ```
-/// 
-/// - Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will
-///   be emmited remotely in the cluster.
+///
+/// - Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will be
+///   emmited remotely in the cluster.
+///
 /// ```json
 /// {
 ///   "local": ["tcp://localhost:1337"]
 /// }
+/// ```
 ///
 /// - Only outgoing traffic on port `1337` and `7331` will go through the local app.
 /// ```json
