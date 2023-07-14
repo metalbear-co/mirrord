@@ -21,7 +21,7 @@ use crate::{
 ///
 /// Takes a list of values, such as:
 ///
-/// - Only UDP traffic on subnet `1.1.1.0/24` on port 1337 will go throuh the remote pod.
+/// - Only UDP traffic on subnet `1.1.1.0/24` on port 1337 will go through the remote pod.
 ///
 /// ```json
 /// {
