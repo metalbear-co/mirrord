@@ -22,7 +22,7 @@ use tokio::{
     sync::mpsc::Sender,
     task,
 };
-use tokio_stream::{StreamExt, StreamMap};
+use tokio_stream::{StreamExt, StreamMap, StreamNotifyClose};
 use tokio_util::io::ReaderStream;
 use tracing::{debug, error, info, trace, warn};
 
@@ -41,7 +41,7 @@ pub(crate) enum TcpOutgoing {
 }
 
 /// Responsible for handling hook and daemon messages for the outgoing traffic feature.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) struct TcpOutgoingHandler {
     // TODO: docs
     /// Holds the channels used to send daemon messages to the interceptor socket, for the case
@@ -52,7 +52,7 @@ pub(crate) struct TcpOutgoingHandler {
     // TODO: docs
     // TODO: if we want to send the forward shutdowns from the user to the agent, we can wrap the
     //      `StreamMap` with a `StreamNotifyClose`, and send a write message with an empty vec.
-    data_rxs: StreamMap<ConnectionId, ReaderStream<ReadHalf<DuplexStream>>>,
+    data_rxs: StreamMap<ConnectionId, StreamNotifyClose<ReaderStream<ReadHalf<DuplexStream>>>>,
 
     /// Holds the connection requests from the `connect` hook. It's main use is to reply back with
     /// the `SocketAddr` of the socket that'll be used to intercept the user's socket operations.
@@ -227,7 +227,8 @@ impl TcpOutgoingHandler {
 
                         let (main_task_side, interceptor_task_side) = io::duplex(1024);
                         let (rx, tx) = split(main_task_side);
-                        self.data_rxs.insert(connection_id, ReaderStream::new(rx));
+                        self.data_rxs
+                            .insert(connection_id, StreamNotifyClose::new(ReaderStream::new(rx)));
                         self.data_txs.insert(connection_id, tx);
 
                         let _ = DetourGuard::new();
@@ -272,6 +273,7 @@ impl TcpOutgoingHandler {
                                     interceptor task. Error: {err}"
                                 );
                             });
+                            // TODO: when do we remove the writer?
                         } else {
                             writer.write_all(&bytes[..]).await.unwrap_or_else(|_| {
                                 warn!(
@@ -305,11 +307,11 @@ impl TcpOutgoingHandler {
         self.data_rxs.next().map(|option| {
             option.map(|(connection_id, bytes)| {
                 match bytes {
-                    Err(err) => {
+                    Some(Err(err)) => {
                         info!("Could not read outgoing data. Error: {:#?}", err);
                         LayerTcpOutgoing::Close(LayerClose { connection_id })
                     }
-                    Ok(bytes) => {
+                    Some(Ok(bytes)) => {
                         // Sends the message that the user wrote to our interceptor socket to
                         // be handled on the `agent`, where it'll be forwarded to the remote.
                         LayerTcpOutgoing::Write(LayerWrite {
@@ -317,6 +319,10 @@ impl TcpOutgoingHandler {
                             bytes: bytes.to_vec(),
                         })
                     }
+                    None => LayerTcpOutgoing::Write(LayerWrite {
+                        connection_id,
+                        bytes: Vec::new(),
+                    }),
                 }
             })
         })

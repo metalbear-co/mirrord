@@ -108,6 +108,7 @@ async fn layer_recv(
             {
                 Ok(writer) => if bytes.is_empty() {
                     writer.shutdown().await
+                    // TODO: remove writer? where?
                 } else {
                     writer.write_all(&bytes).await
                 }
@@ -199,25 +200,25 @@ impl TcpOutgoingApi {
                         // We shouldn't return it as a `Result<T, ResponseError>` since we lose track of connection id
                         // and it doesn't really make sense to do it, but we don't want to break the protocol
                         // so we'll still wrap it with Ok() and if we error we just close the connection.
-                        Some(Ok(read)) => {
+                        Some(Some(Ok(read))) => {
                             let daemon_read = DaemonRead { connection_id, bytes: read.to_vec() };
 
                             let daemon_message = DaemonTcpOutgoing::Read(Ok(daemon_read));
                             daemon_tx.send(daemon_message).await?
                         },
-                        Some(Err(err)) => {
+                        Some(Some(Err(err))) => {
                             warn!("interceptor_task -> read connection_id {:#?} failed with {:#?}", connection_id, err);
                             writers.remove(&connection_id);
 
                             let daemon_message = DaemonTcpOutgoing::Close(connection_id);
                             daemon_tx.send(daemon_message).await?
                         }
-                        None => {
+                        None | Some(None) => {
                             trace!("interceptor_task -> close connection {:#?}", connection_id);
                             // writers.remove(&connection_id);
 
                             // let daemon_message = DaemonTcpOutgoing::Close(connection_id);
-                            let daemon_message = DaemonTcpOutgoing::Read(Ok(DaemonRead { connection_id, bytes: Vec::new()}))
+                            let daemon_message = DaemonTcpOutgoing::Read(Ok(DaemonRead { connection_id, bytes: Vec::new()}));
                             daemon_tx.send(daemon_message).await?
                         }
                     }
