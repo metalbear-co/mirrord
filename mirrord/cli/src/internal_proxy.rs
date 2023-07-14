@@ -115,6 +115,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
     // This will guarantee agent staying alive and will enable us to
     // make the agent close on last connection close immediately (will help in tests)
     let (_main_connection, operator) = connect_and_ping(&config).await?;
+
     print_port(&listener)?;
 
     // wait for first connection `FIRST_CONNECTION_TIMEOUT` seconds, or timeout.

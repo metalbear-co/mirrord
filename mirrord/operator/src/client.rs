@@ -151,9 +151,7 @@ impl OperatorApi {
         session_information: &OperatorSessionInformation,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
         let operator_api = OperatorApi::new(config).await?;
-        let (sender, receiver) = operator_api
-            .connect_target(&session_information)
-            .await?;
+        let (sender, receiver) = operator_api.connect_target(&session_information).await?;
         Ok((sender, receiver))
     }
 
