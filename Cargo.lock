@@ -3259,8 +3259,10 @@ version = "3.50.5"
 dependencies = [
  "bimap",
  "bitflags 2.3.3",
+ "ipnet",
  "mirrord-analytics",
  "mirrord-config-derive",
+ "nom",
  "rstest 0.17.0",
  "schemars",
  "serde",
