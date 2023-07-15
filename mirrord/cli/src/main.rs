@@ -214,13 +214,24 @@ async fn get_kube_pods(
         )
         .await
         .map_err(KubeApiError::from)
-        .map_err(CliError::KubernetesApiFailed)?;
+        .map_err(CliError::KubernetesApiFailed)?
+        .into_iter()
+        .filter(|pod| {
+            pod.status
+                .as_ref()
+                .and_then(|status| status.conditions.as_ref())
+                .and_then(|conditions| {
+                    Some(
+                        conditions
+                            .into_iter()
+                            .all(|condition| condition.status == "True"),
+                    )
+                })
+                .unwrap_or(true)
+        });
 
     // convert pods to (name, container names) pairs
-
     let pod_containers_map: HashMap<String, Vec<String>> = pods
-        .items
-        .iter()
         .filter_map(|pod| {
             let name = pod.metadata.name.clone()?;
             let containers = pod
