@@ -27,6 +27,7 @@ use crate::{
 /// {
 ///   "remote": ["udp://1.1.1.0/24:1337"]
 /// }
+/// ```
 ///
 /// - Only UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331`
 /// will go through the remote pod.
@@ -35,13 +36,15 @@ use crate::{
 ///   "remote": ["google.com:1337", "google.com:7331"]
 /// }
 /// ```
-/// 
-/// - Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will
-///   be emmited remotely in the cluster.
+///
+/// - Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will be
+///   emmited remotely in the cluster.
+///
 /// ```json
 /// {
 ///   "local": ["tcp://localhost:1337"]
 /// }
+/// ```
 ///
 /// - Only outgoing traffic on port `1337` and `7331` will go through the local app.
 /// ```json
@@ -79,7 +82,7 @@ pub enum OutgoingFilterConfig {
 ///         "udp": true,
 ///         "ignore_localhost": false,
 ///         "filter": {
-///           "local": ["tcp://1.1.1.0/24:1337", "1.1.5.0/24", "google.com", ":53"],
+///           "local": ["tcp://1.1.1.0/24:1337", "1.1.5.0/24", "google.com", ":53"]
 ///         },
 ///         "unix_streams": "bear.+"
 ///       }
@@ -151,7 +154,7 @@ impl MirrordToggleableConfig for OutgoingFileConfig {
 }
 
 /// <!--${internal}-->
-/// Errors related to parsing an [`OutgoingFilter`].  
+/// Errors related to parsing an [`OutgoingFilter`].
 #[derive(Debug, Error)]
 pub enum OutgoingFilterError {
     #[error("Nom: failed parsing with {0}!")]

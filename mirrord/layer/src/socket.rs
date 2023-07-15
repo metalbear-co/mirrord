@@ -12,7 +12,9 @@ use dashmap::DashMap;
 use hashbrown::hash_set::HashSet;
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_config::{
-    feature::network::outgoing::{OutgoingFilter, OutgoingFilterConfig, ProtocolFilter},
+    feature::network::outgoing::{
+        AddressFilter, OutgoingFilter, OutgoingFilterConfig, ProtocolFilter,
+    },
     util::VecOrSingle,
 };
 use mirrord_protocol::outgoing::SocketAddress;
@@ -294,8 +296,6 @@ impl TryFrom<Option<OutgoingFilterConfig>> for OutgoingSelector {
     ///
     /// It also removes duplicated filters, by putting them into a [`HashSet`].
     fn try_from(value: Option<OutgoingFilterConfig>) -> Result<Self, Self::Error> {
-        use mirrord_config::feature::network::outgoing::*;
-
         let enabled_tcp = *ENABLED_TCP_OUTGOING
             .get()
             .expect("ENABLED_TCP_OUTGOING should be set before initializing OutgoingSelector!");
@@ -361,14 +361,20 @@ impl OutgoingSelector {
     ///
     /// So if the user specified a selector with `0.0.0.0:0`, we're going to be always matching on
     /// it.
-    #[tracing::instrument(level = "debug", ret)]
-    fn connect_remote<const PROTOCOL: ConnectProtocol>(&self, address: SocketAddr) -> bool {
-        use mirrord_config::feature::network::outgoing::{AddressFilter, ProtocolFilter};
-
+    // #[tracing::instrument(level = "debug", ret)]
+    fn connect_remote<const PROTOCOL: ConnectProtocol>(
+        &self,
+        address: SocketAddr,
+    ) -> HookResult<bool> {
         let filter_protocol = |outgoing: &&OutgoingFilter| match outgoing.protocol {
             ProtocolFilter::Any => true,
             ProtocolFilter::Tcp if PROTOCOL == TCP => true,
             ProtocolFilter::Udp if PROTOCOL == UDP => true,
+            _ => false,
+        };
+
+        let skip_unresolved = |outgoing: &&OutgoingFilter| match outgoing.address {
+            AddressFilter::Name(_) => true,
             _ => false,
         };
 
@@ -391,11 +397,24 @@ impl OutgoingSelector {
             }
         };
 
-        match self {
+        let resolved_hosts = self.resolve_dns()?;
+        let hosts = resolved_hosts.iter();
+
+        Ok(match self {
             OutgoingSelector::Unfiltered => true,
-            OutgoingSelector::Remote(list) => list.iter().filter(filter_protocol).any(any_address),
-            OutgoingSelector::Local(list) => !list.iter().filter(filter_protocol).any(any_address),
-        }
+            OutgoingSelector::Remote(list) => list
+                .iter()
+                .chain(hosts)
+                .filter(skip_unresolved)
+                .filter(filter_protocol)
+                .any(any_address),
+            OutgoingSelector::Local(list) => !list
+                .iter()
+                .chain(hosts)
+                .filter(skip_unresolved)
+                .filter(filter_protocol)
+                .any(any_address),
+        })
     }
 
     /// Resolves the [`OutgoingFilter`] that are host names using either [`remote_getaddrinfo`] or
@@ -404,19 +423,17 @@ impl OutgoingSelector {
     ///
     /// The resolved values are put back into `self` as `AddressFilter::Socket`, while the
     /// `AddressFilter::Name` are removed.
-    #[tracing::instrument(level = "debug", ret)]
-    fn resolve_dns(&mut self) -> HookResult<()> {
-        use mirrord_config::feature::network::outgoing::AddressFilter;
-
+    // #[tracing::instrument(level = "debug", ret)]
+    fn resolve_dns(&self) -> HookResult<HashSet<OutgoingFilter>> {
         // Closure that tries to match `address` with something in the selector set.
-        let name = |outgoing: &OutgoingFilter| match outgoing.address {
+        let name = |outgoing: &&OutgoingFilter| match outgoing.address {
             AddressFilter::Name(_) => true,
             _ => false,
         };
 
         // Converts `AddressFilter::Name`s into something more convenient to be used in `resolve`.
-        let to_name_and_port = |outgoing: OutgoingFilter| match outgoing.address {
-            AddressFilter::Name((name, port)) => (outgoing.protocol, name, port),
+        let to_name_and_port = |outgoing: &OutgoingFilter| match &outgoing.address {
+            AddressFilter::Name((name, port)) => (outgoing.protocol, name.clone(), *port),
             _ => unreachable!("Filter went wrong, we should only have named addresses here!"),
         };
 
@@ -467,18 +484,10 @@ impl OutgoingSelector {
             Ok::<_, HookError>(resolved)
         };
 
-        // Updates the filter (remote or local) with the resolved addresses.
-        let update_filter = |filter: &mut HashSet<_>| {
-            let resolved = resolve(filter.extract_if(name).map(to_name_and_port).collect())?;
-            filter.extend(resolved);
-
-            Ok(())
-        };
-
         match self {
-            OutgoingSelector::Unfiltered => Ok(()),
+            OutgoingSelector::Unfiltered => Ok(HashSet::new()),
             OutgoingSelector::Remote(filter) | OutgoingSelector::Local(filter) => {
-                update_filter(filter)
+                Ok(resolve(filter.iter().filter(name).map(to_name_and_port).collect())?.collect())
             }
         }
     }

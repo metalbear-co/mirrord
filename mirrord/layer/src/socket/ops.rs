@@ -307,25 +307,10 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
 ) -> Detour<ConnectResult> {
-    // TODO(alex): We could hold 2 different globals, 1 for `UNRESOLVED_x` containing the not yet
-    // resolved addresses, and a 2nd with `RESOLVED_x`, where there is no more filter
-    // `AddressFilter::Name`. Doing so, we would only enter this scope once, then we would just
-    // check if the `RESOLVED_x.len() > 0`, meaning we have resolved everything and `UNRESOLVE_x` is
-    // irrelevant.
-    //
-    // This would also help out in removing the `unreachable` we have in `connect_remote`.
-
-    // Scoped access to the `OUTGOING_SELECTOR`, so we don't lock this longer than we need.
-    {
-        let mut selector = OUTGOING_SELECTOR.write()?;
-        selector.resolve_dns()?;
-    }
-
     if remote_address.is_unix()
         || OUTGOING_SELECTOR
-            .read()
-            .unwrap()
-            .connect_remote::<PROTOCOL>(remote_address.as_socket()?)
+            .get()?
+            .connect_remote::<PROTOCOL>(remote_address.as_socket()?)?
     {
         // Prepare this socket to be intercepted.
         let (mirror_tx, mirror_rx) = oneshot::channel();

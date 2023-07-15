@@ -77,7 +77,7 @@ use std::{
     mem,
     net::SocketAddr,
     panic,
-    sync::{Arc, LazyLock, OnceLock, RwLock},
+    sync::{OnceLock, RwLock},
 };
 
 use bimap::BiMap;
@@ -260,8 +260,7 @@ pub(crate) static REMOTE_DNS: OnceLock<bool> = OnceLock::new();
 /// Selector for how outgoing connection will behave, either sending traffic via the remote or from
 /// local app, according to how the user set up the `remote`, and `local` filter, in
 /// `feature.network.outgoing`.
-pub(crate) static OUTGOING_SELECTOR: LazyLock<Arc<RwLock<OutgoingSelector>>> =
-    LazyLock::new(|| Arc::default());
+pub(crate) static OUTGOING_SELECTOR: OnceLock<OutgoingSelector> = OnceLock::new();
 
 /// Ports to ignore because they are used by the IDE debugger
 pub(crate) static DEBUGGER_IGNORED_PORTS: OnceLock<DebuggerPorts> = OnceLock::new();
@@ -426,9 +425,9 @@ fn set_globals(config: &LayerConfig) {
             .expect("Failed setting up outgoing traffic filter!");
 
         // This will crash the app if it comes before `ENABLED_(TCP|UDP)_OUTGOING`!
-        *OUTGOING_SELECTOR
-            .write()
-            .expect("Setting OUTGOING_SELECTOR singleton") = outgoing_selector;
+        OUTGOING_SELECTOR
+            .set(outgoing_selector)
+            .expect("Setting OUTGOING_SELECTOR singleton");
     }
 
     REMOTE_UNIX_STREAMS
