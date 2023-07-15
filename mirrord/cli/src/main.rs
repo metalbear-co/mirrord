@@ -220,12 +220,10 @@ async fn get_kube_pods(
             pod.status
                 .as_ref()
                 .and_then(|status| status.conditions.as_ref())
-                .and_then(|conditions| {
-                    Some(
-                        conditions
-                            .into_iter()
-                            .all(|condition| condition.status == "True"),
-                    )
+                .map(|conditions| {
+                    conditions
+                        .iter()
+                        .all(|condition| condition.status == "True")
                 })
                 .unwrap_or(true)
         });
