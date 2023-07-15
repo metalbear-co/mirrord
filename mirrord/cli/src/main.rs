@@ -199,8 +199,8 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
 }
 
-/// Returns a list of (pod name, [container names]) pairs.
-/// Filtering mesh side cars
+/// Returns a list of (pod name, [container names]) pairs, filtering out mesh side cars
+/// as well as any pods which are not ready or have crashed.
 async fn get_kube_pods(
     namespace: Option<&str>,
     client: &kube::Client,
@@ -221,11 +221,12 @@ async fn get_kube_pods(
                 .as_ref()
                 .and_then(|status| status.conditions.as_ref())
                 .map(|conditions| {
+                    // filter out pods without the Ready condition
                     conditions
                         .iter()
-                        .all(|condition| condition.status == "True")
+                        .any(|condition| condition.type_ == "Ready" && condition.status == "True")
                 })
-                .unwrap_or(true)
+                .unwrap_or(false)
         });
 
     // convert pods to (name, container names) pairs
