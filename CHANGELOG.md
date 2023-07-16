@@ -8,6 +8,44 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.51.1](https://github.com/metalbear-co/mirrord/tree/3.51.1) - 2023-07-16
+
+
+### Changed
+
+- 'mirrod ls' command now no longer lists crashed pods as targets
+  [#1617](https://github.com/metalbear-co/mirrord/issues/1617)
+
+
+### Internal
+
+- Add `readinessProbe` and `livenessProbe` to operator deployment.
+- Add support for operator feature flags & new "proxy" verb api.
+- Remove operator pvc from setup.
+
+
+## [3.51.0](https://github.com/metalbear-co/mirrord/tree/3.51.0) - 2023-07-16
+
+
+### Added
+
+- Add outgoing traffic filter feature.
+
+  Adds a way of controlling from where outgoing traffic should go, either
+  through the remote pod, or from the local app. Can be configured with the
+  `remote` and `local` options under `feature.network.outgoing`.
+  [#702](https://github.com/metalbear-co/mirrord/issues/702)
+- mirrord configuration now allows disabling Linux capabilities for the agent
+  container. [#1662](https://github.com/metalbear-co/mirrord/issues/1662)
+- Add env to specify operator image
+
+
+### Internal
+
+- Add new error to the kube error enum needed by operator
+- Update VS Code gif in README
+
+
 ## [3.50.5](https://github.com/metalbear-co/mirrord/tree/3.50.5) - 2023-07-13
 
 

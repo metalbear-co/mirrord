@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
-use kube::{error::ErrorResponse, Api, Client};
+use kube::{error::ErrorResponse, Api, Client, Resource};
 use mirrord_auth::{credential_store::CredentialStoreSync, error::AuthenticationError};
 use mirrord_config::{
     feature::network::incoming::ConcurrentSteal, target::TargetConfig, LayerConfig,
@@ -19,7 +19,7 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 use tracing::error;
 
-use crate::crd::{MirrordOperatorCrd, TargetCrd, OPERATOR_STATUS_NAME};
+use crate::crd::{MirrordOperatorCrd, OperatorFeatures, TargetCrd, OPERATOR_STATUS_NAME};
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
 const MIRRORD_OPERATOR_SESSION: &str = "MIRRORD_OPERATOR_SESSION";
@@ -55,25 +55,32 @@ type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
 pub struct OperatorApi {
     client: Client,
     target_api: Api<TargetCrd>,
+    target_namespace: Option<String>,
     version_api: Api<MirrordOperatorCrd>,
     target_config: TargetConfig,
     on_concurrent_steal: ConcurrentSteal,
 }
 
 /// Data we store into environment variables for the child processes to use.
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct OperatorSessionInformation {
     pub session_id: String,
     pub target: TargetCrd,
     pub fingerprint: Option<String>,
+    pub operator_features: Vec<OperatorFeatures>,
 }
 
 impl OperatorSessionInformation {
-    pub fn new(target: TargetCrd, fingerprint: Option<String>) -> Self {
+    pub fn new(
+        target: TargetCrd,
+        fingerprint: Option<String>,
+        operator_features: Vec<OperatorFeatures>,
+    ) -> Self {
         Self {
             session_id: rand::random::<u64>().to_string(),
             target,
             fingerprint,
+            operator_features,
         }
     }
 
@@ -132,8 +139,11 @@ impl OperatorApi {
                     progress.subtask("comparing versions").print_message(MessageKind::Warning, Some("Consider either updating your operator version to match your mirrord plugin/CLI version, or downgrading your mirrord plugin/CLI."));
                 }
             }
-            let operator_session_information =
-                OperatorSessionInformation::new(target, status.spec.license.fingerprint);
+            let operator_session_information = OperatorSessionInformation::new(
+                target,
+                status.spec.license.fingerprint,
+                status.spec.features.unwrap_or_default(),
+            );
 
             let (sender, receiver) = operator_api
                 .connect_target(&operator_session_information)
@@ -153,7 +163,7 @@ impl OperatorApi {
         OperatorApi::new(config)
             .await?
             .connect_target(session_information)
-            .await;
+            .await
     }
 
     async fn new(config: &LayerConfig) -> Result<Self> {
@@ -167,20 +177,21 @@ impl OperatorApi {
         .await?;
 
         let target_namespace = if target_config.path.is_some() {
-            target_config.namespace.as_deref()
+            target_config.namespace.clone()
         } else {
             // When targetless, pass agent namespace to operator so that it knows where to create
             // the agent (the operator does not get the agent config).
-            config.agent.namespace.as_deref()
+            config.agent.namespace.clone()
         };
 
-        let target_api: Api<TargetCrd> = get_k8s_resource_api(&client, target_namespace);
+        let target_api: Api<TargetCrd> = get_k8s_resource_api(&client, target_namespace.as_deref());
 
         let version_api: Api<MirrordOperatorCrd> = Api::all(client.clone());
 
         Ok(OperatorApi {
             client,
             target_api,
+            target_namespace,
             version_api,
             target_config,
             on_concurrent_steal,
@@ -205,6 +216,36 @@ impl OperatorApi {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip(self), ret)]
+    fn connect_url(&self, session_information: &OperatorSessionInformation) -> String {
+        let OperatorApi {
+            on_concurrent_steal,
+            ..
+        } = self;
+        let target = &session_information.target;
+
+        if session_information
+            .operator_features
+            .contains(&OperatorFeatures::ProxyApi)
+        {
+            let dt = &();
+            let ns = self
+                .target_namespace
+                .as_deref()
+                .unwrap_or_else(|| self.client.default_namespace());
+            let api_version = TargetCrd::api_version(dt);
+            let plural = TargetCrd::plural(dt);
+
+            format!("/apis/{api_version}/proxy/namespaces/{ns}/{plural}/{}?on_concurrent_steal={on_concurrent_steal}&connect=true", target.name())
+        } else {
+            format!(
+                "{}/{}?on_concurrent_steal={on_concurrent_steal}&connect=true",
+                self.target_api.resource_url(),
+                target.name(),
+            )
+        }
+    }
+
     /// Create websocket connection to operator
     async fn connect_target(
         &self,
@@ -223,12 +264,7 @@ impl OperatorApi {
         }
 
         let mut builder = Request::builder()
-            .uri(format!(
-                "{}/{}?on_concurrent_steal={}&connect=true",
-                self.target_api.resource_url(),
-                session_information.target.name(),
-                self.on_concurrent_steal
-            ))
+            .uri(self.connect_url(session_information))
             .header("x-session-id", session_information.session_id.clone());
 
         if let Some(credential_name) = &session_information.fingerprint {

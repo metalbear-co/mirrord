@@ -75,6 +75,7 @@ pub static OPERATOR_STATUS_NAME: &str = "operator";
 pub struct MirrordOperatorSpec {
     pub operator_version: String,
     pub default_namespace: String,
+    pub features: Option<Vec<OperatorFeatures>>,
     pub license: LicenseInfoOwned,
 }
 
@@ -104,4 +105,9 @@ pub struct LicenseInfoOwned {
     pub organization: String,
     pub expire_at: NaiveDate,
     pub fingerprint: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub enum OperatorFeatures {
+    ProxyApi,
 }

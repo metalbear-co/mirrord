@@ -1,6 +1,6 @@
 use std::{collections::HashSet, sync::LazyLock};
 
-use futures::{StreamExt, TryStreamExt};
+use futures::{AsyncBufReadExt, StreamExt, TryStreamExt};
 use k8s_openapi::api::{
     batch::v1::Job,
     core::v1::{ContainerStatus, EphemeralContainer as KubeEphemeralContainer, Pod},
@@ -110,7 +110,7 @@ async fn wait_for_agent_startup(
     pod_name: &str,
     container_name: String,
 ) -> Result<()> {
-    let mut logs = pod_api
+    let logs = pod_api
         .log_stream(
             pod_name,
             &LogParams {
@@ -121,8 +121,8 @@ async fn wait_for_agent_startup(
         )
         .await?;
 
-    while let Some(line) = logs.try_next().await? {
-        let line = String::from_utf8_lossy(&line);
+    let mut lines = logs.lines();
+    while let Some(line) = lines.try_next().await? {
         if line.contains("agent ready") {
             break;
         }

@@ -4,9 +4,8 @@ use k8s_openapi::{
     api::{
         apps::v1::{Deployment, DeploymentSpec},
         core::v1::{
-            Container, ContainerPort, EnvVar, Namespace, PersistentVolumeClaim,
-            PersistentVolumeClaimSpec, PersistentVolumeClaimVolumeSource, PodSpec, PodTemplateSpec,
-            ResourceRequirements, Secret, SecretVolumeSource, SecurityContext, Service,
+            Container, ContainerPort, EnvVar, HTTPGetAction, Namespace, PodSpec, PodTemplateSpec,
+            Probe, ResourceRequirements, Secret, SecretVolumeSource, SecurityContext, Service,
             ServiceAccount, ServicePort, ServiceSpec, Volume, VolumeMount,
         },
         rbac::v1::{ClusterRole, ClusterRoleBinding, PolicyRule, RoleRef, Subject},
@@ -38,9 +37,6 @@ static OPERATOR_TLS_KEY_FILE_NAME: &str = "tls.key";
 static OPERATOR_TLS_CERT_FILE_NAME: &str = "tls.pem";
 static OPERATOR_SERVICE_ACCOUNT_NAME: &str = "mirrord-operator";
 static OPERATOR_SERVICE_NAME: &str = "mirrord-operator";
-static OPERATOR_PVC_NAME: &str = "mirrord-operator";
-static OPERATOR_PVC_VOLUME_NAME: &str = "state-volume";
-static OPERATOR_PVC_STATISITCS_FILE_NAME: &str = "statisitcs.yaml";
 
 static APP_LABELS: LazyLock<BTreeMap<String, String>> =
     LazyLock::new(|| BTreeMap::from([("app".to_owned(), OPERATOR_NAME.to_owned())]));
@@ -54,8 +50,8 @@ static RESOURCE_REQUESTS: LazyLock<BTreeMap<String, Quantity>> = LazyLock::new(|
 macro_rules! writer_impl {
     ($ident:ident) => {
         impl OperatorSetup for $ident {
-            fn to_writer<W: Write>(&self, mut writer: W) -> Result<()> {
-                serde_yaml::to_writer(&mut writer, &self.0).map_err(SetupError::from)
+            fn to_writer<W: Write>(&self, writer: W) -> Result<()> {
+                serde_yaml::to_writer(writer, &self.0).map_err(SetupError::from)
             }
         }
     };
@@ -95,7 +91,6 @@ pub struct Operator {
     deployment: OperatorDeployment,
     license_secret: Option<OperatorLicenseSecret>,
     namespace: OperatorNamespace,
-    pvc: OperatorPersistentVolumeClaim,
     role: OperatorRole,
     role_binding: OperatorRoleBinding,
     service: OperatorService,
@@ -129,8 +124,6 @@ impl Operator {
             &tls_secret,
         );
 
-        let pvc = OperatorPersistentVolumeClaim::new(&namespace);
-
         let service = OperatorService::new(&namespace);
 
         let api_service = OperatorApiService::new(&service);
@@ -140,7 +133,6 @@ impl Operator {
             deployment,
             license_secret,
             namespace,
-            pvc,
             role,
             role_binding,
             service,
@@ -167,9 +159,6 @@ impl OperatorSetup for Operator {
 
         writer.write_all(b"---\n")?;
         self.role_binding.to_writer(&mut writer)?;
-
-        writer.write_all(b"---\n")?;
-        self.pvc.to_writer(&mut writer)?;
 
         writer.write_all(b"---\n")?;
         self.deployment.to_writer(&mut writer)?;
@@ -244,44 +233,22 @@ impl OperatorDeployment {
                 value: Some(format!("/tls/{OPERATOR_TLS_KEY_FILE_NAME}")),
                 value_from: None,
             },
-            EnvVar {
-                name: "OPERATOR_TELEMETRY_STATISITIC_STATE_PATH".to_owned(),
-                value: Some(format!("/state/{OPERATOR_PVC_STATISITCS_FILE_NAME}")),
-                value_from: None,
-            },
         ];
 
-        let mut volumes = vec![
-            Volume {
-                name: OPERATOR_TLS_VOLUME_NAME.to_owned(),
-                secret: Some(SecretVolumeSource {
-                    secret_name: Some(tls_secret.name().to_owned()),
-                    ..Default::default()
-                }),
+        let mut volumes = vec![Volume {
+            name: OPERATOR_TLS_VOLUME_NAME.to_owned(),
+            secret: Some(SecretVolumeSource {
+                secret_name: Some(tls_secret.name().to_owned()),
                 ..Default::default()
-            },
-            Volume {
-                name: OPERATOR_PVC_VOLUME_NAME.to_owned(),
-                persistent_volume_claim: Some(PersistentVolumeClaimVolumeSource {
-                    claim_name: OPERATOR_PVC_NAME.to_owned(),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        ];
+            }),
+            ..Default::default()
+        }];
 
-        let mut volume_mounts = vec![
-            VolumeMount {
-                name: OPERATOR_TLS_VOLUME_NAME.to_owned(),
-                mount_path: "/tls".to_owned(),
-                ..Default::default()
-            },
-            VolumeMount {
-                name: OPERATOR_PVC_VOLUME_NAME.to_owned(),
-                mount_path: "/state".to_owned(),
-                ..Default::default()
-            },
-        ];
+        let mut volume_mounts = vec![VolumeMount {
+            name: OPERATOR_TLS_VOLUME_NAME.to_owned(),
+            mount_path: "/tls".to_owned(),
+            ..Default::default()
+        }];
 
         if let Some(license_secret) = license_secret {
             envs.push(EnvVar {
@@ -314,6 +281,17 @@ impl OperatorDeployment {
             });
         }
 
+        let health_probe = Probe {
+            http_get: Some(HTTPGetAction {
+                path: Some("/health".to_owned()),
+                port: IntOrString::Int(OPERATOR_PORT),
+                scheme: Some("HTTPS".to_owned()),
+                ..Default::default()
+            }),
+            period_seconds: Some(5),
+            ..Default::default()
+        };
+
         let container = Container {
             name: OPERATOR_NAME.to_owned(),
             image: match option_env!("MIRRORD_OPERATOR_IMAGE") {
@@ -341,6 +319,8 @@ impl OperatorDeployment {
                 requests: Some(RESOURCE_REQUESTS.clone()),
                 ..Default::default()
             }),
+            readiness_probe: Some(health_probe.clone()),
+            liveness_probe: Some(health_probe),
             ..Default::default()
         };
 
@@ -637,36 +617,6 @@ impl OperatorApiService {
     }
 }
 
-#[derive(Debug)]
-pub struct OperatorPersistentVolumeClaim(PersistentVolumeClaim);
-
-impl OperatorPersistentVolumeClaim {
-    pub fn new(namespace: &OperatorNamespace) -> Self {
-        let pvc = PersistentVolumeClaim {
-            metadata: ObjectMeta {
-                name: Some(OPERATOR_PVC_NAME.to_owned()),
-                namespace: Some(namespace.name().to_owned()),
-                labels: Some(APP_LABELS.clone()),
-                ..Default::default()
-            },
-            spec: Some(PersistentVolumeClaimSpec {
-                access_modes: Some(vec!["ReadWriteOnce".to_owned()]),
-                resources: Some(ResourceRequirements {
-                    requests: Some(BTreeMap::from([(
-                        "storage".to_owned(),
-                        Quantity("1Gi".to_owned()),
-                    )])),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-
-        OperatorPersistentVolumeClaim(pvc)
-    }
-}
-
 writer_impl![
     OperatorNamespace,
     OperatorDeployment,
@@ -676,6 +626,5 @@ writer_impl![
     OperatorLicenseSecret,
     OperatorService,
     OperatorTlsSecret,
-    OperatorApiService,
-    OperatorPersistentVolumeClaim
+    OperatorApiService
 ];
