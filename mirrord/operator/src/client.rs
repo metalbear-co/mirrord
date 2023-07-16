@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
@@ -53,7 +51,7 @@ type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
 
 pub struct OperatorApi {
     client: Client,
-    features: HashSet<OperatorFeatures>,
+    features: Vec<OperatorFeatures>,
     target_api: Api<TargetCrd>,
     target_namespace: Option<String>,
     version_api: Api<MirrordOperatorCrd>,
