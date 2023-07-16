@@ -1,3 +1,5 @@
+use std::{collections::HashSet, hash::Hash};
+
 use chrono::NaiveDate;
 use kube::CustomResource;
 use mirrord_config::target::{Target, TargetConfig};
@@ -75,11 +77,13 @@ pub static OPERATOR_STATUS_NAME: &str = "operator";
 pub struct MirrordOperatorSpec {
     pub operator_version: String,
     pub default_namespace: String,
+    pub features: Option<HashSet<OperatorFeatures>>,
     pub license: LicenseInfoOwned,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatus {
+    #[schemars(with = "Option<Vec<OperatorFeatures>>")]
     pub sessions: Vec<Session>,
     pub statistics: Option<MirrordOperatorStatusStatistics>,
 }
@@ -104,4 +108,9 @@ pub struct LicenseInfoOwned {
     pub organization: String,
     pub expire_at: NaiveDate,
     pub fingerprint: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, JsonSchema)]
+pub enum OperatorFeatures {
+    ProxyApi,
 }
