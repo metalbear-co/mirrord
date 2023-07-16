@@ -8,6 +8,22 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.51.1](https://github.com/metalbear-co/mirrord/tree/3.51.1) - 2023-07-16
+
+
+### Changed
+
+- 'mirrod ls' command now no longer lists crashed pods as targets
+  [#1617](https://github.com/metalbear-co/mirrord/issues/1617)
+
+
+### Internal
+
+- Add `readinessProbe` and `livenessProbe` to operator deployment.
+- Add support for operator feature flags & new "proxy" verb api.
+- Remove operator pvc from setup.
+
+
 ## [3.51.0](https://github.com/metalbear-co/mirrord/tree/3.51.0) - 2023-07-16
 
 
