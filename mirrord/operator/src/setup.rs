@@ -4,9 +4,9 @@ use k8s_openapi::{
     api::{
         apps::v1::{Deployment, DeploymentSpec},
         core::v1::{
-            Container, ContainerPort, EnvVar, Namespace, PersistentVolumeClaim,
+            Container, ContainerPort, EnvVar, HTTPGetAction, Namespace, PersistentVolumeClaim,
             PersistentVolumeClaimSpec, PersistentVolumeClaimVolumeSource, PodSpec, PodTemplateSpec,
-            ResourceRequirements, Secret, SecretVolumeSource, SecurityContext, Service,
+            Probe, ResourceRequirements, Secret, SecretVolumeSource, SecurityContext, Service,
             ServiceAccount, ServicePort, ServiceSpec, Volume, VolumeMount,
         },
         rbac::v1::{ClusterRole, ClusterRoleBinding, PolicyRule, RoleRef, Subject},
@@ -314,6 +314,17 @@ impl OperatorDeployment {
             });
         }
 
+        let health_probe = Probe {
+            http_get: Some(HTTPGetAction {
+                path: Some("/health".to_owned()),
+                port: IntOrString::Int(OPERATOR_PORT),
+                scheme: Some("HTTPS".to_owned()),
+                ..Default::default()
+            }),
+            period_seconds: Some(5),
+            ..Default::default()
+        };
+
         let container = Container {
             name: OPERATOR_NAME.to_owned(),
             image: match option_env!("MIRRORD_OPERATOR_IMAGE") {
@@ -341,6 +352,8 @@ impl OperatorDeployment {
                 requests: Some(RESOURCE_REQUESTS.clone()),
                 ..Default::default()
             }),
+            readiness_probe: Some(health_probe.clone()),
+            liveness_probe: Some(health_probe),
             ..Default::default()
         };
 
