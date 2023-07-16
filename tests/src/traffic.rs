@@ -5,7 +5,7 @@ mod traffic {
     use std::{net::UdpSocket, path::PathBuf, time::Duration};
 
     use futures::Future;
-    use futures_util::stream::TryStreamExt;
+    use futures_util::{stream::TryStreamExt, AsyncBufReadExt};
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::LogParams, Api, Client};
     use rstest::*;
@@ -197,16 +197,19 @@ mod traffic {
 
         // Verify that the UDP message sent by the application reached the internal service.
         lp.follow = true; // Follow log stream.
-        let logs = pod_api
+        let mut lines = vec![];
+
+        let mut log_lines = pod_api
             .log_stream(stripped_target, &lp)
             .await
             .unwrap()
-            .try_next()
-            .await
-            .unwrap()
-            .unwrap();
-        let logs = String::from_utf8_lossy(&logs);
-        assert!(logs.contains("Can I pass the test please?")); // Of course you can.
+            .lines();
+        while let Some(log) = log_lines.try_next().await.unwrap() {
+            if log.contains("Can I pass the test please?") {
+                break;
+            }
+        }
+        assert!(false, "Did not find expected log line.");
     }
 
     /// Test that the process does not crash and messages are sent out normally when the
