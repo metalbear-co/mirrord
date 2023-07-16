@@ -67,7 +67,7 @@ impl OperatorApi {
     where
         P: Progress + Send + Sync,
     {
-        let operator_api = OperatorApi::new(config).await?;
+        let mut operator_api = OperatorApi::new(config).await?;
 
         if let Some(target) = operator_api.fetch_target().await? {
             let status = operator_api.get_status().await?;
@@ -89,6 +89,10 @@ impl OperatorApi {
                 } else {
                     progress.subtask("comparing versions").print_message(MessageKind::Warning, Some("Consider either updating your operator version to match your mirrord plugin/CLI version, or downgrading your mirrord plugin/CLI."));
                 }
+            }
+
+            if let Some(features) = status.spec.features {
+                operator_api.features = features;
             }
 
             operator_api
@@ -172,6 +176,7 @@ impl OperatorApi {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip(self, target), ret)]
     fn connect_url(&self, target: &TargetCrd) -> String {
         let OperatorApi {
             features,
@@ -181,16 +186,14 @@ impl OperatorApi {
 
         if features.contains(&OperatorFeatures::ProxyApi) {
             let dt = &();
-            let ns = if let Some(ns) = &self.target_namespace {
-                format!("namespaces/{ns}/")
-            } else {
-                "".into()
-            };
-            let group = TargetCrd::group(dt);
+            let ns = self
+                .target_namespace
+                .as_deref()
+                .unwrap_or_else(|| self.client.default_namespace());
             let api_version = TargetCrd::api_version(dt);
             let plural = TargetCrd::plural(dt);
 
-            format!("/{group}/{api_version}/proxy/{ns}{plural}/?on_concurrent_steal={on_concurrent_steal}&connect=true")
+            format!("/apis/{api_version}/proxy/namespaces/{ns}/{plural}/{}?on_concurrent_steal={on_concurrent_steal}&connect=true", target.name())
         } else {
             format!(
                 "{}/{}?on_concurrent_steal={on_concurrent_steal}&connect=true",
