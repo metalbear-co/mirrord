@@ -203,12 +203,16 @@ mod traffic {
             .await
             .unwrap()
             .lines();
+
+        let mut found = false;
         while let Some(log) = log_lines.try_next().await.unwrap() {
+            println!("logged - {log}");
             if log.contains("Can I pass the test please?") {
+                found = true;
                 break;
             }
         }
-        assert!(false, "Did not find expected log line.");
+        assert!(found, "Did not find expected log line.");
     }
 
     /// Test that the process does not crash and messages are sent out normally when the
