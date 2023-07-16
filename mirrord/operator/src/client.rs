@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
-use kube::{error::ErrorResponse, Api, Client};
+use kube::{error::ErrorResponse, Api, Client, Resource};
 use mirrord_auth::{credential_store::CredentialStoreSync, error::AuthenticationError};
 use mirrord_config::{
     feature::network::incoming::ConcurrentSteal, target::TargetConfig, LayerConfig,
@@ -18,7 +18,7 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 use tracing::{error, trace, warn};
 
-use crate::crd::{MirrordOperatorCrd, TargetCrd, OPERATOR_STATUS_NAME};
+use crate::crd::{MirrordOperatorCrd, OperatorFeatures, TargetCrd, OPERATOR_STATUS_NAME};
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
 static MIRRORD_OPERATOR_SESSION_ID: &str = "MIRRORD_OPERATOR_SESSION_ID";
@@ -51,7 +51,9 @@ type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
 
 pub struct OperatorApi {
     client: Client,
+    features: Vec<OperatorFeatures>,
     target_api: Api<TargetCrd>,
+    target_namespace: Option<String>,
     version_api: Api<MirrordOperatorCrd>,
     target_config: TargetConfig,
     on_concurrent_steal: ConcurrentSteal,
@@ -65,7 +67,7 @@ impl OperatorApi {
     where
         P: Progress + Send + Sync,
     {
-        let operator_api = OperatorApi::new(config).await?;
+        let mut operator_api = OperatorApi::new(config).await?;
 
         if let Some(target) = operator_api.fetch_target().await? {
             let status = operator_api.get_status().await?;
@@ -87,6 +89,10 @@ impl OperatorApi {
                 } else {
                     progress.subtask("comparing versions").print_message(MessageKind::Warning, Some("Consider either updating your operator version to match your mirrord plugin/CLI version, or downgrading your mirrord plugin/CLI."));
                 }
+            }
+
+            if let Some(features) = status.spec.features {
+                operator_api.features = features;
             }
 
             operator_api
@@ -130,20 +136,22 @@ impl OperatorApi {
         .await?;
 
         let target_namespace = if target_config.path.is_some() {
-            target_config.namespace.as_deref()
+            target_config.namespace.clone()
         } else {
             // When targetless, pass agent namespace to operator so that it knows where to create
             // the agent (the operator does not get the agent config).
-            config.agent.namespace.as_deref()
+            config.agent.namespace.clone()
         };
 
-        let target_api: Api<TargetCrd> = get_k8s_resource_api(&client, target_namespace);
+        let target_api: Api<TargetCrd> = get_k8s_resource_api(&client, target_namespace.as_deref());
 
         let version_api: Api<MirrordOperatorCrd> = Api::all(client.clone());
 
         Ok(OperatorApi {
             client,
+            features: Default::default(),
             target_api,
+            target_namespace,
             version_api,
             target_config,
             on_concurrent_steal,
@@ -168,6 +176,33 @@ impl OperatorApi {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip(self, target), ret)]
+    fn connect_url(&self, target: &TargetCrd) -> String {
+        let OperatorApi {
+            features,
+            on_concurrent_steal,
+            ..
+        } = self;
+
+        if features.contains(&OperatorFeatures::ProxyApi) {
+            let dt = &();
+            let ns = self
+                .target_namespace
+                .as_deref()
+                .unwrap_or_else(|| self.client.default_namespace());
+            let api_version = TargetCrd::api_version(dt);
+            let plural = TargetCrd::plural(dt);
+
+            format!("/apis/{api_version}/proxy/namespaces/{ns}/{plural}/{}?on_concurrent_steal={on_concurrent_steal}&connect=true", target.name())
+        } else {
+            format!(
+                "{}/{}?on_concurrent_steal={on_concurrent_steal}&connect=true",
+                self.target_api.resource_url(),
+                target.name(),
+            )
+        }
+    }
+
     /// Create websocket connection to operator
     async fn connect_target(
         &self,
@@ -186,12 +221,7 @@ impl OperatorApi {
         }
 
         let mut builder = Request::builder()
-            .uri(format!(
-                "{}/{}?on_concurrent_steal={}&connect=true",
-                self.target_api.resource_url(),
-                target.name(),
-                self.on_concurrent_steal
-            ))
+            .uri(self.connect_url(&target))
             .header("x-session-id", Self::session_id());
 
         if let Some(credential_name) = credential_name {

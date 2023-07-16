@@ -1,14 +1,19 @@
 //! We implement each hook function in a safe function as much as possible, having the unsafe do the
 //! absolute minimum
 use std::{
-    collections::VecDeque,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    collections::{HashSet, VecDeque},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
     os::unix::io::RawFd,
+    str::FromStr,
     sync::{Arc, LazyLock},
 };
 
 use dashmap::DashMap;
 use libc::{c_int, sockaddr, socklen_t};
+use mirrord_config::{
+    feature::network::outgoing::{OutgoingFilter, OutgoingFilterConfig},
+    util::VecOrSingle,
+};
 use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
 use tracing::warn;
@@ -18,13 +23,19 @@ use self::id::SocketId;
 use crate::{
     common::{blocking_send_hook_message, HookMessage},
     detour::{Bypass, Detour, OptionExt},
-    error::{HookError, HookResult},
-    INCOMING_IGNORE_PORTS,
+    error::{HookError, HookResult, LayerError},
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_PORTS,
 };
 
 pub(super) mod hooks;
 pub(crate) mod id;
 pub(crate) mod ops;
+
+// TODO(alex): Should be an enum, but to do so requires the `adt_const_params` feature, which also
+// requires enabling `incomplete_features`.
+type ConnectProtocol = bool;
+const TCP: ConnectProtocol = false;
+const UDP: ConnectProtocol = !TCP;
 
 pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock::new(DashMap::new);
 
@@ -186,6 +197,10 @@ impl TryFrom<c_int> for SocketKind {
     }
 }
 
+// TODO(alex): We could treat `sockfd` as being the same as `&self` for socket ops, we currently
+// can't do that due to how `dup` interacts directly with our `Arc<UserSocket>`, because we just
+// `clone` the arc, we end up with exact duplicates, but `dup` generates a new fd that we have no
+// way of putting inside the duplicated `UserSocket`.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub(crate) struct UserSocket {
@@ -235,6 +250,7 @@ impl UserSocket {
     }
 
     /// Inform TCP handler about closing a bound/listening port.
+    #[tracing::instrument(level = "trace", ret)]
     pub(crate) fn close(&self) {
         if let Some(port) = self.get_bound_port() {
             match self.kind {
@@ -250,6 +266,138 @@ impl UserSocket {
                 // We don't do incoming UDP, so no need to notify anyone about this.
                 SocketKind::Udp(_) => {}
             }
+        }
+    }
+}
+
+/// Holds the [`OutgoingFilter`]s set up by the user, after a little bit of checking, see
+/// [`OutgoingSelector::new`].
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) enum OutgoingSelector {
+    #[default]
+    Unfiltered,
+    /// If the address from `connect` matches this, then we send the connection through the
+    /// remote pod.
+    Remote(HashSet<OutgoingFilter>),
+    /// If the address from `connect` matches this, then we send the connection from the local app.
+    Local(HashSet<OutgoingFilter>),
+}
+
+impl TryFrom<Option<OutgoingFilterConfig>> for OutgoingSelector {
+    type Error = LayerError;
+
+    /// Builds the [`OutgoingSelector`] from the user config (list of filters), removing filters
+    /// that would create inconsitencies, by checking if their protocol is enabled for outgoing
+    /// traffic, and thus we avoid making this check on every [`ops::connect`] call.
+    ///
+    /// It also removes duplicated filters, by putting them into a [`HashSet`].
+    fn try_from(value: Option<OutgoingFilterConfig>) -> Result<Self, Self::Error> {
+        use mirrord_config::feature::network::outgoing::*;
+
+        let enabled_tcp = *ENABLED_TCP_OUTGOING
+            .get()
+            .expect("ENABLED_TCP_OUTGOING should be set before initializing OutgoingSelector!");
+
+        let enabled_udp = *ENABLED_UDP_OUTGOING
+            .get()
+            .expect("ENABLED_TCP_OUTGOING should be set before initializing OutgoingSelector!");
+
+        let build_selector = |list: VecOrSingle<String>| {
+            Ok::<_, LayerError>(
+                list.to_vec()
+                    .into_iter()
+                    .map(|filter| OutgoingFilter::from_str(&filter))
+                    .collect::<Result<HashSet<_>, _>>()?
+                    .into_iter()
+                    .filter(|OutgoingFilter { protocol, .. }| match protocol {
+                        ProtocolFilter::Any => enabled_tcp || enabled_udp,
+                        ProtocolFilter::Tcp => enabled_tcp,
+                        ProtocolFilter::Udp => enabled_udp,
+                    })
+                    .collect::<HashSet<_>>(),
+            )
+        };
+
+        match value {
+            None => Ok(Self::Unfiltered),
+            Some(OutgoingFilterConfig::Remote(list)) | Some(OutgoingFilterConfig::Local(list))
+                if list.is_empty() =>
+            {
+                Err(LayerError::MissingConfigValue(
+                    "Outgoing traffic filter cannot be empty!".to_string(),
+                ))
+            }
+            Some(OutgoingFilterConfig::Remote(list)) => Ok(Self::Remote(build_selector(list)?)),
+            Some(OutgoingFilterConfig::Local(list)) => Ok(Self::Local(build_selector(list)?)),
+        }
+    }
+}
+
+impl OutgoingSelector {
+    /// Checks if the `address` matches the specified outgoing filter, and returns a `bool`
+    /// indicating if this connection should go through the remote pod, or from the local app.
+    ///
+    /// ## `remote`
+    ///
+    /// When the user specifies something like `remote = [":7777"]`, we're going to check if
+    /// the `address` has `port == 7777`. The same idea can be extrapolated to the other accepted
+    /// values for this config, such as subnet, hostname, ip (and combinations of those).
+    ///
+    /// ## `local`
+    ///
+    /// Basically the same thing as `remote`, but the result is reversed, meaning that, if
+    /// `address` matches something specified in `local = [":7777"]`, then _negate_ it and return
+    /// `false`, meaning we return "do not connect remote" (or "connect local" if you prefer
+    /// positive thinking).
+    ///
+    /// ## Filter rules
+    ///
+    /// The filter comparison follows these rules:
+    ///
+    /// 1. `0.0.0.0` means any ip;
+    /// 2. `:0` means any port;
+    ///
+    /// So if the user specified a selector with `0.0.0.0:0`, we're going to be always matching on
+    /// it.
+    #[tracing::instrument(level = "debug", ret)]
+    fn connect_remote<const PROTOCOL: ConnectProtocol>(&self, address: SocketAddr) -> bool {
+        use mirrord_config::feature::network::outgoing::{AddressFilter, ProtocolFilter};
+
+        let filter_protocol = |outgoing: &&OutgoingFilter| match outgoing.protocol {
+            ProtocolFilter::Any => true,
+            ProtocolFilter::Tcp if PROTOCOL == TCP => true,
+            ProtocolFilter::Udp if PROTOCOL == UDP => true,
+            _ => false,
+        };
+
+        // Closure that tries to match `address` with something in the selector set.
+        let any_address = |outgoing: &OutgoingFilter| match outgoing.address {
+            AddressFilter::Socket(select_address) => {
+                (select_address.ip().is_unspecified() && select_address.port() == 0)
+                    || (select_address.ip().is_unspecified()
+                        && select_address.port() == address.port())
+                    || (select_address.port() == 0 && select_address.ip() == address.ip())
+                    || select_address == address
+            }
+            // TODO(alex): DNS may not trigger the filter, as the local resolved address may be
+            // different from the remote resolved.
+            AddressFilter::Name((ref name, port)) => format!("{name}:{port}")
+                .to_socket_addrs()
+                .map(|mut resolved| {
+                    resolved.any(|resolved_address| {
+                        resolved_address == SocketAddr::new(address.ip(), 0)
+                    })
+                })
+                .unwrap_or_default(),
+            AddressFilter::Subnet((subnet, port)) => {
+                subnet.contains(&address.ip()) && (port == 0 || port == address.port())
+            }
+        };
+
+        match self {
+            OutgoingSelector::Unfiltered => true,
+            OutgoingSelector::Remote(list) => list.iter().filter(filter_protocol).any(any_address),
+            OutgoingSelector::Local(list) => !list.iter().filter(filter_protocol).any(any_address),
         }
     }
 }

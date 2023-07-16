@@ -146,7 +146,7 @@ mod tests {
         let mut analytics = Analytics::default();
         analytics.add("a", true);
         analytics.add("b", false);
-        analytics.add("c", 3);
+        analytics.add("c", 3usize);
 
         struct A {}
         impl CollectAnalytics for A {

@@ -48,6 +48,9 @@ pub mod network;
 ///       "outgoing": {
 ///         "tcp": true,
 ///         "udp": true,
+///         "filter": {
+///           "local": ["tcp://1.1.1.0/24:1337", "1.1.5.0/24", "google.com", ":53"]
+///         },
 ///         "ignore_localhost": false,
 ///         "unix_streams": "bear.+"
 ///       },
