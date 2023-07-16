@@ -43,7 +43,7 @@ where
                 "--proto",
                 "tcp",
                 "--orig-port-dst",
-                &target_port.to_string(),
+                &redirected_port.to_string(),
             ])
             .output()
             .await?;
