@@ -3299,7 +3299,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "tungstenite 0.18.0",
+ "tungstenite 0.19.0",
 ]
 
 [[package]]
@@ -3426,7 +3426,7 @@ dependencies = [
  "serde_yaml",
  "thiserror",
  "tokio",
- "tokio-tungstenite 0.18.0",
+ "tokio-tungstenite 0.19.0",
  "tracing",
 ]
 
@@ -5467,7 +5467,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
- "tokio-tungstenite 0.18.0",
+ "tokio-tungstenite 0.19.0",
  "tokio-util",
  "wsl",
 ]

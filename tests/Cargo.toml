@@ -24,4 +24,4 @@ wsl = "0.1"
 chrono = "0.4"
 tempfile = "3"
 bytes = "1"
-tokio-tungstenite = { version = "0.18" }
+tokio-tungstenite = { version = "0.19" }

@@ -187,8 +187,7 @@ impl OperatorApi {
 
         let mut builder = Request::builder()
             .uri(format!(
-                "{}/{}?on_concurrent_steal={}&connect=true",
-                self.target_api.resource_url(),
+                "/apis/operator.metalbear.co/v1/proxy/namespaces/hybrid/targets/{}?on_concurrent_steal={}&connect=true",
                 target.name(),
                 self.on_concurrent_steal
             ))
