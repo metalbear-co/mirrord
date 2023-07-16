@@ -20,8 +20,7 @@ use futures::{stream::StreamExt, SinkExt};
 use mirrord_analytics::{send_analytics, Analytics, CollectAnalytics};
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
-use mirrord_operator::client::OperatorApi;
-use mirrord_progress::NoProgress;
+use mirrord_operator::client::{OperatorApi, OperatorSessionInformation};
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage};
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -116,6 +115,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
     // This will guarantee agent staying alive and will enable us to
     // make the agent close on last connection close immediately (will help in tests)
     let (_main_connection, operator) = connect_and_ping(&config).await?;
+
     print_port(&listener)?;
 
     // wait for first connection `FIRST_CONNECTION_TIMEOUT` seconds, or timeout.
@@ -206,7 +206,12 @@ async fn connect(
     (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
     bool,
 )> {
-    if let Some(address) = &config.connect_tcp {
+    if let Some(operator_session_information) = OperatorSessionInformation::from_env()? {
+        Ok((
+            OperatorApi::connect(config, &operator_session_information).await?,
+            true,
+        ))
+    } else if let Some(address) = &config.connect_tcp {
         let stream = TcpStream::connect(address)
             .await
             .map_err(InternalProxyError::TcpConnectError)?;
@@ -220,10 +225,6 @@ async fn connect(
             .await?;
         Ok((connection, false))
     } else {
-        let connection = OperatorApi::discover(config, &NoProgress).await?;
-        Ok((
-            connection.ok_or(InternalProxyError::OperatorConnectionError)?,
-            true,
-        ))
+        Err(InternalProxyError::NoConnectionMethod.into())
     }
 }
