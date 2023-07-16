@@ -22,7 +22,7 @@ use tracing::error;
 use crate::crd::{MirrordOperatorCrd, TargetCrd, OPERATOR_STATUS_NAME};
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
-static MIRRORD_OPERATOR_SESSION: &str = "MIRRORD_OPERATOR_SESSION";
+const MIRRORD_OPERATOR_SESSION: &str = "MIRRORD_OPERATOR_SESSION";
 
 #[derive(Debug, Error)]
 pub enum OperatorApiError {
@@ -78,7 +78,7 @@ impl OperatorSessionInformation {
     }
 
     /// Returns environment variable holding the information
-    pub fn env_key() -> &'static str {
+    pub const fn env_key() -> &'static str {
         MIRRORD_OPERATOR_SESSION
     }
 
@@ -150,9 +150,10 @@ impl OperatorApi {
         config: &LayerConfig,
         session_information: &OperatorSessionInformation,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        let operator_api = OperatorApi::new(config).await?;
-        let (sender, receiver) = operator_api.connect_target(&session_information).await?;
-        Ok((sender, receiver))
+        OperatorApi::new(config)
+            .await?
+            .connect_target(session_information)
+            .await;
     }
 
     async fn new(config: &LayerConfig) -> Result<Self> {
