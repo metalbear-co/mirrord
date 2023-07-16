@@ -197,7 +197,6 @@ mod traffic {
 
         // Verify that the UDP message sent by the application reached the internal service.
         lp.follow = true; // Follow log stream.
-        let mut lines = vec![];
 
         let mut log_lines = pod_api
             .log_stream(stripped_target, &lp)

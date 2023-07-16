@@ -1,10 +1,9 @@
 #[cfg(test)]
 
 mod pause {
-    use std::{io::ErrorKind::UnexpectedEof, time::Duration};
+    use std::time::Duration;
 
     use futures::{AsyncBufReadExt, StreamExt};
-    use futures_util::TryStreamExt;
     use k8s_openapi::api::{batch::v1::Job, core::v1::Pod};
     use kube::{
         api::{ListParams, LogParams},
