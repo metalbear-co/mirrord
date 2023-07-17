@@ -159,9 +159,6 @@ pub(crate) enum LayerError {
     )]
     NewConnectionAfterSocketClose(ConnectionId),
 
-    #[error("mirrord-layer: Unmatched pong!")]
-    UnmatchedPong,
-
     #[error("mirrord-layer: JSON convert error")]
     JSONConvertError(#[from] serde_json::Error),
 
