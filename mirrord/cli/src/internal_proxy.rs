@@ -21,7 +21,7 @@ use mirrord_analytics::{send_analytics, Analytics, CollectAnalytics};
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
 use mirrord_operator::client::{OperatorApi, OperatorSessionInformation};
-use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage};
+use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonCodec, DaemonMessage};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -29,7 +29,7 @@ use tokio::{
     task::JoinSet,
     time::timeout,
 };
-use tracing::{error, log::trace};
+use tracing::{error, info, log::trace};
 
 use crate::{
     config::InternalProxyArgs,
@@ -97,6 +97,37 @@ async fn connection_task(
     }
 }
 
+/// Request target container pause from the connected agent.
+async fn request_pause(
+    sender: &mut mpsc::Sender<ClientMessage>,
+    receiver: &mut mpsc::Receiver<DaemonMessage>,
+) -> Result<(), InternalProxyError> {
+    info!("Requesting target container pause from the agent");
+    sender
+        .send(ClientMessage::PauseTargetRequest(true))
+        .await
+        .map_err(|_| {
+            InternalProxyError::PauseError("Failed to request target container pause.".to_string())
+        })?;
+
+    match receiver.recv().await {
+        Some(DaemonMessage::PauseTarget(DaemonPauseTarget::PauseResponse {
+            changed,
+            container_paused: true,
+        })) => {
+            if changed {
+                info!("Target container is now paused.");
+            } else {
+                info!("Target container was already paused.");
+            }
+            Ok(())
+        }
+        msg => Err(InternalProxyError::PauseError(format!(
+            "Failed pausing, got invalid answer: {msg:#?}"
+        ))),
+    }
+}
+
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
 pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
@@ -114,7 +145,19 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
     // Create a main connection, that will be held until proxy is closed.
     // This will guarantee agent staying alive and will enable us to
     // make the agent close on last connection close immediately (will help in tests)
-    let (_main_connection, operator) = connect_and_ping(&config).await?;
+    let (main_connection, operator) = connect_and_ping(&config).await?;
+    if config.pause {
+        tokio::time::timeout(
+            Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into()),
+            request_pause(&mut main_connection.0, &mut main_connection.1),
+        )
+        .await
+        .map_err(|_| {
+            InternalProxyError::PauseError(
+                "Timeout requesting for target container pause.".to_string(),
+            )
+        })??;
+    }
 
     print_port(&listener)?;
 

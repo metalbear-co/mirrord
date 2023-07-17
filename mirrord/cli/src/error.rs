@@ -40,6 +40,8 @@ pub(crate) enum InternalProxyError {
     SetSidError(nix::Error),
     #[error("No connection method, please report a bug")]
     NoConnectionMethod,
+    #[error("Failed pausing target container {0:#?}")]
+    PauseError(String),
 }
 
 #[derive(Debug, Error, Diagnostic)]
