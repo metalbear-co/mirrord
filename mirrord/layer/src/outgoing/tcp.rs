@@ -261,20 +261,15 @@ impl TcpOutgoingHandler {
                         connection_id,
                         bytes,
                     }) => {
-                        let writer = self
-                            .data_txs
-                            .get_mut(&connection_id)
-                            .ok_or(LayerError::NoConnectionId(connection_id))?;
-
                         if bytes.is_empty() {
-                            writer.shutdown().await.unwrap_or_else(|err| {
-                                warn!(
-                                    "Could not shutdown mirrord's writer to the outgoing \
-                                    interceptor task. Error: {err}"
-                                );
-                            });
-                            // TODO: when do we remove the writer?
+                            // Dropping the writer is like calling `shutdown` on the `TcpStream`.
+                            self.data_txs.remove(&connection_id);
                         } else {
+                            let writer = self
+                                .data_txs
+                                .get_mut(&connection_id)
+                                .ok_or(LayerError::NoConnectionId(connection_id))?;
+
                             writer.write_all(&bytes[..]).await.unwrap_or_else(|_| {
                                 warn!(
                                     "Got new data from agent after application closed socket. \
