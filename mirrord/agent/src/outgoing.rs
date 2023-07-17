@@ -185,7 +185,7 @@ impl TcpOutgoingApi {
 
                 // [remote] -> [agent] -> [layer] -> [user]
                 // Read the data from one of the connected remote hosts, and forward the result back
-                // to the `user`.
+                // to the user.
                 Some((connection_id, remote_read)) = readers.next() => {
                     trace!("interceptor_task -> read connection_id {:#?}", connection_id);
 
