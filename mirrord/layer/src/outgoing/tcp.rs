@@ -100,6 +100,7 @@ impl TcpOutgoingHandler {
         } else {
             error!("Unsupported socket address family, not intercepting.")
         }
+        warn!("@@@@ Exiting interceptor task");
     }
 
     /// Handles the following hook messages:
@@ -286,6 +287,11 @@ impl TcpOutgoingHandler {
                         debug!("Remote socket disconnected {e:#?}")
                     }
                 }
+                warn!(
+                    "@@@@ data streams after daemon read: rx - {:?}, tx - {:?}",
+                    self.data_rxs.keys().collect::<Vec<_>>(),
+                    self.data_txs.keys().collect::<Vec<_>>()
+                );
 
                 Ok(())
             }
@@ -293,6 +299,11 @@ impl TcpOutgoingHandler {
                 trace!("Close -> connection_id {:?}", connection_id);
                 self.data_txs.remove(&connection_id);
                 self.data_rxs.remove(&connection_id);
+                warn!(
+                    "@@@@ data streams after daemon close: rx - {:?}, tx - {:?}",
+                    self.data_rxs.keys().collect::<Vec<_>>(),
+                    self.data_txs.keys().collect::<Vec<_>>()
+                );
                 Ok(())
             }
         }

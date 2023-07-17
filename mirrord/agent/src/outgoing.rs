@@ -118,12 +118,22 @@ async fn layer_recv(
                     }
                 }
             }
+            warn!(
+                "@@@@ Data streams after layer write: writers: {:?}, readers: {:?}",
+                writers.keys().collect::<Vec<_>>(),
+                readers.keys().collect::<Vec<_>>()
+            );
         }
         // [layer] -> [agent]
         // `layer` closed their interceptor stream.
         LayerTcpOutgoing::Close(LayerClose { ref connection_id }) => {
             writers.remove(connection_id);
             readers.remove(connection_id);
+            warn!(
+                "@@@@ Data streams after layer close: writers: {:?}, readers: {:?}",
+                writers.keys().collect::<Vec<_>>(),
+                readers.keys().collect::<Vec<_>>()
+            );
         }
     }
 
@@ -175,6 +185,11 @@ impl TcpOutgoingApi {
         > = StreamMap::default();
 
         loop {
+            warn!(
+                "@@@@ Interceptor Task loop head - data streams: writers: {:?}, readers: {:?}",
+                writers.keys().collect::<Vec<_>>(),
+                readers.keys().collect::<Vec<_>>()
+            );
             select! {
                 biased;
 
@@ -224,6 +239,11 @@ impl TcpOutgoingApi {
                     break;
                 }
             }
+            warn!(
+                "@@@@ Interceptor Task loop end - data streams: writers: {:?}, readers: {:?}",
+                writers.keys().collect::<Vec<_>>(),
+                readers.keys().collect::<Vec<_>>()
+            );
         }
 
         Ok(())
