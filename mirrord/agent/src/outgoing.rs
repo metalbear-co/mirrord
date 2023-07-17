@@ -5,14 +5,13 @@ use mirrord_protocol::{
     ConnectionId, RemoteError, ResponseError,
 };
 use socket_stream::SocketStream;
-use streammap_ext::StreamMap;
 use tokio::{
     io::{split, AsyncWriteExt, ReadHalf, WriteHalf},
     select,
     sync::mpsc::{self, Receiver, Sender},
     time::timeout,
 };
-use tokio_stream::{StreamExt, StreamNotifyClose};
+use tokio_stream::{StreamExt, StreamMap, StreamNotifyClose};
 use tokio_util::io::ReaderStream;
 use tracing::{trace, warn};
 
@@ -209,13 +208,13 @@ impl TcpOutgoingApi {
                         // We shouldn't return it as a `Result<T, ResponseError>` since we lose track of connection id
                         // and it doesn't really make sense to do it, but we don't want to break the protocol
                         // so we'll still wrap it with Ok() and if we error we just close the connection.
-                        Some(Some(Ok(read))) => {
+                        Some(Ok(read)) => {
                             let daemon_read = DaemonRead { connection_id, bytes: read.to_vec() };
 
                             let daemon_message = DaemonTcpOutgoing::Read(Ok(daemon_read));
                             daemon_tx.send(daemon_message).await?
                         },
-                        Some(Some(Err(err))) => {
+                        Some(Err(err)) => {
                             warn!("interceptor_task -> read connection_id {:#?} failed with {:#?}", connection_id, err);
                             writers.remove(&connection_id);
                             readers.remove(&connection_id);
@@ -223,17 +222,13 @@ impl TcpOutgoingApi {
                             let daemon_message = DaemonTcpOutgoing::Close(connection_id);
                             daemon_tx.send(daemon_message).await?
                         }
-                        Some(None) => {
-                            warn!("@@@@ connection_id {connection_id} got `Some(None)` on `next()`.");
+                        None => {
                             trace!("interceptor_task -> close connection {:#?}", connection_id);
                             // writers.remove(&connection_id);
 
                             // let daemon_message = DaemonTcpOutgoing::Close(connection_id);
                             let daemon_message = DaemonTcpOutgoing::Read(Ok(DaemonRead { connection_id, bytes: Vec::new()}));
                             daemon_tx.send(daemon_message).await?
-                        }
-                        None => {
-                            warn!("@@@@ connection_id {connection_id} got `None` on `next()`.");
                         }
                     }
                 }
