@@ -1,0 +1,1 @@
+Fixed case where proxy can timeout since it holds a stale connection. Added heartbeat to the connection handling
