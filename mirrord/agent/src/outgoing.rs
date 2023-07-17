@@ -223,13 +223,17 @@ impl TcpOutgoingApi {
                             let daemon_message = DaemonTcpOutgoing::Close(connection_id);
                             daemon_tx.send(daemon_message).await?
                         }
-                        None | Some(None) => {
+                        Some(None) => {
+                            warn!("@@@@ connection_id {connection_id} got `Some(None)` on `next()`.");
                             trace!("interceptor_task -> close connection {:#?}", connection_id);
                             // writers.remove(&connection_id);
 
                             // let daemon_message = DaemonTcpOutgoing::Close(connection_id);
                             let daemon_message = DaemonTcpOutgoing::Read(Ok(DaemonRead { connection_id, bytes: Vec::new()}));
                             daemon_tx.send(daemon_message).await?
+                        }
+                        None => {
+                            warn!("@@@@ connection_id {connection_id} got `None` on `next()`.");
                         }
                     }
                 }
