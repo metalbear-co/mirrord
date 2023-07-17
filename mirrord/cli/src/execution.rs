@@ -6,9 +6,7 @@ use std::{
 use mirrord_config::LayerConfig;
 use mirrord_operator::client::OperatorSessionInformation;
 use mirrord_progress::Progress;
-use mirrord_protocol::{
-    pause::DaemonPauseTarget, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
-};
+use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
 use serde::Serialize;
@@ -16,7 +14,7 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::{Child, Command},
 };
-use tracing::{info, trace};
+use tracing::trace;
 
 use crate::{
     connection::{create_and_connect, AgentConnectInfo, AgentConnection},

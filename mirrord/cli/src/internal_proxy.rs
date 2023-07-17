@@ -145,7 +145,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
     // Create a main connection, that will be held until proxy is closed.
     // This will guarantee agent staying alive and will enable us to
     // make the agent close on last connection close immediately (will help in tests)
-    let (main_connection, operator) = connect_and_ping(&config).await?;
+    let (mut main_connection, operator) = connect_and_ping(&config).await?;
     if config.pause {
         tokio::time::timeout(
             Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into()),
