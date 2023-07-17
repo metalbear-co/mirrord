@@ -13,10 +13,10 @@ const hostList = [
   "www.microsoft.com",
   "www.youtube.com",
   "www.live.com",
-  "www.msn.com",
-  "www.google.com.br",
-  "www.yahoo.co.jp",
-  "www.qq.com",
+  // "www.msn.com",
+  // "www.google.com.br",
+  // "www.yahoo.co.jp",
+  // "www.qq.com",
 ];
 
 let requestIndex = 0;
