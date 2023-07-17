@@ -13,8 +13,8 @@ const hostList = [
   "www.microsoft.com",
   "www.youtube.com",
   "www.live.com",
-  // "www.msn.com",
-  // "www.google.com.br",
+  "www.msn.com",
+  "www.google.com.br",
   // "www.yahoo.co.jp",
   // "www.qq.com",
 ];
