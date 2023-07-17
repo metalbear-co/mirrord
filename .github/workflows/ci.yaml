@@ -463,7 +463,8 @@ jobs:
         with:
           node-version: 14
       - run: npm install express
-      - uses: actions/setup-python@v3
+      - run: npm install why-is-node-running
+#      - uses: actions/setup-python@v3
 #      - run: pip3 install flask
 #      - run: pip3 install fastapi
 #      - run: pip3 install uvicorn[standard]
