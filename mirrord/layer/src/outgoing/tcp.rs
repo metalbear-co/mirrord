@@ -262,6 +262,8 @@ impl TcpOutgoingHandler {
                         bytes,
                     }) => {
                         if bytes.is_empty() {
+                            // TODO: relax
+                            warn!("@@@@@ Got `DaemonRead` with 0 bytes, dropping writer.");
                             // Dropping the writer is like calling `shutdown` on the `TcpStream`.
                             self.data_txs.remove(&connection_id);
                         } else {
@@ -314,10 +316,14 @@ impl TcpOutgoingHandler {
                             bytes: bytes.to_vec(),
                         })
                     }
-                    None => LayerTcpOutgoing::Write(LayerWrite {
-                        connection_id,
-                        bytes: Vec::new(),
-                    }),
+                    None => {
+                        // TODO: relax
+                        warn!("@@@@@ Got `None` from `recv`, sending `LayerWrite` with 0 bytes.");
+                        LayerTcpOutgoing::Write(LayerWrite {
+                            connection_id,
+                            bytes: Vec::new(),
+                        })
+                    }
                 }
             })
         })
