@@ -77,6 +77,13 @@ for (let i = 0; i < 1; i++) {
 //   log() // logs out active handles that are keeping node running
 // }, 100000)
 
+process.on('beforeExit', (code) => {
+  console.log('###### BEFORE EXIT code: ', code);
+});
+
+process.on('worker', (worker) => {
+  console.log('###### WORKER: ', worker);
+})
 
 process.on('exit', function (){
   console.log('Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~Goodbye~!');
