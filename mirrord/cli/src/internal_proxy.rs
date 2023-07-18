@@ -255,10 +255,10 @@ fn create_ping_loop(
     CancellationToken,
     JoinHandle<Result<(), InternalProxyError>>,
 ) {
-    let cancalation_token = CancellationToken::new();
+    let cancellation_token = CancellationToken::new();
 
     let join_handle = tokio::spawn({
-        let cancalation_token = cancalation_token.clone();
+        let cancellation_token = cancellation_token.clone();
 
         async move {
             let mut main_keep_interval = tokio::time::interval(Duration::from_secs(30));
@@ -268,12 +268,12 @@ fn create_ping_loop(
                 tokio::select! {
                     _ = main_keep_interval.tick() => {
                         if let Err(err) = ping(&mut connection.0, &mut connection.1).await {
-                            cancalation_token.cancel();
+                            cancellation_token.cancel();
 
                             return Err(err);
                         }
                     }
-                    _ = cancalation_token.cancelled() => {
+                    _ = cancellation_token.cancelled() => {
                         break;
                     }
                 }
@@ -283,7 +283,7 @@ fn create_ping_loop(
         }
     });
 
-    (cancalation_token, join_handle)
+    (cancellation_token, join_handle)
 }
 
 /// Connects to an agent pod depending on how [`LayerConfig`] is set-up:
