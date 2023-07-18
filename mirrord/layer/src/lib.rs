@@ -829,7 +829,7 @@ impl Layer {
 ///   [`ClientMessage`]s, sending them with `Layer::send`;
 ///
 /// - Handle the heartbeat mechanism (Ping/Pong feature), sending a [`ClientMessage::Ping`] if all
-///   the other channels received nothing for a while (60 seconds);
+///   the other channels received nothing for a while (30 seconds);
 async fn thread_loop(
     mut receiver: Receiver<HookMessage>,
     tx: Sender<ClientMessage>,
