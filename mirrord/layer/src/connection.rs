@@ -3,8 +3,8 @@
 //! The layer will connect to the internal proxy to communicate with the agent.
 use std::net::SocketAddr;
 
-use mirrord_protocol::{ClientMessage, DaemonMessage};
 use mirrord_connection::wrap_raw_connection;
+use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::{
     net::TcpStream,
     sync::mpsc::{Receiver, Sender},

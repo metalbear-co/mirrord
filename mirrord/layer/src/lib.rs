@@ -590,8 +590,9 @@ struct Layer {
     /// Used in the [`thread_loop`] to read [`DaemonMessage`]s and pass them to
     /// `handle_daemon_message`.
     ///
-    /// The [`Sender`] lives in the [`wrap_raw_connection`](mirrord_connection::wrap_raw_connection)
-    /// loop, where we receive the remote [`DaemonMessage`]s, and send them through it.
+    /// The [`Sender`] lives in the
+    /// [`wrap_raw_connection`](mirrord_connection::wrap_raw_connection) loop, where we receive
+    /// the remote [`DaemonMessage`]s, and send them through it.
     rx: Receiver<DaemonMessage>,
 
     /// Handler to the TCP mirror operations, see [`TcpMirrorHandler`].
