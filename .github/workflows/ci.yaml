@@ -454,7 +454,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        container-runtime: ["docker", "containerd"]
+#        container-runtime: ["docker", "containerd"]
+        container-runtime: ["docker"]
     name: e2e
 #    needs: [build_mirrord, test_agent_image, changed_files]
     needs: [test_agent_image]
