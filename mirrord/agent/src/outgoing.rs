@@ -13,7 +13,7 @@ use tokio::{
 };
 use tokio_stream::{StreamExt, StreamMap, StreamNotifyClose};
 use tokio_util::io::ReaderStream;
-use tracing::{trace, warn};
+use tracing::{debug, error, warn};
 
 use crate::{
     error::Result,
@@ -201,7 +201,7 @@ impl TcpOutgoingApi {
                 // Read the data from one of the connected remote hosts, and forward the result back
                 // to the user.
                 Some((connection_id, remote_read)) = readers.next() => {
-                    trace!("interceptor_task -> read connection_id {:#?}", connection_id);
+                    debug!("interceptor_task -> read connection_id {:#?}", connection_id);
 
                     match remote_read {
                         // TODO: PROTOCOL
@@ -215,7 +215,7 @@ impl TcpOutgoingApi {
                             daemon_tx.send(daemon_message).await?
                         },
                         Some(Err(err)) => {
-                            warn!("interceptor_task -> read connection_id {:#?} failed with {:#?}", connection_id, err);
+                            error!("interceptor_task -> read connection_id {:#?} failed with {:#?}", connection_id, err);
                             writers.remove(&connection_id);
                             readers.remove(&connection_id);
 
@@ -223,7 +223,7 @@ impl TcpOutgoingApi {
                             daemon_tx.send(daemon_message).await?
                         }
                         None => {
-                            trace!("interceptor_task -> close connection {:#?}", connection_id);
+                            warn!("interceptor_task -> close connection {:#?}", connection_id);
                             // writers.remove(&connection_id);
 
                             // let daemon_message = DaemonTcpOutgoing::Close(connection_id);

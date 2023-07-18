@@ -80,7 +80,8 @@ mod traffic {
             None,
             None,
             // TODO: None
-            Some(vec![("RUST_LOG", "mirrord=trace")]),
+            // Some(vec![("RUST_LOG", "mirrord=trace")]),
+            None,
         )
         .await;
 
