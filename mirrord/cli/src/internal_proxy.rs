@@ -19,7 +19,8 @@ use std::{
 use futures::{stream::StreamExt, SinkExt};
 use mirrord_analytics::{send_analytics, Analytics, CollectAnalytics};
 use mirrord_config::LayerConfig;
-use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
+use mirrord_connection::wrap_raw_connection;
+use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
 use mirrord_operator::client::{OperatorApi, OperatorSessionInformation};
 use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonCodec, DaemonMessage};
 use tokio::{

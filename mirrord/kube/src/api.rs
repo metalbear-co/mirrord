@@ -1,22 +1,18 @@
-use actix_codec::{AsyncRead, AsyncWrite};
-use futures::{SinkExt, StreamExt};
 use k8s_openapi::{api::core::v1::Namespace, NamespaceResourceScope};
 use kube::{api::ListParams, Api, Client};
+use mirrord_connection::wrap_raw_connection;
 use mirrord_progress::Progress;
-use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage, LogLevel};
+use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::{
     net::{TcpStream, ToSocketAddrs},
     sync::mpsc,
 };
-use tracing::{error, info, warn};
 
 use crate::error::{KubeApiError, Result};
 
 pub mod container;
 pub mod kubernetes;
 mod runtime;
-
-const CONNECTION_CHANNEL_SIZE: usize = 1000;
 
 pub fn get_k8s_resource_api<K>(client: &Client, namespace: Option<&str>) -> Api<K>
 where
@@ -50,88 +46,6 @@ pub async fn get_namespaces(
 pub async fn namespace_exists_for_client(namespace: &str, client: &Client) -> bool {
     let api: Api<Namespace> = Api::all(client.clone());
     api.get(namespace).await.is_ok()
-}
-
-/// Creates the task that handles the messaging between layer/agent.
-/// It does the encoding/decoding of protocol.
-pub fn wrap_raw_connection(
-    stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
-) -> (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>) {
-    let mut codec = actix_codec::Framed::new(stream, ClientCodec::new());
-
-    let (in_tx, mut in_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
-    let (out_tx, out_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
-
-    tokio::spawn(async move {
-        let mut timeout_check = tokio::time::interval(std::time::Duration::from_secs(30));
-        timeout_check.tick().await;
-        let mut ticked = false;
-        loop {
-            tokio::select! {
-                msg = in_rx.recv() => {
-                    match msg {
-                        Some(msg) => {
-                            if let Err(fail) = codec.send(msg).await {
-                                error!("Error sending client message: {:#?}", fail);
-                                break;
-                            }
-                        }
-                        None => {
-                            info!("mirrord-kube: initiated disconnect from agent");
-
-                            break;
-                        }
-                    }
-                }
-                daemon_message = codec.next() => {
-                    timeout_check.reset();
-                    ticked = false;
-                    match daemon_message {
-                        Some(Ok(DaemonMessage::LogMessage(log_message))) => {
-                            match log_message.level {
-                                LogLevel::Warn => {
-                                    warn!(message = log_message.message, "Daemon sent log message")
-                                }
-                                LogLevel::Error => {
-                                    error!(message = log_message.message, "Daemon sent log message")
-                                }
-                            }
-                        }
-                        Some(Ok(msg)) => {
-                            if let Err(fail) = out_tx.send(msg).await {
-                                error!("DaemonMessage dropped: {:#?}", fail);
-
-                                break;
-                            }
-                        }
-                        Some(Err(err)) => {
-                            error!("Error receiving daemon message: {:?}", err);
-                            break;
-                        }
-                        None => {
-                            info!("agent disconnected");
-
-                            break;
-                        }
-                    }
-                },
-                _ = timeout_check.tick() => {
-                    if ticked {
-                        info!("Timeout waiting for agent message");
-                        break
-                    } else {
-                        if let Err(fail) = codec.send(ClientMessage::Ping).await {
-                            error!("Error sending client message: {:#?}", fail);
-                            break;
-                        }
-                        ticked = true;
-                    }
-                }
-            }
-        }
-    });
-
-    (in_tx, out_rx)
 }
 
 pub trait AgentManagment {

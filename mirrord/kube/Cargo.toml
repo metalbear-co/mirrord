@@ -21,6 +21,7 @@ incluster = []
 mirrord-config = { path = "../config"}
 mirrord-progress = { path = "../progress" }
 mirrord-protocol = { path = "../protocol" }
+mirrord-connection = { path = "../connection" }
 
 actix-codec.workspace = true
 futures.workspace = true

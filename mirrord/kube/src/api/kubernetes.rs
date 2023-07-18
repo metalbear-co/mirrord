@@ -8,6 +8,7 @@ use kube::{
     Api, Client, Config,
 };
 use mirrord_config::{agent::AgentConfig, target::TargetConfig, LayerConfig};
+use mirrord_connection::wrap_raw_connection;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use rand::Rng;
@@ -21,7 +22,7 @@ use crate::{
         container::{ContainerApi, EphemeralContainer, JobContainer},
         get_k8s_resource_api,
         runtime::RuntimeDataProvider,
-        wrap_raw_connection, AgentManagment,
+        AgentManagment,
     },
     error::{KubeApiError, Result},
 };

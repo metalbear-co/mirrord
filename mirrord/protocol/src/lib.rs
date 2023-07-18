@@ -22,6 +22,7 @@ pub type ConnectionId = u64;
 /// A per-connection HTTP request ID
 pub type RequestId = u16; // TODO: how many requests in a single connection? is u16 appropriate?
 
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EnvVars(pub String);
 

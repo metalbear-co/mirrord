@@ -3151,6 +3151,7 @@ dependencies = [
  "mirrord-analytics",
  "mirrord-auth",
  "mirrord-config",
+ "mirrord-connection",
  "mirrord-console",
  "mirrord-kube",
  "mirrord-layer",
@@ -3285,6 +3286,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-connection"
+version = "3.51.1"
+dependencies = [
+ "actix-codec",
+ "futures",
+ "mirrord-protocol",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "mirrord-console"
 version = "3.51.1"
 dependencies = [
@@ -3314,6 +3326,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "mirrord-config",
+ "mirrord-connection",
  "mirrord-progress",
  "mirrord-protocol",
  "rand",
@@ -3351,6 +3364,7 @@ dependencies = [
  "k8s-openapi",
  "libc",
  "mirrord-config",
+ "mirrord-connection",
  "mirrord-console",
  "mirrord-layer-macro",
  "mirrord-protocol",
