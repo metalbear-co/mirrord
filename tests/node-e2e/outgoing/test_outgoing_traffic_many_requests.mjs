@@ -1,5 +1,5 @@
 import https from "node:https";
-import log from "why-is-node-running";
+// import log from "why-is-node-running";
 
 
 console.log(">> test_outgoing_traffic_many_requests");
@@ -73,9 +73,9 @@ for (let i = 0; i < 1; i++) {
   makeRequests();
 }
 
-setTimeout(function () {
-  log() // logs out active handles that are keeping node running
-}, 100000)
+// setTimeout(function () {
+//   log() // logs out active handles that are keeping node running
+// }, 100000)
 
 
 process.on('exit', function (){
