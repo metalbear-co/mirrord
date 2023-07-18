@@ -25,10 +25,11 @@ use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonCodec, Dae
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc::{self},
-    task::JoinSet,
+    sync::mpsc,
+    task::{JoinHandle, JoinSet},
     time::timeout,
 };
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, log::trace};
 
 use crate::{
@@ -159,6 +160,9 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
         })??;
     }
 
+    let (main_connection_cancellation_token, main_connection_task_join) =
+        create_ping_loop(main_connection);
+
     print_port(&listener)?;
 
     // wait for first connection `FIRST_CONNECTION_TIMEOUT` seconds, or timeout.
@@ -187,6 +191,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
                 }
             },
             _ = active_connections.join_next(), if !active_connections.is_empty() => {},
+            _ = main_connection_cancellation_token.cancelled() => { break; }
             _ = tokio::time::sleep(Duration::from_secs(5)) => {
                 if active_connections.is_empty() {
                     break;
@@ -194,6 +199,8 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
             }
         }
     }
+    main_connection_cancellation_token.cancel();
+
     let mut analytics = Analytics::default();
     (&config).collect_analytics(&mut analytics);
     if config.telemetry {
@@ -204,7 +211,16 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
         )
         .await;
     }
-    Ok(())
+
+    match main_connection_task_join.await {
+        Ok(Err(err)) => Err(err.into()),
+        Err(err) => {
+            error!("internal_proxy connection paniced {err}");
+
+            Err(InternalProxyError::AgentClosedConnection.into())
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Connect and send ping - this is useful when working using k8s
@@ -231,6 +247,43 @@ async fn ping(
         Some(DaemonMessage::Pong) => Ok(()),
         _ => Err(InternalProxyError::AgentClosedConnection),
     }
+}
+
+fn create_ping_loop(
+    mut connection: (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
+) -> (
+    CancellationToken,
+    JoinHandle<Result<(), InternalProxyError>>,
+) {
+    let cancellation_token = CancellationToken::new();
+
+    let join_handle = tokio::spawn({
+        let cancellation_token = cancellation_token.clone();
+
+        async move {
+            let mut main_keep_interval = tokio::time::interval(Duration::from_secs(30));
+            main_keep_interval.tick().await;
+
+            loop {
+                tokio::select! {
+                    _ = main_keep_interval.tick() => {
+                        if let Err(err) = ping(&mut connection.0, &mut connection.1).await {
+                            cancellation_token.cancel();
+
+                            return Err(err);
+                        }
+                    }
+                    _ = cancellation_token.cancelled() => {
+                        break;
+                    }
+                }
+            }
+
+            Ok(())
+        }
+    });
+
+    (cancellation_token, join_handle)
 }
 
 /// Connects to an agent pod depending on how [`LayerConfig`] is set-up:
