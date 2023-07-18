@@ -5,20 +5,20 @@ import log from "why-is-node-running";
 console.log(">> test_outgoing_traffic_many_requests");
 
 const hostList = [
-  // "www.rust-lang.org",
-  // "www.github.com",
-  // "www.google.com",
-  // "www.bing.com",
-  // "www.yahoo.com",
-  // "www.baidu.com",
-  // "www.twitter.com",
+  "www.rust-lang.org",
+  "www.github.com",
+  "www.google.com",
+  "www.bing.com",
+  "www.yahoo.com",
+  "www.baidu.com",
+  "www.twitter.com",
   "www.microsoft.com",
   "www.youtube.com",
   "www.live.com",
   "www.msn.com",
   "www.google.com.br",
-  // "www.yahoo.co.jp",
-  // "www.qq.com",
+  "www.yahoo.co.jp",
+  "www.qq.com",
 ];
 
 let requestIndex = 0;
