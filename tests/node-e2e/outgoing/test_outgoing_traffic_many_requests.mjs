@@ -12,7 +12,7 @@ const hostList = [
   // "www.yahoo.com",
   // "www.baidu.com",
   // "www.twitter.com",
-  // "www.microsoft.com",
+  "www.microsoft.com",
   "www.youtube.com",
   "www.live.com",
   "www.msn.com",
