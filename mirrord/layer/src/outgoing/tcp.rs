@@ -94,9 +94,9 @@ impl TcpOutgoingHandler {
             let mut mirror_stream = TcpStream::from_std(mirror_stream.into())
                 .map_err(|err| error!("Invalid IP socket address: {err:?}"))
                 .unwrap();
-            copy_bidirectional(&mut mirror_stream, &mut data_stream)
-                .await
-                .ok(); // TODO: handle error.
+            if let Err(err) = copy_bidirectional(&mut mirror_stream, &mut data_stream).await {
+                error!("Error in forwarding outgoing stream: {err:?}");
+            }
         } else {
             error!("Unsupported socket address family, not intercepting.")
         }
