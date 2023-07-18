@@ -19,7 +19,7 @@ use std::{
 use futures::{stream::StreamExt, SinkExt};
 use mirrord_analytics::{send_analytics, Analytics, CollectAnalytics};
 use mirrord_config::LayerConfig;
-use mirrord_connection::wrap_raw_connection;
+use mirrord_connection::wrap_raw_connection_keepalive;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
 use mirrord_operator::client::{OperatorApi, OperatorSessionInformation};
 use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonCodec, DaemonMessage};
@@ -259,7 +259,7 @@ async fn connect(
         let stream = TcpStream::connect(address)
             .await
             .map_err(InternalProxyError::TcpConnectError)?;
-        Ok((wrap_raw_connection(stream), false))
+        Ok((wrap_raw_connection_keepalive(stream), false))
     } else if let (Some(agent_name), Some(port)) =
         (&config.connect_agent_name, config.connect_agent_port)
     {

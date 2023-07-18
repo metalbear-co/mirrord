@@ -8,7 +8,7 @@ use kube::{
     Api, Client, Config,
 };
 use mirrord_config::{agent::AgentConfig, target::TargetConfig, LayerConfig};
-use mirrord_connection::wrap_raw_connection;
+use mirrord_connection::wrap_raw_connection_keepalive;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use rand::Rng;
@@ -68,6 +68,8 @@ impl AgentManagment for KubernetesAPI {
         &self,
         (pod_agent_name, agent_port): Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+        use mirrord_connection::wrap_raw_connection_keepalive;
+
         let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, self.agent.namespace.as_deref());
 
         let pod = pod_api.get(&pod_agent_name).await?;
@@ -93,7 +95,7 @@ impl AgentManagment for KubernetesAPI {
         }
         .map_err(|_| KubeApiError::AgentReadyTimeout)??;
 
-        Ok(wrap_raw_connection(conn))
+        Ok(wrap_raw_connection_keepalive(conn))
     }
 
     #[cfg(not(feature = "incluster"))]
@@ -105,7 +107,7 @@ impl AgentManagment for KubernetesAPI {
         trace!("port-forward to pod {}:{}", &pod_agent_name, &agent_port);
         let mut port_forwarder = pod_api.portforward(&pod_agent_name, &[agent_port]).await?;
 
-        Ok(wrap_raw_connection(
+        Ok(wrap_raw_connection_keepalive(
             port_forwarder
                 .take_stream(agent_port)
                 .ok_or(KubeApiError::PortForwardFailed)?,

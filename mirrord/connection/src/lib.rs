@@ -17,6 +17,73 @@ pub fn wrap_raw_connection(
     let (out_tx, out_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
 
     tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                msg = in_rx.recv() => {
+                    match msg {
+                        Some(msg) => {
+                            if let Err(fail) = codec.send(msg).await {
+                                error!("Error sending client message: {:#?}", fail);
+                                break;
+                            }
+                        }
+                        None => {
+                            info!("mirrord-kube: initiated disconnect from agent");
+
+                            break;
+                        }
+                    }
+                }
+                daemon_message = codec.next() => {
+                    match daemon_message {
+                        Some(Ok(DaemonMessage::LogMessage(log_message))) => {
+                            match log_message.level {
+                                LogLevel::Warn => {
+                                    warn!(message = log_message.message, "Daemon sent log message")
+                                }
+                                LogLevel::Error => {
+                                    error!(message = log_message.message, "Daemon sent log message")
+                                }
+                            }
+                        },
+                        Some(Ok(DaemonMessage::Pong)) => {
+                            trace!("Received pong from agent");
+                        }
+                        Some(Ok(msg)) => {
+                            if let Err(fail) = out_tx.send(msg).await {
+                                error!("DaemonMessage dropped: {:#?}", fail);
+
+                                break;
+                            }
+                        }
+                        Some(Err(err)) => {
+                            error!("Error receiving daemon message: {:?}", err);
+                            break;
+                        }
+                        None => {
+                            info!("agent disconnected");
+
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    (in_tx, out_rx)
+}
+
+/// Like `wrap_raw_connection`](wrap_raw_connection) but with ping/pongs.
+pub fn wrap_raw_connection_keepalive(
+    stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
+) -> (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>) {
+    let mut codec = actix_codec::Framed::new(stream, ClientCodec::new());
+
+    let (in_tx, mut in_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
+    let (out_tx, out_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
+
+    tokio::spawn(async move {
         let mut timeout_check = tokio::time::interval(std::time::Duration::from_secs(30));
         timeout_check.tick().await;
         let mut ticked = false;

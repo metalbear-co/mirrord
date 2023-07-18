@@ -1,6 +1,6 @@
 use k8s_openapi::{api::core::v1::Namespace, NamespaceResourceScope};
 use kube::{api::ListParams, Api, Client};
-use mirrord_connection::wrap_raw_connection;
+use mirrord_connection::wrap_raw_connection_keepalive;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::{
@@ -88,7 +88,7 @@ where
         &self,
         stream: Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        Ok(wrap_raw_connection(stream))
+        Ok(wrap_raw_connection_keepalive(stream))
     }
 
     async fn create_agent<P>(&self, _: &P) -> Result<Self::AgentRef, Self::Err>
