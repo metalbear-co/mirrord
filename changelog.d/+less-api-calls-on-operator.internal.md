@@ -1,1 +1,0 @@
-Reduce amount of API calls to use operator

@@ -8,6 +8,31 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.52.0](https://github.com/metalbear-co/mirrord/tree/3.52.0) - 2023-07-18
+
+
+### Added
+
+- Support for OIDC refresh token
+  [#1460](https://github.com/metalbear-co/mirrord/issues/1460)
+
+
+### Fixed
+
+- Fixed case where proxy can timeout since it holds a stale connection. Added
+  heartbeat to the connection handling
+- Fixed dynamic pause with operator not working - moved pause request to be
+  from internal proxy
+- Update the code to reimplement the fix but without moving the pinging source.
+
+
+### Internal
+
+- Add Cargo Chef to mirrord-agent docker image for better utilisation of cache
+  layers.
+- Reduce amount of API calls to use operator
+
+
 ## [3.51.1](https://github.com/metalbear-co/mirrord/tree/3.51.1) - 2023-07-16
 
 
