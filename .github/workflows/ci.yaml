@@ -262,28 +262,35 @@ jobs:
 #      # For now, just verify it compiles.
 #      - run: cargo build -p mirrord-layer -p mirrord --target=${{matrix.target}}
 
-  build_mirrord:
-    runs-on: ubuntu-latest
-    name: build mirrord
-#    needs: changed_files
-#    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    steps:
-      - uses: actions/checkout@v3
-      - uses: arduino/setup-protoc@v1
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          components: rustfmt
-      - run: cargo build --workspace --exclude mirrord-agent --exclude tests
-      - name: upload layer
-        uses: actions/upload-artifact@v3
-        with:
-          name: mirrord-artifacts
-          path: |
-            target/debug/libmirrord_layer.so
-            target/debug/mirrord
-          if-no-files-found: error
+#  build_mirrord:
+#    runs-on: ubuntu-latest
+#    name: build mirrord
+##    needs: changed_files
+##    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+#    steps:
+#      - uses: actions/checkout@v3
+#      - uses: arduino/setup-protoc@v1
+#        with:
+#          repo-token: ${{ secrets.GITHUB_TOKEN }}
+#      - uses: actions-rust-lang/setup-rust-toolchain@v1
+#        with:
+#          components: rustfmt
+#      - run: cargo build --workspace --exclude mirrord-agent --exclude tests
+#      - name: upload rust cache
+#        uses: actions/upload-artifact@v3
+#        with:
+#          name: rust-cache
+#          path: |
+#            target
+#          if-no-files-found: error
+#      - name: upload layer
+#        uses: actions/upload-artifact@v3
+#        with:
+#          name: mirrord-artifacts
+#          path: |
+#            target/debug/libmirrord_layer.so
+#            target/debug/mirrord
+#          if-no-files-found: error
 
 #  integration_tests:
 #    runs-on: ubuntu-latest
@@ -450,7 +457,7 @@ jobs:
         container-runtime: ["docker", "containerd"]
     name: e2e
 #    needs: [build_mirrord, test_agent_image, changed_files]
-    needs: [build_mirrord, test_agent_image]
+    needs: [test_agent_image]
 #    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
