@@ -160,7 +160,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
         })??;
     }
 
-    let (main_connection_cancalation_token, main_connection_task_join) =
+    let (main_connection_cancellation_token, main_connection_task_join) =
         create_ping_loop(main_connection);
 
     print_port(&listener)?;
@@ -191,7 +191,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
                 }
             },
             _ = active_connections.join_next(), if !active_connections.is_empty() => {},
-            _ = main_connection_cancalation_token.cancelled() => { break; }
+            _ = main_connection_cancellation_token.cancelled() => { break; }
             _ = tokio::time::sleep(Duration::from_secs(5)) => {
                 if active_connections.is_empty() {
                     break;
@@ -199,7 +199,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
             }
         }
     }
-    main_connection_cancalation_token.cancel();
+    main_connection_cancellation_token.cancel();
 
     let mut analytics = Analytics::default();
     (&config).collect_analytics(&mut analytics);
@@ -212,11 +212,15 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
         .await;
     }
 
-    if let Ok(Err(err)) = main_connection_task_join.await {
-        return Err(err.into());
-    }
+    match main_connection_task_join.await {
+        Ok(Err(err)) => Err(err.into()),
+        Err(err) => {
+            error!("internal_proxy connection paniced {err}");
 
-    Ok(())
+            Err(InternalProxyError::AgentClosedConnection.into())
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Connect and send ping - this is useful when working using k8s
