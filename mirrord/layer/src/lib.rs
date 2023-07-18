@@ -583,14 +583,14 @@ struct Layer {
     /// mirrord-agent.
     ///
     /// The [`Receiver`] lives in the
-    /// [`wrap_raw_connection`](mirrord_kube::api::wrap_raw_connection) loop, where we read from
+    /// [`wrap_raw_connection`](mirrord_connection::wrap_raw_connection) loop, where we read from
     /// this channel and send the messages to the agent.
     tx: Sender<ClientMessage>,
 
     /// Used in the [`thread_loop`] to read [`DaemonMessage`]s and pass them to
     /// `handle_daemon_message`.
     ///
-    /// The [`Sender`] lives in the [`wrap_raw_connection`](mirrord_kube::api::wrap_raw_connection)
+    /// The [`Sender`] lives in the [`wrap_raw_connection`](mirrord_connection::wrap_raw_connection)
     /// loop, where we receive the remote [`DaemonMessage`]s, and send them through it.
     rx: Receiver<DaemonMessage>,
 
@@ -671,7 +671,7 @@ impl Layer {
     }
 
     /// Sends a [`ClientMessage`] through `Layer::tx` to the [`Receiver`] in
-    /// [`wrap_raw_connection`](mirrord_kube::api::wrap_raw_connection).
+    /// [`wrap_raw_connection`](mirrord_connection::wrap_raw_connection).
     async fn send(&self, msg: ClientMessage) -> Result<(), ClientMessage> {
         self.tx.send(msg).await.map_err(|err| err.0)
     }

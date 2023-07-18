@@ -17,7 +17,7 @@ pub fn wrap_raw_connection(
     let (out_tx, out_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
 
     tokio::spawn(async move {
-        let mut timeout_check = tokio::time::interval(std::time::Duration::from_secs(2));
+        let mut timeout_check = tokio::time::interval(std::time::Duration::from_secs(30));
         timeout_check.tick().await;
         let mut ticked = false;
         loop {
