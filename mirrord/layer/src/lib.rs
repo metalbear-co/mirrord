@@ -113,6 +113,7 @@ use tokio::{
     runtime::Runtime,
     select,
     sync::mpsc::{channel, Receiver, Sender},
+    time::{sleep, Duration},
 };
 use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
@@ -594,6 +595,13 @@ struct Layer {
     /// loop, where we receive the remote [`DaemonMessage`]s, and send them through it.
     rx: Receiver<DaemonMessage>,
 
+    /// Part of the heartbeat mechanism of mirrord.
+    ///
+    /// When it's been too long since we've last received a message (60 seconds), and this is
+    /// `false`, we send a [`ClientMessage::Ping`], set this to `true`, and expect to receive a
+    /// [`DaemonMessage::Pong`], setting it to `false` and completing the hearbeat detection.
+    ping: bool,
+
     /// Handler to the TCP mirror operations, see [`TcpMirrorHandler`].
     tcp_mirror_handler: TcpMirrorHandler,
 
@@ -655,6 +663,7 @@ impl Layer {
         Self {
             tx,
             rx,
+            ping: false,
             tcp_mirror_handler: TcpMirrorHandler::new(port_mapping.clone()),
             tcp_outgoing_handler: TcpOutgoingHandler::default(),
             udp_outgoing_handler: Default::default(),
@@ -731,6 +740,10 @@ impl Layer {
     ///
     /// ## Special case
     ///
+    /// ### [`DaemonMessage::Pong`]
+    ///
+    /// This message has no dedicated handler, and is thus handled directly here, changing the
+    /// [`Self::ping`] state.
     ///
     /// ### [`DaemonMessage::GetEnvVarsResponse`] and [`DaemonMessage::PauseTarget`]
     ///
@@ -766,7 +779,13 @@ impl Layer {
                     .await
             }
             DaemonMessage::Pong => {
-                trace!("pong!");
+                if self.ping {
+                    self.ping = false;
+                    trace!("Daemon sent pong!");
+                } else {
+                    Err(LayerError::UnmatchedPong)?;
+                }
+
                 Ok(())
             }
             DaemonMessage::GetEnvVarsResponse(_) => {
@@ -808,6 +827,9 @@ impl Layer {
 ///
 /// - Read from the [`Layer`] feature handlers [`Receiver`]s, to turn outgoing messages into
 ///   [`ClientMessage`]s, sending them with `Layer::send`;
+///
+/// - Handle the heartbeat mechanism (Ping/Pong feature), sending a [`ClientMessage::Ping`] if all
+///   the other channels received nothing for a while (60 seconds);
 async fn thread_loop(
     mut receiver: Receiver<HookMessage>,
     tx: Sender<ClientMessage>,
@@ -871,6 +893,15 @@ async fn thread_loop(
             }
             Some(response) = layer.http_response_receiver.recv() => {
                 layer.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response))).await.unwrap();
+            }
+            _ = sleep(Duration::from_secs(30)) => {
+                if !layer.ping {
+                    layer.send(ClientMessage::Ping).await.unwrap();
+                    trace!("sent ping to daemon");
+                    layer.ping = true;
+                } else {
+                    panic!("Client: unmatched ping");
+                }
             }
         }
     }

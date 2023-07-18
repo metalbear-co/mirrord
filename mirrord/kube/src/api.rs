@@ -63,9 +63,6 @@ pub fn wrap_raw_connection(
     let (out_tx, out_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
 
     tokio::spawn(async move {
-        let mut timeout_check = tokio::time::interval(std::time::Duration::from_secs(30));
-        timeout_check.tick().await;
-        let mut ticked = false;
         loop {
             tokio::select! {
                 msg = in_rx.recv() => {
@@ -84,8 +81,6 @@ pub fn wrap_raw_connection(
                     }
                 }
                 daemon_message = codec.next() => {
-                    timeout_check.reset();
-                    ticked = false;
                     match daemon_message {
                         Some(Ok(DaemonMessage::LogMessage(log_message))) => {
                             match log_message.level {
@@ -113,18 +108,6 @@ pub fn wrap_raw_connection(
 
                             break;
                         }
-                    }
-                },
-                _ = timeout_check.tick() => {
-                    if ticked {
-                        info!("Timeout waiting for agent message");
-                        break
-                    } else {
-                        if let Err(fail) = codec.send(ClientMessage::Ping).await {
-                            error!("Error sending client message: {:#?}", fail);
-                            break;
-                        }
-                        ticked = true;
                     }
                 }
             }
