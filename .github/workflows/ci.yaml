@@ -275,7 +275,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
-      - run: cargo build --manifest-path=./Cargo.toml
+      - run: cargo build --workspace --exclude mirrord-agent --exclude tests
       - name: upload layer
         uses: actions/upload-artifact@v3
         with:
