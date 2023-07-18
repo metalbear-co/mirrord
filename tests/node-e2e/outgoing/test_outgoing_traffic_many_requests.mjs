@@ -75,7 +75,7 @@ for (let i = 0; i < 1; i++) {
 
 setTimeout(function () {
   log() // logs out active handles that are keeping node running
-}, 100)
+}, 100000)
 
 
 process.on('exit', function (){
