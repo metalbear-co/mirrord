@@ -2,13 +2,14 @@ mod steal;
 
 #[cfg(test)]
 mod traffic {
-    use std::{net::UdpSocket, path::PathBuf, time::Duration};
+    use std::{net::UdpSocket, path::PathBuf, process::Stdio, time::Duration};
 
     use futures::Future;
     use futures_util::{stream::TryStreamExt, AsyncBufReadExt};
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::LogParams, Api, Client};
     use rstest::*;
+    use tokio::{io::AsyncReadExt, process::Command};
 
     use crate::utils::{
         hostname_service, kube_client, run_exec_with_target, service, udp_logger_service,
@@ -62,6 +63,32 @@ mod traffic {
             run_exec_with_target(node_command, &service.target, None, None, None).await;
 
         let res = process.wait().await;
+        assert!(res.success());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(120))]
+    pub async fn outgoing_traffic_many_requests_no_mirrord() {
+        let mut process = Command::new("node")
+            .args(["node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        eprintln!("~~~~~~~~~~~~~   Waiting for test process to exit.  ~~~~~~~~~~~~~~");
+
+        let res = process.wait().await.unwrap();
+        let mut stdout = Vec::new();
+        process
+            .stdout
+            .unwrap()
+            .read_to_end(&mut stdout)
+            .await
+            .unwrap();
+        eprintln!("stdout: {:}", String::from_utf8_lossy(&stdout[..]));
         assert!(res.success());
     }
 
