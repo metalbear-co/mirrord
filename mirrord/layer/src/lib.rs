@@ -113,7 +113,7 @@ use tokio::{
     runtime::Runtime,
     select,
     sync::mpsc::{channel, Receiver, Sender},
-    time::{sleep, Duration},
+    time::{Duration, Interval},
 };
 use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
@@ -602,6 +602,8 @@ struct Layer {
     /// [`DaemonMessage::Pong`], setting it to `false` and completing the hearbeat detection.
     ping: bool,
 
+    ping_interval: Interval,
+
     /// Handler to the TCP mirror operations, see [`TcpMirrorHandler`].
     tcp_mirror_handler: TcpMirrorHandler,
 
@@ -664,6 +666,7 @@ impl Layer {
             tx,
             rx,
             ping: false,
+            ping_interval: tokio::time::interval(Duration::from_secs(30)),
             tcp_mirror_handler: TcpMirrorHandler::new(port_mapping.clone()),
             tcp_outgoing_handler: TcpOutgoingHandler::default(),
             udp_outgoing_handler: Default::default(),
@@ -681,7 +684,8 @@ impl Layer {
 
     /// Sends a [`ClientMessage`] through `Layer::tx` to the [`Receiver`] in
     /// [`wrap_raw_connection`](mirrord_kube::api::wrap_raw_connection).
-    async fn send(&self, msg: ClientMessage) -> Result<(), ClientMessage> {
+    async fn send(&mut self, msg: ClientMessage) -> Result<(), ClientMessage> {
+        self.ping_interval.reset();
         self.tx.send(msg).await.map_err(|err| err.0)
     }
 
@@ -845,6 +849,8 @@ async fn thread_loop(
         ..
     } = config;
     let mut layer = Layer::new(tx, rx, incoming);
+    layer.ping_interval.tick().await;
+
     loop {
         select! {
             hook_message = receiver.recv() => {
@@ -894,7 +900,7 @@ async fn thread_loop(
             Some(response) = layer.http_response_receiver.recv() => {
                 layer.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response))).await.unwrap();
             }
-            _ = sleep(Duration::from_secs(30)) => {
+            _ = layer.ping_interval.tick() => {
                 if !layer.ping {
                     layer.send(ClientMessage::Ping).await.unwrap();
                     trace!("sent ping to daemon");
