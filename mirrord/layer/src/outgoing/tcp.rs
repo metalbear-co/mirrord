@@ -179,6 +179,11 @@ impl TcpOutgoingHandler {
             DaemonTcpOutgoing::Connect(connect) => {
                 trace!("Connect -> connect {:#?}", connect);
 
+                let response_sender = self
+                    .connect_queue
+                    .pop_front()
+                    .ok_or(LayerError::SendErrorTcpResponse)?;
+
                 let response = async move { connect }
                     .and_then(
                         |DaemonConnect {
@@ -262,9 +267,7 @@ impl TcpOutgoingHandler {
                         })
                     });
 
-                self.connect_queue
-                    .pop_front()
-                    .ok_or(LayerError::SendErrorTcpResponse)?
+                response_sender
                     .send(response)
                     .map_err(|_| LayerError::SendErrorTcpResponse)
             }
