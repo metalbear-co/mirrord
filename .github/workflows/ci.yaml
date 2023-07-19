@@ -531,10 +531,10 @@ jobs:
 #        run: cargo test -p tests targetless
       - name: Run all E2E test
         run: |
-          cargo test -p tests outgoing_traffic_many_requests_no_mirrord -- --test-threads=6
-          cargo test -p tests outgoing_traffic_many_requests -- --test-threads=6
-          cargo test -p tests outgoing_traffic_many_requests -- --test-threads=6
-          cargo test -p tests outgoing_traffic_many_requests -- --test-threads=6
+          RUSTFLAGS="--cfg tokio_unstable" cargo test -p tests outgoing_traffic_many_requests_no_mirrord -- --test-threads=6
+          RUSTFLAGS="--cfg tokio_unstable" cargo test -p tests outgoing_traffic_many_requests -- --test-threads=6
+          RUSTFLAGS="--cfg tokio_unstable" cargo test -p tests outgoing_traffic_many_requests -- --test-threads=6
+          RUSTFLAGS="--cfg tokio_unstable" cargo test -p tests outgoing_traffic_many_requests -- --test-threads=6
       - name: Collect logs
         if: ${{ failure() }}
         run: |
