@@ -67,6 +67,14 @@ pub enum DebuggerType {
     /// `/path/to/rider/lib/ReSharperHost/linux-x64/dotnet/dotnet exec /path/to/rider/lib/
     /// ReSharperHost/JetBrains.Debugger.Worker.exe --mode=client ...` (port missing).
     ReSharper,
+    /// Used in both VSCode and IDEA when debugging java applications.
+    ///
+    /// Command on VSCode and macOS looks like
+    /// /Users/meee/Library/Java/JavaVirtualMachines/corretto-17.0.4.1/Contents/Home/bin/java
+    /// -agentlib:jdwp=transport=dt_socket,server=n,susp end=y,address=localhost:54898
+    /// @/var/folders/2h/fn_s1t8n0cqfc9x71yq845m40000gn/T/cp_dikq30ybalqwcehe333w2xxhd.argfile
+    /// com.example.demo.DemoApplication
+    JavaAgent,
 }
 
 impl FromStr for DebuggerType {
@@ -77,6 +85,7 @@ impl FromStr for DebuggerType {
             "debugpy" => Ok(Self::DebugPy),
             "pydevd" => Ok(Self::PyDevD),
             "resharper" => Ok(Self::ReSharper),
+            "javaagent" => Ok(Self::JavaAgent),
             _ => Err(format!("invalid debugger type: {s}")),
         }
     }
@@ -130,6 +139,21 @@ impl DebuggerType {
                     .find_map(|arg| arg.strip_prefix("--frontend-port="))
                     .and_then(|port| port.parse::<u16>().ok())
                     .map(|port| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
+            }
+            Self::JavaAgent => {
+                let is_java = args.first()?.ends_with("java");
+
+                if !is_java {
+                    None?
+                }
+
+                args.iter()
+                    .find_map(|arg| arg.strip_prefix("-agentlib:jdwp=transport=dt_socket"))
+                    .and_then(|agent_lib_args| agent_lib_args.split(',').find_map(|arg| arg.strip_prefix("address=")))
+                    .and_then(|full_address| full_address.split(':').last())
+                    .and_then(|port| port.parse::<u16>().ok())
+                    .map(|port| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
+
             }
         }
         .and_then(|addr| match addr.ip() {
@@ -279,6 +303,22 @@ mod test {
                     .collect::<Vec<_>>()
             ),
             Some(40905)
+        )
+    }
+
+    #[test]
+    fn detect_javaagent_port() {
+        let debugger = DebuggerType::JavaAgent;
+        let command = "/Users/me/Library/Java/JavaVirtualMachines/corretto-17.0.4.1/Contents/Home/bin/java -agentlib:jdwp=transport=dt_socket,server=n,suspend=y,address=localhost:54898 @/var/folders/2h/fn_s1t8n0cqfc9x71yq845m40000gn/T/cp_dikq30ybalqwcehe333w2xxhd.argfile com.example.demo.DemoApplication";
+
+        assert_eq!(
+            debugger.get_port(
+                &command
+                    .split_ascii_whitespace()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+            ),
+            Some(54898)
         )
     }
 
