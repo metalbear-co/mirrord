@@ -17,8 +17,9 @@ use socket2::{Domain, Socket, Type};
 use tokio::{
     fs::create_dir_all,
     io,
-    io::{copy_bidirectional, split, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf},
-    net::{TcpStream, UnixStream},
+    io::{AsyncWriteExt, ReadHalf, WriteHalf},
+    // net::{TcpStream, UnixStream},
+    net::TcpStream,
     sync::mpsc::Sender,
     task,
 };
@@ -41,25 +42,33 @@ pub(crate) enum TcpOutgoing {
 }
 
 /// Responsible for handling hook and daemon messages for the outgoing traffic feature.
-#[derive(Default)]
 pub(crate) struct TcpOutgoingHandler {
     // TODO: docs
     /// Holds the channels used to send daemon messages to the interceptor socket, for the case
     /// where (agent) received data from the remote host, and sent it to (layer), to finally be
     /// passed all the way back to the user.
-    data_txs: HashMap<ConnectionId, WriteHalf<DuplexStream>>,
+    data_txs: HashMap<ConnectionId, WriteHalf<TcpStream>>,
 
     // TODO: docs
-    // TODO: if we want to send the forward shutdowns from the user to the agent, we can wrap the
-    //      `StreamMap` with a `StreamNotifyClose`, and send a write message with an empty vec.
-    data_rxs: StreamMap<ConnectionId, StreamNotifyClose<ReaderStream<ReadHalf<DuplexStream>>>>,
+    data_rxs: StreamMap<ConnectionId, StreamNotifyClose<ReaderStream<ReadHalf<TcpStream>>>>,
 
     /// Holds the connection requests from the `connect` hook. It's main use is to reply back with
     /// the `SocketAddr` of the socket that'll be used to intercept the user's socket operations.
     connect_queue: ResponseDeque<RemoteConnection>,
+
+    accepted_sockets_tx: Sender<(ConnectionId, TcpStream)>,
 }
 
 impl TcpOutgoingHandler {
+    pub fn new(accepted_sockets_tx: Sender<(ConnectionId, TcpStream)>) -> Self {
+        Self {
+            data_rxs: Default::default(),
+            data_txs: Default::default(),
+            connect_queue: Default::default(),
+            accepted_sockets_tx,
+        }
+    }
+
     // TODO: docs
     /// # Arguments
     ///
@@ -67,7 +76,11 @@ impl TcpOutgoingHandler {
     ///   (instead of to its actual remote target).
     /// * `remote_rx` - A channel for reading incoming data that was forwarded from the remote peer.
     #[tracing::instrument(level = "trace", skip_all)]
-    async fn interceptor_task(layer_socket: Socket, mut data_stream: DuplexStream) {
+    async fn accepter_task(
+        connection_id: ConnectionId,
+        layer_socket: Socket,
+        accepted_stream_tx: Sender<(ConnectionId, TcpStream)>,
+    ) {
         // Accepts the user's socket connection, and finally becomes the interceptor socket.
         let (mirror_stream, _) = layer_socket
             .accept()
@@ -83,19 +96,25 @@ impl TcpOutgoingHandler {
         // succeed.
         let local_addr = mirror_stream.local_addr().unwrap();
         if local_addr.is_unix() {
-            let mut mirror_stream = UnixStream::from_std(mirror_stream.into())
-                .map_err(|err| error!("Invalid unix stream socket address: {err:?}"))
-                .unwrap();
-            // TODO: eliminate duplication
-            copy_bidirectional(&mut mirror_stream, &mut data_stream)
-                .await
-                .ok(); // TODO: handle error.
+            // let mut mirror_stream = UnixStream::from_std(mirror_stream.into())
+            //     .map_err(|err| error!("Invalid unix stream socket address: {err:?}"))
+            //     .unwrap();
+            // // TODO: eliminate duplication
+            // copy_bidirectional(&mut mirror_stream, &mut data_stream)
+            //     .await
+            //     .ok(); // TODO: handle error.
+            println!("TODO");
         } else if local_addr.is_ipv6() || local_addr.is_ipv4() {
-            let mut mirror_stream = TcpStream::from_std(mirror_stream.into())
+            let mirror_stream = TcpStream::from_std(mirror_stream.into())
                 .map_err(|err| error!("Invalid IP socket address: {err:?}"))
                 .unwrap();
-            if let Err(err) = copy_bidirectional(&mut mirror_stream, &mut data_stream).await {
-                error!("Error in forwarding outgoing stream: {err:?}");
+            if let Err(err) = accepted_stream_tx
+                .send((connection_id, mirror_stream))
+                .await
+            {
+                error!(
+                    "Accepter task could not send accepted tcp stream to main layer thread: {err:?}"
+                );
             }
         } else {
             error!("Unsupported socket address family, not intercepting.")
@@ -226,20 +245,15 @@ impl TcpOutgoingHandler {
                         // Agent ----> layer --> remote_tx=====remote_rx --> interceptor -->
                         // mirror_stream
 
-                        let (main_task_side, interceptor_task_side) = io::duplex(1024);
-                        let (rx, tx) = split(main_task_side);
-                        self.data_rxs
-                            .insert(connection_id, StreamNotifyClose::new(ReaderStream::new(rx)));
-                        self.data_txs.insert(connection_id, tx);
-
                         let _ = DetourGuard::new();
                         let layer_address = socket.local_addr()?;
 
                         // `user` and `interceptor` sockets are not yet connected to each other,
                         // spawn a new task to `accept` the connection and pair their reads/writes.
-                        task::spawn(TcpOutgoingHandler::interceptor_task(
+                        task::spawn(TcpOutgoingHandler::accepter_task(
+                            connection_id,
                             socket,
-                            interceptor_task_side,
+                            self.accepted_sockets_tx.clone(),
                         ));
 
                         Ok(RemoteConnection {
@@ -307,6 +321,19 @@ impl TcpOutgoingHandler {
                 Ok(())
             }
         }
+    }
+
+    pub(crate) fn add_accepted_stream_to_maps(
+        &mut self,
+        connection_id: ConnectionId,
+        tcp_stream: TcpStream,
+    ) {
+        let (read_half, write_half) = io::split(tcp_stream);
+        self.data_rxs.insert(
+            connection_id,
+            StreamNotifyClose::new(ReaderStream::new(read_half)),
+        );
+        self.data_txs.insert(connection_id, write_half);
     }
 
     /// Helper function to access the channel of messages that are to be passed directly as

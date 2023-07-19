@@ -101,7 +101,7 @@ use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
     tcp::{HttpResponse, LayerTcpSteal},
-    ClientMessage, DaemonMessage,
+    ClientMessage, ConnectionId, DaemonMessage,
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
 use regex::RegexSet;
@@ -110,6 +110,7 @@ use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
 use tcp_steal::TcpStealHandler;
 use tokio::{
+    net::TcpStream,
     runtime::Runtime,
     select,
     sync::mpsc::{channel, Receiver, Sender},
@@ -607,6 +608,8 @@ struct Layer {
     /// Handler to the TCP mirror operations, see [`TcpMirrorHandler`].
     tcp_mirror_handler: TcpMirrorHandler,
 
+    accepted_sockets_rx: Receiver<(ConnectionId, TcpStream)>,
+
     /// Handler to the TCP outgoing operations, see [`TcpOutgoingHandler`].
     tcp_outgoing_handler: TcpOutgoingHandler,
 
@@ -662,13 +665,16 @@ impl Layer {
             ..
         } = incoming;
 
+        let (accepted_sockets_tx, accepted_sockets_rx) = channel(64);
+
         Self {
             tx,
             rx,
             ping: false,
             ping_interval: tokio::time::interval(Duration::from_secs(30)),
             tcp_mirror_handler: TcpMirrorHandler::new(port_mapping.clone()),
-            tcp_outgoing_handler: TcpOutgoingHandler::default(),
+            accepted_sockets_rx,
+            tcp_outgoing_handler: TcpOutgoingHandler::new(accepted_sockets_tx.clone()),
             udp_outgoing_handler: Default::default(),
             file_handler: FileHandler::default(),
             getaddrinfo_handler_queue: VecDeque::new(),
@@ -855,6 +861,9 @@ async fn thread_loop(
         select! {
             hook_message = receiver.recv() => {
                 layer.handle_hook_message(hook_message.unwrap()).await;
+            }
+            Some((connection_id, tcp_stream)) = layer.accepted_sockets_rx.recv() => {
+                layer.tcp_outgoing_handler.add_accepted_stream_to_maps(connection_id, tcp_stream);
             }
             Some(tcp_outgoing_message) = layer.tcp_outgoing_handler.recv() => {
                 if let Err(fail) =
