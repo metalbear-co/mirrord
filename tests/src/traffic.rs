@@ -106,9 +106,8 @@ mod traffic {
             &service.target,
             None,
             None,
-            // TODO: None
-            // Some(vec![("RUST_LOG", "mirrord=trace")]),
-            None,
+            Some(vec![("RUST_LOG", "mirrord=trace")]),
+            // None,
         )
         .await;
 
