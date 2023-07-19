@@ -8,6 +8,15 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.52.1](https://github.com/metalbear-co/mirrord/tree/3.52.1) - 2023-07-19
+
+
+### Internal
+
+- Added Java Debug port detecting to use in VSCode/IntelliJ
+  [#1689](https://github.com/metalbear-co/mirrord/issues/1689)
+
+
 ## [3.52.0](https://github.com/metalbear-co/mirrord/tree/3.52.0) - 2023-07-18
 
 
