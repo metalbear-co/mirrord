@@ -289,7 +289,7 @@
         },
         "tolerations": {
           "title": "agent.tolerations {#agent-tolerations}",
-          "description": "Sets pod’s tolerations.",
+          "description": "Add extra pod tolerations. (not with ephemeral agents)",
           "type": [
             "array",
             "null"

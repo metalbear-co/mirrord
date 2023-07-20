@@ -201,7 +201,7 @@ pub struct AgentConfig {
 
     /// ### agent.tolerations {#agent-tolerations}
     ///
-    /// Add extra pod tolerations. (not with ephemeral agents)
+    /// Set pod tolerations. (not with ephemeral agents)
     pub tolerations: Option<Vec<Toleration>>,
 
     /// <!--${internal}-->
