@@ -8,6 +8,23 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.53.0](https://github.com/metalbear-co/mirrord/tree/3.53.0) - 2023-07-20
+
+
+### Added
+
+- Add support for `agent.tolerations` configuraion field for setting agent
+  `Toleration`s to work around `Taint`s in the cluster.
+  [#1692](https://github.com/metalbear-co/mirrord/issues/1692)
+
+
+### Changed
+
+- Added env var exclusion for `_JAVA_OPTIONS` to avoid loading remote jars or
+  settings that wouldn't work locally.
+  [#1695](https://github.com/metalbear-co/mirrord/issues/1695)
+
+
 ## [3.52.1](https://github.com/metalbear-co/mirrord/tree/3.52.1) - 2023-07-19
 
 
