@@ -202,6 +202,11 @@ pub struct AgentConfig {
     /// ### agent.tolerations {#agent-tolerations}
     ///
     /// Set pod tolerations. (not with ephemeral agents)
+    /// Default is
+    /// ```yaml
+    /// tolerations:
+    /// - operator: Exists
+    /// ```
     pub tolerations: Option<Vec<Toleration>>,
 
     /// <!--${internal}-->
