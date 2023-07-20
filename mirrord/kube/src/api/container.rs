@@ -172,6 +172,8 @@ impl ContainerApi for JobContainer {
             agent_command_line.push("--test-error".to_owned());
         }
 
+        let extra_tolerations = agent.tolerations.clone().unwrap_or_default();
+
         let targeted = runtime_data.is_some();
 
         let json_value = json!({ // Only Jobs support self deletion after completion
@@ -223,7 +225,8 @@ impl ContainerApi for JobContainer {
                         "tolerations": [
                             {
                                 "operator": "Exists"
-                            }
+                            },
+                            ..extra_tolerations
                         ],
                         "containers": [
                             {
