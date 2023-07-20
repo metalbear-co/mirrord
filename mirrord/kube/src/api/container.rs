@@ -3,7 +3,7 @@ use std::{collections::HashSet, sync::LazyLock};
 use futures::{AsyncBufReadExt, StreamExt, TryStreamExt};
 use k8s_openapi::api::{
     batch::v1::Job,
-    core::v1::{ContainerStatus, EphemeralContainer as KubeEphemeralContainer, Pod},
+    core::v1::{ContainerStatus, EphemeralContainer as KubeEphemeralContainer, Pod, Toleration},
 };
 use kube::{
     api::{ListParams, LogParams, PostParams},
@@ -55,6 +55,13 @@ pub trait ContainerApi {
 
 pub static SKIP_NAMES: LazyLock<HashSet<&'static str>> =
     LazyLock::new(|| HashSet::from(["istio-proxy", "linkerd-proxy", "proxy-init", "istio-init"]));
+
+static DEFAULT_TOLERATIONS: LazyLock<Vec<Toleration>> = LazyLock::new(|| {
+    vec![Toleration {
+        operator: Some("Exists".to_owned()),
+        ..Default::default()
+    }]
+});
 
 /// Choose container logic:
 /// 1. Try to find based on given name
@@ -172,6 +179,8 @@ impl ContainerApi for JobContainer {
             agent_command_line.push("--test-error".to_owned());
         }
 
+        let tolerations = agent.tolerations.as_ref().unwrap_or(&DEFAULT_TOLERATIONS);
+
         let targeted = runtime_data.is_some();
 
         let json_value = json!({ // Only Jobs support self deletion after completion
@@ -220,11 +229,7 @@ impl ContainerApi for JobContainer {
                             ]
                         )),
                         "imagePullSecrets": agent.image_pull_secrets,
-                        "tolerations": [
-                            {
-                                "operator": "Exists"
-                            }
-                        ],
+                        "tolerations": tolerations,
                         "containers": [
                             {
                                 "name": "mirrord-agent",
