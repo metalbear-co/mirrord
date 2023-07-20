@@ -84,7 +84,7 @@ mod operator {
     ) {
         let mut process = run_mirrord(setup.command_args(), Default::default()).await;
 
-        let res = process.wait().await.unwrap();
+        let res = process.wait().await;
         let stdout = process.get_stdout().await;
 
         assert!(res.success());
@@ -114,7 +114,7 @@ mod operator {
 
         let mut process = run_mirrord(args, Default::default()).await;
 
-        let res = process.wait().await.unwrap();
+        let res = process.wait().await;
         assert!(res.success());
 
         check_install_file_result(setup_file, temp_dir).await;
