@@ -1,3 +1,6 @@
+#![allow(clippy::unused_io_amount)]
+#![allow(clippy::indexing_slicing)]
+
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -155,9 +158,23 @@ impl TestProcess {
         assert!(!self.stderr_data.read().await.contains("FAILED"));
     }
 
-    pub async fn wait_assert_success(self) {
-        let output = self.child.wait_with_output().await.unwrap();
-        assert!(output.status.success());
+    pub async fn wait_assert_success(&mut self) {
+        let output = self.child.wait().await.unwrap();
+        assert!(output.success());
+    }
+
+    pub async fn assert_no_error_in_stdout(&self) {
+        assert!(!self
+            .error_capture
+            .is_match(&self.stdout_data.read().await)
+            .unwrap());
+    }
+
+    pub async fn assert_no_error_in_stderr(&self) {
+        assert!(!self
+            .error_capture
+            .is_match(&self.stderr_data.read().await)
+            .unwrap());
     }
 
     pub async fn wait_for_line(&self, timeout: Duration, line: &str) {
