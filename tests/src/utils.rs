@@ -343,14 +343,11 @@ impl Application {
     }
 
     pub async fn assert(&self, process: &TestProcess) {
-        match self {
-            Application::PythonFastApiHTTP => {
-                process.assert_log_level(true, "ERROR").await;
-                process.assert_log_level(false, "ERROR").await;
-                process.assert_log_level(true, "CRITICAL").await;
-                process.assert_log_level(false, "CRITICAL").await;
-            }
-            _ => {}
+        if let Application::PythonFastApiHTTP = self {
+            process.assert_log_level(true, "ERROR").await;
+            process.assert_log_level(false, "ERROR").await;
+            process.assert_log_level(true, "CRITICAL").await;
+            process.assert_log_level(false, "CRITICAL").await;
         }
     }
 }
@@ -614,7 +611,7 @@ impl Drop for KubeService {
                 .and_then(ResourceGuard::take_deleter),
         ]
         .into_iter()
-        .filter_map(std::convert::identity)
+        .flatten()
         .collect::<Vec<_>>();
 
         if deleters.is_empty() {
