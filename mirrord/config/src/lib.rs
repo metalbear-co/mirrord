@@ -135,7 +135,7 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 /// # Options {#root-options}
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "LayerFileConfig", derive = "JsonSchema")]
-#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
+#[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct LayerConfig {
     /// ## accept_invalid_certificates {#root-accept_invalid_certificates}
     ///
@@ -606,6 +606,7 @@ mod tests {
                 network_interface: None,
                 flush_connections: Some(false),
                 disabled_capabilities: None,
+                tolerations: None,
             }),
             feature: Some(FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true).into(),

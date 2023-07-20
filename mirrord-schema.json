@@ -287,6 +287,17 @@
           "format": "uint64",
           "minimum": 0.0
         },
+        "tolerations": {
+          "title": "agent.tolerations {#agent-tolerations}",
+          "description": "Sets pod’s tolerations.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/io.k8s.api.core.v1.Toleration"
+          }
+        },
         "ttl": {
           "title": "agent.ttl {#agent-ttl}",
           "description": "Controls how long the agent pod persists for after the agent exits (in seconds).\n\nCan be useful for collecting logs.\n\nDefaults to `1`.",
@@ -1055,6 +1066,33 @@
           }
         }
       ]
+    },
+    "io.k8s.api.core.v1.Toleration": {
+      "description": "The pod this Toleration is attached to tolerates any taint that matches the triple <key,value,effect> using the matching operator <operator>.",
+      "type": "object",
+      "properties": {
+        "effect": {
+          "description": "Effect indicates the taint effect to match. Empty means match all taint effects. When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.\n\n",
+          "type": "string"
+        },
+        "key": {
+          "description": "Key is the taint key that the toleration applies to. Empty means match all taint keys. If the key is empty, operator must be Exists; this combination means to match all values and all keys.",
+          "type": "string"
+        },
+        "operator": {
+          "description": "Operator represents a key's relationship to the value. Valid operators are Exists and Equal. Defaults to Equal. Exists is equivalent to wildcard for value, so that a pod can tolerate all taints of a particular category.\n\n",
+          "type": "string"
+        },
+        "tolerationSeconds": {
+          "description": "TolerationSeconds represents the period of time the toleration (which must be of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default, it is not set, which means tolerate the taint forever (do not evict). Zero and negative values will be treated as 0 (evict immediately) by the system.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "value": {
+          "description": "Value is the taint value the toleration matches to. If the operator is Exists, the value should be empty, otherwise just a regular string.",
+          "type": "string"
+        }
+      }
     }
   }
 }
