@@ -46,7 +46,7 @@ mod operator {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        let mut validate = TestProcess::from_child(validate, temp_dir).await;
+        let mut validate = TestProcess::from_child(validate, Some(temp_dir)).await;
 
         let mut stdin = validate.child.stdin.take().unwrap();
         stdin.write_all(stdout.as_bytes()).await.unwrap();
@@ -67,7 +67,7 @@ mod operator {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        let mut validate = TestProcess::from_child(validate, temp_dir).await;
+        let mut validate = TestProcess::from_child(validate, Some(temp_dir)).await;
 
         let res = validate.child.wait().await.unwrap();
         let stdout = validate.get_stdout().await;

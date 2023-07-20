@@ -31,20 +31,20 @@ use tempfile::{tempdir, TempDir};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
     process::{Child, Command},
-    sync::{Mutex, RwLock},
+    sync::RwLock,
     task::JoinHandle,
 };
 
-const TEXT: &'static str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
+const TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 pub const CONTAINER_NAME: &str = "test";
 
 /// Name of the environment variable used to control cleanup after failed tests.
 /// By default, resources from failed tests are deleted.
 /// However, if this variable is set, resources will always be preserved.
-pub const PRESERVE_FAILED_ENV_NAME: &'static str = "MIRRORD_E2E_PRESERVE_FAILED";
+pub const PRESERVE_FAILED_ENV_NAME: &str = "MIRRORD_E2E_PRESERVE_FAILED";
 
 /// All Kubernetes resources created for testing purposes share this label.
-pub const TEST_RESOURCE_LABEL: (&'static str, &'static str) = ("mirrord-e2e-test-resource", "true");
+pub const TEST_RESOURCE_LABEL: (&str, &str) = ("mirrord-e2e-test-resource", "true");
 
 pub async fn watch_resource_exists<K: Debug + Clone + DeserializeOwned>(api: &Api<K>, name: &str) {
     let params = WatchParams::default()
@@ -206,7 +206,7 @@ impl TestProcess {
         let stdout_data_reader = stdout_data.clone();
         let pid = child.id().unwrap();
 
-        let stderr_task = tokio::spawn(async move {
+        let stderr_task = Some(tokio::spawn(async move {
             let mut reader = BufReader::new(child_stderr);
             let mut buf = [0; 1024];
             loop {
@@ -221,8 +221,8 @@ impl TestProcess {
                     stderr_data_reader.write().await.push_str(&string);
                 }
             }
-        });
-        let stdout_task = tokio::spawn(async move {
+        }));
+        let stdout_task = Some(tokio::spawn(async move {
             let mut reader = BufReader::new(child_stdout);
             let mut buf = [0; 1024];
             loop {
@@ -236,7 +236,7 @@ impl TestProcess {
                     stdout_data_reader.write().await.push_str(&string);
                 }
             }
-        });
+        }));
 
         let error_capture = Regex::new(r"^.*ERROR[^\w_-]").unwrap();
 
@@ -264,7 +264,7 @@ impl TestProcess {
             .spawn()
             .unwrap();
         println!("Started application.");
-        TestProcess::from_child(child).await
+        TestProcess::from_child(child, None).await
     }
 }
 
@@ -441,7 +441,7 @@ pub async fn run_mirrord(args: Vec<&str>, env: HashMap<&str, &str>) -> TestProce
         server.id().unwrap()
     );
     // We need to hold temp dir until the process is finished
-    TestProcess::from_child(server, temp_dir).await
+    TestProcess::from_child(server, Some(temp_dir)).await
 }
 
 /// Run `mirrord exec` with the given cmd, optional target (`None` for targetless), namespace,
