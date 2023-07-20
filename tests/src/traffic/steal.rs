@@ -300,7 +300,6 @@ mod steal {
 
         tokio::time::timeout(Duration::from_secs(40), client.child.wait())
             .await
-            .unwrap()
             .unwrap();
 
         application.assert(&client).await;
@@ -342,7 +341,6 @@ mod steal {
 
         tokio::time::timeout(Duration::from_secs(40), client.child.wait())
             .await
-            .unwrap()
             .unwrap();
 
         application.assert(&client).await;
@@ -399,7 +397,6 @@ mod steal {
 
         tokio::time::timeout(Duration::from_secs(40), client.child.wait())
             .await
-            .unwrap()
             .unwrap();
 
         application.assert(&client).await;

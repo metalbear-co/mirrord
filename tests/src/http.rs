@@ -61,7 +61,6 @@ mod http {
             .await;
         timeout(Duration::from_secs(40), process.wait())
             .await
-            .unwrap()
             .unwrap();
 
         application.assert(&process).await;
@@ -107,7 +106,6 @@ mod http {
             .await;
         timeout(Duration::from_secs(40), process.wait())
             .await
-            .unwrap()
             .unwrap();
 
         application.assert(&process).await;
