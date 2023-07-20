@@ -4,7 +4,6 @@ use std::{
 };
 
 use actix_codec::Framed;
-use chrono::{Timelike, Utc};
 use futures::{SinkExt, StreamExt};
 use mirrord_protocol::{
     file::{
