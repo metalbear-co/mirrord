@@ -386,9 +386,8 @@ impl FileOps {
 
     #[cfg(target_os = "linux")]
     pub async fn assert(&self, process: TestProcess) {
-        match self {
-            FileOps::Python => process.assert_python_fileops_stderr().await,
-            _ => {}
+        if let FileOps::Python = self {
+            process.assert_python_fileops_stderr().await
         }
     }
 }
