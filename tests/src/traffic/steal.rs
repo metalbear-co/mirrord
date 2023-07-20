@@ -296,7 +296,7 @@ mod steal {
         headers.insert("x-filter", "yes".parse().unwrap());
         send_requests(&url, true, headers).await;
 
-        tokio::time::timeout(Duration::from_secs(40), client.child.wait())
+        let _ = tokio::time::timeout(Duration::from_secs(40), client.child.wait())
             .await
             .unwrap();
 
@@ -337,7 +337,7 @@ mod steal {
         headers.insert("x-filter", "yes".parse().unwrap());
         send_requests(&url, true, headers).await;
 
-        tokio::time::timeout(Duration::from_secs(40), client.child.wait())
+        let _ = tokio::time::timeout(Duration::from_secs(40), client.child.wait())
             .await
             .unwrap();
 
@@ -393,7 +393,7 @@ mod steal {
         let req_builder = req_client.delete(match_url);
         send_request(req_builder, Some("DELETEV1"), headers.clone()).await;
 
-        tokio::time::timeout(Duration::from_secs(40), client.child.wait())
+        let _ = tokio::time::timeout(Duration::from_secs(40), client.child.wait())
             .await
             .unwrap();
 
