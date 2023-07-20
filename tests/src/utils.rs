@@ -163,6 +163,14 @@ impl TestProcess {
         assert!(output.success());
     }
 
+    pub async fn assert_stdout_contains(&self, string: &str) {
+        assert!(self.get_stdout().await.contains(string));
+    }
+
+    pub async fn assert_stderr_contains(&self, string: &str) {
+        assert!(self.get_stderr().await.contains(string));
+    }
+
     pub async fn assert_no_error_in_stdout(&self) {
         assert!(!self
             .error_capture

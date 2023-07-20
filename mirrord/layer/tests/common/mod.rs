@@ -1,11 +1,10 @@
 use std::{
     assert_matches::assert_matches, cmp::min, collections::HashMap, fmt::Debug, path::PathBuf,
-    process::Stdio, sync::Arc,
+    process::Stdio,
 };
 
 use actix_codec::Framed;
 use chrono::{Timelike, Utc};
-use fancy_regex::Regex;
 use futures::{SinkExt, StreamExt};
 use mirrord_protocol::{
     file::{
@@ -29,12 +28,6 @@ use tokio::{
 pub const RUST_OUTGOING_PEERS: &str = "1.1.1.1:1111,2.2.2.2:2222,3.3.3.3:3333";
 /// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
 pub const RUST_OUTGOING_LOCAL: &str = "4.4.4.4:4444";
-
-/// Returns string with time format of hh:mm:ss
-fn format_time() -> String {
-    let now = Utc::now();
-    format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
-}
 
 pub struct LayerConnection {
     pub codec: Framed<TcpStream, DaemonCodec>,
