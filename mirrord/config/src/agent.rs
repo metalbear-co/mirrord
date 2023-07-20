@@ -206,6 +206,8 @@ pub struct AgentConfig {
     /// ```yaml
     /// tolerations:
     /// - operator: Exists
+    ///
+    /// Set to an empty array to have no tolerations at all
     /// ```
     pub tolerations: Option<Vec<Toleration>>,
 
