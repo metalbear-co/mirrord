@@ -98,7 +98,7 @@ mod pause {
             None,
         )
         .await;
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await.unwrap();
         println!("mirrord done running.");
         assert!(res.success());
 
@@ -158,7 +158,7 @@ mod pause {
         )
         .await;
 
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await.unwrap();
         println!("mirrord done running.");
         // Expecting the local process with mirrord to fail due to the agent disconnecting.
         assert!(!res.success());

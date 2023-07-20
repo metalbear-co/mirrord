@@ -18,11 +18,11 @@ use mirrord_protocol::{
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
 use rstest::fixture;
+pub use tests::utils::TestProcess;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, BufReader},
+    io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
-    process::{Child, Command},
-    sync::Mutex,
+    process::Command,
 };
 
 /// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
@@ -34,129 +34,6 @@ pub const RUST_OUTGOING_LOCAL: &str = "4.4.4.4:4444";
 fn format_time() -> String {
     let now = Utc::now();
     format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
-}
-
-pub struct TestProcess {
-    pub child: Option<Child>,
-    stderr: Arc<Mutex<String>>,
-    stdout: Arc<Mutex<String>>,
-    error_capture: Regex,
-}
-
-impl TestProcess {
-    pub async fn get_stdout(&self) -> String {
-        self.stdout.lock().await.clone()
-    }
-
-    pub async fn get_stderr(&self) -> String {
-        self.stderr.lock().await.clone()
-    }
-
-    pub async fn assert_log_level(&self, stderr: bool, level: &str) {
-        if stderr {
-            assert!(!self.stderr.lock().await.contains(level));
-        } else {
-            assert!(!self.stdout.lock().await.contains(level));
-        }
-    }
-
-    async fn from_child(mut child: Child) -> TestProcess {
-        let stderr_data = Arc::new(Mutex::new(String::new()));
-        let stdout_data = Arc::new(Mutex::new(String::new()));
-        let child_stderr = child.stderr.take().unwrap();
-        let child_stdout = child.stdout.take().unwrap();
-        let stderr_data_reader = stderr_data.clone();
-        let stdout_data_reader = stdout_data.clone();
-        let pid = child.id().unwrap();
-
-        tokio::spawn(async move {
-            let mut reader = BufReader::new(child_stderr);
-            let mut buf = [0; 1024];
-            loop {
-                let n = reader.read(&mut buf).await.unwrap();
-                if n == 0 {
-                    break;
-                }
-                let string = String::from_utf8_lossy(&buf[..n]);
-                eprintln!("stderr {} {pid}: {}", format_time(), string);
-                {
-                    stderr_data_reader.lock().await.push_str(&string);
-                }
-            }
-        });
-        tokio::spawn(async move {
-            let mut reader = BufReader::new(child_stdout);
-            let mut buf = [0; 1024];
-            loop {
-                let n = reader.read(&mut buf).await.unwrap();
-                if n == 0 {
-                    break;
-                }
-                let string = String::from_utf8_lossy(&buf[..n]);
-                print!("stdout {} {pid}: {}", format_time(), string);
-                {
-                    stdout_data_reader.lock().await.push_str(&string);
-                }
-            }
-        });
-
-        let error_capture = Regex::new(r"^.*ERROR[^\w_-]").unwrap();
-
-        TestProcess {
-            child: Some(child),
-            stderr: stderr_data,
-            stdout: stdout_data,
-            error_capture,
-        }
-    }
-
-    pub async fn start_process(
-        executable: String,
-        args: Vec<String>,
-        env: HashMap<&str, &str>,
-    ) -> TestProcess {
-        let child = Command::new(executable)
-            .args(args)
-            .envs(env)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        println!("Started application.");
-        TestProcess::from_child(child).await
-    }
-
-    pub async fn assert_stdout_contains(&self, string: &str) {
-        assert!(self.stdout.lock().await.contains(string));
-    }
-
-    pub async fn assert_stderr_contains(&self, string: &str) {
-        assert!(self.stderr.lock().await.contains(string));
-    }
-
-    pub async fn assert_no_error_in_stdout(&self) {
-        assert!(!self
-            .error_capture
-            .is_match(&self.stdout.lock().await)
-            .unwrap());
-    }
-
-    pub async fn assert_no_error_in_stderr(&self) {
-        assert!(!self
-            .error_capture
-            .is_match(&self.stderr.lock().await)
-            .unwrap());
-    }
-
-    pub async fn wait_assert_success(&mut self) {
-        let awaited_child = self.child.take();
-        let output = awaited_child.unwrap().wait_with_output().await.unwrap();
-        assert!(output.status.success());
-    }
-
-    pub async fn wait(&mut self) {
-        self.child.take().unwrap().wait().await.unwrap();
-    }
 }
 
 pub struct LayerConnection {

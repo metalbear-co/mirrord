@@ -48,7 +48,7 @@ mod steal {
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
         send_requests(&url, true, Default::default()).await;
-        tokio::time::timeout(Duration::from_secs(40), process.child.wait())
+        tokio::time::timeout(Duration::from_secs(40), process.wait())
             .await
             .unwrap()
             .unwrap();
@@ -91,7 +91,7 @@ mod steal {
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
         send_requests(&url, true, Default::default()).await;
-        tokio::time::timeout(Duration::from_secs(40), process.child.wait())
+        tokio::time::timeout(Duration::from_secs(40), process.wait())
             .await
             .unwrap()
             .unwrap();
@@ -464,7 +464,7 @@ mod steal {
             .await;
         }
 
-        tokio::time::timeout(Duration::from_secs(40), mirrored_process.child.wait())
+        tokio::time::timeout(Duration::from_secs(40), mirrored_process.wait())
             .await
             .expect("Timed out waiting for mirrored_process!")
             .expect("mirrored_process failed!");
@@ -534,7 +534,7 @@ mod steal {
 
         send_request(req_builder, Some("DELETE"), headers.clone()).await;
 
-        tokio::time::timeout(Duration::from_secs(10), mirrorded_process.child.wait())
+        tokio::time::timeout(Duration::from_secs(10), mirrorded_process.wait())
             .await
             .unwrap()
             .unwrap();
@@ -599,7 +599,7 @@ mod steal {
         headers.insert("x-filter", "yes".parse().unwrap()); // header DOES match.
         send_request(req_builder, Some("DELETE"), headers.clone()).await;
 
-        tokio::time::timeout(Duration::from_secs(10), mirrorded_process.child.wait())
+        tokio::time::timeout(Duration::from_secs(10), mirrorded_process.wait())
             .await
             .unwrap()
             .unwrap();
@@ -686,7 +686,7 @@ mod steal {
         headers.insert("x-filter", "yes".parse().unwrap()); // header DOES match.
         send_request(req_builder, Some("DELETE"), headers.clone()).await;
 
-        tokio::time::timeout(Duration::from_secs(10), mirrorded_process.child.wait())
+        tokio::time::timeout(Duration::from_secs(10), mirrorded_process.wait())
             .await
             .unwrap()
             .unwrap();

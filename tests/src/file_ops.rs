@@ -38,7 +38,7 @@ mod file_ops {
             Some(env),
         )
         .await;
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await.unwrap();
         assert!(res.success());
         ops.assert(process).await;
     }
@@ -67,7 +67,7 @@ mod file_ops {
             Some(env),
         )
         .await;
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await.unwrap();
         assert!(res.success());
         process.assert_python_fileops_stderr().await;
     }
@@ -100,7 +100,7 @@ mod file_ops {
             None,
         )
         .await;
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await.unwrap();
         assert!(res.success());
         process.assert_python_fileops_stderr().await;
     }
@@ -132,7 +132,7 @@ mod file_ops {
             None,
         )
         .await;
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await.unwrap();
         assert!(res.success());
         process.assert_python_fileops_stderr().await;
     }
@@ -150,7 +150,7 @@ mod file_ops {
         let mut process =
             run_exec_with_target(bash_command, &service.target, None, None, None).await;
 
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await.unwrap();
         assert!(res.success());
     }
 
@@ -168,7 +168,7 @@ mod file_ops {
         let mut process =
             run_exec_with_target(bash_command, &service.target, None, None, None).await;
 
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await.unwrap();
         assert!(res.success());
     }
 
@@ -184,7 +184,7 @@ mod file_ops {
         let mut process =
             run_exec_with_target(bash_command, &service.target, None, Some(args), None).await;
 
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await.unwrap();
         assert!(res.success());
     }
 
@@ -219,7 +219,7 @@ mod file_ops {
             None,
         )
         .await;
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await.unwrap();
         assert!(res.success());
     }
 }

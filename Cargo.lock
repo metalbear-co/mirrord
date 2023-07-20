@@ -3369,6 +3369,7 @@ dependencies = [
  "socket2 0.5.3",
  "streammap-ext",
  "test-cdylib",
+ "tests",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -5457,6 +5458,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "chrono",
+ "fancy-regex",
  "futures",
  "futures-util",
  "k8s-openapi",
