@@ -1,8 +1,7 @@
-#![feature(assert_matches)]
 #![cfg(target_os = "macos")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{assert_matches, path::Path, time::Duration};
+use std::{path::Path, time::Duration};
 
 use futures::StreamExt;
 use mirrord_protocol::ClientMessage;
