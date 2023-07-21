@@ -411,7 +411,9 @@ fn init_ext_error_handler(commands: &Commands) -> bool {
             true
         }
         Commands::InternalProxy(_) => {
-            // don't have logs since it breaks when we close stdout/err
+            // Don't setup logs in case of internal proxy, because it's an orphan proces
+            // and we need to close stderr/stdout (in case caller waits for stdout/err to close),
+            // if we enable tracing it'd crash on writing to stderr/out.
             true
         }
         _ => false,
