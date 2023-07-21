@@ -1,7 +1,7 @@
 #[cfg(test)]
 
-/// The pause tests use static names, so they can't be run at the same time.
-/// We use `serial_test` to run them one after the other.
+/// The pause tests use predefined resource names (service/deployment), so they can't be run at the
+/// same time. We use `serial_test` to run them one after the other.
 mod pause {
     use std::time::Duration;
 
