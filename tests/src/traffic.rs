@@ -27,7 +27,7 @@ mod traffic {
         let mut process =
             run_exec_with_target(node_command, &service.target, None, None, None).await;
 
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
         assert!(res.success());
     }
 
@@ -43,7 +43,7 @@ mod traffic {
         let mut process =
             run_exec_with_target(node_command, &service.target, None, None, None).await;
 
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
         assert!(res.success());
     }
 
@@ -61,7 +61,7 @@ mod traffic {
         let mut process =
             run_exec_with_target(node_command, &service.target, None, None, None).await;
 
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
         assert!(res.success());
     }
 
@@ -77,7 +77,7 @@ mod traffic {
         let mut process =
             run_exec_with_target(node_command, &service.target, None, None, None).await;
 
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
         assert!(res.success());
     }
 
@@ -99,7 +99,7 @@ mod traffic {
         )
         .await;
 
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
         assert!(res.success());
     }
 
@@ -113,7 +113,7 @@ mod traffic {
         ];
         let mut process =
             run_exec_with_target(node_command, &service.target, None, None, None).await;
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
         assert!(res.success());
     }
 
@@ -127,7 +127,7 @@ mod traffic {
         ];
         let mut process =
             run_exec_with_target(node_command, &service.target, None, None, None).await;
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
         assert!(res.success());
     }
 
@@ -177,7 +177,7 @@ mod traffic {
             None,
         )
         .await;
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
         assert!(!res.success()); // Should fail because local process cannot reach service.
         let stripped_target = internal_service.target.split('/').collect::<Vec<&str>>()[1];
         let logs = pod_api.logs(stripped_target, &lp).await;
@@ -192,7 +192,7 @@ mod traffic {
             None,
         )
         .await;
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
         assert!(res.success());
 
         // Verify that the UDP message sent by the application reached the internal service.
@@ -248,14 +248,14 @@ mod traffic {
         assert_eq!(amt, 27);
         assert_eq!(buf, "Can I pass the test please?".as_ref()); // Sure you can.
 
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
         assert!(res.success());
     }
 
     pub async fn test_go(service: impl Future<Output = KubeService>, command: Vec<&str>) {
         let service = service.await;
         let mut process = run_exec_with_target(command, &service.target, None, None, None).await;
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
         assert!(res.success());
     }
 
@@ -312,7 +312,7 @@ mod traffic {
         let node_command = vec!["node", "node-e2e/listen/test_listen_localhost.mjs"];
         let mut process =
             run_exec_with_target(node_command, &service.target, None, None, None).await;
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
         assert!(res.success());
     }
 
@@ -325,7 +325,7 @@ mod traffic {
         let mut process =
             run_exec_with_target(node_command, &service.target, None, None, None).await;
 
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
         assert!(res.success());
     }
 
@@ -362,7 +362,7 @@ mod traffic {
             "/app/unix-socket-server.sock",
         )]);
         let mut process = run_exec_with_target(executable, &service.target, None, None, env).await;
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
 
         // The test application panics if it does not successfully connect to the socket, send data,
         // and get the same data back. So if it exits with success everything worked.
@@ -384,7 +384,7 @@ mod traffic {
         let executable = vec![app_path.as_str()];
 
         let mut process = run_exec_with_target(executable, &service.target, None, None, None).await;
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
 
         // The test application panics if it does not successfully connect to the socket, send data,
         // and get the same data back. So if it exits with success everything worked.

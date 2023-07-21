@@ -25,3 +25,5 @@ chrono = "0.4"
 tempfile = "3"
 bytes = "1"
 tokio-tungstenite = { version = "0.19" }
+fancy-regex.workspace = true
+serial_test = "2"

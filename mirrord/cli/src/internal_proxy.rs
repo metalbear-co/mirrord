@@ -11,8 +11,10 @@
 //! or let the [`OperatorApi`] handle the connection.
 
 use std::{
-    io::ErrorKind,
+    fs::File,
+    io::{stderr, stdout, ErrorKind},
     net::{Ipv4Addr, SocketAddrV4},
+    os::fd::{AsRawFd, FromRawFd},
     time::Duration,
 };
 
@@ -176,6 +178,9 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
     let (agent_connection, _) = connect_and_ping(&config).await?;
     active_connections.spawn(connection_task(stream, agent_connection));
 
+    // close stdout/err so we won't hold the terminal/pipe/caller (especially in tests)
+    drop(unsafe { File::from_raw_fd(stdout().as_raw_fd()) });
+    drop(unsafe { File::from_raw_fd(stderr().as_raw_fd()) });
     loop {
         tokio::select! {
             res = listener.accept() => {

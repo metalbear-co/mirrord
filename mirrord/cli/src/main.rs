@@ -404,12 +404,19 @@ async fn main() -> miette::Result<()> {
 // only ls and ext commands need the errors in json format
 // error logs are disabled for extensions
 fn init_ext_error_handler(commands: &Commands) -> bool {
-    if let Commands::ListTargets(_) | Commands::ExtensionExec(_) = commands {
-        mirrord_progress::init_from_env(ProgressMode::Json);
-        let _ = miette::set_hook(Box::new(|_| Box::new(JSONReportHandler::new())));
-        true
-    } else {
-        false
+    match commands {
+        Commands::ListTargets(_) | Commands::ExtensionExec(_) => {
+            mirrord_progress::init_from_env(ProgressMode::Json);
+            let _ = miette::set_hook(Box::new(|_| Box::new(JSONReportHandler::new())));
+            true
+        }
+        Commands::InternalProxy(_) => {
+            // Don't setup logs in case of internal proxy, because it's an orphan proces
+            // and we need to close stderr/stdout (in case caller waits for stdout/err to close),
+            // if we enable tracing it'd crash on writing to stderr/out.
+            true
+        }
+        _ => false,
     }
 }
 
