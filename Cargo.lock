@@ -3320,7 +3320,7 @@ dependencies = [
  "mirrord-progress",
  "mirrord-protocol",
  "rand",
- "rstest 0.17.0",
+ "rstest 0.18.1",
  "serde",
  "serde_json",
  "thiserror",
@@ -3364,7 +3364,7 @@ dependencies = [
  "os_info",
  "rand",
  "regex",
- "rstest 0.17.0",
+ "rstest 0.18.1",
  "serde_json",
  "socket2 0.5.3",
  "streammap-ext",
@@ -5068,6 +5068,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "serial_test"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e56dd856803e253c8f298af3f4d7eb0ae5e23a737252cd90bb4f3b435033b2d"
+dependencies = [
+ "dashmap",
+ "futures",
+ "lazy_static",
+ "log",
+ "parking_lot",
+ "serial_test_derive",
+]
+
+[[package]]
+name = "serial_test_derive"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91d129178576168c589c9ec973feedf7d3126c01ac2bf08795109aa35b69fb8f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.26",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5470,6 +5495,7 @@ dependencies = [
  "rstest 0.18.1",
  "serde",
  "serde_json",
+ "serial_test",
  "tempfile",
  "tokio",
  "tokio-tungstenite 0.19.0",
