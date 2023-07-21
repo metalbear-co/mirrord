@@ -653,10 +653,6 @@ pub async fn service(
     #[future] kube_client: Client,
 ) -> KubeService {
     let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
-    println!(
-        "{} creating service {service_name:?} in namespace {namespace:?}",
-        format_time()
-    );
 
     let kube_client = kube_client.await;
     let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
@@ -677,6 +673,11 @@ pub async fn service(
 
         service_name.to_string()
     };
+
+    println!(
+        "{} creating service {name:?} in namespace {namespace:?}",
+        format_time()
+    );
 
     let namespace_resource: Namespace = serde_json::from_value(json!({
         "apiVersion": "v1",
@@ -817,7 +818,7 @@ pub async fn service(
         .unwrap();
 
     println!(
-        "{:?} done creating service {service_name:?} in namespace {namespace:?}",
+        "{:?} done creating service {name:?} in namespace {namespace:?}",
         Utc::now()
     );
 
