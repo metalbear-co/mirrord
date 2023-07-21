@@ -159,7 +159,7 @@ impl TestProcess {
     }
 
     pub async fn wait_assert_success(&mut self) {
-        let output = self.child.wait().await.unwrap();
+        let output = self.wait().await;
         assert!(output.success());
     }
 
