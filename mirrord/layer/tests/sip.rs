@@ -2,8 +2,10 @@
 #![cfg(target_os = "macos")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::Path, time::Duration};
+use std::{assert_matches, path::Path, time::Duration};
 
+use futures::StreamExt;
+use mirrord_protocol::ClientMessage;
 use rstest::rstest;
 use tokio::net::TcpListener;
 
@@ -35,7 +37,27 @@ async fn tmp_dir_read_locally(dylib_path: &Path) {
     let mut layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     println!("Application subscribed to port, sending tcp messages.");
 
-    layer_connection.expect_gethostname(1).await;
+    layer_connection
+        .expect_file_open_for_reading("/etc/hostname", 1)
+        .await;
+
+    layer_connection
+        .expect_single_file_read("foobar\n", 1)
+        .await;
+
+    match layer_connection.codec.next().await {
+        Some(Ok(ClientMessage::FileRequest(mirrord_protocol::FileRequest::Close(
+            mirrord_protocol::file::CloseFileRequest { fd },
+        )))) => {
+            assert_eq!(fd, 1);
+        }
+        None => {
+            eprintln!("process exit before sending close - ok")
+        }
+        other => {
+            panic!("unexpected message: {other:?}")
+        }
+    }
 
     assert!(layer_connection.is_ended().await);
     test_process.wait().await;
