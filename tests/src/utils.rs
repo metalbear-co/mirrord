@@ -208,7 +208,9 @@ impl TestProcess {
 
     /// Waits for process to end and stdout/err to be read. - returns final exit status
     pub async fn wait(&mut self) -> ExitStatus {
+        eprintln!("waiting for process to exit");
         let exit_status = self.child.wait().await.unwrap();
+        eprintln!("process exit, waiting for stdout/err to be read");
         self.stdout_task
             .take()
             .expect("can't call wait twice")
@@ -219,6 +221,7 @@ impl TestProcess {
             .expect("can't call wait twice")
             .await
             .unwrap();
+        eprintln!("stdout/err read and finished");
         exit_status
     }
 
