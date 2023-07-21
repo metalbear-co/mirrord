@@ -642,14 +642,12 @@ impl Drop for KubeService {
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
 /// This behavior can be changed, see [`FORCE_CLEANUP_ENV_NAME`].
-/// * `randomize_name` - whether a random suffix should be added to the end of the resource names
 #[fixture]
 pub async fn service(
     #[default("default")] namespace: &str,
     #[default("NodePort")] service_type: &str,
     #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
     #[default("http-echo")] service_name: &str,
-    #[default(true)] randomize_name: bool,
     #[future] kube_client: Client,
 ) -> KubeService {
     let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
@@ -659,20 +657,7 @@ pub async fn service(
     let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
     let service_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
 
-    let name = if randomize_name {
-        format!("{}-{}", service_name, random_string())
-    } else {
-        // If using a non-random name, delete existing resources first.
-        // Just continue if they don't exist.
-        let _ = service_api
-            .delete(service_name, &DeleteParams::default())
-            .await;
-        let _ = deployment_api
-            .delete(service_name, &DeleteParams::default())
-            .await;
-
-        service_name.to_string()
-    };
+    let name = format!("{}-{}", service_name, random_string());
 
     println!(
         "{} creating service {name:?} in namespace {namespace:?}",
