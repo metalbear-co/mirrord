@@ -8,6 +8,20 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.53.1](https://github.com/metalbear-co/mirrord/tree/3.53.1) - 2023-07-23
+
+
+### Changed
+
+- Changed internal proxy to drop stdout/stderr after it finishes loading
+
+
+### Internal
+
+- Fixed flakes caused by stdout/stderr not being flushed before after process
+  is done
+
+
 ## [3.53.0](https://github.com/metalbear-co/mirrord/tree/3.53.0) - 2023-07-20
 
 
