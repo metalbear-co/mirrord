@@ -717,7 +717,7 @@ pub(super) fn remote_getaddrinfo(
 ///
 /// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
 /// for the equivalent of this function).
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "debug", ret)]
 pub(super) fn getaddrinfo(
     rawish_node: Option<&CStr>,
     rawish_service: Option<&CStr>,
@@ -801,8 +801,6 @@ pub(super) fn getaddrinfo(
             previous
         })
         .ok_or(HookError::DNSNoName)?;
-
-    debug!("getaddrinfo -> result {:#?}", result);
 
     Detour::Success(result)
 }
