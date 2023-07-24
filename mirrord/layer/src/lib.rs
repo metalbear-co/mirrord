@@ -312,7 +312,7 @@ pub(crate) fn is_debugger_port(addr: &SocketAddr) -> bool {
 
 /// Loads mirrord configuration and applies [`nix_devbox_patch`] patches.
 fn layer_pre_initialization() -> Result<(), LayerError> {
-    let given_process: String = std::env::current_exe()
+    let given_process = std::env::current_exe()
         .ok()
         .and_then(|arg| {
             arg.file_name()
