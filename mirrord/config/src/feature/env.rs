@@ -63,9 +63,8 @@ pub struct EnvConfig {
     /// Allows setting or overriding environment variables (locally) with a custom value.
     ///
     /// For example, if the remote pod has an environment variable `REGION=1`, but this is an
-    /// undesirable value, it's possible to use `overrides` to set `REGION=2` (locally) instead.
-    #[config(rename = "override")]
-    pub overrides: Option<HashMap<String, String>>,
+    /// undesirable value, it's possible to use `override` to set `REGION=2` (locally) instead.
+    pub r#override: Option<HashMap<String, String>>, // `r#`: `override` is a Rust keyword.
 }
 
 impl MirrordToggleableConfig for EnvFileConfig {
@@ -78,7 +77,7 @@ impl MirrordToggleableConfig for EnvFileConfig {
                 .source_value()
                 .transpose()?
                 .or_else(|| Some(VecOrSingle::Single("*".to_owned()))),
-            overrides: None,
+            r#override: None,
         })
     }
 }
@@ -101,7 +100,7 @@ impl CollectAnalytics for &EnvConfig {
         );
         analytics.add(
             "overrides_count",
-            self.overrides
+            self.r#override
                 .as_ref()
                 .map(|v| v.len() as u32)
                 .unwrap_or_default(),

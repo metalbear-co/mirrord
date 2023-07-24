@@ -23,7 +23,7 @@ pub mod network;
 ///     "env": {
 ///       "include": "DATABASE_USER;PUBLIC_ENV",
 ///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
-///       "overrides": {
+///       "override": {
 ///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
 ///         "LOCAL_BEAR": "panda"
 ///       }
