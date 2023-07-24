@@ -1,28 +1,26 @@
+use std::{collections::HashSet, sync::LazyLock};
+
 use mirrord_config::{util::VecOrSingle, LayerConfig};
 use tracing::trace;
 
-mod build_tools {
-    use std::{collections::HashSet, sync::LazyLock};
+static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    HashSet::from([
+        "cc",
+        "ld",
+        "go",
+        "air",
+        "asm",
+        "math",
+        "cargo",
+        "hpack",
+        "rustc",
+        "compile",
+        "cargo-watch",
+    ])
+});
 
-    static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
-        HashSet::from([
-            "cc",
-            "ld",
-            "go",
-            "air",
-            "asm",
-            "math",
-            "cargo",
-            "hpack",
-            "rustc",
-            "compile",
-            "cargo-watch",
-        ])
-    });
-
-    pub fn is_dev_tool(given_process: &str) -> bool {
-        BUILD_TOOL_PROCESSES.contains(given_process)
-    }
+fn is_build_tool(given_process: &str) -> bool {
+    BUILD_TOOL_PROCESSES.contains(given_process)
 }
 
 /// For processes that spawn other processes and also specified in `MIRRORD_SKIP_PROCESSES` list we
@@ -30,15 +28,13 @@ mod build_tools {
 /// `SIP_ONLY_PROCESSES`
 #[cfg(target_os = "macos")]
 mod sip {
-    use std::{collections::HashSet, sync::LazyLock};
-
-    use super::build_tools::is_dev_tool;
+    use super::*;
 
     static SIP_ONLY_PROCESSES: LazyLock<HashSet<&str>> =
         LazyLock::new(|| HashSet::from(["sh", "bash"]));
 
     pub fn is_sip_only(given_process: &str) -> bool {
-        is_dev_tool(given_process) || SIP_ONLY_PROCESSES.contains(given_process)
+        is_build_tool(given_process) || SIP_ONLY_PROCESSES.contains(given_process)
     }
 }
 
@@ -84,7 +80,7 @@ fn should_load(
     skip_processes: Option<Vec<String>>,
     skip_build_tools: bool,
 ) -> bool {
-    if skip_build_tools && build_tools::is_dev_tool(given_process) {
+    if skip_build_tools && is_build_tool(given_process) {
         return false;
     }
 

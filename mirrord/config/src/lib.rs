@@ -164,7 +164,10 @@ pub struct LayerConfig {
 
     /// ## skip_build_tools {#root-skip_build_tools}
     ///
-    /// Automatically skip mouting mirrord on build tools
+    /// Allows mirrord to skip build tools. Useful when running command lines that build and run
+    /// the application in a single command.
+    ///
+    /// Defaults to `true`.
     #[config(env = "MIRRORD_SKIP_BUILD_TOOLS", default = true)]
     pub skip_build_tools: bool,
 
