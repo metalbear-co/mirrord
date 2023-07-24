@@ -204,6 +204,7 @@ async fn outgoing_tcp_named_host(
     let mut conn = layer_connection.codec;
 
     let msg = conn.try_next().await.unwrap().unwrap();
+    panic!("{msg:#?}");
     assert!(matches!(msg, ClientMessage::GetAddrInfoRequest(_)));
 
     conn.send(DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(Ok(
