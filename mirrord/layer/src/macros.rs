@@ -124,7 +124,7 @@ macro_rules! graceful_exit {
             nix::sys::signal::Signal::SIGTERM,
         )
         .expect("unable to graceful exit");
-        std::process::exit(0)
+        panic!()
     }};
 }
 
