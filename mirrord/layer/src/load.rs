@@ -40,7 +40,7 @@ mod sip {
     use super::*;
 
     static SIP_ONLY_PROCESSES: LazyLock<HashSet<&str>> =
-        LazyLock::new(|| HashSet::from(["sh", "bash"]));
+        LazyLock::new(|| HashSet::from(["sh", "bash", "env"]));
 
     pub fn is_sip_only(given_process: &str) -> bool {
         is_build_tool(given_process) || SIP_ONLY_PROCESSES.contains(given_process)
