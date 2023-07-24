@@ -162,6 +162,12 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_SKIP_PROCESSES")]
     pub skip_processes: Option<VecOrSingle<String>>,
 
+    /// ## skip_build_tools {#root-skip_build_tools}
+    ///
+    /// Automatically skip mouting mirrord on build tools
+    #[config(env = "MIRRORD_SKIP_BUILD_TOOLS", default = true)]
+    pub skip_build_tools: bool,
+
     /// ## pause {#root-pause}
     /// Controls target pause feature. Unstable.
     ///
@@ -590,6 +596,7 @@ mod tests {
                 namespace: Some("default".to_owned()),
             }),
             skip_processes: None,
+            skip_build_tools: None,
             agent: Some(AgentFileConfig {
                 log_level: Some("info".to_owned()),
                 namespace: Some("default".to_owned()),

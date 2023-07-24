@@ -1,6 +1,29 @@
 use mirrord_config::{util::VecOrSingle, LayerConfig};
 use tracing::trace;
 
+mod dev_tools {
+    use std::{collections::HashSet, sync::LazyLock};
+
+    static DEV_TOOLS_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+        HashSet::from([
+            "cc",
+            "ld",
+            "go",
+            "asm",
+            "math",
+            "cargo",
+            "rustc",
+            "hpack",
+            "compile",
+            "cargo-watch",
+        ])
+    });
+
+    pub fn is_dev_tool(given_process: &str) -> bool {
+        DEV_TOOLS_PROCESSES.contains(given_process)
+    }
+}
+
 /// For processes that spawn other processes and also specified in `MIRRORD_SKIP_PROCESSES` list we
 /// should patch sip for the spawned instances, curretly limiting to list from
 /// `SIP_ONLY_PROCESSES`
@@ -8,11 +31,13 @@ use tracing::trace;
 mod sip {
     use std::{collections::HashSet, sync::LazyLock};
 
+    use super::dev_tools::is_dev_tool;
+
     static SIP_ONLY_PROCESSES: LazyLock<HashSet<&str>> =
-        LazyLock::new(|| HashSet::from(["sh", "bash", "cargo", "rustc", "cargo-watch"]));
+        LazyLock::new(|| HashSet::from(["sh", "bash"]));
 
     pub fn is_sip_only(given_process: &str) -> bool {
-        SIP_ONLY_PROCESSES.contains(given_process)
+        is_dev_tool(given_process) || SIP_ONLY_PROCESSES.contains(given_process)
     }
 }
 
@@ -32,7 +57,7 @@ pub enum LoadType {
 pub fn load_type(given_process: &str, config: LayerConfig) -> LoadType {
     let skip_processes = config.skip_processes.clone().map(VecOrSingle::to_vec);
 
-    if should_load(given_process, skip_processes) {
+    if should_load(given_process, skip_processes, config.skip_build_tools) {
         trace!("Loading into process: {given_process}.");
         LoadType::Full(Box::new(config))
     } else {
@@ -53,7 +78,15 @@ pub fn load_type(given_process: &str, config: LayerConfig) -> LoadType {
 ///
 /// Some processes may start other processes (like an IDE launching a program to be debugged), and
 /// we don't want to hook mirrord-layer into those.
-fn should_load(given_process: &str, skip_processes: Option<Vec<String>>) -> bool {
+fn should_load(
+    given_process: &str,
+    skip_processes: Option<Vec<String>>,
+    skip_build_tools: bool,
+) -> bool {
+    if skip_build_tools && dev_tools::is_dev_tool(given_process) {
+        return false;
+    }
+
     if let Some(processes_to_avoid) = skip_processes {
         !processes_to_avoid.iter().any(|x| x == given_process)
     } else {
@@ -68,17 +101,33 @@ mod tests {
     use super::*;
 
     #[rstest]
-    #[case("test", Some(vec!["foo".to_string()]))]
-    #[case("test", None)]
-    #[case("test", Some(vec!["foo".to_owned(), "bar".to_owned(), "baz".to_owned()]))]
-    fn should_load_true(#[case] given_process: &str, #[case] skip_processes: Option<Vec<String>>) {
-        assert!(should_load(given_process, skip_processes));
+    #[case("test", Some(vec!["foo".to_string()]), false)]
+    #[case("test", None, false)]
+    #[case("test", Some(vec!["foo".to_owned(), "bar".to_owned(), "baz".to_owned()]), false)]
+    #[case("cargo", None, false)]
+    #[case("cargo", Some(vec!["foo".to_string()]), false)]
+    fn should_load_true(
+        #[case] given_process: &str,
+        #[case] skip_processes: Option<Vec<String>>,
+        #[case] skip_build_tools: bool,
+    ) {
+        assert!(should_load(given_process, skip_processes, skip_build_tools));
     }
 
     #[rstest]
-    #[case("test", Some(vec!["test".to_string()]))]
-    #[case("test", Some(vec!["test".to_owned(), "foo".to_owned(), "bar".to_owned(), "baz".to_owned()]))]
-    fn should_load_false(#[case] given_process: &str, #[case] skip_processes: Option<Vec<String>>) {
-        assert!(!should_load(given_process, skip_processes));
+    #[case("test", Some(vec!["test".to_string()]), false)]
+    #[case("test", Some(vec!["test".to_owned(), "foo".to_owned(), "bar".to_owned(), "baz".to_owned()]), false)]
+    #[case("cargo", None, true)]
+    #[case("cargo", Some(vec!["foo".to_string()]), true)]
+    fn should_load_false(
+        #[case] given_process: &str,
+        #[case] skip_processes: Option<Vec<String>>,
+        #[case] skip_build_tools: bool,
+    ) {
+        assert!(!should_load(
+            given_process,
+            skip_processes,
+            skip_build_tools
+        ));
     }
 }

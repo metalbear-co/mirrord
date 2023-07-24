@@ -94,6 +94,14 @@
         }
       ]
     },
+    "skip_build_tools": {
+      "title": "skip_build_tools {#root-skip_build_tools}",
+      "description": "Automatically skip mouting mirrord on build tools",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "skip_processes": {
       "title": "skip_processes {#root-skip_processes}",
       "description": "Allows mirrord to skip unwanted processes.\n\nUseful when process A spawns process B, and the user wants mirrord to operate only on process B. Accepts a single value, or multiple values separated by `;`.\n\n```json { \"skip_processes\": \"bash;node\" } ```",
