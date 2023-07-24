@@ -168,6 +168,9 @@ pub struct LayerConfig {
     /// the application in a single command.
     ///
     /// Defaults to `true`.
+    ///
+    /// Build-Tools: `["cc", "ld", "go", "air", "asm", "math", "cargo", "hpack", "rustc",
+    /// "compile", "cargo-watch"]`
     #[config(env = "MIRRORD_SKIP_BUILD_TOOLS", default = true)]
     pub skip_build_tools: bool,
 
