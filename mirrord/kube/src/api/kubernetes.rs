@@ -160,6 +160,7 @@ impl AgentManagment for KubernetesAPI {
             .await?
         };
 
+        info!("Created agent pod {pod_agent_name:?}");
         Ok((pod_agent_name, agent_port))
     }
 }

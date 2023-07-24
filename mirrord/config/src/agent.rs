@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use k8s_openapi::api::core::v1::Toleration;
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -52,7 +53,7 @@ impl LinuxCapability {
 /// ```
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "AgentFileConfig", derive = "JsonSchema")]
-#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
+#[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct AgentConfig {
     /// ### agent.log_level {#agent-log_level}
     ///
@@ -197,6 +198,21 @@ pub struct AgentConfig {
     /// If nothing is disabled here, agent uses `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE` and
     /// `SYS_ADMIN`.
     pub disabled_capabilities: Option<Vec<LinuxCapability>>,
+
+    /// ### agent.tolerations {#agent-tolerations}
+    ///
+    /// Set pod tolerations. (not with ephemeral agents)
+    /// Default is
+    /// ```json
+    /// [
+    ///   {
+    ///     "operator": "Exists"
+    ///   }
+    /// ]
+    /// ```
+    ///
+    /// Set to an empty array to have no tolerations at all
+    pub tolerations: Option<Vec<Toleration>>,
 
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing

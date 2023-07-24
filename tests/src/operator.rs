@@ -46,7 +46,7 @@ mod operator {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        let mut validate = TestProcess::from_child(validate, temp_dir).await;
+        let mut validate = TestProcess::from_child(validate, Some(temp_dir)).await;
 
         let mut stdin = validate.child.stdin.take().unwrap();
         stdin.write_all(stdout.as_bytes()).await.unwrap();
@@ -67,7 +67,7 @@ mod operator {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        let mut validate = TestProcess::from_child(validate, temp_dir).await;
+        let mut validate = TestProcess::from_child(validate, Some(temp_dir)).await;
 
         let res = validate.child.wait().await.unwrap();
         let stdout = validate.get_stdout().await;
@@ -84,7 +84,7 @@ mod operator {
     ) {
         let mut process = run_mirrord(setup.command_args(), Default::default()).await;
 
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
         let stdout = process.get_stdout().await;
 
         assert!(res.success());
@@ -114,7 +114,7 @@ mod operator {
 
         let mut process = run_mirrord(args, Default::default()).await;
 
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
         assert!(res.success());
 
         check_install_file_result(setup_file, temp_dir).await;

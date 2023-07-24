@@ -35,6 +35,7 @@ impl EnvFilter {
                 WildMatch::new("JAVA_HOME"),
                 WildMatch::new("PYTHONPATH"),
                 WildMatch::new("RUST_LOG"),
+                WildMatch::new("_JAVA_OPTIONS"),
             ];
 
             for selector in &filter_env_vars {

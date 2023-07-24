@@ -1,10 +1,11 @@
 #[cfg(test)]
 
+/// The pause tests use predefined resource names (service/deployment), so they can't be run at the
+/// same time. We use `serial_test` to run them one after the other.
 mod pause {
-    use std::{io::ErrorKind::UnexpectedEof, time::Duration};
+    use std::time::Duration;
 
     use futures::{AsyncBufReadExt, StreamExt};
-    use futures_util::TryStreamExt;
     use k8s_openapi::api::{batch::v1::Job, core::v1::Pod};
     use kube::{
         api::{ListParams, LogParams},
@@ -12,6 +13,7 @@ mod pause {
         Api, Client, ResourceExt,
     };
     use rstest::*;
+    use serial_test::serial;
 
     use crate::utils::{
         get_service_url, http_log_requester_service, http_logger_service, kube_client,
@@ -45,6 +47,7 @@ mod pause {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
+    #[serial]
     pub async fn pause_log_requests(
         #[future] http_logger_service: KubeService,
         #[future] http_log_requester_service: KubeService,
@@ -73,12 +76,7 @@ mod pause {
 
         let log_stream = pod_api.log_stream(pod_name, &lp).await.unwrap();
 
-        // `IntoAsyncRead` needs a stream with `Error = io::Error`, so convert the error type of the
-        // result from kube::Error to io::Error.
-        let log_stream = log_stream
-            .map(|res| res.map_err(|err| std::io::Error::new(UnexpectedEof, err.to_string())));
-
-        let log_lines = log_stream.into_async_read().lines();
+        let log_lines = log_stream.lines();
 
         // skip 2 lines of flask prints.
         let mut log_lines = log_lines.skip(2);
@@ -140,6 +138,7 @@ mod pause {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
+    #[serial]
     pub async fn unpause_after_error(
         #[future] random_namespace_self_deleting_service: KubeService,
         #[future] kube_client: Client,

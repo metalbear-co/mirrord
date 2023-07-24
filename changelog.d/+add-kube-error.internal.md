@@ -1,1 +1,0 @@
-Add new error to the kube error enum needed by operator

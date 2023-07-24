@@ -1,9 +1,9 @@
 use std::{collections::HashSet, sync::LazyLock};
 
-use futures::{StreamExt, TryStreamExt};
+use futures::{AsyncBufReadExt, StreamExt, TryStreamExt};
 use k8s_openapi::api::{
     batch::v1::Job,
-    core::v1::{ContainerStatus, EphemeralContainer as KubeEphemeralContainer, Pod},
+    core::v1::{ContainerStatus, EphemeralContainer as KubeEphemeralContainer, Pod, Toleration},
 };
 use kube::{
     api::{ListParams, LogParams, PostParams},
@@ -55,6 +55,13 @@ pub trait ContainerApi {
 
 pub static SKIP_NAMES: LazyLock<HashSet<&'static str>> =
     LazyLock::new(|| HashSet::from(["istio-proxy", "linkerd-proxy", "proxy-init", "istio-init"]));
+
+static DEFAULT_TOLERATIONS: LazyLock<Vec<Toleration>> = LazyLock::new(|| {
+    vec![Toleration {
+        operator: Some("Exists".to_owned()),
+        ..Default::default()
+    }]
+});
 
 /// Choose container logic:
 /// 1. Try to find based on given name
@@ -110,7 +117,7 @@ async fn wait_for_agent_startup(
     pod_name: &str,
     container_name: String,
 ) -> Result<()> {
-    let mut logs = pod_api
+    let logs = pod_api
         .log_stream(
             pod_name,
             &LogParams {
@@ -121,8 +128,8 @@ async fn wait_for_agent_startup(
         )
         .await?;
 
-    while let Some(line) = logs.try_next().await? {
-        let line = String::from_utf8_lossy(&line);
+    let mut lines = logs.lines();
+    while let Some(line) = lines.try_next().await? {
         if line.contains("agent ready") {
             break;
         }
@@ -172,6 +179,8 @@ impl ContainerApi for JobContainer {
             agent_command_line.push("--test-error".to_owned());
         }
 
+        let tolerations = agent.tolerations.as_ref().unwrap_or(&DEFAULT_TOLERATIONS);
+
         let targeted = runtime_data.is_some();
 
         let json_value = json!({ // Only Jobs support self deletion after completion
@@ -220,11 +229,7 @@ impl ContainerApi for JobContainer {
                             ]
                         )),
                         "imagePullSecrets": agent.image_pull_secrets,
-                        "tolerations": [
-                            {
-                                "operator": "Exists"
-                            }
-                        ],
+                        "tolerations": tolerations,
                         "containers": [
                             {
                                 "name": "mirrord-agent",

@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "LayerFileConfig",
-  "description": "mirrord allows for a high degree of customization when it comes to which features you want to enable, and how they should function.\n\nAll of the configuration fields have a default value, so a minimal configuration would be no configuration at all.\n\nTo help you get started, here are examples of a basic configuration file, and a complete configuration file containing all fields.\n\n### Basic `config.json` {#root-basic}\n\n```json { \"target\": \"pod/bear-pod\", \"feature\": { \"env\": true, \"fs\": \"read\", \"network\": true } } ```\n\n### Complete `config.json` {#root-complete}\n\n```json { \"accept_invalid_certificates\": false, \"skip_processes\": \"ide-debugger\", \"pause\": false, \"target\": { \"path\": \"pod/bear-pod\", \"namespace\": \"default\" }, \"connect_tcp\": null, \"agent\": { \"log_level\": \"info\", \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"network_interface\": \"eth0\", \"flush_connections\": true }, \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"overrides\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" } }, \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\.json\" , \"read_only\": [ \".+\\.yaml\", \".+important-file\\.txt\" ], \"local\": [ \".+\\.js\", \".+\\.mjs\" ] }, \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_header_filter\": { \"filter\": \"host: api\\..+\", \"ports\": [80, 8080] }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": false }, }, \"operator\": true, \"kubeconfig\": \"~/.kube/config\", \"sip_binaries\": \"bash\", \"telemetry\": true } ```\n\n# Options {#root-options}",
+  "description": "mirrord allows for a high degree of customization when it comes to which features you want to enable, and how they should function.\n\nAll of the configuration fields have a default value, so a minimal configuration would be no configuration at all.\n\nTo help you get started, here are examples of a basic configuration file, and a complete configuration file containing all fields.\n\n### Basic `config.json` {#root-basic}\n\n```json { \"target\": \"pod/bear-pod\", \"feature\": { \"env\": true, \"fs\": \"read\", \"network\": true } } ```\n\n### Complete `config.json` {#root-complete}\n\n```json { \"accept_invalid_certificates\": false, \"skip_processes\": \"ide-debugger\", \"pause\": false, \"target\": { \"path\": \"pod/bear-pod\", \"namespace\": \"default\" }, \"connect_tcp\": null, \"agent\": { \"log_level\": \"info\", \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"network_interface\": \"eth0\", \"flush_connections\": true }, \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"override\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" } }, \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\.json\" , \"read_only\": [ \".+\\.yaml\", \".+important-file\\.txt\" ], \"local\": [ \".+\\.js\", \".+\\.mjs\" ] }, \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_header_filter\": { \"filter\": \"host: api\\..+\", \"ports\": [80, 8080] }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": false }, }, \"operator\": true, \"kubeconfig\": \"~/.kube/config\", \"sip_binaries\": \"bash\", \"telemetry\": true } ```\n\n# Options {#root-options}",
   "type": "object",
   "properties": {
     "accept_invalid_certificates": {
@@ -287,6 +287,17 @@
           "format": "uint64",
           "minimum": 0.0
         },
+        "tolerations": {
+          "title": "agent.tolerations {#agent-tolerations}",
+          "description": "Set pod tolerations. (not with ephemeral agents) Default is ```json [ { \"operator\": \"Exists\" } ] ```\n\nSet to an empty array to have no tolerations at all",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/io.k8s.api.core.v1.Toleration"
+          }
+        },
         "ttl": {
           "title": "agent.ttl {#agent-ttl}",
           "description": "Controls how long the agent pod persists for after the agent exits (in seconds).\n\nCan be useful for collecting logs.\n\nDefaults to `1`.",
@@ -375,7 +386,7 @@
         },
         "override": {
           "title": "feature.env.override {#feature-env-override}",
-          "description": "Allows setting or overriding environment variables (locally) with a custom value.\n\nFor example, if the remote pod has an environment variable `REGION=1`, but this is an undesirable value, it's possible to use `overrides` to set `REGION=2` (locally) instead.",
+          "description": "Allows setting or overriding environment variables (locally) with a custom value.\n\nFor example, if the remote pod has an environment variable `REGION=1`, but this is an undesirable value, it's possible to use `override` to set `REGION=2` (locally) instead.",
           "type": [
             "object",
             "null"
@@ -388,7 +399,7 @@
       "additionalProperties": false
     },
     "FeatureFileConfig": {
-      "description": "Controls mirrord features.\n\nSee the [technical reference, Technical Reference](https://mirrord.dev/docs/reference/) to learn more about what each feature does.\n\nThe [`env`](#feature-env), [`fs`](#feature-fs) and [`network`](#feature-network) options have support for a shortened version, that you can see [here](#root-shortened).\n\n```json { \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"overrides\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" } }, \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\.json\" , \"read_only\": [ \".+\\.yaml\", \".+important-file\\.txt\" ], \"local\": [ \".+\\.js\", \".+\\.mjs\" ] }, \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_header_filter\": { \"filter\": \"host: api\\..+\", \"ports\": [80, 8080] }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": false }, } } ```",
+      "description": "Controls mirrord features.\n\nSee the [technical reference, Technical Reference](https://mirrord.dev/docs/reference/) to learn more about what each feature does.\n\nThe [`env`](#feature-env), [`fs`](#feature-fs) and [`network`](#feature-network) options have support for a shortened version, that you can see [here](#root-shortened).\n\n```json { \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"override\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" } }, \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\.json\" , \"read_only\": [ \".+\\.yaml\", \".+important-file\\.txt\" ], \"local\": [ \".+\\.js\", \".+\\.mjs\" ] }, \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_header_filter\": { \"filter\": \"host: api\\..+\", \"ports\": [80, 8080] }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": false }, } } ```",
       "type": "object",
       "properties": {
         "env": {
@@ -1055,6 +1066,33 @@
           }
         }
       ]
+    },
+    "io.k8s.api.core.v1.Toleration": {
+      "description": "The pod this Toleration is attached to tolerates any taint that matches the triple <key,value,effect> using the matching operator <operator>.",
+      "type": "object",
+      "properties": {
+        "effect": {
+          "description": "Effect indicates the taint effect to match. Empty means match all taint effects. When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.\n\n",
+          "type": "string"
+        },
+        "key": {
+          "description": "Key is the taint key that the toleration applies to. Empty means match all taint keys. If the key is empty, operator must be Exists; this combination means to match all values and all keys.",
+          "type": "string"
+        },
+        "operator": {
+          "description": "Operator represents a key's relationship to the value. Valid operators are Exists and Equal. Defaults to Equal. Exists is equivalent to wildcard for value, so that a pod can tolerate all taints of a particular category.\n\n",
+          "type": "string"
+        },
+        "tolerationSeconds": {
+          "description": "TolerationSeconds represents the period of time the toleration (which must be of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default, it is not set, which means tolerate the taint forever (do not evict). Zero and negative values will be treated as 0 (evict immediately) by the system.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "value": {
+          "description": "Value is the taint value the toleration matches to. If the operator is Exists, the value should be empty, otherwise just a regular string.",
+          "type": "string"
+        }
+      }
     }
   }
 }
