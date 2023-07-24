@@ -203,9 +203,12 @@ pub struct AgentConfig {
     ///
     /// Set pod tolerations. (not with ephemeral agents)
     /// Default is
-    /// ```yaml
-    /// tolerations:
-    /// - operator: Exists
+    /// ```json
+    /// [
+    ///   {
+    ///     "operator": "Exists"
+    ///   }
+    /// ]
     /// ```
     ///
     /// Set to an empty array to have no tolerations at all
