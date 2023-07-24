@@ -312,11 +312,13 @@ pub(crate) fn is_debugger_port(addr: &SocketAddr) -> bool {
 
 /// Loads mirrord configuration and applies [`nix_devbox_patch`] patches.
 fn layer_pre_initialization() -> Result<(), LayerError> {
-    let args = std::env::args().collect::<Vec<_>>();
-
-    let given_process = args
-        .first()
-        .and_then(|arg| arg.split('/').last())
+    let given_process = std::env::current_exe()
+        .ok()
+        .and_then(|arg| {
+            arg.file_name()
+                .and_then(|os_str| os_str.to_str())
+                .map(String::from)
+        })
         .ok_or(LayerError::NoProcessFound)?;
 
     let mut config = LayerConfig::from_env()?;
@@ -345,7 +347,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         }
     }
 
-    match load::load_type(given_process, config) {
+    match load::load_type(&given_process, config) {
         LoadType::Full(config) => layer_start(*config),
         #[cfg(target_os = "macos")]
         LoadType::SIPOnly => sip_only_layer_start(patch_binaries),
