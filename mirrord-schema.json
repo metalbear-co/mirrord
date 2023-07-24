@@ -297,7 +297,7 @@
         },
         "tolerations": {
           "title": "agent.tolerations {#agent-tolerations}",
-          "description": "Set pod tolerations. (not with ephemeral agents) Default is ```yaml tolerations: - operator: Exists ```\n\nSet to an empty array to have no tolerations at all",
+          "description": "Set pod tolerations. (not with ephemeral agents) Default is ```json [ { \"operator\": \"Exists\" } ] ```\n\nSet to an empty array to have no tolerations at all",
           "type": [
             "array",
             "null"

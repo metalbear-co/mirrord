@@ -1,1 +1,0 @@
-Changed internal proxy to drop stdout/stderr after it finishes loading
