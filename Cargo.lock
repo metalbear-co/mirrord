@@ -3376,7 +3376,6 @@ dependencies = [
  "tokio-util",
  "tower",
  "tracing",
- "tracing-appender",
  "tracing-subscriber",
  "trust-dns-resolver",
  "urlencoding",
@@ -5877,17 +5876,6 @@ dependencies = [
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
-]
-
-[[package]]
-name = "tracing-appender"
-version = "0.2.2"
-source = "git+https://github.com/metalbear-co/tracing?branch=worker_options_non_blocking_v1#bf361d828cd8249290b6445f47963ea4025422bd"
-dependencies = [
- "crossbeam-channel",
- "thiserror",
- "time 0.3.23",
- "tracing-subscriber",
 ]
 
 [[package]]
