@@ -25,6 +25,7 @@ static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         "collect2",
         "cargo-watch",
         "debugserver",
+        "jspawnhelper",
     ])
 });
 
