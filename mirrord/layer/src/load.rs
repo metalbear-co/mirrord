@@ -1,26 +1,27 @@
 use mirrord_config::{util::VecOrSingle, LayerConfig};
 use tracing::trace;
 
-mod dev_tools {
+mod build_tools {
     use std::{collections::HashSet, sync::LazyLock};
 
-    static DEV_TOOLS_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         HashSet::from([
             "cc",
             "ld",
             "go",
+            "air",
             "asm",
             "math",
             "cargo",
-            "rustc",
             "hpack",
+            "rustc",
             "compile",
             "cargo-watch",
         ])
     });
 
     pub fn is_dev_tool(given_process: &str) -> bool {
-        DEV_TOOLS_PROCESSES.contains(given_process)
+        BUILD_TOOL_PROCESSES.contains(given_process)
     }
 }
 
@@ -31,7 +32,7 @@ mod dev_tools {
 mod sip {
     use std::{collections::HashSet, sync::LazyLock};
 
-    use super::dev_tools::is_dev_tool;
+    use super::build_tools::is_dev_tool;
 
     static SIP_ONLY_PROCESSES: LazyLock<HashSet<&str>> =
         LazyLock::new(|| HashSet::from(["sh", "bash"]));
@@ -83,7 +84,7 @@ fn should_load(
     skip_processes: Option<Vec<String>>,
     skip_build_tools: bool,
 ) -> bool {
-    if skip_build_tools && dev_tools::is_dev_tool(given_process) {
+    if skip_build_tools && build_tools::is_dev_tool(given_process) {
         return false;
     }
 
