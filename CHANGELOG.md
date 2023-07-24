@@ -8,6 +8,22 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.53.2](https://github.com/metalbear-co/mirrord/tree/3.53.2) - 2023-07-24
+
+
+### Fixed
+
+- Add automatic skip for build-tools `"skip_build_tools": boolean` to config
+  [default: True] (build-tool list: `as`, `cc`, `ld`, `go`, `air`, `asm`,
+  `cc1`, `cgo`, `dlv`, `gcc`, `git`, `link`, `math`, `cargo`, `hpack`, `rustc`,
+  `compile`, `collect2`, `cargo-watch` and `debugserver`)
+  [#1478](https://github.com/metalbear-co/mirrord/issues/1478)
+- Fix `feature.env.override` documentation "overrides" -> "override".
+  [mirrord.dev#120](https://github.com/metalbear-co/mirrord.dev/issues/120)
+- Specify default value for `agent.tolerations` in docs as json instead of
+  yaml.
+
+
 ## [3.53.1](https://github.com/metalbear-co/mirrord/tree/3.53.1) - 2023-07-23
 
 
