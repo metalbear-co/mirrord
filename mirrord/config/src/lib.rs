@@ -169,8 +169,9 @@ pub struct LayerConfig {
     ///
     /// Defaults to `true`.
     ///
-    /// Build-Tools: `["cc", "ld", "go", "air", "asm", "math", "cargo", "hpack", "rustc",
-    /// "compile", "cargo-watch"]`
+    /// Build-Tools: `["as", "cc", "ld", "go", "air", "asm", "cc1", "cgo", "dlv", "gcc", "git",
+    /// "link", "math", "cargo", "hpack", "rustc", "compile", "collect2", "cargo-watch",
+    /// "debugserver"]`
     #[config(env = "MIRRORD_SKIP_BUILD_TOOLS", default = true)]
     pub skip_build_tools: bool,
 

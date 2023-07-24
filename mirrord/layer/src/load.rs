@@ -5,17 +5,26 @@ use tracing::trace;
 
 static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
     HashSet::from([
+        "as",
         "cc",
         "ld",
         "go",
         "air",
         "asm",
+        "cc1",
+        "cgo",
+        "dlv",
+        "gcc",
+        "git",
+        "link",
         "math",
         "cargo",
         "hpack",
         "rustc",
         "compile",
+        "collect2",
         "cargo-watch",
+        "debugserver",
     ])
 });
 
