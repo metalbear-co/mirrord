@@ -92,7 +92,7 @@ impl MirrordExecution {
                 CliError::InitialCommFailed("Timeout waiting for remote environment variables.")
             })??;
             env_vars.extend(remote_env);
-            if let Some(overrides) = &config.feature.env.overrides {
+            if let Some(overrides) = &config.feature.env.r#override {
                 env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
             }
         }
