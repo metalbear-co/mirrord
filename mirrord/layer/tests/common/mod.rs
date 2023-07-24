@@ -596,6 +596,7 @@ pub enum Application {
     EnvBashCat,
     NodeFileOps,
     NodeSpawn,
+    NodeOutgoingRequest,
     Go19Dir,
     Go20Dir,
     Go19DirBypass,
@@ -663,7 +664,7 @@ impl Application {
             | Application::PythonListen => Self::get_python3_executable().await,
             Application::PythonFastApiHTTP => String::from("uvicorn"),
             Application::Fork => String::from("tests/apps/fork/out.c_test_app"),
-            Application::NodeHTTP => String::from("node"),
+            Application::NodeHTTP | Application::NodeOutgoingRequest => String::from("node"),
             Application::JavaTemurinSip => format!(
                 "{}/.sdkman/candidates/java/17.0.6-tem/bin/java",
                 std::env::var("HOME").unwrap(),
@@ -778,6 +779,10 @@ impl Application {
                 app_path.push("node_spawn.mjs");
                 vec![app_path.to_string_lossy().to_string()]
             }
+            Application::NodeOutgoingRequest => {
+                app_path.push("node_outgoing_request.mjs");
+                vec![app_path.to_string_lossy().to_string()]
+            }
             Application::PythonSelfConnect => {
                 app_path.push("self_connect.py");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
@@ -849,6 +854,7 @@ impl Application {
             | Application::EnvBashCat
             | Application::NodeFileOps
             | Application::NodeSpawn
+            | Application::NodeOutgoingRequest
             | Application::BashShebang
             | Application::Fork
             | Application::Go20Issue834

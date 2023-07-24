@@ -1,10 +1,14 @@
 #![feature(assert_matches)]
-// #![cfg(target_os = "linux")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
+use std::{
+    net::{IpAddr, SocketAddr},
+    path::PathBuf,
+    time::Duration,
+};
 
 use mirrord_protocol::{
+    dns::{DnsLookup, GetAddrInfoResponse, LookupRecord},
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
@@ -175,4 +179,79 @@ async fn outgoing_tcp_from_the_local_app_broken(
     config_dir: &PathBuf,
 ) {
     outgoing_tcp_logic(with_config, dylib_path, config_dir).await;
+}
+
+#[rstest]
+#[tokio::test]
+#[timeout(Duration::from_secs(10))]
+async fn outgoing_tcp_named_host(
+    #[values(Some("outgoing_filter_remote_named_host.json"))] with_config: Option<&str>,
+    dylib_path: &PathBuf,
+    config_dir: &PathBuf,
+) {
+    let remote_ip: IpAddr = "6.6.6.6".parse().unwrap();
+
+    let config = with_config.map(|config| {
+        let mut config_path = config_dir.clone();
+        config_path.push(config);
+        config_path
+    });
+    let config = config.as_ref().map(|path_buf| path_buf.to_str().unwrap());
+
+    let (mut test_process, layer_connection) = Application::NodeOutgoingRequest
+        .start_process_with_layer(dylib_path, vec![], config)
+        .await;
+    let mut conn = layer_connection.codec;
+
+    let msg = conn.try_next().await.unwrap().unwrap();
+    assert!(matches!(msg, ClientMessage::GetAddrInfoRequest(_)));
+
+    conn.send(DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(Ok(
+        DnsLookup(vec![LookupRecord {
+            name: "www.rust-lang.org".to_string(),
+            ip: remote_ip,
+        }]),
+    ))))
+    .await
+    .unwrap();
+
+    let ClientMessage::TcpOutgoing(
+        LayerTcpOutgoing::Connect(
+            LayerConnect { remote_address: SocketAddress::Ip(addr) })) = msg else {
+            panic!("Invalid message received from layer: {msg:?}");
+    };
+    assert_eq!(addr.ip(), remote_ip);
+
+    conn.send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
+        DaemonConnect {
+            connection_id: 0,
+            remote_address: addr.into(),
+            local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
+        },
+    ))))
+    .await
+    .unwrap();
+
+    let msg = conn.try_next().await.unwrap().unwrap();
+    let ClientMessage::TcpOutgoing(
+        LayerTcpOutgoing::Write(
+            LayerWrite { connection_id: 0, .. })) = msg else {
+            panic!("Invalid message received from layer: {msg:?}");
+    };
+
+    let minimal_http_response = format!("HTTP/1.1 200 OK Content-Length: 0");
+    conn.send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
+        DaemonRead {
+            connection_id: 0,
+            bytes: minimal_http_response.into_bytes(),
+        },
+    ))))
+    .await
+    .unwrap();
+
+    conn.send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(0)))
+        .await
+        .unwrap();
+
+    test_process.wait_assert_success().await;
 }
