@@ -1056,13 +1056,11 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
     res
 }
 
-// TODO(alex) [mid] 2023-01-24: What is this?
-///
 /// No need to guard because we call another detour which will do the guard for us.
 ///
 /// ## Hook
 ///
-/// Replaces `?`.
+/// One of the many [`libc::close`]-ish functions.
 #[hook_fn]
 pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
     close_detour(fd)
@@ -1078,8 +1076,6 @@ pub(crate) unsafe extern "C" fn __close_detour(fd: c_int) -> c_int {
     close_detour(fd)
 }
 
-// TODO(alex) [mid] 2023-01-24: What is this?
-///
 /// ## Hook
 ///
 /// Needed for libuv that calls the syscall directly.

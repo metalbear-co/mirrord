@@ -373,10 +373,8 @@ impl OutgoingSelector {
             _ => false,
         };
 
-        let skip_unresolved = |outgoing: &&OutgoingFilter| match outgoing.address {
-            AddressFilter::Name(_) => true,
-            _ => false,
-        };
+        let skip_unresolved =
+            |outgoing: &&OutgoingFilter| matches!(outgoing.address, AddressFilter::Name(_));
 
         // Closure that tries to match `address` with something in the selector set.
         let any_address = |outgoing: &OutgoingFilter| match outgoing.address {
@@ -426,10 +424,7 @@ impl OutgoingSelector {
     // #[tracing::instrument(level = "debug", ret)]
     fn resolve_dns(&self) -> HookResult<HashSet<OutgoingFilter>> {
         // Closure that tries to match `address` with something in the selector set.
-        let name = |outgoing: &&OutgoingFilter| match outgoing.address {
-            AddressFilter::Name(_) => true,
-            _ => false,
-        };
+        let name = |outgoing: &&OutgoingFilter| matches!(outgoing.address, AddressFilter::Name(_));
 
         // Converts `AddressFilter::Name`s into something more convenient to be used in `resolve`.
         let to_name_and_port = |outgoing: &OutgoingFilter| match &outgoing.address {
