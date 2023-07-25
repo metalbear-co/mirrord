@@ -162,6 +162,7 @@ Operator License
 }
 
 /// Handle commands related to the operator `mirrord operator ...`
+#[tokio::main]
 pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
     match args.command {
         OperatorCommand::Setup {

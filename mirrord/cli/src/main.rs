@@ -11,7 +11,6 @@ use email_address::EmailAddress;
 use exec::execvp;
 use execution::MirrordExecution;
 use extension::extension_exec;
-use extract::extract_library;
 use k8s_openapi::{
     api::{apps::v1::Deployment, core::v1::Pod},
     Metadata, NamespaceResourceScope,
@@ -47,6 +46,9 @@ mod operator;
 
 pub(crate) use error::{CliError, Result};
 
+use crate::extract::extract_library_cli;
+
+#[tokio::main]
 async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     if !args.disable_version_check {
         prompt_outdated_version().await;
@@ -298,6 +300,7 @@ where
 ///  "pod/nginx-deployment-66b6c48dd5-dc9wk",
 ///  "pod/py-serv-deployment-5c57fbdc98-pdbn4/container/py-serv",
 /// ]```
+#[tokio::main]
 async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
     let (accept_invalid_certificates, kubeconfig, namespace) =
         if let Some(config) = &args.config_file {
@@ -347,6 +350,7 @@ async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
 }
 
 /// Register the email to the waitlist.
+#[tokio::main]
 async fn register_to_waitlist(email: EmailAddress) -> Result<()> {
     const WAITLIST_API: &str = "https://waitlist.metalbear.co/v1/waitlist";
     let mut params = HashMap::new();
@@ -368,8 +372,7 @@ async fn register_to_waitlist(email: EmailAddress) -> Result<()> {
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[tokio::main]
-async fn main() -> miette::Result<()> {
+fn main() -> miette::Result<()> {
     let cli = Cli::parse();
 
     if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
@@ -385,17 +388,15 @@ async fn main() -> miette::Result<()> {
         LazyLock::new(|| TaskProgress::new("mirrord cli starting..."));
 
     match cli.commands {
-        Commands::Exec(args) => exec(&args, &MAIN_PROGRESS_TASK.subtask("exec")).await?,
+        Commands::Exec(args) => exec(&args, &MAIN_PROGRESS_TASK.subtask("exec"))?,
         Commands::Extract { path } => {
-            extract_library(Some(path), &MAIN_PROGRESS_TASK.subtask("extract"), false)?;
+            extract_library_cli(Some(path), &MAIN_PROGRESS_TASK.subtask("extract"), false)?;
         }
-        Commands::ListTargets(args) => print_pod_targets(&args).await?,
-        Commands::Operator(args) => operator_command(*args).await?,
-        Commands::ExtensionExec(args) => {
-            extension_exec(*args, &MAIN_PROGRESS_TASK.subtask("ext")).await?
-        }
-        Commands::InternalProxy(args) => internal_proxy::proxy(*args).await?,
-        Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
+        Commands::ListTargets(args) => print_pod_targets(&args)?,
+        Commands::Operator(args) => operator_command(*args)?,
+        Commands::ExtensionExec(args) => extension_exec(*args, &MAIN_PROGRESS_TASK.subtask("ext"))?,
+        Commands::InternalProxy(args) => internal_proxy::start_proxy_daemon(*args)?,
+        Commands::Waitlist(args) => register_to_waitlist(args.email)?,
     }
 
     Ok(())

@@ -12,9 +12,8 @@
 
 use std::{
     fs::File,
-    io::{stderr, stdout, ErrorKind},
+    io::ErrorKind,
     net::{Ipv4Addr, SocketAddrV4},
-    os::fd::{AsRawFd, FromRawFd},
     time::Duration,
 };
 
@@ -25,7 +24,7 @@ use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentMan
 use mirrord_operator::client::{OperatorApi, OperatorSessionInformation};
 use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonCodec, DaemonMessage};
 use tokio::{
-    net::{TcpListener, TcpStream},
+    net::TcpStream,
     select,
     sync::mpsc,
     task::{JoinHandle, JoinSet},
@@ -33,6 +32,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, log::trace};
+use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
 
 use crate::{
     config::InternalProxyArgs,
@@ -41,7 +41,7 @@ use crate::{
 
 /// Print the port for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.
-fn print_port(listener: &TcpListener) -> Result<()> {
+fn print_port(listener: &std::net::TcpListener) -> Result<(), InternalProxyError> {
     let port = listener
         .local_addr()
         .map_err(InternalProxyError::LocalPortError)?
@@ -131,18 +131,38 @@ async fn request_pause(
     }
 }
 
+fn listen_and_print_addr() -> Result<std::net::TcpListener> {
+    // Let it assign port for us then print it for the user.
+    let listener = std::net::TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+        .map_err(InternalProxyError::ListenError)?;
+    print_port(&listener)?;
+    Ok(listener)
+}
+
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
-pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
-    // Create a new session for the proxy process, detaching from the original terminal.
-    // This makes the process not to receive signals from the "mirrord" process or it's parent
-    // terminal fixes some side effects such as https://github.com/metalbear-co/mirrord/issues/1232
-    nix::unistd::setsid().map_err(InternalProxyError::SetSidError)?;
+pub(crate) fn start_proxy_daemon(args: InternalProxyArgs) -> Result<()> {
+    error!("internal proxy printing port. start_proxy_daemon.");
+    let stderr = File::create("/Users/tal/Documents/projects/mirrord/daemon.err").unwrap();
+    let listener = listen_and_print_addr()?;
+    daemonize::Daemonize::new()
+        .stderr(stderr)
+        .start()
+        .map_err(InternalProxyError::InternalProxyDaemonizationError)?;
+
+    registry()
+        .with(fmt::layer().with_writer(std::io::stderr))
+        .with(EnvFilter::from_default_env())
+        .init();
+    error!("Test logging.");
+    proxy(args, listener)
+}
+
+#[tokio::main]
+pub(crate) async fn proxy(args: InternalProxyArgs, listener: std::net::TcpListener) -> Result<()> {
+    let listener = tokio::net::TcpListener::from_std(listener)
+        .map_err(InternalProxyError::InternalProxyTcpSocketError)?;
     let started = std::time::Instant::now();
-    // Let it assign port for us then print it for the user.
-    let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-        .await
-        .map_err(InternalProxyError::ListenError)?;
 
     let config = LayerConfig::from_env()?;
     // Create a main connection, that will be held until proxy is closed.
@@ -165,8 +185,6 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
     let (main_connection_cancellation_token, main_connection_task_join) =
         create_ping_loop(main_connection);
 
-    print_port(&listener)?;
-
     // wait for first connection `FIRST_CONNECTION_TIMEOUT` seconds, or timeout.
     let (stream, _) = timeout(Duration::from_secs(args.timeout), listener.accept())
         .await
@@ -178,9 +196,6 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
     let (agent_connection, _) = connect_and_ping(&config).await?;
     active_connections.spawn(connection_task(stream, agent_connection));
 
-    // close stdout/err so we won't hold the terminal/pipe/caller (especially in tests)
-    drop(unsafe { File::from_raw_fd(stdout().as_raw_fd()) });
-    drop(unsafe { File::from_raw_fd(stderr().as_raw_fd()) });
     loop {
         tokio::select! {
             res = listener.accept() => {
@@ -307,6 +322,7 @@ async fn connect(
     (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
     bool,
 )> {
+    trace!("internal proxy connecting to agent.");
     if let Some(operator_session_information) = OperatorSessionInformation::from_env()? {
         Ok((
             OperatorApi::connect(config, &operator_session_information).await?,

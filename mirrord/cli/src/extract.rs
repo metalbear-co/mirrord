@@ -28,6 +28,18 @@ use std::env::temp_dir;
 #[cfg(target_os = "macos")]
 use mac::temp_dir;
 
+#[tokio::main]
+pub(crate) async fn extract_library_cli<P>(
+    dest_dir: Option<String>,
+    progress: &P,
+    prefix: bool,
+) -> Result<PathBuf>
+where
+    P: Progress + Send + Sync,
+{
+    extract_library(dest_dir, progress, prefix)
+}
+
 /// Extract to given directory, or tmp by default.
 /// If prefix is true, add a random prefix to the file name that identifies the specific build
 /// of the layer. This is useful for debug purposes usually.

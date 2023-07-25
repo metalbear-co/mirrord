@@ -36,12 +36,16 @@ pub(crate) enum InternalProxyError {
     AgentClosedConnection,
     #[error("Ping error {0:#?} - image version/arch mismatch?")]
     PingError(#[from] tokio::sync::mpsc::error::SendError<mirrord_protocol::ClientMessage>),
-    #[error("Set sid failed {0:#?}, please report a bug")]
-    SetSidError(nix::Error),
     #[error("No connection method, please report a bug")]
     NoConnectionMethod,
     #[error("Failed pausing target container {0:#?}")]
     PauseError(String),
+    #[error(
+        "Mirrord failed to start a necessary local daemon (internal-proxy). Original error: {0:#?}"
+    )]
+    InternalProxyDaemonizationError(#[from] daemonize::Error),
+    #[error("Internal proxy failed to listen on a tcp socket with error: {0:#?}")]
+    InternalProxyTcpSocketError(std::io::Error),
 }
 
 #[derive(Debug, Error, Diagnostic)]
