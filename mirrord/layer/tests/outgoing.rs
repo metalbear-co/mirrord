@@ -209,7 +209,7 @@ search Home
 nameserver 6.6.6.6
 nameserver 7.7.7.7";
 
-    let fd = 0xb16;
+    let mut fd = 0xb16;
     let msg = layer_connection.codec.next().await.unwrap().unwrap();
     let ClientMessage::FileRequest(FileRequest::Open(_)) = msg else {
         panic!("Invalid message {msg:#?}!");
@@ -221,6 +221,7 @@ nameserver 7.7.7.7";
         ))))
         .await
         .unwrap();
+    fd += 1;
 
     let msg = layer_connection.codec.next().await.unwrap().unwrap();
     let ClientMessage::FileRequest(FileRequest::Xstat(_)) = msg else {
@@ -264,12 +265,92 @@ nameserver 7.7.7.7";
     };
     layer_connection.answer_file_read(Vec::new()).await;
 
-    let msg = layer_connection.codec.next().await.unwrap().unwrap();
-    let ClientMessage::FileRequest(FileRequest::Close(_)) = msg else {
-        panic!("Invalid message {msg:#?}!");
+    let msg = loop {
+        let msg = layer_connection.codec.next().await.unwrap().unwrap();
+        println!("msg {msg:#?}");
+
+        match msg {
+            ClientMessage::FileRequest(FileRequest::Close(_)) => {}
+            ClientMessage::FileRequest(FileRequest::Xstat(_)) => {
+                layer_connection
+                    .codec
+                    .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                        XstatResponse {
+                            metadata: MetadataInternal {
+                                device_id: 35,
+                                inode: 13377877,
+                                mode: 33188,
+                                hard_links: 1,
+                                user_id: 0,
+                                group_id: 0,
+                                rdevice_id: 0,
+                                size: 108,
+                                access_time: 124502152,
+                                modification_time: 361169354,
+                                creation_time: 354507272,
+                                block_size: 4096,
+                                blocks: 8,
+                            },
+                        },
+                    ))))
+                    .await
+                    .unwrap();
+            }
+            other => break other,
+        };
     };
 
-    let msg = layer_connection.codec.next().await.unwrap().unwrap();
+    let ClientMessage::FileRequest(FileRequest::Open(_)) = msg else {
+        panic!("Invalid message {msg:#?}!");
+    };
+    layer_connection
+        .codec
+        .send(DaemonMessage::File(FileResponse::Open(Ok(
+            mirrord_protocol::file::OpenFileResponse { fd },
+        ))))
+        .await
+        .unwrap();
+    fd += 1;
+
+    let msg = loop {
+        let msg = layer_connection.codec.next().await.unwrap().unwrap();
+        match msg {
+            ClientMessage::FileRequest(FileRequest::Xstat(_)) => {
+                layer_connection
+                    .codec
+                    .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                        XstatResponse {
+                            metadata: MetadataInternal {
+                                device_id: 35,
+                                inode: 13377877,
+                                mode: 33188,
+                                hard_links: 1,
+                                user_id: 0,
+                                group_id: 0,
+                                rdevice_id: 0,
+                                size: 108,
+                                access_time: 124502152,
+                                modification_time: 361169354,
+                                creation_time: 354507272,
+                                block_size: 4096,
+                                blocks: 8,
+                            },
+                        },
+                    ))))
+                    .await
+                    .unwrap();
+            }
+            other => break other,
+        }
+    };
+
+    // let msg = layer_connection.codec.next().await.unwrap().unwrap();
+    let ClientMessage::FileRequest(FileRequest::Read(_)) = msg else {
+        panic!("Invalid message {msg:#?}!");
+    };
+    layer_connection.answer_file_read(Vec::new()).await;
+
+    // let msg = layer_connection.codec.next().await.unwrap().unwrap();
     let ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {..}) = msg else {
         panic!("Invalid message {msg:#?}!");
     };
