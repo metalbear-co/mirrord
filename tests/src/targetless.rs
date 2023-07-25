@@ -22,7 +22,7 @@ mod targetless {
     pub async fn connect_to_kubernetes_api_service_with_targetless_agent() {
         let app = Application::CurlToKubeApi;
         let mut process = app.run_targetless(None, None, None).await;
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
         assert!(res.success());
         let stdout = process.get_stdout().await;
         assert!(stdout.contains(r#""apiVersion": "v1""#))

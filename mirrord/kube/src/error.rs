@@ -66,4 +66,7 @@ pub enum KubeApiError {
     /// This error should never happen, but has to exist if we don't want to unwrap.
     #[error("mirrord-layer: None runtime data for non-targetless agent. This is a bug.")]
     MissingRuntimeData,
+
+    #[error("Kube incluster error `{0}`!")]
+    KubeInclusterError(#[from] kube::config::InClusterError),
 }

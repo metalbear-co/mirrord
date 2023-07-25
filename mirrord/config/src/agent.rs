@@ -1,10 +1,33 @@
 use std::collections::HashMap;
 
+use k8s_openapi::api::core::v1::Toleration;
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::config::source::MirrordConfigSource;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, JsonSchema, Deserialize, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum LinuxCapability {
+    SysAdmin,
+    SysPtrace,
+    NetRaw,
+    NetAdmin,
+}
+
+impl LinuxCapability {
+    /// All capabilities that can be used by the agent.
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::SysAdmin,
+            Self::SysPtrace,
+            Self::NetRaw,
+            Self::NetAdmin,
+        ]
+    }
+}
 
 /// Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.
 ///
@@ -30,7 +53,7 @@ use crate::config::source::MirrordConfigSource;
 /// ```
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "AgentFileConfig", derive = "JsonSchema")]
-#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
+#[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct AgentConfig {
     /// ### agent.log_level {#agent-log_level}
     ///
@@ -168,6 +191,28 @@ pub struct AgentConfig {
         unstable
     )]
     pub flush_connections: bool,
+
+    /// ### agent.disabled_capabilities {#agent-disabled_capabilities}
+    ///
+    /// Disables specified Linux capabilities for the agent container.
+    /// If nothing is disabled here, agent uses `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE` and
+    /// `SYS_ADMIN`.
+    pub disabled_capabilities: Option<Vec<LinuxCapability>>,
+
+    /// ### agent.tolerations {#agent-tolerations}
+    ///
+    /// Set pod tolerations. (not with ephemeral agents)
+    /// Default is
+    /// ```json
+    /// [
+    ///   {
+    ///     "operator": "Exists"
+    ///   }
+    /// ]
+    /// ```
+    ///
+    /// Set to an empty array to have no tolerations at all
+    pub tolerations: Option<Vec<Toleration>>,
 
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing

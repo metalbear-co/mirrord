@@ -91,7 +91,7 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///     "env": {
 ///       "include": "DATABASE_USER;PUBLIC_ENV",
 ///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
-///       "overrides": {
+///       "override": {
 ///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
 ///         "LOCAL_BEAR": "panda"
 ///       }
@@ -116,6 +116,9 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///       "outgoing": {
 ///         "tcp": true,
 ///         "udp": true,
+///         "filter": {
+///           "local": ["tcp://1.1.1.0/24:1337", "1.1.5.0/24", "google.com", ":53"]
+///         },
 ///         "ignore_localhost": false,
 ///         "unix_streams": "bear.+"
 ///       },
@@ -124,15 +127,15 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///   },
 ///   "operator": true,
 ///   "kubeconfig": "~/.kube/config",
-///   "sip_binaries": "bash"
-///   "telemetry": true,
+///   "sip_binaries": "bash",
+///   "telemetry": true
 /// }
 /// ```
 ///
 /// # Options {#root-options}
 #[derive(MirrordConfig, Clone, Debug)]
 #[config(map_to = "LayerFileConfig", derive = "JsonSchema")]
-#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
+#[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct LayerConfig {
     /// ## accept_invalid_certificates {#root-accept_invalid_certificates}
     ///
@@ -158,6 +161,19 @@ pub struct LayerConfig {
     /// ```
     #[config(env = "MIRRORD_SKIP_PROCESSES")]
     pub skip_processes: Option<VecOrSingle<String>>,
+
+    /// ## skip_build_tools {#root-skip_build_tools}
+    ///
+    /// Allows mirrord to skip build tools. Useful when running command lines that build and run
+    /// the application in a single command.
+    ///
+    /// Defaults to `true`.
+    ///
+    /// Build-Tools: `["as", "cc", "ld", "go", "air", "asm", "cc1", "cgo", "dlv", "gcc", "git",
+    /// "link", "math", "cargo", "hpack", "rustc", "compile", "collect2", "cargo-watch",
+    /// "debugserver"]`
+    #[config(env = "MIRRORD_SKIP_BUILD_TOOLS", default = true)]
+    pub skip_build_tools: bool,
 
     /// ## pause {#root-pause}
     /// Controls target pause feature. Unstable.
@@ -587,6 +603,7 @@ mod tests {
                 namespace: Some("default".to_owned()),
             }),
             skip_processes: None,
+            skip_build_tools: None,
             agent: Some(AgentFileConfig {
                 log_level: Some("info".to_owned()),
                 namespace: Some("default".to_owned()),
@@ -602,6 +619,8 @@ mod tests {
                 startup_timeout: None,
                 network_interface: None,
                 flush_connections: Some(false),
+                disabled_capabilities: None,
+                tolerations: None,
             }),
             feature: Some(FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true).into(),

@@ -11,8 +11,10 @@
 //! or let the [`OperatorApi`] handle the connection.
 
 use std::{
-    io::ErrorKind,
+    fs::File,
+    io::{stderr, stdout, ErrorKind},
     net::{Ipv4Addr, SocketAddrV4},
+    os::fd::{AsRawFd, FromRawFd},
     time::Duration,
 };
 
@@ -20,17 +22,17 @@ use futures::{stream::StreamExt, SinkExt};
 use mirrord_analytics::{send_analytics, Analytics, CollectAnalytics};
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
-use mirrord_operator::client::OperatorApi;
-use mirrord_progress::NoProgress;
-use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage};
+use mirrord_operator::client::{OperatorApi, OperatorSessionInformation};
+use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonCodec, DaemonMessage};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
-    sync::mpsc::{self},
-    task::JoinSet,
+    sync::mpsc,
+    task::{JoinHandle, JoinSet},
     time::timeout,
 };
-use tracing::{error, log::trace};
+use tokio_util::sync::CancellationToken;
+use tracing::{error, info, log::trace};
 
 use crate::{
     config::InternalProxyArgs,
@@ -98,6 +100,37 @@ async fn connection_task(
     }
 }
 
+/// Request target container pause from the connected agent.
+async fn request_pause(
+    sender: &mut mpsc::Sender<ClientMessage>,
+    receiver: &mut mpsc::Receiver<DaemonMessage>,
+) -> Result<(), InternalProxyError> {
+    info!("Requesting target container pause from the agent");
+    sender
+        .send(ClientMessage::PauseTargetRequest(true))
+        .await
+        .map_err(|_| {
+            InternalProxyError::PauseError("Failed to request target container pause.".to_string())
+        })?;
+
+    match receiver.recv().await {
+        Some(DaemonMessage::PauseTarget(DaemonPauseTarget::PauseResponse {
+            changed,
+            container_paused: true,
+        })) => {
+            if changed {
+                info!("Target container is now paused.");
+            } else {
+                info!("Target container was already paused.");
+            }
+            Ok(())
+        }
+        msg => Err(InternalProxyError::PauseError(format!(
+            "Failed pausing, got invalid answer: {msg:#?}"
+        ))),
+    }
+}
+
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
 pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
@@ -115,7 +148,23 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
     // Create a main connection, that will be held until proxy is closed.
     // This will guarantee agent staying alive and will enable us to
     // make the agent close on last connection close immediately (will help in tests)
-    let (_main_connection, operator) = connect_and_ping(&config).await?;
+    let (mut main_connection, operator) = connect_and_ping(&config).await?;
+    if config.pause {
+        tokio::time::timeout(
+            Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into()),
+            request_pause(&mut main_connection.0, &mut main_connection.1),
+        )
+        .await
+        .map_err(|_| {
+            InternalProxyError::PauseError(
+                "Timeout requesting for target container pause.".to_string(),
+            )
+        })??;
+    }
+
+    let (main_connection_cancellation_token, main_connection_task_join) =
+        create_ping_loop(main_connection);
+
     print_port(&listener)?;
 
     // wait for first connection `FIRST_CONNECTION_TIMEOUT` seconds, or timeout.
@@ -129,6 +178,9 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
     let (agent_connection, _) = connect_and_ping(&config).await?;
     active_connections.spawn(connection_task(stream, agent_connection));
 
+    // close stdout/err so we won't hold the terminal/pipe/caller (especially in tests)
+    drop(unsafe { File::from_raw_fd(stdout().as_raw_fd()) });
+    drop(unsafe { File::from_raw_fd(stderr().as_raw_fd()) });
     loop {
         tokio::select! {
             res = listener.accept() => {
@@ -144,6 +196,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
                 }
             },
             _ = active_connections.join_next(), if !active_connections.is_empty() => {},
+            _ = main_connection_cancellation_token.cancelled() => { break; }
             _ = tokio::time::sleep(Duration::from_secs(5)) => {
                 if active_connections.is_empty() {
                     break;
@@ -151,6 +204,8 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
             }
         }
     }
+    main_connection_cancellation_token.cancel();
+
     let mut analytics = Analytics::default();
     (&config).collect_analytics(&mut analytics);
     if config.telemetry {
@@ -161,7 +216,16 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
         )
         .await;
     }
-    Ok(())
+
+    match main_connection_task_join.await {
+        Ok(Err(err)) => Err(err.into()),
+        Err(err) => {
+            error!("internal_proxy connection paniced {err}");
+
+            Err(InternalProxyError::AgentClosedConnection.into())
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Connect and send ping - this is useful when working using k8s
@@ -190,6 +254,43 @@ async fn ping(
     }
 }
 
+fn create_ping_loop(
+    mut connection: (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
+) -> (
+    CancellationToken,
+    JoinHandle<Result<(), InternalProxyError>>,
+) {
+    let cancellation_token = CancellationToken::new();
+
+    let join_handle = tokio::spawn({
+        let cancellation_token = cancellation_token.clone();
+
+        async move {
+            let mut main_keep_interval = tokio::time::interval(Duration::from_secs(30));
+            main_keep_interval.tick().await;
+
+            loop {
+                tokio::select! {
+                    _ = main_keep_interval.tick() => {
+                        if let Err(err) = ping(&mut connection.0, &mut connection.1).await {
+                            cancellation_token.cancel();
+
+                            return Err(err);
+                        }
+                    }
+                    _ = cancellation_token.cancelled() => {
+                        break;
+                    }
+                }
+            }
+
+            Ok(())
+        }
+    });
+
+    (cancellation_token, join_handle)
+}
+
 /// Connects to an agent pod depending on how [`LayerConfig`] is set-up:
 ///
 /// - `connect_tcp`: connects directly to the `address` specified, and calls [`wrap_raw_connection`]
@@ -206,7 +307,12 @@ async fn connect(
     (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
     bool,
 )> {
-    if let Some(address) = &config.connect_tcp {
+    if let Some(operator_session_information) = OperatorSessionInformation::from_env()? {
+        Ok((
+            OperatorApi::connect(config, &operator_session_information).await?,
+            true,
+        ))
+    } else if let Some(address) = &config.connect_tcp {
         let stream = TcpStream::connect(address)
             .await
             .map_err(InternalProxyError::TcpConnectError)?;
@@ -220,10 +326,6 @@ async fn connect(
             .await?;
         Ok((connection, false))
     } else {
-        let connection = OperatorApi::discover(config, &NoProgress).await?;
-        Ok((
-            connection.ok_or(InternalProxyError::OperatorConnectionError)?,
-            true,
-        ))
+        Err(InternalProxyError::NoConnectionMethod.into())
     }
 }

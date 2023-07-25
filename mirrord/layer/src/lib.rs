@@ -105,7 +105,7 @@ use mirrord_protocol::{
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
 use regex::RegexSet;
-use socket::SOCKETS;
+use socket::{OutgoingSelector, SOCKETS};
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
 use tcp_steal::TcpStealHandler;
@@ -113,7 +113,7 @@ use tokio::{
     runtime::Runtime,
     select,
     sync::mpsc::{channel, Receiver, Sender},
-    time::{sleep, Duration},
+    time::{Duration, Interval},
 };
 use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
@@ -254,6 +254,18 @@ pub(crate) static TARGETLESS: OnceLock<bool> = OnceLock::new();
 /// Ports to ignore on listening for mirroring/stealing.
 pub(crate) static INCOMING_IGNORE_PORTS: OnceLock<HashSet<u16>> = OnceLock::new();
 
+// TODO(alex): To support DNS on the selector, change it to `LazyLock<Arc<Mutex>>`, so we can modify
+// the global on `OutgoingSelector::connect_remote`, converting `AddressFilter:Name` to however
+// many addresses we resolve into `AddressFilter::Socket`.
+//
+// Also, we need a global for `REMOTE_DNS`, so we can check it in
+// `OutgoingSelector::connect_remote`, and only resolve DNS through remote if it's `true`.
+
+/// Selector for how outgoing connection will behave, either sending traffic via the remote or from
+/// local app, according to how the user set up the `remote`, and `local` filter, in
+/// `feature.network.outgoing`.
+pub(crate) static OUTGOING_SELECTOR: OnceLock<OutgoingSelector> = OnceLock::new();
+
 /// Ports to ignore because they are used by the IDE debugger
 pub(crate) static DEBUGGER_IGNORED_PORTS: OnceLock<DebuggerPorts> = OnceLock::new();
 
@@ -393,12 +405,31 @@ fn set_globals(config: &LayerConfig) {
     FILE_MODE
         .set(config.feature.fs.clone())
         .expect("Setting FILE_MODE failed.");
+
+    // These must come before `OutgoingSelector::new`.
     ENABLED_TCP_OUTGOING
         .set(config.feature.network.outgoing.tcp)
         .expect("Setting ENABLED_TCP_OUTGOING singleton");
     ENABLED_UDP_OUTGOING
         .set(config.feature.network.outgoing.udp)
         .expect("Setting ENABLED_UDP_OUTGOING singleton");
+
+    {
+        let outgoing_selector = config
+            .feature
+            .network
+            .outgoing
+            .filter
+            .clone()
+            .try_into()
+            .expect("Failed setting up outgoing traffic filter!");
+
+        // This will crash the app if it comes before `ENABLED_(TCP|UDP)_OUTGOING`!
+        OUTGOING_SELECTOR
+            .set(outgoing_selector)
+            .expect("Setting OUTGOING_SELECTOR singleton");
+    }
+
     REMOTE_UNIX_STREAMS
         .set(
             config
@@ -571,6 +602,8 @@ struct Layer {
     /// [`DaemonMessage::Pong`], setting it to `false` and completing the hearbeat detection.
     ping: bool,
 
+    ping_interval: Interval,
+
     /// Handler to the TCP mirror operations, see [`TcpMirrorHandler`].
     tcp_mirror_handler: TcpMirrorHandler,
 
@@ -633,6 +666,7 @@ impl Layer {
             tx,
             rx,
             ping: false,
+            ping_interval: tokio::time::interval(Duration::from_secs(30)),
             tcp_mirror_handler: TcpMirrorHandler::new(port_mapping.clone()),
             tcp_outgoing_handler: TcpOutgoingHandler::default(),
             udp_outgoing_handler: Default::default(),
@@ -650,7 +684,8 @@ impl Layer {
 
     /// Sends a [`ClientMessage`] through `Layer::tx` to the [`Receiver`] in
     /// [`wrap_raw_connection`](mirrord_kube::api::wrap_raw_connection).
-    async fn send(&self, msg: ClientMessage) -> Result<(), ClientMessage> {
+    async fn send(&mut self, msg: ClientMessage) -> Result<(), ClientMessage> {
+        self.ping_interval.reset();
         self.tx.send(msg).await.map_err(|err| err.0)
     }
 
@@ -798,7 +833,7 @@ impl Layer {
 ///   [`ClientMessage`]s, sending them with `Layer::send`;
 ///
 /// - Handle the heartbeat mechanism (Ping/Pong feature), sending a [`ClientMessage::Ping`] if all
-///   the other channels received nothing for a while (60 seconds);
+///   the other channels received nothing for a while (30 seconds);
 async fn thread_loop(
     mut receiver: Receiver<HookMessage>,
     tx: Sender<ClientMessage>,
@@ -814,6 +849,8 @@ async fn thread_loop(
         ..
     } = config;
     let mut layer = Layer::new(tx, rx, incoming);
+    layer.ping_interval.tick().await;
+
     loop {
         select! {
             hook_message = receiver.recv() => {
@@ -863,7 +900,7 @@ async fn thread_loop(
             Some(response) = layer.http_response_receiver.recv() => {
                 layer.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response))).await.unwrap();
             }
-            _ = sleep(Duration::from_secs(30)) => {
+            _ = layer.ping_interval.tick() => {
                 if !layer.ping {
                     layer.send(ClientMessage::Ping).await.unwrap();
                     trace!("sent ping to daemon");

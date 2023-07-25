@@ -8,6 +8,141 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.53.2](https://github.com/metalbear-co/mirrord/tree/3.53.2) - 2023-07-24
+
+
+### Fixed
+
+- Add automatic skip for build-tools `"skip_build_tools": boolean` to config
+  [default: True] (build-tool list: `as`, `cc`, `ld`, `go`, `air`, `asm`,
+  `cc1`, `cgo`, `dlv`, `gcc`, `git`, `link`, `math`, `cargo`, `hpack`, `rustc`,
+  `compile`, `collect2`, `cargo-watch` and `debugserver`)
+  [#1478](https://github.com/metalbear-co/mirrord/issues/1478)
+- Fix `feature.env.override` documentation "overrides" -> "override".
+  [mirrord.dev#120](https://github.com/metalbear-co/mirrord.dev/issues/120)
+- Specify default value for `agent.tolerations` in docs as json instead of
+  yaml.
+
+
+## [3.53.1](https://github.com/metalbear-co/mirrord/tree/3.53.1) - 2023-07-23
+
+
+### Changed
+
+- Changed internal proxy to drop stdout/stderr after it finishes loading
+
+
+### Internal
+
+- Fixed flakes caused by stdout/stderr not being flushed before after process
+  is done
+
+
+## [3.53.0](https://github.com/metalbear-co/mirrord/tree/3.53.0) - 2023-07-20
+
+
+### Added
+
+- Add support for `agent.tolerations` configuraion field for setting agent
+  `Toleration`s to work around `Taint`s in the cluster.
+  [#1692](https://github.com/metalbear-co/mirrord/issues/1692)
+
+
+### Changed
+
+- Added env var exclusion for `_JAVA_OPTIONS` to avoid loading remote jars or
+  settings that wouldn't work locally.
+  [#1695](https://github.com/metalbear-co/mirrord/issues/1695)
+
+
+## [3.52.1](https://github.com/metalbear-co/mirrord/tree/3.52.1) - 2023-07-19
+
+
+### Internal
+
+- Added Java Debug port detecting to use in VSCode/IntelliJ
+  [#1689](https://github.com/metalbear-co/mirrord/issues/1689)
+
+
+## [3.52.0](https://github.com/metalbear-co/mirrord/tree/3.52.0) - 2023-07-18
+
+
+### Added
+
+- Support for OIDC refresh token
+  [#1460](https://github.com/metalbear-co/mirrord/issues/1460)
+
+
+### Fixed
+
+- Fixed case where proxy can timeout since it holds a stale connection. Added
+  heartbeat to the connection handling
+- Fixed dynamic pause with operator not working - moved pause request to be
+  from internal proxy
+- Update the code to reimplement the fix but without moving the pinging source.
+
+
+### Internal
+
+- Add Cargo Chef to mirrord-agent docker image for better utilisation of cache
+  layers.
+- Reduce amount of API calls to use operator
+
+
+## [3.51.1](https://github.com/metalbear-co/mirrord/tree/3.51.1) - 2023-07-16
+
+
+### Changed
+
+- 'mirrod ls' command now no longer lists crashed pods as targets
+  [#1617](https://github.com/metalbear-co/mirrord/issues/1617)
+
+
+### Internal
+
+- Add `readinessProbe` and `livenessProbe` to operator deployment.
+- Add support for operator feature flags & new "proxy" verb api.
+- Remove operator pvc from setup.
+
+
+## [3.51.0](https://github.com/metalbear-co/mirrord/tree/3.51.0) - 2023-07-16
+
+
+### Added
+
+- Add outgoing traffic filter feature.
+
+  Adds a way of controlling from where outgoing traffic should go, either
+  through the remote pod, or from the local app. Can be configured with the
+  `remote` and `local` options under `feature.network.outgoing`.
+  [#702](https://github.com/metalbear-co/mirrord/issues/702)
+- mirrord configuration now allows disabling Linux capabilities for the agent
+  container. [#1662](https://github.com/metalbear-co/mirrord/issues/1662)
+- Add env to specify operator image
+
+
+### Internal
+
+- Add new error to the kube error enum needed by operator
+- Update VS Code gif in README
+
+
+## [3.50.5](https://github.com/metalbear-co/mirrord/tree/3.50.5) - 2023-07-13
+
+
+### Fixed
+
+- Make sure conntrack flushes the correct port.
+  [#1655](https://github.com/metalbear-co/mirrord/issues/1655)
+- Added `CAP_NET_RAW` Linux capability agent.
+
+
+### Internal
+
+- Use a patched (fixed) version of rasn, otherwise doing a cargo update breaks
+  compilation due to rasn-derive from rasn used in apple-codesign.
+
+
 ## [3.50.4](https://github.com/metalbear-co/mirrord/tree/3.50.4) - 2023-07-11
 
 

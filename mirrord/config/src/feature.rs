@@ -23,7 +23,7 @@ pub mod network;
 ///     "env": {
 ///       "include": "DATABASE_USER;PUBLIC_ENV",
 ///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
-///       "overrides": {
+///       "override": {
 ///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
 ///         "LOCAL_BEAR": "panda"
 ///       }
@@ -48,6 +48,9 @@ pub mod network;
 ///       "outgoing": {
 ///         "tcp": true,
 ///         "udp": true,
+///         "filter": {
+///           "local": ["tcp://1.1.1.0/24:1337", "1.1.5.0/24", "google.com", ":53"]
+///         },
 ///         "ignore_localhost": false,
 ///         "unix_streams": "bear.+"
 ///       },
