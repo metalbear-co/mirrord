@@ -1,14 +1,14 @@
-import https from "node:https";
+import http from "node:http";
 
 const rust_lang = {
-  hostname: "www.rust-lang.org",
-  port: 443,
+  hostname: "www.mirrord-magic-service.dev",
+  port: 6666,
   path: "/",
   method: "GET",
 };
 
-function makeRequestHttps(options) {
-    const request = https.request(options, (response) => {
+function makeRequest(options) {
+    const request = http.request(options, (response) => {
     console.log(`statusCode: ${response.statusCode}`);
 
     response.on("data", (data) => {
@@ -34,4 +34,4 @@ function makeRequestHttps(options) {
   request.end();
 }
 
-makeRequestHttps(rust_lang);
+makeRequest(rust_lang);

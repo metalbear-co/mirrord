@@ -3,7 +3,7 @@
         "network": {
             "outgoing": {
                 "filter": {
-                    "remote": ["www.rust-lang.org"]
+                    "remote": ["www.mirrord-magic-service.dev"]
                 }
             }
         }

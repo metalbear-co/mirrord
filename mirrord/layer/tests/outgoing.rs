@@ -209,7 +209,7 @@ async fn outgoing_tcp_named_host(
 
     conn.send(DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(Ok(
         DnsLookup(vec![LookupRecord {
-            name: "www.rust-lang.org".to_string(),
+            name: "www.mirrord-magic-service.dev".to_string(),
             ip: remote_ip,
         }]),
     ))))
