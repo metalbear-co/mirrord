@@ -11,8 +11,8 @@ mod traffic {
     use rstest::*;
 
     use crate::utils::{
-        hostname_service, kube_client, run_exec_with_target, service, udp_logger_service,
-        KubeService, CONTAINER_NAME,
+        config_dir, hostname_service, kube_client, run_exec_with_target, service,
+        udp_logger_service, KubeService, CONTAINER_NAME,
     };
 
     #[rstest]
@@ -131,6 +131,8 @@ mod traffic {
         assert!(res.success());
     }
 
+    // TODO(alex) [high] 2023-07-25: Add the filter config here with the `internal_service.name`,
+    // this should filter local-only, and have a expect panic for remote.
     /// Currently, mirrord only intercepts and forwards outgoing udp traffic if the application
     /// binds a non-0 port and calls `connect`. This test runs with mirrord a node app that does
     /// that and verifies that mirrord intercepts and forwards the outgoing udp message.
@@ -138,6 +140,7 @@ mod traffic {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn outgoing_traffic_udp_with_connect(
+        config_dir: &std::path::PathBuf,
         #[future] udp_logger_service: KubeService,
         #[future] service: KubeService,
         #[future] kube_client: Client,
@@ -165,16 +168,19 @@ mod traffic {
             &internal_service.name,
         ];
 
+        let mut config_path = config_dir.clone();
+        config_path.push("outgoing_filter_local.json");
+
         // Meta-test: verify that the application cannot reach the internal service without
         // mirrord forwarding outgoing UDP traffic via the target pod.
         // If this verification fails, the test itself is invalid.
-        let mirrord_no_outgoing = vec!["--no-outgoing"];
+        // let mirrord_no_outgoing = vec!["--no-outgoing"];
         let mut process = run_exec_with_target(
             node_command.clone(),
             &target_service.target,
             Some(&target_service.namespace),
-            Some(mirrord_no_outgoing),
             None,
+            Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
         )
         .await;
         let res = process.wait().await;
@@ -183,13 +189,16 @@ mod traffic {
         let logs = pod_api.logs(stripped_target, &lp).await;
         assert_eq!(logs.unwrap(), "");
 
+        let mut config_path = config_dir.clone();
+        config_path.push("outgoing_filter_remote.json");
+
         // Run mirrord with outgoing enabled.
         let mut process = run_exec_with_target(
             node_command,
             &target_service.target,
             Some(&target_service.namespace),
             None,
-            None,
+            Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
         )
         .await;
         let res = process.wait().await;

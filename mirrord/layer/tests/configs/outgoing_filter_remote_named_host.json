@@ -1,5 +1,8 @@
 {
     "feature": {
+        "fs": {
+            "mode": "local"
+        },
         "network": {
             "outgoing": {
                 "filter": {
