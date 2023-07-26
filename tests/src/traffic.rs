@@ -174,7 +174,6 @@ mod traffic {
         // Meta-test: verify that the application cannot reach the internal service without
         // mirrord forwarding outgoing UDP traffic via the target pod.
         // If this verification fails, the test itself is invalid.
-        // let mirrord_no_outgoing = vec!["--no-outgoing"];
         let mut process = run_exec_with_target(
             node_command.clone(),
             &target_service.target,
