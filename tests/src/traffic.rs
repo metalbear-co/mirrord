@@ -9,9 +9,10 @@ mod traffic {
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::LogParams, Api, Client};
     use rstest::*;
+    use tokio::{fs::File, io::AsyncWriteExt};
 
     use crate::utils::{
-        config_dir, hostname_service, kube_client, run_exec_with_target, service,
+        config_dir, hostname_service, kube_client, random_string, run_exec_with_target, service,
         udp_logger_service, KubeService, CONTAINER_NAME,
     };
 
@@ -189,8 +190,34 @@ mod traffic {
         let logs = pod_api.logs(stripped_target, &lp).await;
         assert_eq!(logs.unwrap(), "");
 
-        let mut config_path = config_dir.clone();
-        config_path.push("outgoing_filter_remote.json");
+        // Create remote filter file with service name so we can test DNS outgoing filter.
+        let mut filter_config_path = config_dir.clone();
+        let remote_config_filter = format!("outgoing_filter_remote_{}.json", random_string());
+        filter_config_path.push(remote_config_filter);
+        let config_path = filter_config_path.clone();
+
+        let mut remote_config_file = File::create(filter_config_path).await.unwrap();
+
+        let service_name = internal_service.name.clone();
+        let remote_filter = format!(
+            r#"
+{{
+    "feature": {{
+        "network": {{
+            "outgoing": {{
+                "filter": {{
+                    "remote": ["{service_name}"]
+                }}
+            }}
+        }}
+    }}
+}}       "#
+        );
+
+        remote_config_file
+            .write_all(remote_filter.as_bytes())
+            .await
+            .unwrap();
 
         // Run mirrord with outgoing enabled.
         let mut process = run_exec_with_target(
