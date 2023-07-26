@@ -444,12 +444,12 @@ jobs:
       - uses: actions/setup-node@v3 # version 19 spawns processes with `posix_spawn`, so test that also.
         with:
           node-version: 19
-      - run: cargo test -p mirrord-layer
+      - run: cargo test -p mirrord-layer  
 
-  # e2e:
-  #   uses: ./.github/workflows/reusable-e2e.yaml@main
-  #   with:
-  #       operator: false
+  e2e:
+    uses: infiniteregrets/mirrord/.github/workflows/reusable-e2e.yaml@main
+    with:
+        operator: false
 
   lint_markdown:
     runs-on: ubuntu-latest
