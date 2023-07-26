@@ -3320,9 +3320,10 @@ dependencies = [
  "mirrord-progress",
  "mirrord-protocol",
  "rand",
- "rstest 0.17.0",
+ "rstest 0.18.1",
  "serde",
  "serde_json",
+ "shellexpand",
  "thiserror",
  "tokio",
  "tower",
@@ -3364,7 +3365,7 @@ dependencies = [
  "os_info",
  "rand",
  "regex",
- "rstest 0.17.0",
+ "rstest 0.18.1",
  "serde_json",
  "socket2 0.5.3",
  "streammap-ext",
@@ -5127,6 +5128,15 @@ name = "shell-words"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "24188a676b6ae68c3b2cb3a01be17fbf7240ce009799bb56d5b1409051e78fde"
+
+[[package]]
+name = "shellexpand"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da03fa3b94cc19e3ebfc88c4229c49d8f08cdbd1228870a45f0ffdf84988e14b"
+dependencies = [
+ "dirs",
+]
 
 [[package]]
 name = "shlex"
