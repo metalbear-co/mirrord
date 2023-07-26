@@ -448,6 +448,9 @@ jobs:
 
   e2e:
     needs: [build_mirrord, test_agent_image, changed_files]
+    strategy:
+      matrix:
+        container-runtime: ["docker", "containerd"]
     uses: infiniteregrets/mirrord/.github/workflows/reusable-e2e.yaml@reusable-workflow
     with:
         operator: false

@@ -123,12 +123,9 @@ jobs:
   #         docker exec minikube find /var/log/pods -print -exec cat {} \;
 
   mirrord_e2e:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        container-runtime: ["docker", "containerd"]
+    runs-on: ubuntu-latest    
     name: e2e    
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    # if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
