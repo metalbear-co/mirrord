@@ -29,6 +29,7 @@ kube.workspace = true
 rand = "0.8"
 serde.workspace = true
 serde_json.workspace = true
+shellexpand = "3"
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

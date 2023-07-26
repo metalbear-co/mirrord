@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::ops::Deref;
 #[cfg(feature = "incluster")]
 use std::{net::SocketAddr, time::Duration};
 
@@ -170,10 +170,11 @@ pub async fn create_kube_api<P>(
     kubeconfig: Option<P>,
 ) -> Result<Client>
 where
-    P: AsRef<Path>,
+    P: AsRef<str>,
 {
     let mut config = if let Some(kubeconfig) = kubeconfig {
-        let parsed_kube_config = Kubeconfig::read_from(kubeconfig)?;
+        let kubeconfig = shellexpand::tilde(&kubeconfig);
+        let parsed_kube_config = Kubeconfig::read_from(kubeconfig.deref())?;
         Config::from_custom_kubeconfig(parsed_kube_config, &KubeConfigOptions::default()).await?
     } else {
         Config::infer().await?
