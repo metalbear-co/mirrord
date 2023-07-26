@@ -11,14 +11,14 @@ jobs:
   operator_e2e:
     if: ${{ inputs.operator }} == "true"
     runs-on: ubuntu-latest
-    name: e2e    
+    name: e2e
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
       MIRRORD_OPERATOR_IMAGE: "test"
     steps:
       - uses: actions/checkout@v3
         with:
-          repository: "metalbear-co/mirrord"                
+          repository: "metalbear-co/mirrord"
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -120,8 +120,9 @@ jobs:
           docker exec minikube find /var/log/pods -print -exec cat {} \;
 
   mirrord_e2e:
-    runs-on: ubuntu-latest    
-    name: e2e        
+    if: ${{ inputs.operator }} == "false"
+    runs-on: ubuntu-latest
+    name: e2e
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
