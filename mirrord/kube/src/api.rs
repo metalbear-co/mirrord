@@ -8,7 +8,7 @@ use tokio::{
     net::{TcpStream, ToSocketAddrs},
     sync::mpsc,
 };
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::error::{KubeApiError, Result};
 
@@ -57,6 +57,7 @@ pub async fn namespace_exists_for_client(namespace: &str, client: &Client) -> bo
 pub fn wrap_raw_connection(
     stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
 ) -> (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>) {
+    debug!("wrap_raw_connection");
     let mut codec = actix_codec::Framed::new(stream, ClientCodec::new());
 
     let (in_tx, mut in_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
@@ -66,6 +67,7 @@ pub fn wrap_raw_connection(
         loop {
             tokio::select! {
                 msg = in_rx.recv() => {
+                    debug!("next layer message: {msg:?}");
                     match msg {
                         Some(msg) => {
                             if let Err(fail) = codec.send(msg).await {
@@ -81,6 +83,7 @@ pub fn wrap_raw_connection(
                     }
                 }
                 daemon_message = codec.next() => {
+                    debug!("next daemon message: {daemon_message:?}");
                     match daemon_message {
                         Some(Ok(DaemonMessage::LogMessage(log_message))) => {
                             match log_message.level {

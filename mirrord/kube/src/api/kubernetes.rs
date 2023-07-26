@@ -104,6 +104,7 @@ impl AgentManagment for KubernetesAPI {
         trace!("port-forward to pod {}:{}", &pod_agent_name, &agent_port);
         let mut port_forwarder = pod_api.portforward(&pod_agent_name, &[agent_port]).await?;
 
+        trace!("taking stream");
         Ok(wrap_raw_connection(
             port_forwarder
                 .take_stream(agent_port)

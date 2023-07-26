@@ -142,7 +142,6 @@ fn listen_and_print_addr() -> Result<std::net::TcpListener> {
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
 pub(crate) fn start_proxy_daemon(args: InternalProxyArgs) -> Result<()> {
-    error!("internal proxy printing port. start_proxy_daemon.");
     let stderr = File::create("/Users/tal/Documents/projects/mirrord/daemon.err").unwrap();
     let listener = listen_and_print_addr()?;
     daemonize::Daemonize::new()
@@ -154,7 +153,6 @@ pub(crate) fn start_proxy_daemon(args: InternalProxyArgs) -> Result<()> {
         .with(fmt::layer().with_writer(std::io::stderr))
         .with(EnvFilter::from_default_env())
         .init();
-    error!("Test logging.");
     proxy(args, listener)
 }
 
@@ -262,7 +260,8 @@ async fn ping(
     sender: &mut mpsc::Sender<ClientMessage>,
     receiver: &mut mpsc::Receiver<DaemonMessage>,
 ) -> Result<(), InternalProxyError> {
-    sender.send(ClientMessage::Ping).await?;
+    let ping_res = sender.send(ClientMessage::Ping).await;
+    trace!("ping res: {ping_res:?}.");
     match receiver.recv().await {
         Some(DaemonMessage::Pong) => Ok(()),
         _ => Err(InternalProxyError::AgentClosedConnection),
@@ -340,6 +339,7 @@ async fn connect(
         let connection = k8s_api
             .create_connection((agent_name.clone(), port))
             .await?;
+        trace!("Created connection with pod {connection:?}.");
         Ok((connection, false))
     } else {
         Err(InternalProxyError::NoConnectionMethod.into())

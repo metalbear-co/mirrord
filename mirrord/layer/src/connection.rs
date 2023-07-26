@@ -9,7 +9,7 @@ use tokio::{
     net::TcpStream,
     sync::mpsc::{self, Receiver, Sender},
 };
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::graceful_exit;
 
@@ -57,6 +57,7 @@ fn wrap_raw_connection(
         loop {
             tokio::select! {
                 msg = client_in_rx.recv() => {
+                    debug!("next layer message (layer -> proxy): {msg:?}");
                     match msg {
                         Some(msg) => {
                             trace!("Sending client message: {:?}", &msg);
@@ -67,12 +68,14 @@ fn wrap_raw_connection(
                         }
                         None => {
                             info!("mirrord-kube: initiated disconnect from agent");
+                            info!("Backtrace: {}", std::backtrace::Backtrace::force_capture());
 
                             break;
                         }
                     }
                 }
                 daemon_message = codec.next() => {
+                    debug!("next daemon message (proxy -> layer): {daemon_message:?}");
                     match daemon_message {
                         Some(Ok(DaemonMessage::LogMessage(log_message))) => {
                             match log_message.level {
