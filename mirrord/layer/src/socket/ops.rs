@@ -685,7 +685,9 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
     Ok(())
 }
 
-#[tracing::instrument(level = "debug", ret)]
+/// Handles the remote communication part of [`getaddrinfo`], call this if you want to resolve a DNS
+/// through the agent, but don't need to deal with all the [`libc::getaddrinfo`] stuff.
+#[tracing::instrument(level = "trace", ret)]
 pub(super) fn remote_getaddrinfo(
     node: String,
     service: u16,
@@ -717,7 +719,7 @@ pub(super) fn remote_getaddrinfo(
 ///
 /// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
 /// for the equivalent of this function).
-#[tracing::instrument(level = "debug", ret)]
+#[tracing::instrument(level = "trace", ret)]
 pub(super) fn getaddrinfo(
     rawish_node: Option<&CStr>,
     rawish_service: Option<&CStr>,

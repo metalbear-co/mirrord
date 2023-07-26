@@ -361,7 +361,7 @@ impl OutgoingSelector {
     ///
     /// So if the user specified a selector with `0.0.0.0:0`, we're going to be always matching on
     /// it.
-    #[tracing::instrument(level = "debug", ret)]
+    #[tracing::instrument(level = "trace", ret)]
     fn connect_remote<const PROTOCOL: ConnectProtocol>(
         &self,
         address: SocketAddr,
@@ -417,9 +417,8 @@ impl OutgoingSelector {
     /// regular `getaddrinfo`, depending if the user set up the `dns` feature to resolve DNS through
     /// the remote pod or not.
     ///
-    /// The resolved values are put back into `self` as `AddressFilter::Socket`, while the
-    /// `AddressFilter::Name` are removed.
-    #[tracing::instrument(level = "debug", ret)]
+    /// The resolved values are returned in a set as `AddressFilter::Socket`.
+    #[tracing::instrument(level = "trace", ret)]
     fn resolve_dns(&self) -> HookResult<HashSet<OutgoingFilter>> {
         // Closure that tries to match `address` with something in the selector set.
         let name = |outgoing: &&OutgoingFilter| matches!(outgoing.address, AddressFilter::Name(_));

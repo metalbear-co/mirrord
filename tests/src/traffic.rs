@@ -132,8 +132,6 @@ mod traffic {
         assert!(res.success());
     }
 
-    // TODO(alex) [high] 2023-07-25: Add the filter config here with the `internal_service.name`,
-    // this should filter local-only, and have a expect panic for remote.
     /// Currently, mirrord only intercepts and forwards outgoing udp traffic if the application
     /// binds a non-0 port and calls `connect`. This test runs with mirrord a node app that does
     /// that and verifies that mirrord intercepts and forwards the outgoing udp message.
@@ -169,6 +167,7 @@ mod traffic {
             &internal_service.name,
         ];
 
+        // Make connections on port `31415` go through local.
         let mut config_path = config_dir.clone();
         config_path.push("outgoing_filter_local.json");
 
