@@ -127,8 +127,7 @@ jobs:
     strategy:
       matrix:
         container-runtime: ["docker", "containerd"]
-    name: e2e
-    needs: [build_mirrord, test_agent_image, changed_files]
+    name: e2e    
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"

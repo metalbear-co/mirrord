@@ -447,6 +447,7 @@ jobs:
       - run: cargo test -p mirrord-layer  
 
   e2e:
+    needs: [build_mirrord, test_agent_image, changed_files]
     uses: infiniteregrets/mirrord/.github/workflows/reusable-e2e.yaml@reusable-workflow
     with:
         operator: false
