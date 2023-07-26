@@ -2,7 +2,9 @@
     "feature": {
         "network": {
             "outgoing": {
-                "remote": ["udp-logger"]
+                "filter": {
+                    "remote": ["udp-logger"]
+                }
             }
         }
     }
