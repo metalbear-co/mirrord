@@ -12,7 +12,7 @@
 
 use std::{
     fs::File,
-    io::{stderr, stdout, ErrorKind},
+    io::{stdout, ErrorKind},
     net::{Ipv4Addr, SocketAddrV4},
     os::fd::{AsRawFd, FromRawFd},
     time::Duration,
@@ -180,7 +180,6 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
 
     // close stdout/err so we won't hold the terminal/pipe/caller (especially in tests)
     drop(unsafe { File::from_raw_fd(stdout().as_raw_fd()) });
-    drop(unsafe { File::from_raw_fd(stderr().as_raw_fd()) });
     loop {
         tokio::select! {
             res = listener.accept() => {
