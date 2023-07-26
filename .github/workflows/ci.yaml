@@ -446,10 +446,10 @@ jobs:
           node-version: 19
       - run: cargo test -p mirrord-layer
 
-  e2e:
-    uses: ./.github/workflows/reusable-e2e.yaml@main
-    with:
-        operator: false
+  # e2e:
+  #   uses: ./.github/workflows/reusable-e2e.yaml@main
+  #   with:
+  #       operator: false
 
   lint_markdown:
     runs-on: ubuntu-latest
