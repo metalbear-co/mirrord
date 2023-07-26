@@ -447,6 +447,7 @@ jobs:
       - run: cargo test -p mirrord-layer  
 
   e2e:
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     needs: [build_mirrord, test_agent_image, changed_files]
     strategy:
       matrix:
