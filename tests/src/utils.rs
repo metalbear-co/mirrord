@@ -67,7 +67,7 @@ pub async fn watch_resource_exists<K: Debug + Clone + DeserializeOwned>(api: &Ap
 }
 
 /// Creates a random string of 7 alphanumeric lowercase characters.
-pub fn random_string() -> String {
+fn random_string() -> String {
     rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(7)

@@ -12,7 +12,7 @@ mod traffic {
     use tokio::{fs::File, io::AsyncWriteExt};
 
     use crate::utils::{
-        config_dir, hostname_service, kube_client, random_string, run_exec_with_target, service,
+        config_dir, hostname_service, kube_client, run_exec_with_target, service,
         udp_logger_service, KubeService, CONTAINER_NAME,
     };
 
@@ -190,14 +190,14 @@ mod traffic {
         assert_eq!(logs.unwrap(), "");
 
         // Create remote filter file with service name so we can test DNS outgoing filter.
+        let service_name = internal_service.name.clone();
         let mut filter_config_path = config_dir.clone();
-        let remote_config_filter = format!("outgoing_filter_remote_{}.json", random_string());
+        let remote_config_filter = format!("outgoing_filter_remote_{service_name}.json");
         filter_config_path.push(remote_config_filter);
         let config_path = filter_config_path.clone();
 
         let mut remote_config_file = File::create(filter_config_path).await.unwrap();
 
-        let service_name = internal_service.name.clone();
         let remote_filter = format!(
             r#"
 {{
