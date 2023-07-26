@@ -6,7 +6,7 @@ use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorSessionInf
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
-use tracing::trace;
+use tracing::{info, trace};
 
 use crate::{CliError, Result};
 
@@ -81,10 +81,9 @@ where
         ))
     } else {
         if matches!(config.target, mirrord_config::target::TargetConfig{ path: Some(mirrord_config::target::Target::Deployment{..}), ..}) {
-            // progress.subtask("text").done_with("text");
-            eprintln!("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.\n \
-                      Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.\n \
-                      To try it out, join the waitlist with `mirrord waitlist <email address>`, or at this link: https://metalbear.co/#waitlist-form");
+            info!("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.\n \
+                   Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.\n \
+                   To try it out, join the waitlist with `mirrord waitlist <email address>`, or at this link: https://metalbear.co/#waitlist-form");
         }
         let k8s_api = KubernetesAPI::create(config)
             .await

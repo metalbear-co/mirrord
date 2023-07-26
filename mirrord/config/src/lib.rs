@@ -162,6 +162,19 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_SKIP_PROCESSES")]
     pub skip_processes: Option<VecOrSingle<String>>,
 
+    /// ## skip_build_tools {#root-skip_build_tools}
+    ///
+    /// Allows mirrord to skip build tools. Useful when running command lines that build and run
+    /// the application in a single command.
+    ///
+    /// Defaults to `true`.
+    ///
+    /// Build-Tools: `["as", "cc", "ld", "go", "air", "asm", "cc1", "cgo", "dlv", "gcc", "git",
+    /// "link", "math", "cargo", "hpack", "rustc", "compile", "collect2", "cargo-watch",
+    /// "debugserver"]`
+    #[config(env = "MIRRORD_SKIP_BUILD_TOOLS", default = true)]
+    pub skip_build_tools: bool,
+
     /// ## pause {#root-pause}
     /// Controls target pause feature. Unstable.
     ///
@@ -590,6 +603,7 @@ mod tests {
                 namespace: Some("default".to_owned()),
             }),
             skip_processes: None,
+            skip_build_tools: None,
             agent: Some(AgentFileConfig {
                 log_level: Some("info".to_owned()),
                 namespace: Some("default".to_owned()),

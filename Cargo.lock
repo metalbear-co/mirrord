@@ -1919,7 +1919,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.53.1"
+version = "3.53.3"
 dependencies = [
  "libc",
 ]
@@ -2925,7 +2925,7 @@ checksum = "09fc20d2ca12cb9f044c93e3bd6d32d523e6e2ec3db4f7b2939cd99026ecd3f0"
 
 [[package]]
 name = "listen_ports"
-version = "3.53.1"
+version = "3.53.3"
 
 [[package]]
 name = "lock_api"
@@ -3135,7 +3135,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.53.1"
+version = "3.53.3"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -3176,7 +3176,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.53.1"
+version = "3.53.3"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -3226,7 +3226,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.53.1"
+version = "3.53.3"
 dependencies = [
  "assert-json-diff",
  "reqwest",
@@ -3237,7 +3237,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.53.1"
+version = "3.53.3"
 dependencies = [
  "chrono",
  "fs4",
@@ -3257,7 +3257,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.53.1"
+version = "3.53.3"
 dependencies = [
  "bimap",
  "bitflags 2.3.3",
@@ -3278,7 +3278,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.53.1"
+version = "3.53.3"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -3288,7 +3288,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.53.1"
+version = "3.53.3"
 dependencies = [
  "axum",
  "futures",
@@ -3306,7 +3306,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.53.1"
+version = "3.53.3"
 dependencies = [
  "actix-codec",
  "base64 0.21.2",
@@ -3322,6 +3322,7 @@ dependencies = [
  "rstest 0.18.1",
  "serde",
  "serde_json",
+ "shellexpand",
  "thiserror",
  "tokio",
  "tower",
@@ -3330,7 +3331,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.53.1"
+version = "3.53.3"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -3376,7 +3377,6 @@ dependencies = [
  "tokio-util",
  "tower",
  "tracing",
- "tracing-appender",
  "tracing-subscriber",
  "trust-dns-resolver",
  "urlencoding",
@@ -3384,7 +3384,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.53.1"
+version = "3.53.3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3393,7 +3393,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.53.1"
+version = "3.53.3"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -3403,7 +3403,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.53.1"
+version = "3.53.3"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -3436,7 +3436,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.53.1"
+version = "3.53.3"
 dependencies = [
  "atty",
  "serde",
@@ -3468,7 +3468,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.53.1"
+version = "3.53.3"
 dependencies = [
  "apple-codesign",
  "memchr",
@@ -3783,7 +3783,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.53.1"
+version = "3.53.3"
 
 [[package]]
 name = "outref"
@@ -4627,21 +4627,21 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.53.1"
+version = "3.53.3"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.53.1"
+version = "3.53.3"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.53.1"
+version = "3.53.3"
 dependencies = [
  "tokio",
 ]
@@ -5114,6 +5114,15 @@ name = "shell-words"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "24188a676b6ae68c3b2cb3a01be17fbf7240ce009799bb56d5b1409051e78fde"
+
+[[package]]
+name = "shellexpand"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da03fa3b94cc19e3ebfc88c4229c49d8f08cdbd1228870a45f0ffdf84988e14b"
+dependencies = [
+ "dirs",
+]
 
 [[package]]
 name = "shlex"
@@ -5850,17 +5859,6 @@ dependencies = [
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
-]
-
-[[package]]
-name = "tracing-appender"
-version = "0.2.2"
-source = "git+https://github.com/metalbear-co/tracing?branch=worker_options_non_blocking_v1#bf361d828cd8249290b6445f47963ea4025422bd"
-dependencies = [
- "crossbeam-channel",
- "thiserror",
- "time 0.3.23",
- "tracing-subscriber",
 ]
 
 [[package]]

@@ -94,6 +94,14 @@
         }
       ]
     },
+    "skip_build_tools": {
+      "title": "skip_build_tools {#root-skip_build_tools}",
+      "description": "Allows mirrord to skip build tools. Useful when running command lines that build and run the application in a single command.\n\nDefaults to `true`.\n\nBuild-Tools: `[\"as\", \"cc\", \"ld\", \"go\", \"air\", \"asm\", \"cc1\", \"cgo\", \"dlv\", \"gcc\", \"git\", \"link\", \"math\", \"cargo\", \"hpack\", \"rustc\", \"compile\", \"collect2\", \"cargo-watch\", \"debugserver\"]`",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "skip_processes": {
       "title": "skip_processes {#root-skip_processes}",
       "description": "Allows mirrord to skip unwanted processes.\n\nUseful when process A spawns process B, and the user wants mirrord to operate only on process B. Accepts a single value, or multiple values separated by `;`.\n\n```json { \"skip_processes\": \"bash;node\" } ```",
