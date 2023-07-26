@@ -8,6 +8,17 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.53.3](https://github.com/metalbear-co/mirrord/tree/3.53.3) - 2023-07-26
+
+
+### Fixed
+
+- Add `jspawnhelper` to build-tool list & fix skip_processes detection
+  [#1709](https://github.com/metalbear-co/mirrord/issues/1709)
+- Use `shellexpand` to resolve tilde for `kubeconfig`.
+  [#1721](https://github.com/metalbear-co/mirrord/issues/1721)
+
+
 ## [3.53.2](https://github.com/metalbear-co/mirrord/tree/3.53.2) - 2023-07-24
 
 
