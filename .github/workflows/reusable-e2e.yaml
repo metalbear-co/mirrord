@@ -122,7 +122,7 @@ jobs:
           docker exec minikube find /var/log/pods -print -exec cat {} \;
 
   mirrord_e2e:    
-    if: ${{inputs.operator}}
+    if: ${{inputs.operator}} != true
     runs-on: ubuntu-latest
     name: e2e
     env:
