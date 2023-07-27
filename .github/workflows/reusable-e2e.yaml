@@ -9,7 +9,7 @@ on:
 
 jobs:
   operator_e2e:
-    if: ${{ inputs.operator }} == true
+    if: ${{ inputs.operator }} == "true"
     runs-on: ubuntu-latest
     name: e2e
     env:
@@ -119,7 +119,7 @@ jobs:
           kubectl describe pods
           docker exec minikube find /var/log/pods -print -exec cat {} \;
 
-  mirrord_e2e:    
+  mirrord_e2e:
     runs-on: ubuntu-latest
     name: e2e
     env:
