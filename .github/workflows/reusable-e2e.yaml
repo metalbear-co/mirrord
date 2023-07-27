@@ -8,17 +8,19 @@ on:
         type: boolean
 
 jobs:
-  operator_e2e:
-    if: ${{ inputs.operator }} == "true"
+  operator_e2e:    
+    if: ${{inputs.operator  == "true"}}
     runs-on: ubuntu-latest
     name: e2e
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
       MIRRORD_OPERATOR_IMAGE: "test"
-    steps:
+    steps:      
+      - name: fu
+        run: echo "${{inputs.operator  == "true"}}"
       - uses: actions/checkout@v3
         with:
-          repository: "metalbear-co/mirrord"
+          repository: "metalbear-co/mirrord"        
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -119,12 +121,15 @@ jobs:
           kubectl describe pods
           docker exec minikube find /var/log/pods -print -exec cat {} \;
 
-  mirrord_e2e:
+  mirrord_e2e:    
+    if: ${{ inputs.operator }} == true
     runs-on: ubuntu-latest
     name: e2e
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
+      - name: fu
+        run: echo "${{inputs.operator  == "true"}}"
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
