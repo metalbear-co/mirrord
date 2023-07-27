@@ -9,7 +9,7 @@ on:
 
 jobs:
   operator_e2e:    
-    if: ${{inputs.operator  == "true"}}
+    if: ${{inputs.operator  == 'true'}}
     runs-on: ubuntu-latest
     name: e2e
     env:
