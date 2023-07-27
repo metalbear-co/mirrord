@@ -17,7 +17,7 @@ jobs:
       MIRRORD_OPERATOR_IMAGE: "test"
     steps:      
       - name: fu
-        run: echo "${{inputs.operator  == "true"}}"
+        run: echo "${{inputs.operator  == 'true'}}"
       - uses: actions/checkout@v3
         with:
           repository: "metalbear-co/mirrord"        
@@ -129,7 +129,7 @@ jobs:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
       - name: fu
-        run: echo "${{inputs.operator  == "true"}}"
+        run: echo "${{inputs.operator  == 'true'}}"
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
