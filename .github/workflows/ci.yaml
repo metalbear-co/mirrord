@@ -452,7 +452,7 @@ jobs:
     strategy:
       matrix:
         container-runtime: ["docker", "containerd"]
-    uses: ${{ github.workspace }}/.github/workflows/reusable-e2e.yaml
+    uses: ./.github/workflows/reusable-e2e.yaml
     with:
         operator: false
 
