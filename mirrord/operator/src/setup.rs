@@ -634,17 +634,30 @@ impl OperatorClusterUserRole {
                 name: Some(OPERATOR_CLUSTER_USER_ROLE_NAME.to_owned()),
                 ..Default::default()
             },
-            rules: Some(vec![PolicyRule {
-                api_groups: Some(vec!["operator.metalbear.co".to_owned()]),
-                resources: Some(vec![
-                    "mirrordoperators".to_owned(),
-                    "mirrordoperators/certificate".to_owned(),
-                    "targets".to_owned(),
-                    "targets/port-locks".to_owned(),
-                ]),
-                verbs: vec!["get".to_owned(), "list".to_owned(), "proxy".to_owned()],
-                ..Default::default()
-            }]),
+            rules: Some(vec![
+                PolicyRule {
+                    api_groups: Some(vec!["operator.metalbear.co".to_owned()]),
+                    resources: Some(vec![
+                        "mirrordoperators".to_owned(),
+                        "targets".to_owned(),
+                        "targets/port-locks".to_owned(),
+                    ]),
+                    verbs: vec!["get".to_owned(), "list".to_owned()],
+                    ..Default::default()
+                },
+                PolicyRule {
+                    api_groups: Some(vec!["operator.metalbear.co".to_owned()]),
+                    resources: Some(vec!["mirrordoperators/certificate".to_owned()]),
+                    verbs: vec!["create".to_owned()],
+                    ..Default::default()
+                },
+                PolicyRule {
+                    api_groups: Some(vec!["operator.metalbear.co".to_owned()]),
+                    resources: Some(vec!["targets".to_owned()]),
+                    verbs: vec!["proxy".to_owned()],
+                    ..Default::default()
+                },
+            ]),
             ..Default::default()
         };
 
