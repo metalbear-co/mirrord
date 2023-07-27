@@ -444,17 +444,82 @@ jobs:
       - uses: actions/setup-node@v3 # version 19 spawns processes with `posix_spawn`, so test that also.
         with:
           node-version: 19
-      - run: cargo test -p mirrord-layer  
+      - run: cargo test -p mirrord-layer
 
   e2e:
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    needs: [build_mirrord, test_agent_image, changed_files]
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         container-runtime: ["docker", "containerd"]
-    uses: infiniteregrets/mirrord/.github/workflows/reusable-e2e.yaml@reusable-workflow
-    with:
-        operator: false
+    name: e2e
+    needs: [build_mirrord, test_agent_image, changed_files]
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    env:
+      MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 14
+      - run: npm install express
+      - uses: actions/setup-python@v3
+      - run: pip3 install flask
+      - run: pip3 install fastapi
+      - run: pip3 install uvicorn[standard]
+      - run: sudo apt-get update && sudo apt-get install -y curl
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.18.0"
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 18
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.19.0"
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 19
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.20.0-rc.3"
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 20
+      - run: |
+          cd tests/rust-e2e-fileops
+          cargo build
+      - run: |
+          cd tests/rust-unix-socket-client
+          cargo build
+      - run: |
+          cd tests/rust-bypassed-unix-socket
+          cargo build
+      - name: download image
+        uses: actions/download-artifact@v3
+        with:
+          name: test
+          path: /tmp
+      - name: start minikube
+        uses: medyagh/setup-minikube@master
+        with:
+          container-runtime: ${{matrix.container-runtime}}
+      - run: minikube image load /tmp/test.tar
+      # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
+      - name: Run targetless E2E test.
+        run: cargo test -p tests targetless
+      - name: Run all E2E test
+        run: cargo test -p tests -- --test-threads=6
+      - name: Collect logs
+        if: ${{ failure() }}
+        run: |
+          kubectl describe pods
+          docker exec minikube find /var/log/pods -print -exec cat {} \;
 
   lint_markdown:
     runs-on: ubuntu-latest

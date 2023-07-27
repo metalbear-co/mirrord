@@ -15,9 +15,7 @@ jobs:
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
       MIRRORD_OPERATOR_IMAGE: "test"
-    steps:      
-      - name: fu
-        run: echo "${{inputs.operator  == 'true'}}"
+    steps:            
       - uses: actions/checkout@v3
         with:
           repository: "metalbear-co/mirrord"        
@@ -127,9 +125,7 @@ jobs:
     name: e2e
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
-    steps:
-      - name: fu
-        run: echo "${{inputs.operator  == 'false'}}"
+    steps:      
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
