@@ -28,6 +28,7 @@ static OPERATOR_NAME: &str = "mirrord-operator";
 static OPERATOR_PORT: i32 = 3000;
 static OPERATOR_ROLE_NAME: &str = "mirrord-operator";
 static OPERATOR_ROLE_BINDING_NAME: &str = "mirrord-operator";
+static OPERATOR_CLUSTER_USER_ROLE_NAME: &str = "mirrord-operator-user";
 static OPERATOR_LICENSE_SECRET_NAME: &str = "mirrord-operator-license";
 static OPERATOR_LICENSE_SECRET_FILE_NAME: &str = "license.pem";
 static OPERATOR_LICENSE_SECRET_VOLUME_NAME: &str = "license-volume";
@@ -95,6 +96,7 @@ pub struct Operator {
     role_binding: OperatorRoleBinding,
     service: OperatorService,
     service_account: OperatorServiceAccount,
+    user_cluster_role: OperatorClusterUserRole,
     tls_secret: OperatorTlsSecret,
 }
 
@@ -115,6 +117,7 @@ impl Operator {
 
         let role = OperatorRole::new();
         let role_binding = OperatorRoleBinding::new(&role, &service_account);
+        let user_cluster_role = OperatorClusterUserRole::new();
 
         let deployment = OperatorDeployment::new(
             &namespace,
@@ -137,6 +140,7 @@ impl Operator {
             role_binding,
             service,
             service_account,
+            user_cluster_role,
             tls_secret,
         }
     }
@@ -156,6 +160,9 @@ impl OperatorSetup for Operator {
 
         writer.write_all(b"---\n")?;
         self.role.to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        self.user_cluster_role.to_writer(&mut writer)?;
 
         writer.write_all(b"---\n")?;
         self.role_binding.to_writer(&mut writer)?;
@@ -617,6 +624,40 @@ impl OperatorApiService {
     }
 }
 
+#[derive(Debug)]
+pub struct OperatorClusterUserRole(ClusterRole);
+
+impl OperatorClusterUserRole {
+    pub fn new() -> Self {
+        let role = ClusterRole {
+            metadata: ObjectMeta {
+                name: Some(OPERATOR_CLUSTER_USER_ROLE_NAME.to_owned()),
+                ..Default::default()
+            },
+            rules: Some(vec![PolicyRule {
+                api_groups: Some(vec!["operator.metalbear.co".to_owned()]),
+                resources: Some(vec![
+                    "mirrordoperators".to_owned(),
+                    "mirrordoperators/certificate".to_owned(),
+                    "targets".to_owned(),
+                    "targets/port-locks".to_owned(),
+                ]),
+                verbs: vec!["get".to_owned(), "list".to_owned(), "proxy".to_owned()],
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+
+        OperatorClusterUserRole(role)
+    }
+}
+
+impl Default for OperatorClusterUserRole {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 writer_impl![
     OperatorNamespace,
     OperatorDeployment,
@@ -626,5 +667,6 @@ writer_impl![
     OperatorLicenseSecret,
     OperatorService,
     OperatorTlsSecret,
-    OperatorApiService
+    OperatorApiService,
+    OperatorClusterUserRole
 ];
