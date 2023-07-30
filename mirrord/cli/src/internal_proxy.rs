@@ -11,10 +11,8 @@
 //! or let the [`OperatorApi`] handle the connection.
 
 use std::{
-    fs::File,
-    io::{stdout, ErrorKind},
+    io::ErrorKind,
     net::{Ipv4Addr, SocketAddrV4},
-    os::fd::{AsRawFd, FromRawFd},
     time::Duration,
 };
 
@@ -24,6 +22,7 @@ use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
 use mirrord_operator::client::{OperatorApi, OperatorSessionInformation};
 use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonCodec, DaemonMessage};
+use nix::libc;
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -39,6 +38,12 @@ use crate::{
     error::{InternalProxyError, Result},
 };
 
+unsafe fn redirect_stdout_to_dev_null() {
+    let devnull_fd = libc::open(b"/dev/null\0" as *const [u8; 10] as _, libc::O_RDWR);
+    libc::dup2(devnull_fd, libc::STDOUT_FILENO);
+    libc::close(devnull_fd);
+}
+
 /// Print the port for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.
 fn print_port(listener: &TcpListener) -> Result<()> {
@@ -47,6 +52,9 @@ fn print_port(listener: &TcpListener) -> Result<()> {
         .map_err(InternalProxyError::LocalPortError)?
         .port();
     println!("{port}\n");
+    unsafe {
+        redirect_stdout_to_dev_null();
+    }
     Ok(())
 }
 
@@ -178,8 +186,6 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
     let (agent_connection, _) = connect_and_ping(&config).await?;
     active_connections.spawn(connection_task(stream, agent_connection));
 
-    // close stdout/err so we won't hold the terminal/pipe/caller (especially in tests)
-    drop(unsafe { File::from_raw_fd(stdout().as_raw_fd()) });
     loop {
         tokio::select! {
             res = listener.accept() => {
