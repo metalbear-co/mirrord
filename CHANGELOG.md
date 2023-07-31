@@ -8,6 +8,30 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.54.0](https://github.com/metalbear-co/mirrord/tree/3.54.0) - 2023-07-31
+
+
+### Added
+
+- Added mirrord-operator-user `ClusterRole` to operator setup with RBAC
+  permissions to use operator.
+  [#1428](https://github.com/metalbear-co/mirrord/issues/1428)
+
+
+### Fixed
+
+- Exclude environment variable COMPLUS_EnableDiagnostics, fixes [mirrord
+  intellij #67](https://github.com/metalbear-co/mirrord-intellij/issues/67)
+  [#1728](https://github.com/metalbear-co/mirrord/issues/1728)
+
+
+### Internal
+
+- Redirect stderr and stdout of internal proxy to /dev/null (stdout only after
+  printing port).
+  [#int-proxy-dev-null](https://github.com/metalbear-co/mirrord/issues/int-proxy-dev-null)
+
+
 ## [3.53.3](https://github.com/metalbear-co/mirrord/tree/3.53.3) - 2023-07-26
 
 
