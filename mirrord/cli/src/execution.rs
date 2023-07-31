@@ -116,6 +116,7 @@ impl MirrordExecution {
         proxy_command
             .arg("intproxy")
             .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
             .stdin(std::process::Stdio::null());
 
         if let Some(timeout) = timeout {

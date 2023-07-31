@@ -410,12 +410,6 @@ fn init_ext_error_handler(commands: &Commands) -> bool {
             let _ = miette::set_hook(Box::new(|_| Box::new(JSONReportHandler::new())));
             true
         }
-        Commands::InternalProxy(_) => {
-            // Don't setup logs in case of internal proxy, because it's an orphan proces
-            // and we need to close stderr/stdout (in case caller waits for stdout/err to close),
-            // if we enable tracing it'd crash on writing to stderr/out.
-            true
-        }
         _ => false,
     }
 }
