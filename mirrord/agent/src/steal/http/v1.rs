@@ -148,16 +148,6 @@ impl HttpV for HttpV1 {
         sender: &mut Self::Sender,
         request: Request<Incoming>,
     ) -> Result<Response<BoxBody<Bytes, HttpTrafficError>>, HttpTrafficError> {
-        // prepare_response(
-        //     sender
-        //         .send_request(request)
-        //         .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))
-        //         .map_err(HttpTrafficError::from)
-        //         .and_then(collect_response)
-        //         .await?,
-        // )
-        // .await
-
         sender
             .send_request(request)
             .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))

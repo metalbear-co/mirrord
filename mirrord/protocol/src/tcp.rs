@@ -303,8 +303,6 @@ impl HttpResponse {
         connection_id: ConnectionId,
         request_id: RequestId,
     ) -> Result<HttpResponse, hyper::Error> {
-        debug!("{response:?}");
-
         let (
             Parts {
                 status,

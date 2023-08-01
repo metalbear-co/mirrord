@@ -22,7 +22,7 @@ use tokio::{
     net::TcpStream,
     sync::{mpsc::Sender, oneshot},
 };
-use tracing::{debug, error};
+use tracing::error;
 
 use super::{
     filter::{close_connection, HttpFilter, TokioExecutor},
@@ -92,26 +92,12 @@ impl HttpV for HttpV2 {
         sender: &mut Self::Sender,
         request: Request<Incoming>,
     ) -> Result<Response<BoxBody<Bytes, HttpTrafficError>>, HttpTrafficError> {
-        // Send the request to the original destination.
-        // prepare_response(
-        //     sender
-        //         .send_request(request)
-        //         .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))
-        //         .map_err(HttpTrafficError::from)
-        //         .and_then(collect_response)
-        //         .await?,
-        // )
-        // .await
-
         sender
             .send_request(request)
             .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))
             .map_err(HttpTrafficError::from)
             .await
-            .map(|response| {
-                debug!("{response:?}");
-                response.map(|body| BoxBody::new(body.map_err(HttpTrafficError::from)))
-            })
+            .map(|response| response.map(|body| BoxBody::new(body.map_err(HttpTrafficError::from))))
     }
 
     #[tracing::instrument(level = "trace")]
