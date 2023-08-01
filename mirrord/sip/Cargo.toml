@@ -16,7 +16,7 @@ edition.workspace = true
 [dependencies]
 object = "0.29"
 memchr = "2"
-apple-codesign = { workspace = true, default-features = false }
+apple-codesign = { version = "0.22", default-features = false}
 
 once_cell.workspace = true
 tracing.workspace = true
