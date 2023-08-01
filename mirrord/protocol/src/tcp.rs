@@ -1,18 +1,25 @@
 use core::fmt::Display;
-use std::{collections::VecDeque, convert::Infallible, fmt, net::IpAddr};
+use std::{
+    collections::VecDeque,
+    convert::Infallible,
+    fmt,
+    net::IpAddr,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::{
-    body::{Body, Incoming},
+    body::{Body, Frame, Incoming},
     http,
     http::response::Parts,
     HeaderMap, Method, Request, Response, StatusCode, Uri, Version,
 };
 use mirrord_macros::protocol_break;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error};
+use tracing::error;
 
 use crate::{ConnectionId, Port, RemoteResult, RequestId};
 
@@ -129,7 +136,7 @@ pub enum LayerTcpSteal {
 }
 
 /// (De-)Serializable HTTP request.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
 pub struct InternalHttpRequest {
     #[serde(with = "http_serde::method")]
     pub method: Method,
@@ -144,18 +151,6 @@ pub struct InternalHttpRequest {
     pub version: Version,
 
     pub body: InternalHttpBody,
-}
-
-impl fmt::Debug for InternalHttpRequest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("InternalHttpRequest")
-            .field("method", &self.method)
-            .field("uri", &self.uri)
-            .field("headers", &self.headers)
-            .field("version", &self.version)
-            .field("body (length)", &self.body)
-            .finish()
-    }
 }
 
 impl<E> From<InternalHttpRequest> for Request<BoxBody<Bytes, E>>
@@ -237,33 +232,27 @@ impl InternalHttpBody {
     }
 }
 
-impl hyper::body::Body for InternalHttpBody {
+impl Body for InternalHttpBody {
     type Data = Bytes;
 
     type Error = Infallible;
+
     fn poll_frame(
-        mut self: std::pin::Pin<&mut Self>,
-        _: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<
-        std::option::Option<
-            std::result::Result<
-                hyper::body::Frame<<Self as hyper::body::Body>::Data>,
-                <Self as hyper::body::Body>::Error,
-            >,
-        >,
-    > {
-        std::task::Poll::Ready(self.0.pop_front().map(hyper::body::Frame::from).map(Ok))
+        mut self: Pin<&mut Self>,
+        _: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        Poll::Ready(self.0.pop_front().map(Frame::from).map(Ok))
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub enum InternalHttpBodyFrame {
     Data(Vec<u8>),
     Trailers(#[serde(with = "http_serde::header_map")] HeaderMap),
 }
 
-impl From<hyper::body::Frame<Bytes>> for InternalHttpBodyFrame {
-    fn from(frame: hyper::body::Frame<Bytes>) -> Self {
+impl From<Frame<Bytes>> for InternalHttpBodyFrame {
+    fn from(frame: Frame<Bytes>) -> Self {
         if frame.is_data() {
             InternalHttpBodyFrame::Data(frame.into_data().unwrap().to_vec())
         } else {
@@ -272,11 +261,25 @@ impl From<hyper::body::Frame<Bytes>> for InternalHttpBodyFrame {
     }
 }
 
-impl From<InternalHttpBodyFrame> for hyper::body::Frame<Bytes> {
+impl From<InternalHttpBodyFrame> for Frame<Bytes> {
     fn from(frame: InternalHttpBodyFrame) -> Self {
         match frame {
-            InternalHttpBodyFrame::Data(data) => hyper::body::Frame::data(Bytes::from(data)),
-            InternalHttpBodyFrame::Trailers(map) => hyper::body::Frame::trailers(map),
+            InternalHttpBodyFrame::Data(data) => Frame::data(Bytes::from(data)),
+            InternalHttpBodyFrame::Trailers(map) => Frame::trailers(map),
+        }
+    }
+}
+
+impl fmt::Debug for InternalHttpBodyFrame {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InternalHttpBodyFrame::Data(data) => f
+                .debug_tuple("Data")
+                .field(&format_args!("{} (length)", data.len()))
+                .finish(),
+            InternalHttpBodyFrame::Trailers(map) => {
+                f.debug_tuple("Trailers").field(&map.len()).finish()
+            }
         }
     }
 }
