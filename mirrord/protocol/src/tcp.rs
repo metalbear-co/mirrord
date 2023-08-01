@@ -262,9 +262,13 @@ pub enum InternalHttpBodyFrame {
 impl From<Frame<Bytes>> for InternalHttpBodyFrame {
     fn from(frame: Frame<Bytes>) -> Self {
         if frame.is_data() {
-            InternalHttpBodyFrame::Data(frame.into_data().unwrap().to_vec())
+            InternalHttpBodyFrame::Data(frame.into_data().expect("Malfromed data frame").to_vec())
+        } else if frame.is_trailers() {
+            InternalHttpBodyFrame::Trailers(
+                frame.into_trailers().expect("Malfromed trailers frame"),
+            )
         } else {
-            InternalHttpBodyFrame::Trailers(frame.into_trailers().unwrap())
+            panic!("Malfromed frame type")
         }
     }
 }
