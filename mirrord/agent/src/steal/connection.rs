@@ -6,7 +6,6 @@ use std::{
 
 use bytes::Bytes;
 use fancy_regex::Regex;
-use http_body_util::combinators::BoxBody;
 use iptables::IPTables;
 use mirrord_protocol::{
     tcp::{NewTcpConnection, TcpClose},

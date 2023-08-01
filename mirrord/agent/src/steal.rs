@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use bytes::Bytes;
-use http_body_util::combinators::BoxBody;
 use hyper::{body::Incoming, http::request, Request};
 use mirrord_protocol::{
     tcp::{
@@ -21,7 +19,7 @@ use tracing::warn;
 use self::ip_tables::SafeIpTables;
 use crate::{
     error::{AgentError, Result},
-    steal::http::{error::HttpTrafficError, Response},
+    steal::http::Response,
     util::{ClientId, IndexAllocator},
 };
 

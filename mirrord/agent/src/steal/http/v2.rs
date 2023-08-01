@@ -6,7 +6,6 @@
 use core::{fmt::Debug, future::Future, pin::Pin};
 use std::{net::SocketAddr, sync::Arc};
 
-use bytes::Bytes;
 use dashmap::DashMap;
 use futures::TryFutureExt;
 use http_body_util::{combinators::BoxBody, BodyExt};
