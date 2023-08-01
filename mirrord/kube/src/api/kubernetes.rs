@@ -39,6 +39,7 @@ impl KubernetesAPI {
         let client = create_kube_api(
             config.accept_invalid_certificates,
             config.kubeconfig.clone(),
+            config.kube_context.clone(),
         )
         .await?;
 
@@ -168,15 +169,26 @@ impl AgentManagment for KubernetesAPI {
 pub async fn create_kube_api<P>(
     accept_invalid_certificates: bool,
     kubeconfig: Option<P>,
+    kube_context: Option<String>,
 ) -> Result<Client>
 where
     P: AsRef<str>,
 {
+    let kube_config_opts = KubeConfigOptions {
+        context: kube_context,
+        ..Default::default()
+    };
+
     let mut config = if let Some(kubeconfig) = kubeconfig {
         let kubeconfig = shellexpand::tilde(&kubeconfig);
         let parsed_kube_config = Kubeconfig::read_from(kubeconfig.deref())?;
-        Config::from_custom_kubeconfig(parsed_kube_config, &KubeConfigOptions::default()).await?
+        Config::from_custom_kubeconfig(parsed_kube_config, &kube_config_opts).await?
+    } else if kube_config_opts.context.is_some() {
+        // if context is set, it's not in cluster so it has to be a kubeconfig.
+        Config::from_kubeconfig(&kube_config_opts).await?
     } else {
+        // if context isn't set and user doesn't specify a kubeconfig, we infer which tries local
+        // kube or incluster configuration.
         Config::infer().await?
     };
     config.accept_invalid_certs = accept_invalid_certificates;

@@ -287,6 +287,19 @@ pub struct LayerConfig {
     /// [For more information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md)
     #[config(env = "MIRRORD_TELEMETRY", default = true)]
     pub telemetry: bool,
+
+    /// ## kube_context {#root-kube_context}
+    ///
+    /// Kube context to use from the kubeconfig file.
+    /// Will use current context if not specified.
+    ///
+    /// ```json
+    /// {
+    ///  "kube_context": "mycluster"
+    /// }
+    /// ```
+    #[config(env = "MIRRORD_KUBE_CONTEXT")]
+    pub kube_context: Option<String>,
 }
 
 impl LayerConfig {
