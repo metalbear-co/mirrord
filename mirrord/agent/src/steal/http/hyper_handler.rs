@@ -9,8 +9,7 @@ use std::{net::SocketAddr, sync::Arc};
 use bytes::Bytes;
 use dashmap::DashMap;
 use futures::TryFutureExt;
-use http_body_util::combinators::BoxBody;
-use hyper::{body::Incoming, Request, Response};
+use hyper::{body::Incoming, Request};
 use mirrord_protocol::{ConnectionId, Port, RequestId};
 use tokio::{
     net::TcpStream,
@@ -21,7 +20,7 @@ use tracing::error;
 use super::{
     error::HttpTrafficError,
     filter::{HttpFilter, RequestMatch},
-    HttpV,
+    HttpV, Response,
 };
 use crate::{
     steal::{HandlerHttpRequest, MatchedHttpRequest},
@@ -96,7 +95,7 @@ fn match_request(
 async fn matched_request(
     request: MatchedHttpRequest,
     matched_tx: Sender<HandlerHttpRequest>,
-) -> Result<Response<BoxBody<Bytes, HttpTrafficError>>, HttpTrafficError> {
+) -> Result<Response, HttpTrafficError> {
     let (response_tx, response_rx) = oneshot::channel();
     let request = HandlerHttpRequest {
         request,
@@ -167,7 +166,7 @@ where
         request: Request<Incoming>,
         upgrade_tx: Option<oneshot::Sender<RawHyperConnection>>,
         original_destination: SocketAddr,
-    ) -> Result<Response<BoxBody<Bytes, HttpTrafficError>>, HttpTrafficError> {
+    ) -> Result<Response, HttpTrafficError> {
         // TODO(alex): We need a "retry" mechanism here for the client handling part, when the
         // server closes a connection, the client could still be wanting to send a request,
         // so we need to re-connect and send.
@@ -200,7 +199,7 @@ where
         connection_id: ConnectionId,
         request_id: RequestId,
         matched_tx: Sender<HandlerHttpRequest>,
-    ) -> Result<Response<BoxBody<Bytes, HttpTrafficError>>, HttpTrafficError> {
+    ) -> Result<Response, HttpTrafficError> {
         if V::is_upgrade(&request) {
             Self::unmatched_request(request, upgrade_tx, original_destination).await
         } else if let Some(client_id) = match_request(&request, &filters) {

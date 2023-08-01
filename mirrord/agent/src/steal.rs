@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use bytes::Bytes;
 use http_body_util::combinators::BoxBody;
-use hyper::{body::Incoming, http::request, Request, Response};
+use hyper::{body::Incoming, http::request, Request};
 use mirrord_protocol::{
     tcp::{
         DaemonTcp, HttpRequest, HttpResponse, InternalHttpBody, InternalHttpRequest, StealType,
@@ -21,7 +21,7 @@ use tracing::warn;
 use self::ip_tables::SafeIpTables;
 use crate::{
     error::{AgentError, Result},
-    steal::http::error::HttpTrafficError,
+    steal::http::{error::HttpTrafficError, Response},
     util::{ClientId, IndexAllocator},
 };
 
@@ -93,7 +93,7 @@ pub struct HandlerHttpRequest {
 
     /// For sending the response from the stealer task back to the hyper service.
     /// [`TcpConnectionStealer::start`] -----response to this request-----> [`HyperHandler::call`]
-    pub response_tx: oneshot::Sender<Response<BoxBody<Bytes, HttpTrafficError>>>,
+    pub response_tx: oneshot::Sender<Response>,
 }
 
 /// A stolen HTTP request that matched a client's filter. To be sent from the filter code to the

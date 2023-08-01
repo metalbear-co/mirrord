@@ -14,7 +14,7 @@ use std::{net::SocketAddr, sync::Arc};
 use bytes::Bytes;
 use dashmap::DashMap;
 use http_body_util::combinators::BoxBody;
-use hyper::{body::Incoming, Request, Response};
+use hyper::{body::Incoming, Request};
 use mirrord_protocol::ConnectionId;
 use tokio::{
     net::TcpStream,
@@ -38,6 +38,8 @@ mod v1;
 mod v2;
 
 pub(crate) use filter::HttpFilter;
+
+pub(crate) type Response<B = BoxBody<Bytes, HttpTrafficError>> = hyper::Response<B>;
 
 /// Handy alias due to [`ReversibleStream`] being generic, avoiding value mismatches.
 type DefaultReversibleStream = ReversibleStream<MINIMAL_HEADER_SIZE>;
@@ -89,7 +91,7 @@ trait HttpV {
     async fn send_request(
         sender: &mut Self::Sender,
         request: Request<Incoming>,
-    ) -> Result<Response<BoxBody<Bytes, HttpTrafficError>>, HttpTrafficError>;
+    ) -> Result<Response, HttpTrafficError>;
 
     /// Returns `true` if this [`Request`] contains an `UPGRADE` header.
     ///

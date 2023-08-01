@@ -15,7 +15,7 @@ use hyper::{
     client::{self, conn::http2::SendRequest},
     server::conn::http2,
     service::Service,
-    Request, Response,
+    Request,
 };
 use mirrord_protocol::{ConnectionId, Port};
 use tokio::{
@@ -27,7 +27,7 @@ use tracing::error;
 use super::{
     filter::{close_connection, HttpFilter, TokioExecutor},
     hyper_handler::HyperHandler,
-    DefaultReversibleStream, HttpV, RawHyperConnection,
+    DefaultReversibleStream, HttpV, RawHyperConnection, Response,
 };
 use crate::{
     steal::{http::error::HttpTrafficError, HandlerHttpRequest},
@@ -91,7 +91,7 @@ impl HttpV for HttpV2 {
     async fn send_request(
         sender: &mut Self::Sender,
         request: Request<Incoming>,
-    ) -> Result<Response<BoxBody<Bytes, HttpTrafficError>>, HttpTrafficError> {
+    ) -> Result<Response, HttpTrafficError> {
         sender
             .send_request(request)
             .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))
@@ -129,7 +129,7 @@ impl HyperHandler<HttpV2> {
 }
 
 impl Service<Request<Incoming>> for HyperHandler<HttpV2> {
-    type Response = Response<BoxBody<Bytes, HttpTrafficError>>;
+    type Response = Response;
 
     type Error = HttpTrafficError;
 

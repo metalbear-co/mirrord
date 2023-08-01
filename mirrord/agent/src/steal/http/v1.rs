@@ -6,7 +6,6 @@
 use core::{fmt::Debug, future::Future, pin::Pin};
 use std::{net::SocketAddr, sync::Arc};
 
-use bytes::Bytes;
 use dashmap::DashMap;
 use futures::TryFutureExt;
 use http_body_util::{combinators::BoxBody, BodyExt};
@@ -16,7 +15,7 @@ use hyper::{
     header::UPGRADE,
     server::{self, conn::http1},
     service::Service,
-    Request, Response,
+    Request,
 };
 use mirrord_protocol::{ConnectionId, Port};
 use tokio::{
@@ -29,7 +28,7 @@ use tracing::error;
 
 use super::{
     filter::close_connection, hyper_handler::HyperHandler, DefaultReversibleStream, HttpFilter,
-    HttpV, RawHyperConnection,
+    HttpV, RawHyperConnection, Response,
 };
 use crate::{
     steal::{http::error::HttpTrafficError, HandlerHttpRequest},
@@ -147,7 +146,7 @@ impl HttpV for HttpV1 {
     async fn send_request(
         sender: &mut Self::Sender,
         request: Request<Incoming>,
-    ) -> Result<Response<BoxBody<Bytes, HttpTrafficError>>, HttpTrafficError> {
+    ) -> Result<Response, HttpTrafficError> {
         sender
             .send_request(request)
             .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))
@@ -186,7 +185,7 @@ impl HyperHandler<HttpV1> {
 }
 
 impl Service<Request<Incoming>> for HyperHandler<HttpV1> {
-    type Response = Response<BoxBody<Bytes, HttpTrafficError>>;
+    type Response = Response;
 
     type Error = HttpTrafficError;
 
