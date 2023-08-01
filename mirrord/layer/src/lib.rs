@@ -117,7 +117,6 @@ use tokio::{
 };
 use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
-
 use crate::{
     common::HookMessage,
     debugger_ports::DebuggerPorts,
