@@ -662,7 +662,7 @@ mod tests {
             connect_tcp: None,
             operator: None,
             sip_binaries: None,
-            kube_context: None
+            kube_context: None,
         };
 
         assert_eq!(config, expect);
