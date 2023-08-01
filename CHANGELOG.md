@@ -8,6 +8,21 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.54.1](https://github.com/metalbear-co/mirrord/tree/3.54.1) - 2023-08-01
+
+
+### Fixed
+
+- Sometimes the internal proxy doesn't flush before we do redirection then
+  caller can't read port
+  leading to "Couldn't get port of internal proxy"
+
+
+### Internal
+
+- Remove signal dependency from layer
+
+
 ## [3.54.0](https://github.com/metalbear-co/mirrord/tree/3.54.0) - 2023-07-31
 
 
