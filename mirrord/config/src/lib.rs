@@ -64,6 +64,8 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///
 /// ### Complete `config.json` {#root-complete}
 ///
+///  Don't use this example as a starting point, it's just here to show you all the available
+/// options.
 /// ```json
 /// {
 ///   "accept_invalid_certificates": false,
@@ -128,7 +130,8 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///   "operator": true,
 ///   "kubeconfig": "~/.kube/config",
 ///   "sip_binaries": "bash",
-///   "telemetry": true
+///   "telemetry": true,
+///   "kube_context": "my-cluster"
 /// }
 /// ```
 ///
