@@ -50,6 +50,10 @@ unsafe fn detach_io() -> Result<()> {
     // terminal fixes some side effects such as https://github.com/metalbear-co/mirrord/issues/1232
     nix::unistd::setsid().map_err(InternalProxyError::SetSidError)?;
 
+    // flush before redirection
+    {
+        std::io::stdout::lock().flush()
+    }
     for fd in [libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO] {
         redirect_fd_to_dev_null(fd);
     }
@@ -179,9 +183,6 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
         create_ping_loop(main_connection);
 
     print_port(&listener)?;
-    unsafe {
-        detach_io()?;
-    }
 
     // wait for first connection `FIRST_CONNECTION_TIMEOUT` seconds, or timeout.
     let (stream, _) = timeout(Duration::from_secs(args.timeout), listener.accept())
@@ -193,6 +194,10 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
 
     let (agent_connection, _) = connect_and_ping(&config).await?;
     active_connections.spawn(connection_task(stream, agent_connection));
+
+    unsafe {
+        detach_io()?;
+    }
 
     loop {
         tokio::select! {
