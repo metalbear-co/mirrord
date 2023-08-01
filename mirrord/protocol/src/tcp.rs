@@ -175,7 +175,11 @@ impl From<InternalHttpRequest> for Request<Full<Bytes>> {
     }
 }
 
+/// Protocol break - on version 2, please add source port, dest/src IP to the message
+/// so we can avoid losing this information.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[protocol_break(2)]
+
 pub struct HttpRequest {
     #[bincode(with_serde)]
     pub internal_request: InternalHttpRequest,
