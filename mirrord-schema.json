@@ -58,6 +58,14 @@
         }
       ]
     },
+    "kube_context": {
+      "title": "kube_context {#root-kube_context}",
+      "description": "Kube context to use from the kubeconfig file. Will use current context if not specified.\n\n```json { \"kube_context\": \"mycluster\" } ```",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "kubeconfig": {
       "title": "kubeconfig {#root-kubeconfig}",
       "description": "Path to a kubeconfig file, if not specified, will use `KUBECONFIG`, or `~/.kube/config`, or the in-cluster config.\n\n```json { \"kubeconfig\": \"~/bear/kube-config\" } ```",
