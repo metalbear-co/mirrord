@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use bytes::Bytes;
-use http_body_util::{BodyExt, Full};
+use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::{body::Incoming, http::request, Request, Response};
 use mirrord_protocol::{
     tcp::{DaemonTcp, HttpRequest, HttpResponse, InternalHttpRequest, StealType, TcpData},
@@ -13,11 +13,12 @@ use tokio::{
     sync::{mpsc::Sender, oneshot},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use self::ip_tables::SafeIpTables;
 use crate::{
     error::{AgentError, Result},
+    steal::http::error::HttpTrafficError,
     util::{ClientId, IndexAllocator},
 };
 
@@ -89,7 +90,7 @@ pub struct HandlerHttpRequest {
 
     /// For sending the response from the stealer task back to the hyper service.
     /// [`TcpConnectionStealer::start`] -----response to this request-----> [`HyperHandler::call`]
-    pub response_tx: oneshot::Sender<Response<Full<Bytes>>>,
+    pub response_tx: oneshot::Sender<Response<BoxBody<Bytes, HttpTrafficError>>>,
 }
 
 /// A stolen HTTP request that matched a client's filter. To be sent from the filter code to the
@@ -116,7 +117,12 @@ impl MatchedHttpRequest {
             body,
         ) = self.request.into_parts();
 
-        let body = body.collect().await?.to_bytes().to_vec();
+        let collected = body.collect().await?;
+
+        debug!("{collected:?}");
+        let body = collected.to_bytes().to_vec();
+        debug!("{body:?}");
+
         let internal_request = InternalHttpRequest {
             method,
             uri,

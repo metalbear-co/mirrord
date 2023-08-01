@@ -1,10 +1,13 @@
 //! # [`HttpV2`]
 //!
 //! Handles HTTP/2 requests.
-use std::future::{self, Future};
+use std::{
+    convert::Infallible,
+    future::{self, Future},
+};
 
 use bytes::Bytes;
-use http_body_util::Full;
+use http_body_util::combinators::BoxBody;
 use hyper::{
     client::conn::http2::{self, Connection, SendRequest},
     rt::Executor,
@@ -41,12 +44,12 @@ where
 /// Sends the request to `destination`, and gets back a response.
 ///
 /// See [`ConnectionTask`] for usage.
-pub(crate) struct HttpV2(http2::SendRequest<Full<Bytes>>);
+pub(crate) struct HttpV2(http2::SendRequest<BoxBody<Bytes, Infallible>>);
 
 impl HttpV for HttpV2 {
-    type Sender = SendRequest<Full<Bytes>>;
+    type Sender = SendRequest<BoxBody<Bytes, Infallible>>;
 
-    type Connection = Connection<TcpStream, Full<Bytes>>;
+    type Connection = Connection<TcpStream, BoxBody<Bytes, Infallible>>;
 
     #[tracing::instrument(level = "trace")]
     fn new(http_request_sender: Self::Sender) -> Self {

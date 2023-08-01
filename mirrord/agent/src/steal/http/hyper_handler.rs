@@ -9,7 +9,7 @@ use std::{net::SocketAddr, sync::Arc};
 use bytes::Bytes;
 use dashmap::DashMap;
 use futures::TryFutureExt;
-use http_body_util::{BodyExt, Full};
+use http_body_util::combinators::BoxBody;
 use hyper::{
     body::Incoming,
     http::{self, response},
@@ -20,7 +20,7 @@ use tokio::{
     net::TcpStream,
     sync::{mpsc::Sender, oneshot},
 };
-use tracing::error;
+use tracing::{debug, error};
 
 use super::{
     error::HttpTrafficError,
@@ -97,25 +97,16 @@ fn match_request(
 /// Remove headers that would be invalid due to us fiddling with the `body`, and rebuilds the
 /// [`Response`].
 #[tracing::instrument(level = "trace")]
-pub(super) async fn prepare_response(
-    (mut parts, body): (response::Parts, Full<Bytes>),
-) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
+async fn prepare_response(
+    (mut parts, body): (response::Parts, BoxBody<Bytes, HttpTrafficError>),
+) -> Result<Response<BoxBody<Bytes, HttpTrafficError>>, HttpTrafficError> {
     parts.headers.remove(http::header::CONTENT_LENGTH);
     parts.headers.remove(http::header::TRANSFER_ENCODING);
 
+    debug!("{body:?}");
+
     // Rebuild the `Response` after our fiddling.
     Ok(Response::from_parts(parts, body))
-}
-
-/// Converts the body of this response from [`Incoming`] into [`Full`].
-///
-/// To be used with [`prepare_response`].
-#[tracing::instrument(level = "trace")]
-pub(super) async fn collect_response(
-    response: Response<Incoming>,
-) -> Result<(response::Parts, Full<Bytes>), HttpTrafficError> {
-    let (parts, body) = response.into_parts();
-    Ok((parts, Full::new(body.collect().await?.to_bytes())))
 }
 
 /// Sends a [`MatchedHttpRequest`] through `tx` to be handled by the stealer -> layer,
@@ -124,7 +115,7 @@ pub(super) async fn collect_response(
 async fn matched_request(
     request: MatchedHttpRequest,
     matched_tx: Sender<HandlerHttpRequest>,
-) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
+) -> Result<Response<BoxBody<Bytes, HttpTrafficError>>, HttpTrafficError> {
     let (response_tx, response_rx) = oneshot::channel();
     let request = HandlerHttpRequest {
         request,
@@ -195,7 +186,7 @@ where
         request: Request<Incoming>,
         upgrade_tx: Option<oneshot::Sender<RawHyperConnection>>,
         original_destination: SocketAddr,
-    ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
+    ) -> Result<Response<BoxBody<Bytes, HttpTrafficError>>, HttpTrafficError> {
         // TODO(alex): We need a "retry" mechanism here for the client handling part, when the
         // server closes a connection, the client could still be wanting to send a request,
         // so we need to re-connect and send.
@@ -228,7 +219,7 @@ where
         connection_id: ConnectionId,
         request_id: RequestId,
         matched_tx: Sender<HandlerHttpRequest>,
-    ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
+    ) -> Result<Response<BoxBody<Bytes, HttpTrafficError>>, HttpTrafficError> {
         if V::is_upgrade(&request) {
             Self::unmatched_request(request, upgrade_tx, original_destination).await
         } else if let Some(client_id) = match_request(&request, &filters) {

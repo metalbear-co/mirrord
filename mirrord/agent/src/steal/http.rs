@@ -13,7 +13,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 use bytes::Bytes;
 use dashmap::DashMap;
-use http_body_util::Full;
+use http_body_util::combinators::BoxBody;
 use hyper::{body::Incoming, Request, Response};
 use mirrord_protocol::ConnectionId;
 use tokio::{
@@ -89,7 +89,7 @@ trait HttpV {
     async fn send_request(
         sender: &mut Self::Sender,
         request: Request<Incoming>,
-    ) -> Result<Response<Full<Bytes>>, HttpTrafficError>;
+    ) -> Result<Response<BoxBody<Bytes, HttpTrafficError>>, HttpTrafficError>;
 
     /// Returns `true` if this [`Request`] contains an `UPGRADE` header.
     ///

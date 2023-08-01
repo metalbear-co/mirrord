@@ -6,7 +6,7 @@ use std::{
 
 use bytes::Bytes;
 use fancy_regex::Regex;
-use http_body_util::Full;
+use http_body_util::combinators::BoxBody;
 use hyper::Response;
 use iptables::IPTables;
 use mirrord_protocol::{
@@ -109,8 +109,10 @@ pub(crate) struct TcpConnectionStealer {
 
     /// Maps each pending request id to the sender into the channel with the hyper service that
     /// received that requests and is waiting for the response.
-    http_response_senders:
-        HashMap<(ConnectionId, RequestId), oneshot::Sender<Response<Full<Bytes>>>>,
+    http_response_senders: HashMap<
+        (ConnectionId, RequestId),
+        oneshot::Sender<Response<BoxBody<Bytes, HttpTrafficError>>>,
+    >,
 }
 
 impl TcpConnectionStealer {

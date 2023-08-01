@@ -9,7 +9,7 @@ use std::{net::SocketAddr, sync::Arc};
 use bytes::Bytes;
 use dashmap::DashMap;
 use futures::TryFutureExt;
-use http_body_util::Full;
+use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::{
     body::Incoming,
     client::{self, conn::http2::SendRequest},
@@ -22,11 +22,11 @@ use tokio::{
     net::TcpStream,
     sync::{mpsc::Sender, oneshot},
 };
-use tracing::error;
+use tracing::{debug, error};
 
 use super::{
     filter::{close_connection, HttpFilter, TokioExecutor},
-    hyper_handler::{collect_response, prepare_response, HyperHandler},
+    hyper_handler::HyperHandler,
     DefaultReversibleStream, HttpV, RawHyperConnection,
 };
 use crate::{
@@ -91,17 +91,27 @@ impl HttpV for HttpV2 {
     async fn send_request(
         sender: &mut Self::Sender,
         request: Request<Incoming>,
-    ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
+    ) -> Result<Response<BoxBody<Bytes, HttpTrafficError>>, HttpTrafficError> {
         // Send the request to the original destination.
-        prepare_response(
-            sender
-                .send_request(request)
-                .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))
-                .map_err(HttpTrafficError::from)
-                .and_then(collect_response)
-                .await?,
-        )
-        .await
+        // prepare_response(
+        //     sender
+        //         .send_request(request)
+        //         .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))
+        //         .map_err(HttpTrafficError::from)
+        //         .and_then(collect_response)
+        //         .await?,
+        // )
+        // .await
+
+        sender
+            .send_request(request)
+            .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))
+            .map_err(HttpTrafficError::from)
+            .await
+            .map(|response| {
+                debug!("{response:?}");
+                response.map(|body| BoxBody::new(body.map_err(HttpTrafficError::from)))
+            })
     }
 
     #[tracing::instrument(level = "trace")]
@@ -133,7 +143,7 @@ impl HyperHandler<HttpV2> {
 }
 
 impl Service<Request<Incoming>> for HyperHandler<HttpV2> {
-    type Response = Response<Full<Bytes>>;
+    type Response = Response<BoxBody<Bytes, HttpTrafficError>>;
 
     type Error = HttpTrafficError;
 

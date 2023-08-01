@@ -1,10 +1,10 @@
 //! [`HttpV1`]
 //!
 //! Handles HTTP/1 requests.
-use std::future;
+use std::{convert::Infallible, future};
 
 use bytes::Bytes;
-use http_body_util::Full;
+use http_body_util::combinators::BoxBody;
 use hyper::client::conn::http1::{self, Connection, SendRequest};
 use mirrord_protocol::tcp::HttpRequest;
 use tokio::net::TcpStream;
@@ -17,12 +17,12 @@ use crate::tcp_steal::http_forwarding::HttpForwarderError;
 /// Sends the request to `destination`, and gets back a response.
 ///
 /// See [`ConnectionTask`] for usage.
-pub(crate) struct HttpV1(http1::SendRequest<Full<Bytes>>);
+pub(crate) struct HttpV1(http1::SendRequest<BoxBody<Bytes, Infallible>>);
 
 impl HttpV for HttpV1 {
-    type Sender = SendRequest<Full<Bytes>>;
+    type Sender = SendRequest<BoxBody<Bytes, Infallible>>;
 
-    type Connection = Connection<TcpStream, Full<Bytes>>;
+    type Connection = Connection<TcpStream, BoxBody<Bytes, Infallible>>;
 
     #[tracing::instrument(level = "trace")]
     fn new(http_request_sender: Self::Sender) -> Self {

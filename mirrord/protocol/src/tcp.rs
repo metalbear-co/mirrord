@@ -1,16 +1,16 @@
 use core::fmt::Display;
-use std::{fmt, net::IpAddr};
+use std::{collections::VecDeque, convert::Infallible, fmt, net::IpAddr};
 
 use bincode::{Decode, Encode};
 use bytes::Bytes;
-use http_body_util::{BodyExt, Full};
+use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::{
     body::Incoming, http, http::response::Parts, HeaderMap, Method, Request, Response, StatusCode,
     Uri, Version,
 };
 use mirrord_macros::protocol_break;
 use serde::{Deserialize, Serialize};
-use tracing::error;
+use tracing::{debug, error};
 
 use crate::{ConnectionId, Port, RemoteResult, RequestId};
 
@@ -156,7 +156,10 @@ impl fmt::Debug for InternalHttpRequest {
     }
 }
 
-impl From<InternalHttpRequest> for Request<Full<Bytes>> {
+impl<E> From<InternalHttpRequest> for Request<BoxBody<Bytes, E>>
+where
+    E: From<Infallible>,
+{
     fn from(value: InternalHttpRequest) -> Self {
         let InternalHttpRequest {
             method,
@@ -165,7 +168,9 @@ impl From<InternalHttpRequest> for Request<Full<Bytes>> {
             version,
             body,
         } = value;
-        let mut request = Request::new(Full::new(Bytes::from(body)));
+        let mut request = Request::new(BoxBody::new(
+            Full::new(Bytes::from(body)).map_err(|e| e.into()),
+        ));
         *request.method_mut() = method;
         *request.uri_mut() = uri;
         *request.version_mut() = version;
@@ -205,7 +210,62 @@ pub struct InternalHttpResponse {
     #[serde(with = "http_serde::header_map")]
     headers: HeaderMap,
 
-    body: Vec<u8>,
+    body: InternalHttpBody,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
+pub struct InternalHttpBody(VecDeque<InternalHttpBodyFrame>);
+
+impl InternalHttpBody {
+    fn from_bytes(bytes: &[u8]) -> Self {
+        InternalHttpBody(VecDeque::from([InternalHttpBodyFrame::Data(
+            bytes.to_vec(),
+        )]))
+    }
+}
+
+impl hyper::body::Body for InternalHttpBody {
+    type Data = Bytes;
+
+    type Error = Infallible;
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<
+        std::option::Option<
+            std::result::Result<
+                hyper::body::Frame<<Self as hyper::body::Body>::Data>,
+                <Self as hyper::body::Body>::Error,
+            >,
+        >,
+    > {
+        std::task::Poll::Ready(self.0.pop_front().map(hyper::body::Frame::from).map(Ok))
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub enum InternalHttpBodyFrame {
+    Data(Vec<u8>),
+    Trailers(#[serde(with = "http_serde::header_map")] HeaderMap),
+}
+
+impl From<hyper::body::Frame<Bytes>> for InternalHttpBodyFrame {
+    fn from(frame: hyper::body::Frame<Bytes>) -> Self {
+        if frame.is_data() {
+            InternalHttpBodyFrame::Data(frame.into_data().unwrap().to_vec())
+        } else {
+            InternalHttpBodyFrame::Trailers(frame.into_trailers().unwrap())
+        }
+    }
+}
+
+impl From<InternalHttpBodyFrame> for hyper::body::Frame<Bytes> {
+    fn from(frame: InternalHttpBodyFrame) -> Self {
+        match frame {
+            InternalHttpBodyFrame::Data(data) => hyper::body::Frame::data(Bytes::from(data)),
+            InternalHttpBodyFrame::Trailers(map) => hyper::body::Frame::trailers(map),
+        }
+    }
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -224,12 +284,15 @@ impl HttpResponse {
     /// and we also need some extra parameters.
     ///
     /// So this is our alternative implementation to `From<Response<Incoming>>`.
+    #[tracing::instrument(level = "trace")]
     pub async fn from_hyper_response(
         response: Response<Incoming>,
         port: Port,
         connection_id: ConnectionId,
         request_id: RequestId,
     ) -> Result<HttpResponse, hyper::Error> {
+        debug!("{response:?}");
+
         let (
             Parts {
                 status,
@@ -237,10 +300,17 @@ impl HttpResponse {
                 headers,
                 ..
             },
-            body,
+            mut body,
         ) = response.into_parts();
 
-        let body = body.collect().await?.to_bytes().to_vec();
+        let mut frames = VecDeque::new();
+
+        while let Some(frame) = body.frame().await {
+            frames.push_back(frame?.into());
+        }
+
+        let body = InternalHttpBody(frames);
+
         let internal_response = InternalHttpResponse {
             status,
             headers,
@@ -256,6 +326,7 @@ impl HttpResponse {
         })
     }
 
+    #[tracing::instrument(level = "trace")]
     pub fn response_from_request(request: HttpRequest, status: StatusCode, message: &str) -> Self {
         let HttpRequest {
             internal_request: InternalHttpRequest { version, .. },
@@ -264,13 +335,15 @@ impl HttpResponse {
             port,
         } = request;
 
-        let body = format!(
-            "{} {}\n{}\n",
-            status.as_str(),
-            status.canonical_reason().unwrap_or_default(),
-            message
-        )
-        .into_bytes();
+        let body = InternalHttpBody::from_bytes(
+            format!(
+                "{} {}\n{}\n",
+                status.as_str(),
+                status.canonical_reason().unwrap_or_default(),
+                message
+            )
+            .as_bytes(),
+        );
 
         Self {
             port,
@@ -285,6 +358,7 @@ impl HttpResponse {
         }
     }
 
+    #[tracing::instrument(level = "trace")]
     pub fn empty_response_from_request(request: HttpRequest, status: StatusCode) -> Self {
         let HttpRequest {
             internal_request: InternalHttpRequest { version, .. },
@@ -307,7 +381,10 @@ impl HttpResponse {
     }
 }
 
-impl TryFrom<InternalHttpResponse> for Response<Full<Bytes>> {
+impl<E> TryFrom<InternalHttpResponse> for Response<BoxBody<Bytes, E>>
+where
+    E: From<Infallible>,
+{
     type Error = http::Error;
 
     fn try_from(value: InternalHttpResponse) -> Result<Self, Self::Error> {
@@ -322,6 +399,7 @@ impl TryFrom<InternalHttpResponse> for Response<Full<Bytes>> {
         if let Some(h) = builder.headers_mut() {
             *h = headers;
         }
-        builder.body(Full::new(Bytes::from(body)))
+
+        builder.body(BoxBody::new(body.map_err(|e| e.into())))
     }
 }
