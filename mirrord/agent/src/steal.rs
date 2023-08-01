@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 
 use bytes::Bytes;
-use http_body_util::{combinators::BoxBody, BodyExt};
+use http_body_util::combinators::BoxBody;
 use hyper::{body::Incoming, http::request, Request, Response};
 use mirrord_protocol::{
-    tcp::{DaemonTcp, HttpRequest, HttpResponse, InternalHttpRequest, StealType, TcpData},
+    tcp::{
+        DaemonTcp, HttpRequest, HttpResponse, InternalHttpBody, InternalHttpRequest, StealType,
+        TcpData,
+    },
     ConnectionId, Port, RequestId,
 };
 use tokio::{
@@ -13,7 +16,7 @@ use tokio::{
     sync::{mpsc::Sender, oneshot},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, warn};
+use tracing::warn;
 
 use self::ip_tables::SafeIpTables;
 use crate::{
@@ -117,11 +120,7 @@ impl MatchedHttpRequest {
             body,
         ) = self.request.into_parts();
 
-        let collected = body.collect().await?;
-
-        debug!("{collected:?}");
-        let body = collected.to_bytes().to_vec();
-        debug!("{body:?}");
+        let body = InternalHttpBody::from_body(body).await?;
 
         let internal_request = InternalHttpRequest {
             method,

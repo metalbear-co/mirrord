@@ -3,10 +3,12 @@ use std::{collections::VecDeque, convert::Infallible, fmt, net::IpAddr};
 
 use bincode::{Decode, Encode};
 use bytes::Bytes;
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
+use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::{
-    body::Incoming, http, http::response::Parts, HeaderMap, Method, Request, Response, StatusCode,
-    Uri, Version,
+    body::{Body, Incoming},
+    http,
+    http::response::Parts,
+    HeaderMap, Method, Request, Response, StatusCode, Uri, Version,
 };
 use mirrord_macros::protocol_break;
 use serde::{Deserialize, Serialize};
@@ -141,7 +143,7 @@ pub struct InternalHttpRequest {
     #[serde(with = "http_serde::version")]
     pub version: Version,
 
-    pub body: Vec<u8>,
+    pub body: InternalHttpBody,
 }
 
 impl fmt::Debug for InternalHttpRequest {
@@ -151,7 +153,7 @@ impl fmt::Debug for InternalHttpRequest {
             .field("uri", &self.uri)
             .field("headers", &self.headers)
             .field("version", &self.version)
-            .field("body (length)", &self.body.len())
+            .field("body (length)", &self.body)
             .finish()
     }
 }
@@ -168,9 +170,7 @@ where
             version,
             body,
         } = value;
-        let mut request = Request::new(BoxBody::new(
-            Full::new(Bytes::from(body)).map_err(|e| e.into()),
-        ));
+        let mut request = Request::new(BoxBody::new(body.map_err(|e| e.into())));
         *request.method_mut() = method;
         *request.uri_mut() = uri;
         *request.version_mut() = version;
@@ -217,10 +217,23 @@ pub struct InternalHttpResponse {
 pub struct InternalHttpBody(VecDeque<InternalHttpBodyFrame>);
 
 impl InternalHttpBody {
-    fn from_bytes(bytes: &[u8]) -> Self {
+    pub fn from_bytes(bytes: &[u8]) -> Self {
         InternalHttpBody(VecDeque::from([InternalHttpBodyFrame::Data(
             bytes.to_vec(),
         )]))
+    }
+
+    pub async fn from_body<B>(mut body: B) -> Result<Self, B::Error>
+    where
+        B: Body<Data = Bytes> + Unpin,
+    {
+        let mut frames = VecDeque::new();
+
+        while let Some(frame) = body.frame().await {
+            frames.push_back(frame?.into());
+        }
+
+        Ok(InternalHttpBody(frames))
     }
 }
 
@@ -284,7 +297,6 @@ impl HttpResponse {
     /// and we also need some extra parameters.
     ///
     /// So this is our alternative implementation to `From<Response<Incoming>>`.
-    #[tracing::instrument(level = "trace")]
     pub async fn from_hyper_response(
         response: Response<Incoming>,
         port: Port,
@@ -300,16 +312,10 @@ impl HttpResponse {
                 headers,
                 ..
             },
-            mut body,
+            body,
         ) = response.into_parts();
 
-        let mut frames = VecDeque::new();
-
-        while let Some(frame) = body.frame().await {
-            frames.push_back(frame?.into());
-        }
-
-        let body = InternalHttpBody(frames);
+        let body = InternalHttpBody::from_body(body).await?;
 
         let internal_response = InternalHttpResponse {
             status,
@@ -326,7 +332,6 @@ impl HttpResponse {
         })
     }
 
-    #[tracing::instrument(level = "trace")]
     pub fn response_from_request(request: HttpRequest, status: StatusCode, message: &str) -> Self {
         let HttpRequest {
             internal_request: InternalHttpRequest { version, .. },
@@ -358,7 +363,6 @@ impl HttpResponse {
         }
     }
 
-    #[tracing::instrument(level = "trace")]
     pub fn empty_response_from_request(request: HttpRequest, status: StatusCode) -> Self {
         let HttpRequest {
             internal_request: InternalHttpRequest { version, .. },

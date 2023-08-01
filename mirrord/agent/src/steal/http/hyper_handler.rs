@@ -10,17 +10,13 @@ use bytes::Bytes;
 use dashmap::DashMap;
 use futures::TryFutureExt;
 use http_body_util::combinators::BoxBody;
-use hyper::{
-    body::Incoming,
-    http::{self, response},
-    Request, Response,
-};
+use hyper::{body::Incoming, Request, Response};
 use mirrord_protocol::{ConnectionId, Port, RequestId};
 use tokio::{
     net::TcpStream,
     sync::{mpsc::Sender, oneshot},
 };
-use tracing::{debug, error};
+use tracing::error;
 
 use super::{
     error::HttpTrafficError,
@@ -94,21 +90,6 @@ fn match_request(
     })
 }
 
-/// Remove headers that would be invalid due to us fiddling with the `body`, and rebuilds the
-/// [`Response`].
-#[tracing::instrument(level = "trace")]
-async fn prepare_response(
-    (mut parts, body): (response::Parts, BoxBody<Bytes, HttpTrafficError>),
-) -> Result<Response<BoxBody<Bytes, HttpTrafficError>>, HttpTrafficError> {
-    parts.headers.remove(http::header::CONTENT_LENGTH);
-    parts.headers.remove(http::header::TRANSFER_ENCODING);
-
-    debug!("{body:?}");
-
-    // Rebuild the `Response` after our fiddling.
-    Ok(Response::from_parts(parts, body))
-}
-
 /// Sends a [`MatchedHttpRequest`] through `tx` to be handled by the stealer -> layer,
 /// and then waits for the response and returns it once it's there.
 #[tracing::instrument(level = "trace", skip(matched_tx))]
@@ -127,7 +108,7 @@ async fn matched_request(
         .map_err(HttpTrafficError::from)
         .await?;
 
-    prepare_response(response_rx.await?.into_parts()).await
+    response_rx.await.map_err(HttpTrafficError::from)
 }
 
 impl<V> HyperHandler<V>
