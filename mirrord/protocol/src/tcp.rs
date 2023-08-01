@@ -12,7 +12,7 @@ use bincode::{Decode, Encode};
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::{
-    body::{Body, Frame, Incoming, SizeHint},
+    body::{Body, Frame, Incoming},
     http,
     http::response::Parts,
     HeaderMap, Method, Request, Response, StatusCode, Uri, Version,
