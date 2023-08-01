@@ -12,7 +12,7 @@ use bincode::{Decode, Encode};
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::{
-    body::{Body, Frame, Incoming},
+    body::{Body, Frame, Incoming, SizeHint},
     http,
     http::response::Parts,
     HeaderMap, Method, Request, Response, StatusCode, Uri, Version,
@@ -242,6 +242,10 @@ impl Body for InternalHttpBody {
         _: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         Poll::Ready(self.0.pop_front().map(Frame::from).map(Ok))
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.0.is_empty()
     }
 }
 
