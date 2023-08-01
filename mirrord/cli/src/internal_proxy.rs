@@ -11,7 +11,7 @@
 //! or let the [`OperatorApi`] handle the connection.
 
 use std::{
-    io::ErrorKind,
+    io::{ErrorKind, Write},
     net::{Ipv4Addr, SocketAddrV4},
     time::Duration,
 };
@@ -52,7 +52,7 @@ unsafe fn detach_io() -> Result<()> {
 
     // flush before redirection
     {
-        std::io::stdout::lock().flush()
+        std::io::stdout().lock().flush()
     }
     for fd in [libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO] {
         redirect_fd_to_dev_null(fd);
