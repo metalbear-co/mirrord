@@ -1,0 +1,1 @@
+Add userextras/prinicipalid to operators cluster role
