@@ -53,8 +53,16 @@ pub trait ContainerApi {
         P: Progress + Send + Sync;
 }
 
-pub static SKIP_NAMES: LazyLock<HashSet<&'static str>> =
-    LazyLock::new(|| HashSet::from(["istio-proxy", "istio-init", "linkerd-proxy", "linkerd-init", "vault-agent", "vault-agent-init"]));
+pub static SKIP_NAMES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    HashSet::from([
+        "istio-proxy",
+        "istio-init",
+        "linkerd-proxy",
+        "linkerd-init",
+        "vault-agent",
+        "vault-agent-init",
+    ])
+});
 
 static DEFAULT_TOLERATIONS: LazyLock<Vec<Toleration>> = LazyLock::new(|| {
     vec![Toleration {
