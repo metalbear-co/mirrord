@@ -1,0 +1,1 @@
+Document behavior of deployment in OSS vs mirrord for Teams

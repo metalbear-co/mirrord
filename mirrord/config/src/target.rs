@@ -72,6 +72,9 @@ pub struct TargetConfig {
     ///
     /// Specifies the running pod (or deployment) to mirror.
     ///
+    /// Note: Deployment level steal/mirroring is available only in mirrord for Teams
+    /// If you use it without it, it will choose a random pod replica to work with.
+    ///
     /// Supports:
     /// - `pod/{sample-pod}`;
     /// - `podname/{sample-pod}`;
