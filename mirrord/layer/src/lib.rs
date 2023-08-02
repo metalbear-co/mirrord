@@ -75,7 +75,6 @@ extern crate core;
 
 use std::{
     collections::{HashSet, VecDeque},
-    env::Args,
     ffi::OsString,
     mem,
     net::SocketAddr,
@@ -97,7 +96,6 @@ use mirrord_config::{
         network::{incoming::IncomingConfig, NetworkConfig},
         FeatureConfig,
     },
-    util::VecOrSingle,
     LayerConfig,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
@@ -340,7 +338,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         }
     }
 
-    match load::load_type(&given_process, config) {
+    match load::load_type(given_process, config) {
         LoadType::Full(config) => layer_start(*config),
         #[cfg(target_os = "macos")]
         LoadType::SIPOnly => sip_only_layer_start(patch_binaries),
