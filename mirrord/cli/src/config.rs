@@ -179,6 +179,10 @@ pub(super) struct ExecArgs {
     /// Load config from config file
     #[arg(short = 'f', long)]
     pub config_file: Option<PathBuf>,
+
+    /// Kube context to use from Kubeconfig
+    #[arg(long)]
+    pub context: Option<String>,
 }
 
 #[derive(Args, Debug)]
