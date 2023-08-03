@@ -1,1 +1,0 @@
-Add note to the HttpRequest message with information to add when we break the protocol.
