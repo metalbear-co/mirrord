@@ -5,7 +5,10 @@ use std::net::SocketAddr;
 
 use futures::{SinkExt, StreamExt};
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage, LogLevel};
-use tokio::{net::TcpStream, sync::mpsc};
+use tokio::{
+    net::TcpStream,
+    sync::mpsc::{self, Receiver, Sender},
+};
 use tracing::{error, info, trace, warn};
 
 use crate::graceful_exit;
@@ -27,26 +30,30 @@ const FAIL_STILL_STUCK: &str = r#"
 /// Connects to the internal proxy in given `SocketAddr`
 /// layer uses to communicate with it, in the form of a [`Sender`] for [`ClientMessage`]s, and a
 /// [`Receiver`] for [`DaemonMessage`]s.
-/// Creates the task that handles the messaging between layer/agent.
-/// It does the encoding/decoding of protocol.
-/// We connect in a separate task to avoid blocking the execution of the real process until the
-/// connection happens. Should help in stressful situations like https://github.com/metalbear-co/mirrord/issues/1716
 pub(crate) async fn connect_to_proxy(
     addr: SocketAddr,
+) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
+    let stream = match TcpStream::connect(addr).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            error!("Couldn't connect to internal proxy: {e:?}, {addr:?}");
+            graceful_exit!("{FAIL_STILL_STUCK:?}");
+        }
+    };
+    wrap_raw_connection(stream)
+}
+
+/// Creates the task that handles the messaging between layer/agent.
+/// It does the encoding/decoding of protocol.
+fn wrap_raw_connection(
+    stream: TcpStream,
 ) -> (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>) {
+    let mut codec = actix_codec::Framed::new(stream, ClientCodec::new());
+
     let (client_in_tx, mut client_in_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
     let (daemon_out_tx, daemon_out_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
 
     tokio::spawn(async move {
-        let stream = match TcpStream::connect(addr).await {
-            Ok(stream) => stream,
-            Err(e) => {
-                error!("Couldn't connect to internal proxy: {e:?}, {addr:?}");
-                graceful_exit!("{FAIL_STILL_STUCK:?}");
-            }
-        };
-        let mut codec = actix_codec::Framed::new(stream, ClientCodec::new());
-
         loop {
             tokio::select! {
                 msg = client_in_rx.recv() => {
