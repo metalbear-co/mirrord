@@ -234,7 +234,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
                         active_connections.spawn(async move {
                             match connect_and_ping(&config).await {
                                 Ok((agent_connection, _)) => connection_task(stream, agent_connection).await,
-                                Err(err) => error!("connectino to agent failed {err:#?}")
+                                Err(err) => error!("connection to agent failed {err:#?}")
                             }
                             });
                     },
