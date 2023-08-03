@@ -13,11 +13,10 @@ mod pause {
         Api, Client, ResourceExt,
     };
     use rstest::*;
-    use serial_test::serial;
 
     use crate::utils::{
-        get_service_url, http_log_requester_service, http_logger_service, kube_client,
-        random_namespace_self_deleting_service, run_exec_with_target, KubeService,
+        get_service_url, kube_client, pause_services, random_namespace_self_deleting_service,
+        run_exec_with_target, KubeService,
     };
 
     /// http_logger_service is a service that logs strings from the uri of incoming http requests.
@@ -47,9 +46,8 @@ mod pause {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    #[serial]
     pub async fn pause_log_requests(
-        #[future] pause_services: KubeService,
+        #[future] pause_services: (KubeService, KubeService, String),
         #[future] kube_client: Client,
     ) {
         let (requester_service, logger_service, namespace) = pause_services.await;
@@ -136,7 +134,6 @@ mod pause {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
-    #[serial]
     pub async fn unpause_after_error(
         #[future] random_namespace_self_deleting_service: KubeService,
         #[future] kube_client: Client,
