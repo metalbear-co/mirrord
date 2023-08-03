@@ -81,7 +81,8 @@ where
         ))
     } else {
         if matches!(config.target, mirrord_config::target::TargetConfig{ path: Some(mirrord_config::target::Target::Deployment{..}), ..}) {
-            progress.print_message(mirrord_progress::MessageKind::Warning,Some( "When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.\n \
+            // This is CLI Only because the extensions also implement this check with better messaging.
+            progress.print_message(mirrord_progress::MessageKind::CliOnly,Some( "When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.\n \
                    Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.\n \
                    To try it out, join the waitlist with `mirrord waitlist <email address>`, or at this link: https://metalbear.co/#waitlist-form"));
         }

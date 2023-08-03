@@ -36,6 +36,7 @@ pub enum MessageKind {
     Success,
     Failure,
     Warning,
+    CliOnly,
 }
 
 /// Initialize progress reporting based on the [`MIRRORD_PROGRESS_ENV`]
@@ -297,6 +298,7 @@ impl Progress for TaskProgress {
                     MessageKind::Success => '✓',
                     MessageKind::Failure => 'x',
                     MessageKind::Warning => '!',
+                    MessageKind::CliOnly => '#',
                 };
 
                 if let Some(msg) = msg {
@@ -312,18 +314,24 @@ impl Progress for TaskProgress {
                 }
             }
             ProgressMode::Json => {
-                let message = if kind == MessageKind::Warning {
-                    ProgressMessage::Warning(WarningMessage {
-                        message: msg.unwrap().to_string(),
-                    })
-                } else {
-                    ProgressMessage::FinishedTask(FinishedTaskMessage {
-                        name: self.name.clone(),
-                        success: kind == MessageKind::Success,
-                        message: msg.map(|s| s.to_string()),
-                    })
-                };
-                message.print();
+                match kind {
+                    MessageKind::Warning => {
+                        let message = ProgressMessage::Warning(WarningMessage {
+                            message: msg.unwrap().to_string(),
+                        });
+                        message.print();
+                    }
+                    MessageKind::Success | MessageKind::Failure => {
+                        let message = ProgressMessage::FinishedTask(FinishedTaskMessage {
+                            name: self.name.clone(),
+                            success: kind == MessageKind::Success,
+                            message: msg.map(|s| s.to_string()),
+                        });
+                        message.print();
+                    }
+                    // ignore cli only messages
+                    MessageKind::CliOnly => {}
+                }
             }
             ProgressMode::Off => {}
         }
