@@ -49,14 +49,12 @@ mod pause {
     #[timeout(Duration::from_secs(240))]
     #[serial]
     pub async fn pause_log_requests(
-        #[future] http_logger_service: KubeService,
-        #[future] http_log_requester_service: KubeService,
+        #[future] pause_services: KubeService,
         #[future] kube_client: Client,
     ) {
-        let logger_service = http_logger_service.await;
-        let requester_service = http_log_requester_service.await; // Impersonate a pod of this service, to reach internal.
+        let (requester_service, logger_service, namespace) = pause_services.await;
         let kube_client = kube_client.await;
-        let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &logger_service.namespace);
+        let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
 
         let target_parts = logger_service.target.split('/').collect::<Vec<&str>>();
         let pod_name = target_parts[1];
@@ -110,7 +108,6 @@ mod pause {
         // Skip all the logs by the deployed app from before we ran local.
         let mut next_log = log_lines.next().await.unwrap().unwrap();
         while next_log == hi_from_deployed_app {
-            println!("got log {next_log}");
             next_log = log_lines.next().await.unwrap().unwrap();
         }
 
