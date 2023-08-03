@@ -146,8 +146,10 @@ mod tcp;
 mod tcp_mirror;
 mod tcp_steal;
 
-#[cfg(target_os = "linux")]
-#[cfg(target_arch = "x86_64")]
+#[cfg_attr(
+    all(target_os = "linux", target_arch = "x86_64"),
+    path = "go/linux_x64.rs"
+)]
 mod go_hooks;
 
 fn build_runtime() -> Runtime {
