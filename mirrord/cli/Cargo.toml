@@ -50,6 +50,7 @@ humantime = "2"
 nix.workspace = true
 email_address = "0.2"
 tokio-util.workspace = true
+socket2.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

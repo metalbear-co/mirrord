@@ -153,14 +153,39 @@ async fn request_pause(
     }
 }
 
+/// Creates a listening socket using socket2
+/// to control the backlog and manage scenarios where
+/// the proxy is under heavy load.
+/// https://github.com/metalbear-co/mirrord/issues/1716#issuecomment-1663736500
+/// in macOS backlog is documented to be hardcoded limited to 128.
+fn create_listen_socket() -> Result<TcpListener, InternalProxyError> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::IPV4,
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )
+    .map_err(InternalProxyError::ListenError)?;
+
+    socket
+        .bind(&socket2::SockAddr::from(SocketAddrV4::new(
+            Ipv4Addr::LOCALHOST,
+            0,
+        )))
+        .map_err(InternalProxyError::ListenError)?;
+    socket
+        .listen(1024)
+        .map_err(InternalProxyError::ListenError)?;
+
+    // socket2 -> std -> tokio
+    TcpListener::from_std(socket.into()).map_err(InternalProxyError::ListenError)
+}
+
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
 pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
     let started = std::time::Instant::now();
     // Let it assign port for us then print it for the user.
-    let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-        .await
-        .map_err(InternalProxyError::ListenError)?;
+    let listener = create_listen_socket()?;
 
     let config = LayerConfig::from_env()?;
     // Create a main connection, that will be held until proxy is closed.
@@ -205,8 +230,13 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
             res = listener.accept() => {
                 match res {
                     Ok((stream, _)) => {
-                        let (agent_connection, _) = connect_and_ping(&config).await?;
-                        active_connections.spawn(connection_task(stream, agent_connection));
+                        let config = config.clone();
+                        active_connections.spawn(async move {
+                            match connect_and_ping(&config).await {
+                                Ok((agent_connection, _)) => connection_task(stream, agent_connection).await,
+                                Err(err) => error!("connectino to agent failed {err:#?}")
+                            }
+                            });
                     },
                     Err(err) => {
                         error!("Error accepting connection: {err:#?}");

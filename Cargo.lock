@@ -3172,6 +3172,7 @@ dependencies = [
  "semver 1.0.18",
  "serde",
  "serde_json",
+ "socket2 0.5.3",
  "thiserror",
  "tokio",
  "tokio-util",
