@@ -27,7 +27,7 @@ http-serde = "1.1.2"
 http-body-util = { workspace = true }
 fancy-regex = { workspace = true }
 libc.workspace = true
-postcard = { version = "1", features = ["use-std"] }
+postcard = { version = "1", features = ["use-std"], optional = true }
 socket2.workspace = true
 semver.workspace = true
 
@@ -35,3 +35,8 @@ mirrord-macros = { path = "../macros" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 nix.workspace = true
+
+[features]
+default = []
+
+postcard = ["dep:postcard"]

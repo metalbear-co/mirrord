@@ -61,6 +61,7 @@ where
     }
 }
 
+#[cfg(feature = "postcard")]
 pub mod with_serde {
     use serde::{Deserialize, Serialize};
 
