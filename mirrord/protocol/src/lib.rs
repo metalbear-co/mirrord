@@ -6,6 +6,7 @@
 pub mod codec;
 pub mod dns;
 pub mod error;
+pub mod features;
 pub mod file;
 pub mod outgoing;
 pub mod pause;
