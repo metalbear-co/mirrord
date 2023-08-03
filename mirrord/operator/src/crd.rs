@@ -110,4 +110,5 @@ pub struct LicenseInfoOwned {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub enum OperatorFeatures {
     ProxyApi,
+    Codec(#[schemars(with = "u32")] mirrord_protocol::features::Features),
 }

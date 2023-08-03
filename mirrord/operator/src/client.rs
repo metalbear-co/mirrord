@@ -11,7 +11,10 @@ use mirrord_kube::{
     error::KubeApiError,
 };
 use mirrord_progress::{MessageKind, Progress};
-use mirrord_protocol::{ClientMessage, DaemonMessage};
+use mirrord_protocol::{
+    features::{with_bincode, Features},
+    ClientMessage, DaemonMessage,
+};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -284,7 +287,7 @@ impl OperatorApi {
             .await
             .map_err(KubeApiError::from)?;
 
-        Ok(ConnectionWrapper::wrap(connection))
+        Ok(ConnectionWrapper::wrap(connection, session_information))
     }
 }
 
@@ -292,6 +295,7 @@ pub struct ConnectionWrapper<T> {
     connection: T,
     client_rx: Receiver<ClientMessage>,
     daemon_tx: Sender<DaemonMessage>,
+    features: Features,
 }
 
 impl<T> ConnectionWrapper<T>
@@ -302,14 +306,28 @@ where
         + Unpin
         + 'stream,
 {
-    fn wrap(connection: T) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
+    fn wrap(
+        connection: T,
+        session_information: &OperatorSessionInformation,
+    ) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
         let (client_tx, client_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
         let (daemon_tx, daemon_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
+
+        let features = session_information
+            .operator_features
+            .iter()
+            .filter_map(|feature| match feature {
+                OperatorFeatures::Codec(featrues) => Some(*featrues),
+                _ => None,
+            })
+            .next()
+            .unwrap_or_else(Features::empty);
 
         let connection_wrapper = ConnectionWrapper {
             connection,
             client_rx,
             daemon_tx,
+            features,
         };
 
         tokio::spawn(async move {
@@ -322,7 +340,11 @@ where
     }
 
     async fn handle_client_message(&mut self, client_message: ClientMessage) -> Result<()> {
-        let payload = bincode::encode_to_vec(client_message, bincode::config::standard())?;
+        let payload = with_bincode::encode_with_features(
+            self.features,
+            client_message,
+            bincode::config::standard(),
+        )?;
 
         self.connection.send(payload.into()).await?;
 
@@ -335,7 +357,8 @@ where
     ) -> Result<()> {
         match daemon_message? {
             Message::Binary(payload) => {
-                let (daemon_message, _) = bincode::decode_from_slice::<DaemonMessage, _>(
+                let (daemon_message, _) = with_bincode::decode_with_features::<DaemonMessage, _>(
+                    self.features,
                     &payload,
                     bincode::config::standard(),
                 )?;

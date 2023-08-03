@@ -10,10 +10,7 @@ use mirrord_macros::protocol_break;
 
 use crate::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
-    features::{
-        with_bincode::{decode_with_features, encode_with_features},
-        Features,
-    },
+    features::{with_bincode, Features},
     file::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, FdOpenDirRequest,
         GetDEnts64Request, GetDEnts64Response, OpenDirResponse, OpenFileRequest, OpenFileResponse,
@@ -144,7 +141,7 @@ pub struct ClientCodec {
 
 impl ClientCodec {
     pub fn new() -> Self {
-        Self::with_features(Features::empty())
+        Self::with_features(Features::all())
     }
 
     pub fn with_features(features: Features) -> Self {
@@ -166,7 +163,7 @@ impl Decoder for ClientCodec {
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
-        match decode_with_features(self.features, &src[..], self.config) {
+        match with_bincode::decode_with_features(self.features, &src[..], self.config) {
             Ok((message, read)) => {
                 src.advance(read);
                 Ok(Some(message))
@@ -181,7 +178,7 @@ impl Encoder<ClientMessage> for ClientCodec {
     type Error = io::Error;
 
     fn encode(&mut self, msg: ClientMessage, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let encoded = match encode_with_features(self.features, msg, self.config) {
+        let encoded = match with_bincode::encode_with_features(self.features, msg, self.config) {
             Ok(encoded) => encoded,
             Err(err) => {
                 return Err(io::Error::new(io::ErrorKind::Other, err.to_string()));
@@ -201,7 +198,7 @@ pub struct DaemonCodec {
 
 impl DaemonCodec {
     pub fn new() -> Self {
-        Self::with_features(Features::empty())
+        Self::with_features(Features::all())
     }
 
     pub fn with_features(features: Features) -> Self {
@@ -223,7 +220,7 @@ impl Decoder for DaemonCodec {
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
-        match decode_with_features(self.features, &src[..], self.config) {
+        match with_bincode::decode_with_features(self.features, &src[..], self.config) {
             Ok((message, read)) => {
                 src.advance(read);
                 Ok(Some(message))
@@ -238,7 +235,7 @@ impl Encoder<DaemonMessage> for DaemonCodec {
     type Error = io::Error;
 
     fn encode(&mut self, msg: DaemonMessage, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let encoded = match encode_with_features(self.features, msg, self.config) {
+        let encoded = match with_bincode::encode_with_features(self.features, msg, self.config) {
             Ok(encoded) => encoded,
             Err(err) => {
                 return Err(io::Error::new(io::ErrorKind::Other, err.to_string()));

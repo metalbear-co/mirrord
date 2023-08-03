@@ -24,8 +24,8 @@ use futures::{
     SinkExt, TryFutureExt,
 };
 use mirrord_protocol::{
-    pause::DaemonPauseTarget, ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
-    LogMessage,
+    features::Features, pause::DaemonPauseTarget, ClientMessage, DaemonCodec, DaemonMessage,
+    GetEnvVarsRequest, LogMessage,
 };
 use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
 use sniffer::{SnifferCommand, TcpConnectionSniffer, TcpSnifferApi};
@@ -84,6 +84,8 @@ struct State {
     env: HashMap<String, String>,
     /// Whether this agent is run in an ephemeral container.
     ephemeral: bool,
+
+    protocol_features: Features,
 }
 
 impl State {
@@ -124,6 +126,7 @@ impl State {
             container,
             env,
             ephemeral: args.ephemeral_container,
+            protocol_features: args.protocol_features,
         })
     }
 
@@ -148,7 +151,7 @@ impl State {
         tasks: BackgroundTasks,
         cancellation_token: CancellationToken,
     ) -> Result<Option<JoinHandle<u32>>> {
-        let mut stream = Framed::new(stream, DaemonCodec::new());
+        let mut stream = Framed::new(stream, DaemonCodec::with_features(self.protocol_features));
 
         let client_id = match self.new_client().await {
             Ok(id) => id,

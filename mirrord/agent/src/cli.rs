@@ -4,6 +4,7 @@ use clap::{
     error::{Error, ErrorKind},
     Parser,
 };
+use mirrord_protocol::features::Features;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -35,6 +36,9 @@ pub struct Args {
     /// Pause the target container while clients are connected.
     #[arg(short = 'p', long, default_value_t = false)]
     pub pause: bool,
+
+    #[arg(long, default_value_t = Features::all())]
+    pub protocol_features: Features,
 
     /// Return an error after accepting the first client connection, in order to test agent error
     /// cleanup.

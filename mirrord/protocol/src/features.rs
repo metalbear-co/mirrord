@@ -6,9 +6,7 @@ use serde::{Deserialize, Serialize};
 
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-    pub struct Features: u32 {
-        const KeepHttpFrames = 0b00000001;
-    }
+    pub struct Features: u32 { }
 }
 
 impl_serde_for_bitflags!(Features);
