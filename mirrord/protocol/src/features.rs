@@ -76,61 +76,6 @@ where
     }
 }
 
-#[cfg(feature = "postcard")]
-pub mod with_serde {
-    use serde::{Deserialize, Serialize};
-
-    use super::{Features, PROTOCOL_FEATURES};
-
-    pub fn serialize_with_features<S>(
-        features: Features,
-        value: &S,
-    ) -> Result<Vec<u8>, postcard::Error>
-    where
-        S: Serialize,
-    {
-        PROTOCOL_FEATURES.with(|cell| {
-            if let Ok(mut feat) = cell.try_borrow_mut() {
-                *feat = features
-            }
-        });
-
-        let result = postcard::to_stdvec_cobs(value);
-
-        PROTOCOL_FEATURES.with(|cell| {
-            if let Ok(mut feat) = cell.try_borrow_mut() {
-                *feat = Features::empty()
-            }
-        });
-
-        result
-    }
-
-    pub fn deserialize_with_features<D>(
-        features: Features,
-        buffer: &mut [u8],
-    ) -> Result<D, postcard::Error>
-    where
-        for<'de> D: Deserialize<'de>,
-    {
-        PROTOCOL_FEATURES.with(|cell| {
-            if let Ok(mut feat) = cell.try_borrow_mut() {
-                *feat = features
-            }
-        });
-
-        let result = postcard::from_bytes_cobs(buffer);
-
-        PROTOCOL_FEATURES.with(|cell| {
-            if let Ok(mut feat) = cell.try_borrow_mut() {
-                *feat = Features::empty()
-            }
-        });
-
-        result
-    }
-}
-
 pub mod with_bincode {
     use bincode::{
         config::Config,
