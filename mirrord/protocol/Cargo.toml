@@ -17,6 +17,7 @@ edition.workspace = true
 actix-codec.workspace = true
 bytes.workspace = true
 bitflags = "2"
+bitflags_serde_shim = "0.2"
 thiserror.workspace = true
 trust-dns-resolver.workspace = true
 serde.workspace = true

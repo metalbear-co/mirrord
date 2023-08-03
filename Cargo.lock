@@ -910,6 +910,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "630be753d4e58660abd17930c71b647fe46c27ea6b63cc59e1e3851406972e42"
 
 [[package]]
+name = "bitflags_serde_shim"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e678d043c18557c001a9f81be1c04e09339f9c990b8d5e20801e7ca4a1c6f244"
+dependencies = [
+ "bitflags 1.3.2",
+ "serde",
+]
+
+[[package]]
 name = "bitvec"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3500,6 +3510,7 @@ dependencies = [
  "actix-codec",
  "bincode",
  "bitflags 2.3.3",
+ "bitflags_serde_shim",
  "bytes",
  "fancy-regex",
  "http-body-util",
