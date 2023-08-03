@@ -110,6 +110,7 @@ mod pause {
         // Skip all the logs by the deployed app from before we ran local.
         let mut next_log = log_lines.next().await.unwrap().unwrap();
         while next_log == hi_from_deployed_app {
+            println!("got log {next_log}");
             next_log = log_lines.next().await.unwrap().unwrap();
         }
 
