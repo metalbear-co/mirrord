@@ -627,10 +627,8 @@ pub enum Application {
     RustRecvFrom,
     RustListenPorts,
     Fork,
+    OpenFile,
     // For running applications with the executable and arguments determined at runtime.
-    // Compiled only on macos just because it's currently only used there, but could be used also
-    // on Linux.
-    #[cfg(target_os = "macos")]
     DynamicApp(String, Vec<String>),
 }
 
@@ -732,8 +730,12 @@ impl Application {
                     "../../target/debug/listen_ports"
                 )
             }
-            #[cfg(target_os = "macos")]
-            Application::DynamicApp(exe, _args) => exe.clone(),
+            Application::OpenFile => format!(
+                "{}/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                "tests/apps/open_file/out.c_test_app",
+            ), // String::from("tests/apps/open_file/out.c_test_app"),
+            Application::DynamicApp(exe, _) => exe.clone(),
         }
     }
 
@@ -816,7 +818,8 @@ impl Application {
             | Application::BashShebang
             | Application::Go19SelfOpen
             | Application::Go19DirBypass
-            | Application::Go20DirBypass => vec![],
+            | Application::Go20DirBypass
+            | Application::OpenFile => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
@@ -825,8 +828,7 @@ impl Application {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
-            #[cfg(target_os = "macos")]
-            Application::DynamicApp(_exe, args) => args.to_owned(),
+            Application::DynamicApp(_, args) => args.to_owned(),
         }
     }
 
@@ -876,9 +878,9 @@ impl Application {
             | Application::RustIssue1458
             | Application::RustIssue1458PortNot53
             | Application::RustListenPorts
-            | Application::RustRecvFrom => unimplemented!("shouldn't get here"),
-            #[cfg(target_os = "macos")]
-            Application::DynamicApp(_, _) => unimplemented!("shouldn't get here"),
+            | Application::RustRecvFrom
+            | Application::OpenFile
+            | Application::DynamicApp(..) => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
         }
     }
