@@ -449,7 +449,7 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    needs: [build_mirrord, test_agent_image, changed_files]
+    needs: [test_agent_image, changed_files]
     strategy:
       matrix:
         container-runtime: ["docker", "containerd"]
@@ -457,6 +457,7 @@ jobs:
       - uses: ./.github/workflows/reusable-e2e.yaml
         with:
           operator: false
+          ref: ''
 
   lint_markdown:
     runs-on: ubuntu-latest

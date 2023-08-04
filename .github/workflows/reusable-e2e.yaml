@@ -7,15 +7,51 @@ on:
         required: true
         type: boolean
 
+      ref:
+        required: true
+        type: string
+
 jobs:
+
+  build_mirrord:
+    runs-on: ubuntu-latest
+    name: build mirrord      
+    steps:
+      - name: checkout
+        if: ${{ !inputs.operator }}
+        uses: actions/checkout@v3
+        with: 
+          ref: ${{ inputs.ref }}
+      - uses: arduino/setup-protoc@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt
+      - run: cargo build --manifest-path=./Cargo.toml
+      - name: upload layer
+        uses: actions/upload-artifact@v3
+        with:
+          name: mirrord-artifacts-x
+          path: |
+            target/debug/libmirrord_layer.so
+            target/debug/mirrord
+          if-no-files-found: error
+
 
   mirrord_e2e:    
     if: ${{ !inputs.operator }}
+    needs: build_mirrord
     runs-on: ubuntu-latest
     name: e2e
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:      
+      - name: download mirrord
+        uses: actions/download-artifact@v3
+        with:
+          name: mirrord-artifacts-x
+          path: target/debug/
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
