@@ -116,6 +116,7 @@ impl MirrordExecution {
         proxy_command
             .arg("intproxy")
             .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
             .stdin(std::process::Stdio::null());
 
         if let Some(timeout) = timeout {
@@ -157,6 +158,14 @@ impl MirrordExecution {
         env_vars.insert(
             "MIRRORD_CONNECT_TCP".to_string(),
             format!("127.0.0.1:{port}"),
+        );
+
+        // Fix https://github.com/metalbear-co/mirrord/issues/1745
+        // by disabling the fork safety check in the Objective-C runtime.
+        #[cfg(target_os = "macos")]
+        env_vars.insert(
+            "OBJC_DISABLE_INITIALIZE_FORK_SAFETY".to_string(),
+            "YES".to_string(),
         );
 
         #[cfg(target_os = "macos")]

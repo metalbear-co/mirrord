@@ -11,10 +11,8 @@
 //! or let the [`OperatorApi`] handle the connection.
 
 use std::{
-    fs::File,
-    io::{stderr, stdout, ErrorKind},
+    io::{ErrorKind, Write},
     net::{Ipv4Addr, SocketAddrV4},
-    os::fd::{AsRawFd, FromRawFd},
     time::Duration,
 };
 
@@ -24,6 +22,7 @@ use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
 use mirrord_operator::client::{OperatorApi, OperatorSessionInformation};
 use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonCodec, DaemonMessage};
+use nix::libc;
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -38,6 +37,29 @@ use crate::{
     config::InternalProxyArgs,
     error::{InternalProxyError, Result},
 };
+
+unsafe fn redirect_fd_to_dev_null(fd: libc::c_int) {
+    let devnull_fd = libc::open(b"/dev/null\0" as *const [u8; 10] as _, libc::O_RDWR);
+    libc::dup2(devnull_fd, fd);
+    libc::close(devnull_fd);
+}
+
+unsafe fn detach_io() -> Result<()> {
+    // Create a new session for the proxy process, detaching from the original terminal.
+    // This makes the process not to receive signals from the "mirrord" process or it's parent
+    // terminal fixes some side effects such as https://github.com/metalbear-co/mirrord/issues/1232
+    nix::unistd::setsid().map_err(InternalProxyError::SetSidError)?;
+
+    // flush before redirection
+    {
+        // best effort
+        let _ = std::io::stdout().lock().flush();
+    }
+    for fd in [libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO] {
+        redirect_fd_to_dev_null(fd);
+    }
+    Ok(())
+}
 
 /// Print the port for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.
@@ -134,10 +156,6 @@ async fn request_pause(
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
 pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
-    // Create a new session for the proxy process, detaching from the original terminal.
-    // This makes the process not to receive signals from the "mirrord" process or it's parent
-    // terminal fixes some side effects such as https://github.com/metalbear-co/mirrord/issues/1232
-    nix::unistd::setsid().map_err(InternalProxyError::SetSidError)?;
     let started = std::time::Instant::now();
     // Let it assign port for us then print it for the user.
     let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
@@ -178,9 +196,10 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
     let (agent_connection, _) = connect_and_ping(&config).await?;
     active_connections.spawn(connection_task(stream, agent_connection));
 
-    // close stdout/err so we won't hold the terminal/pipe/caller (especially in tests)
-    drop(unsafe { File::from_raw_fd(stdout().as_raw_fd()) });
-    drop(unsafe { File::from_raw_fd(stderr().as_raw_fd()) });
+    unsafe {
+        detach_io()?;
+    }
+
     loop {
         tokio::select! {
             res = listener.accept() => {

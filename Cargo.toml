@@ -14,10 +14,11 @@ members = [
     "tests/rust-unix-socket-client",
     "tests/rust-bypassed-unix-socket",
 ]
+resolver = "2"
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.53.3"
+version = "3.55.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"

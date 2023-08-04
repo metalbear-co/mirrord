@@ -13,6 +13,7 @@
 #![feature(pointer_byte_offsets)]
 #![feature(lazy_cell)]
 #![feature(async_fn_in_trait)]
+#![feature(once_cell_try)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![allow(incomplete_features)]
 #![warn(clippy::indexing_slicing)]
@@ -74,6 +75,7 @@ extern crate core;
 
 use std::{
     collections::{HashSet, VecDeque},
+    ffi::OsString,
     mem,
     net::SocketAddr,
     panic,
@@ -94,7 +96,6 @@ use mirrord_config::{
         network::{incoming::IncomingConfig, NetworkConfig},
         FeatureConfig,
     },
-    util::VecOrSingle,
     LayerConfig,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
@@ -145,8 +146,11 @@ mod tcp;
 mod tcp_mirror;
 mod tcp_steal;
 
-#[cfg(target_os = "linux")]
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+#[cfg_attr(
+    all(target_os = "linux", target_arch = "x86_64"),
+    path = "go/linux_x64.rs"
+)]
 mod go_hooks;
 
 fn build_runtime() -> Runtime {
@@ -268,35 +272,17 @@ pub(crate) static DEBUGGER_IGNORED_PORTS: OnceLock<DebuggerPorts> = OnceLock::ne
 /// Mapping of ports to use for binding local sockets created by us for intercepting.
 pub(crate) static LISTEN_PORTS: OnceLock<BiMap<u16, u16>> = OnceLock::new();
 
-/// Check if we're running in NixOS or Devbox.
-///
-/// - If so, add `sh` to the skip list because of
-/// [#531](https://github.com/metalbear-co/mirrord/issues/531)
-fn nix_devbox_patch(config: &mut LayerConfig) {
-    let mut current_skip = config
-        .skip_processes
-        .clone()
-        .map(VecOrSingle::to_vec)
-        .unwrap_or_default();
+// The following statics are to avoid using CoreFoundation or high level macOS APIs
+// that aren't safe to use after fork.
 
-    if is_nix_or_devbox() && !current_skip.contains(&"sh".to_string()) {
-        current_skip.push("sh".into());
-        std::env::set_var("MIRRORD_SKIP_PROCESSES", current_skip.join(";"));
-        config.skip_processes = Some(VecOrSingle::Multiple(current_skip));
-    }
-}
+/// Executable we're loaded to
+pub(crate) static EXECUTABLE_NAME: OnceLock<String> = OnceLock::new();
 
-/// Check if NixOS or Devbox by discrimnating env vars.
-fn is_nix_or_devbox() -> bool {
-    if let Ok(res) = std::env::var("IN_NIX_SHELL") && res.as_str() == "1" {
-        true
-    }
-    else if let Ok(res) = std::env::var("DEVBOX_SHELL_ENABLED") && res.as_str() == "1" {
-        true
-    } else {
-        false
-    }
-}
+/// Executable path we're loaded to
+pub(crate) static EXECUTABLE_PATH: OnceLock<String> = OnceLock::new();
+
+/// Program arguments
+pub(crate) static EXECUTABLE_ARGS: OnceLock<Vec<OsString>> = OnceLock::new();
 
 /// Prevent mirrord from connecting to ports used by the IDE debugger
 pub(crate) fn is_debugger_port(addr: &SocketAddr) -> bool {
@@ -306,20 +292,24 @@ pub(crate) fn is_debugger_port(addr: &SocketAddr) -> bool {
         .contains(addr)
 }
 
-/// Loads mirrord configuration and applies [`nix_devbox_patch`] patches.
+/// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
 fn layer_pre_initialization() -> Result<(), LayerError> {
-    let given_process = std::env::current_exe()
-        .ok()
-        .and_then(|arg| {
-            arg.file_name()
-                .and_then(|os_str| os_str.to_str())
-                .map(String::from)
-        })
-        .ok_or(LayerError::NoProcessFound)?;
+    let given_process = EXECUTABLE_NAME.get_or_try_init(|| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|arg| {
+                arg.file_name()
+                    .and_then(|os_str| os_str.to_str())
+                    .map(String::from)
+            })
+            .ok_or(LayerError::NoProcessFound)
+    })?;
 
-    let mut config = LayerConfig::from_env()?;
-
-    nix_devbox_patch(&mut config);
+    EXECUTABLE_PATH.get_or_try_init(|| {
+        std::env::current_exe().map(|arg| arg.to_string_lossy().into_owned())
+    })?;
+    EXECUTABLE_ARGS.get_or_init(|| std::env::args_os().collect());
+    let config = LayerConfig::from_env()?;
 
     #[cfg(target_os = "macos")]
     let patch_binaries = config
@@ -332,18 +322,22 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
     // for https://github.com/metalbear-co/mirrord/issues/1529
     #[cfg(target_os = "macos")]
     if given_process.ends_with("dotnet") {
-        if let Ok(path) = std::env::current_exe() {
-            if let Ok(Some(binary)) =
-                mirrord_sip::sip_patch(path.to_str().unwrap(), &patch_binaries)
-            {
-                let err = exec::execvp(binary, std::env::args());
-                error!("Couldn't execute {:?}", err);
-                return Err(LayerError::ExecFailed(err));
-            }
+        let path = EXECUTABLE_PATH
+            .get()
+            .expect("EXECUTABLE_PATH needs to be set!");
+        if let Ok(Some(binary)) = mirrord_sip::sip_patch(path, &patch_binaries) {
+            let err = exec::execvp(
+                binary,
+                EXECUTABLE_ARGS
+                    .get()
+                    .expect("EXECUTABLE_ARGS needs to be set!"),
+            );
+            error!("Couldn't execute {:?}", err);
+            return Err(LayerError::ExecFailed(err));
         }
     }
 
-    match load::load_type(&given_process, config) {
+    match load::load_type(given_process, config) {
         LoadType::Full(config) => layer_start(*config),
         #[cfg(target_os = "macos")]
         LoadType::SIPOnly => sip_only_layer_start(patch_binaries),
@@ -519,11 +513,13 @@ fn layer_start(mut config: LayerConfig) {
     info!("Initializing mirrord-layer!");
     trace!(
         "Loaded into executable: {}, on pid {}, with args: {:?}",
-        std::env::current_exe()
-            .map(|path| path.to_string_lossy().to_string())
-            .unwrap_or_default(),
+        EXECUTABLE_PATH
+            .get()
+            .expect("EXECUTABLE_PATH should be set!"),
         std::process::id(),
-        std::env::args()
+        EXECUTABLE_ARGS
+            .get()
+            .expect("EXECUTABLE_ARGS needs to be set!")
     );
 
     let address = config
@@ -994,8 +990,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
         unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
     }
 
-    #[cfg(target_os = "linux")]
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
     {
         go_hooks::enable_hooks(&mut hook_manager);
     }
@@ -1045,6 +1040,8 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 }
 
 /// Hook for `libc::fork`.
+///
+/// on macOS, be wary what we do in this path as we might trigger https://github.com/metalbear-co/mirrord/issues/1745
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
     debug!("Process {} forking!.", std::process::id());

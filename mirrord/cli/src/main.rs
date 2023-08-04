@@ -145,6 +145,10 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
         std::env::set_var("MIRRORD_UDP_OUTGOING", "false");
     }
 
+    if let Some(context) = &args.context {
+        std::env::set_var("MIRRORD_KUBE_CONTEXT", context);
+    }
+
     if let Some(config_file) = &args.config_file {
         // Set canoncialized path to config file, in case forks/children are in different
         // working directories.
@@ -299,19 +303,20 @@ where
 ///  "pod/py-serv-deployment-5c57fbdc98-pdbn4/container/py-serv",
 /// ]```
 async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
-    let (accept_invalid_certificates, kubeconfig, namespace) =
+    let (accept_invalid_certificates, kubeconfig, namespace, kube_context) =
         if let Some(config) = &args.config_file {
             let layer_config = LayerFileConfig::from_path(config)?.generate_config()?;
             (
                 layer_config.accept_invalid_certificates,
                 layer_config.kubeconfig,
                 layer_config.target.namespace,
+                layer_config.kube_context,
             )
         } else {
-            (false, None, None)
+            (false, None, None, None)
         };
 
-    let client = create_kube_api(accept_invalid_certificates, kubeconfig)
+    let client = create_kube_api(accept_invalid_certificates, kubeconfig, kube_context)
         .await
         .map_err(CliError::KubernetesApiFailed)?;
 
@@ -408,12 +413,6 @@ fn init_ext_error_handler(commands: &Commands) -> bool {
         Commands::ListTargets(_) | Commands::ExtensionExec(_) => {
             mirrord_progress::init_from_env(ProgressMode::Json);
             let _ = miette::set_hook(Box::new(|_| Box::new(JSONReportHandler::new())));
-            true
-        }
-        Commands::InternalProxy(_) => {
-            // Don't setup logs in case of internal proxy, because it's an orphan proces
-            // and we need to close stderr/stdout (in case caller waits for stdout/err to close),
-            // if we enable tracing it'd crash on writing to stderr/out.
             true
         }
         _ => false,

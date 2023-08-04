@@ -8,6 +8,83 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.55.0](https://github.com/metalbear-co/mirrord/tree/3.55.0) - 2023-08-03
+
+
+### Added
+
+- Add support for selecting Kubeconfig context to use by either using:
+  1. Configuration option `kube_context`.
+  2. mirrord exec argument `--context`
+  3. Environment variable `MIRRORD_KUBE_CONTEXT`
+  [#1735](https://github.com/metalbear-co/mirrord/issues/1735)
+
+
+### Changed
+
+- Add userextras/prinicipalid to operators cluster role
+- Document behavior of deployment in OSS vs mirrord for Teams
+- Skip HashiCorp Vault supporting containers
+
+
+### Fixed
+
+- Fix fork issue on macOS
+  [#1745](https://github.com/metalbear-co/mirrord/issues/1745)
+- Add access for the operator's cluster role to argoproj rollouts
+  [#1751](https://github.com/metalbear-co/mirrord/issues/1751)
+- Fixed warning on using deployment target with no operator
+
+
+### Internal
+
+- Attempt to fix fork issue on macOS by avoiding access to CF on fork
+  [#1745](https://github.com/metalbear-co/mirrord/issues/1745)
+- Add note to the HttpRequest message with information to add when we break the
+  protocol.
+- Change deployment warning to be emit on cli only
+- Refactor the organization of go hooks in preparation for support for arm
+
+
+## [3.54.1](https://github.com/metalbear-co/mirrord/tree/3.54.1) - 2023-08-01
+
+
+### Fixed
+
+- Sometimes the internal proxy doesn't flush before we do redirection then
+  caller can't read port
+  leading to "Couldn't get port of internal proxy"
+
+
+### Internal
+
+- Remove signal dependency from layer
+
+
+## [3.54.0](https://github.com/metalbear-co/mirrord/tree/3.54.0) - 2023-07-31
+
+
+### Added
+
+- Added mirrord-operator-user `ClusterRole` to operator setup with RBAC
+  permissions to use operator.
+  [#1428](https://github.com/metalbear-co/mirrord/issues/1428)
+
+
+### Fixed
+
+- Exclude environment variable COMPLUS_EnableDiagnostics, fixes [mirrord
+  intellij #67](https://github.com/metalbear-co/mirrord-intellij/issues/67)
+  [#1728](https://github.com/metalbear-co/mirrord/issues/1728)
+
+
+### Internal
+
+- Redirect stderr and stdout of internal proxy to /dev/null (stdout only after
+  printing port).
+  [#int-proxy-dev-null](https://github.com/metalbear-co/mirrord/issues/int-proxy-dev-null)
+
+
 ## [3.53.3](https://github.com/metalbear-co/mirrord/tree/3.53.3) - 2023-07-26
 
 
