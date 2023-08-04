@@ -47,7 +47,7 @@ mod pause {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn pause_log_requests(
-        #[future] pause_services: (KubeService, KubeService, String),
+        #[future] pause_services: (KubeService, KubeService),
         #[future] kube_client: Client,
     ) {
         let (requester_service, logger_service) = pause_services.await;
