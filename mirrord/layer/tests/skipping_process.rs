@@ -80,7 +80,7 @@ async fn dont_skip(dylib_path: &PathBuf) {
         .await;
 
     let mut conn = LayerConnection::get_initialized_connection(&listener).await;
-    conn.expect_file_open_for_reading("/etc/hostname", 5).await;
+    conn.expect_file_open_for_reading("/etc/resolv.conf", 5).await;
 
     test_process.wait_assert_success().await;
 }
