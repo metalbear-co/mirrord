@@ -101,7 +101,9 @@ mod pause {
         let res = process.child.wait().await.unwrap();
         println!("mirrord done running.");
         assert!(res.success());
-
+        // remove! this is so we'll have logs
+        std::mem::forget(requester_service);
+        std::mem::forget(logger_service);
         println!("Spooling logs forward to get to local app's first log.");
         // Skip all the logs by the deployed app from before we ran local.
         let mut next_log = log_lines.next().await.unwrap().unwrap();
