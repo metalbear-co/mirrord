@@ -393,7 +393,11 @@ impl OutgoingSelector {
             }
         };
 
-        let resolved_hosts = self.resolve_dns()?;
+        let resolved_hosts = match &self {
+            OutgoingSelector::Unfiltered => HashSet::default(),
+            OutgoingSelector::Remote(_) => self.resolve_dns::<true>()?,
+            OutgoingSelector::Local(_) => self.resolve_dns::<false>()?,
+        };
         let hosts = resolved_hosts.iter();
 
         Ok(match self {
@@ -418,8 +422,11 @@ impl OutgoingSelector {
     /// the remote pod or not.
     ///
     /// The resolved values are returned in a set as `AddressFilter::Socket`.
+    ///
+    /// `REMOTE` controls whether the named hosts should be resolved remotely, by checking if we're
+    /// dealing with [`OutgoingSelector::Remote`] and [`REMOTE_DNS`] is set.
     #[tracing::instrument(level = "trace", ret)]
-    fn resolve_dns(&self) -> HookResult<HashSet<OutgoingFilter>> {
+    fn resolve_dns<const REMOTE: bool>(&self) -> HookResult<HashSet<OutgoingFilter>> {
         // Closure that tries to match `address` with something in the selector set.
         let name = |outgoing: &&OutgoingFilter| matches!(outgoing.address, AddressFilter::Name(_));
 
@@ -434,7 +441,8 @@ impl OutgoingSelector {
             let mut unresolved = unresolved.into_iter();
 
             // Resolve DNS through the agent.
-            let resolved = if *REMOTE_DNS.get().expect("REMOTE_DNS should be set by now!") {
+            let resolved = if *REMOTE_DNS.get().expect("REMOTE_DNS should be set by now!") && REMOTE
+            {
                 unresolved
                     .try_fold(
                         HashSet::with_capacity(8),
