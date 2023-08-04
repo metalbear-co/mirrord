@@ -70,6 +70,11 @@ impl ExecutableName {
         })
     }
 
+    #[cfg(target_os = "macos")]
+    pub fn ends_with(&self, suffix: &str) -> bool {
+        self.exec_name.ends_with(suffix) || self.invoked_as.ends_with(suffix)
+    }
+
     fn is_build_tool(&self) -> bool {
         BUILD_TOOL_PROCESSES.contains(self.exec_name.as_str())
             || BUILD_TOOL_PROCESSES.contains(self.invoked_as.as_str())
