@@ -447,17 +447,15 @@ jobs:
       - run: cargo test -p mirrord-layer
 
   e2e:
-    runs-on: ubuntu-latest
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     needs: [test_agent_image, changed_files]
     strategy:
       matrix:
         container-runtime: ["docker", "containerd"]
-    steps:
-      - uses: ./.github/workflows/reusable-e2e.yaml
-        with:
-          operator: false
-          ref: ''
+    uses: ./.github/workflows/reusable-e2e.yaml
+    with:
+      operator: false
+      ref: ''
 
   lint_markdown:
     runs-on: ubuntu-latest
