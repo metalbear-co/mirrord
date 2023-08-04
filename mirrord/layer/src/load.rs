@@ -87,7 +87,7 @@ impl ExecutableName {
 
         !skip_processes
             .iter()
-            .any(|name| name.as_ref() == &self.exec_name || name.as_ref() == &self.invoked_as)
+            .any(|name| name.as_ref() == self.exec_name || name.as_ref() == self.invoked_as)
     }
 
     /// Determine the [`LoadType`] for this process.
