@@ -854,7 +854,7 @@ pub async fn udp_logger_service(#[future] kube_client: Client) -> KubeService {
 pub async fn pause_services(#[future] kube_client: Client) -> (KubeService, KubeService, String) {
     let kube_client = kube_client.await;
     let kube_client_clone = kube_client.clone();
-    let namespace = format!("{}", random_string());
+    let namespace = random_string().to_string();
     let requester = service(
         &namespace,
         "ClusterIP",
