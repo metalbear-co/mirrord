@@ -77,6 +77,7 @@ mod pause {
         // skip 2 lines of flask prints.
         let mut log_lines = log_lines.skip(2);
 
+        let start_time = std::time::Instant::now();
         let command = vec!["pause/send_reqs.sh"];
         let mirrord_pause_arg = vec!["--pause"];
 
@@ -101,13 +102,28 @@ mod pause {
         let res = process.child.wait().await.unwrap();
         println!("mirrord done running.");
         assert!(res.success());
-        // remove! this is so we'll have logs
-        std::mem::forget(requester_service);
-        std::mem::forget(logger_service);
+
+        let lp = LogParams {
+            container: Some(container_name.to_string()), // Default to first, we only have 1.
+            follow: true,
+            limit_bytes: None,
+            pretty: false,
+            previous: false,
+            since_seconds: Some(start_time.elapsed().as_secs() as i64),
+            tail_lines: None,
+            timestamps: false,
+        };
+
+        println!("getting log stream.");
+
+        let log_stream = pod_api.log_stream(pod_name, &lp).await.unwrap();
+
+        let mut log_lines = log_stream.lines();
         println!("Spooling logs forward to get to local app's first log.");
         // Skip all the logs by the deployed app from before we ran local.
         let mut next_log = log_lines.next().await.unwrap().unwrap();
         while next_log == hi_from_deployed_app {
+            println!("Skipping log: {next_log:?}");
             next_log = log_lines.next().await.unwrap().unwrap();
         }
 
