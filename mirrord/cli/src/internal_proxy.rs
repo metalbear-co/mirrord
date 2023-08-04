@@ -79,10 +79,14 @@ fn print_port(listener: &TcpListener) -> Result<()> {
 /// We parse the protocol so we might add some logic here in the future?
 async fn connection_task(config: LayerConfig, stream: TcpStream) {
     debug!("intproxy connect_and_ping");
-    let agent_connection = match connect_and_ping(&config).await {
-        Ok((agent_connection, _)) => agent_connection,
-        Err(err) => {
+    let agent_connection = match timeout(Duration::from_secs(5), connect_and_ping(&config)).await {
+        Ok(Ok((agent_connection, _))) => agent_connection,
+        Ok(Err(err)) => {
             error!("connection to agent failed {err:#?}");
+            return;
+        }
+        Err(timeout_error) => {
+            error!("intproxy creation of connection to agent timed out: {timeout_error:?}");
             return;
         }
     };
