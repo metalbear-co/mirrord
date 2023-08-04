@@ -78,6 +78,7 @@ fn print_port(listener: &TcpListener) -> Result<()> {
 /// Supposed to run as an async detached task, proxying the connection.
 /// We parse the protocol so we might add some logic here in the future?
 async fn connection_task(config: LayerConfig, stream: TcpStream) {
+    debug!("intproxy connect_and_ping");
     let agent_connection = match connect_and_ping(&config).await {
         Ok((agent_connection, _)) => agent_connection,
         Err(err) => {
@@ -85,6 +86,7 @@ async fn connection_task(config: LayerConfig, stream: TcpStream) {
             return;
         }
     };
+    debug!("starting connection task, layer_stream: {stream:?}");
     let mut layer_connection = actix_codec::Framed::new(stream, DaemonCodec::new());
     let (agent_sender, mut agent_receiver) = agent_connection;
     loop {
