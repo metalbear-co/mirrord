@@ -31,7 +31,10 @@ use tokio::{
     time::timeout,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, log::trace};
+use tracing::{
+    error, info,
+    log::{debug, trace},
+};
 
 use crate::{
     config::InternalProxyArgs,
@@ -87,6 +90,7 @@ async fn connection_task(config: LayerConfig, stream: TcpStream) {
     loop {
         select! {
             layer_message = layer_connection.next() => {
+                debug!("next layer to intproxy message: {layer_message:?}");
                 match layer_message {
                     Some(Ok(layer_message)) => {
                         if let Err(err) = agent_sender.send(layer_message).await {
@@ -109,6 +113,7 @@ async fn connection_task(config: LayerConfig, stream: TcpStream) {
                 }
             },
             agent_message = agent_receiver.recv() => {
+                debug!("next agent to intproxy message: {agent_message:?}");
                 match agent_message {
                     Some(agent_message) => {
                         if let Err(err) = layer_connection.send(agent_message).await {
@@ -242,12 +247,19 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
                     }
                 }
             },
-            _ = active_connections.join_next(), if !active_connections.is_empty() => {},
-            _ = main_connection_cancellation_token.cancelled() => { break; }
+            _ = active_connections.join_next(), if !active_connections.is_empty() => {
+                debug!("connection_task (intproxy <--> layer) completed.")
+            },
+            _ = main_connection_cancellation_token.cancelled() => {
+                debug!("intproxy main connection canceled.");
+                break;
+            }
             _ = tokio::time::sleep(Duration::from_secs(5)) => {
                 if active_connections.is_empty() {
+                    debug!("intproxy timeout, no active connections. Exiting.");
                     break;
                 }
+                debug!("intproxy 5 sec tick, active_connections: {active_connections:?}.");
             }
         }
     }
@@ -264,6 +276,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
         .await;
     }
 
+    debug!("intproxy joining main connection task");
     match main_connection_task_join.await {
         Ok(Err(err)) => Err(err.into()),
         Err(err) => {
