@@ -50,9 +50,9 @@ mod pause {
         #[future] pause_services: (KubeService, KubeService, String),
         #[future] kube_client: Client,
     ) {
-        let (requester_service, logger_service, namespace) = pause_services.await;
+        let (requester_service, logger_service) = pause_services.await;
         let kube_client = kube_client.await;
-        let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
+        let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &requester_service.namespace);
 
         let target_parts = logger_service.target.split('/').collect::<Vec<&str>>();
         let pod_name = target_parts[1];

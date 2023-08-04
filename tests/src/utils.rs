@@ -849,9 +849,9 @@ pub async fn udp_logger_service(#[future] kube_client: Client) -> KubeService {
 }
 
 /// Initiailizes the services needed for pause testing.
-/// Returns the requester service, the logger service, and the namespace.
+/// Returns the requester service, the logger service
 #[fixture]
-pub async fn pause_services(#[future] kube_client: Client) -> (KubeService, KubeService, String) {
+pub async fn pause_services(#[future] kube_client: Client) -> (KubeService, KubeService) {
     let kube_client = kube_client.await;
     let kube_client_clone = kube_client.clone();
     let namespace = random_string().to_string();
@@ -877,7 +877,7 @@ pub async fn pause_services(#[future] kube_client: Client) -> (KubeService, Kube
         async { kube_client },
     )
     .await;
-    (requester, logger, namespace)
+    (requester, logger)
 }
 
 /// Service that listens on port 80 and returns "remote: <DATA>" when getting "<DATA>" directly
