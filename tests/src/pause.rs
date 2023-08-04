@@ -96,7 +96,12 @@ mod pause {
             &requester_service.target,
             Some(&requester_service.namespace),
             Some(mirrord_pause_arg),
-            None,
+            Some(vec![
+                ("RUST_LOG", "mirrord=trace"),
+                ("MIRRORD_AGENT_RUST_LOG", "mirrord=trace"),
+                ("MIRRORD_AGENT_TTL", "30"),
+                ("MIRRORD_OPERATOR_ENABLE", "false"),
+            ]),
         )
         .await;
         let res = process.child.wait().await.unwrap();
@@ -129,11 +134,13 @@ mod pause {
 
         // Verify first log from local app.
         assert_eq!(next_log, hi_from_local_app);
+        println!("verified first log from local app.");
 
         // Verify that the second log from local app comes right after it - the deployed requester
         // was paused.
         let log_from_local = log_lines.next().await.unwrap().unwrap();
         assert_eq!(log_from_local, hi_again_from_local_app);
+        println!("verified second log from local app. Now verifying that the deployed app resumes (the target pod is unpaused).");
 
         // Verify that the deployed app resumes after the local app is done.
         let log_from_deployed_after_resume = log_lines.next().await.unwrap().unwrap();
