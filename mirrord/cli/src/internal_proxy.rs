@@ -74,10 +74,14 @@ fn print_port(listener: &TcpListener) -> Result<()> {
 
 /// Supposed to run as an async detached task, proxying the connection.
 /// We parse the protocol so we might add some logic here in the future?
-async fn connection_task(
-    stream: TcpStream,
-    agent_connection: (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
-) {
+async fn connection_task(config: LayerConfig, stream: TcpStream) {
+    let agent_connection = match connect_and_ping(&config).await {
+        Ok((agent_connection, _)) => agent_connection,
+        Err(err) => {
+            error!("connection to agent failed {err:#?}");
+            return;
+        }
+    };
     let mut layer_connection = actix_codec::Framed::new(stream, DaemonCodec::new());
     let (agent_sender, mut agent_receiver) = agent_connection;
     loop {
@@ -218,8 +222,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
 
     let mut active_connections = JoinSet::new();
 
-    let (agent_connection, _) = connect_and_ping(&config).await?;
-    active_connections.spawn(connection_task(stream, agent_connection));
+    active_connections.spawn(connection_task(config.clone(), stream));
 
     unsafe {
         detach_io()?;
@@ -231,12 +234,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
                 match res {
                     Ok((stream, _)) => {
                         let config = config.clone();
-                        active_connections.spawn(async move {
-                            match connect_and_ping(&config).await {
-                                Ok((agent_connection, _)) => connection_task(stream, agent_connection).await,
-                                Err(err) => error!("connection to agent failed {err:#?}")
-                            }
-                            });
+                        active_connections.spawn(connection_task(config, stream));
                     },
                     Err(err) => {
                         error!("Error accepting connection: {err:#?}");
