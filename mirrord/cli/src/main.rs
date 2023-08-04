@@ -381,7 +381,11 @@ async fn main() -> miette::Result<()> {
         mirrord_console::init_logger(&console_addr)?;
     } else if !init_ext_error_handler(&cli.commands) {
         registry()
-            .with(fmt::layer().with_writer(std::io::stderr))
+            .with(
+                fmt::layer()
+                    .with_thread_ids(true)
+                    .with_writer(std::io::stderr),
+            )
             .with(EnvFilter::from_default_env())
             .init();
     }
