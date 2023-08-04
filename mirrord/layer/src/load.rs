@@ -39,7 +39,8 @@ static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
 pub struct ExecutableName {
     /// Executable file name, for example `x86_64-linux-gnu-ld.bfd`.
     exec_name: String,
-    /// Last part of the process name as seen in the arguments, for example `ld` extracted from `/usr/bin/ld`.
+    /// Last part of the process name as seen in the arguments, for example `ld` extracted from
+    /// `/usr/bin/ld`.
     invoked_as: String,
 }
 
@@ -92,7 +93,11 @@ impl ExecutableName {
 
     /// Determine the [`LoadType`] for this process.
     pub fn load_type(&self, config: LayerConfig) -> LoadType {
-        let skip_processes = config.skip_processes.as_ref().map(VecOrSingle::as_slice).unwrap_or(&[]);
+        let skip_processes = config
+            .skip_processes
+            .as_ref()
+            .map(VecOrSingle::as_slice)
+            .unwrap_or(&[]);
 
         if self.should_load(skip_processes, config.skip_build_tools) {
             trace!("Loading into process: {self}.");
@@ -166,7 +171,7 @@ mod tests {
     ) {
         let executable_name = ExecutableName {
             exec_name: exec_name.to_string(),
-            invoked_as: invoked_as.to_string()
+            invoked_as: invoked_as.to_string(),
         };
 
         assert!(executable_name.should_load(skip_processes, skip_build_tools));
