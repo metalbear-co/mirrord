@@ -55,7 +55,7 @@ unsafe fn detach_io() -> Result<()> {
         // best effort
         let _ = std::io::stdout().lock().flush();
     }
-    for fd in [libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO] {
+    for fd in [libc::STDIN_FILENO, libc::STDOUT_FILENO] {
         redirect_fd_to_dev_null(fd);
     }
     Ok(())
