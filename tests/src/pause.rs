@@ -96,34 +96,13 @@ mod pause {
             &requester_service.target,
             Some(&requester_service.namespace),
             Some(mirrord_pause_arg),
-            Some(vec![
-                ("RUST_LOG", "mirrord=trace"),
-                ("MIRRORD_AGENT_RUST_LOG", "mirrord=trace"),
-                ("MIRRORD_AGENT_TTL", "30"),
-                ("MIRRORD_OPERATOR_ENABLE", "false"),
-            ]),
+            None,
         )
         .await;
         let res = process.child.wait().await.unwrap();
         println!("mirrord done running.");
         assert!(res.success());
 
-        let lp = LogParams {
-            container: Some(container_name.to_string()), // Default to first, we only have 1.
-            follow: true,
-            limit_bytes: None,
-            pretty: false,
-            previous: false,
-            since_seconds: Some(start_time.elapsed().as_secs() as i64),
-            tail_lines: None,
-            timestamps: false,
-        };
-
-        println!("getting log stream.");
-
-        let log_stream = pod_api.log_stream(pod_name, &lp).await.unwrap();
-
-        let mut log_lines = log_stream.lines();
         println!("Spooling logs forward to get to local app's first log.");
         // Skip all the logs by the deployed app from before we ran local.
         let mut next_log = log_lines.next().await.unwrap().unwrap();
