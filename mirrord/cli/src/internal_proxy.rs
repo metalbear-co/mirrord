@@ -276,7 +276,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
         .await;
     }
 
-    debug!("intproxy joining main connection task");
+    trace!("intproxy joining main connection task");
     match main_connection_task_join.await {
         Ok(Err(err)) => Err(err.into()),
         Err(err) => {
