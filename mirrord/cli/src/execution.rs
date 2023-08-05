@@ -111,16 +111,13 @@ impl MirrordExecution {
         let mut proxy_command =
             Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
 
-        let log_name = "intproxy.log";
-        let log = File::create(log_name).expect("failed to open log");
-
         // Set timeout when running from extension to be 30 seconds
         // since it might need to compile, build until it runs the actual process
         // and layer connects
         proxy_command
             .arg("intproxy")
             .stdout(std::process::Stdio::piped())
-            .stderr(log)
+            .stderr(std::process::Stdio::null())
             .stdin(std::process::Stdio::null());
 
         if let Some(timeout) = timeout {

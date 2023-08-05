@@ -58,7 +58,7 @@ unsafe fn detach_io() -> Result<()> {
         // best effort
         let _ = std::io::stdout().lock().flush();
     }
-    for fd in [libc::STDIN_FILENO, libc::STDOUT_FILENO] {
+    for fd in [libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO] {
         redirect_fd_to_dev_null(fd);
     }
     Ok(())
@@ -78,25 +78,18 @@ fn print_port(listener: &TcpListener) -> Result<()> {
 /// Supposed to run as an async detached task, proxying the connection.
 /// We parse the protocol so we might add some logic here in the future?
 async fn connection_task(config: LayerConfig, stream: TcpStream) {
-    debug!("intproxy connect_and_ping");
-    let agent_connection = match timeout(Duration::from_secs(5), connect_and_ping(&config)).await {
-        Ok(Ok((agent_connection, _))) => agent_connection,
-        Ok(Err(err)) => {
+    let agent_connection = match connect_and_ping(&config).await {
+        Ok((agent_connection, _)) => agent_connection,
+        Err(err) => {
             error!("connection to agent failed {err:#?}");
             return;
         }
-        Err(timeout_error) => {
-            error!("intproxy creation of connection to agent timed out: {timeout_error:?}");
-            return;
-        }
     };
-    debug!("starting connection task, layer_stream: {stream:?}");
     let mut layer_connection = actix_codec::Framed::new(stream, DaemonCodec::new());
     let (agent_sender, mut agent_receiver) = agent_connection;
     loop {
         select! {
             layer_message = layer_connection.next() => {
-                debug!("next layer to intproxy message: {layer_message:?}");
                 match layer_message {
                     Some(Ok(layer_message)) => {
                         if let Err(err) = agent_sender.send(layer_message).await {
@@ -119,7 +112,6 @@ async fn connection_task(config: LayerConfig, stream: TcpStream) {
                 }
             },
             agent_message = agent_receiver.recv() => {
-                debug!("next agent to intproxy message: {agent_message:?}");
                 match agent_message {
                     Some(agent_message) => {
                         if let Err(err) = layer_connection.send(agent_message).await {
@@ -257,19 +249,17 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
                     }
                 }
             },
-            _ = active_connections.join_next(), if !active_connections.is_empty() => {
-                debug!("connection_task (intproxy <--> layer) completed.")
-            },
+            _ = active_connections.join_next(), if !active_connections.is_empty() => {},
             _ = main_connection_cancellation_token.cancelled() => {
-                debug!("intproxy main connection canceled.");
+                trace!("intproxy main connection canceled.");
                 break;
             }
             _ = tokio::time::sleep(Duration::from_secs(5)) => {
                 if active_connections.is_empty() {
-                    debug!("intproxy timeout, no active connections. Exiting.");
+                    trace!("intproxy timeout, no active connections. Exiting.");
                     break;
                 }
-                debug!("intproxy 5 sec tick, active_connections: {active_connections:?}.");
+                trace!("intproxy 5 sec tick, active_connections: {active_connections:?}.");
             }
         }
     }
