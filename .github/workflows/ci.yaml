@@ -454,7 +454,7 @@ jobs:
         container-runtime: ["docker", "containerd"]
     uses: ./.github/workflows/reusable-e2e.yaml
     with:
-      operator: false
+      operator: true
       ref: ''
 
   lint_markdown:
