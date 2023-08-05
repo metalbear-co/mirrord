@@ -191,6 +191,10 @@ fn create_listen_socket() -> Result<TcpListener, InternalProxyError> {
         .listen(1024)
         .map_err(InternalProxyError::ListenError)?;
 
+    socket
+        .set_nonblocking(true)
+        .map_err(InternalProxyError::ListenError)?;
+
     // socket2 -> std -> tokio
     TcpListener::from_std(socket.into()).map_err(InternalProxyError::ListenError)
 }

@@ -40,7 +40,7 @@ exec.workspace = true
 anyhow.workspace = true
 reqwest.workspace = true
 const-random = "0.1.15"
-tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "macros", "process"]}
+tokio = { workspace = true, features = ["rt", "net", "macros"]}
 kube.workspace = true
 k8s-openapi.workspace = true
 miette = { version = "5", features = ["fancy"] }
