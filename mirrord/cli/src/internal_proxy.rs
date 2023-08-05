@@ -31,10 +31,7 @@ use tokio::{
     time::timeout,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{
-    error, info,
-    log::{debug, trace},
-};
+use tracing::{error, info, log::trace};
 
 use crate::{
     config::InternalProxyArgs,
