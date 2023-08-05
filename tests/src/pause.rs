@@ -77,7 +77,6 @@ mod pause {
         // skip 2 lines of flask prints.
         let mut log_lines = log_lines.skip(2);
 
-        let start_time = std::time::Instant::now();
         let command = vec!["pause/send_reqs.sh"];
         let mirrord_pause_arg = vec!["--pause"];
 
