@@ -89,6 +89,7 @@ use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
 use hooks::HookManager;
 use libc::{c_int, pid_t};
+use load::ExecutableName;
 use mirrord_config::{
     feature::{
         fs::{FsConfig, FsModeConfig},
@@ -256,7 +257,7 @@ pub(crate) static LISTEN_PORTS: OnceLock<BiMap<u16, u16>> = OnceLock::new();
 // that aren't safe to use after fork.
 
 /// Executable we're loaded to
-pub(crate) static EXECUTABLE_NAME: OnceLock<String> = OnceLock::new();
+pub(crate) static EXECUTABLE_NAME: OnceLock<ExecutableName> = OnceLock::new();
 
 /// Executable path we're loaded to
 pub(crate) static EXECUTABLE_PATH: OnceLock<String> = OnceLock::new();
@@ -274,16 +275,7 @@ pub(crate) fn is_debugger_port(addr: &SocketAddr) -> bool {
 
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
 fn layer_pre_initialization() -> Result<(), LayerError> {
-    let given_process = EXECUTABLE_NAME.get_or_try_init(|| {
-        std::env::current_exe()
-            .ok()
-            .and_then(|arg| {
-                arg.file_name()
-                    .and_then(|os_str| os_str.to_str())
-                    .map(String::from)
-            })
-            .ok_or(LayerError::NoProcessFound)
-    })?;
+    let given_process = EXECUTABLE_NAME.get_or_try_init(ExecutableName::from_env)?;
 
     EXECUTABLE_PATH.get_or_try_init(|| {
         std::env::current_exe().map(|arg| arg.to_string_lossy().into_owned())
@@ -317,7 +309,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         }
     }
 
-    match load::load_type(given_process, config) {
+    match given_process.load_type(config) {
         LoadType::Full(config) => layer_start(*config),
         #[cfg(target_os = "macos")]
         LoadType::SIPOnly => sip_only_layer_start(patch_binaries),
