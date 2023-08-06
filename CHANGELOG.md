@@ -8,6 +8,16 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.55.2](https://github.com/metalbear-co/mirrord/tree/3.55.2) - 2023-08-06
+
+
+### Fixed
+
+- macOS - Running Go build with mirrord while Go binary is SIP protected is
+  fixed by enabling file hooks on SIP load mode.
+  [#1764](https://github.com/metalbear-co/mirrord/issues/1764)
+
+
 ## [3.55.1](https://github.com/metalbear-co/mirrord/tree/3.55.1) - 2023-08-06
 
 
