@@ -8,6 +8,23 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.55.1](https://github.com/metalbear-co/mirrord/tree/3.55.1) - 2023-08-06
+
+
+### Fixed
+
+- Try to resolve an issue where internal proxy is under heavy load since bash
+  scripts does a lot of fork/exec by:
+  1. Increasing internal proxy's listen backlog (might not help on macOS)
+  2. Change internal proxy to create the upstream (agent) connection in a
+  different task, allowing it to keep accepting.
+  [#1716](https://github.com/metalbear-co/mirrord/issues/1716)
+- Fixed detecting skipped processes during layer injection.
+  [#1752](https://github.com/metalbear-co/mirrord/issues/1752)
+- Fix fork issues by changing layer runtime to be current thread
+  [#1759](https://github.com/metalbear-co/mirrord/issues/1759)
+
+
 ## [3.55.0](https://github.com/metalbear-co/mirrord/tree/3.55.0) - 2023-08-03
 
 
