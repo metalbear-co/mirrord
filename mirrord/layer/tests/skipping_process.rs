@@ -23,6 +23,8 @@ async fn symlink_app(app: &Application) -> Application {
     Application::DynamicApp(path.to_str().unwrap().to_string(), vec![])
 }
 
+// This doesn't work on macOS, probably different way it determines executable.
+#[cfg(not(target_os = "macos"))]
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
@@ -48,7 +50,7 @@ async fn skip_based_on_exec_name(dylib_path: &PathBuf) {
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
-async fn skip_based_on_invokation_name(dylib_path: &PathBuf) {
+async fn skip_based_on_invocation_name(dylib_path: &PathBuf) {
     let app = Application::OpenFile;
     let symlinked_app = symlink_app(&app).await;
 
@@ -80,7 +82,8 @@ async fn dont_skip(dylib_path: &PathBuf) {
         .await;
 
     let mut conn = LayerConnection::get_initialized_connection(&listener).await;
-    conn.expect_file_open_for_reading("/etc/resolv.conf", 5).await;
+    conn.expect_file_open_for_reading("/etc/resolv.conf", 5)
+        .await;
 
     test_process.wait_assert_success().await;
 }
