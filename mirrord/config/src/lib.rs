@@ -64,6 +64,8 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///
 /// ### Complete `config.json` {#root-complete}
 ///
+///  Don't use this example as a starting point, it's just here to show you all the available
+/// options.
 /// ```json
 /// {
 ///   "accept_invalid_certificates": false,
@@ -128,7 +130,8 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///   "operator": true,
 ///   "kubeconfig": "~/.kube/config",
 ///   "sip_binaries": "bash",
-///   "telemetry": true
+///   "telemetry": true,
+///   "kube_context": "my-cluster"
 /// }
 /// ```
 ///
@@ -287,6 +290,19 @@ pub struct LayerConfig {
     /// [For more information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md)
     #[config(env = "MIRRORD_TELEMETRY", default = true)]
     pub telemetry: bool,
+
+    /// ## kube_context {#root-kube_context}
+    ///
+    /// Kube context to use from the kubeconfig file.
+    /// Will use current context if not specified.
+    ///
+    /// ```json
+    /// {
+    ///  "kube_context": "mycluster"
+    /// }
+    /// ```
+    #[config(env = "MIRRORD_KUBE_CONTEXT")]
+    pub kube_context: Option<String>,
 }
 
 impl LayerConfig {
@@ -649,6 +665,7 @@ mod tests {
             connect_tcp: None,
             operator: None,
             sip_binaries: None,
+            kube_context: None,
         };
 
         assert_eq!(config, expect);

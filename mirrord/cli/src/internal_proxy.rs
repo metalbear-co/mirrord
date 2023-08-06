@@ -74,10 +74,14 @@ fn print_port(listener: &TcpListener) -> Result<()> {
 
 /// Supposed to run as an async detached task, proxying the connection.
 /// We parse the protocol so we might add some logic here in the future?
-async fn connection_task(
-    stream: TcpStream,
-    agent_connection: (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
-) {
+async fn connection_task(config: LayerConfig, stream: TcpStream) {
+    let agent_connection = match connect_and_ping(&config).await {
+        Ok((agent_connection, _)) => agent_connection,
+        Err(err) => {
+            error!("connection to agent failed {err:#?}");
+            return;
+        }
+    };
     let mut layer_connection = actix_codec::Framed::new(stream, DaemonCodec::new());
     let (agent_sender, mut agent_receiver) = agent_connection;
     loop {
@@ -153,14 +157,43 @@ async fn request_pause(
     }
 }
 
+/// Creates a listening socket using socket2
+/// to control the backlog and manage scenarios where
+/// the proxy is under heavy load.
+/// https://github.com/metalbear-co/mirrord/issues/1716#issuecomment-1663736500
+/// in macOS backlog is documented to be hardcoded limited to 128.
+fn create_listen_socket() -> Result<TcpListener, InternalProxyError> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::IPV4,
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )
+    .map_err(InternalProxyError::ListenError)?;
+
+    socket
+        .bind(&socket2::SockAddr::from(SocketAddrV4::new(
+            Ipv4Addr::LOCALHOST,
+            0,
+        )))
+        .map_err(InternalProxyError::ListenError)?;
+    socket
+        .listen(1024)
+        .map_err(InternalProxyError::ListenError)?;
+
+    socket
+        .set_nonblocking(true)
+        .map_err(InternalProxyError::ListenError)?;
+
+    // socket2 -> std -> tokio
+    TcpListener::from_std(socket.into()).map_err(InternalProxyError::ListenError)
+}
+
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
 pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
     let started = std::time::Instant::now();
     // Let it assign port for us then print it for the user.
-    let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-        .await
-        .map_err(InternalProxyError::ListenError)?;
+    let listener = create_listen_socket()?;
 
     let config = LayerConfig::from_env()?;
     // Create a main connection, that will be held until proxy is closed.
@@ -193,8 +226,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
 
     let mut active_connections = JoinSet::new();
 
-    let (agent_connection, _) = connect_and_ping(&config).await?;
-    active_connections.spawn(connection_task(stream, agent_connection));
+    active_connections.spawn(connection_task(config.clone(), stream));
 
     unsafe {
         detach_io()?;
@@ -205,8 +237,8 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
             res = listener.accept() => {
                 match res {
                     Ok((stream, _)) => {
-                        let (agent_connection, _) = connect_and_ping(&config).await?;
-                        active_connections.spawn(connection_task(stream, agent_connection));
+                        let config = config.clone();
+                        active_connections.spawn(connection_task(config, stream));
                     },
                     Err(err) => {
                         error!("Error accepting connection: {err:#?}");
@@ -215,11 +247,16 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
                 }
             },
             _ = active_connections.join_next(), if !active_connections.is_empty() => {},
-            _ = main_connection_cancellation_token.cancelled() => { break; }
+            _ = main_connection_cancellation_token.cancelled() => {
+                trace!("intproxy main connection canceled.");
+                break;
+            }
             _ = tokio::time::sleep(Duration::from_secs(5)) => {
                 if active_connections.is_empty() {
+                    trace!("intproxy timeout, no active connections. Exiting.");
                     break;
                 }
+                trace!("intproxy 5 sec tick, active_connections: {active_connections:?}.");
             }
         }
     }
@@ -236,6 +273,7 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
         .await;
     }
 
+    trace!("intproxy joining main connection task");
     match main_connection_task_join.await {
         Ok(Err(err)) => Err(err.into()),
         Err(err) => {

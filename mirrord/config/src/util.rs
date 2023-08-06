@@ -59,6 +59,13 @@ pub enum VecOrSingle<T> {
 }
 
 impl<T> VecOrSingle<T> {
+    pub fn as_slice(&self) -> &[T] {
+        match self {
+            Self::Single(v) => std::slice::from_ref(v),
+            Self::Multiple(v) => v.as_slice(),
+        }
+    }
+
     pub fn join<Separator>(self, sep: Separator) -> <[T] as Join<Separator>>::Output
     where
         [T]: Join<Separator>,

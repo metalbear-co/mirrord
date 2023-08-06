@@ -173,6 +173,7 @@ impl OperatorApi {
         let client = create_kube_api(
             config.accept_invalid_certificates,
             config.kubeconfig.clone(),
+            config.kube_context.clone(),
         )
         .await?;
 

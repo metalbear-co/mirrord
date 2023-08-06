@@ -18,7 +18,7 @@ resolver = "2"
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.54.1"
+version = "3.55.1"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -34,7 +34,7 @@ categories = ["development-tools", "backend", "devtool"]
 [workspace.dependencies]
 actix-codec = "0.5"
 bytes = "1"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros"] }
+tokio = { version = "1" }
 tokio-stream = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

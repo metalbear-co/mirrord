@@ -412,12 +412,18 @@ impl OperatorRole {
             },
             rules: Some(vec![
                 PolicyRule {
-                    api_groups: Some(vec!["".to_owned(), "apps".to_owned(), "batch".to_owned()]),
+                    api_groups: Some(vec![
+                        "".to_owned(),
+                        "apps".to_owned(),
+                        "batch".to_owned(),
+                        "argoproj.io".to_owned(),
+                    ]),
                     resources: Some(vec![
                         "pods".to_owned(),
                         "pods/ephemeralcontainers".to_owned(),
                         "deployments".to_owned(),
                         "jobs".to_owned(),
+                        "rollouts".to_owned(),
                     ]),
                     verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
                     ..Default::default()
