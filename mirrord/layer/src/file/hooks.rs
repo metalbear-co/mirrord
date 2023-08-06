@@ -111,18 +111,6 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
 }
 
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn opendir_detour(raw_path: *const c_char) -> usize {
-    // to avoid adding new messages to the protocol, we can just call open + fdopendir.
-    open_logic(raw_path, libc::O_DIRECTORY, 0)
-        .and_then(|fd| fdopendir(fd))
-        .unwrap_or_bypass_with(|_bypass| {
-            #[cfg(target_os = "macos")]
-            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
-            FN_OPENDIR(raw_path)
-        })
-}
-
-#[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fdopendir_detour(fd: RawFd) -> usize {
     fdopendir(fd).unwrap_or_bypass_with(|_| FN_FDOPENDIR(fd))
 }
@@ -864,13 +852,6 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         );
         replace!(
             hook_manager,
-            "opendir",
-            opendir_detour,
-            FnOpendir,
-            FN_OPENDIR
-        );
-        replace!(
-            hook_manager,
             "fdopendir",
             fdopendir_detour,
             FnFdopendir,
@@ -922,13 +903,6 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             fdopendir_detour,
             FnFdopendir,
             FN_FDOPENDIR
-        );
-        replace!(
-            hook_manager,
-            "opendir$INODE64",
-            opendir_detour,
-            FnOpendir,
-            FN_OPENDIR
         );
         replace!(
             hook_manager,
