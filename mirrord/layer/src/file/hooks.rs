@@ -44,13 +44,13 @@ use crate::{
 /// a different one according to the bypass.
 /// We pass reference to bypass to make sure the bypass lives with the pointer.
 #[cfg(target_os = "macos")]
-fn update_ptr_from_bypass(ptr: *const c_char, bypass: &Bypass) -> *const c_char {
+fn update_ptr_from_bypass(ptr: *const c_char, bypass: Bypass) -> *const c_char {
     match bypass {
         // For some reason, the program is trying to carry out an operation on a path that is
         // inside mirrord's temp bin dir. The detour has returned us the original path of the file
         // (stripped mirrord's dir path), so now we carry out the operation locally, on the stripped
         // path.
-        Bypass::FileOperationInMirrordBinTempDir(stripped_ptr) => stripped_ptr.as_ptr(),
+        Bypass::FileOperationInMirrordBinTempDir(stripped_ptr) => stripped_ptr,
         _ => ptr,
     }
 }
@@ -84,7 +84,7 @@ pub(super) unsafe extern "C" fn open_detour(
     } else {
         open_logic(raw_path, open_flags, mode).unwrap_or_bypass_with(|_bypass| {
             #[cfg(target_os = "macos")]
-            let raw_path = update_ptr_from_bypass(raw_path, &&_bypass);
+            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
             FN_OPEN(raw_path, open_flags, mode)
         })
     }
@@ -104,7 +104,7 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
     } else {
         open_logic(raw_path, open_flags, mode).unwrap_or_bypass_with(|_bypass| {
             #[cfg(target_os = "macos")]
-            let raw_path = update_ptr_from_bypass(raw_path, &_bypass);
+            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
             FN_OPEN_NOCANCEL(raw_path, open_flags, mode)
         })
     }
@@ -117,7 +117,7 @@ pub(crate) unsafe extern "C" fn opendir_detour(raw_path: *const c_char) -> usize
         .and_then(|fd| fdopendir(fd))
         .unwrap_or_bypass_with(|_bypass| {
             #[cfg(target_os = "macos")]
-            let raw_path = update_ptr_from_bypass(raw_path, &&_bypass);
+            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
             FN_OPENDIR(raw_path)
         })
 }
@@ -209,7 +209,7 @@ pub(crate) unsafe extern "C" fn openat_detour(
 
     openat(fd, raw_path.checked_into(), open_options).unwrap_or_bypass_with(|_bypass| {
         #[cfg(target_os = "macos")]
-        let raw_path = update_ptr_from_bypass(raw_path, &_bypass);
+        let raw_path = update_ptr_from_bypass(raw_path, _bypass);
         FN_OPENAT(fd, raw_path, open_flags)
     })
 }
@@ -224,7 +224,7 @@ pub(crate) unsafe extern "C" fn _openat_nocancel_detour(
 
     openat(fd, raw_path.checked_into(), open_options).unwrap_or_bypass_with(|_bypass| {
         #[cfg(target_os = "macos")]
-        let raw_path = update_ptr_from_bypass(raw_path, &_bypass);
+        let raw_path = update_ptr_from_bypass(raw_path, _bypass);
         FN__OPENAT_NOCANCEL(fd, raw_path, open_flags)
     })
 }
@@ -494,7 +494,7 @@ pub(crate) unsafe extern "C" fn _write_nocancel_detour(
 unsafe fn access_logic(raw_path: *const c_char, mode: c_int) -> c_int {
     access(raw_path.checked_into(), mode as u8).unwrap_or_bypass_with(|_bypass| {
         #[cfg(target_os = "macos")]
-        let raw_path = update_ptr_from_bypass(raw_path, &_bypass);
+        let raw_path = update_ptr_from_bypass(raw_path, _bypass);
         FN_ACCESS(raw_path, mode)
     })
 }
@@ -586,7 +586,7 @@ unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) 
         })
         .unwrap_or_bypass_with(|_bypass| {
             #[cfg(target_os = "macos")]
-            let raw_path = update_ptr_from_bypass(raw_path, &_bypass);
+            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
             FN_LSTAT(raw_path, out_stat)
         })
 }
@@ -622,7 +622,7 @@ unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -
         })
         .unwrap_or_bypass_with(|_bypass| {
             #[cfg(target_os = "macos")]
-            let raw_path = update_ptr_from_bypass(raw_path, &_bypass);
+            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
             FN_STAT(raw_path, out_stat)
         })
 }
@@ -650,7 +650,7 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
         })
         .unwrap_or_bypass_with(|_bypass| {
             #[cfg(target_os = "macos")]
-            let raw_path = update_ptr_from_bypass(raw_path, &_bypass);
+            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
             FN___XSTAT(ver, raw_path, out_stat)
         })
 }
@@ -684,7 +684,7 @@ unsafe extern "C" fn fstatat_detour(
 ) -> c_int {
     fstatat_logic(fd, raw_path, out_stat, flag).unwrap_or_bypass_with(|_bypass| {
         #[cfg(target_os = "macos")]
-        let raw_path = update_ptr_from_bypass(raw_path, &_bypass);
+        let raw_path = update_ptr_from_bypass(raw_path, _bypass);
         FN_FSTATAT(fd, raw_path, out_stat, flag)
     })
 }

@@ -94,7 +94,7 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
 }
 
 /// Hold a vector of new CStrings to use instead of the original argv.
-#[derive(Default, Debug)]
+#[derive(Default)]
 struct Argv(Vec<CString>);
 
 /// This must be memory-same as just a `*const c_char`.
@@ -271,7 +271,7 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
             let old_len = *buflen;
 
             // SAFETY:  `later_ptr` is a pointer to a later char in the same buffer.
-            let prefix_len = later_ptr.as_ptr().offset_from(path);
+            let prefix_len = later_ptr.offset_from(path);
 
             let stripped_len = old_len - prefix_len as u32;
 
@@ -279,7 +279,7 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
             // - can read `stripped_len` bytes from `path_cstring` because it's its length.
             // - can write `stripped_len` bytes to `path`, because the length of the path after
             //   stripping a prefix will always be shorter than before.
-            path.copy_from(later_ptr.as_ptr(), stripped_len as _);
+            path.copy_from(later_ptr, stripped_len as _);
 
             // SAFETY:
             // - We call the original function before this, so if it's not a valid pointer we should
@@ -303,7 +303,7 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
     let detour: Detour<PathBuf> = raw_path.checked_into();
     let raw_path = if let Bypass(FileOperationInMirrordBinTempDir(ptr)) = detour {
         trace!("dlopen called with a path inside our patch dir, switching with fixed pointer.");
-        ptr.as_ptr()
+        ptr
     } else {
         trace!("dlopen called on path {detour:?}.");
         raw_path
