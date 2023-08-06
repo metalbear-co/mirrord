@@ -1,5 +1,9 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{collections::VecDeque, ffi::CStr, path::PathBuf};
+use std::{
+    collections::VecDeque,
+    ffi::{CStr, CString},
+    path::PathBuf,
+};
 
 use libc::c_char;
 use mirrord_protocol::{file::OpenOptionsInternal, RemoteResult};
@@ -132,6 +136,25 @@ impl CheckedInto<PathBuf> for *const c_char {
         let str_det = CheckedInto::<&str>::checked_into(self);
         #[cfg(target_os = "macos")]
         let str_det = str_det.and_then(|path_str| {
+            let path = PathBuf::from(path_str);
+            // if path is relative, and we're in the patch dir, we need to add the real path before
+            // the relative path to patch it correctly.
+            if path.is_relative() {
+                if let Ok(our_path) = std::env::current_dir() {
+                    if let Ok(patched_path) = our_path
+                        .strip_prefix(MIRRORD_TEMP_BIN_DIR_STRING.as_str())
+                        .or_else(|_| {
+                            our_path.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str())
+                        })
+                    {
+                        // will make ../fun /tmp/mirrord-bin/../fun
+                        let final_path = patched_path.join(path);
+                        return Detour::Bypass(Bypass::FileOperationInMirrordBinTempDir(
+                            CString::new(final_path.to_str().unwrap()).unwrap(),
+                        ));
+                    }
+                }
+            }
             let optional_stripped_path = path_str
                 .strip_prefix(MIRRORD_TEMP_BIN_DIR_STRING.as_str())
                 .or_else(|| path_str.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()));
@@ -141,7 +164,7 @@ impl CheckedInto<PathBuf> for *const c_char {
                 // `path_str`, `stripped_path.as_ptr()` returns a pointer to a later index
                 // in the same string owned by the caller (the hooked program).
                 Detour::Bypass(Bypass::FileOperationInMirrordBinTempDir(
-                    stripped_path.as_ptr() as _,
+                    CString::new(stripped_path).unwrap(),
                 ))
             } else {
                 Detour::Success(path_str) // strip is None, path not in temp dir.

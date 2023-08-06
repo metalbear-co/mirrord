@@ -313,7 +313,9 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         LoadType::Full(config) => layer_start(*config),
         #[cfg(target_os = "macos")]
         LoadType::SIPOnly => sip_only_layer_start(patch_binaries),
-        LoadType::Skip => {}
+        LoadType::Skip => {
+
+        }
     }
 
     Ok(())
@@ -527,6 +529,9 @@ fn sip_only_layer_start(patch_binaries: Vec<String>) {
     let mut hook_manager = HookManager::default();
 
     unsafe { exec_utils::enable_execve_hook(&mut hook_manager, patch_binaries) };
+    // we need to hook file access to patch path to our temp bin.
+    FILE_FILTER.set(FileFilter::new(FsConfig { mode: FsModeConfig::Local, read_write: None, read_only: None, local: None })).expect("FILE_FILTER set failed");
+    unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
 }
 
 /// Acts as an API to the various features of mirrord-layer, holding the actual feature handler

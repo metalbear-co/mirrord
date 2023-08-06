@@ -9,10 +9,9 @@ use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
-use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf, sync::OnceLock};
-
 #[cfg(target_os = "macos")]
-use libc::c_char;
+use std::ffi::CString;
+use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf, sync::OnceLock};
 
 use crate::error::HookError;
 
@@ -146,7 +145,7 @@ pub(crate) enum Bypass {
     /// We hooked a file operation on a path in mirrord's bin directory. So do the operation
     /// locally, but on the original path, not the one in mirrord's dir.
     #[cfg(target_os = "macos")]
-    FileOperationInMirrordBinTempDir(*const c_char),
+    FileOperationInMirrordBinTempDir(CString),
 
     /// File [`PathBuf`] should be ignored (used for tests).
     IgnoredFile(PathBuf),
