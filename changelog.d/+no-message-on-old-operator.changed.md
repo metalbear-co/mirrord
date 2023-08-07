@@ -1,0 +1,1 @@
+Change operator / cli version mismatch to show only when mirrord is older than operator

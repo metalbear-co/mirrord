@@ -27,6 +27,7 @@ async fn test_dns_resolve(
         .await;
 
     let mut conn = layer_connection.codec;
+
     let msg = conn.try_next().await.unwrap().unwrap();
 
     let ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node }) = msg else {

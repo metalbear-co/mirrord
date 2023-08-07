@@ -336,10 +336,6 @@ impl TryFrom<Option<OutgoingFilterConfig>> for OutgoingSelector {
 }
 
 impl OutgoingSelector {
-    pub(crate) fn is_remote(&self) -> bool {
-        matches!(self, OutgoingSelector::Remote(_))
-    }
-
     /// Checks if the `address` matches the specified outgoing filter, and returns a `bool`
     /// indicating if this connection should go through the remote pod, or from the local app.
     ///

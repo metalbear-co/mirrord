@@ -94,6 +94,7 @@ pub enum ClientMessage {
     GetAddrInfoRequest(GetAddrInfoRequest),
     /// Whether to pause or unpause the target container.
     PauseTargetRequest(bool),
+    SwitchProtocolVersion(#[bincode(with_serde)] semver::Version),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
@@ -131,6 +132,7 @@ pub enum DaemonMessage {
     GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
     GetAddrInfoResponse(GetAddrInfoResponse),
     PauseTarget(DaemonPauseTarget),
+    SwitchProtocolVersionResponse(#[bincode(with_serde)] semver::Version),
 }
 
 pub struct ClientCodec {
