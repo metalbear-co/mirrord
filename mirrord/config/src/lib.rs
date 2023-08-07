@@ -11,6 +11,7 @@
 pub mod agent;
 pub mod config;
 pub mod feature;
+pub mod internal_proxy;
 pub mod target;
 pub mod util;
 
@@ -24,7 +25,7 @@ use tracing::warn;
 
 use crate::{
     agent::AgentConfig, config::source::MirrordConfigSource, feature::FeatureConfig,
-    target::TargetConfig, util::VecOrSingle,
+    internal_proxy::InternalProxyConfig, target::TargetConfig, util::VecOrSingle,
 };
 
 const PAUSE_WITHOUT_STEAL_WARNING: &str =
@@ -303,6 +304,10 @@ pub struct LayerConfig {
     /// ```
     #[config(env = "MIRRORD_KUBE_CONTEXT")]
     pub kube_context: Option<String>,
+
+    /// # internal_proxy {#root-internal_proxy}
+    #[config(nested)]
+    pub internal_proxy: InternalProxyConfig,
 }
 
 impl LayerConfig {
@@ -666,6 +671,7 @@ mod tests {
             operator: None,
             sip_binaries: None,
             kube_context: None,
+            internal_proxy: None
         };
 
         assert_eq!(config, expect);
