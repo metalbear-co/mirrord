@@ -379,7 +379,7 @@ fn set_globals(config: &LayerConfig) {
         .expect("Setting REMOTE_DNS singleton");
 
     {
-        let outgoing_selector = config
+        let outgoing_selector: OutgoingSelector = config
             .feature
             .network
             .outgoing
@@ -387,6 +387,15 @@ fn set_globals(config: &LayerConfig) {
             .clone()
             .try_into()
             .expect("Failed setting up outgoing traffic filter!");
+
+        if outgoing_selector.is_remote() && !REMOTE_DNS.get().unwrap() {
+            warn!(
+                "mirrord outgoing traffic filter is set to resolve host names through the remote \
+                environment, but the DNS feature is disabled!\nThis is most likely is a mistake!\n\
+                > Consider turning on the remote DNS resolving feature, or changing the outgoing \
+                traffic filter to `local`."
+            );
+        }
 
         // This will crash the app if it comes before `ENABLED_(TCP|UDP)_OUTGOING`!
         OUTGOING_SELECTOR
