@@ -101,7 +101,7 @@ use mirrord_config::{
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
-    tcp::{HttpResponse, LayerTcpSteal},
+    tcp::{HttpResponseFallback, LayerTcpSteal},
     ClientMessage, DaemonMessage,
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
@@ -599,7 +599,7 @@ struct Layer {
     /// Receives responses in the layer loop to be forwarded to the agent.
     ///
     /// Part of the stealer HTTP traffic feature, see `http`.
-    pub http_response_receiver: Receiver<HttpResponse>,
+    pub http_response_receiver: Receiver<HttpResponseFallback>,
 
     /// Sets the way we handle [`HookMessage::Tcp`] in `handle_hook_message`:
     ///
@@ -768,6 +768,7 @@ impl Layer {
             DaemonMessage::PauseTarget(_) => {
                 unreachable!("We set pausing target only on initialization, shouldn't happen")
             }
+            DaemonMessage::SwitchProtocolVersionResponse(_) => Ok(()),
         }
     }
 }
@@ -812,6 +813,16 @@ async fn thread_loop(
     } = config;
     let mut layer = Layer::new(tx, rx, incoming);
     layer.ping_interval.tick().await;
+
+    if let Err(err) = layer
+        .tx
+        .send(ClientMessage::SwitchProtocolVersion(
+            mirrord_protocol::VERSION.clone(),
+        ))
+        .await
+    {
+        warn!("Unable to switch protocol: {err}");
+    }
 
     loop {
         select! {
@@ -860,7 +871,12 @@ async fn thread_loop(
                 layer.send(message).await.unwrap();
             }
             Some(response) = layer.http_response_receiver.recv() => {
-                layer.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response))).await.unwrap();
+                let message = match response {
+                    HttpResponseFallback::Framed(res) => ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(res)),
+                    HttpResponseFallback::Fallback(res) => ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(res))
+                };
+
+                layer.send(message).await.unwrap();
             }
             _ = layer.ping_interval.tick() => {
                 if !layer.ping {

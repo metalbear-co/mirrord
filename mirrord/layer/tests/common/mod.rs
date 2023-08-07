@@ -39,7 +39,14 @@ impl LayerConnection {
     async fn accept_library_connection(listener: &TcpListener) -> Framed<TcpStream, DaemonCodec> {
         let (stream, _) = listener.accept().await.unwrap();
         println!("Got connection from library.");
-        Framed::new(stream, DaemonCodec::new())
+        let mut codec = Framed::new(stream, DaemonCodec::new());
+
+        assert!(matches!(
+            codec.next().await,
+            None | Some(Ok(ClientMessage::SwitchProtocolVersion(_)))
+        ));
+
+        codec
     }
 
     /// Accept the library's connection and verify initial ENV message

@@ -26,4 +26,7 @@ pub enum HttpTrafficError {
 
     #[error("Failed closing connection with `{0}`!")]
     CloseSender(#[from] tokio::sync::mpsc::error::SendError<ConnectionId>),
+
+    #[error(transparent)]
+    Never(#[from] std::convert::Infallible),
 }
