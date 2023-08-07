@@ -5,10 +5,12 @@ use std::{path::Path, time::Duration};
 
 #[cfg(not(target_os = "macos"))]
 use futures::SinkExt;
+use futures::StreamExt;
+use mirrord_protocol::ClientMessage;
 #[cfg(not(target_os = "macos"))]
 use mirrord_protocol::{
     file::{MetadataInternal, XstatRequest, XstatResponse},
-    ClientMessage, DaemonMessage, FileRequest, FileResponse,
+    DaemonMessage, FileRequest, FileResponse,
 };
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
@@ -52,8 +54,18 @@ async fn bash_script(dylib_path: &Path) {
     // After the process forks we create a new main loop layer task in the child process.
     // That connection will die as soon as the new process calls execve, then a new layer will be
     // initialized.
-    let mut _layer_after_fork_before_exec =
+    let mut layer_after_fork_before_exec =
         LayerConnection::get_initialized_connection(&listener).await;
+
+    assert!(matches!(
+        layer_after_fork_before_exec
+            .codec
+            .next()
+            .await
+            .unwrap()
+            .unwrap(),
+        ClientMessage::SwitchProtocolVersion(_)
+    ));
 
     let mut cat_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     // TODO: theoretically the connections arrival order could be different, should we handle it?
@@ -61,6 +73,11 @@ async fn bash_script(dylib_path: &Path) {
     cat_layer_connection
         .expect_file_open_for_reading("/very_interesting_file", fd)
         .await;
+
+    assert!(matches!(
+        cat_layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::SwitchProtocolVersion(_)
+    ));
 
     #[cfg(not(target_os = "macos"))]
     {
