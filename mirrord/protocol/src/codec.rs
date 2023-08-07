@@ -132,6 +132,7 @@ pub enum DaemonMessage {
     GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
     GetAddrInfoResponse(GetAddrInfoResponse),
     PauseTarget(DaemonPauseTarget),
+    SwitchProtocolVersionResponse(#[bincode(with_serde)] semver::Version),
 }
 
 pub struct ClientCodec {

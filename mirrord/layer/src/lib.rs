@@ -758,6 +758,7 @@ impl Layer {
             DaemonMessage::PauseTarget(_) => {
                 unreachable!("We set pausing target only on initialization, shouldn't happen")
             }
+            DaemonMessage::SwitchProtocolVersionResponse(_) => Ok(()),
         }
     }
 }
