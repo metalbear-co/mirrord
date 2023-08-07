@@ -111,6 +111,4 @@ pub struct LicenseInfoOwned {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub enum OperatorFeatures {
     ProxyApi,
-    #[serde(other)]
-    Unknown,
 }
