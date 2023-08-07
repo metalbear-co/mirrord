@@ -5,12 +5,13 @@ use std::{
     fmt,
     net::IpAddr,
     pin::Pin,
+    sync::LazyLock,
     task::{Context, Poll},
 };
 
 use bincode::{Decode, Encode};
 use bytes::Bytes;
-use http_body_util::{combinators::BoxBody, BodyExt};
+use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::{
     body::{Body, Frame, Incoming},
     http,
@@ -18,6 +19,7 @@ use hyper::{
     HeaderMap, Method, Request, Response, StatusCode, Uri, Version,
 };
 use mirrord_macros::protocol_break;
+use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
@@ -69,7 +71,8 @@ pub enum DaemonTcp {
     /// Used to notify the subscription occured, needed for e2e tests to remove sleeps and
     /// flakiness.
     SubscribeResult(RemoteResult<Port>),
-    HttpRequest(HttpRequest),
+    HttpRequest(HttpRequest<Vec<u8>>),
+    HttpRequestFramed(HttpRequest<InternalHttpBody>),
 }
 
 /// Wraps the string that will become a [`fancy_regex::Regex`], providing a nice API in
@@ -132,12 +135,13 @@ pub enum LayerTcpSteal {
     ConnectionUnsubscribe(ConnectionId),
     PortUnsubscribe(Port),
     Data(TcpData),
-    HttpResponse(HttpResponse),
+    HttpResponse(HttpResponse<Vec<u8>>),
+    HttpResponseFramed(HttpResponse<InternalHttpBody>),
 }
 
 /// (De-)Serializable HTTP request.
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-pub struct InternalHttpRequest {
+pub struct InternalHttpRequest<Body> {
     #[serde(with = "http_serde::method")]
     pub method: Method,
 
@@ -150,14 +154,14 @@ pub struct InternalHttpRequest {
     #[serde(with = "http_serde::version")]
     pub version: Version,
 
-    pub body: InternalHttpBody,
+    pub body: Body,
 }
 
-impl<E> From<InternalHttpRequest> for Request<BoxBody<Bytes, E>>
+impl<E> From<InternalHttpRequest<InternalHttpBody>> for Request<BoxBody<Bytes, E>>
 where
     E: From<Infallible>,
 {
-    fn from(value: InternalHttpRequest) -> Self {
+    fn from(value: InternalHttpRequest<InternalHttpBody>) -> Self {
         let InternalHttpRequest {
             method,
             uri,
@@ -175,14 +179,25 @@ where
     }
 }
 
+pub enum HttpRequestFallback {
+    Body(HttpRequest<InternalHttpBody>),
+    Fallback(HttpRequest<Vec<u8>>),
+}
+
+pub static HTTP_REQUEST_FALLBACK_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| "<1.3.0".parse().expect("Bad Identifier"));
+
 /// Protocol break - on version 2, please add source port, dest/src IP to the message
 /// so we can avoid losing this information.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 #[protocol_break(2)]
-
-pub struct HttpRequest {
+#[bincode(bounds = "for<'de> Body: Serialize + Deserialize<'de>")]
+pub struct HttpRequest<Body>
+where
+    for<'de> Body: Serialize + Deserialize<'de>,
+{
     #[bincode(with_serde)]
-    pub internal_request: InternalHttpRequest,
+    pub internal_request: InternalHttpRequest<Body>,
     pub connection_id: ConnectionId,
     pub request_id: RequestId,
     /// Unlike TcpData, HttpRequest includes the port, so that the connection can be created
@@ -190,7 +205,10 @@ pub struct HttpRequest {
     pub port: Port,
 }
 
-impl HttpRequest {
+impl<B: Serialize> HttpRequest<B>
+where
+    for<'de> B: Serialize + Deserialize<'de>,
+{
     /// Gets this request's HTTP version.
     pub fn version(&self) -> Version {
         self.internal_request.version
@@ -199,7 +217,7 @@ impl HttpRequest {
 
 /// (De-)Serializable HTTP response.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-pub struct InternalHttpResponse {
+pub struct InternalHttpResponse<Body> {
     #[serde(with = "http_serde::status_code")]
     status: StatusCode,
 
@@ -209,7 +227,28 @@ pub struct InternalHttpResponse {
     #[serde(with = "http_serde::header_map")]
     headers: HeaderMap,
 
-    body: InternalHttpBody,
+    body: Body,
+}
+
+impl<B> InternalHttpResponse<B> {
+    pub fn map_body<T, F>(self, cb: F) -> InternalHttpResponse<T>
+    where
+        F: FnOnce(B) -> T,
+    {
+        let InternalHttpResponse {
+            status,
+            version,
+            headers,
+            body,
+        } = self;
+
+        InternalHttpResponse {
+            status,
+            version,
+            headers,
+            body: cb(body),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
@@ -296,18 +335,54 @@ impl fmt::Debug for InternalHttpBodyFrame {
     }
 }
 
+#[derive(Debug)]
+pub enum HttpResponseFallback {
+    Body(HttpResponse<InternalHttpBody>),
+    Fallback(HttpResponse<Vec<u8>>),
+}
+
+impl HttpResponseFallback {
+    pub fn connection_id(&self) -> ConnectionId {
+        match self {
+            HttpResponseFallback::Body(req) => req.connection_id,
+            HttpResponseFallback::Fallback(req) => req.connection_id,
+        }
+    }
+
+    pub fn request_id(&self) -> RequestId {
+        match self {
+            HttpResponseFallback::Body(req) => req.request_id,
+            HttpResponseFallback::Fallback(req) => req.request_id,
+        }
+    }
+
+    pub fn into_hyper<E>(self) -> Result<Response<BoxBody<Bytes, E>>, http::Error>
+    where
+        E: From<Infallible>,
+    {
+        match self {
+            HttpResponseFallback::Body(req) => req.internal_response.try_into(),
+            HttpResponseFallback::Fallback(req) => req.internal_response.try_into(),
+        }
+    }
+}
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct HttpResponse {
+#[bincode(bounds = "for<'de> Body: Serialize + Deserialize<'de>")]
+pub struct HttpResponse<Body>
+where
+    for<'de> Body: Serialize + Deserialize<'de>,
+{
     /// This is used to make sure the response is sent in its turn, after responses to all earlier
     /// requests were already sent.
     pub port: Port,
     pub connection_id: ConnectionId,
     pub request_id: RequestId,
     #[bincode(with_serde)]
-    pub internal_response: InternalHttpResponse,
+    pub internal_response: InternalHttpResponse<Body>,
 }
 
-impl HttpResponse {
+impl HttpResponse<InternalHttpBody> {
     /// We cannot implement this with the [`From`] trait as it doesn't support `async` conversions,
     /// and we also need some extra parameters.
     ///
@@ -317,7 +392,7 @@ impl HttpResponse {
         port: Port,
         connection_id: ConnectionId,
         request_id: RequestId,
-    ) -> Result<HttpResponse, hyper::Error> {
+    ) -> Result<HttpResponse<InternalHttpBody>, hyper::Error> {
         let (
             Parts {
                 status,
@@ -345,7 +420,11 @@ impl HttpResponse {
         })
     }
 
-    pub fn response_from_request(request: HttpRequest, status: StatusCode, message: &str) -> Self {
+    pub fn response_from_request(
+        request: HttpRequest<InternalHttpBody>,
+        status: StatusCode,
+        message: &str,
+    ) -> Self {
         let HttpRequest {
             internal_request: InternalHttpRequest { version, .. },
             connection_id,
@@ -376,7 +455,10 @@ impl HttpResponse {
         }
     }
 
-    pub fn empty_response_from_request(request: HttpRequest, status: StatusCode) -> Self {
+    pub fn empty_response_from_request(
+        request: HttpRequest<InternalHttpBody>,
+        status: StatusCode,
+    ) -> Self {
         let HttpRequest {
             internal_request: InternalHttpRequest { version, .. },
             connection_id,
@@ -398,13 +480,13 @@ impl HttpResponse {
     }
 }
 
-impl<E> TryFrom<InternalHttpResponse> for Response<BoxBody<Bytes, E>>
+impl<E> TryFrom<InternalHttpResponse<InternalHttpBody>> for Response<BoxBody<Bytes, E>>
 where
     E: From<Infallible>,
 {
     type Error = http::Error;
 
-    fn try_from(value: InternalHttpResponse) -> Result<Self, Self::Error> {
+    fn try_from(value: InternalHttpResponse<InternalHttpBody>) -> Result<Self, Self::Error> {
         let InternalHttpResponse {
             status,
             version,
@@ -418,5 +500,30 @@ where
         }
 
         builder.body(BoxBody::new(body.map_err(|e| e.into())))
+    }
+}
+
+impl<E> TryFrom<InternalHttpResponse<Vec<u8>>> for Response<BoxBody<Bytes, E>>
+where
+    E: From<Infallible>,
+{
+    type Error = http::Error;
+
+    fn try_from(value: InternalHttpResponse<Vec<u8>>) -> Result<Self, Self::Error> {
+        let InternalHttpResponse {
+            status,
+            version,
+            headers,
+            body,
+        } = value;
+
+        let mut builder = Response::builder().status(status).version(version);
+        if let Some(h) = builder.headers_mut() {
+            *h = headers;
+        }
+
+        builder.body(BoxBody::new(
+            Full::new(Bytes::from(body)).map_err(|e| e.into()),
+        ))
     }
 }

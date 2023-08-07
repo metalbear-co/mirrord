@@ -1,4 +1,4 @@
-use mirrord_protocol::tcp::{DaemonTcp, HttpResponse, LayerTcpSteal, TcpData};
+use mirrord_protocol::tcp::{DaemonTcp, HttpResponseFallback, LayerTcpSteal, TcpData};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use super::*;
@@ -39,13 +39,14 @@ impl TcpStealerApi {
         command_tx: Sender<StealerCommand>,
         task_status: TaskStatus,
         channel_size: usize,
+        protocol_version: semver::Version,
     ) -> Result<Self, AgentError> {
         let (daemon_tx, daemon_rx) = mpsc::channel(channel_size);
 
         command_tx
             .send(StealerCommand {
                 client_id,
-                command: Command::NewClient(daemon_tx),
+                command: Command::NewClient(daemon_tx, protocol_version),
             })
             .await?;
 
@@ -134,8 +135,19 @@ impl TcpStealerApi {
     /// agent, to an internal stealer command [`Command::HttpResponse`].
     ///
     /// The actual handling of this message is done in [`TcpConnectionStealer`].
-    pub(crate) async fn http_response(&mut self, response: HttpResponse) -> Result<(), AgentError> {
+    pub(crate) async fn http_response(
+        &mut self,
+        response: HttpResponseFallback,
+    ) -> Result<(), AgentError> {
         self.send_command(Command::HttpResponse(response)).await
+    }
+
+    pub(crate) async fn switch_protocl_version(
+        &mut self,
+        version: semver::Version,
+    ) -> Result<(), AgentError> {
+        self.send_command(Command::SwitchProtocolVersion(version))
+            .await
     }
 
     /// Handles the conversion of [`LayerTcpSteal::ClientClose`], that is passed from the
@@ -156,7 +168,14 @@ impl TcpStealerApi {
             }
             LayerTcpSteal::PortUnsubscribe(port) => self.port_unsubscribe(port).await,
             LayerTcpSteal::Data(tcp_data) => self.client_data(tcp_data).await,
-            LayerTcpSteal::HttpResponse(response) => self.http_response(response).await,
+            LayerTcpSteal::HttpResponse(response) => {
+                self.http_response(HttpResponseFallback::Fallback(response))
+                    .await
+            }
+            LayerTcpSteal::HttpResponseFramed(response) => {
+                self.http_response(HttpResponseFallback::Body(response))
+                    .await
+            }
         }
     }
 }
