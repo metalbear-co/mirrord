@@ -5,11 +5,10 @@ use std::{path::Path, time::Duration};
 
 #[cfg(not(target_os = "macos"))]
 use futures::SinkExt;
-use mirrord_protocol::ClientMessage;
 #[cfg(not(target_os = "macos"))]
 use mirrord_protocol::{
     file::{MetadataInternal, XstatRequest, XstatResponse},
-    DaemonMessage, FileRequest, FileResponse,
+    ClientMessage, DaemonMessage, FileRequest, FileResponse,
 };
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
@@ -19,6 +18,7 @@ use tokio::net::TcpListener;
 mod common;
 
 pub use common::*;
+#[cfg(not(target_os = "macos"))]
 use tokio_stream::StreamExt;
 
 /// Run a bash script and verify that mirrord is able to load and hook into env, bash and cat.
@@ -45,11 +45,6 @@ async fn bash_script(dylib_path: &Path) {
     let mut bash_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     // Accept the connection from the layer in the cat binary and verify initial messages.
 
-    assert!(matches!(
-        bash_layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::SwitchProtocolVersion(_)
-    ));
-
     let fd: u64 = 1;
 
     bash_layer_connection.expect_gethostname(fd).await;
@@ -62,11 +57,6 @@ async fn bash_script(dylib_path: &Path) {
 
     let mut cat_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     // TODO: theoretically the connections arrival order could be different, should we handle it?
-
-    assert!(matches!(
-        cat_layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::SwitchProtocolVersion(_)
-    ));
 
     cat_layer_connection
         .expect_file_open_for_reading("/very_interesting_file", fd)

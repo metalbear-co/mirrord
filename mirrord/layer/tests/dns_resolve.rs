@@ -28,11 +28,6 @@ async fn test_dns_resolve(
 
     let mut conn = layer_connection.codec;
 
-    assert!(matches!(
-        conn.try_next().await.unwrap().unwrap(),
-        ClientMessage::SwitchProtocolVersion(_)
-    ));
-
     let msg = conn.try_next().await.unwrap().unwrap();
 
     let ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node }) = msg else {
