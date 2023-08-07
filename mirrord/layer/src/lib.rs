@@ -390,10 +390,10 @@ fn set_globals(config: &LayerConfig) {
 
         if outgoing_selector.is_remote() && !REMOTE_DNS.get().unwrap() {
             warn!(
-                "mirrord outgoing traffic filter is set to resolve host names through the remote \
-                environment, but the DNS feature is disabled!\nThis is most likely is a mistake!\n\
-                > Consider turning on the remote DNS resolving feature, or changing the outgoing \
-                traffic filter to `local`."
+                "The mirrord outgoing traffic filter includes host names to be connected remotely, \
+                but the remote DNS feature is disabled, so the addresses of these hosts will be \
+                resolved locally!\n\
+                > Consider enabling the remote DNS resolution feature."
             );
         }
 
