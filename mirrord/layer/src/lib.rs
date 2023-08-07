@@ -388,15 +388,6 @@ fn set_globals(config: &LayerConfig) {
             .try_into()
             .expect("Failed setting up outgoing traffic filter!");
 
-        if outgoing_selector.is_remote() && !REMOTE_DNS.get().unwrap() {
-            warn!(
-                "The mirrord outgoing traffic filter includes host names to be connected remotely, \
-                but the remote DNS feature is disabled, so the addresses of these hosts will be \
-                resolved locally!\n\
-                > Consider enabling the remote DNS resolution feature."
-            );
-        }
-
         // This will crash the app if it comes before `ENABLED_(TCP|UDP)_OUTGOING`!
         OUTGOING_SELECTOR
             .set(outgoing_selector)

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use mirrord_config::LayerConfig;
+use mirrord_config::{feature::network::outgoing::OutgoingFilterConfig, LayerConfig};
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
 use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorSessionInformation};
 use mirrord_progress::Progress;
@@ -74,6 +74,21 @@ pub(crate) async fn create_and_connect<P>(
 where
     P: Progress + Send + Sync,
 {
+    if let Some(outgoing_filter) = &config.feature.network.outgoing.filter {
+        if matches!(outgoing_filter, OutgoingFilterConfig::Remote(_)) && !config.feature.network.dns
+        {
+            progress.print_message(
+                mirrord_progress::MessageKind::Warning,
+                Some(
+                    "The mirrord outgoing traffic filter includes host names to be connected remotely,\
+                     but the remote DNS feature is disabled, so the addresses of these hosts will be\
+                     resolved locally!\n\
+                     > Consider enabling the remote DNS resolution feature.",
+                ),
+            );
+        }
+    }
+
     if config.operator && let Some((sender, receiver, operator_information)) = create_operator_session(config, progress).await? {
         Ok((
             AgentConnectInfo::Operator(operator_information),
