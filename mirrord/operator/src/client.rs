@@ -373,7 +373,12 @@ where
                             if let Some(operator_protocol_version) = self.protocol_version.as_ref() {
                                 self.handle_client_message(ClientMessage::SwitchProtocolVersion(operator_protocol_version.min(&version).clone())).await?;
                             } else {
-                                self.handle_daemon_message(DaemonMessage::SwitchProtocolVersionResponse("1.2.1".parse().expect("Bad static version"))).await?
+                                self.daemon_tx
+                                    .send(DaemonMessage::SwitchProtocolVersionResponse(
+                                        "1.2.1".parse().expect("Bad static version"),
+                                    ))
+                                    .await
+                                    .map_err(|_| OperatorApiError::DaemonReceiverDropped)?;
                             }
                         }
                         Some(client_message) => self.handle_client_message(client_message).await?,
