@@ -284,11 +284,12 @@ impl OperatorApi {
             .await
             .map_err(KubeApiError::from)?;
 
-        Ok(ConnectionWrapper::wrap(connection))
+        Ok(ConnectionWrapper::wrap(connection, false))
     }
 }
 
 pub struct ConnectionWrapper<T> {
+    allow_protocol_upgrade: bool,
     connection: T,
     client_rx: Receiver<ClientMessage>,
     daemon_tx: Sender<DaemonMessage>,
@@ -302,11 +303,15 @@ where
         + Unpin
         + 'stream,
 {
-    fn wrap(connection: T) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
+    fn wrap(
+        connection: T,
+        allow_protocol_upgrade: bool,
+    ) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
         let (client_tx, client_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
         let (daemon_tx, daemon_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
 
         let connection_wrapper = ConnectionWrapper {
+            allow_protocol_upgrade,
             connection,
             client_rx,
             daemon_tx,
@@ -354,6 +359,7 @@ where
             tokio::select! {
                 client_message = self.client_rx.recv() => {
                     match client_message {
+                        Some(ClientMessage::SwitchProtocolVersion(_)) if !self.allow_protocol_upgrade => { continue; }
                         Some(client_message) => self.handle_client_message(client_message).await?,
                         None => break,
                     }

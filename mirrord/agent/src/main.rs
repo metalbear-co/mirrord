@@ -466,7 +466,7 @@ impl ClientConnectionHandler {
                 ))
                 .await?;
             }
-            ClientMessage::SwitchVersion(version) => {
+            ClientMessage::SwitchProtocolVersion(version) => {
                 self.tcp_stealer_api.switch_protocl_version(version).await?;
             }
         }

@@ -12,7 +12,7 @@ pub mod outgoing;
 pub mod pause;
 pub mod tcp;
 
-use std::{collections::HashSet, ops::Deref};
+use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
 pub use codec::*;
 pub use error::*;
@@ -22,6 +22,12 @@ pub type ConnectionId = u64;
 
 /// A per-connection HTTP request ID
 pub type RequestId = u16; // TODO: how many requests in a single connection? is u16 appropriate?
+
+pub static VERSION: LazyLock<semver::Version> = LazyLock::new(|| {
+    env!("CARGO_PKG_VERSION")
+        .parse()
+        .expect("Bad version parsing")
+});
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EnvVars(pub String);

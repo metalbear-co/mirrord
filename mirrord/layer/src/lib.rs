@@ -803,6 +803,16 @@ async fn thread_loop(
     let mut layer = Layer::new(tx, rx, incoming);
     layer.ping_interval.tick().await;
 
+    if let Err(err) = layer
+        .tx
+        .send(ClientMessage::SwitchProtocolVersion(
+            mirrord_protocol::VERSION.clone(),
+        ))
+        .await
+    {
+        warn!("Unable to switch protocol: {err}");
+    }
+
     loop {
         select! {
             hook_message = receiver.recv() => {
