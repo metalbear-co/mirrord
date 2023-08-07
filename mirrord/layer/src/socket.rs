@@ -404,14 +404,14 @@ impl OutgoingSelector {
             OutgoingSelector::Unfiltered => true,
             OutgoingSelector::Remote(list) => list
                 .iter()
-                .chain(hosts)
                 .filter(skip_unresolved)
+                .chain(hosts)
                 .filter(filter_protocol)
                 .any(any_address),
             OutgoingSelector::Local(list) => !list
                 .iter()
-                .chain(hosts)
                 .filter(skip_unresolved)
+                .chain(hosts)
                 .filter(filter_protocol)
                 .any(any_address),
         })
@@ -428,7 +428,8 @@ impl OutgoingSelector {
     #[tracing::instrument(level = "trace", ret)]
     fn resolve_dns<const REMOTE: bool>(&self) -> HookResult<HashSet<OutgoingFilter>> {
         // Closure that tries to match `address` with something in the selector set.
-        let name = |outgoing: &&OutgoingFilter| matches!(outgoing.address, AddressFilter::Name(_));
+        let is_name =
+            |outgoing: &&OutgoingFilter| matches!(outgoing.address, AddressFilter::Name(_));
 
         // Converts `AddressFilter::Name`s into something more convenient to be used in `resolve`.
         let to_name_and_port = |outgoing: &OutgoingFilter| match &outgoing.address {
@@ -438,6 +439,8 @@ impl OutgoingSelector {
 
         // Resolves a list of host names, depending on how the user sets the remote `dns` feature.
         let resolve = |unresolved: HashSet<(ProtocolFilter, String, u16)>| {
+            const USUAL_AMOUNT_OF_ADDRESSES: usize = 8;
+            let amount_of_addresses = unresolved.len() * USUAL_AMOUNT_OF_ADDRESSES;
             let mut unresolved = unresolved.into_iter();
 
             // Resolve DNS through the agent.
@@ -445,7 +448,7 @@ impl OutgoingSelector {
             {
                 unresolved
                     .try_fold(
-                        HashSet::with_capacity(8),
+                        HashSet::with_capacity(amount_of_addresses),
                         |mut resolved, (protocol, name, port)| {
                             let addresses =
                                 remote_getaddrinfo(name, port)?
@@ -467,7 +470,7 @@ impl OutgoingSelector {
                 // Resolve DNS locally.
                 unresolved
                     .try_fold(
-                        HashSet::with_capacity(8),
+                        HashSet::with_capacity(amount_of_addresses),
                         |mut resolved: HashSet<OutgoingFilter>, (protocol, name, port)| {
                             let addresses = name.to_socket_addrs()?.map(|address| OutgoingFilter {
                                 protocol,
@@ -486,9 +489,14 @@ impl OutgoingSelector {
 
         match self {
             OutgoingSelector::Unfiltered => Ok(HashSet::new()),
-            OutgoingSelector::Remote(filter) | OutgoingSelector::Local(filter) => {
-                Ok(resolve(filter.iter().filter(name).map(to_name_and_port).collect())?.collect())
-            }
+            OutgoingSelector::Remote(filter) | OutgoingSelector::Local(filter) => Ok(resolve(
+                filter
+                    .iter()
+                    .filter(is_name)
+                    .map(to_name_and_port)
+                    .collect(),
+            )?
+            .collect()),
         }
     }
 }
