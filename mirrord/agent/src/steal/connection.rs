@@ -691,7 +691,7 @@ impl TcpConnectionStealer {
         }
     }
 
-    fn switch_protocl_version(&mut self, client_id: ClientId, protocol_version: semver::Version) {
+    fn switch_protocol_version(&mut self, client_id: ClientId, protocol_version: semver::Version) {
         if let Some(guard) = self.clients.get_mut(&client_id) {
             guard.1 = protocol_version;
         }
@@ -717,7 +717,7 @@ impl TcpConnectionStealer {
             Command::ResponseData(tcp_data) => self.forward_data(tcp_data).await?,
             Command::HttpResponse(response) => self.http_response(response).await,
             Command::SwitchProtocolVersion(version) => {
-                self.switch_protocl_version(client_id, version)
+                self.switch_protocol_version(client_id, version)
             }
         }
 

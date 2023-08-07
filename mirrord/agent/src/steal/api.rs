@@ -142,7 +142,7 @@ impl TcpStealerApi {
         self.send_command(Command::HttpResponse(response)).await
     }
 
-    pub(crate) async fn switch_protocl_version(
+    pub(crate) async fn switch_protocol_version(
         &mut self,
         version: semver::Version,
     ) -> Result<(), AgentError> {

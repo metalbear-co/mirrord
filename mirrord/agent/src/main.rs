@@ -468,7 +468,7 @@ impl ClientConnectionHandler {
             }
             ClientMessage::SwitchProtocolVersion(version) => {
                 self.tcp_stealer_api
-                    .switch_protocl_version(version.clone())
+                    .switch_protocol_version(version.clone())
                     .await?;
 
                 self.respond(DaemonMessage::SwitchProtocolVersionResponse(version))
