@@ -264,6 +264,10 @@ impl OperatorApi {
             return Err(OperatorApiError::ConcurrentStealAbort);
         }
 
+        let allow_protocol_upgrade = session_information
+            .operator_features
+            .contains(&OperatorFeatures::ProtocolSwitch);
+
         let mut builder = Request::builder()
             .uri(self.connect_url(session_information))
             .header("x-session-id", session_information.session_id.clone());
@@ -284,7 +288,7 @@ impl OperatorApi {
             .await
             .map_err(KubeApiError::from)?;
 
-        Ok(ConnectionWrapper::wrap(connection, false))
+        Ok(ConnectionWrapper::wrap(connection, allow_protocol_upgrade))
     }
 }
 
