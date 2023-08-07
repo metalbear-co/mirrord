@@ -45,6 +45,11 @@ async fn bash_script(dylib_path: &Path) {
     let mut bash_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     // Accept the connection from the layer in the cat binary and verify initial messages.
 
+    assert!(matches!(
+        bash_layer_connection.codec.next().await.unwrap().unwrap(),
+        ClientMessage::SwitchProtocolVersion(_)
+    ));
+
     let fd: u64 = 1;
 
     bash_layer_connection.expect_gethostname(fd).await;
@@ -52,30 +57,20 @@ async fn bash_script(dylib_path: &Path) {
     // After the process forks we create a new main loop layer task in the child process.
     // That connection will die as soon as the new process calls execve, then a new layer will be
     // initialized.
-    let mut layer_after_fork_before_exec =
+    let mut _layer_after_fork_before_exec =
         LayerConnection::get_initialized_connection(&listener).await;
-
-    assert!(matches!(
-        layer_after_fork_before_exec
-            .codec
-            .next()
-            .await
-            .unwrap()
-            .unwrap(),
-        ClientMessage::SwitchProtocolVersion(_)
-    ));
 
     let mut cat_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     // TODO: theoretically the connections arrival order could be different, should we handle it?
-
-    cat_layer_connection
-        .expect_file_open_for_reading("/very_interesting_file", fd)
-        .await;
 
     assert!(matches!(
         cat_layer_connection.codec.next().await.unwrap().unwrap(),
         ClientMessage::SwitchProtocolVersion(_)
     ));
+
+    cat_layer_connection
+        .expect_file_open_for_reading("/very_interesting_file", fd)
+        .await;
 
     #[cfg(not(target_os = "macos"))]
     {
