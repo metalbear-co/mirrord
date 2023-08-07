@@ -68,6 +68,7 @@ pub struct OperatorSessionInformation {
     pub target: TargetCrd,
     pub fingerprint: Option<String>,
     pub operator_features: Vec<OperatorFeatures>,
+    pub protocol_version: Option<semver::Version>,
 }
 
 impl OperatorSessionInformation {
@@ -75,12 +76,14 @@ impl OperatorSessionInformation {
         target: TargetCrd,
         fingerprint: Option<String>,
         operator_features: Vec<OperatorFeatures>,
+        protocol_version: Option<semver::Version>,
     ) -> Self {
         Self {
             session_id: rand::random::<u64>().to_string(),
             target,
             fingerprint,
             operator_features,
+            protocol_version,
         }
     }
 
@@ -143,6 +146,10 @@ impl OperatorApi {
                 target,
                 status.spec.license.fingerprint,
                 status.spec.features.unwrap_or_default(),
+                status
+                    .spec
+                    .protocol_version
+                    .and_then(|str_version| str_version.parse().ok()),
             );
 
             let (sender, receiver) = operator_api
@@ -264,10 +271,6 @@ impl OperatorApi {
             return Err(OperatorApiError::ConcurrentStealAbort);
         }
 
-        let allow_protocol_upgrade = session_information
-            .operator_features
-            .contains(&OperatorFeatures::ProtocolSwitch);
-
         let mut builder = Request::builder()
             .uri(self.connect_url(session_information))
             .header("x-session-id", session_information.session_id.clone());
@@ -288,15 +291,18 @@ impl OperatorApi {
             .await
             .map_err(KubeApiError::from)?;
 
-        Ok(ConnectionWrapper::wrap(connection, allow_protocol_upgrade))
+        Ok(ConnectionWrapper::wrap(
+            connection,
+            session_information.protocol_version.clone(),
+        ))
     }
 }
 
 pub struct ConnectionWrapper<T> {
-    allow_protocol_upgrade: bool,
     connection: T,
     client_rx: Receiver<ClientMessage>,
     daemon_tx: Sender<DaemonMessage>,
+    protocol_version: Option<semver::Version>,
 }
 
 impl<T> ConnectionWrapper<T>
@@ -309,13 +315,13 @@ where
 {
     fn wrap(
         connection: T,
-        allow_protocol_upgrade: bool,
+        protocol_version: Option<semver::Version>,
     ) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
         let (client_tx, client_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
         let (daemon_tx, daemon_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
 
         let connection_wrapper = ConnectionWrapper {
-            allow_protocol_upgrade,
+            protocol_version,
             connection,
             client_rx,
             daemon_tx,
@@ -363,7 +369,11 @@ where
             tokio::select! {
                 client_message = self.client_rx.recv() => {
                     match client_message {
-                        Some(ClientMessage::SwitchProtocolVersion(_)) if !self.allow_protocol_upgrade => { continue; }
+                        Some(ClientMessage::SwitchProtocolVersion(version)) => {
+                            if let Some(operator_protocol_version) = self.protocol_version.as_ref() {
+                                self.handle_client_message(ClientMessage::SwitchProtocolVersion(operator_protocol_version.min(&version).clone())).await?;
+                            }
+                        }
                         Some(client_message) => self.handle_client_message(client_message).await?,
                         None => break,
                     }
