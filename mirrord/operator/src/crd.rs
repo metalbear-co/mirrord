@@ -110,4 +110,7 @@ pub struct LicenseInfoOwned {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub enum OperatorFeatures {
     ProxyApi,
+    ProtocolSwitch, // TODO: check before sending
+    #[serde(other)]
+    Unknown,
 }

@@ -173,7 +173,7 @@ impl TcpStealerApi {
                     .await
             }
             LayerTcpSteal::HttpResponseFramed(response) => {
-                self.http_response(HttpResponseFallback::Body(response))
+                self.http_response(HttpResponseFallback::Framed(response))
                     .await
             }
         }

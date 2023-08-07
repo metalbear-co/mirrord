@@ -8,7 +8,7 @@ use bytes::Bytes;
 use fancy_regex::Regex;
 use iptables::IPTables;
 use mirrord_protocol::{
-    tcp::{HttpResponseFallback, NewTcpConnection, TcpClose, HTTP_REQUEST_FALLBACK_VERSION},
+    tcp::{HttpResponseFallback, NewTcpConnection, TcpClose, HTTP_FRAMED_VERSION},
     RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
     ResponseError::PortAlreadyStolen,
 };
@@ -246,7 +246,7 @@ impl TcpConnectionStealer {
             self.http_response_senders
                 .insert((request.connection_id, request.request_id), response_tx);
 
-            if HTTP_REQUEST_FALLBACK_VERSION.matches(version) {
+            if HTTP_FRAMED_VERSION.matches(version) {
                 Ok(daemon_tx
                     .send(DaemonTcp::HttpRequest(
                         request.into_serializable_fallback().await?,
@@ -633,8 +633,6 @@ impl TcpConnectionStealer {
         fields(response_senders = ?self.http_response_senders.keys()),
     )]
     async fn http_response(&mut self, response: HttpResponseFallback) {
-        let is_fallback = matches!(response, HttpResponseFallback::Fallback(_));
-
         match self
             .http_response_senders
             .remove(&(response.connection_id(), response.request_id()))

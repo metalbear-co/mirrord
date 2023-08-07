@@ -179,12 +179,77 @@ where
     }
 }
 
+impl<E> From<InternalHttpRequest<Vec<u8>>> for Request<BoxBody<Bytes, E>>
+where
+    E: From<Infallible>,
+{
+    fn from(value: InternalHttpRequest<Vec<u8>>) -> Self {
+        let InternalHttpRequest {
+            method,
+            uri,
+            headers,
+            version,
+            body,
+        } = value;
+        let mut request = Request::new(BoxBody::new(
+            Full::new(Bytes::from(body)).map_err(|e| e.into()),
+        ));
+        *request.method_mut() = method;
+        *request.uri_mut() = uri;
+        *request.version_mut() = version;
+        *request.headers_mut() = headers;
+
+        request
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum HttpRequestFallback {
-    Body(HttpRequest<InternalHttpBody>),
+    Framed(HttpRequest<InternalHttpBody>),
     Fallback(HttpRequest<Vec<u8>>),
 }
 
-pub static HTTP_REQUEST_FALLBACK_VERSION: LazyLock<VersionReq> =
+impl HttpRequestFallback {
+    pub fn connection_id(&self) -> ConnectionId {
+        match self {
+            HttpRequestFallback::Framed(req) => req.connection_id,
+            HttpRequestFallback::Fallback(req) => req.connection_id,
+        }
+    }
+
+    pub fn port(&self) -> Port {
+        match self {
+            HttpRequestFallback::Framed(req) => req.port,
+            HttpRequestFallback::Fallback(req) => req.port,
+        }
+    }
+
+    pub fn request_id(&self) -> RequestId {
+        match self {
+            HttpRequestFallback::Framed(req) => req.request_id,
+            HttpRequestFallback::Fallback(req) => req.request_id,
+        }
+    }
+
+    pub fn version(&self) -> Version {
+        match self {
+            HttpRequestFallback::Framed(req) => req.version(),
+            HttpRequestFallback::Fallback(req) => req.version(),
+        }
+    }
+
+    pub fn into_hyper<E>(self) -> Request<BoxBody<Bytes, E>>
+    where
+        E: From<Infallible>,
+    {
+        match self {
+            HttpRequestFallback::Framed(req) => req.internal_request.into(),
+            HttpRequestFallback::Fallback(req) => req.internal_request.into(),
+        }
+    }
+}
+
+pub static HTTP_FRAMED_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| "<1.3.0".parse().expect("Bad Identifier"));
 
 /// Protocol break - on version 2, please add source port, dest/src IP to the message
@@ -337,21 +402,21 @@ impl fmt::Debug for InternalHttpBodyFrame {
 
 #[derive(Debug)]
 pub enum HttpResponseFallback {
-    Body(HttpResponse<InternalHttpBody>),
+    Framed(HttpResponse<InternalHttpBody>),
     Fallback(HttpResponse<Vec<u8>>),
 }
 
 impl HttpResponseFallback {
     pub fn connection_id(&self) -> ConnectionId {
         match self {
-            HttpResponseFallback::Body(req) => req.connection_id,
+            HttpResponseFallback::Framed(req) => req.connection_id,
             HttpResponseFallback::Fallback(req) => req.connection_id,
         }
     }
 
     pub fn request_id(&self) -> RequestId {
         match self {
-            HttpResponseFallback::Body(req) => req.request_id,
+            HttpResponseFallback::Framed(req) => req.request_id,
             HttpResponseFallback::Fallback(req) => req.request_id,
         }
     }
@@ -361,8 +426,23 @@ impl HttpResponseFallback {
         E: From<Infallible>,
     {
         match self {
-            HttpResponseFallback::Body(req) => req.internal_response.try_into(),
+            HttpResponseFallback::Framed(req) => req.internal_response.try_into(),
             HttpResponseFallback::Fallback(req) => req.internal_response.try_into(),
+        }
+    }
+
+    pub fn response_from_request(
+        request: HttpRequestFallback,
+        status: StatusCode,
+        message: &str,
+    ) -> Self {
+        match request {
+            HttpRequestFallback::Framed(request) => HttpResponseFallback::Framed(
+                HttpResponse::<InternalHttpBody>::response_from_request(request, status, message),
+            ),
+            HttpRequestFallback::Fallback(request) => HttpResponseFallback::Fallback(
+                HttpResponse::<Vec<u8>>::response_from_request(request, status, message),
+            ),
         }
     }
 }
@@ -459,6 +539,99 @@ impl HttpResponse<InternalHttpBody> {
         request: HttpRequest<InternalHttpBody>,
         status: StatusCode,
     ) -> Self {
+        let HttpRequest {
+            internal_request: InternalHttpRequest { version, .. },
+            connection_id,
+            request_id,
+            port,
+        } = request;
+
+        Self {
+            port,
+            connection_id,
+            request_id,
+            internal_response: InternalHttpResponse {
+                status,
+                version,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+        }
+    }
+}
+
+impl HttpResponse<Vec<u8>> {
+    /// We cannot implement this with the [`From`] trait as it doesn't support `async` conversions,
+    /// and we also need some extra parameters.
+    ///
+    /// So this is our alternative implementation to `From<Response<Incoming>>`.
+    pub async fn from_hyper_response(
+        response: Response<Incoming>,
+        port: Port,
+        connection_id: ConnectionId,
+        request_id: RequestId,
+    ) -> Result<HttpResponse<Vec<u8>>, hyper::Error> {
+        let (
+            Parts {
+                status,
+                version,
+                headers,
+                ..
+            },
+            body,
+        ) = response.into_parts();
+
+        let body = body.collect().await?.to_bytes().to_vec();
+
+        let internal_response = InternalHttpResponse {
+            status,
+            headers,
+            version,
+            body,
+        };
+
+        Ok(HttpResponse {
+            request_id,
+            port,
+            connection_id,
+            internal_response,
+        })
+    }
+
+    pub fn response_from_request(
+        request: HttpRequest<Vec<u8>>,
+        status: StatusCode,
+        message: &str,
+    ) -> Self {
+        let HttpRequest {
+            internal_request: InternalHttpRequest { version, .. },
+            connection_id,
+            request_id,
+            port,
+        } = request;
+
+        let body = format!(
+            "{} {}\n{}\n",
+            status.as_str(),
+            status.canonical_reason().unwrap_or_default(),
+            message
+        )
+        .into_bytes();
+
+        Self {
+            port,
+            connection_id,
+            request_id,
+            internal_response: InternalHttpResponse {
+                status,
+                version,
+                headers: Default::default(),
+                body,
+            },
+        }
+    }
+
+    pub fn empty_response_from_request(request: HttpRequest<Vec<u8>>, status: StatusCode) -> Self {
         let HttpRequest {
             internal_request: InternalHttpRequest { version, .. },
             connection_id,

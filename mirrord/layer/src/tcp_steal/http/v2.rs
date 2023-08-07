@@ -12,7 +12,7 @@ use hyper::{
     client::conn::http2::{self, Connection, SendRequest},
     rt::Executor,
 };
-use mirrord_protocol::tcp::HttpRequest;
+use mirrord_protocol::tcp::HttpRequestFallback;
 use tokio::net::TcpStream;
 use tracing::trace;
 
@@ -66,7 +66,7 @@ impl HttpV for HttpV2 {
     #[tracing::instrument(level = "trace", skip(self))]
     async fn send_request(
         &mut self,
-        request: HttpRequest,
+        request: HttpRequestFallback,
     ) -> hyper::Result<hyper::Response<hyper::body::Incoming>> {
         let request_sender = &mut self.0;
 
@@ -74,9 +74,7 @@ impl HttpV for HttpV2 {
         // https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/barbara_tries_unix_socket.html#the-single-magical-line
         future::poll_fn(|cx| request_sender.poll_ready(cx)).await?;
 
-        request_sender
-            .send_request(request.internal_request.into())
-            .await
+        request_sender.send_request(request.into_hyper()).await
     }
 
     fn take_sender(self) -> Self::Sender {

@@ -3376,6 +3376,7 @@ dependencies = [
  "rand",
  "regex",
  "rstest 0.17.0",
+ "serde",
  "serde_json",
  "socket2 0.5.3",
  "streammap-ext",
