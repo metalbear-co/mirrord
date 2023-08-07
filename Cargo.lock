@@ -1941,7 +1941,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.55.0"
+version = "3.55.2"
 dependencies = [
  "libc",
 ]
@@ -2944,7 +2944,7 @@ checksum = "57bcfdad1b858c2db7c38303a6d2ad4dfaf5eb53dfeb0910128b2c26d6158503"
 
 [[package]]
 name = "listen_ports"
-version = "3.55.0"
+version = "3.55.2"
 
 [[package]]
 name = "lock_api"
@@ -3154,7 +3154,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.55.0"
+version = "3.55.2"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -3185,6 +3185,7 @@ dependencies = [
  "semver 1.0.18",
  "serde",
  "serde_json",
+ "socket2 0.5.3",
  "thiserror",
  "tokio",
  "tokio-util",
@@ -3195,7 +3196,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.55.0"
+version = "3.55.2"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -3245,7 +3246,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.55.0"
+version = "3.55.2"
 dependencies = [
  "assert-json-diff",
  "reqwest",
@@ -3256,7 +3257,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.55.0"
+version = "3.55.2"
 dependencies = [
  "chrono",
  "fs4",
@@ -3276,7 +3277,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.55.0"
+version = "3.55.2"
 dependencies = [
  "bimap",
  "bitflags 2.3.3",
@@ -3297,7 +3298,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.55.0"
+version = "3.55.2"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -3307,7 +3308,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.55.0"
+version = "3.55.2"
 dependencies = [
  "axum",
  "futures",
@@ -3325,7 +3326,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.55.0"
+version = "3.55.2"
 dependencies = [
  "actix-codec",
  "base64 0.21.2",
@@ -3350,7 +3351,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.55.0"
+version = "3.55.2"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -3403,7 +3404,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.55.0"
+version = "3.55.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3412,7 +3413,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.55.0"
+version = "3.55.2"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -3422,7 +3423,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.55.0"
+version = "3.55.2"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -3455,7 +3456,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.55.0"
+version = "3.55.2"
 dependencies = [
  "atty",
  "serde",
@@ -3487,7 +3488,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.55.0"
+version = "3.55.2"
 dependencies = [
  "apple-codesign",
  "memchr",
@@ -3808,7 +3809,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.55.0"
+version = "3.55.2"
 
 [[package]]
 name = "outref"
@@ -4652,21 +4653,21 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.55.0"
+version = "3.55.2"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.55.0"
+version = "3.55.2"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.55.0"
+version = "3.55.2"
 dependencies = [
  "tokio",
 ]
@@ -5076,31 +5077,6 @@ dependencies = [
  "ryu",
  "serde",
  "unsafe-libyaml",
-]
-
-[[package]]
-name = "serial_test"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e56dd856803e253c8f298af3f4d7eb0ae5e23a737252cd90bb4f3b435033b2d"
-dependencies = [
- "dashmap",
- "futures",
- "lazy_static",
- "log",
- "parking_lot",
- "serial_test_derive",
-]
-
-[[package]]
-name = "serial_test_derive"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91d129178576168c589c9ec973feedf7d3126c01ac2bf08795109aa35b69fb8f"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.28",
 ]
 
 [[package]]
@@ -5514,7 +5490,6 @@ dependencies = [
  "rstest 0.18.1",
  "serde",
  "serde_json",
- "serial_test",
  "tempfile",
  "tokio",
  "tokio-tungstenite 0.19.0",

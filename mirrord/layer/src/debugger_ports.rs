@@ -48,7 +48,7 @@ pub enum DebuggerType {
     /// --client 127.0.0.1 --port 32845 --file /path/to/script.py`
     ///
     /// Port would not be extracted from a command like `/path/to/python /path/to/script.py ...`
-    /// (debugger name missing) or `/path/to/pycharm/plugins/pydevd.py ...` (python invokation
+    /// (debugger name missing) or `/path/to/pycharm/plugins/pydevd.py ...` (python invocation
     /// missing) or `/path/to/python /path/to/pycharm/plugins/pydevd.py --client 127.0.0.1 ...`
     /// (port missing).
     PyDevD,

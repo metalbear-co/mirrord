@@ -129,6 +129,7 @@ fn generate_remote_ro_set() -> RegexSet {
 /// Global filter used by file operations to bypass (use local) or continue (use remote).
 pub(crate) static FILE_FILTER: OnceLock<FileFilter> = OnceLock::new();
 
+#[derive(Debug)]
 pub(crate) struct FileFilter {
     read_only: Option<RegexSet>,
     read_write: Option<RegexSet>,

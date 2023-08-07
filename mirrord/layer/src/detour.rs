@@ -40,17 +40,6 @@ thread_local!(
     static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false)
 );
 
-/// Sets [`DETOUR_BYPASS`] to `true`, bypassing the layer's detours.
-///
-/// Prefer using `DetourGuard::new` instead.
-pub(super) fn detour_bypass_on() {
-    DETOUR_BYPASS.with(|enabled| {
-        if let Ok(mut bypass) = enabled.try_borrow_mut() {
-            *bypass = true
-        }
-    });
-}
-
 /// Sets [`DETOUR_BYPASS`] to `false`.
 ///
 /// Prefer relying on the [`Drop`] implementation of [`DetourGuard`] instead.

@@ -848,32 +848,36 @@ pub async fn udp_logger_service(#[future] kube_client: Client) -> KubeService {
     .await
 }
 
+/// Initiailizes the services needed for pause testing.
+/// Returns the requester service, the logger service
 #[fixture]
-pub async fn http_logger_service(#[future] kube_client: Client) -> KubeService {
-    service(
-        "default",
-        "ClusterIP",
-        "ghcr.io/metalbear-co/mirrord-http-logger:latest",
-        "mirrord-tests-http-logger",
-        false, // So that requester can reach logger by name.
-        kube_client,
-    )
-    .await
-}
-
-#[fixture]
-pub async fn http_log_requester_service(#[future] kube_client: Client) -> KubeService {
-    service(
-        "default",
+pub async fn pause_services(#[future] kube_client: Client) -> (KubeService, KubeService) {
+    let kube_client = kube_client.await;
+    let kube_client_clone = kube_client.clone();
+    let namespace = random_string().to_string();
+    let requester = service(
+        &namespace,
         "ClusterIP",
         "ghcr.io/metalbear-co/mirrord-http-log-requester:latest",
         "mirrord-http-log-requester",
         // Have a non-random name, so that there can only be one requester at any point in time
         // so that another requester does not send requests while this one is paused.
         false,
-        kube_client,
+        // have to pass it as future ;_;
+        async { kube_client_clone },
     )
-    .await
+    .await;
+
+    let logger = service(
+        &namespace,
+        "ClusterIP",
+        "ghcr.io/metalbear-co/mirrord-http-logger:latest",
+        "mirrord-tests-http-logger",
+        false, // So that requester can reach logger by name.
+        async { kube_client },
+    )
+    .await;
+    (requester, logger)
 }
 
 /// Service that listens on port 80 and returns "remote: <DATA>" when getting "<DATA>" directly
