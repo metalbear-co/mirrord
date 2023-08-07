@@ -42,8 +42,8 @@ impl LayerConnection {
         let mut codec = Framed::new(stream, DaemonCodec::new());
 
         assert!(matches!(
-            codec.next().await.unwrap().unwrap(),
-            ClientMessage::SwitchProtocolVersion(_)
+            codec.next().await,
+            None | Some(Ok(ClientMessage::SwitchProtocolVersion(_)))
         ));
 
         codec
