@@ -30,6 +30,7 @@ frida-gum = { git = "https://github.com/metalbear-co/frida-rust", version = "0.1
 futures.workspace = true
 
 tokio = { workspace = true, features = ["fs", "rt", "rt-multi-thread", "macros", "process"] }
+serde.workspace = true
 serde_json.workspace = true
 
 actix-codec.workspace = true

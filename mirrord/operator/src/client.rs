@@ -68,6 +68,7 @@ pub struct OperatorSessionInformation {
     pub target: TargetCrd,
     pub fingerprint: Option<String>,
     pub operator_features: Vec<OperatorFeatures>,
+    pub protocol_version: Option<semver::Version>,
 }
 
 impl OperatorSessionInformation {
@@ -75,12 +76,14 @@ impl OperatorSessionInformation {
         target: TargetCrd,
         fingerprint: Option<String>,
         operator_features: Vec<OperatorFeatures>,
+        protocol_version: Option<semver::Version>,
     ) -> Self {
         Self {
             session_id: rand::random::<u64>().to_string(),
             target,
             fingerprint,
             operator_features,
+            protocol_version,
         }
     }
 
@@ -139,6 +142,10 @@ impl OperatorApi {
                 target,
                 status.spec.license.fingerprint,
                 status.spec.features.unwrap_or_default(),
+                status
+                    .spec
+                    .protocol_version
+                    .and_then(|str_version| str_version.parse().ok()),
             );
 
             let (sender, receiver) = operator_api
@@ -280,7 +287,10 @@ impl OperatorApi {
             .await
             .map_err(KubeApiError::from)?;
 
-        Ok(ConnectionWrapper::wrap(connection))
+        Ok(ConnectionWrapper::wrap(
+            connection,
+            session_information.protocol_version.clone(),
+        ))
     }
 }
 
@@ -288,6 +298,7 @@ pub struct ConnectionWrapper<T> {
     connection: T,
     client_rx: Receiver<ClientMessage>,
     daemon_tx: Sender<DaemonMessage>,
+    protocol_version: Option<semver::Version>,
 }
 
 impl<T> ConnectionWrapper<T>
@@ -298,11 +309,15 @@ where
         + Unpin
         + 'stream,
 {
-    fn wrap(connection: T) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
+    fn wrap(
+        connection: T,
+        protocol_version: Option<semver::Version>,
+    ) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
         let (client_tx, client_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
         let (daemon_tx, daemon_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
 
         let connection_wrapper = ConnectionWrapper {
+            protocol_version,
             connection,
             client_rx,
             daemon_tx,
@@ -350,6 +365,18 @@ where
             tokio::select! {
                 client_message = self.client_rx.recv() => {
                     match client_message {
+                        Some(ClientMessage::SwitchProtocolVersion(version)) => {
+                            if let Some(operator_protocol_version) = self.protocol_version.as_ref() {
+                                self.handle_client_message(ClientMessage::SwitchProtocolVersion(operator_protocol_version.min(&version).clone())).await?;
+                            } else {
+                                self.daemon_tx
+                                    .send(DaemonMessage::SwitchProtocolVersionResponse(
+                                        "1.2.1".parse().expect("Bad static version"),
+                                    ))
+                                    .await
+                                    .map_err(|_| OperatorApiError::DaemonReceiverDropped)?;
+                            }
+                        }
                         Some(client_message) => self.handle_client_message(client_message).await?,
                         None => break,
                     }

@@ -6,11 +6,9 @@ use std::{
 
 use bytes::Bytes;
 use fancy_regex::Regex;
-use http_body_util::Full;
-use hyper::Response;
 use iptables::IPTables;
 use mirrord_protocol::{
-    tcp::{NewTcpConnection, TcpClose},
+    tcp::{HttpResponseFallback, NewTcpConnection, TcpClose, HTTP_FRAMED_VERSION},
     RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
     ResponseError::PortAlreadyStolen,
 };
@@ -29,7 +27,7 @@ use crate::{
     error::Result,
     steal::{
         connection::StealSubscription::{HttpFiltered, Unfiltered},
-        http::{HttpFilter, HttpFilterManager},
+        http::{HttpFilter, HttpFilterManager, Response},
     },
     AgentError::{AgentInvariantViolated, HttpRequestReceiverClosed},
 };
@@ -60,7 +58,7 @@ pub(crate) struct TcpConnectionStealer {
 
     /// Connected clients (layer instances) and the channels which the stealer task uses to send
     /// back messages (stealer -> agent -> layer).
-    clients: HashMap<ClientId, Sender<DaemonTcp>>,
+    clients: HashMap<ClientId, (Sender<DaemonTcp>, semver::Version)>,
     index_allocator: IndexAllocator<ConnectionId, 100>,
 
     /// Intercepts the connections, instead of letting them go through their normal pathways, this
@@ -109,8 +107,7 @@ pub(crate) struct TcpConnectionStealer {
 
     /// Maps each pending request id to the sender into the channel with the hyper service that
     /// received that requests and is waiting for the response.
-    http_response_senders:
-        HashMap<(ConnectionId, RequestId), oneshot::Sender<Response<Full<Bytes>>>>,
+    http_response_senders: HashMap<(ConnectionId, RequestId), oneshot::Sender<Response>>,
 }
 
 impl TcpConnectionStealer {
@@ -207,7 +204,7 @@ impl TcpConnectionStealer {
                     // Send a close message to all clients that were subscribed to the connection.
                     if let Some(clients) = self.http_connection_clients.remove(&connection_id) {
                         for client_id in clients.into_iter() {
-                            if let Some(client_tx) = self.clients.get(&client_id) {
+                            if let Some((client_tx, _)) = self.clients.get(&client_id) {
                                 client_tx.send(DaemonTcp::Close(TcpClose {connection_id})).await?
                             } else {
                                 warn!("Cannot notify client {client_id} on the closing of a connection.")
@@ -240,7 +237,7 @@ impl TcpConnectionStealer {
             response_tx,
         } = request.ok_or(HttpRequestReceiverClosed)?;
 
-        if let Some(daemon_tx) = self.clients.get(&request.client_id) {
+        if let Some((daemon_tx, version)) = self.clients.get(&request.client_id) {
             // Note down: client_id got a request out of connection_id.
             self.http_connection_clients
                 .entry(request.connection_id)
@@ -248,9 +245,20 @@ impl TcpConnectionStealer {
                 .insert(request.client_id);
             self.http_response_senders
                 .insert((request.connection_id, request.request_id), response_tx);
-            Ok(daemon_tx
-                .send(DaemonTcp::HttpRequest(request.into_serializable().await?))
-                .await?)
+
+            if HTTP_FRAMED_VERSION.matches(version) {
+                Ok(daemon_tx
+                    .send(DaemonTcp::HttpRequest(
+                        request.into_serializable_fallback().await?,
+                    ))
+                    .await?)
+            } else {
+                Ok(daemon_tx
+                    .send(DaemonTcp::HttpRequestFramed(
+                        request.into_serializable().await?,
+                    ))
+                    .await?)
+            }
         } else {
             warn!(
                 "Got stolen request for client {:?} that is not, or no longer, subscribed.",
@@ -281,7 +289,7 @@ impl TcpConnectionStealer {
             })
             .unwrap_or(Ok(DaemonTcp::Close(TcpClose { connection_id })))?;
 
-        if let Some(daemon_tx) = self
+        if let Some((daemon_tx, _)) = self
             .connection_clients
             .get(&connection_id)
             .and_then(|client_id| self.clients.get(client_id))
@@ -331,7 +339,7 @@ impl TcpConnectionStealer {
 
         // Send new connection to subscribed layer.
         match self.clients.get(&client_id) {
-            Some(daemon_tx) => Ok(daemon_tx.send(new_connection).await?),
+            Some((daemon_tx, _)) => Ok(daemon_tx.send(new_connection).await?),
             None => {
                 // Should not happen.
                 debug_assert!(false);
@@ -391,8 +399,13 @@ impl TcpConnectionStealer {
 
     /// Registers a new layer instance that has the `steal` feature enabled.
     #[tracing::instrument(level = "trace", skip(self, sender))]
-    fn new_client(&mut self, client_id: ClientId, sender: Sender<DaemonTcp>) {
-        self.clients.insert(client_id, sender);
+    fn new_client(
+        &mut self,
+        client_id: ClientId,
+        sender: Sender<DaemonTcp>,
+        protocol_version: semver::Version,
+    ) {
+        self.clients.insert(client_id, (sender, protocol_version));
     }
 
     /// Initialize iptables member, which creates an iptables chain for our rules.
@@ -579,7 +592,7 @@ impl TcpConnectionStealer {
         client_id: &ClientId,
         message: DaemonTcp,
     ) -> Result<(), AgentError> {
-        if let Some(sender) = self.clients.get(client_id) {
+        if let Some((sender, _)) = self.clients.get(client_id) {
             if let Err(fail) = sender.send(message).await {
                 warn!(
                     "Failed to send message to client {} with {:#?}!",
@@ -619,18 +632,17 @@ impl TcpConnectionStealer {
         skip(self),
         fields(response_senders = ?self.http_response_senders.keys()),
     )]
-    async fn http_response(&mut self, response: HttpResponse) {
+    async fn http_response(&mut self, response: HttpResponseFallback) {
         match self
             .http_response_senders
-            .remove(&(response.connection_id, response.request_id))
+            .remove(&(response.connection_id(), response.request_id()))
         {
             None => {
                 error!("Got unexpected http response. Not forwarding.");
             }
             Some(response_tx) => {
                 let _res = response // inspecting errors, not propagating.
-                    .internal_response
-                    .try_into()
+                    .into_hyper()
                     .inspect_err(|err| {
                         error!("Could not reconstruct http response: {err:?}");
                         debug_assert!(false);
@@ -679,13 +691,21 @@ impl TcpConnectionStealer {
         }
     }
 
+    fn switch_protocol_version(&mut self, client_id: ClientId, protocol_version: semver::Version) {
+        if let Some(guard) = self.clients.get_mut(&client_id) {
+            guard.1 = protocol_version;
+        }
+    }
+
     /// Handles [`Command`]s that were received by [`TcpConnectionStealer::command_rx`].
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_command(&mut self, command: StealerCommand) -> Result<(), AgentError> {
         let StealerCommand { client_id, command } = command;
 
         match command {
-            Command::NewClient(daemon_tx) => self.new_client(client_id, daemon_tx),
+            Command::NewClient(daemon_tx, protocol_version) => {
+                self.new_client(client_id, daemon_tx, protocol_version)
+            }
             Command::ConnectionUnsubscribe(connection_id) => {
                 self.connection_unsubscribe(connection_id)
             }
@@ -696,6 +716,9 @@ impl TcpConnectionStealer {
             Command::ClientClose => self.close_client(client_id).await?,
             Command::ResponseData(tcp_data) => self.forward_data(tcp_data).await?,
             Command::HttpResponse(response) => self.http_response(response).await,
+            Command::SwitchProtocolVersion(version) => {
+                self.switch_protocol_version(client_id, version)
+            }
         }
 
         Ok(())
