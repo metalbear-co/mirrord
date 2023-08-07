@@ -42,6 +42,7 @@ use crate::{
 
 /// Take the original raw c_char pointer and a resulting bypass, and either the original pointer or
 /// a different one according to the bypass.
+/// We pass reference to bypass to make sure the bypass lives with the pointer.
 #[cfg(target_os = "macos")]
 fn update_ptr_from_bypass(ptr: *const c_char, bypass: Bypass) -> *const c_char {
     match bypass {
