@@ -671,7 +671,7 @@ mod tests {
             operator: None,
             sip_binaries: None,
             kube_context: None,
-            internal_proxy: None
+            internal_proxy: None,
         };
 
         assert_eq!(config, expect);
