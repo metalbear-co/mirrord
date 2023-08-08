@@ -11,7 +11,7 @@ use std::{
 
 use serde::Serialize;
 use serde_json::to_string;
-use termspin::{spinner::dots, Group, Line, Loop, SharedFrames};
+use indicatif::ProgressBar;
 
 /// The environment variable name that is used
 /// to determine the mode of progress reporting
@@ -19,10 +19,10 @@ pub const MIRRORD_PROGRESS_ENV: &str = "MIRRORD_PROGRESS_MODE";
 
 /// `ProgressMode` specifies the way progress is reported
 /// by [`TaskProgress`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProgressMode {
     /// Display dynamic progress with spinners.
-    Standard,
+    Standard(ProgressBar),
     /// Display simple human-readable messages in new lines.
     Simple,
     /// Output progress messages in JSON format for programmatic use.
@@ -56,7 +56,7 @@ static PROGRESS: OnceLock<ProgressReport> = OnceLock::new();
 fn get_report() -> &'static ProgressReport {
     PROGRESS.get_or_init(|| {
         ProgressReport::from_env(if atty::is(atty::Stream::Stdout) {
-            ProgressMode::Standard
+            ProgressMode::Standard(ProgressBar::new_spinner())
         } else {
             ProgressMode::Simple
         })
@@ -65,7 +65,6 @@ fn get_report() -> &'static ProgressReport {
 
 /// Global progress state.
 struct ProgressReport {
-    spinner_loop: Loop<SharedFrames<Group>>,
     mode: ProgressMode,
 }
 
@@ -73,13 +72,12 @@ impl ProgressReport {
     fn new(mode: ProgressMode) -> Self {
         Self {
             mode,
-            spinner_loop: Loop::new(Duration::from_millis(100), Group::new().shared()),
         }
     }
 
     fn from_env(fallback: ProgressMode) -> Self {
         Self::new(match std::env::var(MIRRORD_PROGRESS_ENV).as_deref() {
-            Ok("std" | "standard") => ProgressMode::Standard,
+            Ok("std" | "standard") => ProgressMode::Standard(ProgressBar::new_spinner()),
             Ok("dumb" | "simple") => ProgressMode::Simple,
             Ok("json") => ProgressMode::Json,
             Ok("off") => ProgressMode::Off,
