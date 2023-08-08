@@ -1,11 +1,12 @@
-use alloc::ffi::CString;
+use alloc::{alloc::Layout, ffi::CString};
 use core::{cmp, ffi::CStr, mem};
-use std::{os::unix::io::RawFd, sync::LazyLock};
+use std::{mem::forget, os::unix::io::RawFd, sync::LazyLock};
 
 use dashmap::DashSet;
 use errno::{set_errno, Errno};
 use libc::{c_char, c_int, c_void, size_t, sockaddr, socklen_t, ssize_t, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
+use tracing::debug;
 
 use super::ops::*;
 use crate::{detour::DetourGuard, hooks::HookManager, replace};
@@ -370,6 +371,128 @@ pub(super) unsafe extern "C" fn send_to_detour(
         })
     }
 }
+
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn recvmsg_detour(
+    sockfd: i32,
+    message_header: *mut libc::msghdr,
+    flags: c_int,
+) -> ssize_t {
+    // Returns `-1`, but calling the original function sets whatever `errno` for us.
+    if message_header.is_null() {
+        libc::recvmsg(sockfd, message_header, flags)
+    } else {
+        if (*message_header).msg_name.is_null() {
+            // Safety: we can deref `message_header` here, as we check for null before.
+            let data_blocks = (*message_header).msg_iov;
+            let number_of_blocks = (*message_header).msg_iovlen;
+
+            let mut offset = 0;
+            let total_length = (0..number_of_blocks)
+                .reduce(|acc, _| {
+                    let block = data_blocks.byte_add(offset);
+                    offset += (*data_blocks).iov_len;
+
+                    acc + (*block).iov_len
+                })
+                .unwrap_or_default();
+            // TODO(alex) [mid] 2023-08-08: Do we need this `total_length` check though? Real use
+            // example will tell us the answer.
+            let layout = Layout::array::<u8>(total_length).unwrap();
+            let message = std::alloc::alloc(Layout::array::<u8>(total_length).unwrap());
+            debug!("recvmsg_detour -> total_length {total_length:#?}");
+
+            let received = libc::recv(sockfd, message as *mut _, total_length, flags);
+            if received == -1 {
+                received
+            } else {
+                // TODO(alex) [high] 2023-08-08: Rebuild the iovec.
+                let mut offset = 0;
+                let mut message_offset = 0;
+                while offset < total_length && message_offset < received as usize {
+                    let block = data_blocks.byte_add(offset);
+                    offset += (*data_blocks).iov_len;
+
+                    (*block).iov_base.copy_from(
+                        message.byte_add(message_offset) as *const _,
+                        (*block).iov_len,
+                    );
+
+                    message_offset += (*block).iov_len;
+                }
+
+                std::alloc::dealloc(message, layout);
+
+                received
+            }
+        } else {
+            todo!()
+        }
+    }
+}
+/// Not a faithful reproduction of what [`libc::sendmsg`] is supposed to do, see [`send_to`].
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn sendmsg_detour(
+    sockfd: RawFd,
+    message_header: *const libc::msghdr,
+    flags: c_int,
+) -> ssize_t {
+    // TODO(alex) [high] 2023-08-08: Check if this is true, or if it's true only for the address
+    // in the struct.
+    // Equivalent to just calling `send`.
+
+    // When the whole thing is null, the operation happens, but does basically nothing (afaik).
+    //
+    // If you ever hit an issue with this, maybe null here is meant to `libc::send` a 0-sized
+    // message?
+    if message_header.is_null() {
+        FN_SENDMSG(sockfd, message_header, flags)
+    } else {
+        // Safety: we can deref `message_header` here, as we check for null before.
+        let data_blocks = (*message_header).msg_iov;
+        let number_of_blocks = (*message_header).msg_iovlen;
+        debug!("sendmsg_detour -> number of blocks {number_of_blocks:?}");
+
+        let mut offset = 0;
+        let total_length = (0..number_of_blocks)
+            .reduce(|acc, _| {
+                let block = data_blocks.byte_add(offset);
+
+                offset += (*block).iov_len;
+
+                acc + (*block).iov_len
+            })
+            .unwrap_or_default();
+
+        debug!("sendmsg_detour -> total_length {total_length:#?}");
+
+        let message = std::alloc::alloc(Layout::array::<u8>(total_length).unwrap());
+        let mut offset = 0;
+        for _ in 0..number_of_blocks {
+            let block = data_blocks.byte_add(offset);
+            message
+                .byte_offset(offset as isize)
+                .copy_from((*block).iov_base as *const _, (*block).iov_len);
+            offset += (*data_blocks).iov_len;
+        }
+        debug!("sendmsg_detour -> built blocks");
+
+        // Equivalent to just calling `send`.
+        if (*message_header).msg_name.is_null() {
+            libc::send(sockfd, message as *const _, total_length, flags)
+        } else {
+            send_to(
+                sockfd,
+                message as *const _,
+                total_length,
+                flags,
+                std::mem::transmute((*message_header).msg_name),
+                (*message_header).msg_namelen,
+            )
+            .unwrap_or_bypass_with(|_| FN_SENDMSG(sockfd, message_header, flags))
+        }
+    }
+}
 pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled_remote_dns: bool) {
     replace!(hook_manager, "socket", socket_detour, FnSocket, FN_SOCKET);
 
@@ -386,6 +509,20 @@ pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled
         send_to_detour,
         FnSend_to,
         FN_SEND_TO
+    );
+    replace!(
+        hook_manager,
+        "recvmsg",
+        recvmsg_detour,
+        FnRecvmsg,
+        FN_RECVMSG
+    );
+    replace!(
+        hook_manager,
+        "sendmsg",
+        sendmsg_detour,
+        FnSendmsg,
+        FN_SENDMSG
     );
 
     replace!(hook_manager, "bind", bind_detour, FnBind, FN_BIND);
