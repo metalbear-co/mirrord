@@ -2352,7 +2352,8 @@ dependencies = [
 [[package]]
 name = "http-body"
 version = "1.0.0-rc.2"
-source = "git+https://github.com/meowjesty/http-body?branch=issue/922/http2#d4809041116a097d6d9bece681d0842b79b26170"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "951dfc2e32ac02d67c90c0d65bd27009a635dc9b381a2cc7d284ab01e3a0150d"
 dependencies = [
  "bytes",
  "http",
@@ -2360,8 +2361,9 @@ dependencies = [
 
 [[package]]
 name = "http-body-util"
-version = "0.1.0-rc.2"
-source = "git+https://github.com/meowjesty/http-body?branch=issue/922/http2#d4809041116a097d6d9bece681d0842b79b26170"
+version = "0.1.0-rc.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08ef12f041acdd397010e5fb6433270c147d3b8b2d0a840cd7fff8e531dca5c8"
 dependencies = [
  "bytes",
  "futures-util",
@@ -2430,12 +2432,12 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "1.0.0-rc.3"
-source = "git+https://github.com/meowjesty/hyper?branch=issue/922/http2#1b7c2bf95f70425954e34df2b2f757daa9b0e020"
+version = "1.0.0-rc.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d280a71f348bcc670fc55b02b63c53a04ac0bf2daff2980795aeaf53edae10e6"
 dependencies = [
  "bytes",
  "futures-channel",
- "futures-core",
  "futures-util",
  "h2",
  "http",
@@ -3202,7 +3204,7 @@ dependencies = [
  "http",
  "http-body-util",
  "httparse",
- "hyper 1.0.0-rc.3",
+ "hyper 1.0.0-rc.4",
  "iptables",
  "k8s-cri",
  "libc",
@@ -3224,6 +3226,7 @@ dependencies = [
  "test_bin",
  "thiserror",
  "tokio",
+ "tokio-compat",
  "tokio-stream",
  "tokio-util",
  "tonic",
@@ -3329,7 +3332,7 @@ dependencies = [
  "mirrord-progress",
  "mirrord-protocol",
  "rand",
- "rstest 0.17.0",
+ "rstest 0.18.1",
  "serde",
  "serde_json",
  "shellexpand",
@@ -3359,7 +3362,7 @@ dependencies = [
  "futures",
  "http-body 1.0.0-rc.2",
  "http-body-util",
- "hyper 1.0.0-rc.3",
+ "hyper 1.0.0-rc.4",
  "itertools",
  "k8s-openapi",
  "libc",
@@ -3374,7 +3377,7 @@ dependencies = [
  "os_info",
  "rand",
  "regex",
- "rstest 0.17.0",
+ "rstest 0.18.1",
  "serde_json",
  "socket2 0.5.3",
  "streammap-ext",
@@ -3382,6 +3385,7 @@ dependencies = [
  "tests",
  "thiserror",
  "tokio",
+ "tokio-compat",
  "tokio-stream",
  "tokio-util",
  "tower",
@@ -3463,7 +3467,7 @@ dependencies = [
  "fancy-regex",
  "http-body-util",
  "http-serde",
- "hyper 1.0.0-rc.3",
+ "hyper 1.0.0-rc.4",
  "libc",
  "mirrord-macros",
  "nix 0.24.3",
@@ -5607,6 +5611,15 @@ dependencies = [
  "socket2 0.4.9",
  "tokio-macros",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "tokio-compat"
+version = "3.55.2"
+dependencies = [
+ "hyper 1.0.0-rc.4",
+ "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]

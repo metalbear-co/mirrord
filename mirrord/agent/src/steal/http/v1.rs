@@ -4,7 +4,10 @@
 //!
 //! Handles HTTP/1 requests (with support for upgrades).
 use core::{fmt::Debug, future::Future, pin::Pin};
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::SocketAddr,
+    sync::{atomic::Ordering, Arc},
+};
 
 use bytes::Bytes;
 use dashmap::DashMap;
@@ -25,6 +28,7 @@ use tokio::{
     net::TcpStream,
     sync::{mpsc::Sender, oneshot},
 };
+use tokio_compat::WrapIo;
 use tracing::error;
 
 use super::{
@@ -76,7 +80,7 @@ impl HttpV for HttpV1 {
         } = http1::Builder::new()
             .preserve_header_case(true)
             .serve_connection(
-                stream,
+                stream.wrap(),
                 HyperHandler::<HttpV1>::new(
                     filters,
                     matched_tx,
@@ -100,11 +104,14 @@ impl HttpV for HttpV1 {
 
             // Send the data we received from the original destination, and have not
             // processed as HTTP, to the client.
-            client_agent.write_all(&client_unprocessed).await?;
+            client_agent
+                .inner_mut()
+                .write_all(&client_unprocessed)
+                .await?;
 
             // Now both the client and original destinations should be in sync, so we
             // can just copy the bytes from one into the other.
-            copy_bidirectional(&mut client_agent, &mut agent_remote).await?;
+            copy_bidirectional(client_agent.inner_mut(), &mut agent_remote).await?;
         }
 
         close_connection(connection_close_sender, connection_id).await
@@ -115,7 +122,7 @@ impl HttpV for HttpV1 {
         target_stream: TcpStream,
         upgrade_tx: Option<oneshot::Sender<RawHyperConnection>>,
     ) -> Result<Self::Sender, HttpTrafficError> {
-        let (request_sender, mut connection) = client::conn::http1::handshake(target_stream)
+        let (request_sender, mut connection) = client::conn::http1::handshake(target_stream.wrap())
             .await
             .inspect_err(|fail| error!("Handshake failed with {fail:#?}"))?;
 
@@ -134,7 +141,7 @@ impl HttpV for HttpV1 {
 
                 let _ = sender
                     .send(RawHyperConnection {
-                        stream: io,
+                        stream: io.into_inner(),
                         unprocessed_bytes: read_buf,
                     })
                     .inspect_err(|_| error!("Failed sending interceptor connection!"));
@@ -183,7 +190,7 @@ impl HyperHandler<HttpV1> {
             connection_id,
             port,
             original_destination,
-            request_id: 0,
+            next_request_id: Default::default(),
             handle_version: HttpV1(upgrade_tx),
         }
     }
@@ -197,8 +204,8 @@ impl Service<Request<Incoming>> for HyperHandler<HttpV1> {
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     #[tracing::instrument(level = "trace", skip(self))]
-    fn call(&mut self, request: Request<Incoming>) -> Self::Future {
-        self.request_id += 1;
+    fn call(&self, request: Request<Incoming>) -> Self::Future {
+        let request_id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
 
         Box::pin(HyperHandler::<HttpV1>::handle_request(
             request,
@@ -207,7 +214,7 @@ impl Service<Request<Incoming>> for HyperHandler<HttpV1> {
             self.filters.clone(),
             self.port,
             self.connection_id,
-            self.request_id,
+            request_id,
             self.matched_tx.clone(),
         ))
     }

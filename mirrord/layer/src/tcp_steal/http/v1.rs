@@ -8,6 +8,7 @@ use http_body_util::Full;
 use hyper::client::conn::http1::{self, Connection, SendRequest};
 use mirrord_protocol::tcp::HttpRequest;
 use tokio::net::TcpStream;
+use tokio_compat::{TokioIo, WrapIo};
 
 use super::HttpV;
 use crate::tcp_steal::http_forwarding::HttpForwarderError;
@@ -22,7 +23,7 @@ pub(crate) struct HttpV1(http1::SendRequest<Full<Bytes>>);
 impl HttpV for HttpV1 {
     type Sender = SendRequest<Full<Bytes>>;
 
-    type Connection = Connection<TcpStream, Full<Bytes>>;
+    type Connection = Connection<TokioIo<TcpStream>, Full<Bytes>>;
 
     #[tracing::instrument(level = "trace")]
     fn new(http_request_sender: Self::Sender) -> Self {
@@ -33,7 +34,7 @@ impl HttpV for HttpV1 {
     async fn handshake(
         target_stream: TcpStream,
     ) -> Result<(Self::Sender, Self::Connection), HttpForwarderError> {
-        Ok(http1::handshake(target_stream).await?)
+        Ok(http1::handshake(target_stream.wrap()).await?)
     }
 
     #[tracing::instrument(level = "trace", skip(self))]

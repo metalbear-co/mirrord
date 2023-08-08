@@ -1,0 +1,19 @@
+[package]
+name = "tokio-compat"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+[dependencies]
+hyper.workspace = true
+pin-project-lite = "0.2.4"
+tokio.workspace = true
