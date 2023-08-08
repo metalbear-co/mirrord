@@ -8,6 +8,27 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.56.0](https://github.com/metalbear-co/mirrord/tree/3.56.0) - 2023-08-07
+
+
+### Added
+
+- Added `internal_proxy` timeout configurations to allow users specify timeouts
+  in edge cases. [#1761](https://github.com/metalbear-co/mirrord/issues/1761)
+
+
+### Changed
+
+- Change operator / cli version mismatch to show only when mirrord is older
+  than operator
+
+
+### Fixed
+
+- Fix grpc errors caused by missing trailers on filtered http responses.
+  [#1731](https://github.com/metalbear-co/mirrord/issues/1731)
+
+
 ## [3.55.2](https://github.com/metalbear-co/mirrord/tree/3.55.2) - 2023-08-06
 
 

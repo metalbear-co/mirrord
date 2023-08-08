@@ -9,7 +9,7 @@ use mirrord_config::feature::network::incoming::http_filter::{
     HttpFilterConfig, HttpHeaderFilterConfig,
 };
 use mirrord_protocol::{
-    tcp::{HttpRequest, HttpResponse},
+    tcp::{HttpRequestFallback, HttpResponseFallback},
     ConnectionId, Port,
 };
 use tokio::{
@@ -32,8 +32,8 @@ pub(super) mod v2;
 /// send them through `response_sender`, which is where we get the responses that will be sent back
 /// to the agent, and finally back to the remote pod.
 pub(super) struct ConnectionTask<HttpVersion: HttpV> {
-    request_receiver: Receiver<HttpRequest>,
-    response_sender: Sender<HttpResponse>,
+    request_receiver: Receiver<HttpRequestFallback>,
+    response_sender: Sender<HttpResponseFallback>,
     port: Port,
     connection_id: ConnectionId,
 
@@ -84,19 +84,22 @@ pub(super) trait HttpV: Sized {
     ///
     /// [`http1::SendRequest`]: hyper::client::conn::http1::SendRequest
     /// [`http2::SendRequest`]: hyper::client::conn::http2::SendRequest
-    async fn send_request(&mut self, request: HttpRequest) -> hyper::Result<Response<Incoming>>;
+    async fn send_request(
+        &mut self,
+        request: HttpRequestFallback,
+    ) -> hyper::Result<Response<Incoming>>;
 
     /// Sends the [`HttpRequest`] through `Self::sender`, converting the response into a
     /// [`HttpResponse`].
     #[tracing::instrument(level = "trace", skip(self))]
     async fn send_http_request_to_application(
         &mut self,
-        request: HttpRequest,
+        request: HttpRequestFallback,
         port: Port,
         connection_id: ConnectionId,
         destination: SocketAddr,
-    ) -> Result<HttpResponse, HttpForwarderError> {
-        let request_id = request.request_id;
+    ) -> Result<HttpResponseFallback, HttpForwarderError> {
+        let request_id = request.request_id();
 
         let response = self
             .send_request(request.clone())
@@ -136,8 +139,8 @@ where
     #[tracing::instrument(level = "trace", skip(request_receiver, response_sender))]
     pub(super) async fn new(
         connect_to: SocketAddr,
-        request_receiver: Receiver<HttpRequest>,
-        response_sender: Sender<HttpResponse>,
+        request_receiver: Receiver<HttpRequestFallback>,
+        response_sender: Sender<HttpResponseFallback>,
         port: Port,
         connection_id: ConnectionId,
     ) -> Result<ConnectionTask<V>, HttpForwarderError> {

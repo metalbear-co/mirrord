@@ -162,10 +162,9 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     let config = LayerConfig::from_env()?;
 
     #[cfg(target_os = "macos")]
-    let execution_info =
-        MirrordExecution::start(&config, Some(&args.binary), progress, None).await?;
+    let execution_info = MirrordExecution::start(&config, Some(&args.binary), progress).await?;
     #[cfg(not(target_os = "macos"))]
-    let execution_info = MirrordExecution::start(&config, progress, None).await?;
+    let execution_info = MirrordExecution::start(&config, progress).await?;
 
     #[cfg(target_os = "macos")]
     let (_did_sip_patch, binary) = match execution_info.patched_path {
@@ -399,7 +398,7 @@ async fn main() -> miette::Result<()> {
         Commands::ExtensionExec(args) => {
             extension_exec(*args, &MAIN_PROGRESS_TASK.subtask("ext")).await?
         }
-        Commands::InternalProxy(args) => internal_proxy::proxy(*args).await?,
+        Commands::InternalProxy => internal_proxy::proxy().await?,
         Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
     }
 

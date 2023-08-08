@@ -9,17 +9,16 @@ use std::{
     sync::{atomic::Ordering, Arc, Mutex},
 };
 
-use bytes::Bytes;
 use dashmap::DashMap;
 use futures::TryFutureExt;
-use http_body_util::Full;
+use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::{
     body::Incoming,
     client::{self, conn::http1::SendRequest},
     header::UPGRADE,
     server::{self, conn::http1},
     service::Service,
-    Request, Response,
+    Request,
 };
 use mirrord_protocol::{ConnectionId, Port};
 use tokio::{
@@ -32,9 +31,8 @@ use tokio_compat::WrapIo;
 use tracing::error;
 
 use super::{
-    filter::close_connection,
-    hyper_handler::{collect_response, prepare_response, HyperHandler},
-    DefaultReversibleStream, HttpFilter, HttpV, RawHyperConnection,
+    filter::close_connection, hyper_handler::HyperHandler, DefaultReversibleStream, HttpFilter,
+    HttpV, RawHyperConnection, Response,
 };
 use crate::{
     steal::{http::error::HttpTrafficError, HandlerHttpRequest},
@@ -159,16 +157,13 @@ impl HttpV for HttpV1 {
     async fn send_request(
         sender: &mut Self::Sender,
         request: Request<Incoming>,
-    ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
-        prepare_response(
-            sender
-                .send_request(request)
-                .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))
-                .map_err(HttpTrafficError::from)
-                .and_then(collect_response)
-                .await?,
-        )
-        .await
+    ) -> Result<Response, HttpTrafficError> {
+        sender
+            .send_request(request)
+            .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))
+            .map_err(HttpTrafficError::from)
+            .await
+            .map(|response| response.map(|body| BoxBody::new(body.map_err(HttpTrafficError::from))))
     }
 
     #[tracing::instrument(level = "trace")]
@@ -201,7 +196,7 @@ impl HyperHandler<HttpV1> {
 }
 
 impl Service<Request<Incoming>> for HyperHandler<HttpV1> {
-    type Response = Response<Full<Bytes>>;
+    type Response = Response;
 
     type Error = HttpTrafficError;
 

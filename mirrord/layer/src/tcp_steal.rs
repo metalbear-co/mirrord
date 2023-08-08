@@ -8,7 +8,8 @@ use futures::TryFutureExt;
 use hyper::{body::Incoming, Response, StatusCode};
 use mirrord_protocol::{
     tcp::{
-        Filter, HttpFilter, HttpRequest, HttpResponse, LayerTcpSteal, NewTcpConnection,
+        Filter, HttpFilter, HttpRequestFallback, HttpResponse, HttpResponseFallback,
+        InternalHttpBody, LayerTcpSteal, NewTcpConnection,
         StealType::{All, FilteredHttp, FilteredHttpEx},
         TcpClose, TcpData,
     },
@@ -39,12 +40,12 @@ mod http;
 
 #[tracing::instrument(level = "trace")]
 async fn handle_response(
-    request: HttpRequest,
+    request: HttpRequestFallback,
     response: Result<Response<Incoming>, hyper::Error>,
     port: Port,
     connection_id: ConnectionId,
     request_id: RequestId,
-) -> Result<HttpResponse, HttpForwarderError> {
+) -> Result<HttpResponseFallback, HttpForwarderError> {
     match response {
             Err(err) if err.is_closed() => {
                 warn!(
@@ -58,7 +59,7 @@ async fn handle_response(
             Err(err) if err.is_parse() => {
                 warn!("Could not parse HTTP response to filtered HTTP request, got error: {err:?}.");
                 let body_message = format!("mirrord: could not parse HTTP response from local application - {err:?}");
-                Ok(HttpResponse::response_from_request(
+                Ok(HttpResponseFallback::response_from_request(
                     request,
                     StatusCode::BAD_GATEWAY,
                     &body_message,
@@ -67,20 +68,36 @@ async fn handle_response(
             Err(err) => {
                 warn!("Request to local application failed with: {err:?}.");
                 let body_message = format!("mirrord tried to forward the request to the local application and got {err:?}");
-                Ok(HttpResponse::response_from_request(
+                Ok(HttpResponseFallback::response_from_request(
                     request,
                     StatusCode::BAD_GATEWAY,
                     &body_message,
                 ))
             }
-            Ok(res) => Ok(
-                HttpResponse::from_hyper_response(res, port, connection_id, request_id)
+            Ok(res) if matches!(request, HttpRequestFallback::Framed(_)) => Ok(
+                HttpResponse::<InternalHttpBody>::from_hyper_response(res, port, connection_id, request_id)
                     .await
+                    .map(HttpResponseFallback::Framed)
                     .unwrap_or_else(|e| {
                         error!("Failed to read response to filtered http request: {e:?}. \
                         Please consider reporting this issue on \
                         https://github.com/metalbear-co/mirrord/issues/new?labels=bug&template=bug_report.yml");
-                        HttpResponse::response_from_request(
+                        HttpResponseFallback::response_from_request(
+                            request,
+                            StatusCode::BAD_GATEWAY,
+                            "mirrord",
+                        )
+                    }),
+            ),
+            Ok(res) => Ok(
+                HttpResponse::<Vec<u8>>::from_hyper_response(res, port, connection_id, request_id)
+                    .await
+                    .map(HttpResponseFallback::Fallback)
+                    .unwrap_or_else(|e| {
+                        error!("Failed to read response to filtered http request: {e:?}. \
+                        Please consider reporting this issue on \
+                        https://github.com/metalbear-co/mirrord/issues/new?labels=bug&template=bug_report.yml");
+                        HttpResponseFallback::response_from_request(
                             request,
                             StatusCode::BAD_GATEWAY,
                             "mirrord",
@@ -97,11 +114,11 @@ pub struct TcpStealHandler {
 
     /// Mapping of a ConnectionId to a sender that sends HTTP requests over to a task that is
     /// running an http client for this connection.
-    http_request_senders: HashMap<ConnectionId, Sender<HttpRequest>>,
+    http_request_senders: HashMap<ConnectionId, Sender<HttpRequestFallback>>,
 
     /// Sender of responses from within an http client task back to the main layer task.
     /// This sender is cloned and moved into those tasks.
-    http_response_sender: Sender<HttpResponse>,
+    http_response_sender: Sender<HttpResponseFallback>,
 
     /// HTTP filter settings
     http_filter_settings: HttpFilterSettings,
@@ -174,8 +191,11 @@ impl TcpHandler<true> for TcpStealHandler {
     /// local connection will be started for it, otherwise it will be sent in the existing local
     /// connection.
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn handle_http_request(&mut self, request: HttpRequest) -> Result<(), LayerError> {
-        if let Some(sender) = self.http_request_senders.get(&request.connection_id) {
+    async fn handle_http_request(
+        &mut self,
+        request: HttpRequestFallback,
+    ) -> Result<(), LayerError> {
+        if let Some(sender) = self.http_request_senders.get(&request.connection_id()) {
             trace!(
                 "Got an HTTP request from an existing connection, sending it to the client task \
                 to be forwarded to the application."
@@ -279,7 +299,7 @@ impl TcpHandler<true> for TcpStealHandler {
 
 impl TcpStealHandler {
     pub(crate) fn new(
-        http_response_sender: Sender<HttpResponse>,
+        http_response_sender: Sender<HttpResponseFallback>,
         port_mapping: BiMap<u16, u16>,
         http_filter_settings: HttpFilterSettings,
     ) -> Self {
@@ -335,14 +355,16 @@ impl TcpStealHandler {
     #[tracing::instrument(level = "trace", skip(self))]
     async fn create_http_connection(
         &mut self,
-        http_request: HttpRequest,
+        http_request: HttpRequestFallback,
     ) -> Result<(), LayerError> {
-        let listen = self.ports().get(&http_request.port).ok_or(
-            LayerError::NewConnectionAfterSocketClose(http_request.connection_id),
-        )?;
+        let port = http_request.port();
+        let connection_id = http_request.connection_id();
+
+        let listen = self
+            .ports()
+            .get(&port)
+            .ok_or(LayerError::NewConnectionAfterSocketClose(connection_id))?;
         let addr: SocketAddr = listen.into();
-        let connection_id = http_request.connection_id;
-        let port = http_request.port;
 
         let (request_sender, request_receiver) = channel(1024);
 
