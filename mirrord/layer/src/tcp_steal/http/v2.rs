@@ -12,6 +12,7 @@ use hyper::{
     client::conn::http2::{self, Connection, SendRequest},
     rt::Executor,
 };
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use mirrord_protocol::tcp::HttpRequestFallback;
 use tokio::net::TcpStream;
 use tracing::trace;
@@ -19,21 +20,24 @@ use tracing::trace;
 use super::HttpV;
 use crate::{detour::DetourGuard, tcp_steal::http_forwarding::HttpForwarderError};
 
-// TODO(alex): Import this from `hyper-util` when the crate is actually published.
-/// Future executor that utilises `tokio` threads.
+/// Thin wrapper over [`TokioExecutor`].
+/// Makes sure that detours are bypassed when executing futures.
 #[non_exhaustive]
 #[derive(Default, Debug, Clone)]
-pub struct TokioExecutor;
+pub struct DetourGuardExecutor {
+    inner: TokioExecutor,
+}
 
-impl<Fut> Executor<Fut> for TokioExecutor
+impl<Fut> Executor<Fut> for DetourGuardExecutor
 where
     Fut: Future + Send + 'static,
     Fut::Output: Send + 'static,
 {
     fn execute(&self, fut: Fut) {
         trace!("starting tokio executor for hyper HTTP/2");
-        tokio::spawn(async move {
-            let _ = DetourGuard::new();
+
+        self.inner.execute(async move {
+            let _guard = DetourGuard::new();
             fut.await
         });
     }
@@ -49,7 +53,8 @@ pub(crate) struct HttpV2(http2::SendRequest<BoxBody<Bytes, Infallible>>);
 impl HttpV for HttpV2 {
     type Sender = SendRequest<BoxBody<Bytes, Infallible>>;
 
-    type Connection = Connection<TcpStream, BoxBody<Bytes, Infallible>>;
+    type Connection =
+        Connection<TokioIo<TcpStream>, BoxBody<Bytes, Infallible>, DetourGuardExecutor>;
 
     #[tracing::instrument(level = "trace")]
     fn new(http_request_sender: Self::Sender) -> Self {
@@ -60,7 +65,7 @@ impl HttpV for HttpV2 {
     async fn handshake(
         target_stream: TcpStream,
     ) -> Result<(Self::Sender, Self::Connection), HttpForwarderError> {
-        Ok(http2::handshake(TokioExecutor::default(), target_stream).await?)
+        Ok(http2::handshake(DetourGuardExecutor::default(), TokioIo::new(target_stream)).await?)
     }
 
     #[tracing::instrument(level = "trace", skip(self))]

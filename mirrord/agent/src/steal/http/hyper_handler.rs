@@ -4,7 +4,10 @@
 //!
 //! # [`RawHyperConnection`]
 use core::fmt::Debug;
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::SocketAddr,
+    sync::{atomic::AtomicU16, Arc},
+};
 
 use bytes::Bytes;
 use dashmap::DashMap;
@@ -59,7 +62,7 @@ where
     pub(crate) original_destination: SocketAddr,
 
     /// Keeps track of which HTTP request we're dealing with, so we don't mix up [`Request`]s.
-    pub(crate) request_id: RequestId,
+    pub(crate) next_request_id: AtomicU16,
 
     pub(super) handle_version: V,
 }

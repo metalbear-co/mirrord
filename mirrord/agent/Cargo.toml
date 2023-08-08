@@ -44,6 +44,7 @@ wildmatch = "2"
 enum_dispatch = "0.3"
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["full"] }
+hyper-util.workspace = true
 httparse = "1"
 fancy-regex = { workspace = true }
 dashmap = { version = "5" }
