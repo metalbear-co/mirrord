@@ -48,7 +48,6 @@ impl MirrordExecution {
         // We only need the executable on macos, for SIP handling.
         #[cfg(target_os = "macos")] executable: Option<&str>,
         progress: &P,
-        timeout: Option<u64>,
     ) -> Result<Self>
     where
         P: Progress + Send + Sync,
@@ -118,10 +117,6 @@ impl MirrordExecution {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
             .stdin(std::process::Stdio::null());
-
-        if let Some(timeout) = timeout {
-            proxy_command.arg("-t").arg(timeout.to_string());
-        }
 
         match &connect_info {
             AgentConnectInfo::DirectKubernetes(name, port) => {

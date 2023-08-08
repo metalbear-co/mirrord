@@ -33,10 +33,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, log::trace};
 
-use crate::{
-    config::InternalProxyArgs,
-    error::{InternalProxyError, Result},
-};
+use crate::error::{InternalProxyError, Result};
 
 unsafe fn redirect_fd_to_dev_null(fd: libc::c_int) {
     let devnull_fd = libc::open(b"/dev/null\0" as *const [u8; 10] as _, libc::O_RDWR);
@@ -190,7 +187,7 @@ fn create_listen_socket() -> Result<TcpListener, InternalProxyError> {
 
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
-pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
+pub(crate) async fn proxy() -> Result<()> {
     let started = std::time::Instant::now();
     // Let it assign port for us then print it for the user.
     let listener = create_listen_socket()?;
@@ -218,11 +215,13 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
 
     print_port(&listener)?;
 
-    // wait for first connection `FIRST_CONNECTION_TIMEOUT` seconds, or timeout.
-    let (stream, _) = timeout(Duration::from_secs(args.timeout), listener.accept())
-        .await
-        .map_err(|_| InternalProxyError::FirstConnectionTimeout)?
-        .map_err(InternalProxyError::AcceptError)?;
+    let (stream, _) = timeout(
+        Duration::from_secs(config.internal_proxy.start_idle_timeout),
+        listener.accept(),
+    )
+    .await
+    .map_err(|_| InternalProxyError::FirstConnectionTimeout)?
+    .map_err(InternalProxyError::AcceptError)?;
 
     let mut active_connections = JoinSet::new();
 
@@ -251,12 +250,12 @@ pub(crate) async fn proxy(args: InternalProxyArgs) -> Result<()> {
                 trace!("intproxy main connection canceled.");
                 break;
             }
-            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+            _ = tokio::time::sleep(Duration::from_secs(config.internal_proxy.idle_timeout)) => {
                 if active_connections.is_empty() {
                     trace!("intproxy timeout, no active connections. Exiting.");
                     break;
                 }
-                trace!("intproxy 5 sec tick, active_connections: {active_connections:?}.");
+                trace!("intproxy {} sec tick, active_connections: {active_connections:?}.", config.internal_proxy.idle_timeout);
             }
         }
     }

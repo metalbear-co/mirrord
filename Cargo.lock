@@ -1941,7 +1941,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.55.2"
+version = "3.56.0"
 dependencies = [
  "libc",
 ]
@@ -2944,7 +2944,7 @@ checksum = "57bcfdad1b858c2db7c38303a6d2ad4dfaf5eb53dfeb0910128b2c26d6158503"
 
 [[package]]
 name = "listen_ports"
-version = "3.55.2"
+version = "3.56.0"
 
 [[package]]
 name = "lock_api"
@@ -3154,7 +3154,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.55.2"
+version = "3.56.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -3196,7 +3196,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.55.2"
+version = "3.56.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -3247,7 +3247,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.55.2"
+version = "3.56.0"
 dependencies = [
  "assert-json-diff",
  "reqwest",
@@ -3258,7 +3258,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.55.2"
+version = "3.56.0"
 dependencies = [
  "chrono",
  "fs4",
@@ -3278,7 +3278,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.55.2"
+version = "3.56.0"
 dependencies = [
  "bimap",
  "bitflags 2.3.3",
@@ -3299,7 +3299,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.55.2"
+version = "3.56.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -3309,7 +3309,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.55.2"
+version = "3.56.0"
 dependencies = [
  "axum",
  "futures",
@@ -3327,7 +3327,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.55.2"
+version = "3.56.0"
 dependencies = [
  "actix-codec",
  "base64 0.21.2",
@@ -3352,7 +3352,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.55.2"
+version = "3.56.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -3406,7 +3406,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.55.2"
+version = "3.56.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3415,7 +3415,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.55.2"
+version = "3.56.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -3425,7 +3425,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.55.2"
+version = "3.56.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -3458,7 +3458,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.55.2"
+version = "3.56.0"
 dependencies = [
  "atty",
  "serde",
@@ -3490,7 +3490,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.55.2"
+version = "3.56.0"
 dependencies = [
  "apple-codesign",
  "memchr",
@@ -3811,7 +3811,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.55.2"
+version = "3.56.0"
 
 [[package]]
 name = "outref"
@@ -4655,21 +4655,21 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.55.2"
+version = "3.56.0"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.55.2"
+version = "3.56.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.55.2"
+version = "3.56.0"
 dependencies = [
  "tokio",
 ]

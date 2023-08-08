@@ -54,7 +54,7 @@ pub(super) enum Commands {
 
     /// Internal proxy - used to aggregate connections from multiple layers
     #[command(hide = true, name = "intproxy")]
-    InternalProxy(Box<InternalProxyArgs>),
+    InternalProxy,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -264,18 +264,6 @@ pub(super) struct ExtensionExecArgs {
     /// User executable - the executable the layer is going to be injected to.
     #[arg(short = 'e')]
     pub executable: Option<String>,
-}
-
-#[derive(Args, Debug)]
-pub(super) struct InternalProxyArgs {
-    /// Launch timeout until we get first connection.
-    /// If layer doesn't connect in this time, we timeout and exit.
-    #[arg(short = 't', default_value_t = 30)]
-    pub timeout: u64,
-
-    /// Specify config file to use
-    #[arg(short = 'f')]
-    pub config_file: Option<String>,
 }
 
 #[derive(Args, Debug)]
