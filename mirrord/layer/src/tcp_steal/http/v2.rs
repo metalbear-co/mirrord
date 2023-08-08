@@ -12,9 +12,9 @@ use hyper::{
     client::conn::http2::{self, Connection, SendRequest},
     rt::Executor,
 };
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use mirrord_protocol::tcp::HttpRequestFallback;
 use tokio::net::TcpStream;
-use tokio_compat::{TokioExecutor, TokioIo, WrapIo};
 use tracing::trace;
 
 use super::HttpV;
@@ -65,7 +65,7 @@ impl HttpV for HttpV2 {
     async fn handshake(
         target_stream: TcpStream,
     ) -> Result<(Self::Sender, Self::Connection), HttpForwarderError> {
-        Ok(http2::handshake(DetourGuardExecutor::default(), target_stream.wrap()).await?)
+        Ok(http2::handshake(DetourGuardExecutor::default(), TokioIo::new(target_stream)).await?)
     }
 
     #[tracing::instrument(level = "trace", skip(self))]

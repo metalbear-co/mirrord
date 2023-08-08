@@ -6,9 +6,9 @@ use std::{convert::Infallible, future};
 use bytes::Bytes;
 use http_body_util::combinators::BoxBody;
 use hyper::client::conn::http1::{self, Connection, SendRequest};
+use hyper_util::rt::TokioIo;
 use mirrord_protocol::tcp::HttpRequestFallback;
 use tokio::net::TcpStream;
-use tokio_compat::{TokioIo, WrapIo};
 
 use super::HttpV;
 use crate::tcp_steal::http_forwarding::HttpForwarderError;
@@ -34,7 +34,7 @@ impl HttpV for HttpV1 {
     async fn handshake(
         target_stream: TcpStream,
     ) -> Result<(Self::Sender, Self::Connection), HttpForwarderError> {
-        Ok(http1::handshake(target_stream.wrap()).await?)
+        Ok(http1::handshake(TokioIo::new(target_stream)).await?)
     }
 
     #[tracing::instrument(level = "trace", skip(self))]

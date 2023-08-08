@@ -20,6 +20,7 @@ use hyper::{
     service::Service,
     Request,
 };
+use hyper_util::rt::TokioIo;
 use mirrord_protocol::{ConnectionId, Port};
 use tokio::{
     io::{copy_bidirectional, AsyncWriteExt},
@@ -27,7 +28,6 @@ use tokio::{
     net::TcpStream,
     sync::{mpsc::Sender, oneshot},
 };
-use tokio_compat::WrapIo;
 use tracing::error;
 
 use super::{
@@ -76,13 +76,13 @@ impl HttpV for HttpV1 {
         // We have to keep the connection alive to handle a possible upgrade request
         // manually.
         let server::conn::http1::Parts {
-            io: mut client_agent, // i.e. browser-agent connection
+            io: client_agent, // i.e. browser-agent connection
             read_buf: agent_unprocessed,
             ..
         } = http1::Builder::new()
             .preserve_header_case(true)
             .serve_connection(
-                stream.wrap(),
+                TokioIo::new(stream),
                 HyperHandler::<HttpV1>::new(
                     filters,
                     matched_tx,
@@ -104,16 +104,14 @@ impl HttpV for HttpV1 {
             // HTTP, to the original destination.
             agent_remote.write_all(&agent_unprocessed).await?;
 
+            let mut client_agent = client_agent.into_inner();
             // Send the data we received from the original destination, and have not
             // processed as HTTP, to the client.
-            client_agent
-                .inner_mut()
-                .write_all(&client_unprocessed)
-                .await?;
+            client_agent.write_all(&client_unprocessed).await?;
 
             // Now both the client and original destinations should be in sync, so we
             // can just copy the bytes from one into the other.
-            copy_bidirectional(client_agent.inner_mut(), &mut agent_remote).await?;
+            copy_bidirectional(&mut client_agent, &mut agent_remote).await?;
         }
 
         close_connection(connection_close_sender, connection_id).await
@@ -124,9 +122,10 @@ impl HttpV for HttpV1 {
         target_stream: TcpStream,
         upgrade_tx: Option<oneshot::Sender<RawHyperConnection>>,
     ) -> Result<Self::Sender, HttpTrafficError> {
-        let (request_sender, mut connection) = client::conn::http1::handshake(target_stream.wrap())
-            .await
-            .inspect_err(|fail| error!("Handshake failed with {fail:#?}"))?;
+        let (request_sender, mut connection) =
+            client::conn::http1::handshake(TokioIo::new(target_stream))
+                .await
+                .inspect_err(|fail| error!("Handshake failed with {fail:#?}"))?;
 
         // We need this to progress the connection forward (hyper thing).
         tokio::spawn(async move {

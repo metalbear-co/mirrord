@@ -53,11 +53,11 @@ itertools = "0.10"
 os_info = "3"
 bytemuck = "1"
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
+hyper-util.workspace = true
 http-body-util  = { workspace = true }
 bimap.workspace = true
 dashmap = "5.4"
 exec.workspace = true
-tokio-compat = { path = "../tokio-compat" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

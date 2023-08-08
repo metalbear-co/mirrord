@@ -2496,6 +2496,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper-util"
+version = "0.0.0"
+source = "git+https://github.com/hyperium/hyper-util#f898015fc9eca9f459ddac521db278d904099e89"
+dependencies = [
+ "futures-channel",
+ "futures-util",
+ "http",
+ "hyper 1.0.0-rc.4",
+ "once_cell",
+ "pin-project-lite",
+ "socket2 0.4.9",
+ "tokio",
+ "tower",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
 name = "hyperlocal"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3205,6 +3223,7 @@ dependencies = [
  "http-body-util",
  "httparse",
  "hyper 1.0.0-rc.4",
+ "hyper-util",
  "iptables",
  "k8s-cri",
  "libc",
@@ -3227,7 +3246,6 @@ dependencies = [
  "test_bin",
  "thiserror",
  "tokio",
- "tokio-compat",
  "tokio-stream",
  "tokio-util",
  "tonic",
@@ -3364,6 +3382,7 @@ dependencies = [
  "http-body 1.0.0-rc.2",
  "http-body-util",
  "hyper 1.0.0-rc.4",
+ "hyper-util",
  "itertools",
  "k8s-openapi",
  "libc",
@@ -3387,7 +3406,6 @@ dependencies = [
  "tests",
  "thiserror",
  "tokio",
- "tokio-compat",
  "tokio-stream",
  "tokio-util",
  "tower",
@@ -5616,15 +5634,6 @@ dependencies = [
  "socket2 0.4.9",
  "tokio-macros",
  "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "tokio-compat"
-version = "3.56.0"
-dependencies = [
- "hyper 1.0.0-rc.4",
- "pin-project-lite",
- "tokio",
 ]
 
 [[package]]

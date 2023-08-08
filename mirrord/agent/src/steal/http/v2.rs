@@ -19,12 +19,12 @@ use hyper::{
     service::Service,
     Request,
 };
+use hyper_util::rt::TokioIo;
 use mirrord_protocol::{ConnectionId, Port};
 use tokio::{
     net::TcpStream,
     sync::{mpsc::Sender, oneshot},
 };
-use tokio_compat::WrapIo;
 use tracing::error;
 
 use super::{
@@ -56,7 +56,7 @@ impl HttpV for HttpV2 {
     ) -> Result<(), HttpTrafficError> {
         http2::Builder::new(TokioExecutor::default())
             .serve_connection(
-                stream.wrap(),
+                TokioIo::new(stream),
                 HyperHandler::<HttpV2>::new(
                     filters,
                     matched_tx,
@@ -76,7 +76,7 @@ impl HttpV for HttpV2 {
         _: Option<oneshot::Sender<RawHyperConnection>>,
     ) -> Result<Self::Sender, HttpTrafficError> {
         let (request_sender, connection) =
-            client::conn::http2::handshake(TokioExecutor::default(), target_stream.wrap())
+            client::conn::http2::handshake(TokioExecutor::default(), TokioIo::new(target_stream))
                 .await
                 .inspect_err(|fail| error!("Handshake failed with {fail:#?}"))?;
 
