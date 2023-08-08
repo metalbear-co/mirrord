@@ -6,7 +6,7 @@
 use core::{fmt::Debug, future::Future, pin::Pin};
 use std::{
     net::SocketAddr,
-    sync::{atomic::Ordering, Arc},
+    sync::{atomic::Ordering, Arc, Mutex},
 };
 
 use bytes::Bytes;
@@ -49,11 +49,15 @@ use crate::{
 ///
 /// We use this channel to take control of the upgraded connection back from hyper.
 #[derive(Debug)]
-pub(crate) struct HttpV1(Option<oneshot::Sender<RawHyperConnection>>);
+pub(crate) struct HttpV1(Mutex<Option<oneshot::Sender<RawHyperConnection>>>);
 
 impl HttpV1 {
-    fn take_upgrade_tx(&mut self) -> Option<oneshot::Sender<RawHyperConnection>> {
-        self.0.take()
+    fn new(upgrate_tx: Option<oneshot::Sender<RawHyperConnection>>) -> Self {
+        Self(Mutex::new(upgrate_tx))
+    }
+
+    fn take_upgrade_tx(&self) -> Option<oneshot::Sender<RawHyperConnection>> {
+        self.0.lock().expect("poisoned lock").take()
     }
 }
 
@@ -191,7 +195,7 @@ impl HyperHandler<HttpV1> {
             port,
             original_destination,
             next_request_id: Default::default(),
-            handle_version: HttpV1(upgrade_tx),
+            handle_version: HttpV1::new(upgrade_tx),
         }
     }
 }
