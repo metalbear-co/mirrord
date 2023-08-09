@@ -208,7 +208,7 @@ impl SpinnerProgress {
     fn new(text: &str) -> SpinnerProgress {
         let root_progress = MultiProgress::new();
         let progress = spinner(0);
-        progress.set_message(format!("{text}"));
+        progress.set_message(text.to_string());
         root_progress.add(progress.clone());
         progress.enable_steady_tick(Duration::from_millis(60));
 
@@ -226,7 +226,7 @@ impl Progress for SpinnerProgress {
     fn subtask(&self, text: &str) -> SpinnerProgress {
         let indent = self.indent + 1;
         let progress = spinner(indent);
-        progress.set_message(format!("{text}"));
+        progress.set_message(text.to_string());
         self.root_progress.add(progress.clone());
         progress.enable_steady_tick(Duration::from_millis(60));
         SpinnerProgress {
@@ -289,7 +289,8 @@ impl ProgressTracker {
             Ok("dumb" | "simple") => SimpleProgress::new(text).into(),
             Ok("json") => JsonProgress::new(text).into(),
             Ok("off") => NullProgress.into(),
-            Ok("std" | "standard") | _ => SpinnerProgress::new(text).into(),
+            Ok("std" | "standard") => SpinnerProgress::new(text).into(),
+            _ => SpinnerProgress::new(text).into(),
         }
     }
 }
