@@ -18,3 +18,4 @@ atty = "0.2.14"
 indicatif = "0.17"
 serde.workspace = true
 serde_json.workspace = true
+enum_dispatch.workspace = true

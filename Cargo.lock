@@ -3463,6 +3463,7 @@ name = "mirrord-progress"
 version = "3.56.0"
 dependencies = [
  "atty",
+ "enum_dispatch",
  "indicatif",
  "serde",
  "serde_json",

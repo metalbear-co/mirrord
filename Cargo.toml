@@ -56,6 +56,7 @@ num-traits = "0.2"
 regex = { version = "1", features = ["unicode-case"] }
 miette = "5"
 fancy-regex = { version = "0.10" }
+enum_dispatch = "0.3"
 
 # TODO(alex): Change when https://github.com/hyperium/http-body/issues/88 is solved.
 hyper = { git = "https://github.com/meowjesty/hyper", branch = "issue/922/http2", features = ["full"] }

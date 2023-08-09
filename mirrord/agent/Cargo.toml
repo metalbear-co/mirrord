@@ -41,7 +41,7 @@ bytes = "1.2"
 regex = "1"
 socket2.workspace = true
 wildmatch = "2"
-enum_dispatch = "0.3"
+enum_dispatch.workspace = true
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["full"] }
 httparse = "1"
