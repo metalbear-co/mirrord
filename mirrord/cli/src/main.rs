@@ -3,7 +3,7 @@
 #![feature(result_option_inspect)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{collections::HashMap, sync::LazyLock, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
 use clap::Parser;
 use config::*;
@@ -27,7 +27,7 @@ use mirrord_kube::{
     },
     error::KubeApiError,
 };
-use mirrord_progress::{Progress, ProgressMode, TaskProgress};
+use mirrord_progress::{Progress, ProgressTracker};
 use operator::operator_command;
 use semver::Version;
 use serde::de::DeserializeOwned;
@@ -47,9 +47,10 @@ mod operator;
 
 pub(crate) use error::{CliError, Result};
 
-async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
+async fn exec(args: &ExecArgs) -> Result<()> {
+    let progress = ProgressTracker::from_env("mirrord exec");
     if !args.disable_version_check {
-        prompt_outdated_version().await;
+        prompt_outdated_version(&progress).await;
     }
     info!(
         "Launching {:?} with arguments {:?}",
@@ -157,12 +158,13 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
         std::env::set_var("MIRRORD_CONFIG_FILE", full_path);
     }
 
-    let sub_progress = progress.subtask("preparing to launch process");
+    let mut sub_progress = progress.subtask("preparing to launch process");
 
     let config = LayerConfig::from_env()?;
 
     #[cfg(target_os = "macos")]
-    let execution_info = MirrordExecution::start(&config, Some(&args.binary), progress).await?;
+    let execution_info =
+        MirrordExecution::start(&config, Some(&args.binary), &sub_progress).await?;
     #[cfg(not(target_os = "macos"))]
     let execution_info = MirrordExecution::start(&config, progress).await?;
 
@@ -187,7 +189,7 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     // Put original executable in argv[0] even if actually running patched version.
     binary_args.insert(0, args.binary.clone());
 
-    sub_progress.done_with("ready to launch process");
+    sub_progress.success(Some("ready to launch process"));
     // The execve hook is not yet active and does not hijack this call.
     let err = execvp(binary.clone(), binary_args.clone());
     error!("Couldn't execute {:?}", err);
@@ -385,19 +387,18 @@ async fn main() -> miette::Result<()> {
             .init();
     }
 
-    static MAIN_PROGRESS_TASK: LazyLock<TaskProgress> =
-        LazyLock::new(|| TaskProgress::new("mirrord cli starting..."));
-
     match cli.commands {
-        Commands::Exec(args) => exec(&args, &MAIN_PROGRESS_TASK.subtask("exec")).await?,
+        Commands::Exec(args) => exec(&args).await?,
         Commands::Extract { path } => {
-            extract_library(Some(path), &MAIN_PROGRESS_TASK.subtask("extract"), false)?;
+            extract_library(
+                Some(path),
+                &ProgressTracker::from_env("mirrord extract library..."),
+                false,
+            )?;
         }
         Commands::ListTargets(args) => print_pod_targets(&args).await?,
         Commands::Operator(args) => operator_command(*args).await?,
-        Commands::ExtensionExec(args) => {
-            extension_exec(*args, &MAIN_PROGRESS_TASK.subtask("ext")).await?
-        }
+        Commands::ExtensionExec(args) => extension_exec(*args).await?,
         Commands::InternalProxy => internal_proxy::proxy().await?,
         Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
     }
@@ -410,7 +411,6 @@ async fn main() -> miette::Result<()> {
 fn init_ext_error_handler(commands: &Commands) -> bool {
     match commands {
         Commands::ListTargets(_) | Commands::ExtensionExec(_) => {
-            mirrord_progress::init_from_env(ProgressMode::Json);
             let _ = miette::set_hook(Box::new(|_| Box::new(JSONReportHandler::new())));
             true
         }
@@ -418,7 +418,8 @@ fn init_ext_error_handler(commands: &Commands) -> bool {
     }
 }
 
-async fn prompt_outdated_version() {
+async fn prompt_outdated_version(progress: &ProgressTracker) {
+    let mut progress = progress.subtask("version check");
     let check_version: bool = std::env::var("MIRRORD_CHECK_VERSION")
         .map(|s| s.parse().unwrap_or(true))
         .unwrap_or(true);
@@ -438,9 +439,10 @@ async fn prompt_outdated_version() {
                     if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
                         let is_homebrew = which("mirrord").ok().map(|mirrord_path| mirrord_path.to_string_lossy().contains("homebrew")).unwrap_or_default();
                         let command = if is_homebrew { "brew upgrade metalbear-co/mirrord/mirrord" } else { "curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash" };
-                        println!("New mirrord version available: {latest_version}. To update, run: `{command:?}`.");
-                        println!("To disable version checks, set env variable MIRRORD_CHECK_VERSION to 'false'.")
+                        progress.print(&format!("New mirrord version available: {}. To update, run: `{:?}`.", latest_version, command));
+                        progress.print("To disable version checks, set env variable MIRRORD_CHECK_VERSION to 'false'.")
                     }
+                    progress.success(None);
                 }
             }
         }

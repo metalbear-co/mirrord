@@ -1,5 +1,7 @@
+use std::time::Duration;
+
 use enum_dispatch::enum_dispatch;
-use indicatif::{ProgressBar, MultiProgress};
+use indicatif::{MultiProgress, ProgressBar};
 use serde::Serialize;
 use serde_json::to_string;
 
@@ -181,13 +183,13 @@ impl Progress for SimpleProgress {
     fn set_fail_on_drop(&mut self, _: bool) {}
 }
 
-
 #[derive(Debug)]
 pub struct SpinnerProgress {
     done: bool,
     fail_on_drop: bool,
     root_progress: MultiProgress,
     progress: ProgressBar,
+    indent: usize,
 }
 
 impl SpinnerProgress {
@@ -197,53 +199,65 @@ impl SpinnerProgress {
         progress.set_message(format!("{text}"));
         root_progress.add(progress.clone());
 
-    
         SpinnerProgress {
             done: false,
             fail_on_drop: true,
+            indent: 0,
             root_progress,
-            progress
+            progress,
         }
     }
-
 }
 
 impl Progress for SpinnerProgress {
     fn subtask(&self, text: &str) -> SpinnerProgress {
         let progress = ProgressBar::new_spinner();
+        let indent = self.indent + 1;
+        progress.set_message(format!("{} {text}", "  ".repeat(indent)));
         self.root_progress.add(progress.clone());
-        progress.set_message(format!("{text}"));
         SpinnerProgress {
             done: false,
             fail_on_drop: true,
             root_progress: self.root_progress.clone(),
-            progress
+            indent,
+            progress,
         }
     }
 
-    fn print(&self, _: &str) {}
+    fn print(&self, msg: &str) {
+        let _ = self.root_progress.println(msg);
+    }
 
     fn warning(&self, msg: &str) {
-        self.progress.set_message(format!("! {msg}"));
+        self.progress
+            .set_message(format!("{} ! {msg}", "  ".repeat(self.indent)));
     }
 
     fn failure(&mut self, msg: Option<&str>) {
         self.done = true;
         if let Some(msg) = msg {
-            self.progress.abandon_with_message(format!("{msg}"));
+            self.progress
+                .abandon_with_message(format!("{} x {msg}", "  ".repeat(self.indent)));
         } else {
-            self.progress.set_prefix("x");
-            self.progress.abandon();
+            self.progress.abandon_with_message(format!(
+                "{} x {}",
+                "  ".repeat(self.indent),
+                self.progress.message()
+            ));
         }
     }
 
     fn success(&mut self, msg: Option<&str>) {
         self.done = true;
-        self.progress.set_prefix("✓");
         if let Some(msg) = msg {
-            self.progress.finish_with_message(format!("{msg}"));
+            self.progress
+                .finish_with_message(format!("{} ✓ {msg}", "  ".repeat(self.indent)));
         } else {
-            self.progress.finish();
+            self.progress.finish_with_message(format!(
+                "{} ✓ {}",
+                "  ".repeat(self.indent),
+                self.progress.message()
+            ));
         }
     }
 
@@ -264,15 +278,13 @@ impl Drop for SpinnerProgress {
     }
 }
 
-
 impl ProgressTracker {
-    pub fn from_env(fallback: ProgressTracker, text: &str) -> Self {
+    pub fn from_env(text: &str) -> Self {
         match std::env::var(MIRRORD_PROGRESS_ENV).as_deref() {
-            Ok("std" | "standard") => SpinnerProgress::new(text).into(),
             Ok("dumb" | "simple") => SimpleProgress::new(text).into(),
             Ok("json") => JsonProgress::new(text).into(),
             Ok("off") => NullProgress.into(),
-            _ => fallback,
+            Ok("std" | "standard") | _ => SpinnerProgress::new(text).into(),
         }
     }
 }
@@ -280,7 +292,7 @@ impl ProgressTracker {
 /// Message sent when a new task is created using subtask/new
 #[derive(Serialize, Debug, Clone, Default)]
 struct NewTaskMessage {
-    /// Task name (identifier)
+    /// Task name (indentifier)
     name: String,
     /// Parent task name, if subtask.
     parent: Option<String>,

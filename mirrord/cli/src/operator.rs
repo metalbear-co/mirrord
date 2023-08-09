@@ -8,7 +8,7 @@ use mirrord_operator::{
     crd::{LicenseInfoOwned, MirrordOperatorCrd, MirrordOperatorSpec, OPERATOR_STATUS_NAME},
     setup::{LicenseType, Operator, OperatorNamespace, OperatorSetup, SetupOptions},
 };
-use mirrord_progress::{Progress, TaskProgress};
+use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{row, Table};
 use tokio::fs;
 use tracing::warn;
@@ -87,11 +87,11 @@ async fn get_status_api(config: Option<String>) -> Result<Api<MirrordOperatorCrd
 }
 
 async fn operator_status(config: Option<String>) -> Result<()> {
-    let progress = TaskProgress::new("Operator Status").fail_on_drop(true);
+    let mut progress = ProgressTracker::from_env("Operator Status");
 
     let status_api = get_status_api(config).await?;
 
-    let status_progress = progress.subtask("fetching status");
+    let mut status_progress = progress.subtask("fetching status");
 
     let mirrord_status = match status_api
         .get(OPERATOR_STATUS_NAME)
@@ -102,15 +102,15 @@ async fn operator_status(config: Option<String>) -> Result<()> {
     {
         Ok(status) => status,
         Err(err) => {
-            status_progress.fail_with("unable to get status");
+            status_progress.failure(Some("unable to get status"));
 
             return Err(err);
         }
     };
 
-    status_progress.done_with("fetched status");
+    status_progress.success(Some("fetched status"));
 
-    progress.done();
+    progress.success(None);
 
     let MirrordOperatorSpec {
         operator_version,

@@ -133,11 +133,11 @@ impl OperatorApi {
             if operator_version > mirrord_version {
                 version_progress.warning(&format!("Your mirrord plugin/CLI version {} does not match the operator version {}. This can lead to unforeseen issues.", mirrord_version, operator_version));
                 version_progress.warning(
-                        "Consider updating your mirrord plugin/CLI to match the operator version.",
+                    "Consider updating your mirrord plugin/CLI to match the operator version.",
                 );
             }
             version_progress.success(None);
-            
+
             let operator_session_information = OperatorSessionInformation::new(
                 target,
                 status.spec.license.fingerprint,
