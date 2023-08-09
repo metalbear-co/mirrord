@@ -6,6 +6,7 @@ use dashmap::DashSet;
 use errno::{set_errno, Errno};
 use libc::{c_char, c_int, c_void, size_t, sockaddr, socklen_t, ssize_t, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
+use nix::sys::socket::ControlMessageOwned;
 use tracing::debug;
 
 use super::ops::*;
@@ -390,9 +391,23 @@ pub(super) unsafe extern "C" fn recvmsg_detour(
         let recvmsg_result = FN_RECVMSG(sockfd, message_header, flags);
         debug!("recvmsg_detour -> received {recvmsg_result:#?}",);
 
+        if !((*message_header).msg_name).is_null() {
+            let raw_destination = unsafe { *message_header }.msg_name as *const libc::sockaddr;
+            let destination_length = unsafe { *message_header }.msg_namelen;
+            tracing::info!(
+                "recvmsg_detour -> from {:#?}",
+                <socket2::SockAddr as crate::socket::SocketAddrExt>::try_from_raw(
+                    raw_destination,
+                    destination_length,
+                )
+                .map(|s| s.as_socket())
+            );
+        }
+
         recvmsg_result
     }
 }
+
 /// Not a faithful reproduction of what [`libc::sendmsg`] is supposed to do, see [`send_to`].
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn sendmsg_detour(
@@ -413,78 +428,81 @@ pub(super) unsafe extern "C" fn sendmsg_detour(
         FN_SENDMSG(sockfd, message_header, flags)
     } else {
         debug!("sendmsg_detour -> ");
-        // Safety: we can deref `message_header` here, as we check for null before.
-        let data_blocks = (*message_header).msg_iov;
-        let number_of_blocks = (*message_header).msg_iovlen;
-        debug!("sendmsg_detour -> number of blocks {number_of_blocks:?}");
-
-        let mut offset = 0;
-        let total_length = (!data_blocks.is_null())
-            .then(|| {
-                (0..number_of_blocks)
-                    .reduce(|acc, _| {
-                        let block = data_blocks.byte_add(offset);
-
-                        offset += (*block).iov_len;
-
-                        acc + (*block).iov_len
-                    })
-                    .unwrap_or_default()
-            })
-            .unwrap_or_default();
-
-        debug!("sendmsg_detour -> total_length {total_length:#?}");
-
-        let mut offset = 0;
-        let message = (!data_blocks.is_null()).then(|| {
-            (0..number_of_blocks).fold(
-                std::alloc::alloc(Layout::array::<u8>(total_length).unwrap()),
-                |acc, _| {
-                    let block = data_blocks.byte_add(offset);
-                    acc.byte_offset(offset as isize)
-                        .copy_from((*block).iov_base as *const _, (*block).iov_len);
-
-                    offset += (*data_blocks).iov_len;
-
-                    acc
-                },
-            )
-        });
-        debug!("sendmsg_detour -> built blocks");
-        debug!(
-            "sendmsg_detour -> sending stuff {:#?}",
-            (*message_header).msg_iovlen
-        );
-
-        // Equivalent to just calling `send`.
-        if let Some(buffer) = message {
-            if (*message_header).msg_name.is_null() {
-                debug!("sendmsg_detour -> calling send");
-                libc::send(sockfd, buffer as *const _, total_length, flags)
-            } else {
-                let named = std::slice::from_raw_parts(
-                    (*message_header).msg_name as *const u8,
-                    (*message_header).msg_namelen as usize,
-                );
-
-                let d_name = String::from_utf8_lossy(named);
-
-                debug!("sendmsg_detour -> calling send_to with {d_name:#?}");
-                send_to(
-                    sockfd,
-                    buffer as *const _,
-                    total_length,
-                    flags,
-                    std::mem::transmute((*message_header).msg_name),
-                    (*message_header).msg_namelen,
-                )
-                .unwrap_or_bypass_with(|_| FN_SENDMSG(sockfd, message_header, flags))
-            }
-        } else {
-            debug!("sendmsg_detour -> bypassed with libc");
-            libc::sendmsg(sockfd, message_header, flags)
-        }
+        sendmsg(sockfd, message_header, flags)
+            .unwrap_or_bypass_with(|_| FN_SENDMSG(sockfd, message_header, flags))
     }
+    //     // Safety: we can deref `message_header` here, as we check for null before.
+    //     let data_blocks = (*message_header).msg_iov;
+    //     let number_of_blocks = (*message_header).msg_iovlen;
+    //     debug!("sendmsg_detour -> number of blocks {number_of_blocks:?}");
+
+    //     let mut offset = 0;
+    //     let total_length = (!data_blocks.is_null())
+    //         .then(|| {
+    //             (0..number_of_blocks)
+    //                 .reduce(|acc, _| {
+    //                     let block = data_blocks.byte_add(offset);
+
+    //                     offset += (*block).iov_len;
+
+    //                     acc + (*block).iov_len
+    //                 })
+    //                 .unwrap_or_default()
+    //         })
+    //         .unwrap_or_default();
+
+    //     debug!("sendmsg_detour -> total_length {total_length:#?}");
+
+    //     let mut offset = 0;
+    //     let message = (!data_blocks.is_null()).then(|| {
+    //         (0..number_of_blocks).fold(
+    //             std::alloc::alloc(Layout::array::<u8>(total_length).unwrap()),
+    //             |acc, _| {
+    //                 let block = data_blocks.byte_add(offset);
+    //                 acc.byte_offset(offset as isize)
+    //                     .copy_from((*block).iov_base as *const _, (*block).iov_len);
+
+    //                 offset += (*data_blocks).iov_len;
+
+    //                 acc
+    //             },
+    //         )
+    //     });
+    //     debug!("sendmsg_detour -> built blocks");
+    //     debug!(
+    //         "sendmsg_detour -> sending stuff {:#?}",
+    //         (*message_header).msg_iovlen
+    //     );
+
+    //     // Equivalent to just calling `send`.
+    //     if let Some(buffer) = message {
+    //         if (*message_header).msg_name.is_null() {
+    //             debug!("sendmsg_detour -> calling send");
+    //             libc::send(sockfd, buffer as *const _, total_length, flags)
+    //         } else {
+    //             let named = std::slice::from_raw_parts(
+    //                 (*message_header).msg_name as *const u8,
+    //                 (*message_header).msg_namelen as usize,
+    //             );
+
+    //             let d_name = String::from_utf8_lossy(named);
+
+    //             debug!("sendmsg_detour -> calling send_to with {d_name:#?}");
+    //             send_to(
+    //                 sockfd,
+    //                 buffer as *const _,
+    //                 total_length,
+    //                 flags,
+    //                 std::mem::transmute((*message_header).msg_name),
+    //                 (*message_header).msg_namelen,
+    //             )
+    //             .unwrap_or_bypass_with(|_| FN_SENDMSG(sockfd, message_header, flags))
+    //         }
+    //     } else {
+    //         debug!("sendmsg_detour -> bypassed with libc");
+    //         libc::sendmsg(sockfd, message_header, flags)
+    //     }
+    // }
 }
 pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled_remote_dns: bool) {
     replace!(hook_manager, "socket", socket_detour, FnSocket, FN_SOCKET);
