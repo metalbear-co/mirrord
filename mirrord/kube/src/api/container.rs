@@ -487,3 +487,21 @@ impl ContainerApi for EphemeralContainer {
         Ok(runtime_data.pod_name.to_string())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use rstest::rstest;
+    use super::*;
+
+    #[rstest]
+    #[case("agent ready", None)]
+    #[case("agent ready - version 3.56.0", Some("3.56.0"))]
+    fn agent_version_regex(#[case] agent_message: &str, #[case] version: Option<&str>) {
+        let captures = AGENT_READY_REGEX
+            .get_or_init(|| Regex::new(AGENT_READY_PATTERN).unwrap())
+            .captures(agent_message)
+            .unwrap();
+
+        assert_eq!(captures.get(2).map(|c| c.as_str()), version);
+    }
+}
