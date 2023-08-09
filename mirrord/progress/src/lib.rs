@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use enum_dispatch::enum_dispatch;
-use indicatif::{MultiProgress, ProgressBar};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde::Serialize;
 use serde_json::to_string;
 
@@ -183,6 +183,18 @@ impl Progress for SimpleProgress {
     fn set_fail_on_drop(&mut self, _: bool) {}
 }
 
+fn spinner_template(indent: usize) -> String {
+    format!("{indent}{{spinner}} {{msg}}", indent = "  ".repeat(indent))
+}
+
+fn spinner(indent: usize) -> ProgressBar {
+    ProgressBar::hidden().with_style(
+        ProgressStyle::default_spinner()
+            .template(&spinner_template(indent))
+            .unwrap(),
+    )
+}
+
 #[derive(Debug)]
 pub struct SpinnerProgress {
     done: bool,
@@ -195,9 +207,10 @@ pub struct SpinnerProgress {
 impl SpinnerProgress {
     fn new(text: &str) -> SpinnerProgress {
         let root_progress = MultiProgress::new();
-        let progress = ProgressBar::new_spinner();
+        let progress = spinner(0);
         progress.set_message(format!("{text}"));
         root_progress.add(progress.clone());
+        progress.enable_steady_tick(Duration::from_millis(60));
 
         SpinnerProgress {
             done: false,
@@ -211,10 +224,11 @@ impl SpinnerProgress {
 
 impl Progress for SpinnerProgress {
     fn subtask(&self, text: &str) -> SpinnerProgress {
-        let progress = ProgressBar::new_spinner();
         let indent = self.indent + 1;
-        progress.set_message(format!("{} {text}", "  ".repeat(indent)));
+        let progress = spinner(indent);
+        progress.set_message(format!("{text}"));
         self.root_progress.add(progress.clone());
+        progress.enable_steady_tick(Duration::from_millis(60));
         SpinnerProgress {
             done: false,
             fail_on_drop: true,
@@ -229,35 +243,26 @@ impl Progress for SpinnerProgress {
     }
 
     fn warning(&self, msg: &str) {
-        self.progress
-            .set_message(format!("{} ! {msg}", "  ".repeat(self.indent)));
+        self.progress.set_message(format!("! {msg}"));
     }
 
     fn failure(&mut self, msg: Option<&str>) {
         self.done = true;
         if let Some(msg) = msg {
-            self.progress
-                .abandon_with_message(format!("{} x {msg}", "  ".repeat(self.indent)));
+            self.progress.abandon_with_message(format!("x {msg}"));
         } else {
-            self.progress.abandon_with_message(format!(
-                "{} x {}",
-                "  ".repeat(self.indent),
-                self.progress.message()
-            ));
+            self.progress
+                .abandon_with_message(format!("x {}", self.progress.message()));
         }
     }
 
     fn success(&mut self, msg: Option<&str>) {
         self.done = true;
         if let Some(msg) = msg {
-            self.progress
-                .finish_with_message(format!("{} ✓ {msg}", "  ".repeat(self.indent)));
+            self.progress.finish_with_message(format!("✓ {msg}"));
         } else {
-            self.progress.finish_with_message(format!(
-                "{} ✓ {}",
-                "  ".repeat(self.indent),
-                self.progress.message()
-            ));
+            self.progress
+                .finish_with_message(format!("✓ {}", self.progress.message()));
         }
     }
 
