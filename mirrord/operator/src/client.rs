@@ -10,7 +10,7 @@ use mirrord_kube::{
     api::{get_k8s_resource_api, kubernetes::create_kube_api},
     error::KubeApiError,
 };
-use mirrord_progress::{MessageKind, Progress};
+use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -124,20 +124,27 @@ impl OperatorApi {
         if let Some(target) = operator_api.fetch_target().await? {
             let status = operator_api.get_status().await?;
 
+            let mut version_progress = progress.subtask("comparing versions");
             let operator_version = Version::parse(&status.spec.operator_version).unwrap(); // TODO: Remove unwrap
 
             // This is printed multiple times when the local process forks. Can be solved by e.g.
             // propagating an env var, don't think it's worth the extra complexity though
             let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
             if operator_version > mirrord_version {
-                progress.subtask("comparing versions").print_message(MessageKind::Warning, Some(&format!("Your mirrord plugin/CLI version {} does not match the operator version {}. This can lead to unforeseen issues.", mirrord_version, operator_version)));
-                progress.subtask("comparing versions").print_message(
-                    MessageKind::Warning,
-                    Some(
-                        "Consider updating your mirrord plugin/CLI to match the operator version.",
-                    ),
+                // we make two sub tasks since it looks best this way
+                version_progress.warning(
+                    &format!(
+                        "Your mirrord plugin/CLI version {} does not match the operator version {}. This can lead to unforeseen issues.",
+                        mirrord_version,
+                        operator_version));
+                version_progress.success(None);
+                version_progress = progress.subtask("comparing versions");
+                version_progress.warning(
+                    "Consider updating your mirrord plugin/CLI to match the operator version.",
                 );
             }
+            version_progress.success(None);
+
             let operator_session_information = OperatorSessionInformation::new(
                 target,
                 status.spec.license.fingerprint,
