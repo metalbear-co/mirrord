@@ -361,6 +361,8 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
             layer_address: Some(layer_address.try_into()?),
         };
 
+        debug!("we are connected {connected:#?}");
+
         Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
         SOCKETS.insert(sockfd, user_socket_info);
 
@@ -428,7 +430,7 @@ fn connect_to_local_address(
 /// that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request interception procedure.
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
-#[tracing::instrument(level = "trace", ret, skip(raw_address))]
+#[tracing::instrument(level = "debug", ret, skip(raw_address))]
 pub(super) fn connect(
     sockfd: RawFd,
     raw_address: *const sockaddr,
@@ -696,7 +698,7 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
 ///
 /// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
 /// for the equivalent of this function).
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "debug", ret)]
 pub(super) fn getaddrinfo(
     rawish_node: Option<&CStr>,
     rawish_service: Option<&CStr>,
@@ -898,7 +900,7 @@ pub(super) fn recv_from(
 ///
 /// See [`recv_from`] for more information.
 #[tracing::instrument(
-    level = "trace",
+    level = "debug",
     ret,
     skip(raw_message, raw_destination, destination_length)
 )]
@@ -911,7 +913,7 @@ pub(super) fn send_to(
     destination_length: socklen_t,
 ) -> Detour<isize> {
     let destination = SockAddr::try_from_raw(raw_destination, destination_length)?;
-    trace!("destination {:?}", destination.as_socket());
+    debug!("destination {:?}", destination.as_socket());
 
     let (_, user_socket_info) = SOCKETS
         .remove(&sockfd)
