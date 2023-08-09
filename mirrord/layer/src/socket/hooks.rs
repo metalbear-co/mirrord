@@ -408,6 +408,41 @@ pub(super) unsafe extern "C" fn recvmsg_detour(
     }
 }
 
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn _recvmsg_nocancel_detour(
+    sockfd: i32,
+    message_header: *mut libc::msghdr,
+    flags: c_int,
+) -> ssize_t {
+    debug!("recvmsg_nocancel_detour -> fd {sockfd:#?}");
+    // Returns `-1`, but calling the original function sets whatever `errno` for us.
+    if message_header.is_null() {
+        libc::recvmsg(sockfd, message_header, flags)
+    } else {
+        debug!(
+            "recvmsg_detour -> receiving stuff {:#?}",
+            (*message_header).msg_iovlen
+        );
+        let recvmsg_result = FN__RECVMSG_NOCANCEL(sockfd, message_header, flags);
+        debug!("recvmsg_detour -> received {recvmsg_result:#?}",);
+
+        if !((*message_header).msg_name).is_null() {
+            let raw_destination = unsafe { *message_header }.msg_name as *const libc::sockaddr;
+            let destination_length = unsafe { *message_header }.msg_namelen;
+            tracing::info!(
+                "recvmsg_detour -> from {:#?}",
+                <socket2::SockAddr as crate::socket::SocketAddrExt>::try_from_raw(
+                    raw_destination,
+                    destination_length,
+                )
+                .map(|s| s.as_socket())
+            );
+        }
+
+        recvmsg_result
+    }
+}
+
 /// Not a faithful reproduction of what [`libc::sendmsg`] is supposed to do, see [`send_to`].
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn sendmsg_detour(
@@ -504,6 +539,31 @@ pub(super) unsafe extern "C" fn sendmsg_detour(
     //     }
     // }
 }
+
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn _sendmsg_nocancel_detour(
+    sockfd: RawFd,
+    message_header: *const libc::msghdr,
+    flags: c_int,
+) -> ssize_t {
+    debug!("sendmsg_nocancel_detour -> fd {sockfd:#?}");
+    // TODO(alex) [high] 2023-08-08: Check if this is true, or if it's true only for the address
+    // in the struct.
+    // Equivalent to just calling `send`.
+
+    // When the whole thing is null, the operation happens, but does basically nothing (afaik).
+    //
+    // If you ever hit an issue with this, maybe null here is meant to `libc::send` a 0-sized
+    // message?
+    if message_header.is_null() {
+        FN_SENDMSG(sockfd, message_header, flags)
+    } else {
+        debug!("sendmsg_detour -> ");
+        sendmsg(sockfd, message_header, flags)
+            .unwrap_or_bypass_with(|_| FN__SENDMSG_NOCANCEL(sockfd, message_header, flags))
+    }
+}
+
 pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled_remote_dns: bool) {
     replace!(hook_manager, "socket", socket_detour, FnSocket, FN_SOCKET);
 
@@ -530,10 +590,17 @@ pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled
     );
     replace!(
         hook_manager,
-        "sendmsg",
-        sendmsg_detour,
-        FnSendmsg,
-        FN_SENDMSG
+        "_recvmsg$NOCANCEL",
+        _recvmsg_nocancel_detour,
+        Fn_recvmsg_nocancel,
+        FN__RECVMSG_NOCANCEL
+    );
+    replace!(
+        hook_manager,
+        "_sendmsg$NOCANCEL",
+        _sendmsg_nocancel_detour,
+        Fn_sendmsg_nocancel,
+        FN__SENDMSG_NOCANCEL
     );
 
     replace!(hook_manager, "bind", bind_detour, FnBind, FN_BIND);
