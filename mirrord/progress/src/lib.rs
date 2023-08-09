@@ -1,16 +1,5 @@
-#![warn(clippy::indexing_slicing)]
-
-use std::{
-    io::stdout,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        OnceLock,
-    },
-    time::Duration,
-};
-
 use enum_dispatch::enum_dispatch;
-use indicatif::ProgressBar;
+use indicatif::{ProgressBar, MultiProgress};
 use serde::Serialize;
 use serde_json::to_string;
 
@@ -45,7 +34,7 @@ pub trait Progress: Sized {
 #[enum_dispatch(Progress)]
 pub enum ProgressTracker {
     // /// Display dynamic progress with spinners.
-    // Standard(ProgressBar),
+    SpinnerProgress(SpinnerProgress),
     /// Display simple human-readable messages in new lines.
     SimpleProgress(SimpleProgress),
     // /// Output progress messages in JSON format for programmatic use.
@@ -117,7 +106,7 @@ impl Progress for JsonProgress {
             parent: Some(self.name.clone()),
             name: text.to_string(),
             done: false,
-            fail_on_drop: false,
+            fail_on_drop: true,
         };
         task.print_new_task();
         task
@@ -192,10 +181,94 @@ impl Progress for SimpleProgress {
     fn set_fail_on_drop(&mut self, _: bool) {}
 }
 
+
+#[derive(Debug)]
+pub struct SpinnerProgress {
+    done: bool,
+    fail_on_drop: bool,
+    root_progress: MultiProgress,
+    progress: ProgressBar,
+}
+
+impl SpinnerProgress {
+    fn new(text: &str) -> SpinnerProgress {
+        let root_progress = MultiProgress::new();
+        let progress = ProgressBar::new_spinner();
+        progress.set_message(format!("{text}"));
+        root_progress.add(progress.clone());
+
+    
+        SpinnerProgress {
+            done: false,
+            fail_on_drop: true,
+            root_progress,
+            progress
+        }
+    }
+
+}
+
+impl Progress for SpinnerProgress {
+    fn subtask(&self, text: &str) -> SpinnerProgress {
+        let progress = ProgressBar::new_spinner();
+        self.root_progress.add(progress.clone());
+        progress.set_message(format!("{text}"));
+        SpinnerProgress {
+            done: false,
+            fail_on_drop: true,
+            root_progress: self.root_progress.clone(),
+            progress
+        }
+    }
+
+    fn print(&self, _: &str) {}
+
+    fn warning(&self, msg: &str) {
+        self.progress.set_message(format!("! {msg}"));
+    }
+
+    fn failure(&mut self, msg: Option<&str>) {
+        self.done = true;
+        if let Some(msg) = msg {
+            self.progress.abandon_with_message(format!("{msg}"));
+        } else {
+            self.progress.set_prefix("x");
+            self.progress.abandon();
+        }
+    }
+
+    fn success(&mut self, msg: Option<&str>) {
+        self.done = true;
+        self.progress.set_prefix("✓");
+        if let Some(msg) = msg {
+            self.progress.finish_with_message(format!("{msg}"));
+        } else {
+            self.progress.finish();
+        }
+    }
+
+    fn set_fail_on_drop(&mut self, fail: bool) {
+        self.fail_on_drop = fail;
+    }
+}
+
+impl Drop for SpinnerProgress {
+    fn drop(&mut self) {
+        if !self.done {
+            if self.fail_on_drop {
+                self.failure(None);
+            } else {
+                self.success(None);
+            }
+        }
+    }
+}
+
+
 impl ProgressTracker {
     pub fn from_env(fallback: ProgressTracker, text: &str) -> Self {
         match std::env::var(MIRRORD_PROGRESS_ENV).as_deref() {
-            // Ok("std" | "standard") => ProgressMode::Standard(ProgressBar::new_spinner()),
+            Ok("std" | "standard") => SpinnerProgress::new(text).into(),
             Ok("dumb" | "simple") => SimpleProgress::new(text).into(),
             Ok("json") => JsonProgress::new(text).into(),
             Ok("off") => NullProgress.into(),

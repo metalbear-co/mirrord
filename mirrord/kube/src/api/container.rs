@@ -161,7 +161,7 @@ impl ContainerApi for JobContainer {
     where
         P: Progress + Send + Sync,
     {
-        let pod_progress = progress.subtask("creating agent pod...");
+        let mut pod_progress = progress.subtask("creating agent pod...");
         let mirrord_agent_job_name = get_agent_name();
 
         let mut agent_command_line = vec![
@@ -300,9 +300,9 @@ impl ContainerApi for JobContainer {
             .labels(&format!("job-name={mirrord_agent_job_name}"))
             .timeout(60);
 
-        pod_progress.done_with("agent pod created");
+        pod_progress.success(Some("agent pod created"));
 
-        let pod_progress = progress.subtask("waiting for pod to be ready...");
+        let mut pod_progress = progress.subtask("waiting for pod to be ready...");
 
         let pod_api: Api<Pod> = get_k8s_resource_api(client, agent.namespace.as_deref());
 
@@ -331,7 +331,7 @@ impl ContainerApi for JobContainer {
 
         wait_for_agent_startup(&pod_api, &pod_name, "mirrord-agent".to_string()).await?;
 
-        pod_progress.done_with("pod is ready");
+        pod_progress.success(Some("pod is ready"));
 
         Ok(pod_name)
     }
@@ -354,7 +354,7 @@ impl ContainerApi for EphemeralContainer {
     {
         // Ephemeral should never be targetless, so there should be runtime data.
         let runtime_data = runtime_data.ok_or(KubeApiError::MissingRuntimeData)?;
-        let container_progress = progress.subtask("creating ephemeral container...");
+        let mut container_progress = progress.subtask("creating ephemeral container...");
 
         warn!("Ephemeral Containers is an experimental feature
                   >> Refer https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/ for more info");
@@ -425,9 +425,9 @@ impl ContainerApi for EphemeralContainer {
             .fields(&format!("metadata.name={}", &runtime_data.pod_name))
             .timeout(60);
 
-        container_progress.done_with("container created");
+        container_progress.success(Some("container created"));
 
-        let container_progress = progress.subtask("waiting for container to be ready...");
+        let mut container_progress = progress.subtask("waiting for container to be ready...");
 
         let stream = watcher(pod_api.clone(), watcher_config).applied_objects();
         pin!(stream);
@@ -443,7 +443,7 @@ impl ContainerApi for EphemeralContainer {
 
         wait_for_agent_startup(&pod_api, &runtime_data.pod_name, mirrord_agent_name).await?;
 
-        container_progress.done_with("container is ready");
+        container_progress.success(Some("container is ready"));
 
         debug!("container is ready");
         Ok(runtime_data.pod_name.to_string())
