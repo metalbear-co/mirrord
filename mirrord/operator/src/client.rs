@@ -131,7 +131,14 @@ impl OperatorApi {
             // propagating an env var, don't think it's worth the extra complexity though
             let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
             if operator_version > mirrord_version {
-                version_progress.warning(&format!("Your mirrord plugin/CLI version {} does not match the operator version {}. This can lead to unforeseen issues.", mirrord_version, operator_version));
+                // we make two sub tasks since it looks best this way
+                version_progress.warning(
+                    &format!(
+                        "Your mirrord plugin/CLI version {} does not match the operator version {}. This can lead to unforeseen issues.",
+                        mirrord_version,
+                        operator_version));
+                version_progress.success(None);
+                version_progress = progress.subtask("comparing versions");
                 version_progress.warning(
                     "Consider updating your mirrord plugin/CLI to match the operator version.",
                 );
