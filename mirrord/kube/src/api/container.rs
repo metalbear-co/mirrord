@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::LazyLock};
+use std::{cell::OnceCell, collections::HashSet, sync::LazyLock};
 
 use futures::{AsyncBufReadExt, StreamExt, TryStreamExt};
 use k8s_openapi::api::{
@@ -11,8 +11,9 @@ use kube::{
     Api, Client,
 };
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
-use mirrord_progress::Progress;
+use mirrord_progress::{MessageKind, Progress};
 use rand::distributions::{Alphanumeric, DistString};
+use regex::Regex;
 use serde_json::json;
 use tokio::pin;
 use tracing::{debug, warn};
@@ -120,11 +121,22 @@ fn get_agent_name() -> String {
     agent_name
 }
 
+const AGENT_READY_REGEX: OnceCell<Regex> = OnceCell::new();
+const AGENT_READY_PATTERN: &str = "agent ready( - version (\\S+))?";
+
+/**
+ * Wait until the agent prints the "agent ready" message.
+ * Return agent version extracted from the message (if found).
+ */
 async fn wait_for_agent_startup(
     pod_api: &Api<Pod>,
     pod_name: &str,
     container_name: String,
-) -> Result<()> {
+) -> Result<Option<String>> {
+    let regex = AGENT_READY_REGEX
+        .get_or_init(|| Regex::new(AGENT_READY_PATTERN).expect("failed to create regex"))
+        .clone();
+
     let logs = pod_api
         .log_stream(
             pod_name,
@@ -138,11 +150,15 @@ async fn wait_for_agent_startup(
 
     let mut lines = logs.lines();
     while let Some(line) = lines.try_next().await? {
-        if line.contains("agent ready") {
-            break;
-        }
+        let Some(captures) = regex.captures(&line) else {
+            continue;
+        };
+
+        let version = captures.get(2).map(|m| m.as_str().to_string());
+        return Ok(version);
     }
-    Ok(())
+
+    Err(KubeApiError::AgentReadyMessageMissing)
 }
 
 #[derive(Debug)]
@@ -329,7 +345,18 @@ impl ContainerApi for JobContainer {
             .and_then(|pod| pod.metadata.name.clone())
             .ok_or(KubeApiError::JobPodNotFound(mirrord_agent_job_name))?;
 
-        wait_for_agent_startup(&pod_api, &pod_name, "mirrord-agent".to_string()).await?;
+        let version =
+            wait_for_agent_startup(&pod_api, &pod_name, "mirrord-agent".to_string()).await?;
+        match version {
+            Some(version) if version != env!("CARGO_PKG_VERSION") => {
+                let message = format!(
+                    "Agent version {version} does not match the local mirrord version {}. This may lead to unexpected errors.",
+                    env!("CARGO_PKG_VERSION"),
+                );
+                pod_progress.print_message(MessageKind::Warning, Some(&message));
+            }
+            _ => {}
+        }
 
         pod_progress.done_with("pod is ready");
 
@@ -441,7 +468,18 @@ impl ContainerApi for EphemeralContainer {
             }
         }
 
-        wait_for_agent_startup(&pod_api, &runtime_data.pod_name, mirrord_agent_name).await?;
+        let version =
+            wait_for_agent_startup(&pod_api, &runtime_data.pod_name, mirrord_agent_name).await?;
+        match version {
+            Some(version) if version != env!("CARGO_PKG_VERSION") => {
+                let message = format!(
+                    "Agent version {version} does not match the local mirrord version {}. This may lead to unexpected errors.",
+                    env!("CARGO_PKG_VERSION"),
+                );
+                container_progress.print_message(MessageKind::Warning, Some(&message));
+            }
+            _ => {}
+        }
 
         container_progress.done_with("container is ready");
 
