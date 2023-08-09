@@ -1,4 +1,4 @@
-use std::{cell::OnceCell, collections::HashSet, sync::LazyLock};
+use std::{collections::HashSet, sync::LazyLock};
 
 use futures::{AsyncBufReadExt, StreamExt, TryStreamExt};
 use k8s_openapi::api::{
@@ -121,8 +121,9 @@ fn get_agent_name() -> String {
     agent_name
 }
 
-const AGENT_READY_REGEX: OnceCell<Regex> = OnceCell::new();
-const AGENT_READY_PATTERN: &str = "agent ready( - version (\\S+))?";
+static AGENT_READY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new("agent ready( - version (\\S+))?").expect("failed to create regex")
+});
 
 /**
  * Wait until the agent prints the "agent ready" message.
@@ -133,10 +134,6 @@ async fn wait_for_agent_startup(
     pod_name: &str,
     container_name: String,
 ) -> Result<Option<String>> {
-    let regex = AGENT_READY_REGEX
-        .get_or_init(|| Regex::new(AGENT_READY_PATTERN).expect("failed to create regex"))
-        .clone();
-
     let logs = pod_api
         .log_stream(
             pod_name,
@@ -150,7 +147,7 @@ async fn wait_for_agent_startup(
 
     let mut lines = logs.lines();
     while let Some(line) = lines.try_next().await? {
-        let Some(captures) = regex.captures(&line) else {
+        let Some(captures) = AGENT_READY_REGEX.captures(&line) else {
             continue;
         };
 
@@ -491,16 +488,14 @@ impl ContainerApi for EphemeralContainer {
 #[cfg(test)]
 mod test {
     use rstest::rstest;
+
     use super::*;
 
     #[rstest]
     #[case("agent ready", None)]
     #[case("agent ready - version 3.56.0", Some("3.56.0"))]
     fn agent_version_regex(#[case] agent_message: &str, #[case] version: Option<&str>) {
-        let captures = AGENT_READY_REGEX
-            .get_or_init(|| Regex::new(AGENT_READY_PATTERN).unwrap())
-            .captures(agent_message)
-            .unwrap();
+        let captures = AGENT_READY_REGEX.captures(agent_message).unwrap();
 
         assert_eq!(captures.get(2).map(|c| c.as_str()), version);
     }
