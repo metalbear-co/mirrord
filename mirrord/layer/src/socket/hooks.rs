@@ -596,7 +596,7 @@ pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled
     );
     replace!(
         hook_manager,
-        "sendmsg$",
+        "sendmsg",
         sendmsg_detour,
         FnSendmsg,
         FN_SENDMSG
