@@ -11,7 +11,7 @@ use kube::{
     Api, Client,
 };
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
-use mirrord_progress::{MessageKind, Progress};
+use mirrord_progress::Progress;
 use rand::distributions::{Alphanumeric, DistString};
 use regex::Regex;
 use serde_json::json;
@@ -350,7 +350,7 @@ impl ContainerApi for JobContainer {
                     "Agent version {version} does not match the local mirrord version {}. This may lead to unexpected errors.",
                     env!("CARGO_PKG_VERSION"),
                 );
-                pod_progress.print_message(MessageKind::Warning, Some(&message));
+                pod_progress.warning(&message);
             }
             _ => {}
         }
@@ -473,7 +473,7 @@ impl ContainerApi for EphemeralContainer {
                     "Agent version {version} does not match the local mirrord version {}. This may lead to unexpected errors.",
                     env!("CARGO_PKG_VERSION"),
                 );
-                container_progress.print_message(MessageKind::Warning, Some(&message));
+                container_progress.warning(&message);
             }
             _ => {}
         }
