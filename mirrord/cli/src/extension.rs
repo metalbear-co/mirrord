@@ -31,9 +31,9 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs, progress: &TaskProgr
     // or run tasks before actually launching.
     #[cfg(target_os = "macos")]
     let mut execution_info =
-        MirrordExecution::start(&config, args.executable.as_deref(), &progress, Some(60)).await?;
+        MirrordExecution::start(&config, args.executable.as_deref(), &progress).await?;
     #[cfg(not(target_os = "macos"))]
-    let mut execution_info = MirrordExecution::start(&config, &progress, Some(60)).await?;
+    let mut execution_info = MirrordExecution::start(&config, &progress).await?;
 
     // We don't execute so set envs aren't passed, so we need to add config file and target to env.
     execution_info.environment.extend(env);

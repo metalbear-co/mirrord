@@ -13,6 +13,7 @@
 #![feature(pointer_byte_offsets)]
 #![feature(lazy_cell)]
 #![feature(async_fn_in_trait)]
+#![feature(once_cell_try)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![allow(incomplete_features)]
 #![warn(clippy::indexing_slicing)]
@@ -74,7 +75,7 @@ extern crate core;
 
 use std::{
     collections::{HashSet, VecDeque},
-    mem,
+    ffi::OsString,
     net::SocketAddr,
     panic,
     sync::{OnceLock, RwLock},
@@ -88,24 +89,24 @@ use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
 use hooks::HookManager;
 use libc::{c_int, pid_t};
+use load::ExecutableName;
 use mirrord_config::{
     feature::{
         fs::{FsConfig, FsModeConfig},
         network::{incoming::IncomingConfig, NetworkConfig},
         FeatureConfig,
     },
-    util::VecOrSingle,
     LayerConfig,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
-    tcp::{HttpResponse, LayerTcpSteal},
+    tcp::{HttpResponseFallback, LayerTcpSteal},
     ClientMessage, DaemonMessage,
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
 use regex::RegexSet;
-use socket::SOCKETS;
+use socket::{OutgoingSelector, SOCKETS};
 use tcp::TcpHandler;
 use tcp_mirror::TcpMirrorHandler;
 use tcp_steal::TcpStealHandler;
@@ -113,7 +114,7 @@ use tokio::{
     runtime::Runtime,
     select,
     sync::mpsc::{channel, Receiver, Sender},
-    time::{sleep, Duration},
+    time::{Duration, Interval},
 };
 use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
@@ -145,39 +146,19 @@ mod tcp;
 mod tcp_mirror;
 mod tcp_steal;
 
-#[cfg(target_os = "linux")]
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+#[cfg_attr(
+    all(target_os = "linux", target_arch = "x86_64"),
+    path = "go/linux_x64.rs"
+)]
 mod go_hooks;
 
 fn build_runtime() -> Runtime {
-    tokio::runtime::Builder::new_multi_thread()
+    tokio::runtime::Builder::new_current_thread()
         .enable_all()
-        .on_thread_start(detour::detour_bypass_on)
-        .on_thread_stop(detour::detour_bypass_off)
         .build()
         .unwrap()
 }
-
-/// Main tokio [`Runtime`] for mirrord-layer async tasks.
-///
-/// Apart from some pre-initialization steps, mirrord-layer mostly runs inside this runtime with
-/// `RUNTIME.block_on`.
-/// This is static because it needs to continue living as long as the process is running.
-///
-/// ## Usage
-///
-/// Currently it's being used to run 2 big tasks:
-///
-/// 1. [`connection::connect`]: which creates the mirrord-agent connection for this layer instance;
-///
-/// 2. [`start_layer_thread`]: where we [`spawn`](tokio::spawn) mirrord-layer's main loop.
-///
-/// ## Bypass
-///
-/// To prevent us from intercepting neccessary (local) syscalls (like creating a socket), we use
-/// [`detour::detour_bypass_on`] `on_thread_start`, and [`detour::detour_bypass_off`]
-/// `on_thread_stop`.
-static mut RUNTIME: Option<Runtime> = None;
 
 // TODO: We don't really need a lock, we just need a type that:
 //  1. Can be initialized as static (with a const constructor or whatever)
@@ -254,41 +235,35 @@ pub(crate) static TARGETLESS: OnceLock<bool> = OnceLock::new();
 /// Ports to ignore on listening for mirroring/stealing.
 pub(crate) static INCOMING_IGNORE_PORTS: OnceLock<HashSet<u16>> = OnceLock::new();
 
+// TODO(alex): To support DNS on the selector, change it to `LazyLock<Arc<Mutex>>`, so we can modify
+// the global on `OutgoingSelector::connect_remote`, converting `AddressFilter:Name` to however
+// many addresses we resolve into `AddressFilter::Socket`.
+//
+// Also, we need a global for `REMOTE_DNS`, so we can check it in
+// `OutgoingSelector::connect_remote`, and only resolve DNS through remote if it's `true`.
+
+/// Selector for how outgoing connection will behave, either sending traffic via the remote or from
+/// local app, according to how the user set up the `remote`, and `local` filter, in
+/// `feature.network.outgoing`.
+pub(crate) static OUTGOING_SELECTOR: OnceLock<OutgoingSelector> = OnceLock::new();
+
 /// Ports to ignore because they are used by the IDE debugger
 pub(crate) static DEBUGGER_IGNORED_PORTS: OnceLock<DebuggerPorts> = OnceLock::new();
 
 /// Mapping of ports to use for binding local sockets created by us for intercepting.
 pub(crate) static LISTEN_PORTS: OnceLock<BiMap<u16, u16>> = OnceLock::new();
 
-/// Check if we're running in NixOS or Devbox.
-///
-/// - If so, add `sh` to the skip list because of
-/// [#531](https://github.com/metalbear-co/mirrord/issues/531)
-fn nix_devbox_patch(config: &mut LayerConfig) {
-    let mut current_skip = config
-        .skip_processes
-        .clone()
-        .map(VecOrSingle::to_vec)
-        .unwrap_or_default();
+// The following statics are to avoid using CoreFoundation or high level macOS APIs
+// that aren't safe to use after fork.
 
-    if is_nix_or_devbox() && !current_skip.contains(&"sh".to_string()) {
-        current_skip.push("sh".into());
-        std::env::set_var("MIRRORD_SKIP_PROCESSES", current_skip.join(";"));
-        config.skip_processes = Some(VecOrSingle::Multiple(current_skip));
-    }
-}
+/// Executable we're loaded to
+pub(crate) static EXECUTABLE_NAME: OnceLock<ExecutableName> = OnceLock::new();
 
-/// Check if NixOS or Devbox by discrimnating env vars.
-fn is_nix_or_devbox() -> bool {
-    if let Ok(res) = std::env::var("IN_NIX_SHELL") && res.as_str() == "1" {
-        true
-    }
-    else if let Ok(res) = std::env::var("DEVBOX_SHELL_ENABLED") && res.as_str() == "1" {
-        true
-    } else {
-        false
-    }
-}
+/// Executable path we're loaded to
+pub(crate) static EXECUTABLE_PATH: OnceLock<String> = OnceLock::new();
+
+/// Program arguments
+pub(crate) static EXECUTABLE_ARGS: OnceLock<Vec<OsString>> = OnceLock::new();
 
 /// Prevent mirrord from connecting to ports used by the IDE debugger
 pub(crate) fn is_debugger_port(addr: &SocketAddr) -> bool {
@@ -298,18 +273,15 @@ pub(crate) fn is_debugger_port(addr: &SocketAddr) -> bool {
         .contains(addr)
 }
 
-/// Loads mirrord configuration and applies [`nix_devbox_patch`] patches.
+/// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
 fn layer_pre_initialization() -> Result<(), LayerError> {
-    let args = std::env::args().collect::<Vec<_>>();
+    let given_process = EXECUTABLE_NAME.get_or_try_init(ExecutableName::from_env)?;
 
-    let given_process = args
-        .first()
-        .and_then(|arg| arg.split('/').last())
-        .ok_or(LayerError::NoProcessFound)?;
-
-    let mut config = LayerConfig::from_env()?;
-
-    nix_devbox_patch(&mut config);
+    EXECUTABLE_PATH.get_or_try_init(|| {
+        std::env::current_exe().map(|arg| arg.to_string_lossy().into_owned())
+    })?;
+    EXECUTABLE_ARGS.get_or_init(|| std::env::args_os().collect());
+    let config = LayerConfig::from_env()?;
 
     #[cfg(target_os = "macos")]
     let patch_binaries = config
@@ -322,18 +294,22 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
     // for https://github.com/metalbear-co/mirrord/issues/1529
     #[cfg(target_os = "macos")]
     if given_process.ends_with("dotnet") {
-        if let Ok(path) = std::env::current_exe() {
-            if let Ok(Some(binary)) =
-                mirrord_sip::sip_patch(path.to_str().unwrap(), &patch_binaries)
-            {
-                let err = exec::execvp(binary, std::env::args());
-                error!("Couldn't execute {:?}", err);
-                return Err(LayerError::ExecFailed(err));
-            }
+        let path = EXECUTABLE_PATH
+            .get()
+            .expect("EXECUTABLE_PATH needs to be set!");
+        if let Ok(Some(binary)) = mirrord_sip::sip_patch(path, &patch_binaries) {
+            let err = exec::execvp(
+                binary,
+                EXECUTABLE_ARGS
+                    .get()
+                    .expect("EXECUTABLE_ARGS needs to be set!"),
+            );
+            error!("Couldn't execute {:?}", err);
+            return Err(LayerError::ExecFailed(err));
         }
     }
 
-    match load::load_type(given_process, config) {
+    match given_process.load_type(config) {
         LoadType::Full(config) => layer_start(*config),
         #[cfg(target_os = "macos")]
         LoadType::SIPOnly => sip_only_layer_start(patch_binaries),
@@ -393,12 +369,31 @@ fn set_globals(config: &LayerConfig) {
     FILE_MODE
         .set(config.feature.fs.clone())
         .expect("Setting FILE_MODE failed.");
+
+    // These must come before `OutgoingSelector::new`.
     ENABLED_TCP_OUTGOING
         .set(config.feature.network.outgoing.tcp)
         .expect("Setting ENABLED_TCP_OUTGOING singleton");
     ENABLED_UDP_OUTGOING
         .set(config.feature.network.outgoing.udp)
         .expect("Setting ENABLED_UDP_OUTGOING singleton");
+
+    {
+        let outgoing_selector = config
+            .feature
+            .network
+            .outgoing
+            .filter
+            .clone()
+            .try_into()
+            .expect("Failed setting up outgoing traffic filter!");
+
+        // This will crash the app if it comes before `ENABLED_(TCP|UDP)_OUTGOING`!
+        OUTGOING_SELECTOR
+            .set(outgoing_selector)
+            .expect("Setting OUTGOING_SELECTOR singleton");
+    }
+
     REMOTE_UNIX_STREAMS
         .set(
             config
@@ -486,11 +481,13 @@ fn layer_start(mut config: LayerConfig) {
     info!("Initializing mirrord-layer!");
     trace!(
         "Loaded into executable: {}, on pid {}, with args: {:?}",
-        std::env::current_exe()
-            .map(|path| path.to_string_lossy().to_string())
-            .unwrap_or_default(),
+        EXECUTABLE_PATH
+            .get()
+            .expect("EXECUTABLE_PATH should be set!"),
         std::process::id(),
-        std::env::args()
+        EXECUTABLE_ARGS
+            .get()
+            .expect("EXECUTABLE_ARGS needs to be set!")
     );
 
     let address = config
@@ -500,22 +497,8 @@ fn layer_start(mut config: LayerConfig) {
         .parse()
         .expect("couldn't parse proxy address");
 
-    // SAFETY: This function runs once per process, `RUNTIME` is not used anywhere else but this
-    // function, so there are no other threads using `RUNTIME`, so it's safe to mutate it here.
-    let new_runtime = unsafe {
-        // leak the old runtime if there is one (on fork there is).
-        // We do that because we need a new runtime for the child process, and dropping the runtime
-        // inherited from the parent process leads to errors.
-        if let Some(old_runtime) = RUNTIME.take() {
-            mem::forget(old_runtime);
-        }
-        // We probably don't even need to keep a global `RUNTIME` at all, we could just create it
-        // here and `mem::forget` it before it goes out of scope.
-        RUNTIME = Some(build_runtime());
-        RUNTIME.as_ref().unwrap() // unwrap: we set it in the line above
-    };
-
-    let (tx, rx) = new_runtime.block_on(connection::connect_to_proxy(address));
+    let runtime = build_runtime();
+    let (tx, rx) = runtime.block_on(connection::connect_to_proxy(address));
     let (sender, receiver) = channel::<HookMessage>(1000);
 
     if let Some(lock) = HOOK_SENDER.get() {
@@ -534,7 +517,7 @@ fn layer_start(mut config: LayerConfig) {
             .expect("Setting HOOK_SENDER singleton");
     }
 
-    new_runtime.block_on(start_layer_thread(tx, rx, receiver, config));
+    start_layer_thread(tx, rx, receiver, config, runtime);
 }
 
 /// We need to hook execve syscall to allow mirrord-layer to be loaded with sip patch when loading
@@ -544,6 +527,16 @@ fn sip_only_layer_start(patch_binaries: Vec<String>) {
     let mut hook_manager = HookManager::default();
 
     unsafe { exec_utils::enable_execve_hook(&mut hook_manager, patch_binaries) };
+    // we need to hook file access to patch path to our temp bin.
+    FILE_FILTER
+        .set(FileFilter::new(FsConfig {
+            mode: FsModeConfig::Local,
+            read_write: None,
+            read_only: None,
+            local: None,
+        }))
+        .expect("FILE_FILTER set failed");
+    unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
 }
 
 /// Acts as an API to the various features of mirrord-layer, holding the actual feature handler
@@ -570,6 +563,8 @@ struct Layer {
     /// `false`, we send a [`ClientMessage::Ping`], set this to `true`, and expect to receive a
     /// [`DaemonMessage::Pong`], setting it to `false` and completing the hearbeat detection.
     ping: bool,
+
+    ping_interval: Interval,
 
     /// Handler to the TCP mirror operations, see [`TcpMirrorHandler`].
     tcp_mirror_handler: TcpMirrorHandler,
@@ -604,7 +599,7 @@ struct Layer {
     /// Receives responses in the layer loop to be forwarded to the agent.
     ///
     /// Part of the stealer HTTP traffic feature, see `http`.
-    pub http_response_receiver: Receiver<HttpResponse>,
+    pub http_response_receiver: Receiver<HttpResponseFallback>,
 
     /// Sets the way we handle [`HookMessage::Tcp`] in `handle_hook_message`:
     ///
@@ -633,6 +628,7 @@ impl Layer {
             tx,
             rx,
             ping: false,
+            ping_interval: tokio::time::interval(Duration::from_secs(30)),
             tcp_mirror_handler: TcpMirrorHandler::new(port_mapping.clone()),
             tcp_outgoing_handler: TcpOutgoingHandler::default(),
             udp_outgoing_handler: Default::default(),
@@ -650,7 +646,8 @@ impl Layer {
 
     /// Sends a [`ClientMessage`] through `Layer::tx` to the [`Receiver`] in
     /// [`wrap_raw_connection`](mirrord_kube::api::wrap_raw_connection).
-    async fn send(&self, msg: ClientMessage) -> Result<(), ClientMessage> {
+    async fn send(&mut self, msg: ClientMessage) -> Result<(), ClientMessage> {
+        self.ping_interval.reset();
         self.tx.send(msg).await.map_err(|err| err.0)
     }
 
@@ -771,6 +768,7 @@ impl Layer {
             DaemonMessage::PauseTarget(_) => {
                 unreachable!("We set pausing target only on initialization, shouldn't happen")
             }
+            DaemonMessage::SwitchProtocolVersionResponse(_) => Ok(()),
         }
     }
 }
@@ -798,7 +796,7 @@ impl Layer {
 ///   [`ClientMessage`]s, sending them with `Layer::send`;
 ///
 /// - Handle the heartbeat mechanism (Ping/Pong feature), sending a [`ClientMessage::Ping`] if all
-///   the other channels received nothing for a while (60 seconds);
+///   the other channels received nothing for a while (30 seconds);
 async fn thread_loop(
     mut receiver: Receiver<HookMessage>,
     tx: Sender<ClientMessage>,
@@ -814,6 +812,18 @@ async fn thread_loop(
         ..
     } = config;
     let mut layer = Layer::new(tx, rx, incoming);
+    layer.ping_interval.tick().await;
+
+    if let Err(err) = layer
+        .tx
+        .send(ClientMessage::SwitchProtocolVersion(
+            mirrord_protocol::VERSION.clone(),
+        ))
+        .await
+    {
+        warn!("Unable to switch protocol: {err}");
+    }
+
     loop {
         select! {
             hook_message = receiver.recv() => {
@@ -861,9 +871,14 @@ async fn thread_loop(
                 layer.send(message).await.unwrap();
             }
             Some(response) = layer.http_response_receiver.recv() => {
-                layer.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(response))).await.unwrap();
+                let message = match response {
+                    HttpResponseFallback::Framed(res) => ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(res)),
+                    HttpResponseFallback::Fallback(res) => ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(res))
+                };
+
+                layer.send(message).await.unwrap();
             }
-            _ = sleep(Duration::from_secs(30)) => {
+            _ = layer.ping_interval.tick() => {
                 if !layer.ping {
                     layer.send(ClientMessage::Ping).await.unwrap();
                     trace!("sent ping to daemon");
@@ -879,13 +894,17 @@ async fn thread_loop(
 
 /// Initializes mirrord-layer's [`thread_loop`] in a separate [`tokio::task`].
 #[tracing::instrument(level = "trace", skip(tx, rx, receiver))]
-async fn start_layer_thread(
+fn start_layer_thread(
     tx: Sender<ClientMessage>,
     rx: Receiver<DaemonMessage>,
     receiver: Receiver<HookMessage>,
     config: LayerConfig,
+    runtime: Runtime,
 ) {
-    tokio::spawn(thread_loop(receiver, tx, rx, config));
+    std::thread::spawn(move || {
+        let _guard = DetourGuard::new();
+        runtime.block_on(thread_loop(receiver, tx, rx, config))
+    });
 }
 
 /// Prepares the [`HookManager`] and [`replace!`]s [`libc`] calls with our hooks, according to what
@@ -955,8 +974,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
         unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
     }
 
-    #[cfg(target_os = "linux")]
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
     {
         go_hooks::enable_hooks(&mut hook_manager);
     }
@@ -1006,6 +1024,8 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 }
 
 /// Hook for `libc::fork`.
+///
+/// on macOS, be wary what we do in this path as we might trigger https://github.com/metalbear-co/mirrord/issues/1745
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
     debug!("Process {} forking!.", std::process::id());

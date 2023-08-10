@@ -44,6 +44,9 @@ pub struct Args {
     /// This feature is used internally for debugging purposes only!
     #[arg(long, default_value_t = false, hide = true)]
     pub test_error: bool,
+
+    #[arg(long, default_value = "1.2.1")]
+    pub base_protocol_version: semver::Version,
 }
 
 const DEFAULT_RUNTIME: &str = "containerd";

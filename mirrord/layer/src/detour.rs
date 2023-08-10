@@ -40,17 +40,6 @@ thread_local!(
     static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false)
 );
 
-/// Sets [`DETOUR_BYPASS`] to `true`, bypassing the layer's detours.
-///
-/// Prefer using `DetourGuard::new` instead.
-pub(super) fn detour_bypass_on() {
-    DETOUR_BYPASS.with(|enabled| {
-        if let Ok(mut bypass) = enabled.try_borrow_mut() {
-            *bypass = true
-        }
-    });
-}
-
 /// Sets [`DETOUR_BYPASS`] to `false`.
 ///
 /// Prefer relying on the [`Drop`] implementation of [`DetourGuard`] instead.
@@ -210,6 +199,10 @@ pub(crate) enum Bypass {
 
     /// Hooked a `connect` to a target that is disabled in the configuration.
     DisabledOutgoing,
+
+    /// Outgoing connection either did not match any `remote` selector, or it matched a `local`
+    /// one.
+    FilteredConnection,
 }
 
 /// [`ControlFlow`](std::ops::ControlFlow)-like enum to be used by hooks.
@@ -386,6 +379,25 @@ pub(crate) trait OptionExt {
     fn bypass(self, value: Bypass) -> Detour<Self::Opt>;
 }
 
+/// Extends `Option<T>` with `Detour<T>` conversion methods.
+pub(crate) trait OptionDetourExt<T>: OptionExt {
+    /// Transposes an `Option` of a [`Detour`] into a [`Detour`] of an `Option`.
+    ///
+    /// - [`None`] will be mapped to `Success(None)`;
+    /// - `Some(Success)` will be mapped to `Success(Some)`;
+    /// - `Some(Error)` will be mapped to `Error`;
+    /// - `Some(Bypass)` will be mapped to `Bypass`;
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// let x: Detour<Option<i32>> = Detour::Sucess(Some(5));
+    /// let y: Option<Detour<i32>> = Some(Detour::Success(5));
+    /// assert_eq!(x, y.transpose());
+    /// ```
+    fn transpose(self) -> Detour<Option<T>>;
+}
+
 impl<T> OptionExt for Option<T> {
     type Opt = T;
 
@@ -393,6 +405,18 @@ impl<T> OptionExt for Option<T> {
         match self {
             Some(v) => Detour::Success(v),
             None => Detour::Bypass(value),
+        }
+    }
+}
+
+impl<T> OptionDetourExt<T> for Option<Detour<T>> {
+    #[inline]
+    fn transpose(self) -> Detour<Option<T>> {
+        match self {
+            Some(Detour::Success(s)) => Detour::Success(Some(s)),
+            Some(Detour::Error(e)) => Detour::Error(e),
+            Some(Detour::Bypass(b)) => Detour::Bypass(b),
+            None => Detour::Success(None),
         }
     }
 }

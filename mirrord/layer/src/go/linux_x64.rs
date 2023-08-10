@@ -1,4 +1,3 @@
-#![cfg(target_os = "linux")]
 use std::arch::asm;
 
 use errno::errno;

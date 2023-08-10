@@ -1,0 +1,11 @@
+{
+    "feature": {
+        "network": {
+            "outgoing": {
+                "filter": {
+                    "local": [":1111"]
+                }
+            }
+        }
+    }
+}

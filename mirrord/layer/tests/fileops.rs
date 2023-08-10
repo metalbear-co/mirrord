@@ -629,13 +629,11 @@ async fn read_go(
     // Notify Go test app that the close detour completed and it can exit.
     // (The go app waits for this, since Go does not wait for the close detour to complete before
     // returning from `Close`).
-    test_process.child.as_ref().map(|process| {
-        signal::kill(
-            Pid::from_raw(process.id().unwrap() as pid_t),
-            Signal::SIGTERM,
-        )
-        .unwrap()
-    });
+    signal::kill(
+        Pid::from_raw(test_process.child.id().unwrap() as pid_t),
+        Signal::SIGTERM,
+    )
+    .unwrap();
 
     assert!(layer_connection.is_ended().await);
 

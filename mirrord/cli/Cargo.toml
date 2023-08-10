@@ -40,7 +40,7 @@ exec.workspace = true
 anyhow.workspace = true
 reqwest.workspace = true
 const-random = "0.1.15"
-tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "macros", "process"]}
+tokio = { workspace = true, features = ["rt", "net", "macros", "process"]}
 kube.workspace = true
 k8s-openapi.workspace = true
 miette = { version = "5", features = ["fancy"] }
@@ -49,6 +49,8 @@ prettytable-rs = "0.10"
 humantime = "2"
 nix.workspace = true
 email_address = "0.2"
+tokio-util.workspace = true
+socket2.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

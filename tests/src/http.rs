@@ -59,9 +59,8 @@ mod http {
         process
             .wait_for_line(Duration::from_secs(10), "DELETE")
             .await;
-        timeout(Duration::from_secs(40), process.child.wait())
+        timeout(Duration::from_secs(40), process.wait())
             .await
-            .unwrap()
             .unwrap();
 
         application.assert(&process).await;
@@ -105,9 +104,8 @@ mod http {
         process
             .wait_for_line(Duration::from_secs(10), "DELETE")
             .await;
-        timeout(Duration::from_secs(40), process.child.wait())
+        timeout(Duration::from_secs(40), process.wait())
             .await
-            .unwrap()
             .unwrap();
 
         application.assert(&process).await;

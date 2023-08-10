@@ -40,7 +40,7 @@ mod env {
             None,
         )
         .await;
-        let res = process.child.wait().await.unwrap();
+        let res = process.wait().await;
         assert!(res.success());
     }
 }

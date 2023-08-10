@@ -8,6 +8,277 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.56.0](https://github.com/metalbear-co/mirrord/tree/3.56.0) - 2023-08-07
+
+
+### Added
+
+- Added `internal_proxy` timeout configurations to allow users specify timeouts
+  in edge cases. [#1761](https://github.com/metalbear-co/mirrord/issues/1761)
+
+
+### Changed
+
+- Change operator / cli version mismatch to show only when mirrord is older
+  than operator
+
+
+### Fixed
+
+- Fix grpc errors caused by missing trailers on filtered http responses.
+  [#1731](https://github.com/metalbear-co/mirrord/issues/1731)
+
+
+## [3.55.2](https://github.com/metalbear-co/mirrord/tree/3.55.2) - 2023-08-06
+
+
+### Fixed
+
+- macOS - Running Go build with mirrord while Go binary is SIP protected is
+  fixed by enabling file hooks on SIP load mode.
+  [#1764](https://github.com/metalbear-co/mirrord/issues/1764)
+
+
+## [3.55.1](https://github.com/metalbear-co/mirrord/tree/3.55.1) - 2023-08-06
+
+
+### Fixed
+
+- Try to resolve an issue where internal proxy is under heavy load since bash
+  scripts does a lot of fork/exec by:
+  1. Increasing internal proxy's listen backlog (might not help on macOS)
+  2. Change internal proxy to create the upstream (agent) connection in a
+  different task, allowing it to keep accepting.
+  [#1716](https://github.com/metalbear-co/mirrord/issues/1716)
+- Fixed detecting skipped processes during layer injection.
+  [#1752](https://github.com/metalbear-co/mirrord/issues/1752)
+- Fix fork issues by changing layer runtime to be current thread
+  [#1759](https://github.com/metalbear-co/mirrord/issues/1759)
+
+
+## [3.55.0](https://github.com/metalbear-co/mirrord/tree/3.55.0) - 2023-08-03
+
+
+### Added
+
+- Add support for selecting Kubeconfig context to use by either using:
+  1. Configuration option `kube_context`.
+  2. mirrord exec argument `--context`
+  3. Environment variable `MIRRORD_KUBE_CONTEXT`
+  [#1735](https://github.com/metalbear-co/mirrord/issues/1735)
+
+
+### Changed
+
+- Add userextras/prinicipalid to operators cluster role
+- Document behavior of deployment in OSS vs mirrord for Teams
+- Skip HashiCorp Vault supporting containers
+
+
+### Fixed
+
+- Fix fork issue on macOS
+  [#1745](https://github.com/metalbear-co/mirrord/issues/1745)
+- Add access for the operator's cluster role to argoproj rollouts
+  [#1751](https://github.com/metalbear-co/mirrord/issues/1751)
+- Fixed warning on using deployment target with no operator
+
+
+### Internal
+
+- Attempt to fix fork issue on macOS by avoiding access to CF on fork
+  [#1745](https://github.com/metalbear-co/mirrord/issues/1745)
+- Add note to the HttpRequest message with information to add when we break the
+  protocol.
+- Change deployment warning to be emit on cli only
+- Refactor the organization of go hooks in preparation for support for arm
+
+
+## [3.54.1](https://github.com/metalbear-co/mirrord/tree/3.54.1) - 2023-08-01
+
+
+### Fixed
+
+- Sometimes the internal proxy doesn't flush before we do redirection then
+  caller can't read port
+  leading to "Couldn't get port of internal proxy"
+
+
+### Internal
+
+- Remove signal dependency from layer
+
+
+## [3.54.0](https://github.com/metalbear-co/mirrord/tree/3.54.0) - 2023-07-31
+
+
+### Added
+
+- Added mirrord-operator-user `ClusterRole` to operator setup with RBAC
+  permissions to use operator.
+  [#1428](https://github.com/metalbear-co/mirrord/issues/1428)
+
+
+### Fixed
+
+- Exclude environment variable COMPLUS_EnableDiagnostics, fixes [mirrord
+  intellij #67](https://github.com/metalbear-co/mirrord-intellij/issues/67)
+  [#1728](https://github.com/metalbear-co/mirrord/issues/1728)
+
+
+### Internal
+
+- Redirect stderr and stdout of internal proxy to /dev/null (stdout only after
+  printing port).
+  [#int-proxy-dev-null](https://github.com/metalbear-co/mirrord/issues/int-proxy-dev-null)
+
+
+## [3.53.3](https://github.com/metalbear-co/mirrord/tree/3.53.3) - 2023-07-26
+
+
+### Fixed
+
+- Add `jspawnhelper` to build-tool list & fix skip_processes detection
+  [#1709](https://github.com/metalbear-co/mirrord/issues/1709)
+- Use `shellexpand` to resolve tilde for `kubeconfig`.
+  [#1721](https://github.com/metalbear-co/mirrord/issues/1721)
+
+
+## [3.53.2](https://github.com/metalbear-co/mirrord/tree/3.53.2) - 2023-07-24
+
+
+### Fixed
+
+- Add automatic skip for build-tools `"skip_build_tools": boolean` to config
+  [default: True] (build-tool list: `as`, `cc`, `ld`, `go`, `air`, `asm`,
+  `cc1`, `cgo`, `dlv`, `gcc`, `git`, `link`, `math`, `cargo`, `hpack`, `rustc`,
+  `compile`, `collect2`, `cargo-watch` and `debugserver`)
+  [#1478](https://github.com/metalbear-co/mirrord/issues/1478)
+- Fix `feature.env.override` documentation "overrides" -> "override".
+  [mirrord.dev#120](https://github.com/metalbear-co/mirrord.dev/issues/120)
+- Specify default value for `agent.tolerations` in docs as json instead of
+  yaml.
+
+
+## [3.53.1](https://github.com/metalbear-co/mirrord/tree/3.53.1) - 2023-07-23
+
+
+### Changed
+
+- Changed internal proxy to drop stdout/stderr after it finishes loading
+
+
+### Internal
+
+- Fixed flakes caused by stdout/stderr not being flushed before after process
+  is done
+
+
+## [3.53.0](https://github.com/metalbear-co/mirrord/tree/3.53.0) - 2023-07-20
+
+
+### Added
+
+- Add support for `agent.tolerations` configuraion field for setting agent
+  `Toleration`s to work around `Taint`s in the cluster.
+  [#1692](https://github.com/metalbear-co/mirrord/issues/1692)
+
+
+### Changed
+
+- Added env var exclusion for `_JAVA_OPTIONS` to avoid loading remote jars or
+  settings that wouldn't work locally.
+  [#1695](https://github.com/metalbear-co/mirrord/issues/1695)
+
+
+## [3.52.1](https://github.com/metalbear-co/mirrord/tree/3.52.1) - 2023-07-19
+
+
+### Internal
+
+- Added Java Debug port detecting to use in VSCode/IntelliJ
+  [#1689](https://github.com/metalbear-co/mirrord/issues/1689)
+
+
+## [3.52.0](https://github.com/metalbear-co/mirrord/tree/3.52.0) - 2023-07-18
+
+
+### Added
+
+- Support for OIDC refresh token
+  [#1460](https://github.com/metalbear-co/mirrord/issues/1460)
+
+
+### Fixed
+
+- Fixed case where proxy can timeout since it holds a stale connection. Added
+  heartbeat to the connection handling
+- Fixed dynamic pause with operator not working - moved pause request to be
+  from internal proxy
+- Update the code to reimplement the fix but without moving the pinging source.
+
+
+### Internal
+
+- Add Cargo Chef to mirrord-agent docker image for better utilisation of cache
+  layers.
+- Reduce amount of API calls to use operator
+
+
+## [3.51.1](https://github.com/metalbear-co/mirrord/tree/3.51.1) - 2023-07-16
+
+
+### Changed
+
+- 'mirrod ls' command now no longer lists crashed pods as targets
+  [#1617](https://github.com/metalbear-co/mirrord/issues/1617)
+
+
+### Internal
+
+- Add `readinessProbe` and `livenessProbe` to operator deployment.
+- Add support for operator feature flags & new "proxy" verb api.
+- Remove operator pvc from setup.
+
+
+## [3.51.0](https://github.com/metalbear-co/mirrord/tree/3.51.0) - 2023-07-16
+
+
+### Added
+
+- Add outgoing traffic filter feature.
+
+  Adds a way of controlling from where outgoing traffic should go, either
+  through the remote pod, or from the local app. Can be configured with the
+  `remote` and `local` options under `feature.network.outgoing`.
+  [#702](https://github.com/metalbear-co/mirrord/issues/702)
+- mirrord configuration now allows disabling Linux capabilities for the agent
+  container. [#1662](https://github.com/metalbear-co/mirrord/issues/1662)
+- Add env to specify operator image
+
+
+### Internal
+
+- Add new error to the kube error enum needed by operator
+- Update VS Code gif in README
+
+
+## [3.50.5](https://github.com/metalbear-co/mirrord/tree/3.50.5) - 2023-07-13
+
+
+### Fixed
+
+- Make sure conntrack flushes the correct port.
+  [#1655](https://github.com/metalbear-co/mirrord/issues/1655)
+- Added `CAP_NET_RAW` Linux capability agent.
+
+
+### Internal
+
+- Use a patched (fixed) version of rasn, otherwise doing a cargo update breaks
+  compilation due to rasn-derive from rasn used in apple-codesign.
+
+
 ## [3.50.4](https://github.com/metalbear-co/mirrord/tree/3.50.4) - 2023-07-11
 
 

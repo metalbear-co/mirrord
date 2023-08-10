@@ -147,6 +147,7 @@ impl State {
         stream: TcpStream,
         tasks: BackgroundTasks,
         cancellation_token: CancellationToken,
+        protocol_version: semver::Version,
     ) -> Result<Option<JoinHandle<u32>>> {
         let mut stream = Framed::new(stream, DaemonCodec::new());
 
@@ -177,6 +178,7 @@ impl State {
                 ephemeral_container,
                 tasks,
                 env,
+                protocol_version,
             )
             .and_then(|client| client.start(cancellation_token))
             .await;
@@ -250,6 +252,7 @@ impl ClientConnectionHandler {
         ephemeral: bool,
         bg_tasks: BackgroundTasks,
         env: HashMap<String, String>,
+        protocol_version: semver::Version,
     ) -> Result<Self> {
         let pid = container_handle.as_ref().map(ContainerHandle::pid);
 
@@ -282,6 +285,7 @@ impl ClientConnectionHandler {
             bg_tasks.stealer_sender,
             bg_tasks.stealer_status,
             CHANNEL_SIZE,
+            protocol_version,
         )
         .await
         {
@@ -462,6 +466,14 @@ impl ClientConnectionHandler {
                 ))
                 .await?;
             }
+            ClientMessage::SwitchProtocolVersion(version) => {
+                self.tcp_stealer_api
+                    .switch_protocol_version(version.clone())
+                    .await?;
+
+                self.respond(DaemonMessage::SwitchProtocolVersionResponse(version))
+                    .await?;
+            }
         }
 
         Ok(true)
@@ -564,7 +576,12 @@ async fn start_agent() -> Result<()> {
         Ok(Ok((stream, addr))) => {
             trace!("start -> Connection accepted from {:?}", addr);
             if let Some(client) = state
-                .new_connection(stream, bg_tasks.clone(), cancellation_token.clone())
+                .new_connection(
+                    stream,
+                    bg_tasks.clone(),
+                    cancellation_token.clone(),
+                    args.base_protocol_version.clone(),
+                )
                 .await?
             {
                 clients.push(client)
@@ -592,6 +609,7 @@ async fn start_agent() -> Result<()> {
                     stream,
                     bg_tasks.clone(),
                     cancellation_token.clone(),
+                    args.base_protocol_version.clone(),
                 ).await? {clients.push(client) };
             },
             client = clients.next() => {

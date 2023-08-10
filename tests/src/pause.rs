@@ -1,10 +1,11 @@
 #[cfg(test)]
 
+/// The pause tests use predefined resource names (service/deployment), so they can't be run at the
+/// same time. We use `serial_test` to run them one after the other.
 mod pause {
-    use std::{io::ErrorKind::UnexpectedEof, time::Duration};
+    use std::time::Duration;
 
     use futures::{AsyncBufReadExt, StreamExt};
-    use futures_util::TryStreamExt;
     use k8s_openapi::api::{batch::v1::Job, core::v1::Pod};
     use kube::{
         api::{ListParams, LogParams},
@@ -14,8 +15,8 @@ mod pause {
     use rstest::*;
 
     use crate::utils::{
-        get_service_url, http_log_requester_service, http_logger_service, kube_client,
-        random_namespace_self_deleting_service, run_exec_with_target, KubeService,
+        get_service_url, kube_client, pause_services, random_namespace_self_deleting_service,
+        run_exec_with_target, KubeService,
     };
 
     /// http_logger_service is a service that logs strings from the uri of incoming http requests.
@@ -46,14 +47,12 @@ mod pause {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn pause_log_requests(
-        #[future] http_logger_service: KubeService,
-        #[future] http_log_requester_service: KubeService,
+        #[future] pause_services: (KubeService, KubeService),
         #[future] kube_client: Client,
     ) {
-        let logger_service = http_logger_service.await;
-        let requester_service = http_log_requester_service.await; // Impersonate a pod of this service, to reach internal.
+        let (requester_service, logger_service) = pause_services.await;
         let kube_client = kube_client.await;
-        let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &logger_service.namespace);
+        let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &requester_service.namespace);
 
         let target_parts = logger_service.target.split('/').collect::<Vec<&str>>();
         let pod_name = target_parts[1];
@@ -73,12 +72,7 @@ mod pause {
 
         let log_stream = pod_api.log_stream(pod_name, &lp).await.unwrap();
 
-        // `IntoAsyncRead` needs a stream with `Error = io::Error`, so convert the error type of the
-        // result from kube::Error to io::Error.
-        let log_stream = log_stream
-            .map(|res| res.map_err(|err| std::io::Error::new(UnexpectedEof, err.to_string())));
-
-        let log_lines = log_stream.into_async_read().lines();
+        let log_lines = log_stream.lines();
 
         // skip 2 lines of flask prints.
         let mut log_lines = log_lines.skip(2);
@@ -112,16 +106,19 @@ mod pause {
         // Skip all the logs by the deployed app from before we ran local.
         let mut next_log = log_lines.next().await.unwrap().unwrap();
         while next_log == hi_from_deployed_app {
+            println!("Skipping log: {next_log:?}");
             next_log = log_lines.next().await.unwrap().unwrap();
         }
 
         // Verify first log from local app.
         assert_eq!(next_log, hi_from_local_app);
+        println!("verified first log from local app.");
 
         // Verify that the second log from local app comes right after it - the deployed requester
         // was paused.
         let log_from_local = log_lines.next().await.unwrap().unwrap();
         assert_eq!(log_from_local, hi_again_from_local_app);
+        println!("verified second log from local app. Now verifying that the deployed app resumes (the target pod is unpaused).");
 
         // Verify that the deployed app resumes after the local app is done.
         let log_from_deployed_after_resume = log_lines.next().await.unwrap().unwrap();

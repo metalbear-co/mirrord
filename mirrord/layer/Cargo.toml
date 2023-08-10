@@ -25,12 +25,12 @@ libc.workspace = true
 nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-tracing-appender = { git = "https://github.com/metalbear-co/tracing", package = "tracing-appender", branch = "worker_options_non_blocking_v1" }
 # change to upstream once https://github.com/frida/frida-rust/pull/99 is merged
 frida-gum = { git = "https://github.com/metalbear-co/frida-rust", version = "0.12", features = ["auto-download"], branch="capstone_remove" }
 futures.workspace = true
 
-tokio = { workspace = true, features = ["fs"] }
+tokio = { workspace = true, features = ["fs", "rt", "rt-multi-thread", "macros", "process"] }
+serde.workspace = true
 serde_json.workspace = true
 
 actix-codec.workspace = true
@@ -71,7 +71,8 @@ hyper = { workspace = true }
 rstest = "*"
 test-cdylib = "*"
 tower = "0.4"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros", "process"] }
+tokio = { version = "1", features = ["rt", "net", "macros"] }
+tests = { path = "../../tests" }
 
 [lib]
 crate_type = ["cdylib"]

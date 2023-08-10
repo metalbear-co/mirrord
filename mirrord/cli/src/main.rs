@@ -14,9 +14,9 @@ use extension::extension_exec;
 use extract::extract_library;
 use k8s_openapi::{
     api::{apps::v1::Deployment, core::v1::Pod},
-    Metadata,
+    Metadata, NamespaceResourceScope,
 };
-use kube::{api::ListParams, Api};
+use kube::api::ListParams;
 use miette::JSONReportHandler;
 use mirrord_config::{config::MirrordConfig, LayerConfig, LayerFileConfig};
 use mirrord_kube::{
@@ -30,6 +30,7 @@ use mirrord_kube::{
 use mirrord_progress::{Progress, ProgressMode, TaskProgress};
 use operator::operator_command;
 use semver::Version;
+use serde::de::DeserializeOwned;
 use serde_json::json;
 use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
@@ -144,6 +145,10 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
         std::env::set_var("MIRRORD_UDP_OUTGOING", "false");
     }
 
+    if let Some(context) = &args.context {
+        std::env::set_var("MIRRORD_KUBE_CONTEXT", context);
+    }
+
     if let Some(config_file) = &args.config_file {
         // Set canoncialized path to config file, in case forks/children are in different
         // working directories.
@@ -157,10 +162,9 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     let config = LayerConfig::from_env()?;
 
     #[cfg(target_os = "macos")]
-    let execution_info =
-        MirrordExecution::start(&config, Some(&args.binary), progress, None).await?;
+    let execution_info = MirrordExecution::start(&config, Some(&args.binary), progress).await?;
     #[cfg(not(target_os = "macos"))]
-    let execution_info = MirrordExecution::start(&config, progress, None).await?;
+    let execution_info = MirrordExecution::start(&config, progress).await?;
 
     #[cfg(target_os = "macos")]
     let (_did_sip_patch, binary) = match execution_info.patched_path {
@@ -199,28 +203,29 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
 }
 
-/// Returns a list of (pod name, [container names]) pairs.
-/// Filtering mesh side cars
+/// Returns a list of (pod name, [container names]) pairs, filtering out mesh side cars
+/// as well as any pods which are not ready or have crashed.
 async fn get_kube_pods(
     namespace: Option<&str>,
     client: &kube::Client,
 ) -> Result<HashMap<String, Vec<String>>> {
-    let api: Api<Pod> = get_k8s_resource_api(client, namespace);
-    let pods = api
-        .list(
-            &ListParams::default()
-                .labels("app!=mirrord")
-                .fields("status.phase=Running"),
-        )
+    let pods = get_kube_resources::<Pod>(namespace, client, Some("status.phase=Running"))
         .await
-        .map_err(KubeApiError::from)
-        .map_err(CliError::KubernetesApiFailed)?;
+        .filter(|pod| {
+            pod.status
+                .as_ref()
+                .and_then(|status| status.conditions.as_ref())
+                .map(|conditions| {
+                    // filter out pods without the Ready condition
+                    conditions
+                        .iter()
+                        .any(|condition| condition.type_ == "Ready" && condition.status == "True")
+                })
+                .unwrap_or(false)
+        });
 
     // convert pods to (name, container names) pairs
-
     let pod_containers_map: HashMap<String, Vec<String>> = pods
-        .items
-        .iter()
         .filter_map(|pod| {
             let name = pod.metadata.name.clone()?;
             let containers = pod
@@ -244,15 +249,8 @@ async fn get_kube_deployments(
     namespace: Option<&str>,
     client: &kube::Client,
 ) -> Result<impl Iterator<Item = String>> {
-    let api: Api<Deployment> = get_k8s_resource_api(client, namespace);
-    let deployments = api
-        .list(&ListParams::default().labels("app!=mirrord"))
+    Ok(get_kube_resources::<Deployment>(namespace, client, None)
         .await
-        .map_err(KubeApiError::from)
-        .map_err(CliError::KubernetesApiFailed)?;
-
-    Ok(deployments
-        .into_iter()
         .filter(|deployment| {
             deployment
                 .status
@@ -267,17 +265,34 @@ async fn get_kube_rollouts(
     namespace: Option<&str>,
     client: &kube::Client,
 ) -> Result<impl Iterator<Item = String>> {
-    let api: Api<Rollout> = get_k8s_resource_api(client, namespace);
-
-    let rollouts = api
-        .list(&ListParams::default().labels("app!=mirrord"))
+    Ok(get_kube_resources::<Rollout>(namespace, client, None)
         .await
-        .map(|rollouts| rollouts.into_iter())
+        .filter_map(|rollout| rollout.metadata().name.clone()))
+}
+
+async fn get_kube_resources<K>(
+    namespace: Option<&str>,
+    client: &kube::Client,
+    field_selector: Option<&str>,
+) -> impl Iterator<Item = K>
+where
+    K: kube::Resource<Scope = NamespaceResourceScope>,
+    <K as kube::Resource>::DynamicType: Default,
+    K: Clone + DeserializeOwned + std::fmt::Debug,
+{
+    // Set up filters on the K8s resources returned - in this case, excluding the agent resources
+    // and then applying any provided field-based filter conditions.
+    let params = &mut ListParams::default().labels("app!=mirrord");
+    if let Some(fields) = field_selector {
+        params.field_selector = Some(fields.to_string())
+    }
+    get_k8s_resource_api(client, namespace)
+        .list(params)
+        .await
+        .map(|resources| resources.into_iter())
         .map_err(KubeApiError::from)
         .map_err(CliError::KubernetesApiFailed)
-        .unwrap_or_else(|_| Vec::new().into_iter());
-
-    Ok(rollouts.filter_map(|rollout| rollout.metadata().name.clone()))
+        .unwrap_or_else(|_| Vec::new().into_iter())
 }
 
 /// Lists all possible target paths for pods.
@@ -287,19 +302,20 @@ async fn get_kube_rollouts(
 ///  "pod/py-serv-deployment-5c57fbdc98-pdbn4/container/py-serv",
 /// ]```
 async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
-    let (accept_invalid_certificates, kubeconfig, namespace) =
+    let (accept_invalid_certificates, kubeconfig, namespace, kube_context) =
         if let Some(config) = &args.config_file {
             let layer_config = LayerFileConfig::from_path(config)?.generate_config()?;
             (
                 layer_config.accept_invalid_certificates,
                 layer_config.kubeconfig,
                 layer_config.target.namespace,
+                layer_config.kube_context,
             )
         } else {
-            (false, None, None)
+            (false, None, None, None)
         };
 
-    let client = create_kube_api(accept_invalid_certificates, kubeconfig)
+    let client = create_kube_api(accept_invalid_certificates, kubeconfig, kube_context)
         .await
         .map_err(CliError::KubernetesApiFailed)?;
 
@@ -382,7 +398,7 @@ async fn main() -> miette::Result<()> {
         Commands::ExtensionExec(args) => {
             extension_exec(*args, &MAIN_PROGRESS_TASK.subtask("ext")).await?
         }
-        Commands::InternalProxy(args) => internal_proxy::proxy(*args).await?,
+        Commands::InternalProxy => internal_proxy::proxy().await?,
         Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
     }
 
@@ -392,12 +408,13 @@ async fn main() -> miette::Result<()> {
 // only ls and ext commands need the errors in json format
 // error logs are disabled for extensions
 fn init_ext_error_handler(commands: &Commands) -> bool {
-    if let Commands::ListTargets(_) | Commands::ExtensionExec(_) = commands {
-        mirrord_progress::init_from_env(ProgressMode::Json);
-        let _ = miette::set_hook(Box::new(|_| Box::new(JSONReportHandler::new())));
-        true
-    } else {
-        false
+    match commands {
+        Commands::ListTargets(_) | Commands::ExtensionExec(_) => {
+            mirrord_progress::init_from_env(ProgressMode::Json);
+            let _ = miette::set_hook(Box::new(|_| Box::new(JSONReportHandler::new())));
+            true
+        }
+        _ => false,
     }
 }
 

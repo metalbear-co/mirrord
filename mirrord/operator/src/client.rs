@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
-use kube::{error::ErrorResponse, Api, Client};
+use kube::{error::ErrorResponse, Api, Client, Resource};
 use mirrord_auth::{credential_store::CredentialStoreSync, error::AuthenticationError};
 use mirrord_config::{
     feature::network::incoming::ConcurrentSteal, target::TargetConfig, LayerConfig,
@@ -13,15 +13,16 @@ use mirrord_kube::{
 use mirrord_progress::{MessageKind, Progress};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use semver::Version;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
-use tracing::{error, trace, warn};
+use tracing::error;
 
-use crate::crd::{MirrordOperatorCrd, TargetCrd, OPERATOR_STATUS_NAME};
+use crate::crd::{MirrordOperatorCrd, OperatorFeatures, TargetCrd, OPERATOR_STATUS_NAME};
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
-static MIRRORD_OPERATOR_SESSION_ID: &str = "MIRRORD_OPERATOR_SESSION_ID";
+const MIRRORD_OPERATOR_SESSION: &str = "MIRRORD_OPERATOR_SESSION";
 
 #[derive(Debug, Error)]
 pub enum OperatorApiError {
@@ -45,6 +46,8 @@ pub enum OperatorApiError {
     Authentication(#[from] AuthenticationError),
     #[error("Can't start proccess because other locks exist on target")]
     ConcurrentStealAbort,
+    #[error("Invalid operator session - this is a bug, please report it. value: `{0}` err: `{1}`")]
+    InvalidOperatorSession(String, serde_json::Error),
 }
 
 type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
@@ -52,16 +55,67 @@ type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
 pub struct OperatorApi {
     client: Client,
     target_api: Api<TargetCrd>,
+    target_namespace: Option<String>,
     version_api: Api<MirrordOperatorCrd>,
     target_config: TargetConfig,
     on_concurrent_steal: ConcurrentSteal,
 }
 
+/// Data we store into environment variables for the child processes to use.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct OperatorSessionInformation {
+    pub session_id: String,
+    pub target: TargetCrd,
+    pub fingerprint: Option<String>,
+    pub operator_features: Vec<OperatorFeatures>,
+    pub protocol_version: Option<semver::Version>,
+}
+
+impl OperatorSessionInformation {
+    pub fn new(
+        target: TargetCrd,
+        fingerprint: Option<String>,
+        operator_features: Vec<OperatorFeatures>,
+        protocol_version: Option<semver::Version>,
+    ) -> Self {
+        Self {
+            session_id: rand::random::<u64>().to_string(),
+            target,
+            fingerprint,
+            operator_features,
+            protocol_version,
+        }
+    }
+
+    /// Returns environment variable holding the information
+    pub const fn env_key() -> &'static str {
+        MIRRORD_OPERATOR_SESSION
+    }
+
+    /// Loads the information from environment variables
+    pub fn from_env() -> Result<Option<Self>> {
+        std::env::var(Self::env_key())
+            .ok()
+            .map(|val| {
+                serde_json::from_str(&val)
+                    .map_err(|e| OperatorApiError::InvalidOperatorSession(val, e))
+            })
+            .transpose()
+    }
+}
+
 impl OperatorApi {
-    pub async fn discover<P>(
+    /// Creates a new operator session, setting the session information in environment variables.
+    pub async fn create_session<P>(
         config: &LayerConfig,
         progress: &P,
-    ) -> Result<Option<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)>>
+    ) -> Result<
+        Option<(
+            mpsc::Sender<ClientMessage>,
+            mpsc::Receiver<DaemonMessage>,
+            OperatorSessionInformation,
+        )>,
+    >
     where
         P: Progress + Send + Sync,
     {
@@ -75,48 +129,44 @@ impl OperatorApi {
             // This is printed multiple times when the local process forks. Can be solved by e.g.
             // propagating an env var, don't think it's worth the extra complexity though
             let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
-            if operator_version != mirrord_version {
+            if operator_version > mirrord_version {
                 progress.subtask("comparing versions").print_message(MessageKind::Warning, Some(&format!("Your mirrord plugin/CLI version {} does not match the operator version {}. This can lead to unforeseen issues.", mirrord_version, operator_version)));
-                if operator_version > mirrord_version {
-                    progress.subtask("comparing versions").print_message(
-                        MessageKind::Warning,
-                        Some(
-                            "Consider updating your mirrord plugin/CLI to match the operator version.",
-                        ),
-                    );
-                } else {
-                    progress.subtask("comparing versions").print_message(MessageKind::Warning, Some("Consider either updating your operator version to match your mirrord plugin/CLI version, or downgrading your mirrord plugin/CLI."));
-                }
+                progress.subtask("comparing versions").print_message(
+                    MessageKind::Warning,
+                    Some(
+                        "Consider updating your mirrord plugin/CLI to match the operator version.",
+                    ),
+                );
             }
+            let operator_session_information = OperatorSessionInformation::new(
+                target,
+                status.spec.license.fingerprint,
+                status.spec.features.unwrap_or_default(),
+                status
+                    .spec
+                    .protocol_version
+                    .and_then(|str_version| str_version.parse().ok()),
+            );
 
-            operator_api
-                .connect_target(target, status.spec.license.fingerprint)
-                .await
-                .map(Some)
+            let (sender, receiver) = operator_api
+                .connect_target(&operator_session_information)
+                .await?;
+            Ok(Some((sender, receiver, operator_session_information)))
         } else {
             // No operator found
             Ok(None)
         }
     }
 
-    /// Uses `MIRRORD_OPERATOR_SESSION_ID` to have a persistant session_id across child processes,
-    /// if env var is empty or missing random id will be generated and saved in env
-    fn session_id() -> u64 {
-        std::env::var(MIRRORD_OPERATOR_SESSION_ID)
-            .inspect_err(|_| trace!("{MIRRORD_OPERATOR_SESSION_ID} empty, creating new session"))
-            .ok()
-            .and_then(|val| {
-                val.parse()
-                    .inspect_err(|err| {
-                        warn!("Error parsing {MIRRORD_OPERATOR_SESSION_ID}, creating new session. Err: {err}")
-                    })
-                    .ok()
-            })
-            .unwrap_or_else(|| {
-                let id = rand::random();
-                std::env::set_var(MIRRORD_OPERATOR_SESSION_ID, format!("{id}"));
-                id
-            })
+    /// Connect to session using operator and session information
+    pub async fn connect(
+        config: &LayerConfig,
+        session_information: &OperatorSessionInformation,
+    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+        OperatorApi::new(config)
+            .await?
+            .connect_target(session_information)
+            .await
     }
 
     async fn new(config: &LayerConfig) -> Result<Self> {
@@ -126,24 +176,26 @@ impl OperatorApi {
         let client = create_kube_api(
             config.accept_invalid_certificates,
             config.kubeconfig.clone(),
+            config.kube_context.clone(),
         )
         .await?;
 
         let target_namespace = if target_config.path.is_some() {
-            target_config.namespace.as_deref()
+            target_config.namespace.clone()
         } else {
             // When targetless, pass agent namespace to operator so that it knows where to create
             // the agent (the operator does not get the agent config).
-            config.agent.namespace.as_deref()
+            config.agent.namespace.clone()
         };
 
-        let target_api: Api<TargetCrd> = get_k8s_resource_api(&client, target_namespace);
+        let target_api: Api<TargetCrd> = get_k8s_resource_api(&client, target_namespace.as_deref());
 
         let version_api: Api<MirrordOperatorCrd> = Api::all(client.clone());
 
         Ok(OperatorApi {
             client,
             target_api,
+            target_namespace,
             version_api,
             target_config,
             on_concurrent_steal,
@@ -168,15 +220,45 @@ impl OperatorApi {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip(self), ret)]
+    fn connect_url(&self, session_information: &OperatorSessionInformation) -> String {
+        let OperatorApi {
+            on_concurrent_steal,
+            ..
+        } = self;
+        let target = &session_information.target;
+
+        if session_information
+            .operator_features
+            .contains(&OperatorFeatures::ProxyApi)
+        {
+            let dt = &();
+            let ns = self
+                .target_namespace
+                .as_deref()
+                .unwrap_or_else(|| self.client.default_namespace());
+            let api_version = TargetCrd::api_version(dt);
+            let plural = TargetCrd::plural(dt);
+
+            format!("/apis/{api_version}/proxy/namespaces/{ns}/{plural}/{}?on_concurrent_steal={on_concurrent_steal}&connect=true", target.name())
+        } else {
+            format!(
+                "{}/{}?on_concurrent_steal={on_concurrent_steal}&connect=true",
+                self.target_api.resource_url(),
+                target.name(),
+            )
+        }
+    }
+
     /// Create websocket connection to operator
     async fn connect_target(
         &self,
-        target: TargetCrd,
-        credential_name: Option<String>,
+        session_information: &OperatorSessionInformation,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+        // why are we checking on client side..?
         if self.on_concurrent_steal == ConcurrentSteal::Abort && let Ok(lock_target) = self
                 .target_api
-                .get_subresource("port-locks", &target.name())
+                .get_subresource("port-locks", &session_information.target.name())
                 .await && lock_target
                 .spec
                 .port_locks
@@ -186,18 +268,13 @@ impl OperatorApi {
         }
 
         let mut builder = Request::builder()
-            .uri(format!(
-                "{}/{}?on_concurrent_steal={}&connect=true",
-                self.target_api.resource_url(),
-                target.name(),
-                self.on_concurrent_steal
-            ))
-            .header("x-session-id", Self::session_id());
+            .uri(self.connect_url(session_information))
+            .header("x-session-id", session_information.session_id.clone());
 
-        if let Some(credential_name) = credential_name {
+        if let Some(credential_name) = &session_information.fingerprint {
             let client_credentials = CredentialStoreSync::get_client_certificate::<
                 MirrordOperatorCrd,
-            >(&self.client, credential_name)
+            >(&self.client, credential_name.to_string())
             .await
             .map(|certificate_der| general_purpose::STANDARD.encode(certificate_der))?;
 
@@ -210,7 +287,10 @@ impl OperatorApi {
             .await
             .map_err(KubeApiError::from)?;
 
-        Ok(ConnectionWrapper::wrap(connection))
+        Ok(ConnectionWrapper::wrap(
+            connection,
+            session_information.protocol_version.clone(),
+        ))
     }
 }
 
@@ -218,6 +298,7 @@ pub struct ConnectionWrapper<T> {
     connection: T,
     client_rx: Receiver<ClientMessage>,
     daemon_tx: Sender<DaemonMessage>,
+    protocol_version: Option<semver::Version>,
 }
 
 impl<T> ConnectionWrapper<T>
@@ -228,11 +309,15 @@ where
         + Unpin
         + 'stream,
 {
-    fn wrap(connection: T) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
+    fn wrap(
+        connection: T,
+        protocol_version: Option<semver::Version>,
+    ) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
         let (client_tx, client_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
         let (daemon_tx, daemon_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
 
         let connection_wrapper = ConnectionWrapper {
+            protocol_version,
             connection,
             client_rx,
             daemon_tx,
@@ -280,6 +365,18 @@ where
             tokio::select! {
                 client_message = self.client_rx.recv() => {
                     match client_message {
+                        Some(ClientMessage::SwitchProtocolVersion(version)) => {
+                            if let Some(operator_protocol_version) = self.protocol_version.as_ref() {
+                                self.handle_client_message(ClientMessage::SwitchProtocolVersion(operator_protocol_version.min(&version).clone())).await?;
+                            } else {
+                                self.daemon_tx
+                                    .send(DaemonMessage::SwitchProtocolVersionResponse(
+                                        "1.2.1".parse().expect("Bad static version"),
+                                    ))
+                                    .await
+                                    .map_err(|_| OperatorApiError::DaemonReceiverDropped)?;
+                            }
+                        }
                         Some(client_message) => self.handle_client_message(client_message).await?,
                         None => break,
                     }

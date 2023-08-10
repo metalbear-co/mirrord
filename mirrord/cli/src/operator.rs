@@ -72,9 +72,13 @@ async fn operator_setup(
 async fn get_status_api(config: Option<String>) -> Result<Api<MirrordOperatorCrd>> {
     let kube_api = if let Some(config_path) = config {
         let config = LayerFileConfig::from_path(config_path)?.generate_config()?;
-        create_kube_api(config.accept_invalid_certificates, config.kubeconfig)
+        create_kube_api(
+            config.accept_invalid_certificates,
+            config.kubeconfig,
+            config.kube_context,
+        )
     } else {
-        create_kube_api(false, None)
+        create_kube_api(false, None, None)
     }
     .await
     .map_err(CliError::KubernetesApiFailed)?;

@@ -416,6 +416,9 @@ jobs:
           cd mirrord/layer/tests/apps/fileops
           cargo build
       - run: |
+          cd mirrord/layer/tests/apps/outgoing
+          cargo build
+      - run: |
           cd mirrord/layer/tests/apps/recv_from
           cargo build
       - run: |

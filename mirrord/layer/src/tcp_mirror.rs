@@ -7,7 +7,7 @@ use std::{
 
 use bimap::BiMap;
 use mirrord_protocol::{
-    tcp::{HttpRequest, LayerTcp, NewTcpConnection, TcpClose, TcpData},
+    tcp::{HttpRequestFallback, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, ConnectionId, Port,
 };
 use tokio::{
@@ -222,7 +222,7 @@ impl TcpHandler<false> for TcpMirrorHandler {
     /// steal, but steal has some extra messages that should not be used with mirror.
     async fn handle_http_request(
         &mut self,
-        _request: HttpRequest,
+        _request: HttpRequestFallback,
     ) -> std::result::Result<(), LayerError> {
         error!("Error: Mirror handler received http request.");
         debug_assert!(false);
