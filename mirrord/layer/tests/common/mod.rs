@@ -633,6 +633,7 @@ pub enum Application {
     RustDnsResolve,
     RustRecvFrom,
     RustListenPorts,
+    RustSendRecvMsg,
     Fork,
     OpenFile,
     // For running applications with the executable and arguments determined at runtime.
@@ -737,6 +738,13 @@ impl Application {
                     "../../target/debug/listen_ports"
                 )
             }
+            Application::RustSendRecvMsg => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/send_recv_msg"
+                )
+            }
             Application::OpenFile => format!(
                 "{}/{}",
                 env!("CARGO_MANIFEST_DIR"),
@@ -821,6 +829,7 @@ impl Application {
             | Application::RustDnsResolve
             | Application::RustRecvFrom
             | Application::RustListenPorts
+            | Application::RustSendRecvMsg
             | Application::EnvBashCat
             | Application::BashShebang
             | Application::Go19SelfOpen
@@ -885,6 +894,7 @@ impl Application {
             | Application::RustIssue1458
             | Application::RustIssue1458PortNot53
             | Application::RustListenPorts
+            | Application::RustSendRecvMsg
             | Application::RustRecvFrom
             | Application::OpenFile
             | Application::DynamicApp(..) => unimplemented!("shouldn't get here"),

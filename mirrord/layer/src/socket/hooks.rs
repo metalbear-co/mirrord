@@ -1,12 +1,11 @@
-use alloc::{alloc::Layout, ffi::CString};
+use alloc::ffi::CString;
 use core::{cmp, ffi::CStr, mem};
-use std::{mem::forget, os::unix::io::RawFd, sync::LazyLock};
+use std::{os::unix::io::RawFd, sync::LazyLock};
 
 use dashmap::DashSet;
 use errno::{set_errno, Errno};
 use libc::{c_char, c_int, c_void, size_t, sockaddr, socklen_t, ssize_t, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
-use nix::sys::socket::ControlMessageOwned;
 use tracing::debug;
 
 use super::ops::*;
@@ -594,6 +593,13 @@ pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled
         _recvmsg_nocancel_detour,
         Fn_recvmsg_nocancel,
         FN__RECVMSG_NOCANCEL
+    );
+    replace!(
+        hook_manager,
+        "sendmsg$",
+        sendmsg_detour,
+        FnSendmsg,
+        FN_SENDMSG
     );
     replace!(
         hook_manager,

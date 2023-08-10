@@ -4988,6 +4988,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
+name = "send_recv_msg"
+version = "3.56.1"
+dependencies = [
+ "libc",
+ "socket2 0.5.3",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.183"
 source = "registry+https://github.com/rust-lang/crates.io-index"
