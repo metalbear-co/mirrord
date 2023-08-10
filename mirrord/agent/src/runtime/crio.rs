@@ -3,6 +3,7 @@ use futures::TryFutureExt;
 use http::{Request, Response};
 use http_body_util::{BodyExt, Empty};
 use hyper::{body::Incoming, client::conn};
+use hyper_util::rt::TokioIo;
 use k8s_cri::v1alpha2::{runtime_service_client::RuntimeServiceClient, ContainerStatusRequest};
 use serde::Deserialize;
 use tokio::net::UnixStream;
@@ -34,7 +35,7 @@ impl CriOContainer {
 
     async fn api_get(path: &str) -> Result<Response<Incoming>> {
         let stream = UnixStream::connect(CRIO_DEFAULT_SOCK_PATH).await?;
-        let (mut request_sender, connection) = conn::http1::handshake(stream).await?;
+        let (mut request_sender, connection) = conn::http1::handshake(TokioIo::new(stream)).await?;
 
         tokio::spawn(async move {
             if let Err(e) = connection.await {

@@ -1935,7 +1935,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.56.0"
+version = "3.56.1"
 dependencies = [
  "libc",
 ]
@@ -2352,7 +2352,8 @@ dependencies = [
 [[package]]
 name = "http-body"
 version = "1.0.0-rc.2"
-source = "git+https://github.com/meowjesty/http-body?branch=issue/922/http2#d4809041116a097d6d9bece681d0842b79b26170"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "951dfc2e32ac02d67c90c0d65bd27009a635dc9b381a2cc7d284ab01e3a0150d"
 dependencies = [
  "bytes",
  "http",
@@ -2360,8 +2361,9 @@ dependencies = [
 
 [[package]]
 name = "http-body-util"
-version = "0.1.0-rc.2"
-source = "git+https://github.com/meowjesty/http-body?branch=issue/922/http2#d4809041116a097d6d9bece681d0842b79b26170"
+version = "0.1.0-rc.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08ef12f041acdd397010e5fb6433270c147d3b8b2d0a840cd7fff8e531dca5c8"
 dependencies = [
  "bytes",
  "futures-util",
@@ -2430,12 +2432,12 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "1.0.0-rc.3"
-source = "git+https://github.com/meowjesty/hyper?branch=issue/922/http2#1b7c2bf95f70425954e34df2b2f757daa9b0e020"
+version = "1.0.0-rc.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d280a71f348bcc670fc55b02b63c53a04ac0bf2daff2980795aeaf53edae10e6"
 dependencies = [
  "bytes",
  "futures-channel",
- "futures-core",
  "futures-util",
  "h2",
  "http",
@@ -2491,6 +2493,24 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tokio-io-timeout",
+]
+
+[[package]]
+name = "hyper-util"
+version = "0.0.0"
+source = "git+https://github.com/hyperium/hyper-util#f898015fc9eca9f459ddac521db278d904099e89"
+dependencies = [
+ "futures-channel",
+ "futures-util",
+ "http",
+ "hyper 1.0.0-rc.4",
+ "once_cell",
+ "pin-project-lite",
+ "socket2 0.4.9",
+ "tokio",
+ "tower",
+ "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -2575,6 +2595,19 @@ checksum = "d5477fe2230a79769d8dc68e0eabf5437907c0457a5614a9e8dddb67f65eb65d"
 dependencies = [
  "equivalent",
  "hashbrown 0.14.0",
+]
+
+[[package]]
+name = "indicatif"
+version = "0.17.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b297dc40733f23a0e52728a58fa9489a5b7638a324932de16b41adc3ef80730"
+dependencies = [
+ "console",
+ "instant",
+ "number_prefix",
+ "portable-atomic",
+ "unicode-width",
 ]
 
 [[package]]
@@ -2934,7 +2967,7 @@ checksum = "57bcfdad1b858c2db7c38303a6d2ad4dfaf5eb53dfeb0910128b2c26d6158503"
 
 [[package]]
 name = "listen_ports"
-version = "3.56.0"
+version = "3.56.1"
 
 [[package]]
 name = "lock_api"
@@ -3144,7 +3177,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.56.0"
+version = "3.56.1"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -3186,7 +3219,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.56.0"
+version = "3.56.1"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -3202,7 +3235,8 @@ dependencies = [
  "http",
  "http-body-util",
  "httparse",
- "hyper 1.0.0-rc.3",
+ "hyper 1.0.0-rc.4",
+ "hyper-util",
  "iptables",
  "k8s-cri",
  "libc",
@@ -3237,7 +3271,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.56.0"
+version = "3.56.1"
 dependencies = [
  "assert-json-diff",
  "reqwest",
@@ -3248,7 +3282,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.56.0"
+version = "3.56.1"
 dependencies = [
  "chrono",
  "fs4",
@@ -3268,7 +3302,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.56.0"
+version = "3.56.1"
 dependencies = [
  "bimap",
  "bitflags 2.3.3",
@@ -3289,7 +3323,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.56.0"
+version = "3.56.1"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -3299,7 +3333,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.56.0"
+version = "3.56.1"
 dependencies = [
  "axum",
  "futures",
@@ -3317,7 +3351,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.56.0"
+version = "3.56.1"
 dependencies = [
  "actix-codec",
  "base64 0.21.2",
@@ -3343,7 +3377,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.56.0"
+version = "3.56.1"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -3361,7 +3395,8 @@ dependencies = [
  "futures",
  "http-body 1.0.0-rc.2",
  "http-body-util",
- "hyper 1.0.0-rc.3",
+ "hyper 1.0.0-rc.4",
+ "hyper-util",
  "itertools",
  "k8s-openapi",
  "libc",
@@ -3396,7 +3431,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.56.0"
+version = "3.56.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3405,7 +3440,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.56.0"
+version = "3.56.1"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -3415,7 +3450,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.56.0"
+version = "3.56.1"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -3448,12 +3483,13 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.56.0"
+version = "3.56.1"
 dependencies = [
  "atty",
+ "enum_dispatch",
+ "indicatif",
  "serde",
  "serde_json",
- "termspin",
 ]
 
 [[package]]
@@ -3466,7 +3502,7 @@ dependencies = [
  "fancy-regex",
  "http-body-util",
  "http-serde",
- "hyper 1.0.0-rc.3",
+ "hyper 1.0.0-rc.4",
  "libc",
  "mirrord-macros",
  "nix 0.24.3",
@@ -3480,7 +3516,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.56.0"
+version = "3.56.1"
 dependencies = [
  "apple-codesign",
  "memchr",
@@ -3721,6 +3757,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "number_prefix"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "830b246a0e5f20af87141b25c173cd1b609bd7779a4617d6ec582abaf90870f3"
+
+[[package]]
 name = "object"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3801,7 +3843,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.56.0"
+version = "3.56.1"
 
 [[package]]
 name = "outref"
@@ -4097,6 +4139,12 @@ dependencies = [
  "pnet_packet",
  "pnet_sys",
 ]
+
+[[package]]
+name = "portable-atomic"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f32154ba0af3a075eefa1eda8bb414ee928f62303a54ea85b8d6638ff1a6ee9e"
 
 [[package]]
 name = "ppv-lite86"
@@ -4645,21 +4693,21 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.56.0"
+version = "3.56.1"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.56.0"
+version = "3.56.1"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.56.0"
+version = "3.56.1"
 dependencies = [
  "tokio",
 ]
@@ -5432,15 +5480,6 @@ checksum = "633c1a546cee861a1a6d0dc69ebeca693bf4296661ba7852b9d21d159e0506df"
 dependencies = [
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "termspin"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "057886b8a481f5e301215f35d67d93b65ddee0973a70594625bc6388de088cf7"
-dependencies = [
- "downcast",
 ]
 
 [[package]]

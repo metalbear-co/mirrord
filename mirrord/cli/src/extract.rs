@@ -39,7 +39,7 @@ pub(crate) fn extract_library<P>(
 where
     P: Progress + Send + Sync,
 {
-    let progress = progress.subtask("extracting layer");
+    let mut progress = progress.subtask("extracting layer");
     let extension = Path::new(env!("MIRRORD_LAYER_FILE"))
         .extension()
         .unwrap()
@@ -64,6 +64,6 @@ where
         debug!("Extracted library file to {:?}", &file_path);
     }
 
-    progress.done_with("layer extracted");
+    progress.success(Some("layer extracted"));
     Ok(file_path)
 }
