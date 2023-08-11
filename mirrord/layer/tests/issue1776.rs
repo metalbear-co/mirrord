@@ -21,18 +21,18 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn send_recv_msg(
+async fn test_issue1776(
     #[values(Application::RustSendRecvMsg)] application: Application,
     dylib_path: &PathBuf,
     config_dir: &PathBuf,
 ) {
     let mut config_path = config_dir.clone();
-    config_path.push("send_recv_msg.json");
+    config_path.push("issue1776.json");
     let (mut test_process, layer_connection) = application
         .start_process_with_layer(dylib_path, vec![], Some(config_path.to_str().unwrap()))
         .await;
 
-    println!("Application started.");
+    println!("Application started, preparing to resolve DNS with sendmsg/recvmsg.");
     let mut connection = layer_connection.codec;
 
     let client_msg = connection.try_next().await.unwrap().unwrap();
@@ -75,9 +75,9 @@ async fn send_recv_msg(
 
     test_process.wait_assert_success().await;
     test_process
-        .assert_stdout_contains("test issue 1458: START")
+        .assert_stdout_contains("test issue 1776: START")
         .await;
     test_process
-        .assert_stdout_contains("test issue 1458: SUCCESS")
+        .assert_stdout_contains("test issue 1776: SUCCESS")
         .await;
 }

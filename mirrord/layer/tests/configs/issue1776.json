@@ -2,10 +2,6 @@
     "feature": {
         "fs": false,
         "network": {
-            "incoming": {
-                "mode": "steal",
-                "listen_ports": [[80, 51222]]
-            },
             "outgoing": {
                 "udp": true
             }

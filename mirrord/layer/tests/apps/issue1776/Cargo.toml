@@ -1,5 +1,5 @@
 [package]
-name = "send_recv_msg"
+name = "issue1776"
 version.workspace = true
 authors.workspace = true
 description.workspace = true

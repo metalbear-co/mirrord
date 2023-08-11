@@ -742,7 +742,7 @@ impl Application {
                 format!(
                     "{}/{}",
                     env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/send_recv_msg"
+                    "../../target/debug/issue1776"
                 )
             }
             Application::OpenFile => format!(
