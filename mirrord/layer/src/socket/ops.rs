@@ -927,10 +927,9 @@ pub(super) fn send_to(
     // we've bound the destination socket.
     //
     // If none of the above are true, then the destination is some real address outside our scope.
-    let sent_result = if let Some(destination) = destination
-        .as_socket()
-        .filter(|destination| destination.port() != 53)
-    {
+    let sent_result = if let Some(destination) = destination.as_socket().filter(|destination| {
+        destination.port() != 53 || destination.port() != 7777 || destination.port() != 8888
+    }) {
         // We want to keep holding this socket.
         SOCKETS.insert(sockfd, user_socket_info);
 
@@ -1041,15 +1040,14 @@ pub(super) fn sendmsg(
     // we've bound the destination socket.
     //
     // If none of the above are true, then the destination is some real address outside our scope.
-    let sent_result = if let Some(destination) = destination
-        .as_socket()
-        .filter(|destination| destination.port() != 53)
-    {
+    let sent_result = if let Some(destination) = destination.as_socket().filter(|destination| {
+        destination.port() != 53 && destination.port() != 7777 && destination.port() != 8888
+    }) {
         // We want to keep holding this socket.
         SOCKETS.insert(sockfd, user_socket_info);
 
         // Sending a packet on port NOT 53.
-        let _destination = SOCKETS
+        let destination = SOCKETS
             .iter()
             .filter(|socket| socket.kind.is_udp())
             // Is the `destination` one of our sockets? If so, then we grab the actual address,
@@ -1084,15 +1082,34 @@ pub(super) fn sendmsg(
                 _ => None,
             })?;
 
-        // let rawish_true_destination = SockAddr::from(destination);
-        // let raw_true_destination = rawish_true_destination.as_ptr();
-        // let raw_true_destination_length = rawish_true_destination.len();
+        let rawish_true_destination = SockAddr::from(destination);
+        let raw_true_destination = rawish_true_destination.as_ptr() as *mut c_void;
+        let raw_true_destination_length = rawish_true_destination.len();
 
-        unsafe { FN_SENDMSG(sockfd, raw_message_header, flags) }
+        let mut true_message_header = Box::new(unsafe { *raw_message_header });
+
+        unsafe {
+            true_message_header
+                .as_mut()
+                .msg_name
+                .copy_to(raw_true_destination, raw_true_destination_length as usize)
+        };
+        true_message_header.as_mut().msg_namelen = raw_true_destination_length;
+
+        debug!(
+            "values are different? lengths {:?} {:?} || pointers {:?} {:?}",
+            true_message_header.msg_name,
+            unsafe { (*raw_message_header).msg_name },
+            true_message_header.msg_namelen,
+            unsafe { (*raw_message_header).msg_namelen },
+        );
+
+        unsafe { FN_SENDMSG(sockfd, Box::leak(true_message_header), flags) }
     } else {
+        debug!("we have bypassed the DNS stuff.");
         connect_outgoing::<UDP, false>(sockfd, destination, user_socket_info)?;
 
-        let _layer_address: SockAddr = SOCKETS
+        let layer_address: SockAddr = SOCKETS
             .get(&sockfd)
             .and_then(|socket| match &socket.state {
                 SocketState::Connected(connected) => connected.layer_address.clone(),
@@ -1100,10 +1117,27 @@ pub(super) fn sendmsg(
             })
             .map(SocketAddress::try_into)??;
 
-        // let raw_interceptor_address = layer_address.as_ptr();
-        // let raw_interceptor_length = layer_address.len();
+        let raw_interceptor_address = layer_address.as_ptr() as *mut _;
+        let raw_interceptor_length = layer_address.len();
+        let mut true_message_header = Box::new(unsafe { *raw_message_header });
 
-        unsafe { FN_SENDMSG(sockfd, raw_message_header, flags) }
+        unsafe {
+            true_message_header
+                .as_mut()
+                .msg_name
+                .copy_to(raw_interceptor_address, raw_interceptor_length as usize)
+        };
+        true_message_header.as_mut().msg_namelen = raw_interceptor_length;
+
+        debug!(
+            "values are different? lengths {:?} {:?} || pointers {:?} {:?}",
+            true_message_header.msg_name,
+            unsafe { (*raw_message_header).msg_name },
+            true_message_header.msg_namelen,
+            unsafe { (*raw_message_header).msg_namelen },
+        );
+
+        unsafe { FN_SENDMSG(sockfd, Box::leak(true_message_header), flags) }
     };
 
     Detour::Success(sent_result)
