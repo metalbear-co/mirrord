@@ -8,6 +8,7 @@ members = [
     "mirrord/layer/tests/apps/dns_resolve",
     "mirrord/layer/tests/apps/recv_from",
     "mirrord/layer/tests/apps/issue1776",
+    "mirrord/layer/tests/apps/issue1776portnot53",
     "sample/rust",
     "medschool",
     "tests",

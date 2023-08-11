@@ -22,7 +22,7 @@ pub use common::*;
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn test_issue1776(
-    #[values(Application::RustSendRecvMsg)] application: Application,
+    #[values(Application::RustIssue1776)] application: Application,
     dylib_path: &PathBuf,
     config_dir: &PathBuf,
 ) {
@@ -79,5 +79,36 @@ async fn test_issue1776(
         .await;
     test_process
         .assert_stdout_contains("test issue 1776: SUCCESS")
+        .await;
+}
+
+/// Verify that we don't intercept UDP packets when `sendto` address' port is not `53`.
+///
+/// TODO(alex): When we fully implement proper UDP handling, this test will fail with some missing
+/// message (just delete it), you've been warned.
+#[rstest]
+#[tokio::test]
+#[timeout(Duration::from_secs(60))]
+async fn test_issue1776_port_not_53(
+    #[values(Application::RustIssue1776PortNot53)] application: Application,
+    dylib_path: &PathBuf,
+    config_dir: &PathBuf,
+) {
+    let mut config_path = config_dir.clone();
+    config_path.push("issue1776.json");
+    let (mut test_process, mut layer_connection) = application
+        .start_process_with_layer(dylib_path, vec![], Some(config_path.to_str().unwrap()))
+        .await;
+
+    println!("Application started, preparing to send UDP packet.");
+
+    assert!(layer_connection.codec.try_next().await.unwrap().is_none());
+
+    test_process.wait_assert_success().await;
+    test_process
+        .assert_stdout_contains("test issue 1776 port not 53: START")
+        .await;
+    test_process
+        .assert_stdout_contains("test issue 1776 port not 53: SUCCESS")
         .await;
 }
