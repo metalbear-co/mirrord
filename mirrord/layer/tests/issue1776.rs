@@ -62,7 +62,7 @@ async fn test_issue1776(
         .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
             DaemonRead {
                 connection_id: 0,
-                bytes: vec![1; 1],
+                bytes: vec![0; 4],
             },
         ))))
         .await
