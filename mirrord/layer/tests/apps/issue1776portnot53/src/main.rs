@@ -23,38 +23,22 @@ unsafe fn address_from_raw(
 }
 
 fn main() {
-    println!("test issue 1776: START");
+    println!("test issue 1776 port not 53: START");
 
     let local_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let remote_addr: SocketAddr = "1.2.3.4:53".parse().unwrap();
+    let remote_addr: SocketAddr = "127.0.0.0:9999".parse().unwrap();
 
     let socket = UdpSocket::bind(local_addr).unwrap();
+    let recv_socket = UdpSocket::bind(remote_addr).unwrap();
+
     let socket_fd = socket.as_raw_fd();
+    let recv_socket_fd = recv_socket.as_raw_fd();
 
-    // mirrord should intercept this
-    unsafe {
-        let mut outgoing_msg_hdr: libc::msghdr = mem::zeroed();
+    let rawish_remote_addr = SockAddr::from(remote_addr);
+    let remote_addr_ptr = rawish_remote_addr.as_ptr() as *mut c_void;
+    let remote_addr_len = rawish_remote_addr.len();
 
-        let rawish_remote_addr = SockAddr::from(remote_addr);
-        let remote_addr_ptr = rawish_remote_addr.as_ptr() as *mut c_void;
-        let remote_addr_len = rawish_remote_addr.len();
-
-        outgoing_msg_hdr.msg_name = remote_addr_ptr;
-        outgoing_msg_hdr.msg_namelen = remote_addr_len;
-
-        let bytes = &mut [0u8, 1, 2, 3];
-        let bytes_ptr = bytes.as_mut_ptr() as *mut c_void;
-        let mut iov = iovec {
-            iov_base: bytes_ptr,
-            iov_len: 4,
-        };
-
-        outgoing_msg_hdr.msg_iov = &mut iov;
-        outgoing_msg_hdr.msg_iovlen = 1;
-
-        let amount = libc::sendmsg(socket_fd, &outgoing_msg_hdr, 0);
-        assert_eq!(amount, 4);
-
+    let recv_thread = std::thread::spawn(move || unsafe {
         let mut incoming_msg_hdr: libc::msghdr = mem::zeroed();
         let incoming_name =
             alloc::alloc_zeroed(Layout::array::<u8>(size_of::<libc::sockaddr>()).unwrap())
@@ -74,14 +58,37 @@ fn main() {
         incoming_msg_hdr.msg_iov = &mut iov;
         incoming_msg_hdr.msg_iovlen = 1;
 
-        let amount = libc::recvmsg(socket_fd, &mut incoming_msg_hdr, 0);
+        let amount = libc::recvmsg(recv_socket_fd, &mut incoming_msg_hdr, 0);
 
         let raw_incoming_addr = incoming_msg_hdr.msg_name as *const libc::sockaddr;
         let raw_incoming_addr_len = incoming_msg_hdr.msg_namelen;
         let incoming_addr = address_from_raw(raw_incoming_addr, raw_incoming_addr_len).unwrap();
         assert_eq!(amount, 4);
         assert_eq!(incoming_addr, local_addr);
+    });
+
+    // mirrord should intercept this
+    unsafe {
+        let mut outgoing_msg_hdr: libc::msghdr = mem::zeroed();
+
+        outgoing_msg_hdr.msg_name = remote_addr_ptr;
+        outgoing_msg_hdr.msg_namelen = remote_addr_len;
+
+        let bytes = &mut [0u8, 1, 2, 3];
+        let bytes_ptr = bytes.as_mut_ptr() as *mut c_void;
+        let mut iov = iovec {
+            iov_base: bytes_ptr,
+            iov_len: 4,
+        };
+
+        outgoing_msg_hdr.msg_iov = &mut iov;
+        outgoing_msg_hdr.msg_iovlen = 1;
+
+        let amount = libc::sendmsg(socket_fd, &outgoing_msg_hdr, 0);
+        assert_eq!(amount, 4);
     }
 
-    println!("test issue 1776: SUCCESS");
+    recv_thread.join().unwrap();
+
+    println!("test issue 1776 port not 53: SUCCESS");
 }
