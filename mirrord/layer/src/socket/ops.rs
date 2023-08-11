@@ -927,9 +927,10 @@ pub(super) fn send_to(
     // we've bound the destination socket.
     //
     // If none of the above are true, then the destination is some real address outside our scope.
-    let sent_result = if let Some(destination) = destination.as_socket().filter(|destination| {
-        destination.port() != 53 || destination.port() != 7777 || destination.port() != 8888
-    }) {
+    let sent_result = if let Some(destination) = destination
+        .as_socket()
+        .filter(|destination| destination.port() != 53)
+    {
         // We want to keep holding this socket.
         SOCKETS.insert(sockfd, user_socket_info);
 
