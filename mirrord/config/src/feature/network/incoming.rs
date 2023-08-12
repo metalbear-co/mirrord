@@ -350,9 +350,10 @@ impl IncomingConfig {
 
 /// Allows selecting between mirrorring or stealing traffic.
 ///
-/// Can be set to either `"mirror"` (default) or `"steal"`.
+/// Can be set to either `"mirror"` (default), `"steal"` or `"off"`.
 ///
 /// - `"mirror"`: Sniffs on TCP port, and send a copy of the data to listeners.
+/// - `"off"`: Disables the incoming network feature.
 /// - `"steal"`: Supports 2 modes of operation:
 ///
 /// 1. Port traffic stealing: Steals all TCP data from a

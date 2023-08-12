@@ -732,7 +732,7 @@
       ]
     },
     "IncomingMode": {
-      "description": "Allows selecting between mirrorring or stealing traffic.\n\nCan be set to either `\"mirror\"` (default) or `\"steal\"`.\n\n- `\"mirror\"`: Sniffs on TCP port, and send a copy of the data to listeners. - `\"steal\"`: Supports 2 modes of operation:\n\n1. Port traffic stealing: Steals all TCP data from a port, which is selected whenever the user listens in a TCP socket (enabling the feature is enough to make this work, no additional configuration is needed);\n\n2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and steals the traffic on the port if it is HTTP;",
+      "description": "Allows selecting between mirrorring or stealing traffic.\n\nCan be set to either `\"mirror\"` (default), `\"steal\"` or `\"off\"`.\n\n- `\"mirror\"`: Sniffs on TCP port, and send a copy of the data to listeners. - `\"off\"`: Disables the incoming network feature. - `\"steal\"`: Supports 2 modes of operation:\n\n1. Port traffic stealing: Steals all TCP data from a port, which is selected whenever the user listens in a TCP socket (enabling the feature is enough to make this work, no additional configuration is needed);\n\n2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and steals the traffic on the port if it is HTTP;",
       "oneOf": [
         {
           "description": "<!--${internal}--> ### mirror\n\nSniffs on TCP port, and send a copy of the data to listeners.",
