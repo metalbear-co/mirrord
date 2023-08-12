@@ -747,6 +747,13 @@
           "enum": [
             "steal"
           ]
+        },
+        {
+          "description": "<!--${internal}--> ### Off\n\nDisables the incoming network feature.",
+          "type": "string",
+          "enum": [
+            "off"
+          ]
         }
       ]
     },
