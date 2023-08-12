@@ -24,7 +24,7 @@ use crate::{
     common::{blocking_send_hook_message, HookMessage},
     detour::{Bypass, Detour, OptionExt},
     error::{HookError, HookResult, LayerError},
-    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_PORTS,
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,
 };
 
 pub(super) mod hooks;
