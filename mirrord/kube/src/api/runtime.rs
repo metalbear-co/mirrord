@@ -1,6 +1,8 @@
 use std::{
     collections::BTreeMap,
+    convert::Infallible,
     fmt::{Display, Formatter},
+    ops::FromResidual,
 };
 
 use k8s_openapi::{
@@ -108,7 +110,7 @@ impl RuntimeData {
         })
     }
 
-    pub async fn check_node(&self, client: &kube::Client) -> Result<()> {
+    pub async fn check_node(&self, client: &kube::Client) -> NodeCheck<()> {
         let node_api: Api<Node> = Api::all(client.clone());
         let pod_api: Api<Pod> = Api::all(client.clone());
 
@@ -144,14 +146,40 @@ impl RuntimeData {
         }
 
         if allowed <= pod_count {
-            return Err(KubeApiError::NodePodsFull(
+            NodeCheck::Failed(KubeApiError::NodePodLimitExceeded(
                 self.node_name.clone(),
                 pod_count,
                 allowed,
-            ));
+            ))
+        } else {
+            NodeCheck::Success(())
         }
+    }
+}
 
-        Ok(())
+pub enum NodeCheck<T> {
+    Success(T),
+    Failed(KubeApiError),
+    Error(KubeApiError),
+}
+
+impl<T, E> FromResidual<Result<Infallible, E>> for NodeCheck<T>
+where
+    E: Into<KubeApiError>,
+{
+    fn from_residual(error: Result<Infallible, E>) -> Self {
+        match error {
+            Ok(_) => unreachable!(),
+            Err(err) => {
+                let kube_error = err.into();
+
+                if matches!(kube_error, KubeApiError::NodePodLimitExceeded(_, _, _)) {
+                    NodeCheck::Failed(kube_error)
+                } else {
+                    NodeCheck::Error(kube_error)
+                }
+            }
+        }
     }
 }
 
