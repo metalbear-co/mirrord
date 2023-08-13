@@ -76,6 +76,6 @@ pub enum KubeApiError {
     #[error("Unable to fetch node limits for {0:?}")]
     NodeBadAllocatable(String),
 
-    #[error("Node {0:?} is too full ({1}/{2}) pods")]
-    NodePodLimitExceeded(String, u32, u32),
+    #[error("Node {0:?} is too full with {1} pods")]
+    NodePodLimitExceeded(String, usize),
 }

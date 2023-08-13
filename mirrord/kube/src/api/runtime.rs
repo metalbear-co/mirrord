@@ -110,7 +110,7 @@ impl RuntimeData {
         })
     }
 
-    pub async fn check_node(&self, client: &kube::Client) -> NodeCheck<()> {
+    pub async fn check_node(&self, client: &kube::Client) -> NodeCheck {
         let node_api: Api<Node> = Api::all(client.clone());
         let pod_api: Api<Pod> = Api::all(client.clone());
 
@@ -121,7 +121,7 @@ impl RuntimeData {
             .and_then(|status| status.allocatable)
             .ok_or_else(|| KubeApiError::NodeBadAllocatable(self.node_name.clone()))?;
 
-        let allowed: u32 = allocatable
+        let allowed: usize = allocatable
             .get("pods")
             .and_then(|Quantity(quantity)| quantity.parse().ok())
             .ok_or_else(|| KubeApiError::NodeBadAllocatable(self.node_name.clone()))?;
@@ -135,7 +135,7 @@ impl RuntimeData {
         loop {
             let pods_on_node = pod_api.list(&list_params).await?;
 
-            pod_count += pods_on_node.items.len() as u32;
+            pod_count += pods_on_node.items.len();
 
             match pods_on_node.metadata.continue_ {
                 Some(next) => {
@@ -146,39 +146,32 @@ impl RuntimeData {
         }
 
         if allowed <= pod_count {
-            NodeCheck::Failed(KubeApiError::NodePodLimitExceeded(
-                self.node_name.clone(),
-                pod_count,
-                allowed,
-            ))
+            NodeCheck::Failed(self.node_name.clone(), pod_count)
         } else {
-            NodeCheck::Success(())
+            NodeCheck::Success
         }
     }
 }
 
-pub enum NodeCheck<T> {
-    Success(T),
-    Failed(KubeApiError),
+pub enum NodeCheck {
+    Success,
+    Failed(String, usize),
     Error(KubeApiError),
 }
 
-impl<T, E> FromResidual<Result<Infallible, E>> for NodeCheck<T>
+impl<E> FromResidual<Result<Infallible, E>> for NodeCheck
 where
     E: Into<KubeApiError>,
 {
     fn from_residual(error: Result<Infallible, E>) -> Self {
         match error {
             Ok(_) => unreachable!(),
-            Err(err) => {
-                let kube_error = err.into();
-
-                if matches!(kube_error, KubeApiError::NodePodLimitExceeded(_, _, _)) {
-                    NodeCheck::Failed(kube_error)
-                } else {
-                    NodeCheck::Error(kube_error)
+            Err(err) => match err.into() {
+                KubeApiError::NodePodLimitExceeded(node_name, pods) => {
+                    NodeCheck::Failed(node_name, pods)
                 }
-            }
+                err => NodeCheck::Error(err),
+            },
         }
     }
 }
