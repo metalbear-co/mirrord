@@ -101,12 +101,15 @@ impl<'a> HookManager<'a> {
     ) -> Result<NativePointer> {
         // This can't fail
         let module = self.modules.first().unwrap().clone();
+        // for symbol in Module::enumerate_symbols(&module) {
+        //     trace!("found symbol {}", symbol.name);
+        // }
+
         self.hook_symbol(&module, symbol, detour)
     }
 
     /// Resolve symbol in main module
-    #[cfg(target_os = "linux")]
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
     pub(crate) fn resolve_symbol_main_module(&self, symbol: &str) -> Option<NativePointer> {
         // This can't fail
         let module = self.modules.first().unwrap().clone();
