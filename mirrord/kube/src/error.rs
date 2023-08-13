@@ -72,4 +72,10 @@ pub enum KubeApiError {
 
     #[error("mirrord-layer: Failed to wait for agent startup")]
     AgentReadyMessageMissing,
+
+    #[error("Unable to fetch node limits for {0:?}")]
+    NodeBadAllocatable(String),
+
+    #[error("Node {0:?} is too full ({1}/{2}) pods")]
+    NodePodsFull(String, u32, u32),
 }

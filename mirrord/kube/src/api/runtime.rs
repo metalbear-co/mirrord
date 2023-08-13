@@ -3,7 +3,13 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use k8s_openapi::api::{apps::v1::Deployment, core::v1::Pod};
+use k8s_openapi::{
+    api::{
+        apps::v1::Deployment,
+        core::v1::{Node, Pod},
+    },
+    apimachinery::pkg::api::resource::Quantity,
+};
 use kube::{api::ListParams, Api, Client};
 use mirrord_config::target::{DeploymentTarget, PodTarget, RolloutTarget, Target};
 
@@ -100,6 +106,52 @@ impl RuntimeData {
             container_runtime,
             container_name,
         })
+    }
+
+    pub async fn check_node(&self, client: &kube::Client) -> Result<()> {
+        let node_api: Api<Node> = Api::all(client.clone());
+        let pod_api: Api<Pod> = Api::all(client.clone());
+
+        let node = node_api.get(&self.node_name).await?;
+
+        let allocatable = node
+            .status
+            .and_then(|status| status.allocatable)
+            .ok_or_else(|| KubeApiError::NodeBadAllocatable(self.node_name.clone()))?;
+
+        let allowed: u32 = allocatable
+            .get("pods")
+            .and_then(|Quantity(quantity)| quantity.parse().ok())
+            .ok_or_else(|| KubeApiError::NodeBadAllocatable(self.node_name.clone()))?;
+
+        let mut pod_count = 0;
+        let mut list_params = ListParams {
+            field_selector: Some(format!("spec.nodeName={}", self.node_name)),
+            ..Default::default()
+        };
+
+        loop {
+            let pods_on_node = pod_api.list(&list_params).await?;
+
+            pod_count += pods_on_node.items.len() as u32;
+
+            match pods_on_node.metadata.continue_ {
+                Some(next) => {
+                    list_params = list_params.continue_token(&next);
+                }
+                None => break,
+            }
+        }
+
+        if allowed <= pod_count {
+            return Err(KubeApiError::NodePodsFull(
+                self.node_name.clone(),
+                pod_count,
+                allowed,
+            ));
+        }
+
+        Ok(())
     }
 }
 

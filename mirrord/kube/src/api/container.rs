@@ -174,6 +174,12 @@ impl ContainerApi for JobContainer {
     where
         P: Progress + Send + Sync,
     {
+        if agent.check_out_of_pods && let Some(runtime_data) = runtime_data.as_ref() {
+            let check_node = progress.subtask("checking if node is allocatable...");
+            runtime_data.check_node(client).await?;
+            check_node.done_with("node is ok");
+        }
+
         let mut pod_progress = progress.subtask("creating agent pod...");
         let mirrord_agent_job_name = get_agent_name();
 
