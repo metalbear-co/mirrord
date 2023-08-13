@@ -213,6 +213,14 @@
       "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json { \"agent\": { \"log_level\": \"info\", \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"network_interface\": \"eth0\", \"pause\": false, \"flush_connections\": false, } } ```",
       "type": "object",
       "properties": {
+        "check_out_of_pods": {
+          "title": "agent.check_out_of_pods {#agent-check_out_of_pods}",
+          "description": "Determine if to check whether there is room for agent job in target node. Can be disabled if the check takes too long and you are sure there is enough resources on each node",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "communication_timeout": {
           "title": "agent.communication_timeout {#agent-communication_timeout}",
           "description": "Controls how long the agent lives when there are no connections.\n\nEach connection has its own heartbeat mechanism, so even if the local application has no messages, the agent stays alive until there are no more heartbeat messages.",
