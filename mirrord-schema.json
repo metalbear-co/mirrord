@@ -215,7 +215,7 @@
       "properties": {
         "check_out_of_pods": {
           "title": "agent.check_out_of_pods {#agent-check_out_of_pods}",
-          "description": "Determine if to check whether there is room for agent job in target node. Can be disabled if the check takes too long and you are sure there is enough resources on each node",
+          "description": "Determine if to check whether there is room for agent job in target node.  (not with ephemeral agents)\n\nCan be disabled if the check takes too long and you are sure there is enough resources on each node",
           "type": [
             "boolean",
             "null"

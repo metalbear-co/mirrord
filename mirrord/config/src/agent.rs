@@ -216,7 +216,9 @@ pub struct AgentConfig {
 
     /// ### agent.check_out_of_pods {#agent-check_out_of_pods}
     ///
-    /// Determine if to check whether there is room for agent job in target node.
+    /// Determine if to check whether there is room for agent job in target node.  (not with
+    /// ephemeral agents)
+    ///
     /// Can be disabled if the check takes too long and you are sure there is enough resources on
     /// each node
     #[config(default = true)]
