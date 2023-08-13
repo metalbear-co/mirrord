@@ -183,7 +183,6 @@ impl ContainerApi for JobContainer {
                 NodeCheck::Success => check_node.success(Some("node is allocatable")),
                 NodeCheck::Error(err) => {
                     debug!("{err}");
-
                     check_node.warning("unable to check if node is allocatable");
                 },
                 NodeCheck::Failed(node_name, pods) => {
