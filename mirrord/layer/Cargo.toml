@@ -77,4 +77,3 @@ tests = { path = "../../tests" }
 
 [lib]
 crate_type = ["cdylib"]
-

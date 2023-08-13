@@ -104,7 +104,7 @@ mod tests {
             ),
             (
                 Some("false"),
-                IncomingConfig { mode: IncomingMode::Mirror, ..Default::default() }
+                IncomingConfig { mode: IncomingMode::Off, ..Default::default() }
             ),
             (
                 Some("true"),

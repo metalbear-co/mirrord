@@ -10,6 +10,7 @@ use std::{
 };
 
 use libc::{c_int, c_void, sockaddr, socklen_t};
+use mirrord_config::feature::network::incoming::IncomingMode;
 use mirrord_protocol::{
     dns::LookupRecord,
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
@@ -28,7 +29,7 @@ use crate::{
     is_debugger_port,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
     tcp::{Listen, TcpIncoming},
-    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_LOCALHOST, LISTEN_PORTS,
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_CONFIG, LISTEN_PORTS,
     OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR, REMOTE_UNIX_STREAMS, TARGETLESS,
 };
 
@@ -140,11 +141,11 @@ pub(super) fn bind(
 ) -> Detour<i32> {
     let requested_address = SocketAddr::try_from_raw(raw_address, address_length)?;
     let requested_port = requested_address.port();
-
-    let ignore_localhost = INCOMING_IGNORE_LOCALHOST
+    let incoming_config = INCOMING_CONFIG
         .get()
-        .copied()
-        .expect("Should be set during initialization!");
+        .expect("`INCOMING_CONFIG` not set. Please report a bug");
+
+    let ignore_localhost = incoming_config.ignore_localhost;
 
     let mut socket = {
         SOCKETS
@@ -166,26 +167,9 @@ pub(super) fn bind(
     // To handle #1458, we don't ignore port `0` for UDP.
     if (is_ignored_port(&requested_address) && matches!(socket.kind, SocketKind::Tcp(_)))
         || is_debugger_port(&requested_address)
-        || INCOMING_IGNORE_PORTS
-            .get()
-            .expect("`INCOMING_IGNORE_PORTS` not set. Please report a bug")
-            .contains(&requested_port)
+        || incoming_config.ignore_ports.contains(&requested_port)
     {
         Err(Bypass::Port(requested_address.port()))?;
-    }
-
-    if TARGETLESS
-        .get()
-        .copied()
-        .expect("Should be set during initialization!")
-    {
-        warn!(
-            "Binding a port ({}) while running targetless. A targetless agent is not exposed by \
-            any service. Therefore, letting this port bind happen locally instead of on the \
-            cluster.",
-            requested_address.port()
-        );
-        return Detour::Bypass(Bypass::BindWhenTargetless);
     }
 
     // Check if the user's requested address isn't already in use, even though it's not actually
@@ -262,7 +246,26 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
             .map(|(_, socket)| socket)
             .bypass(Bypass::LocalFdNotFound(sockfd))?
     };
+    let incoming = INCOMING_CONFIG
+        .get()
+        .expect("`INCOMING_CONFIG` not set. Please report a bug");
 
+    if matches!(incoming.mode, IncomingMode::Off) {
+        return Detour::Bypass(Bypass::DisabledIncoming);
+    }
+
+    if TARGETLESS
+        .get()
+        .copied()
+        .expect("Should be set during initialization!")
+    {
+        warn!(
+            "Listening while running targetless. A targetless agent is not exposed by \
+        any service. Therefore, letting this port bind happen locally instead of on the \
+        cluster.",
+        );
+        return Detour::Bypass(Bypass::BindWhenTargetless);
+    }
     match socket.state {
         SocketState::Bound(Bound {
             requested_address,

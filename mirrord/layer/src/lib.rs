@@ -74,7 +74,7 @@ extern crate alloc;
 extern crate core;
 
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::VecDeque,
     ffi::OsString,
     net::SocketAddr,
     panic,
@@ -221,19 +221,12 @@ pub(crate) static REMOTE_UNIX_STREAMS: OnceLock<Option<RegexSet>> = OnceLock::ne
 /// When true, localhost connections will stay local (won't go to the remote pod localhost)
 pub(crate) static OUTGOING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
 
-/// Tells us if the user enabled wants to ignore listening on localhost in [`IncomingConfig`].
-///
-/// ## Usage
-///
-/// When true, localhost connections will stay local - wont mirror or steal.
-pub(crate) static INCOMING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
+/// Incoming config [`IncomingConfig`].
+pub(crate) static INCOMING_CONFIG: OnceLock<IncomingConfig> = OnceLock::new();
 
 /// Indicates this is a targetless run, so that users can be warned if their application is
 /// mirroring/stealing from a targetless agent.
 pub(crate) static TARGETLESS: OnceLock<bool> = OnceLock::new();
-
-/// Ports to ignore on listening for mirroring/stealing.
-pub(crate) static INCOMING_IGNORE_PORTS: OnceLock<HashSet<u16>> = OnceLock::new();
 
 // TODO(alex): To support DNS on the selector, change it to `LazyLock<Arc<Mutex>>`, so we can modify
 // the global on `OutgoingSelector::connect_remote`, converting `AddressFilter:Name` to however
@@ -378,6 +371,10 @@ fn set_globals(config: &LayerConfig) {
         .set(config.feature.network.outgoing.udp)
         .expect("Setting ENABLED_UDP_OUTGOING singleton");
 
+    INCOMING_CONFIG
+        .set(config.feature.network.incoming.clone())
+        .expect("SETTING INCOMING_CONFIG singleton");
+
     {
         let outgoing_selector = config
             .feature
@@ -413,17 +410,9 @@ fn set_globals(config: &LayerConfig) {
         .set(config.feature.network.outgoing.ignore_localhost)
         .expect("Setting OUTGOING_IGNORE_LOCALHOST singleton");
 
-    INCOMING_IGNORE_LOCALHOST
-        .set(config.feature.network.incoming.ignore_localhost)
-        .expect("Setting INCOMING_IGNORE_LOCALHOST singleton");
-
     TARGETLESS
         .set(config.target.path.is_none())
         .expect("Setting TARGETLESS singleton");
-
-    INCOMING_IGNORE_PORTS
-        .set(config.feature.network.incoming.ignore_ports.clone())
-        .expect("Setting INCOMING_IGNORE_PORTS failed");
 
     FILE_FILTER.get_or_init(|| FileFilter::new(config.feature.fs.clone()));
 
