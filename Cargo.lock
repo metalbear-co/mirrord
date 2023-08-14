@@ -2697,6 +2697,7 @@ dependencies = [
 name = "issue1776"
 version = "3.56.1"
 dependencies = [
+ "errno 0.3.2",
  "libc",
  "socket2 0.5.3",
 ]

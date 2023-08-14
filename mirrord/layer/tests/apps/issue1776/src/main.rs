@@ -53,7 +53,7 @@ fn main() {
         outgoing_msg_hdr.msg_iovlen = 1;
 
         let amount = libc::sendmsg(socket_fd, &outgoing_msg_hdr, 0);
-        assert_eq!(amount, 4);
+        assert_eq!(amount, 4, "with errno {}", errno::errno());
 
         let mut incoming_msg_hdr: libc::msghdr = mem::zeroed();
         let incoming_name =
@@ -79,7 +79,7 @@ fn main() {
         let raw_incoming_addr = incoming_msg_hdr.msg_name as *const libc::sockaddr;
         let raw_incoming_addr_len = incoming_msg_hdr.msg_namelen;
         let incoming_addr = address_from_raw(raw_incoming_addr, raw_incoming_addr_len).unwrap();
-        assert_eq!(amount, 4);
+        assert_eq!(amount, 4, "with errno {}", errno::errno());
         assert_eq!(incoming_addr, local_addr);
     }
 
