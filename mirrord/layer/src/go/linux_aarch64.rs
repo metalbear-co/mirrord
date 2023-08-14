@@ -32,76 +32,24 @@ unsafe extern "C" fn go_syscall_detour() {
 #[naked]
 unsafe extern "C" fn gosave_systemstack_switch() {
     asm!(
-        "nop",
+        "adrp       x0,0x73000",
+        "add        x0,x0,0x3d0",
+        "add        x0,x0,0x8",
+        "str        x0,[x28, 0x40]",
+        "mov        x0,sp",
+        "str        x0,[x28, 0x38]",
+        "str        x29,[x28, 0x68]",
+        "str        xzr,[x28, 0x60]",
+        "str        xzr,[x28, 0x58]",
+        "ldr        x0,[x28, 0x50]",
+        "cbz        x0,1f",
+        "bl         go_runtime_abort",
+        "1:",
+        "ret",
         options(noreturn)
     );
 }
 
-/// [Naked function] maps to runtime.abort.abi0, called by `gosave_systemstack_switch`
-#[no_mangle]
-#[naked]
-unsafe extern "C" fn go_runtime_abort() {
-    asm!("nop", options(noreturn));
-}
-
-/// Syscall & Rawsyscall handler - supports upto 4 params, used for socket,
-/// bind, listen, and accept
-/// Note: Depending on success/failure Syscall may or may not call this handler
-#[no_mangle]
-unsafe extern "C" fn c_abi_syscall_handler(
-    syscall: i64,
-    param1: i64,
-    param2: i64,
-    param3: i64,
-) -> i64 {
-    trace!(
-        "c_abi_syscall_handler: syscall={} param1={} param2={} param3={}",
-        syscall,
-        param1,
-        param2,
-        param3
-    );
-    let res = match syscall {
-        libc::SYS_socket => socket_detour(param1 as _, param2 as _, param3 as _) as i64,
-        libc::SYS_bind => bind_detour(param1 as _, param2 as _, param3 as _) as i64,
-        libc::SYS_listen => listen_detour(param1 as _, param2 as _) as i64,
-        libc::SYS_connect => connect_detour(param1 as _, param2 as _, param3 as _) as i64,
-        libc::SYS_accept => accept_detour(param1 as _, param2 as _, param3 as _) as i64,
-        libc::SYS_close => close_detour(param1 as _) as i64,
-
-        _ if FILE_MODE.get().unwrap().is_active() => match syscall {
-            libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
-            libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
-            libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _),
-            // Note(syscall_linux.go)
-            // if flags == 0 {
-            // 	return faccessat(dirfd, path, mode)
-            // }
-            // The Linux kernel faccessat system call does not take any flags.
-            // The glibc faccessat implements the flags itself; see
-            // https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/unix/sysv/linux/faccessat.c;hb=HEAD
-            // Because people naturally expect syscall.Faccessat to act
-            // like C faccessat, we do the same.
-            libc::SYS_faccessat => {
-                faccessat_detour(param1 as _, param2 as _, param3 as _, 0) as i64
-            }
-            libc::SYS_fstat => fstat_detour(param1 as _, param2 as _) as i64,
-            libc::SYS_getdents64 => getdents64_detour(param1 as _, param2 as _, param3 as _) as i64,
-            _ => {
-                let syscall_res = syscall_3(syscall, param1, param2, param3);
-                return syscall_res;
-            }
-        },
-        _ => {
-            let syscall_res = syscall_3(syscall, param1, param2, param3);
-            return syscall_res;
-        }
-    };
-    match res {
-        -1 => -errno().0 as i64,
-        _ => res,
-    }
-}
 
 /// Syscall & Syscall6 handler - supports upto 6 params, mainly used for
 /// accept4 Note: Depending on success/failure Syscall may or may not call this handler
@@ -232,12 +180,52 @@ unsafe extern "C" fn exit_syscall() {
     );
 }
 
+/// [Naked function] maps to runtime.abort.abi0, called by `gosave_systemstack_switch`
+#[no_mangle]
+#[naked]
+unsafe extern "C" fn go_runtime_abort() {
+    asm!("mov x0, xzr", "ldr x0, [x0]", options(noreturn));
+}
+
 /// Detour for Go >= 1.19
 /// On Go 1.19 one hook catches all (?) syscalls and therefore we call the syscall6 handler always
 /// so syscall6 handler need to handle syscall3 detours as well.
 #[naked]
 unsafe extern "C" fn go_syscall_new_detour() {
     asm!(
+        // adjusted copy of `runtime.systemstack.abi0`
+        // x28 = g, load m from it into x4
+        "ldr x4, [x28, 0x30]",
+        // store gsignal in x5
+        "ldr x5, [x4, 0x50]",
+        // check if g = gsignal
+        "cmp x5, x28",
+        // if equal, jump to noswitch
+        "b.eq 2f"
+        // load g0 into r5, see if it's same as our g
+        // if it is, jump to noswitch
+        "ldr x5, [x4]",
+        "cmp x5, x28",
+        "b.eq 2f",
+        // if curg == g jmp to switch, if not, crash.
+        "ldr x6, [x4, 0xc0]"
+        "cmp x6, x28",
+        "b.eq 1f"
+        "b go_runtime_abort"
+        "1:" // switch
+        // save arguments to registers before replacing stack
+        "ldr x10, [sp, 0x8]",
+        "ldr x11, [sp, 0x10]",
+        "ldr x12, [sp, 0x18]",
+        "ldr x13, [sp, 0x20]",
+        "ldr x14, [sp, 0x28]",
+        "ldr x15, [sp, 0x30]",
+        "ldr x16, [sp, 0x38]",
+        "bl gosave_systemstack_switch",
+        ""
+        //
+        "2:" //noswitch
+        // we can just use the stack
         // The function receives syscall, arg1, arg2, arg3, arg4, arg5, arg6 from stack
         // starting with SP+8
         "ldr x0, [sp, 0x8]",
@@ -248,15 +236,17 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "ldr x5, [sp, 0x30]",
         "ldr x6, [sp, 0x38]",
         "bl c_abi_syscall6_handler",
+        // check return code
         "cmn x0, 0xfff",
-        "b.cc 1f",
+        // jump to success if return code == 0
+        "b.cc 3f",
         "mov x4, -0x1",
         "str x4, [sp, 0x40]",
         "str xzr, [sp, 0x48]",
         "neg x0, x0",
         "str x0, [sp, 0x50]",
         "ret",
-        "1:",
+        "3:",
         "str x0, [sp, 0x40]",
         "str x1, [sp, 0x48]",
         "str xzr, [sp, 0x50]",
