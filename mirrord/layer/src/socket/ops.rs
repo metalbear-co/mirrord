@@ -929,7 +929,7 @@ pub(super) fn send_to(
     // If none of the above are true, then the destination is some real address outside our scope.
     let sent_result = if let Some(destination) = destination
         .as_socket()
-        .filter(|destination| destination.port() != 53)
+        .filter(|destination| destination.port() != 53 && destination.port() != 10200)
     {
         // We want to keep holding this socket.
         SOCKETS.insert(sockfd, user_socket_info);
@@ -1020,6 +1020,7 @@ pub(super) fn sendmsg(
     flags: i32,
 ) -> Detour<isize> {
     let destination = if !unsafe { *raw_message_header }.msg_name.is_null() {
+        debug!("message had a null destination, so we're connected {sockfd:?}");
         let raw_destination = unsafe { *raw_message_header }.msg_name as *const libc::sockaddr;
         let destination_length = unsafe { *raw_message_header }.msg_namelen;
         SockAddr::try_from_raw(raw_destination, destination_length)?
@@ -1085,6 +1086,7 @@ pub(super) fn sendmsg(
                 _ => None,
             })?;
 
+        debug!("we're just sending a message to {destination:?}");
         let rawish_true_destination = SockAddr::from(destination);
         let raw_true_destination = rawish_true_destination.as_ptr() as *mut c_void;
         let raw_true_destination_length = rawish_true_destination.len();
@@ -1110,6 +1112,7 @@ pub(super) fn sendmsg(
         unsafe { FN_SENDMSG(sockfd, Box::leak(true_message_header), flags) }
     } else {
         debug!("we have bypassed the DNS stuff.");
+        debug!("we're about to connect this {user_socket_info:?} as UDP");
         connect_outgoing::<UDP, false>(sockfd, destination, user_socket_info)?;
 
         let layer_address: SockAddr = SOCKETS

@@ -403,6 +403,16 @@ pub(super) unsafe extern "C" fn recvmsg_detour(
             );
         }
 
+        if !(*message_header).msg_control.is_null() {
+            let message_control_header = (*message_header).msg_control as *const libc::cmsghdr;
+            debug!(
+                "control header type {:?} level {:?} len {:?}",
+                (*message_control_header).cmsg_type,
+                (*message_control_header).cmsg_level,
+                (*message_control_header).cmsg_len,
+            );
+        }
+
         recvmsg_result
     }
 }
