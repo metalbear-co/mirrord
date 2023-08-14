@@ -9,23 +9,6 @@ use crate::{
 };
 
 
-/// [Naked function] hook for Syscall6
-#[naked]
-unsafe extern "C" fn go_syscall6_detour() {
-    asm!(
-        "nop",
-        options(noreturn)
-    );
-}
-
-/// [Naked function] hook for Syscall
-#[naked]
-unsafe extern "C" fn go_syscall_detour() {
-    asm!(
-        "nop",
-        options(noreturn)
-    );
-}
 
 /// [Naked function] maps to gasave_systemstack_switch, called by asmcgocall.abi0
 #[no_mangle]
@@ -133,16 +116,6 @@ unsafe extern "C" fn c_abi_syscall6_handler(
     }
 }
 
-/// [Naked function] 3 param version (Syscall6) for making the syscall, libc's syscall is not
-/// used here as it doesn't return the value that go expects (it does translation)
-#[naked]
-unsafe extern "C" fn syscall_3(syscall: i64, param1: i64, param2: i64, param3: i64) -> i64 {
-    asm!(
-        "nop",
-        options(noreturn)
-    )
-}
-
 /// [Naked function] 6 param version, used by Rawsyscall & Syscall
 #[naked]
 unsafe extern "C" fn syscall_6(
@@ -155,29 +128,17 @@ unsafe extern "C" fn syscall_6(
     param6: i64,
 ) -> i64 {
     asm!(
-        "nop",
+        "mov    x8, x0",
+        "mov    x0, x1",
+        "mov    x1, x2",
+        "mov    x2, x3",
+        "mov    x3, x4",
+        "mov    x4, x5",
+        "mov    x5, x6",
+        "svc 0x0",
+        "ret",
         options(noreturn)
     )
-}
-
-/// Clobbers rax, rcx
-#[no_mangle]
-#[naked]
-unsafe extern "C" fn enter_syscall() {
-    asm!(
-        "nop",
-        options(noreturn)
-    );
-}
-
-/// clobbers xmm15, r14, rax
-#[no_mangle]
-#[naked]
-unsafe extern "C" fn exit_syscall() {
-    asm!(
-        "nop",
-        options(noreturn)
-    );
 }
 
 /// runtime.save_g.abi0
@@ -216,26 +177,26 @@ unsafe extern "C" fn go_syscall_new_detour() {
         // check if g = gsignal
         "cmp x5, x28",
         // if equal, jump to noswitch
-        "b.eq 2f"
+        "b.eq 2f",
         // load g0 into r5, see if it's same as our g
         // if it is, jump to noswitch
         "ldr x5, [x4]",
         "cmp x5, x28",
         "b.eq 2f",
         // if curg == g jmp to switch, if not, crash.
-        "ldr x6, [x4, 0xc0]"
+        "ldr x6, [x4, 0xc0]",
         "cmp x6, x28",
-        "b.eq 1f"
-        "b go_runtime_abort"
-        "1:" // switch
+        "b.eq 1f",
+        "b go_runtime_abort",
+        "1:", // switch
         // save arguments to registers before replacing stack
-        "ldr x10, [sp, 0x8]",
-        "ldr x11, [sp, 0x10]",
-        "ldr x12, [sp, 0x18]",
-        "ldr x13, [sp, 0x20]",
-        "ldr x14, [sp, 0x28]",
-        "ldr x15, [sp, 0x30]",
-        "ldr x16, [sp, 0x38]",
+        "ldr x9, [sp, 0x8]",
+        "ldr x10, [sp, 0x10]",
+        "ldr x11, [sp, 0x18]",
+        "ldr x12, [sp, 0x20]",
+        "ldr x13, [sp, 0x28]",
+        "ldr x14, [sp, 0x30]",
+        "ldr x15, [sp, 0x38]",
         "bl gosave_systemstack_switch",
         // save_g implementation, minus cgo check
         "mov x28, x5",
@@ -243,15 +204,15 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "ldr x3, [x28, 0x38]",
         "mov sp, x3",
         "ldr x29, [x28, 0x68]",
-        "mov x0, x10",
-        "mov x1, x11",
-        "mov x2, x12",
-        "mov x3, x13",
-        "mov x4, x14",
-        "mov x5, x15",
-        "mov x6, x16",
+        "mov x0, x9",
+        "mov x1, x10",
+        "mov x2, x11",
+        "mov x3, x12",
+        "mov x4, x13",
+        "mov x5, x14",
+        "mov x6, x15",
         "bl c_abi_syscall6_handler",
-        "mov x16, x0",
+        "mov x15, x0",
         "ldr x3, [x28, 0x30]",
         "ldr x28, [x3, 0xc0]",
         "bl go_runtime_save_g",
@@ -260,9 +221,9 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "ldr x29, [x28, 0x68]",
         "str xzr, [x28, 0x38]",
         "str xzr, [x28, 0x68]",
-        "mov x0, x16",
+        "mov x0, x15",
         "b 3f",
-        "2:" //noswitch
+        "2:", //noswitch
         // we can just use the stack
         // The function receives syscall, arg1, arg2, arg3, arg4, arg5, arg6 from stack
         // starting with SP+8
@@ -275,7 +236,7 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "ldr x6, [sp, 0x38]",
         "bl c_abi_syscall6_handler",
         // aftercall
-        "3:"
+        "3:",
         // check return code
         "cmn x0, 0xfff",
         // jump to success if return code == 0
