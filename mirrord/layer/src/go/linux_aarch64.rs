@@ -180,6 +180,21 @@ unsafe extern "C" fn exit_syscall() {
     );
 }
 
+/// runtime.save_g.abi0
+#[no_mangle]
+#[naked]
+unsafe extern "C" fn go_runtime_save_g() {
+    asm!(
+        // save_g implementation, minus cgo check
+        "adrp x27, 0x660000",
+        "mrs x0, tpidr_el0",
+        "mov x27, 0x10",
+        "str x28, [x0, x27, LSL 0x0]",
+        "ret",
+        options(noreturn)
+    );
+}
+
 /// [Naked function] maps to runtime.abort.abi0, called by `gosave_systemstack_switch`
 #[no_mangle]
 #[naked]
@@ -222,8 +237,31 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "ldr x15, [sp, 0x30]",
         "ldr x16, [sp, 0x38]",
         "bl gosave_systemstack_switch",
-        ""
-        //
+        // save_g implementation, minus cgo check
+        "mov x28, x5",
+        "bl go_runtime_save_g",
+        "ldr x3, [x28, 0x38]",
+        "mov sp, x3",
+        "ldr x29, [x28, 0x68]",
+        "mov x0, x10",
+        "mov x1, x11",
+        "mov x2, x12",
+        "mov x3, x13",
+        "mov x4, x14",
+        "mov x5, x15",
+        "mov x6, x16",
+        "bl c_abi_syscall6_handler",
+        "mov x16, x0",
+        "ldr x3, [x28, 0x30]",
+        "ldr x28, [x3, 0xc0]",
+        "bl go_runtime_save_g",
+        "ldr x0,[x28, 0x38]",
+        "mov sp, x0",
+        "ldr x29, [x28, 0x68]",
+        "str xzr, [x28, 0x38]",
+        "str xzr, [x28, 0x68]",
+        "mov x0, x16",
+        "b 3f",
         "2:" //noswitch
         // we can just use the stack
         // The function receives syscall, arg1, arg2, arg3, arg4, arg5, arg6 from stack
@@ -236,17 +274,21 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "ldr x5, [sp, 0x30]",
         "ldr x6, [sp, 0x38]",
         "bl c_abi_syscall6_handler",
+        // aftercall
+        "3:"
         // check return code
         "cmn x0, 0xfff",
         // jump to success if return code == 0
-        "b.cc 3f",
+        "b.cc 4f",
+        // syscall fail flow
         "mov x4, -0x1",
         "str x4, [sp, 0x40]",
         "str xzr, [sp, 0x48]",
         "neg x0, x0",
         "str x0, [sp, 0x50]",
         "ret",
-        "3:",
+        // syscall success
+        "4:",
         "str x0, [sp, 0x40]",
         "str x1, [sp, 0x48]",
         "str xzr, [sp, 0x50]",
