@@ -14,6 +14,7 @@ use k8s_openapi::{
 };
 use kube::{api::ListParams, Api, Client};
 use mirrord_config::target::{DeploymentTarget, PodTarget, RolloutTarget, Target};
+use tracing::debug;
 
 use crate::{
     api::{container::choose_container, get_k8s_resource_api, kubernetes::rollout::Rollout},
@@ -110,6 +111,7 @@ impl RuntimeData {
         })
     }
 
+    #[tracing::instrument(level = "trace", skip(client), ret)]
     pub async fn check_node(&self, client: &kube::Client) -> NodeCheck {
         let node_api: Api<Node> = Api::all(client.clone());
         let pod_api: Api<Pod> = Api::all(client.clone());
@@ -137,6 +139,8 @@ impl RuntimeData {
 
             pod_count += pods_on_node.items.len();
 
+            debug!("checking OOP {} -> {pod_count}/{allowed}", self.node_name);
+
             match pods_on_node.metadata.continue_ {
                 Some(next) => {
                     list_params = list_params.continue_token(&next);
@@ -153,6 +157,7 @@ impl RuntimeData {
     }
 }
 
+#[derive(Debug)]
 pub enum NodeCheck {
     Success,
     Failed(String, usize),
