@@ -214,6 +214,16 @@ pub struct AgentConfig {
     /// Set to an empty array to have no tolerations at all
     pub tolerations: Option<Vec<Toleration>>,
 
+    /// ### agent.check_out_of_pods {#agent-check_out_of_pods}
+    ///
+    /// Determine if to check whether there is room for agent job in target node. (Not applicable
+    /// when using ephemeral containers feature)
+    ///
+    /// Can be disabled if the check takes too long and you are sure there is enough resources on
+    /// each node
+    #[config(default = true)]
+    pub check_out_of_pods: bool,
+
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).
