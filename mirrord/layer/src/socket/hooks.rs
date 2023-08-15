@@ -408,11 +408,13 @@ pub(super) unsafe extern "C" fn sendmsg_detour(
     flags: c_int,
 ) -> ssize_t {
     debug!("sendmsg_detour -> fd {sockfd:#?}");
-    // When the whole thing is null, the operation happens, but does basically nothing (afaik).
+    // When the whole header is null, the operation happens, but does basically nothing (afaik).
     //
     // If you ever hit an issue with this, maybe null here is meant to `libc::send` a 0-sized
     // message?
-    if message_header.is_null() {
+    //
+    // When `msg_name` is null, this is equivalent to `send`.
+    if message_header.is_null() || (*message_header).msg_name.is_null() {
         FN_SENDMSG(sockfd, message_header, flags)
     } else {
         sendmsg(sockfd, message_header, flags)
