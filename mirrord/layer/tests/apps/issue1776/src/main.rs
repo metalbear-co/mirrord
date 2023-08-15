@@ -81,7 +81,7 @@ fn main() {
         let raw_incoming_addr_len = incoming_msg_hdr.msg_namelen;
         let incoming_addr = address_from_raw(raw_incoming_addr, raw_incoming_addr_len).unwrap();
         assert_eq!(amount, 4, "with errno {}", errno::errno());
-        assert_eq!(incoming_addr, local_addr);
+        assert_eq!(incoming_addr, remote_addr);
     }
 
     println!("test issue 1776: SUCCESS");
