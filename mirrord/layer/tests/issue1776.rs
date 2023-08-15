@@ -16,8 +16,10 @@ mod common;
 
 pub use common::*;
 
-/// Start an application (and load the layer into it) that listens on a port that is configured to
-/// be ignored, and verify that no messages are sent to the agent.
+/// Verify that issue [#1776](https://github.com/metalbear-co/mirrord/issues/1776) is fixed.
+///
+/// We test this with `outgoing.udp = false`, as we're just trying to resolve DNS, and not full UDP
+/// outgoing traffic.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
@@ -36,8 +38,11 @@ async fn test_issue1776(
     let mut connection = layer_connection.codec;
 
     let client_msg = connection.try_next().await.unwrap().unwrap();
-    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect { remote_address: SocketAddress::Ip(addr) })) = client_msg else {
-            panic!("Invalid message received from layer: {client_msg:?}");
+    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
+        remote_address: SocketAddress::Ip(addr),
+    })) = client_msg
+    else {
+        panic!("Invalid message received from layer: {client_msg:?}");
     };
 
     println!("connecting to address {addr:#?}");
@@ -54,7 +59,10 @@ async fn test_issue1776(
         .unwrap();
 
     let client_msg = connection.try_next().await.unwrap().unwrap();
-    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite { connection_id: 0, .. })) = client_msg else {
+    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
+        connection_id: 0, ..
+    })) = client_msg
+    else {
         panic!("Invalid message received from layer: {client_msg:?}");
     };
 

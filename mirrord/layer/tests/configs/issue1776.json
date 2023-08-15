@@ -3,7 +3,7 @@
         "fs": false,
         "network": {
             "outgoing": {
-                "udp": true
+                "udp": false
             }
         }
     }
