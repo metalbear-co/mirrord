@@ -91,7 +91,7 @@ where
             .await
             .map_err(CliError::KubernetesApiFailed)?;
 
-        k8s_api.detect_openshift().await;
+        k8s_api.detect_openshift(progress).await;
 
         let (pod_agent_name, agent_port) = tokio::time::timeout(
             Duration::from_secs(config.agent.startup_timeout),
