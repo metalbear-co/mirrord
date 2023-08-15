@@ -19,8 +19,6 @@ pip3 install uvicorn[standard]
 sudo apt-get install bison
 bash < <(curl -s -S -L https://raw.githubusercontent.com/moovweb/gvm/master/binscripts/gvm-installer)
 
-echo "Exit code is $?"
-
 source /home/runner/.gvm/scripts/gvm
 
 gvm install go1.18
