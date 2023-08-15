@@ -642,6 +642,7 @@ mod tests {
                 flush_connections: Some(false),
                 disabled_capabilities: None,
                 tolerations: None,
+                check_out_of_pods: None,
             }),
             feature: Some(FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true).into(),

@@ -128,10 +128,11 @@ impl AgentManagment for KubernetesAPI {
         P: Progress + Send + Sync,
     {
         let runtime_data = if let Some(ref path) = self.target.path {
-            Some(
-                path.runtime_data(&self.client, self.target.namespace.as_deref())
-                    .await?,
-            )
+            let runtime_data = path
+                .runtime_data(&self.client, self.target.namespace.as_deref())
+                .await?;
+
+            Some(runtime_data)
         } else {
             // Most users won't see this, since the default log level is error, and also progress
             // reporting overrides logs in this stage of the run.

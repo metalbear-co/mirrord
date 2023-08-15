@@ -35,26 +35,27 @@ pub(crate) async fn create_operator_session<P>(
 where
     P: Progress + Send + Sync,
 {
-    let sub_progress = progress.subtask("checking operator");
+    let mut sub_progress = progress.subtask("checking operator");
 
     match OperatorApi::create_session(config, progress).await {
         Ok(Some(connection)) => {
-            sub_progress.done_with("connected to operator");
-
+            sub_progress.success(Some("connected to operator"));
             Ok(Some(connection))
         }
         Ok(None) => {
-            sub_progress.done_with("no operator detected");
+            sub_progress.success(Some("no operator detected"));
 
             Ok(None)
         }
         Err(OperatorApiError::ConcurrentStealAbort) => {
-            sub_progress.fail_with("operator concurrent port steal lock");
+            sub_progress.failure(Some("operator concurrent port steal lock"));
 
             Err(CliError::OperatorConcurrentSteal)
         }
         Err(err) => {
-            sub_progress.fail_with("unable to check if operator exists, probably due to RBAC");
+            sub_progress.failure(Some(
+                "unable to check if operator exists, probably due to RBAC",
+            ));
 
             trace!(
                 "{}",
@@ -82,9 +83,9 @@ where
     } else {
         if matches!(config.target, mirrord_config::target::TargetConfig{ path: Some(mirrord_config::target::Target::Deployment{..}), ..}) {
             // This is CLI Only because the extensions also implement this check with better messaging.
-            progress.print_message(mirrord_progress::MessageKind::CliOnly,Some( "When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.\n \
-                   Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.\n \
-                   To try it out, join the waitlist with `mirrord waitlist <email address>`, or at this link: https://metalbear.co/#waitlist-form"));
+            progress.print( "When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
+            progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
+            progress.print("To try it out, join the waitlist with `mirrord waitlist <email address>`, or at this link: https://metalbear.co/#waitlist-form");
         }
         let k8s_api = KubernetesAPI::create(config)
             .await
