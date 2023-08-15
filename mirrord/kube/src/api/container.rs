@@ -132,6 +132,7 @@ static AGENT_READY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
  * Wait until the agent prints the "agent ready" message.
  * Return agent version extracted from the message (if found).
  */
+#[tracing::instrument(level = "trace", skip(pod_api), ret)]
 async fn wait_for_agent_startup(
     pod_api: &Api<Pod>,
     pod_name: &str,
