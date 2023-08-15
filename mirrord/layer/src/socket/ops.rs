@@ -1022,14 +1022,12 @@ pub(super) fn sendmsg(
     raw_message_header: *const libc::msghdr,
     flags: i32,
 ) -> Detour<isize> {
-    let destination = if !unsafe { *raw_message_header }.msg_name.is_null() {
-        debug!("message had a null destination, so we're connected {sockfd:?}");
+    // We have a destination, so apply our fake `connect` patch.
+    let destination = (!unsafe { *raw_message_header }.msg_name.is_null()).then(|| {
         let raw_destination = unsafe { *raw_message_header }.msg_name as *const libc::sockaddr;
         let destination_length = unsafe { *raw_message_header }.msg_namelen;
-        SockAddr::try_from_raw(raw_destination, destination_length)?
-    } else {
-        todo!()
-    };
+        SockAddr::try_from_raw(raw_destination, destination_length)
+    })??;
 
     debug!("destination {:?}", destination.as_socket());
 
