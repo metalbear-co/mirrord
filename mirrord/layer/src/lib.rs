@@ -93,7 +93,10 @@ use load::ExecutableName;
 use mirrord_config::{
     feature::{
         fs::{FsConfig, FsModeConfig},
-        network::{incoming::IncomingConfig, NetworkConfig},
+        network::{
+            incoming::{IncomingConfig, IncomingMode},
+            NetworkConfig,
+        },
         FeatureConfig,
     },
     LayerConfig,
@@ -146,12 +149,19 @@ mod tcp;
 mod tcp_mirror;
 mod tcp_steal;
 
-#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-#[cfg_attr(
-    all(target_os = "linux", target_arch = "x86_64"),
-    path = "go/linux_x64.rs"
-)]
-mod go_hooks;
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
+mod go;
+
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
+use crate::go::go_hooks;
+
+const TRACE_ONLY_ENV: &str = "MIRRORD_LAYER_TRACE_ONLY";
 
 fn build_runtime() -> Runtime {
     tokio::runtime::Builder::new_current_thread()
@@ -448,6 +458,21 @@ fn layer_start(mut config: LayerConfig) {
         config.feature.fs.mode = FsModeConfig::LocalWithOverrides;
     }
 
+    // Check if we're in trace only mode (no agent)
+    let trace_only = std::env::var(TRACE_ONLY_ENV)
+        .unwrap_or_default()
+        .parse()
+        .unwrap_or(false);
+
+    // Disable all features that require the agent
+    if trace_only {
+        config.feature.fs.mode = FsModeConfig::Local;
+        config.feature.network.dns = false;
+        config.feature.network.incoming.mode = IncomingMode::Off;
+        config.feature.network.outgoing.tcp = false;
+        config.feature.network.outgoing.udp = false;
+    }
+
     // does not need to be atomic because on the first call there are never other threads.
     // Will be false when manually called from fork hook.
     if LAYER_INITIALIZED.get().is_none() {
@@ -478,6 +503,10 @@ fn layer_start(mut config: LayerConfig) {
             .get()
             .expect("EXECUTABLE_ARGS needs to be set!")
     );
+
+    if trace_only {
+        return;
+    }
 
     let address = config
         .connect_tcp
@@ -963,7 +992,10 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
         unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
     }
 
-    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+    #[cfg(all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_os = "linux"
+    ))]
     {
         go_hooks::enable_hooks(&mut hook_manager);
     }
