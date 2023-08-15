@@ -170,6 +170,7 @@ unsafe extern "C" fn go_runtime_abort() {
 unsafe extern "C" fn go_syscall_new_detour() {
     asm!(
         // adjusted copy of `runtime.systemstack.abi0`
+        // I'm not sure why it does this but okay
         // x28 = g, load m from it into x4
         "ldr x4, [x28, 0x30]",
         // store gsignal in x5
