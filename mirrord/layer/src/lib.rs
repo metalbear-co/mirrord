@@ -519,10 +519,6 @@ fn layer_start(mut config: LayerConfig) {
         if let Some(old_sender) = HOOK_SENDER.take() {
             // HOOK_SENDER is already set, we're currently on a fork detour.
 
-            // `expect`: `lock` returns error if another thread panicked while holding the lock, but
-            // when this code runs there are still no other threads in the process, because it's
-            // called either from the ctor, or from the child in a `fork` hook, before
-            // execution is returned to the user application.
             // we can't call drop since it might trigger the traceback that can be seen here
             // https://github.com/metalbear-co/mirrord/issues/1792
             // so we leak it.
