@@ -83,7 +83,10 @@ macro_rules! replace {
 ///     go_rawsyscall_detour
 /// );
 /// ```
-#[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
 macro_rules! hook_symbol {
     ($hook_manager:expr, $func:expr, $detour_name:expr) => {
         match $hook_manager.hook_symbol_main_module($func, $detour_name as *mut libc::c_void) {
@@ -128,5 +131,8 @@ macro_rules! graceful_exit {
     }};
 }
 
-#[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
 pub(crate) use hook_symbol;

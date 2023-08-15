@@ -8,8 +8,6 @@ use crate::{
     FILE_MODE,
 };
 
-
-
 /// [Naked function] maps to gasave_systemstack_switch, called by asmcgocall.abi0
 #[no_mangle]
 #[naked]
@@ -32,7 +30,6 @@ unsafe extern "C" fn gosave_systemstack_switch() {
         options(noreturn)
     );
 }
-
 
 /// Syscall & Syscall6 handler - supports upto 6 params, mainly used for
 /// accept4 Note: Depending on success/failure Syscall may or may not call this handler
@@ -269,103 +266,6 @@ unsafe extern "C" fn go_syscall_new_detour() {
         options(noreturn)
     )
 }
-
-// /// Detour for Go >= 1.19
-// /// On Go 1.19 one hook catches all (?) syscalls and therefore we call the syscall6 handler always
-// /// so syscall6 handler need to handle syscall3 detours as well.
-// #[naked]
-// unsafe extern "C" fn go_syscall_new_detour() {
-//     asm!(
-//         // adjusted copy of `runtime.systemstack.abi0`
-//         // I'm not sure why it does this but okay
-//         // x28 = g, load m from it into x4
-//         "ldr x4, [x28, 0x30]",
-//         // store gsignal in x5
-//         "ldr x5, [x4, 0x50]",
-//         // check if g = gsignal
-//         "cmp x5, x28",
-//         // if equal, jump to noswitch
-//         "b.eq 2f",
-//         // load g0 into r5, see if it's same as our g
-//         // if it is, jump to noswitch
-//         "ldr x5, [x4]",
-//         "cmp x5, x28",
-//         "b.eq 2f",
-//         // if curg == g jmp to switch, if not, crash.
-//         "ldr x6, [x4, 0xc0]",
-//         "cmp x6, x28",
-//         "b.eq 1f",
-//         "b go_runtime_abort",
-//         "1:", // switch
-//         // save arguments to registers before replacing stack
-//         "ldr x9, [sp, 0x8]",
-//         "ldr x10, [sp, 0x10]",
-//         "ldr x11, [sp, 0x18]",
-//         "ldr x12, [sp, 0x20]",
-//         "ldr x13, [sp, 0x28]",
-//         "ldr x14, [sp, 0x30]",
-//         "ldr x15, [sp, 0x38]",
-//         "bl gosave_systemstack_switch",
-//         // save_g implementation, minus cgo check
-//         "mov x28, x5",
-//         "bl go_runtime_save_g",
-//         "ldr x3, [x28, 0x38]",
-//         "mov sp, x3",
-//         "ldr x29, [x28, 0x68]",
-//         "mov x0, x9",
-//         "mov x1, x10",
-//         "mov x2, x11",
-//         "mov x3, x12",
-//         "mov x4, x13",
-//         "mov x5, x14",
-//         "mov x6, x15",
-//         "bl c_abi_syscall6_handler",
-//         "mov x15, x0",
-//         "ldr x3, [x28, 0x30]",
-//         "ldr x28, [x3, 0xc0]",
-//         "bl go_runtime_save_g",
-//         "ldr x0,[x28, 0x38]",
-//         "mov sp, x0",
-//         "ldr x29, [x28, 0x68]",
-//         "str xzr, [x28, 0x38]",
-//         "str xzr, [x28, 0x68]",
-//         "mov x0, x15",
-//         "b 3f",
-//         "2:", //noswitch
-//         // we can just use the stack
-//         // The function receives syscall, arg1, arg2, arg3, arg4, arg5, arg6 from stack
-//         // starting with SP+8
-//         "ldr x0, [sp, 0x8]",
-//         "ldr x1, [sp, 0x10]",
-//         "ldr x2, [sp, 0x18]",
-//         "ldr x3, [sp, 0x20]",
-//         "ldr x4, [sp, 0x28]",
-//         "ldr x5, [sp, 0x30]",
-//         "ldr x6, [sp, 0x38]",
-//         "bl c_abi_syscall6_handler",
-//         // aftercall
-//         "3:",
-//         // check return code
-//         "cmn x0, 0xfff",
-//         // jump to success if return code == 0
-//         "b.cc 4f",
-//         // syscall fail flow
-//         "mov x4, -0x1",
-//         "str x4, [sp, 0x40]",
-//         "str xzr, [sp, 0x48]",
-//         "neg x0, x0",
-//         "str x0, [sp, 0x50]",
-//         "ret",
-//         // syscall success
-//         "4:",
-//         "str x0, [sp, 0x40]",
-//         "str x1, [sp, 0x48]",
-//         "str xzr, [sp, 0x50]",
-//         "ret",
-//         options(noreturn)
-//     )
-// }
-
 
 /// Hooks for when hooking a post go 1.19 binary
 fn post_go1_19(hook_manager: &mut HookManager) {

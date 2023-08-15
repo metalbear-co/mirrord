@@ -149,7 +149,10 @@ mod tcp;
 mod tcp_mirror;
 mod tcp_steal;
 
-#[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), target_os = "linux"))]
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
 #[cfg_attr(
     all(target_os = "linux", target_arch = "x86_64"),
     path = "go/linux_x64.rs"
@@ -991,7 +994,10 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
         unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
     }
 
-    #[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), target_os = "linux"))]
+    #[cfg(all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_os = "linux"
+    ))]
     {
         go_hooks::enable_hooks(&mut hook_manager);
     }
