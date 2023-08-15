@@ -379,7 +379,7 @@ unsafe extern "C" fn syscall_3(syscall: i64, param1: i64, param2: i64, param3: i
 
 /// [Naked function] 6 param version, used by Rawsyscall & Syscall
 #[naked]
-unsafe extern "C" pub(crate) fn syscall_6(
+pub(crate) unsafe extern "C" fn syscall_6(
     syscall: i64,
     param1: i64,
     param2: i64,

@@ -1,12 +1,8 @@
 use std::arch::asm;
 
-use errno::errno;
 use tracing::trace;
 
-use crate::{
-    close_detour, file::hooks::*, hooks::HookManager, macros::hook_symbol, socket::hooks::*,
-    FILE_MODE,
-};
+use crate::{macros::hook_symbol, HookManager};
 
 /// [Naked function] maps to gasave_systemstack_switch, called by asmcgocall.abi0
 #[no_mangle]
@@ -31,10 +27,9 @@ unsafe extern "C" fn gosave_systemstack_switch() {
     );
 }
 
-
 /// [Naked function] 6 param version, used by Rawsyscall & Syscall
 #[naked]
-unsafe extern "C" pub(crate) fn syscall_6(
+pub(crate) unsafe extern "C" fn syscall_6(
     syscall: i64,
     param1: i64,
     param2: i64,
