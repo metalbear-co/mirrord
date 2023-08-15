@@ -16,7 +16,7 @@ use rand::distributions::{Alphanumeric, DistString};
 use regex::Regex;
 use serde_json::json;
 use tokio::pin;
-use tracing::{debug, warn};
+use tracing::{trace, debug, warn};
 
 use crate::{
     api::{
@@ -151,9 +151,13 @@ async fn wait_for_agent_startup(
 
     let mut lines = logs.lines();
     while let Some(line) = lines.try_next().await? {
+        trace!("log -> {line}");
+
         let Some(captures) = AGENT_READY_REGEX.captures(&line) else {
             continue;
         };
+
+        trace!("capture -> {captures:?}");
 
         let version = captures.get(2).map(|m| m.as_str().to_string());
         return Ok(version);
