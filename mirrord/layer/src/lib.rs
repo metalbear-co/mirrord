@@ -153,15 +153,13 @@ mod tcp_steal;
     any(target_arch = "x86_64", target_arch = "aarch64"),
     target_os = "linux"
 ))]
-#[cfg_attr(
-    all(target_os = "linux", target_arch = "x86_64"),
-    path = "go/linux_x64.rs"
-)]
-#[cfg_attr(
-    all(target_os = "linux", target_arch = "aarch64"),
-    path = "go/linux_aarch64.rs"
-)]
-mod go_hooks;
+mod go;
+
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
+use crate::go::go_hooks;
 
 const TRACE_ONLY_ENV: &str = "MIRRORD_LAYER_TRACE_ONLY";
 
