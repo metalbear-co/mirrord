@@ -880,6 +880,55 @@ pub(super) fn recv_from(
     Detour::Success(recv_from_result)
 }
 
+/// Helps manually resolving DNS on port `53` with UDP, see [`send_to`] and [`sendmsg`].
+#[tracing::instrument(level = "debug", ret)]
+fn send_dns_patch(
+    sockfd: RawFd,
+    user_socket_info: Arc<UserSocket>,
+    destination: SocketAddr,
+) -> Detour<SockAddr> {
+    // We want to keep holding this socket.
+    SOCKETS.insert(sockfd, user_socket_info);
+
+    // Sending a packet on port NOT 53.
+    let destination = SOCKETS
+        .iter()
+        .filter(|socket| socket.kind.is_udp())
+        // Is the `destination` one of our sockets? If so, then we grab the actual address,
+        // instead of the, possibly fake address from mirrord.
+        .find_map(|receiver_socket| match &receiver_socket.state {
+            SocketState::Bound(Bound {
+                requested_address,
+                address,
+            }) => {
+                // Special case for port `0`, see `getsockname`.
+                if requested_address.port() == 0 {
+                    (SocketAddr::new(requested_address.ip(), address.port()) == destination)
+                        .then_some(*address)
+                } else {
+                    (*requested_address == destination).then_some(*address)
+                }
+            }
+            SocketState::Connected(Connected {
+                remote_address,
+                layer_address,
+                ..
+            }) => {
+                let remote_address: SocketAddr = remote_address.clone().try_into().ok()?;
+                let layer_address: SocketAddr = layer_address.clone()?.try_into().ok()?;
+
+                if remote_address == destination {
+                    Some(layer_address)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })?;
+
+    Detour::Success(SockAddr::from(destination))
+}
+
 /// ## DNS resolution on port `53`
 ///
 /// There is a bit of trickery going on here, as this function first triggers a _semantical_
@@ -932,50 +981,9 @@ pub(super) fn send_to(
     // If none of the above are true, then the destination is some real address outside our scope.
     let sent_result = if let Some(destination) = destination
         .as_socket()
-        .filter(|destination| destination.port() != 53 && destination.port() != 10200)
+        .filter(|destination| destination.port() != 53)
     {
-        // We want to keep holding this socket.
-        SOCKETS.insert(sockfd, user_socket_info);
-
-        // Sending a packet on port NOT 53.
-        let destination = SOCKETS
-            .iter()
-            .filter(|socket| socket.kind.is_udp())
-            // Is the `destination` one of our sockets? If so, then we grab the actual address,
-            // instead of the, possibly fake address from mirrord.
-            .find_map(|receiver_socket| match &receiver_socket.state {
-                SocketState::Bound(Bound {
-                    requested_address,
-                    address,
-                }) => {
-                    // Special case for port `0`, see `getsockname`.
-                    if requested_address.port() == 0 {
-                        (SocketAddr::new(requested_address.ip(), address.port()) == destination)
-                            .then_some(*address)
-                    } else {
-                        (*requested_address == destination).then_some(*address)
-                    }
-                }
-                SocketState::Connected(Connected {
-                    remote_address,
-                    layer_address,
-                    ..
-                }) => {
-                    let remote_address: SocketAddr = remote_address.clone().try_into().ok()?;
-                    let layer_address: SocketAddr = layer_address.clone()?.try_into().ok()?;
-
-                    if remote_address == destination {
-                        Some(layer_address)
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            })?;
-
-        let rawish_true_destination = SockAddr::from(destination);
-        let raw_true_destination = rawish_true_destination.as_ptr();
-        let raw_true_destination_length = rawish_true_destination.len();
+        let raw_true_destination = send_dns_patch(sockfd, user_socket_info, destination)?;
 
         unsafe {
             FN_SEND_TO(
@@ -983,8 +991,8 @@ pub(super) fn send_to(
                 raw_message,
                 message_length,
                 flags,
-                raw_true_destination,
-                raw_true_destination_length,
+                raw_true_destination.as_ptr(),
+                raw_true_destination.len(),
             )
         }
     } else {
@@ -1047,73 +1055,20 @@ pub(super) fn sendmsg(
         .as_socket()
         .filter(|destination| destination.port() != 53)
     {
-        debug!("port != 53");
-        // We want to keep holding this socket.
-        SOCKETS.insert(sockfd, user_socket_info);
-
-        // Sending a packet on port NOT 53.
-        let destination = SOCKETS
-            .iter()
-            .filter(|socket| socket.kind.is_udp())
-            // Is the `destination` one of our sockets? If so, then we grab the actual address,
-            // instead of the, possibly fake address from mirrord.
-            .find_map(|receiver_socket| match &receiver_socket.state {
-                SocketState::Bound(Bound {
-                    requested_address,
-                    address,
-                }) => {
-                    // Special case for port `0`, see `getsockname`.
-                    if requested_address.port() == 0 {
-                        (SocketAddr::new(requested_address.ip(), address.port()) == destination)
-                            .then_some(*address)
-                    } else {
-                        (*requested_address == destination).then_some(*address)
-                    }
-                }
-                SocketState::Connected(Connected {
-                    remote_address,
-                    layer_address,
-                    ..
-                }) => {
-                    let remote_address: SocketAddr = remote_address.clone().try_into().ok()?;
-                    let layer_address: SocketAddr = layer_address.clone()?.try_into().ok()?;
-
-                    if remote_address == destination {
-                        Some(layer_address)
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            })?;
-
-        debug!("we're just sending a message to {destination:?}");
-        let rawish_true_destination = SockAddr::from(destination);
-        let raw_true_destination = rawish_true_destination.as_ptr() as *mut c_void;
-        let raw_true_destination_length = rawish_true_destination.len();
+        let raw_true_destination = send_dns_patch(sockfd, user_socket_info, destination)?;
 
         let mut true_message_header = Box::new(unsafe { *raw_message_header });
 
         unsafe {
-            true_message_header
-                .as_mut()
-                .msg_name
-                .copy_to(raw_true_destination, raw_true_destination_length as usize)
+            true_message_header.as_mut().msg_name.copy_from(
+                raw_true_destination.as_ptr() as *const _,
+                raw_true_destination.len() as usize,
+            )
         };
-        true_message_header.as_mut().msg_namelen = raw_true_destination_length;
+        true_message_header.as_mut().msg_namelen = raw_true_destination.len();
 
-        debug!(
-            "values are different? lengths {:?} {:?} || pointers {:?} {:?}",
-            true_message_header.msg_name,
-            unsafe { (*raw_message_header).msg_name },
-            true_message_header.msg_namelen,
-            unsafe { (*raw_message_header).msg_namelen },
-        );
-
-        unsafe { FN_SENDMSG(sockfd, Box::leak(true_message_header), flags) }
+        unsafe { FN_SENDMSG(sockfd, true_message_header.as_ref(), flags) }
     } else {
-        debug!("we have bypassed the DNS stuff.");
-        debug!("we're about to connect this {user_socket_info:?} as UDP");
         connect_outgoing::<UDP, false>(sockfd, destination, user_socket_info)?;
 
         let layer_address: SockAddr = SOCKETS
@@ -1124,7 +1079,7 @@ pub(super) fn sendmsg(
             })
             .map(SocketAddress::try_into)??;
 
-        let raw_interceptor_address = layer_address.as_ptr() as *mut _;
+        let raw_interceptor_address = layer_address.as_ptr() as *const _;
         let raw_interceptor_length = layer_address.len();
         let mut true_message_header = Box::new(unsafe { *raw_message_header });
 
@@ -1132,7 +1087,7 @@ pub(super) fn sendmsg(
             true_message_header
                 .as_mut()
                 .msg_name
-                .copy_to(raw_interceptor_address, raw_interceptor_length as usize)
+                .copy_from(raw_interceptor_address, raw_interceptor_length as usize)
         };
         true_message_header.as_mut().msg_namelen = raw_interceptor_length;
 
@@ -1144,7 +1099,7 @@ pub(super) fn sendmsg(
             unsafe { (*raw_message_header).msg_namelen },
         );
 
-        unsafe { FN_SENDMSG(sockfd, Box::leak(true_message_header), flags) }
+        unsafe { FN_SENDMSG(sockfd, true_message_header.as_ref(), flags) }
     };
 
     Detour::Success(sent_result)
