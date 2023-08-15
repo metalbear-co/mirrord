@@ -26,7 +26,7 @@ fn main() {
     println!("test issue 1776 port not 53: START");
 
     let local_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let remote_addr: SocketAddr = "127.0.0.0:9999".parse().unwrap();
+    let remote_addr: SocketAddr = "127.0.0.1:7778".parse().unwrap();
 
     let socket = UdpSocket::bind(local_addr).unwrap();
     let recv_socket = UdpSocket::bind(remote_addr).unwrap();

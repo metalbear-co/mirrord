@@ -90,7 +90,7 @@ async fn test_issue1776(
         .await;
 }
 
-/// Verify that we don't intercept UDP packets when `sendto` address' port is not `53`.
+/// Verify that we don't intercept UDP packets when `sendmsg` address' port is not `53`.
 ///
 /// TODO(alex): When we fully implement proper UDP handling, this test will fail with some missing
 /// message (just delete it), you've been warned.
