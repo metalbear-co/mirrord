@@ -1024,6 +1024,8 @@ pub(super) fn send_to(
     Detour::Success(sent_result)
 }
 
+/// Same behavior as [`send_to`], the only difference is that here we deal with [`libc::msghdr`],
+/// instead of directly with socket addresses.
 #[tracing::instrument(level = "debug", ret, skip(raw_message_header))]
 pub(super) fn sendmsg(
     sockfd: RawFd,
@@ -1090,14 +1092,6 @@ pub(super) fn sendmsg(
                 .copy_from(raw_interceptor_address, raw_interceptor_length as usize)
         };
         true_message_header.as_mut().msg_namelen = raw_interceptor_length;
-
-        debug!(
-            "values are different? lengths {:?} {:?} || pointers {:?} {:?}",
-            true_message_header.msg_name,
-            unsafe { (*raw_message_header).msg_name },
-            true_message_header.msg_namelen,
-            unsafe { (*raw_message_header).msg_namelen },
-        );
 
         unsafe { FN_SENDMSG(sockfd, true_message_header.as_ref(), flags) }
     };

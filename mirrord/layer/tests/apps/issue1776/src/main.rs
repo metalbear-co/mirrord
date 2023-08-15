@@ -22,6 +22,7 @@ unsafe fn address_from_raw(
     .and_then(|((), address)| address.as_socket())
 }
 
+/// Test that C# `mongodb+srv` protocol can resolve DNS with udp `sendmsg` and `recvmsg`.
 fn main() {
     println!("test issue 1776: START");
 

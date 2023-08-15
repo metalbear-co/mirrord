@@ -372,6 +372,7 @@ pub(super) unsafe extern "C" fn send_to_detour(
     }
 }
 
+/// Not a faithful reproduction of what [`libc::recvmsg`] is supposed to do, see [`recv_from`].
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn recvmsg_detour(
     sockfd: i32,
