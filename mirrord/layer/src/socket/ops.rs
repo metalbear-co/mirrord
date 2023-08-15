@@ -1044,7 +1044,7 @@ pub(super) fn sendmsg(
     // If none of the above are true, then the destination is some real address outside our scope.
     let sent_result = if let Some(destination) = destination
         .as_socket()
-        .filter(|destination| destination.port() != 53 && destination.port() != 10200)
+        .filter(|destination| destination.port() != 53)
     {
         debug!("port != 53");
         // We want to keep holding this socket.
