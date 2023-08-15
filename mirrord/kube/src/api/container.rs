@@ -19,7 +19,10 @@ use tokio::pin;
 use tracing::{debug, warn};
 
 use crate::{
-    api::{get_k8s_resource_api, runtime::RuntimeData},
+    api::{
+        get_k8s_resource_api,
+        runtime::{NodeCheck, RuntimeData},
+    },
     error::{KubeApiError, Result},
 };
 
@@ -174,6 +177,22 @@ impl ContainerApi for JobContainer {
     where
         P: Progress + Send + Sync,
     {
+        if agent.check_out_of_pods && let Some(runtime_data) = runtime_data.as_ref() {
+            let mut check_node = progress.subtask("checking if node is allocatable...");
+            match runtime_data.check_node(client).await {
+                NodeCheck::Success => check_node.success(Some("node is allocatable")),
+                NodeCheck::Error(err) => {
+                    debug!("{err}");
+                    check_node.warning("unable to check if node is allocatable");
+                },
+                NodeCheck::Failed(node_name, pods) => {
+                    check_node.failure(Some("node is not allocatable"));
+
+                    return Err(KubeApiError::NodePodLimitExceeded(node_name, pods));
+                }
+            }
+        }
+
         let mut pod_progress = progress.subtask("creating agent pod...");
         let mirrord_agent_job_name = get_agent_name();
 
