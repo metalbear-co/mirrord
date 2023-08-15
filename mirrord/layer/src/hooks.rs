@@ -101,10 +101,6 @@ impl<'a> HookManager<'a> {
     ) -> Result<NativePointer> {
         // This can't fail
         let module = self.modules.first().unwrap().clone();
-        // for symbol in Module::enumerate_symbols(&module) {
-        //     trace!("found symbol {}", symbol.name);
-        // }
-
         self.hook_symbol(&module, symbol, detour)
     }
 
