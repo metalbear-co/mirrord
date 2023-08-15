@@ -983,7 +983,7 @@ pub(super) fn send_to(
         .as_socket()
         .filter(|destination| destination.port() != 53)
     {
-        let raw_true_destination = send_dns_patch(sockfd, user_socket_info, destination)?;
+        let rawish_true_destination = send_dns_patch(sockfd, user_socket_info, destination)?;
 
         unsafe {
             FN_SEND_TO(
@@ -991,8 +991,8 @@ pub(super) fn send_to(
                 raw_message,
                 message_length,
                 flags,
-                raw_true_destination.as_ptr(),
-                raw_true_destination.len(),
+                rawish_true_destination.as_ptr(),
+                rawish_true_destination.len(),
             )
         }
     } else {
@@ -1057,17 +1057,17 @@ pub(super) fn sendmsg(
         .as_socket()
         .filter(|destination| destination.port() != 53)
     {
-        let raw_true_destination = send_dns_patch(sockfd, user_socket_info, destination)?;
+        let rawish_true_destination = send_dns_patch(sockfd, user_socket_info, destination)?;
 
         let mut true_message_header = Box::new(unsafe { *raw_message_header });
 
         unsafe {
             true_message_header.as_mut().msg_name.copy_from(
-                raw_true_destination.as_ptr() as *const _,
-                raw_true_destination.len() as usize,
+                rawish_true_destination.as_ptr() as *const _,
+                rawish_true_destination.len() as usize,
             )
         };
-        true_message_header.as_mut().msg_namelen = raw_true_destination.len();
+        true_message_header.as_mut().msg_namelen = rawish_true_destination.len();
 
         unsafe { FN_SENDMSG(sockfd, true_message_header.as_ref(), flags) }
     } else {
