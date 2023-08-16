@@ -78,14 +78,11 @@ where
     if let Some(outgoing_filter) = &config.feature.network.outgoing.filter {
         if matches!(outgoing_filter, OutgoingFilterConfig::Remote(_)) && !config.feature.network.dns
         {
-            progress.print_message(
-                mirrord_progress::MessageKind::Warning,
-                Some(
+            progress.warning(
                     "The mirrord outgoing traffic filter includes host names to be connected remotely,\
                      but the remote DNS feature is disabled, so the addresses of these hosts will be\
                      resolved locally!\n\
                      > Consider enabling the remote DNS resolution feature.",
-                ),
             );
         }
     }
