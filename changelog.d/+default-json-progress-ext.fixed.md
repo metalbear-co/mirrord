@@ -1,0 +1,1 @@
+CLI now uses the json progress tracker as default.
