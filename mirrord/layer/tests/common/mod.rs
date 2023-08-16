@@ -743,7 +743,7 @@ impl Application {
                 format!(
                     "{}/{}",
                     env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/issue1776"
+                    "../../target/debug/issue1776portnot53"
                 )
             }
             Application::OpenFile => format!(
