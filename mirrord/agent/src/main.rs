@@ -559,9 +559,10 @@ async fn start_agent() -> Result<()> {
         dns_api,
     };
 
-    // WARNING: This exact string is expected to be read in `pod_api.rs`, more specifically in
-    // `wait_for_agent_startup`. If you change this then mirrord fails to initialize.
-    println!("agent ready");
+    // WARNING: `wait_for_agent_startup` in `mirrord/kube/src/api/container.rs` expects a line
+    // containing "agent_ready" to be printed. If you change this then mirrord fails to
+    // initialize.
+    println!("agent ready - version {}", env!("CARGO_PKG_VERSION"));
 
     let mut clients = FuturesUnordered::new();
 

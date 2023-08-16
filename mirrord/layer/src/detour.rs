@@ -203,6 +203,9 @@ pub(crate) enum Bypass {
     /// Outgoing connection either did not match any `remote` selector, or it matched a `local`
     /// one.
     FilteredConnection,
+
+    /// Incoming traffic is disabled, bypass.
+    DisabledIncoming,
 }
 
 /// [`ControlFlow`](std::ops::ControlFlow)-like enum to be used by hooks.

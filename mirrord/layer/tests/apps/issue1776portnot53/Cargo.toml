@@ -1,5 +1,5 @@
 [package]
-name = "mirrord-progress"
+name = "issue1776portnot53"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -14,8 +14,5 @@ publish.workspace = true
 edition.workspace = true
 
 [dependencies]
-atty = "0.2.14"
-indicatif = "0.17"
-serde.workspace = true
-serde_json.workspace = true
-enum_dispatch.workspace = true
+libc.workspace = true
+socket2.workspace = true

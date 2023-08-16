@@ -13,12 +13,16 @@ use kube::{
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
 use mirrord_progress::Progress;
 use rand::distributions::{Alphanumeric, DistString};
+use regex::Regex;
 use serde_json::json;
 use tokio::pin;
 use tracing::{debug, warn};
 
 use crate::{
-    api::{get_k8s_resource_api, runtime::RuntimeData},
+    api::{
+        get_k8s_resource_api,
+        runtime::{NodeCheck, RuntimeData},
+    },
     error::{KubeApiError, Result},
 };
 
@@ -120,11 +124,19 @@ fn get_agent_name() -> String {
     agent_name
 }
 
+static AGENT_READY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new("agent ready( - version (\\S+))?").expect("failed to create regex")
+});
+
+/**
+ * Wait until the agent prints the "agent ready" message.
+ * Return agent version extracted from the message (if found).
+ */
 async fn wait_for_agent_startup(
     pod_api: &Api<Pod>,
     pod_name: &str,
     container_name: String,
-) -> Result<()> {
+) -> Result<Option<String>> {
     let logs = pod_api
         .log_stream(
             pod_name,
@@ -138,11 +150,15 @@ async fn wait_for_agent_startup(
 
     let mut lines = logs.lines();
     while let Some(line) = lines.try_next().await? {
-        if line.contains("agent ready") {
-            break;
-        }
+        let Some(captures) = AGENT_READY_REGEX.captures(&line) else {
+            continue;
+        };
+
+        let version = captures.get(2).map(|m| m.as_str().to_string());
+        return Ok(version);
     }
-    Ok(())
+
+    Err(KubeApiError::AgentReadyMessageMissing)
 }
 
 #[derive(Debug)]
@@ -161,7 +177,23 @@ impl ContainerApi for JobContainer {
     where
         P: Progress + Send + Sync,
     {
-        let pod_progress = progress.subtask("creating agent pod...");
+        if agent.check_out_of_pods && let Some(runtime_data) = runtime_data.as_ref() {
+            let mut check_node = progress.subtask("checking if node is allocatable...");
+            match runtime_data.check_node(client).await {
+                NodeCheck::Success => check_node.success(Some("node is allocatable")),
+                NodeCheck::Error(err) => {
+                    debug!("{err}");
+                    check_node.warning("unable to check if node is allocatable");
+                },
+                NodeCheck::Failed(node_name, pods) => {
+                    check_node.failure(Some("node is not allocatable"));
+
+                    return Err(KubeApiError::NodePodLimitExceeded(node_name, pods));
+                }
+            }
+        }
+
+        let mut pod_progress = progress.subtask("creating agent pod...");
         let mirrord_agent_job_name = get_agent_name();
 
         let mut agent_command_line = vec![
@@ -300,9 +332,9 @@ impl ContainerApi for JobContainer {
             .labels(&format!("job-name={mirrord_agent_job_name}"))
             .timeout(60);
 
-        pod_progress.done_with("agent pod created");
+        pod_progress.success(Some("agent pod created"));
 
-        let pod_progress = progress.subtask("waiting for pod to be ready...");
+        let mut pod_progress = progress.subtask("waiting for pod to be ready...");
 
         let pod_api: Api<Pod> = get_k8s_resource_api(client, agent.namespace.as_deref());
 
@@ -329,9 +361,20 @@ impl ContainerApi for JobContainer {
             .and_then(|pod| pod.metadata.name.clone())
             .ok_or(KubeApiError::JobPodNotFound(mirrord_agent_job_name))?;
 
-        wait_for_agent_startup(&pod_api, &pod_name, "mirrord-agent".to_string()).await?;
+        let version =
+            wait_for_agent_startup(&pod_api, &pod_name, "mirrord-agent".to_string()).await?;
+        match version {
+            Some(version) if version != env!("CARGO_PKG_VERSION") => {
+                let message = format!(
+                    "Agent version {version} does not match the local mirrord version {}. This may lead to unexpected errors.",
+                    env!("CARGO_PKG_VERSION"),
+                );
+                pod_progress.warning(&message);
+            }
+            _ => {}
+        }
 
-        pod_progress.done_with("pod is ready");
+        pod_progress.success(Some("pod is ready"));
 
         Ok(pod_name)
     }
@@ -354,7 +397,7 @@ impl ContainerApi for EphemeralContainer {
     {
         // Ephemeral should never be targetless, so there should be runtime data.
         let runtime_data = runtime_data.ok_or(KubeApiError::MissingRuntimeData)?;
-        let container_progress = progress.subtask("creating ephemeral container...");
+        let mut container_progress = progress.subtask("creating ephemeral container...");
 
         warn!("Ephemeral Containers is an experimental feature
                   >> Refer https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/ for more info");
@@ -425,9 +468,9 @@ impl ContainerApi for EphemeralContainer {
             .fields(&format!("metadata.name={}", &runtime_data.pod_name))
             .timeout(60);
 
-        container_progress.done_with("container created");
+        container_progress.success(Some("container created"));
 
-        let container_progress = progress.subtask("waiting for container to be ready...");
+        let mut container_progress = progress.subtask("waiting for container to be ready...");
 
         let stream = watcher(pod_api.clone(), watcher_config).applied_objects();
         pin!(stream);
@@ -441,11 +484,38 @@ impl ContainerApi for EphemeralContainer {
             }
         }
 
-        wait_for_agent_startup(&pod_api, &runtime_data.pod_name, mirrord_agent_name).await?;
+        let version =
+            wait_for_agent_startup(&pod_api, &runtime_data.pod_name, mirrord_agent_name).await?;
+        match version {
+            Some(version) if version != env!("CARGO_PKG_VERSION") => {
+                let message = format!(
+                    "Agent version {version} does not match the local mirrord version {}. This may lead to unexpected errors.",
+                    env!("CARGO_PKG_VERSION"),
+                );
+                container_progress.warning(&message);
+            }
+            _ => {}
+        }
 
-        container_progress.done_with("container is ready");
+        container_progress.success(Some("container is ready"));
 
         debug!("container is ready");
         Ok(runtime_data.pod_name.to_string())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    #[case("agent ready", None)]
+    #[case("agent ready - version 3.56.0", Some("3.56.0"))]
+    fn agent_version_regex(#[case] agent_message: &str, #[case] version: Option<&str>) {
+        let captures = AGENT_READY_REGEX.captures(agent_message).unwrap();
+
+        assert_eq!(captures.get(2).map(|c| c.as_str()), version);
     }
 }

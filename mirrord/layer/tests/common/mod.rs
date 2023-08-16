@@ -630,6 +630,8 @@ pub enum Application {
     RustIssue1054,
     RustIssue1458,
     RustIssue1458PortNot53,
+    RustIssue1776,
+    RustIssue1776PortNot53,
     RustDnsResolve,
     RustRecvFrom,
     RustListenPorts,
@@ -737,6 +739,20 @@ impl Application {
                     "../../target/debug/listen_ports"
                 )
             }
+            Application::RustIssue1776 => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/issue1776"
+                )
+            }
+            Application::RustIssue1776PortNot53 => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/issue1776portnot53"
+                )
+            }
             Application::OpenFile => format!(
                 "{}/{}",
                 env!("CARGO_MANIFEST_DIR"),
@@ -818,6 +834,8 @@ impl Application {
             | Application::RustIssue1054
             | Application::RustIssue1458
             | Application::RustIssue1458PortNot53
+            | Application::RustIssue1776
+            | Application::RustIssue1776PortNot53
             | Application::RustDnsResolve
             | Application::RustRecvFrom
             | Application::RustListenPorts
@@ -884,6 +902,8 @@ impl Application {
             | Application::RustOutgoingTcp
             | Application::RustIssue1458
             | Application::RustIssue1458PortNot53
+            | Application::RustIssue1776
+            | Application::RustIssue1776PortNot53
             | Application::RustListenPorts
             | Application::RustRecvFrom
             | Application::OpenFile

@@ -6,6 +6,7 @@ use std::{convert::Infallible, future};
 use bytes::Bytes;
 use http_body_util::combinators::BoxBody;
 use hyper::client::conn::http1::{self, Connection, SendRequest};
+use hyper_util::rt::TokioIo;
 use mirrord_protocol::tcp::HttpRequestFallback;
 use tokio::net::TcpStream;
 
@@ -22,7 +23,7 @@ pub(crate) struct HttpV1(http1::SendRequest<BoxBody<Bytes, Infallible>>);
 impl HttpV for HttpV1 {
     type Sender = SendRequest<BoxBody<Bytes, Infallible>>;
 
-    type Connection = Connection<TcpStream, BoxBody<Bytes, Infallible>>;
+    type Connection = Connection<TokioIo<TcpStream>, BoxBody<Bytes, Infallible>>;
 
     #[tracing::instrument(level = "trace")]
     fn new(http_request_sender: Self::Sender) -> Self {
@@ -33,7 +34,7 @@ impl HttpV for HttpV1 {
     async fn handshake(
         target_stream: TcpStream,
     ) -> Result<(Self::Sender, Self::Connection), HttpForwarderError> {
-        Ok(http1::handshake(target_stream).await?)
+        Ok(http1::handshake(TokioIo::new(target_stream)).await?)
     }
 
     #[tracing::instrument(level = "trace", skip(self))]

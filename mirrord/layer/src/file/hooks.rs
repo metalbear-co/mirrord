@@ -57,7 +57,7 @@ fn update_ptr_from_bypass(ptr: *const c_char, bypass: Bypass) -> *const c_char {
 
 /// Implementation of open_detour, used in open_detour and openat_detour
 /// We ignore mode in case we don't bypass the call.
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "trace", ret)]
 unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, mode: c_int) -> Detour<RawFd> {
     let path = raw_path.checked_into();
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
@@ -334,6 +334,31 @@ pub(crate) unsafe extern "C" fn _read_nocancel_detour(
             ssize_t::try_from(read_amount).unwrap()
         })
         .unwrap_or_bypass_with(|_| FN__READ_NOCANCEL(fd, out_buffer, count))
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn read_nocancel_detour(
+    fd: RawFd,
+    out_buffer: *mut c_void,
+    count: size_t,
+) -> ssize_t {
+    read(fd, count as u64)
+        .map(|read_file| {
+            let ReadFileResponse { bytes, read_amount } = read_file;
+
+            // There is no distinction between reading 0 bytes or if we hit EOF, but we only copy to
+            // buffer if we have something to copy.
+            if read_amount > 0 {
+                let read_ptr = bytes.as_ptr();
+                let out_buffer = out_buffer.cast();
+                ptr::copy(read_ptr, out_buffer, read_amount as usize);
+            }
+
+            // WARN: Must be careful when it comes to `EOF`, incorrect handling may appear as the
+            // `read` call being repeated.
+            ssize_t::try_from(read_amount).unwrap()
+        })
+        .unwrap_or_bypass_with(|_| FN_READ_NOCANCEL(fd, out_buffer, count))
 }
 
 #[hook_guard_fn]
@@ -770,6 +795,14 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         _read_nocancel_detour,
         Fn_read_nocancel,
         FN__READ_NOCANCEL
+    );
+
+    replace!(
+        hook_manager,
+        "read$NOCANCEL",
+        read_nocancel_detour,
+        FnRead_nocancel,
+        FN_READ_NOCANCEL
     );
 
     replace!(

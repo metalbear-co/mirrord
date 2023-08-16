@@ -213,6 +213,14 @@
       "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json { \"agent\": { \"log_level\": \"info\", \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"network_interface\": \"eth0\", \"pause\": false, \"flush_connections\": false, } } ```",
       "type": "object",
       "properties": {
+        "check_out_of_pods": {
+          "title": "agent.check_out_of_pods {#agent-check_out_of_pods}",
+          "description": "Determine if to check whether there is room for agent job in target node. (Not applicable when using ephemeral containers feature)\n\nCan be disabled if the check takes too long and you are sure there is enough resources on each node",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "communication_timeout": {
           "title": "agent.communication_timeout {#agent-communication_timeout}",
           "description": "Controls how long the agent lives when there are no connections.\n\nEach connection has its own heartbeat mechanism, so even if the local application has no messages, the agent stays alive until there are no more heartbeat messages.",
@@ -732,7 +740,7 @@
       ]
     },
     "IncomingMode": {
-      "description": "Allows selecting between mirrorring or stealing traffic.\n\nCan be set to either `\"mirror\"` (default) or `\"steal\"`.\n\n- `\"mirror\"`: Sniffs on TCP port, and send a copy of the data to listeners. - `\"steal\"`: Supports 2 modes of operation:\n\n1. Port traffic stealing: Steals all TCP data from a port, which is selected whenever the user listens in a TCP socket (enabling the feature is enough to make this work, no additional configuration is needed);\n\n2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and steals the traffic on the port if it is HTTP;",
+      "description": "Allows selecting between mirrorring or stealing traffic.\n\nCan be set to either `\"mirror\"` (default), `\"steal\"` or `\"off\"`.\n\n- `\"mirror\"`: Sniffs on TCP port, and send a copy of the data to listeners. - `\"off\"`: Disables the incoming network feature. - `\"steal\"`: Supports 2 modes of operation:\n\n1. Port traffic stealing: Steals all TCP data from a port, which is selected whenever the user listens in a TCP socket (enabling the feature is enough to make this work, no additional configuration is needed);\n\n2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and steals the traffic on the port if it is HTTP;",
       "oneOf": [
         {
           "description": "<!--${internal}--> ### mirror\n\nSniffs on TCP port, and send a copy of the data to listeners.",
@@ -746,6 +754,13 @@
           "type": "string",
           "enum": [
             "steal"
+          ]
+        },
+        {
+          "description": "<!--${internal}--> ### Off\n\nDisables the incoming network feature.",
+          "type": "string",
+          "enum": [
+            "off"
           ]
         }
       ]

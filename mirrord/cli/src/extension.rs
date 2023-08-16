@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 
 use mirrord_config::LayerConfig;
-use mirrord_progress::{Progress, TaskProgress};
+use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
 use crate::{config::ExtensionExecArgs, error::CliError, execution::MirrordExecution, Result};
 
 /// Facilitate the execution of a process using mirrord by an IDE extension
-pub(crate) async fn extension_exec(args: ExtensionExecArgs, progress: &TaskProgress) -> Result<()> {
-    let progress = progress.subtask("mirrord preparing to launch");
+pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
+    let mut progress = ProgressTracker::try_from_env("mirrord preparing to launch")
+        .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
     let mut env: HashMap<String, String> = HashMap::new();
 
     if let Some(config_file) = args.config_file {
@@ -39,7 +40,7 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs, progress: &TaskProgr
     execution_info.environment.extend(env);
 
     let output = serde_json::to_string(&execution_info)?;
-    progress.done_with(&output);
+    progress.success(Some(&output));
     execution_info.wait().await?;
     Ok(())
 }

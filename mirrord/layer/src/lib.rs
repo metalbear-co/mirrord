@@ -73,13 +73,7 @@
 extern crate alloc;
 extern crate core;
 
-use std::{
-    collections::{HashSet, VecDeque},
-    ffi::OsString,
-    net::SocketAddr,
-    panic,
-    sync::{OnceLock, RwLock},
-};
+use std::{collections::VecDeque, ffi::OsString, net::SocketAddr, panic, sync::OnceLock};
 
 use bimap::BiMap;
 use common::ResponseChannel;
@@ -93,7 +87,10 @@ use load::ExecutableName;
 use mirrord_config::{
     feature::{
         fs::{FsConfig, FsModeConfig},
-        network::{incoming::IncomingConfig, NetworkConfig},
+        network::{
+            incoming::{IncomingConfig, IncomingMode},
+            NetworkConfig,
+        },
         FeatureConfig,
     },
     LayerConfig,
@@ -146,12 +143,19 @@ mod tcp;
 mod tcp_mirror;
 mod tcp_steal;
 
-#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-#[cfg_attr(
-    all(target_os = "linux", target_arch = "x86_64"),
-    path = "go/linux_x64.rs"
-)]
-mod go_hooks;
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
+mod go;
+
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    target_os = "linux"
+))]
+use crate::go::go_hooks;
+
+const TRACE_ONLY_ENV: &str = "MIRRORD_LAYER_TRACE_ONLY";
 
 fn build_runtime() -> Runtime {
     tokio::runtime::Builder::new_current_thread()
@@ -178,7 +182,7 @@ fn build_runtime() -> Runtime {
 ///
 /// You probably don't want to use this directly, instead prefer calling
 /// [`blocking_send_hook_message`](common::blocking_send_hook_message) to send internal messages.
-pub(crate) static HOOK_SENDER: OnceLock<RwLock<Sender<HookMessage>>> = OnceLock::new();
+pub(crate) static mut HOOK_SENDER: OnceLock<Sender<HookMessage>> = OnceLock::new();
 
 pub(crate) static LAYER_INITIALIZED: OnceLock<()> = OnceLock::new();
 
@@ -221,19 +225,12 @@ pub(crate) static REMOTE_UNIX_STREAMS: OnceLock<Option<RegexSet>> = OnceLock::ne
 /// When true, localhost connections will stay local (won't go to the remote pod localhost)
 pub(crate) static OUTGOING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
 
-/// Tells us if the user enabled wants to ignore listening on localhost in [`IncomingConfig`].
-///
-/// ## Usage
-///
-/// When true, localhost connections will stay local - wont mirror or steal.
-pub(crate) static INCOMING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
+/// Incoming config [`IncomingConfig`].
+pub(crate) static INCOMING_CONFIG: OnceLock<IncomingConfig> = OnceLock::new();
 
 /// Indicates this is a targetless run, so that users can be warned if their application is
 /// mirroring/stealing from a targetless agent.
 pub(crate) static TARGETLESS: OnceLock<bool> = OnceLock::new();
-
-/// Ports to ignore on listening for mirroring/stealing.
-pub(crate) static INCOMING_IGNORE_PORTS: OnceLock<HashSet<u16>> = OnceLock::new();
 
 /// Whether to resolve DNS locally or through the remote pod.
 pub(crate) static REMOTE_DNS: OnceLock<bool> = OnceLock::new();
@@ -365,6 +362,9 @@ fn set_globals(config: &LayerConfig) {
     FILE_MODE
         .set(config.feature.fs.clone())
         .expect("Setting FILE_MODE failed.");
+    INCOMING_CONFIG
+        .set(config.feature.network.incoming.clone())
+        .expect("SETTING INCOMING_CONFIG singleton");
 
     // These must come before `OutgoingSelector::new`.
     ENABLED_TCP_OUTGOING
@@ -413,17 +413,9 @@ fn set_globals(config: &LayerConfig) {
         .set(config.feature.network.outgoing.ignore_localhost)
         .expect("Setting OUTGOING_IGNORE_LOCALHOST singleton");
 
-    INCOMING_IGNORE_LOCALHOST
-        .set(config.feature.network.incoming.ignore_localhost)
-        .expect("Setting INCOMING_IGNORE_LOCALHOST singleton");
-
     TARGETLESS
         .set(config.target.path.is_none())
         .expect("Setting TARGETLESS singleton");
-
-    INCOMING_IGNORE_PORTS
-        .set(config.feature.network.incoming.ignore_ports.clone())
-        .expect("Setting INCOMING_IGNORE_PORTS failed");
 
     FILE_FILTER.get_or_init(|| FileFilter::new(config.feature.fs.clone()));
 
@@ -459,6 +451,21 @@ fn layer_start(mut config: LayerConfig) {
         config.feature.fs.mode = FsModeConfig::LocalWithOverrides;
     }
 
+    // Check if we're in trace only mode (no agent)
+    let trace_only = std::env::var(TRACE_ONLY_ENV)
+        .unwrap_or_default()
+        .parse()
+        .unwrap_or(false);
+
+    // Disable all features that require the agent
+    if trace_only {
+        config.feature.fs.mode = FsModeConfig::Local;
+        config.feature.network.dns = false;
+        config.feature.network.incoming.mode = IncomingMode::Off;
+        config.feature.network.outgoing.tcp = false;
+        config.feature.network.outgoing.udp = false;
+    }
+
     // does not need to be atomic because on the first call there are never other threads.
     // Will be false when manually called from fork hook.
     if LAYER_INITIALIZED.get().is_none() {
@@ -490,6 +497,10 @@ fn layer_start(mut config: LayerConfig) {
             .expect("EXECUTABLE_ARGS needs to be set!")
     );
 
+    if trace_only {
+        return;
+    }
+
     let address = config
         .connect_tcp
         .as_ref()
@@ -501,21 +512,21 @@ fn layer_start(mut config: LayerConfig) {
     let (tx, rx) = runtime.block_on(connection::connect_to_proxy(address));
     let (sender, receiver) = channel::<HookMessage>(1000);
 
-    if let Some(lock) = HOOK_SENDER.get() {
-        // HOOK_SENDER is already set, we're currently on a fork detour.
+    // SAFETY: mutation of `HOOK_SENDER` happens only in the ctor, or in the fork hook, and in all
+    // of those cases there's only one thread so we can do this safely.
+    unsafe {
+        if let Some(old_sender) = HOOK_SENDER.take() {
+            // HOOK_SENDER is already set, we're currently on a fork detour.
 
-        // `expect`: `lock` returns error if another thread panicked while holding the lock, but
-        // when this code runs there are still no other threads in the process, because it's called
-        // either from the ctor, or from the child in a `fork` hook, before execution is returned to
-        // the user application.
-        *(lock.write().expect("Could not reset HOOK_SENDER")) = sender;
-    } else {
-        // First call to this func, we're in the ctor.
-
+            // we can't call drop since it might trigger the traceback that can be seen here
+            // https://github.com/metalbear-co/mirrord/issues/1792
+            // so we leak it.
+            std::mem::forget(old_sender);
+        }
         HOOK_SENDER
-            .set(RwLock::new(sender))
+            .set(sender)
             .expect("Setting HOOK_SENDER singleton");
-    }
+    };
 
     start_layer_thread(tx, rx, receiver, config, runtime);
 }
@@ -974,7 +985,10 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
         unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
     }
 
-    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+    #[cfg(all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_os = "linux"
+    ))]
     {
         go_hooks::enable_hooks(&mut hook_manager);
     }

@@ -243,7 +243,7 @@ pub struct IncomingAdvancedFileConfig {
 /// See the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more
 /// details.
 ///
-/// Incoming traffic supports 2 modes of operation:
+/// Incoming traffic supports 3 modes of operation:
 ///
 /// 1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested
 /// listeners;
@@ -251,6 +251,7 @@ pub struct IncomingAdvancedFileConfig {
 /// 2. Steal: Captures the TCP data from a port, and forwards it to the local process, see
 /// [`"mode": "steal"`](#feature-network-incoming-mode);
 ///
+/// 3. Off: Disables the incoming network feature.
 /// Steals all the incoming traffic:
 ///
 /// ```json
@@ -349,9 +350,10 @@ impl IncomingConfig {
 
 /// Allows selecting between mirrorring or stealing traffic.
 ///
-/// Can be set to either `"mirror"` (default) or `"steal"`.
+/// Can be set to either `"mirror"` (default), `"steal"` or `"off"`.
 ///
 /// - `"mirror"`: Sniffs on TCP port, and send a copy of the data to listeners.
+/// - `"off"`: Disables the incoming network feature.
 /// - `"steal"`: Supports 2 modes of operation:
 ///
 /// 1. Port traffic stealing: Steals all TCP data from a
@@ -385,6 +387,12 @@ pub enum IncomingMode {
     /// data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and
     /// steals the traffic on the port if it is HTTP;
     Steal,
+
+    /// <!--${internal}-->
+    /// ### Off
+    ///
+    /// Disables the incoming network feature.
+    Off,
 }
 
 #[derive(Error, Debug)]
@@ -397,10 +405,11 @@ impl FromStr for IncomingMode {
     fn from_str(val: &str) -> Result<Self, Self::Err> {
         match val.parse::<bool>() {
             Ok(true) => Ok(Self::Steal),
-            Ok(false) => Ok(Self::Mirror),
+            Ok(false) => Ok(Self::Off),
             Err(_) => match val {
                 "steal" => Ok(Self::Steal),
                 "mirror" => Ok(Self::Mirror),
+                "off" => Ok(Self::Off),
                 _ => Err(IncomingConfigParseError),
             },
         }
@@ -468,6 +477,7 @@ impl From<&IncomingMode> for AnalyticValue {
         match value {
             IncomingMode::Mirror => AnalyticValue::Number(0),
             IncomingMode::Steal => AnalyticValue::Number(1),
+            IncomingMode::Off => AnalyticValue::Number(2),
         }
     }
 }

@@ -28,7 +28,7 @@ use crate::{
     detour::{Bypass, Detour, OptionExt},
     error::{HookError, HookResult, LayerError},
     socket::ops::remote_getaddrinfo,
-    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_PORTS, REMOTE_DNS,
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, REMOTE_DNS,
 };
 
 pub(super) mod hooks;
