@@ -359,6 +359,12 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/listen_ports
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue1776
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue1776portnot53
+          cargo build
       - run: ./scripts/build_c_apps.sh
       - name: download layer # Download layer lib built in the `build_mirrord` job.
         uses: actions/download-artifact@v3
@@ -423,6 +429,12 @@ jobs:
           cargo build
       - run: |
           cd mirrord/layer/tests/apps/dns_resolve
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue1776
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue1776portnot53
           cargo build
       - run: ./scripts/build_c_apps.sh
       # For the `java_temurin_sip` test.
