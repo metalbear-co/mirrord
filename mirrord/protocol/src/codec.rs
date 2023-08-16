@@ -1,12 +1,14 @@
 use std::{
     collections::{HashMap, HashSet},
     io,
+    sync::LazyLock,
 };
 
 use actix_codec::{Decoder, Encoder};
 use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
 use mirrord_macros::protocol_break;
+use semver::VersionReq;
 
 use crate::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
@@ -79,6 +81,9 @@ pub enum FileRequest {
     CloseDir(CloseDirRequest),
     GetDEnts64(GetDEnts64Request),
 }
+
+pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
+    LazyLock::new(|| "<1.3.1".parse().expect("Bad Identifier"));
 
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

@@ -99,7 +99,7 @@ use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
     tcp::{HttpResponseFallback, LayerTcpSteal},
-    ClientMessage, DaemonMessage,
+    ClientMessage, DaemonMessage, CLIENT_READY_FOR_LOGS,
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
 use regex::RegexSet;
@@ -780,7 +780,15 @@ impl Layer {
             DaemonMessage::PauseTarget(_) => {
                 unreachable!("We set pausing target only on initialization, shouldn't happen")
             }
-            DaemonMessage::SwitchProtocolVersionResponse(_) => Ok(()),
+            DaemonMessage::SwitchProtocolVersionResponse(protocol_version) => {
+                if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
+                    if let Err(err) = self.tx.send(ClientMessage::ReadyForLogs).await {
+                        warn!("Unable to ready-up for logs: {err}");
+                    }
+                }
+
+                Ok(())
+            }
         }
     }
 }
@@ -834,10 +842,6 @@ async fn thread_loop(
         .await
     {
         warn!("Unable to switch protocol: {err}");
-    }
-
-    if let Err(err) = layer.tx.send(ClientMessage::ReadyForLogs).await {
-        warn!("Unable to ready-up for logs: {err}");
     }
 
     loop {

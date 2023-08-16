@@ -14,7 +14,6 @@ use k8s_openapi::{
 };
 use kube::{api::ListParams, Api, Client};
 use mirrord_config::target::{DeploymentTarget, PodTarget, RolloutTarget, Target};
-use tracing::debug;
 
 use crate::{
     api::{container::choose_container, get_k8s_resource_api, kubernetes::rollout::Rollout},
@@ -138,8 +137,6 @@ impl RuntimeData {
             let pods_on_node = pod_api.list(&list_params).await?;
 
             pod_count += pods_on_node.items.len();
-
-            debug!("checking OOP {} -> {pod_count}/{allowed}", self.node_name);
 
             match pods_on_node.metadata.continue_ {
                 Some(next) => {
