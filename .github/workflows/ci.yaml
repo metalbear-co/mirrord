@@ -458,9 +458,7 @@ jobs:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
       - uses: actions/checkout@v3
-      - run: |
-          chmod +x ./scripts/setup_e2e.sh
-          ./scripts/setup_e2e.sh
+      - run: ./scripts/setup_e2e.sh
       - name: download image
         uses: actions/download-artifact@v3
         with:

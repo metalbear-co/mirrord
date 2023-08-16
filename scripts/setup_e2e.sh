@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 sudo apt-get update && sudo apt-get install -y curl
 
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sudo sh -s -- -y
@@ -46,4 +48,4 @@ bash ./scripts/build_go_apps.sh 20
 
 cargo build --manifest-path=./tests/rust-e2e-fileops/Cargo.toml
 cargo build --manifest-path=./tests/rust-unix-socket-client/Cargo.toml
-cargo build --manifest-path=./tests/rust-bypassed-unix-socket/Cargo.toml          
+cargo build --manifest-path=./tests/rust-bypassed-unix-socket/Cargo.toml
