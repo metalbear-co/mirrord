@@ -16,7 +16,7 @@ use rand::distributions::{Alphanumeric, DistString};
 use regex::Regex;
 use serde_json::json;
 use tokio::pin;
-use tracing::{trace, debug, warn};
+use tracing::{debug, trace, warn};
 
 use crate::{
     api::{

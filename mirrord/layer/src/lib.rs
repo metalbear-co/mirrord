@@ -813,6 +813,10 @@ async fn thread_loop(
         warn!("Unable to switch protocol: {err}");
     }
 
+    if let Err(err) = layer.tx.send(ClientMessage::ReadyForLogs).await {
+        warn!("Unable to ready-up for logs: {err}");
+    }
+
     loop {
         select! {
             hook_message = receiver.recv() => {

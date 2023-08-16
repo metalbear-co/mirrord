@@ -95,6 +95,7 @@ pub enum ClientMessage {
     /// Whether to pause or unpause the target container.
     PauseTargetRequest(bool),
     SwitchProtocolVersion(#[bincode(with_serde)] semver::Version),
+    ReadyForLogs,
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.

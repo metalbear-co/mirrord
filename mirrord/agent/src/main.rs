@@ -474,6 +474,7 @@ impl ClientConnectionHandler {
                 self.respond(DaemonMessage::SwitchProtocolVersionResponse(version))
                     .await?;
             }
+            ClientMessage::ReadyForLogs => {}
         }
 
         Ok(true)
