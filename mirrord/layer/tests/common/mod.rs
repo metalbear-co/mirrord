@@ -739,7 +739,14 @@ impl Application {
                     "../../target/debug/listen_ports"
                 )
             }
-            Application::RustIssue1776 | Application::RustIssue1776PortNot53 => {
+            Application::RustIssue1776 => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/issue1776"
+                )
+            }
+            Application::RustIssue1776PortNot53 => {
                 format!(
                     "{}/{}",
                     env!("CARGO_MANIFEST_DIR"),
