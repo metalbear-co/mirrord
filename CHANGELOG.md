@@ -8,6 +8,16 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.57.2](https://github.com/metalbear-co/mirrord/tree/3.57.2) - 2023-08-16
+
+
+### Fixed
+
+- Fix crash on forks by leaking HOOK_SENDER
+  [#1792](https://github.com/metalbear-co/mirrord/issues/1792)
+- CLI now uses the json progress tracker as default.
+
+
 ## [3.57.1](https://github.com/metalbear-co/mirrord/tree/3.57.1) - 2023-08-15
 
 
