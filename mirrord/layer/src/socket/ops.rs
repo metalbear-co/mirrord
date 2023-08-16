@@ -17,7 +17,7 @@ use mirrord_protocol::{
 };
 use socket2::SockAddr;
 use tokio::sync::oneshot;
-use tracing::{debug, error, info, trace};
+use tracing::{error, info, trace};
 
 use super::{hooks::*, *};
 use crate::{
@@ -304,7 +304,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
 /// interception procedure.
 /// This returns errno so we can restore the correct errno in case result is -1 (until we get
 /// back to the hook we might call functions that will corrupt errno)
-#[tracing::instrument(level = "debug", ret)]
+#[tracing::instrument(level = "trace", ret)]
 fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
     sockfd: RawFd,
     remote_address: SockAddr,
@@ -364,7 +364,7 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
             layer_address: Some(layer_address.try_into()?),
         };
 
-        debug!("we are connected {connected:#?}");
+        trace!("we are connected {connected:#?}");
 
         Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
         SOCKETS.insert(sockfd, user_socket_info);
@@ -433,7 +433,7 @@ fn connect_to_local_address(
 /// that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request interception procedure.
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
-#[tracing::instrument(level = "debug", ret, skip(raw_address))]
+#[tracing::instrument(level = "trace", ret, skip(raw_address))]
 pub(super) fn connect(
     sockfd: RawFd,
     raw_address: *const sockaddr,
@@ -554,7 +554,7 @@ pub(super) fn getpeername(
             })?
     };
 
-    debug!("getpeername -> remote_address {:#?}", remote_address);
+    trace!("getpeername -> remote_address {:#?}", remote_address);
 
     fill_address(address, address_len, remote_address.try_into()?)
 }
@@ -701,7 +701,7 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
 ///
 /// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
 /// for the equivalent of this function).
-#[tracing::instrument(level = "debug", ret)]
+#[tracing::instrument(level = "trace", ret)]
 pub(super) fn getaddrinfo(
     rawish_node: Option<&CStr>,
     rawish_service: Option<&CStr>,
@@ -795,7 +795,7 @@ pub(super) fn getaddrinfo(
         })
         .ok_or(HookError::DNSNoName)?;
 
-    debug!("getaddrinfo -> result {:#?}", result);
+    trace!("getaddrinfo -> result {:#?}", result);
 
     Detour::Success(result)
 }
@@ -866,6 +866,11 @@ pub(super) fn recv_from(
     raw_source: *mut sockaddr,
     source_length: *mut socklen_t,
 ) -> Detour<isize> {
+    if errno::errno() == errno::Errno(libc::EAGAIN) {
+        trace!("recvfrom/recvmsg hit EAGAIN, setting errno to 0");
+        errno::set_errno(errno::Errno(0));
+    }
+
     SOCKETS
         .get(&sockfd)
         .and_then(|socket| match &socket.state {
@@ -881,7 +886,7 @@ pub(super) fn recv_from(
 }
 
 /// Helps manually resolving DNS on port `53` with UDP, see [`send_to`] and [`sendmsg`].
-#[tracing::instrument(level = "debug", ret)]
+#[tracing::instrument(level = "trace", ret)]
 fn send_dns_patch(
     sockfd: RawFd,
     user_socket_info: Arc<UserSocket>,
@@ -952,7 +957,7 @@ fn send_dns_patch(
 ///
 /// See [`recv_from`] for more information.
 #[tracing::instrument(
-    level = "debug",
+    level = "trace",
     ret,
     skip(raw_message, raw_destination, destination_length)
 )]
@@ -965,7 +970,7 @@ pub(super) fn send_to(
     destination_length: socklen_t,
 ) -> Detour<isize> {
     let destination = SockAddr::try_from_raw(raw_destination, destination_length)?;
-    debug!("destination {:?}", destination.as_socket());
+    trace!("destination {:?}", destination.as_socket());
 
     let (_, user_socket_info) = SOCKETS
         .remove(&sockfd)
@@ -1026,7 +1031,7 @@ pub(super) fn send_to(
 
 /// Same behavior as [`send_to`], the only difference is that here we deal with [`libc::msghdr`],
 /// instead of directly with socket addresses.
-#[tracing::instrument(level = "debug", ret, skip(raw_message_header))]
+#[tracing::instrument(level = "trace", ret, skip(raw_message_header))]
 pub(super) fn sendmsg(
     sockfd: RawFd,
     raw_message_header: *const libc::msghdr,
@@ -1039,7 +1044,7 @@ pub(super) fn sendmsg(
         SockAddr::try_from_raw(raw_destination, destination_length)
     })??;
 
-    debug!("destination {:?}", destination.as_socket());
+    trace!("destination {:?}", destination.as_socket());
 
     let (_, user_socket_info) = SOCKETS
         .remove(&sockfd)

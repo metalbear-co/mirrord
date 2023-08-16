@@ -6,7 +6,6 @@ use dashmap::DashSet;
 use errno::{set_errno, Errno};
 use libc::{c_char, c_int, c_void, size_t, sockaddr, socklen_t, ssize_t, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
-use tracing::debug;
 
 use super::ops::*;
 use crate::{detour::DetourGuard, hooks::HookManager, replace};
@@ -381,17 +380,11 @@ pub(super) unsafe extern "C" fn recvmsg_detour(
     message_header: *mut libc::msghdr,
     flags: c_int,
 ) -> ssize_t {
-    debug!("recvmsg_detour -> fd {sockfd:#?}");
     let recvmsg_result = FN_RECVMSG(sockfd, message_header, flags);
 
     if recvmsg_result == -1 && errno::errno() != errno::Errno(libc::EAGAIN) {
         recvmsg_result
     } else {
-        if errno::errno() == errno::Errno(libc::EAGAIN) {
-            debug!("we hit EAGAIN");
-            errno::set_errno(errno::Errno(0));
-        }
-
         // Fills the address, similar to how `recv_from` works.
         recv_from(
             sockfd,
@@ -412,7 +405,6 @@ pub(super) unsafe extern "C" fn sendmsg_detour(
     message_header: *const libc::msghdr,
     flags: c_int,
 ) -> ssize_t {
-    debug!("sendmsg_detour -> fd {sockfd:#?}");
     // When the whole header is null, the operation happens, but does basically nothing (afaik).
     //
     // If you ever hit an issue with this, maybe null here is meant to `libc::send` a 0-sized
