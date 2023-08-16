@@ -73,7 +73,7 @@ pub struct JsonProgress {
 }
 
 impl JsonProgress {
-    fn new(text: &str) -> JsonProgress {
+    pub fn new(text: &str) -> JsonProgress {
         let progress = JsonProgress {
             parent: None,
             name: text.to_string(),
@@ -284,14 +284,22 @@ impl Drop for SpinnerProgress {
 }
 
 impl ProgressTracker {
+    /// Get the progress tracker from environment or return a default ([`SpinnerProgress`]).
     pub fn from_env(text: &str) -> Self {
-        match std::env::var(MIRRORD_PROGRESS_ENV).as_deref() {
+        Self::try_from_env(text).unwrap_or_else(|| SpinnerProgress::new(text).into())
+    }
+
+    /// Get the progress tracker from environment.
+    pub fn try_from_env(text: &str) -> Option<Self> {
+        let progress = match std::env::var(MIRRORD_PROGRESS_ENV).as_deref() {
             Ok("dumb" | "simple") => SimpleProgress::new(text).into(),
             Ok("json") => JsonProgress::new(text).into(),
             Ok("off") => NullProgress.into(),
             Ok("std" | "standard") => SpinnerProgress::new(text).into(),
-            _ => SpinnerProgress::new(text).into(),
-        }
+            _ => return None,
+        };
+
+        Some(progress)
     }
 }
 

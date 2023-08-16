@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 
 use mirrord_config::LayerConfig;
-use mirrord_progress::{Progress, ProgressTracker};
+use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
 use crate::{config::ExtensionExecArgs, error::CliError, execution::MirrordExecution, Result};
 
 /// Facilitate the execution of a process using mirrord by an IDE extension
 pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
-    let mut progress = ProgressTracker::from_env("mirrord preparing to launch");
+    let mut progress = ProgressTracker::try_from_env("mirrord preparing to launch")
+        .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
     let mut env: HashMap<String, String> = HashMap::new();
 
     if let Some(config_file) = args.config_file {

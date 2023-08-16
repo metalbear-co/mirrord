@@ -8,6 +8,57 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.57.2](https://github.com/metalbear-co/mirrord/tree/3.57.2) - 2023-08-16
+
+
+### Fixed
+
+- Fix crash on forks by leaking HOOK_SENDER
+  [#1792](https://github.com/metalbear-co/mirrord/issues/1792)
+- CLI now uses the json progress tracker as default.
+
+
+## [3.57.1](https://github.com/metalbear-co/mirrord/tree/3.57.1) - 2023-08-15
+
+
+### Internal
+
+- Add `nodes` and `pods/log` resource permissions to `mirrord-operator`
+  ClusterRole.
+
+
+## [3.57.0](https://github.com/metalbear-co/mirrord/tree/3.57.0) - 2023-08-15
+
+
+### Added
+
+- Add hooks for Go 1.19 >= on Linux Arm
+  [#563](https://github.com/metalbear-co/mirrord/issues/563)
+- Add node allocatabillity check to prevent OutOfPods error on agent job.
+  [#1782](https://github.com/metalbear-co/mirrord/issues/1782)
+
+
+### Changed
+
+- Incoming config now supports off mode, which is also used when `"incoming":
+  "off"`.
+  When incoming is off, listen requests go through.
+  Changed targetless to warn on listen, since bind can happen on outgoing
+  sockets as well.
+
+
+### Fixed
+
+- Replaced termspin with indicatif, fix multi line issues and refactored
+  progress. [#1664](https://github.com/metalbear-co/mirrord/issues/1664)
+
+
+### Internal
+
+- Add trace only mode for layer for easier debugging
+- Agent now prints its version in the initial "agent ready" message.
+
+
 ## [3.56.1](https://github.com/metalbear-co/mirrord/tree/3.56.1) - 2023-08-09
 
 
