@@ -250,7 +250,7 @@ impl HttpRequestFallback {
 }
 
 pub static HTTP_FRAMED_VERSION: LazyLock<VersionReq> =
-    LazyLock::new(|| "<1.3.0".parse().expect("Bad Identifier"));
+    LazyLock::new(|| ">=1.3.0".parse().expect("Bad Identifier"));
 
 /// Protocol break - on version 2, please add source port, dest/src IP to the message
 /// so we can avoid losing this information.

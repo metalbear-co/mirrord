@@ -83,7 +83,7 @@ pub enum FileRequest {
 }
 
 pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
-    LazyLock::new(|| "<1.3.1".parse().expect("Bad Identifier"));
+    LazyLock::new(|| ">=1.3.1".parse().expect("Bad Identifier"));
 
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
