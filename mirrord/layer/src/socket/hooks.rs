@@ -370,6 +370,55 @@ pub(super) unsafe extern "C" fn send_to_detour(
         })
     }
 }
+
+/// Not a faithful reproduction of what [`libc::recvmsg`] is supposed to do, see [`recv_from`].
+///
+/// TODO(alex): We are ignoring the control message header [`libc::cmsghdr`].
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn recvmsg_detour(
+    sockfd: i32,
+    message_header: *mut libc::msghdr,
+    flags: c_int,
+) -> ssize_t {
+    let recvmsg_result = FN_RECVMSG(sockfd, message_header, flags);
+
+    if recvmsg_result == -1 && errno::errno() != errno::Errno(libc::EAGAIN) {
+        recvmsg_result
+    } else {
+        // Fills the address, similar to how `recv_from` works.
+        recv_from(
+            sockfd,
+            recvmsg_result,
+            (*message_header).msg_name as *mut _,
+            &mut (*message_header).msg_namelen,
+        )
+        .unwrap_or_bypass(recvmsg_result)
+    }
+}
+
+/// Not a faithful reproduction of what [`libc::sendmsg`] is supposed to do, see [`sendmsg`].
+///
+/// TODO(alex): We are ignoring the control message header [`libc::cmgshdr`].
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn sendmsg_detour(
+    sockfd: RawFd,
+    message_header: *const libc::msghdr,
+    flags: c_int,
+) -> ssize_t {
+    // When the whole header is null, the operation happens, but does basically nothing (afaik).
+    //
+    // If you ever hit an issue with this, maybe null here is meant to `libc::send` a 0-sized
+    // message?
+    //
+    // When `msg_name` is null, this is equivalent to `send`.
+    if message_header.is_null() || (*message_header).msg_name.is_null() {
+        FN_SENDMSG(sockfd, message_header, flags)
+    } else {
+        sendmsg(sockfd, message_header, flags)
+            .unwrap_or_bypass_with(|_| FN_SENDMSG(sockfd, message_header, flags))
+    }
+}
+
 pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled_remote_dns: bool) {
     replace!(hook_manager, "socket", socket_detour, FnSocket, FN_SOCKET);
 
@@ -386,6 +435,20 @@ pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled
         send_to_detour,
         FnSend_to,
         FN_SEND_TO
+    );
+    replace!(
+        hook_manager,
+        "recvmsg",
+        recvmsg_detour,
+        FnRecvmsg,
+        FN_RECVMSG
+    );
+    replace!(
+        hook_manager,
+        "sendmsg",
+        sendmsg_detour,
+        FnSendmsg,
+        FN_SENDMSG
     );
 
     replace!(hook_manager, "bind", bind_detour, FnBind, FN_BIND);
