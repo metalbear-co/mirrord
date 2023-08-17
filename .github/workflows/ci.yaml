@@ -359,6 +359,12 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/listen_ports
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue1776
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue1776portnot53
+          cargo build
       - run: ./scripts/build_c_apps.sh
       - name: download layer # Download layer lib built in the `build_mirrord` job.
         uses: actions/download-artifact@v3
@@ -424,6 +430,12 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/dns_resolve
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue1776
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue1776portnot53
+          cargo build
       - run: ./scripts/build_c_apps.sh
       # For the `java_temurin_sip` test.
       - uses: sdkman/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
@@ -458,48 +470,7 @@ jobs:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          components: rustfmt
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 14
-      - run: npm install express
-      - uses: actions/setup-python@v3
-      - run: pip3 install flask
-      - run: pip3 install fastapi
-      - run: pip3 install uvicorn[standard]
-      - run: sudo apt-get update && sudo apt-get install -y curl
-      - uses: actions/setup-go@v3
-        with:
-          go-version: "1.18.0"
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 18
-      - uses: actions/setup-go@v3
-        with:
-          go-version: "1.19.0"
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 19
-      - uses: actions/setup-go@v3
-        with:
-          go-version: "1.20.0-rc.3"
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 20
-      - run: |
-          cd tests/rust-e2e-fileops
-          cargo build
-      - run: |
-          cd tests/rust-unix-socket-client
-          cargo build
-      - run: |
-          cd tests/rust-bypassed-unix-socket
-          cargo build
+      - run: ./scripts/setup_e2e.sh
       - name: download image
         uses: actions/download-artifact@v3
         with:
