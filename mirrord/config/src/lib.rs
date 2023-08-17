@@ -626,7 +626,7 @@ mod tests {
             skip_processes: None,
             skip_build_tools: None,
             agent: Some(AgentFileConfig {
-                privileged: Some(false),
+                privileged: None,
                 log_level: Some("info".to_owned()),
                 namespace: Some("default".to_owned()),
                 image: Some("".to_owned()),
