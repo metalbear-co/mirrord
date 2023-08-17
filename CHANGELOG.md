@@ -8,6 +8,26 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.58.0](https://github.com/metalbear-co/mirrord/tree/3.58.0) - 2023-08-17
+
+
+### Added
+
+- Introduced hooks for sendmsg and recvmsg, so mongodb+srv protocol (Csharp)
+  may resolve DNS (implementation follows previous sendto and recvfrom patch).
+  [#1776](https://github.com/metalbear-co/mirrord/issues/1776)
+
+
+### Fixed
+
+- Fixed more complicated scenarios using Go on Linux Arm
+
+
+### Internal
+
+- Move e2e setup to a bash script
+
+
 ## [3.57.2](https://github.com/metalbear-co/mirrord/tree/3.57.2) - 2023-08-16
 
 
