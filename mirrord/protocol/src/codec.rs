@@ -82,6 +82,7 @@ pub enum FileRequest {
     GetDEnts64(GetDEnts64Request),
 }
 
+/// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
 pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.3.1".parse().expect("Bad Identifier"));
 
