@@ -1,6 +1,7 @@
 use alloc::ffi::CString;
 use core::{ffi::CStr, mem};
 use std::{
+    borrow::BorrowMut,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
@@ -9,6 +10,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
+use dashmap::Map;
 use libc::{c_int, c_void, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::IncomingMode;
 use mirrord_protocol::{
@@ -22,7 +24,7 @@ use tracing::{error, info, trace};
 use super::{hooks::*, *};
 use crate::{
     common::{blocking_send_hook_message, HookMessage},
-    detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
+    detour::{Detour, DetourGuard, OnceLockExt, OptionDetourExt, OptionExt},
     dns::GetAddrInfo,
     error::HookError,
     file::{self, OPEN_FILES},
@@ -32,6 +34,9 @@ use crate::{
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_CONFIG, LISTEN_PORTS,
     OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR, REMOTE_UNIX_STREAMS, TARGETLESS,
 };
+
+pub(super) static DNS_CACHE: LazyLock<DashMap<SocketAddr, String>> =
+    LazyLock::new(|| DashMap::with_capacity(8));
 
 /// Hostname initialized from the agent with [`gethostname`].
 pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();
@@ -310,11 +315,16 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
 ) -> Detour<ConnectResult> {
-    if remote_address.is_unix()
-        || OUTGOING_SELECTOR
-            .get()?
-            .connect_remote::<PROTOCOL>(remote_address.as_socket()?)?
-    {
+    // TODO(alex) [high] 2023-08-16: Retrieve the correct local address from the `resolve_dns`, when
+    // the address belongs to our DNS_CACHE and this is a filtered connection.
+    //
+    // This means that we make `FilteredConnection(local_address)`, and connect to it on the hook.
+    //
+    // ADD(alex) [high] 2023-08-16: Actually, just add the `libc::connect` call on the filtered
+    // `else`, and we can convert `SocketAddr` to `*const sockaddr` easily? Or maybe
+    // `FilteredConnection(SockAddr)`?
+
+    let remote_connection = |remote_address: SockAddr| {
         // Prepare this socket to be intercepted.
         let (mirror_tx, mirror_rx) = oneshot::channel();
 
@@ -370,8 +380,30 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
         SOCKETS.insert(sockfd, user_socket_info);
 
         Detour::Success(connect_result)
+    };
+
+    if remote_address.is_unix() {
+        let connect_result = remote_connection(remote_address)?;
+        Detour::Success(connect_result)
     } else {
-        Detour::Bypass(Bypass::FilteredConnection)
+        match OUTGOING_SELECTOR
+            .get()?
+            .connect_remote::<PROTOCOL>(remote_address.as_socket()?)?
+        {
+            ConnectionThrough::Remote(addr) => {
+                let connect_result = remote_connection(SockAddr::from(addr))?;
+                Detour::Success(connect_result)
+            }
+            ConnectionThrough::Local(addr) => {
+                let rawish_local_addr = SockAddr::from(addr);
+
+                let connect_result = ConnectResult::from(unsafe {
+                    FN_CONNECT(sockfd, rawish_local_addr.as_ptr(), rawish_local_addr.len())
+                });
+
+                Detour::Success(connect_result)
+            }
+        }
     }
 }
 
@@ -724,13 +756,13 @@ pub(super) fn remote_getaddrinfo(
 ///
 /// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
 /// for the equivalent of this function).
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "debug", ret)]
 pub(super) fn getaddrinfo(
     rawish_node: Option<&CStr>,
     rawish_service: Option<&CStr>,
     raw_hints: Option<&libc::addrinfo>,
 ) -> Detour<*mut libc::addrinfo> {
-    let node = rawish_node
+    let node: String = rawish_node
         .bypass(Bypass::NullNode)?
         .to_str()
         .map_err(|fail| {
@@ -771,9 +803,14 @@ pub(super) fn getaddrinfo(
     let service = service.map_or(0, |s| s.parse().unwrap_or_default());
 
     // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
-    let result = remote_getaddrinfo(node, service)?
+    let result = remote_getaddrinfo(node.clone(), service)?
         .into_iter()
         .map(|(name, address)| {
+            // Cache the resolved hosts to use in the outgoing traffic filter.
+            {
+                let _ = DNS_CACHE.insert(address, node.clone());
+            }
+
             let rawish_sock_addr = SockAddr::from(address);
             let ai_addrlen = rawish_sock_addr.len();
             let ai_family = rawish_sock_addr.family() as _;
