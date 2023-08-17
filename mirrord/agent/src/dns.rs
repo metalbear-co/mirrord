@@ -78,9 +78,9 @@ pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Resul
                     kind: ResolveErrorKindInternal::Unknown,
                 }),
             });
-            if let Err(result) = tx.send(GetAddrInfoResponse(result)) {
-                error!("couldn't send result to caller {result:?}");
-            }
+        if let Err(result) = tx.send(GetAddrInfoResponse(result)) {
+            error!("couldn't send result to caller {result:?}");
+        }
     }
 
     Ok(())
