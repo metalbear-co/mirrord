@@ -32,6 +32,8 @@ pub(crate) unsafe extern "C" fn syscall_6(
     )
 }
 
+/// asmcgocall can only pass a pointer argument, so it sends us the SP
+/// which layouts to this struct.
 #[repr(C)]
 struct SyscallArgs {
     syscall: i64,
@@ -43,6 +45,7 @@ struct SyscallArgs {
     arg6: i64,
 }
 
+/// asmcgocall can pass a pointer, so this is a conversion call to `c_abi_syscall6_handler`
 unsafe extern "C" fn mirrord_syscall_handler(syscall_struct: *const SyscallArgs) -> i64 {
     c_abi_syscall6_handler(
         (*syscall_struct).syscall,
