@@ -518,45 +518,50 @@ impl OutgoingSelector {
             let mut unresolved = unresolved.into_iter();
 
             // Resolve DNS through the agent.
-            let resolved = if *REMOTE_DNS.get().expect("REMOTE_DNS should be set by now!") && REMOTE
-            {
-                unresolved
-                    .try_fold(
-                        HashSet::with_capacity(amount_of_addresses),
-                        |mut resolved, (protocol, name, port)| {
-                            let addresses =
-                                remote_getaddrinfo(name, port)?
-                                    .into_iter()
-                                    .map(|(_, address)| OutgoingFilter {
+            let resolved =
+                if *REMOTE_DNS.get().expect("REMOTE_DNS should be set by now!") && REMOTE {
+                    unresolved
+                        .try_fold(
+                            HashSet::with_capacity(amount_of_addresses),
+                            |mut resolved, (protocol, name, port)| {
+                                let addresses = remote_getaddrinfo(name, port)?.into_iter().map(
+                                    |(_, address)| OutgoingFilter {
                                         protocol,
                                         address: AddressFilter::Socket(SocketAddr::new(
                                             address.ip(),
                                             port,
                                         )),
+                                    },
+                                );
+
+                                resolved.extend(addresses);
+                                Ok::<_, HookError>(resolved)
+                            },
+                        )?
+                        .into_iter()
+                } else {
+                    // Resolve DNS locally.
+                    unresolved
+                        .try_fold(
+                            HashSet::with_capacity(amount_of_addresses),
+                            |mut resolved: HashSet<OutgoingFilter>, (protocol, name, port)| {
+                                let addresses =
+                                    format!("{name}:{port}").to_socket_addrs()?.map(|address| {
+                                        OutgoingFilter {
+                                            protocol,
+                                            address: AddressFilter::Socket(SocketAddr::new(
+                                                address.ip(),
+                                                port,
+                                            )),
+                                        }
                                     });
 
-                            resolved.extend(addresses);
-                            Ok::<_, HookError>(resolved)
-                        },
-                    )?
-                    .into_iter()
-            } else {
-                // Resolve DNS locally.
-                unresolved
-                    .try_fold(
-                        HashSet::with_capacity(amount_of_addresses),
-                        |mut resolved: HashSet<OutgoingFilter>, (protocol, name, port)| {
-                            let addresses = name.to_socket_addrs()?.map(|address| OutgoingFilter {
-                                protocol,
-                                address: AddressFilter::Socket(SocketAddr::new(address.ip(), port)),
-                            });
-
-                            resolved.extend(addresses);
-                            Ok::<_, HookError>(resolved)
-                        },
-                    )?
-                    .into_iter()
-            };
+                                resolved.extend(addresses);
+                                Ok::<_, HookError>(resolved)
+                            },
+                        )?
+                        .into_iter()
+                };
 
             Ok::<_, HookError>(resolved)
         };
