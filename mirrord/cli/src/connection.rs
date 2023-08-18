@@ -92,8 +92,8 @@ where
             .map_err(CliError::KubernetesApiFailed)?;
 
         let mut detect_openshift_task = progress.subtask("detecting OpenShift...");
-        if let Err(_) = k8s_api.detect_openshift(&mut detect_openshift_task).await {
-            detect_openshift_task.warning(&format!("couldn't determine OpenShift"));
+        if (k8s_api.detect_openshift(&mut detect_openshift_task).await).is_err() {
+            detect_openshift_task.warning("couldn't determine OpenShift");
         };
 
         let (pod_agent_name, agent_port) = tokio::time::timeout(
