@@ -58,7 +58,7 @@ impl KubernetesAPI {
         }
     }
 
-    pub async fn detect_openshift<P>(&self, progress: &P) -> Result<()>
+    pub async fn detect_openshift<P>(&self, progress: &mut P) -> Result<()>
     where
         P: Progress + Send + Sync,
     {
@@ -68,7 +68,9 @@ impl KubernetesAPI {
             .has_group("route.openshift.io")
         {
             progress.warning("mirrord is running on openshift, due to default PSP of openshift, mirrord may not be able to create the agent. Please refer to https://mirrord.dev/docs/overview/faq/#can-i-use-mirrord-with-openshift");
-        };
+        } else {
+            progress.success(Some("OpenShift not detected."))
+        }
         Ok(())
     }
 }
