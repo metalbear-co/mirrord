@@ -345,6 +345,9 @@ impl OutgoingSelector {
     /// Checks if the `address` matches the specified outgoing filter, and returns a `bool`
     /// indicating if this connection should go through the remote pod, or from the local app.
     ///
+    /// Returns either a [`ConnectionThrough::Remote`] or [`ConnectionThroughLocal`], with the
+    /// address that should be connected to.
+    ///
     /// ## `remote`
     ///
     /// When the user specifies something like `remote = [":7777"]`, we're going to check if
@@ -354,9 +357,8 @@ impl OutgoingSelector {
     /// ## `local`
     ///
     /// Basically the same thing as `remote`, but the result is reversed, meaning that, if
-    /// `address` matches something specified in `local = [":7777"]`, then _negate_ it and return
-    /// `false`, meaning we return "do not connect remote" (or "connect local" if you prefer
-    /// positive thinking).
+    /// `address` matches something specified in `local = [":7777"]`, then we return a
+    /// [`ConnectionThrough::Local`].
     ///
     /// ## Filter rules
     ///
@@ -372,6 +374,7 @@ impl OutgoingSelector {
         &self,
         address: SocketAddr,
     ) -> Detour<ConnectionThrough> {
+        // Closure that checks if the current filter matches the enabled protocols.
         let filter_protocol = |outgoing: &&OutgoingFilter| match outgoing.protocol {
             ProtocolFilter::Any => true,
             ProtocolFilter::Tcp if PROTOCOL == TCP => true,
@@ -379,11 +382,12 @@ impl OutgoingSelector {
             _ => false,
         };
 
+        // Closure to skip hostnames, as these filters will be dealt with after being resolved.
         let skip_unresolved =
             |outgoing: &&OutgoingFilter| !matches!(outgoing.address, AddressFilter::Name(_));
 
         // Closure that tries to match `address` with something in the selector set.
-        let any_address = |outgoing: &OutgoingFilter| match outgoing.address {
+        let select_address = |outgoing: &OutgoingFilter| match outgoing.address {
             AddressFilter::Socket(select_address) => ((select_address.ip().is_unspecified()
                 && select_address.port() == 0)
                 || (select_address.ip().is_unspecified()
@@ -399,6 +403,7 @@ impl OutgoingSelector {
             .then_some(address),
         };
 
+        // Resolve the hostnames in the filter.
         let resolved_hosts = match &self {
             OutgoingSelector::Unfiltered => HashSet::default(),
             OutgoingSelector::Remote(_) => self.resolve_dns::<true>()?,
@@ -406,57 +411,17 @@ impl OutgoingSelector {
         };
         let hosts = resolved_hosts.iter();
 
-        // let resolve_dns_locally = || {
-        //     if let Some((cached_hostname, port)) = DNS_CACHE
-        //         .get(&SocketAddr::from((address.ip(), 0)))
-        //         .map(|addr| (addr.value().clone(), address.port()))
-        //     {
-        //         debug!("Resolving address locally [{cached_hostname:?}]");
-        //         let _guard = DetourGuard::new();
-        //         let locally_resolved = format!("{cached_hostname}:{port}")
-        //             .to_socket_addrs()?
-        //             .find(SocketAddr::is_ipv4)?;
-
-        //         debug!("resolved address {locally_resolved:#?}");
-        //         Ok::<_, HookError>(ConnectionThrough::Local(locally_resolved))
-        //     } else {
-        //         Ok::<_, HookError>(ConnectionThrough::Local(selected_address))
-        //     }?
-        // };
-
         Detour::Success(match self {
             OutgoingSelector::Unfiltered => ConnectionThrough::Remote(address),
-
-            // TODO(alex) [high] 2023-08-17: If we have config `port = 8888`, and this
-            // connection has port `7777`, then we don't match on the remote
-            // filter, which means this returns empty option.
-            //
-            // `None` turns into bypass, which calls `FN_CONNECT(resolved_address:7777)`, which
-            // is the wrong address, as it resolved in the cluster! We have to resolve the
-            // address locally in this case.
             OutgoingSelector::Remote(list) => {
                 if let None = list
                     .iter()
                     .filter(skip_unresolved)
                     .chain(hosts)
                     .filter(filter_protocol)
-                    .find_map(any_address)
+                    .find_map(select_address)
                 {
-                    if let Some((cached_hostname, port)) = DNS_CACHE
-                        .get(&SocketAddr::from((address.ip(), 0)))
-                        .map(|addr| (addr.value().clone(), address.port()))
-                    {
-                        debug!("remote filter: Resolving address locally [{cached_hostname:?}]");
-                        let _guard = DetourGuard::new();
-                        let locally_resolved = format!("{cached_hostname}:{port}")
-                            .to_socket_addrs()?
-                            .find(SocketAddr::is_ipv4)?;
-
-                        debug!("remote filter: resolved address {locally_resolved:#?}");
-                        Ok::<_, HookError>(ConnectionThrough::Local(locally_resolved))
-                    } else {
-                        Ok::<_, HookError>(ConnectionThrough::Local(address))
-                    }?
+                    Self::get_address_from_dns_cache::<true>(address, None)?
                 } else {
                     ConnectionThrough::Remote(address)
                 }
@@ -467,23 +432,9 @@ impl OutgoingSelector {
                     .filter(skip_unresolved)
                     .chain(hosts)
                     .filter(filter_protocol)
-                    .find_map(any_address)
+                    .find_map(select_address)
                 {
-                    if let Some((cached_hostname, port)) = DNS_CACHE
-                        .get(&SocketAddr::from((address.ip(), 0)))
-                        .map(|addr| (addr.value().clone(), address.port()))
-                    {
-                        debug!("local filter: Resolving address locally [{cached_hostname:?}]");
-                        let _guard = DetourGuard::new();
-                        let locally_resolved = format!("{cached_hostname}:{port}")
-                            .to_socket_addrs()?
-                            .find(SocketAddr::is_ipv4)?;
-
-                        debug!("local filter: resolved address {locally_resolved:#?}");
-                        Ok::<_, HookError>(ConnectionThrough::Local(locally_resolved))
-                    } else {
-                        Ok::<_, HookError>(ConnectionThrough::Local(selected_address))
-                    }?
+                    Self::get_address_from_dns_cache::<false>(address, Some(selected_address))?
                 } else {
                     ConnectionThrough::Remote(address)
                 }
@@ -576,6 +527,31 @@ impl OutgoingSelector {
                     .collect(),
             )?
             .collect()),
+        }
+    }
+
+    fn get_address_from_dns_cache<const REMOTE: bool>(
+        address: SocketAddr,
+        selected_address: Option<SocketAddr>,
+    ) -> Detour<ConnectionThrough> {
+        if let Some((cached_hostname, port)) = DNS_CACHE
+            .get(&SocketAddr::from((address.ip(), 0)))
+            .map(|addr| (addr.value().clone(), address.port()))
+        {
+            debug!("filter {REMOTE:?}: Resolving address locally [{cached_hostname:?}]");
+            let _guard = DetourGuard::new();
+            let locally_resolved = format!("{cached_hostname}:{port}")
+                .to_socket_addrs()?
+                .find(SocketAddr::is_ipv4)?;
+
+            debug!("remote filter: resolved address {locally_resolved:#?}");
+            Detour::Success(ConnectionThrough::Local(locally_resolved))
+        } else {
+            if REMOTE {
+                Detour::Success(ConnectionThrough::Local(address))
+            } else {
+                Detour::Success(ConnectionThrough::Local(selected_address.unwrap()))
+            }
         }
     }
 }
