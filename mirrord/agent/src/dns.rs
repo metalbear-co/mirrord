@@ -69,14 +69,14 @@ pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Resul
 
         let result = dns_lookup(root_path.as_path(), request.node)
             .await
-            .inspect_err(|err| {
+            .map_err(|err| {
                 error!("dns_lookup -> ResponseError:: {err:?}");
-            })
-            .map_err(|err| match err {
-                ResponseError::DnsLookup(err) => ResponseError::DnsLookup(err),
-                _ => ResponseError::DnsLookup(DnsLookupError {
-                    kind: ResolveErrorKindInternal::Unknown,
-                }),
+                match err {
+                    ResponseError::DnsLookup(err) => ResponseError::DnsLookup(err),
+                    _ => ResponseError::DnsLookup(DnsLookupError {
+                        kind: ResolveErrorKindInternal::Unknown,
+                    }),
+                }
             });
         if let Err(result) = tx.send(GetAddrInfoResponse(result)) {
             error!("couldn't send result to caller {result:?}");
