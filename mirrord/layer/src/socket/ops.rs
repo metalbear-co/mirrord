@@ -33,11 +33,12 @@ use crate::{
     OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR, REMOTE_UNIX_STREAMS, TARGETLESS,
 };
 
-/// Holds the pair of [`SocketAddr`] with their hostnames, resolved through [`getaddrinfo`].
+/// Holds the pair of [`SocketAddr`] with their hostnames, resolved remotely through
+/// [`getaddrinfo`].
 ///
 /// Used by [`connect_outgoing`] to retrieve the hostname from the address that the user called
 /// [`connect`] with, so we can resolve it locally when neccessary.
-pub(super) static DNS_CACHE: LazyLock<DashMap<SocketAddr, String>> =
+pub(super) static DNS_OUTGOING_FILTER_CACHE: LazyLock<DashMap<SocketAddr, String>> =
     LazyLock::new(|| DashMap::with_capacity(8));
 
 /// Hostname initialized from the agent with [`gethostname`].
@@ -385,7 +386,7 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
         // handle this address trickery.
         match OUTGOING_SELECTOR
             .get()?
-            .connect_remote::<PROTOCOL>(remote_address.as_socket()?)?
+            .get_connection_through::<PROTOCOL>(remote_address.as_socket()?)?
         {
             ConnectionThrough::Remote(addr) => {
                 let connect_result = remote_connection(SockAddr::from(addr))?;
@@ -753,7 +754,7 @@ pub(super) fn remote_getaddrinfo(
 ///
 /// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
 /// for the equivalent of this function).
-#[tracing::instrument(level = "debug", ret)]
+#[tracing::instrument(level = "trace", ret)]
 pub(super) fn getaddrinfo(
     rawish_node: Option<&CStr>,
     rawish_service: Option<&CStr>,
@@ -805,7 +806,7 @@ pub(super) fn getaddrinfo(
         .map(|(name, address)| {
             // Cache the resolved hosts to use in the outgoing traffic filter.
             {
-                let _ = DNS_CACHE.insert(address, node.clone());
+                let _ = DNS_OUTGOING_FILTER_CACHE.insert(address, node.clone());
             }
 
             let rawish_sock_addr = SockAddr::from(address);
