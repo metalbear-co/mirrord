@@ -315,15 +315,7 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
 ) -> Detour<ConnectResult> {
-    // TODO(alex) [high] 2023-08-16: Retrieve the correct local address from the `resolve_dns`, when
-    // the address belongs to our DNS_CACHE and this is a filtered connection.
-    //
-    // This means that we make `FilteredConnection(local_address)`, and connect to it on the hook.
-    //
-    // ADD(alex) [high] 2023-08-16: Actually, just add the `libc::connect` call on the filtered
-    // `else`, and we can convert `SocketAddr` to `*const sockaddr` easily? Or maybe
-    // `FilteredConnection(SockAddr)`?
-
+    // Closure that performs the connection with mirrord messaging.
     let remote_connection = |remote_address: SockAddr| {
         // Prepare this socket to be intercepted.
         let (mirror_tx, mirror_rx) = oneshot::channel();
@@ -386,6 +378,9 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
         let connect_result = remote_connection(remote_address)?;
         Detour::Success(connect_result)
     } else {
+        // Can't just connect to whatever `remote_address` is, as it might be a remotely resolved
+        // address, in a local connection context (or vice-versa), so we let `remote_connection`
+        // handle this address trickery.
         match OUTGOING_SELECTOR
             .get()?
             .connect_remote::<PROTOCOL>(remote_address.as_socket()?)?

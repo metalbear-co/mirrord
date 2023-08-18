@@ -19,7 +19,7 @@ use mirrord_config::{
 };
 use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
-use tracing::{debug, warn};
+use tracing::warn;
 use trust_dns_resolver::config::Protocol;
 
 use self::id::SocketId;
@@ -274,9 +274,13 @@ impl UserSocket {
     }
 }
 
+/// Holds valid address that we should use to `connect_outgoing`.
 #[derive(Debug, Clone, Copy)]
 enum ConnectionThrough {
+    /// Connect locally, this means just call `FN_CONNECT` on the inner [`SokcetAddr`].
     Local(SocketAddr),
+
+    /// Connect through the agent.
     Remote(SocketAddr),
 }
 
@@ -411,6 +415,8 @@ impl OutgoingSelector {
         };
         let hosts = resolved_hosts.iter();
 
+        // Send back the valid address to connect, in some cases (when DNS resolving is involved),
+        // this address may be different than the one we initially received in this function.
         Detour::Success(match self {
             OutgoingSelector::Unfiltered => ConnectionThrough::Remote(address),
             OutgoingSelector::Remote(list) => {
@@ -421,7 +427,7 @@ impl OutgoingSelector {
                     .filter(filter_protocol)
                     .find_map(select_address)
                 {
-                    Self::get_address_from_dns_cache::<true>(address, None)?
+                    Self::get_address_to_connect::<true>(address, None)?
                 } else {
                     ConnectionThrough::Remote(address)
                 }
@@ -434,7 +440,7 @@ impl OutgoingSelector {
                     .filter(filter_protocol)
                     .find_map(select_address)
                 {
-                    Self::get_address_from_dns_cache::<false>(address, Some(selected_address))?
+                    Self::get_address_to_connect::<false>(address, Some(selected_address))?
                 } else {
                     ConnectionThrough::Remote(address)
                 }
@@ -530,7 +536,20 @@ impl OutgoingSelector {
         }
     }
 
-    fn get_address_from_dns_cache<const REMOTE: bool>(
+    /// Helper function that looks into the [`DNS_CACHE`] for `address`, so we can retrieve the
+    /// hostname and resolve it locally (when applicable).
+    ///
+    /// We only get here when the [`OutgoingSelector::Remote`] matched nothing, thus
+    /// `selected_address` comes in as `None`, or when the [`OutgoingSelector::Local`] matched on
+    /// something, so we have `Some(selected_address)`.
+    ///
+    /// Returns 1 of 3 possibilities:
+    ///
+    /// 1. `address` is in [`DNS_CACHE`]: resolves the hostname locally, then return it as
+    /// [`ConnectionThrough::Local`];
+    /// 2. `address` is **NOT** in [`DNS_CACHE`]: check `REMOTE` and return the valid local address;
+    #[tracing::instrument(level = "trace", ret)]
+    fn get_address_to_connect<const REMOTE: bool>(
         address: SocketAddr,
         selected_address: Option<SocketAddr>,
     ) -> Detour<ConnectionThrough> {
@@ -538,13 +557,11 @@ impl OutgoingSelector {
             .get(&SocketAddr::from((address.ip(), 0)))
             .map(|addr| (addr.value().clone(), address.port()))
         {
-            debug!("filter {REMOTE:?}: Resolving address locally [{cached_hostname:?}]");
             let _guard = DetourGuard::new();
             let locally_resolved = format!("{cached_hostname}:{port}")
                 .to_socket_addrs()?
                 .find(SocketAddr::is_ipv4)?;
 
-            debug!("remote filter: resolved address {locally_resolved:#?}");
             Detour::Success(ConnectionThrough::Local(locally_resolved))
         } else {
             if REMOTE {
