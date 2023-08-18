@@ -46,7 +46,7 @@ pub(crate) unsafe extern "C" fn connect_detour(
 ) -> c_int {
     connect(sockfd, raw_address, address_length)
         .map(From::from)
-        .unwrap_or_bypass_with(|g| FN_CONNECT(sockfd, raw_address, address_length))
+        .unwrap_or_bypass_with(|_| FN_CONNECT(sockfd, raw_address, address_length))
 }
 
 /// Hook for `_connect$NOCANCEL` (for macos, see

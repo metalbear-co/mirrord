@@ -420,12 +420,13 @@ impl OutgoingSelector {
         Detour::Success(match self {
             OutgoingSelector::Unfiltered => ConnectionThrough::Remote(address),
             OutgoingSelector::Remote(list) => {
-                if let None = list
+                if list
                     .iter()
                     .filter(skip_unresolved)
                     .chain(hosts)
                     .filter(filter_protocol)
                     .find_map(select_address)
+                    .is_none()
                 {
                     Self::get_address_to_connect::<true>(address, None)?
                 } else {
@@ -433,16 +434,17 @@ impl OutgoingSelector {
                 }
             }
             OutgoingSelector::Local(list) => {
-                if let Some(selected_address) = list
+                match list
                     .iter()
                     .filter(skip_unresolved)
                     .chain(hosts)
                     .filter(filter_protocol)
                     .find_map(select_address)
                 {
-                    Self::get_address_to_connect::<false>(address, Some(selected_address))?
-                } else {
-                    ConnectionThrough::Remote(address)
+                    Some(selected_address) => {
+                        Self::get_address_to_connect::<false>(address, Some(selected_address))?
+                    }
+                    None => ConnectionThrough::Remote(address),
                 }
             }
         })
@@ -563,12 +565,10 @@ impl OutgoingSelector {
                 .find(SocketAddr::is_ipv4)?;
 
             Detour::Success(ConnectionThrough::Local(locally_resolved))
+        } else if REMOTE {
+            Detour::Success(ConnectionThrough::Local(address))
         } else {
-            if REMOTE {
-                Detour::Success(ConnectionThrough::Local(address))
-            } else {
-                Detour::Success(ConnectionThrough::Local(selected_address.unwrap()))
-            }
+            Detour::Success(ConnectionThrough::Local(selected_address.unwrap()))
         }
     }
 }

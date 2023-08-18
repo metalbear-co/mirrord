@@ -1,7 +1,6 @@
 use alloc::ffi::CString;
 use core::{ffi::CStr, mem};
 use std::{
-    borrow::BorrowMut,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::RawFd,
@@ -10,7 +9,6 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use dashmap::Map;
 use libc::{c_int, c_void, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::IncomingMode;
 use mirrord_protocol::{
@@ -24,7 +22,7 @@ use tracing::{error, info, trace};
 use super::{hooks::*, *};
 use crate::{
     common::{blocking_send_hook_message, HookMessage},
-    detour::{Detour, DetourGuard, OnceLockExt, OptionDetourExt, OptionExt},
+    detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     dns::GetAddrInfo,
     error::HookError,
     file::{self, OPEN_FILES},
