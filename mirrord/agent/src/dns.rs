@@ -5,7 +5,7 @@ use std::{
 
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse},
-    RemoteResult,
+    DnsLookupError, RemoteResult, ResolveErrorKindInternal, ResponseError,
 };
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
@@ -67,8 +67,18 @@ pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Resul
     while let Some(DnsRequest { request, tx }) = rx.recv().await {
         trace!("dns_worker -> request {:#?}", request);
 
-        let result = dns_lookup(root_path.as_path(), request.node);
-        if let Err(result) = tx.send(GetAddrInfoResponse(result.await)) {
+        let result = dns_lookup(root_path.as_path(), request.node)
+            .await
+            .map_err(|err| {
+                error!("dns_lookup -> ResponseError:: {err:?}");
+                match err {
+                    ResponseError::DnsLookup(err) => ResponseError::DnsLookup(err),
+                    _ => ResponseError::DnsLookup(DnsLookupError {
+                        kind: ResolveErrorKindInternal::Unknown,
+                    }),
+                }
+            });
+        if let Err(result) = tx.send(GetAddrInfoResponse(result)) {
             error!("couldn't send result to caller {result:?}");
         }
     }

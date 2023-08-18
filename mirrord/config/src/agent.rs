@@ -224,6 +224,15 @@ pub struct AgentConfig {
     #[config(default = true)]
     pub check_out_of_pods: bool,
 
+    /// ### agent.privileged {#agent-privileged}
+    ///
+    /// Run the mirror agent as privileged container.
+    /// Defaults to `false`.
+    ///
+    /// Might be needed in strict environments such as Bottlerocket.
+    #[config(default = false)]
+    pub privileged: bool,
+
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).

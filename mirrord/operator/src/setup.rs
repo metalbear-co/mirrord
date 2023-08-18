@@ -419,7 +419,9 @@ impl OperatorRole {
                         "argoproj.io".to_owned(),
                     ]),
                     resources: Some(vec![
+                        "nodes".to_owned(),
                         "pods".to_owned(),
+                        "pods/log".to_owned(),
                         "pods/ephemeralcontainers".to_owned(),
                         "deployments".to_owned(),
                         "jobs".to_owned(),
