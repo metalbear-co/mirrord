@@ -67,9 +67,9 @@ impl KubernetesAPI {
             .await?
             .has_group("route.openshift.io")
         {
-            progress.warning("mirrord is running on openshift, due to default PSP of openshift, mirrord may not be able to create the agent. Please refer to https://mirrord.dev/docs/overview/faq/#can-i-use-mirrord-with-openshift");
+            progress.warning("mirrord has detected it's running on OpenShift. Due to the default PSP of OpenShift, mirrord may not be able to create the agent. Please refer to the documentation at https://mirrord.dev/docs/overview/faq/#can-i-use-mirrord-with-openshift");
         } else {
-            progress.success(Some("OpenShift not detected."))
+            progress.success(Some("OpenShift was not detected."))
         }
         Ok(())
     }
