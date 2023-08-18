@@ -372,7 +372,7 @@ impl OutgoingSelector {
     ///
     /// So if the user specified a selector with `0.0.0.0:0`, we're going to be always matching on
     /// it.
-    #[tracing::instrument(level = "debug", ret)]
+    #[tracing::instrument(level = "trace", ret)]
     fn get_connection_through<const PROTOCOL: ConnectProtocol>(
         &self,
         address: SocketAddr,
@@ -552,7 +552,7 @@ impl OutgoingSelector {
     /// 1. `address` is in [`DNS_CACHE`]: resolves the hostname locally, then return it as
     /// [`ConnectionThrough::Local`];
     /// 2. `address` is **NOT** in [`DNS_CACHE`]: return the `address` as-is;
-    #[tracing::instrument(level = "debug", ret)]
+    #[tracing::instrument(level = "trace", ret)]
     fn get_local_address_to_connect(address: SocketAddr) -> Detour<ConnectionThrough> {
         if let Some((cached_hostname, port)) = DNS_OUTGOING_FILTER_CACHE
             .get(&SocketAddr::from((address.ip(), 0)))
