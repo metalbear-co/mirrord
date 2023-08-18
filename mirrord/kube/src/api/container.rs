@@ -424,6 +424,7 @@ impl ContainerApi for EphemeralContainer {
                 "capabilities": {
                     "add": get_capabilities(agent),
                 },
+                "privileged": agent.privileged,
             },
             "imagePullPolicy": agent.image_pull_policy,
             "targetContainerName": runtime_data.container_name,

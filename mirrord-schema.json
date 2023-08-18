@@ -314,7 +314,7 @@
         },
         "privileged": {
           "title": "agent.privileged {#agent-privileged}",
-          "description": "Run the mirror agent as privileged container. (Not applicable when using ephemeral) Defaults to `false`.\n\nMight be needed in strict environments such as Bottlerocket.",
+          "description": "Run the mirror agent as privileged container. Defaults to `false`.\n\nMight be needed in strict environments such as Bottlerocket.",
           "type": [
             "boolean",
             "null"
