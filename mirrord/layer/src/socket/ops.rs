@@ -38,7 +38,7 @@ use crate::{
 ///
 /// Used by [`connect_outgoing`] to retrieve the hostname from the address that the user called
 /// [`connect`] with, so we can resolve it locally when neccessary.
-pub(super) static DNS_OUTGOING_FILTER_CACHE: LazyLock<DashMap<SocketAddr, String>> =
+pub(super) static REMOTE_DNS_REVERSE_MAPPING: LazyLock<DashMap<SocketAddr, String>> =
     LazyLock::new(|| DashMap::with_capacity(8));
 
 /// Hostname initialized from the agent with [`gethostname`].
@@ -806,7 +806,7 @@ pub(super) fn getaddrinfo(
         .map(|(name, address)| {
             // Cache the resolved hosts to use in the outgoing traffic filter.
             {
-                let _ = DNS_OUTGOING_FILTER_CACHE.insert(address, node.clone());
+                let _ = REMOTE_DNS_REVERSE_MAPPING.insert(address, node.clone());
             }
 
             let rawish_sock_addr = SockAddr::from(address);

@@ -27,7 +27,7 @@ use crate::{
     common::{blocking_send_hook_message, HookMessage},
     detour::{Bypass, Detour, DetourGuard, OptionExt},
     error::{HookError, HookResult, LayerError},
-    socket::ops::{remote_getaddrinfo, DNS_OUTGOING_FILTER_CACHE},
+    socket::ops::{remote_getaddrinfo, REMOTE_DNS_REVERSE_MAPPING},
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, REMOTE_DNS,
 };
 
@@ -428,8 +428,8 @@ impl OutgoingSelector {
                 {
                     // No "remote" selector matched `address`, so now we try to get the correct
                     // address to connect to, either it's a resolved hostname, then we check our
-                    // `DNS_CACHE` and resolve the hostname locally, or this `address` is the one
-                    // the user wants.
+                    // `REMOTE_DNS_REVERSE_MAPPING` and resolve the hostname locally, or this
+                    // `address` is the one the user wants.
                     Self::get_local_address_to_connect(address)?
                 } else {
                     ConnectionThrough::Remote(address)
@@ -539,8 +539,8 @@ impl OutgoingSelector {
         }
     }
 
-    /// Helper function that looks into the [`DNS_CACHE`] for `address`, so we can retrieve the
-    /// hostname and resolve it locally (when applicable).
+    /// Helper function that looks into the [`REMOTE_DNS_REVERSE_MAPPING`] for `address`, so we can
+    /// retrieve the hostname and resolve it locally (when applicable).
     ///
     /// - `address`: the [`SocketAddr`] that was passed to `connect`;
     ///
@@ -549,12 +549,12 @@ impl OutgoingSelector {
     ///
     /// Returns 1 of 2 possibilities:
     ///
-    /// 1. `address` is in [`DNS_CACHE`]: resolves the hostname locally, then return it as
-    /// [`ConnectionThrough::Local`];
-    /// 2. `address` is **NOT** in [`DNS_CACHE`]: return the `address` as-is;
+    /// 1. `address` is in [`REMOTE_DNS_REVERSE_MAPPING`]: resolves the hostname locally, then
+    /// return it as [`ConnectionThrough::Local`];
+    /// 2. `address` is **NOT** in [`REMOTE_DNS_REVERSE_MAPPING`]: return the `address` as-is;
     #[tracing::instrument(level = "trace", ret)]
     fn get_local_address_to_connect(address: SocketAddr) -> Detour<ConnectionThrough> {
-        if let Some((cached_hostname, port)) = DNS_OUTGOING_FILTER_CACHE
+        if let Some((cached_hostname, port)) = REMOTE_DNS_REVERSE_MAPPING
             .get(&SocketAddr::from((address.ip(), 0)))
             .map(|addr| (addr.value().clone(), address.port()))
         {
