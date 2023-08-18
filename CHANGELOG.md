@@ -8,6 +8,49 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.59.0](https://github.com/metalbear-co/mirrord/tree/3.59.0) - 2023-08-18
+
+
+### Added
+
+- Add option to run agent container as privileged - `"agent" : {"privileged":
+  true}`
+  Should help with Bottlerocket or other secured k8s environments.
+  Applicable for both job/ephemeral.
+  [#1806](https://github.com/metalbear-co/mirrord/issues/1806)
+
+
+### Fixed
+
+- Send only ResponseError::DnsLookup for all errors during DNS lookups
+  [#1809](https://github.com/metalbear-co/mirrord/issues/1809)
+
+
+### Internal
+
+- Update Frida dependency
+
+
+## [3.58.0](https://github.com/metalbear-co/mirrord/tree/3.58.0) - 2023-08-17
+
+
+### Added
+
+- Introduced hooks for sendmsg and recvmsg, so mongodb+srv protocol (Csharp)
+  may resolve DNS (implementation follows previous sendto and recvfrom patch).
+  [#1776](https://github.com/metalbear-co/mirrord/issues/1776)
+
+
+### Fixed
+
+- Fixed more complicated scenarios using Go on Linux Arm
+
+
+### Internal
+
+- Move e2e setup to a bash script
+
+
 ## [3.57.2](https://github.com/metalbear-co/mirrord/tree/3.57.2) - 2023-08-16
 
 
