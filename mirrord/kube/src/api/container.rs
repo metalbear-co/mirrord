@@ -278,6 +278,7 @@ impl ContainerApi for JobContainer {
                                 "securityContext": targeted.then(||
                                     json!({
                                         "runAsGroup": agent_gid,
+                                        "privileged": agent.privileged,
                                         "capabilities": {
                                             "add": get_capabilities(agent),
                                         }
