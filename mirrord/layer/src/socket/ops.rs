@@ -33,6 +33,10 @@ use crate::{
     OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR, REMOTE_UNIX_STREAMS, TARGETLESS,
 };
 
+/// Holds the pair of [`SocketAddr`] with their hostnames, resolved through [`getaddrinfo`].
+///
+/// Used by [`connect_outgoing`] to retrieve the hostname from the address that the user called
+/// [`connect`] with, so we can resolve it locally when neccessary.
 pub(super) static DNS_CACHE: LazyLock<DashMap<SocketAddr, String>> =
     LazyLock::new(|| DashMap::with_capacity(8));
 
