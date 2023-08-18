@@ -226,7 +226,7 @@ pub struct AgentConfig {
 
     /// ### agent.privileged {#agent-privileged}
     ///
-    /// Run the mirror agent as privileged container. (Not applicable when using ephemeral)
+    /// Run the mirror agent as privileged container.
     /// Defaults to `false`.
     ///
     /// Might be needed in strict environments such as Bottlerocket.
