@@ -439,21 +439,21 @@ impl ContainerApi for EphemeralContainer {
 
         let pod_api = get_k8s_resource_api(client, agent.namespace.as_deref());
         let pod: Pod = pod_api.get(&runtime_data.pod_name).await?;
-        let spec = pod
-            .spec
-            .ok_or(KubeApiError::PodSpecNotFound)?
+        let pod_spec = pod.spec.ok_or(KubeApiError::PodSpecNotFound)?;
+
+        let container_spec = pod_spec
             .containers
             .iter()
             .find(|c| c.name == runtime_data.container_name)
-            .ok_or(KubeApiError::ContainerNotFound)?;
+            .ok_or_else(|| KubeApiError::ContainerNotFound(runtime_data.container_name))?;
 
-        if let Some(spec_env) = spec.env.as_ref() {
+        if let Some(spec_env) = container_spec.env.as_ref() {
             let mut env = ephemeral_container.env.unwrap_or_default();
             env.extend(spec_env.iter().cloned());
             ephemeral_container.env = Some(env)
         }
 
-        if let Some(env_from) = spec.env_from.as_ref() {
+        if let Some(env_from) = container_spec.env_from.as_ref() {
             let mut env = ephemeral_container.env_from.unwrap_or_default();
             env.extend(env_from.iter().cloned());
             ephemeral_container.env_from = Some(env)
