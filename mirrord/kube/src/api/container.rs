@@ -417,7 +417,7 @@ impl ContainerApi for EphemeralContainer {
             agent_command_line.push(timeout.to_string());
         }
 
-        let ephemeral_container: KubeEphemeralContainer = serde_json::from_value(json!({
+        let mut ephemeral_container: KubeEphemeralContainer = serde_json::from_value(json!({
             "name": mirrord_agent_name,
             "image": Self::agent_image(agent),
             "securityContext": {
@@ -438,6 +438,27 @@ impl ContainerApi for EphemeralContainer {
         debug!("Requesting ephemeral_containers_subresource");
 
         let pod_api = get_k8s_resource_api(client, agent.namespace.as_deref());
+        let pod: Pod = pod_api.get(&runtime_data.pod_name).await?;
+        let spec = pod
+            .spec
+            .ok_or(KubeApiError::PodSpecNotFound)?
+            .containers
+            .iter()
+            .find(|c| c.name == runtime_data.container_name)
+            .ok_or(KubeApiError::ContainerNotFound)?;
+
+        if let Some(spec_env) = spec.env.as_ref() {
+            let mut env = ephemeral_container.env.unwrap_or_default();
+            env.extend(spec_env.iter().cloned());
+            ephemeral_container.env = Some(env)
+        }
+
+        if let Some(env_from) = spec.env_from.as_ref() {
+            let mut env = ephemeral_container.env_from.unwrap_or_default();
+            env.extend(env_from.iter().cloned());
+            ephemeral_container.env_from = Some(env)
+        }
+
         let mut ephemeral_containers_subresource: Pod = pod_api
             .get_subresource("ephemeralcontainers", &runtime_data.pod_name)
             .await
