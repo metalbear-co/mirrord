@@ -263,11 +263,16 @@ pub(crate) async fn proxy() -> Result<()> {
 
     let mut analytics = Analytics::default();
     (&config).collect_analytics(&mut analytics);
+
+    if let Some(operator) = operator.as_ref() {
+        operator.collect_analytics(&mut analytics);
+    }
+
     if config.telemetry {
         send_analytics(
             analytics,
             started.elapsed().as_secs().try_into().unwrap_or(u32::MAX),
-            operator,
+            operator.is_some(),
         )
         .await;
     }
@@ -291,7 +296,7 @@ async fn connect_and_ping(
     config: &LayerConfig,
 ) -> Result<(
     (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
-    bool,
+    Option<OperatorSessionInformation>,
 )> {
     let ((mut sender, mut receiver), operator) = connect(config).await?;
     ping(&mut sender, &mut receiver).await?;
@@ -361,18 +366,18 @@ async fn connect(
     config: &LayerConfig,
 ) -> Result<(
     (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
-    bool,
+    Option<OperatorSessionInformation>,
 )> {
     if let Some(operator_session_information) = OperatorSessionInformation::from_env()? {
         Ok((
             OperatorApi::connect(config, &operator_session_information).await?,
-            true,
+            Some(operator_session_information),
         ))
     } else if let Some(address) = &config.connect_tcp {
         let stream = TcpStream::connect(address)
             .await
             .map_err(InternalProxyError::TcpConnectError)?;
-        Ok((wrap_raw_connection(stream), false))
+        Ok((wrap_raw_connection(stream), None))
     } else if let (Some(agent_name), Some(port)) =
         (&config.connect_agent_name, config.connect_agent_port)
     {
@@ -380,7 +385,7 @@ async fn connect(
         let connection = k8s_api
             .create_connection((agent_name.clone(), port))
             .await?;
-        Ok((connection, false))
+        Ok((connection, None))
     } else {
         Err(InternalProxyError::NoConnectionMethod.into())
     }

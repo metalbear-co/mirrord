@@ -3291,6 +3291,7 @@ name = "mirrord-analytics"
 version = "3.59.0"
 dependencies = [
  "assert-json-diff",
+ "base64 0.21.2",
  "reqwest",
  "serde",
  "serde_json",
@@ -3479,6 +3480,7 @@ dependencies = [
  "http",
  "k8s-openapi",
  "kube",
+ "mirrord-analytics",
  "mirrord-auth",
  "mirrord-config",
  "mirrord-kube",

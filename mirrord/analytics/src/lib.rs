@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -14,6 +15,7 @@ pub enum AnalyticValue {
     Bool(bool),
     Number(u32),
     Nested(Analytics),
+    Hash(AnalyticsHash),
 }
 
 /// Struct to store analytics data.
@@ -66,6 +68,22 @@ impl Analytics {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AnalyticsHash(#[serde(with = "serde_base64")] Vec<u8>);
+
+impl AnalyticsHash {
+    pub fn from_digest(val: u64) -> Self {
+        AnalyticsHash(val.to_be_bytes().to_vec())
+    }
+
+    pub fn from_base64(val: &str) -> Option<Self> {
+        general_purpose::STANDARD_NO_PAD
+            .decode(val)
+            .map(AnalyticsHash)
+            .ok()
+    }
+}
+
 /// Structs that collect analytics about themselves should implement this trait
 pub trait CollectAnalytics {
     /// Write analytics data to the given `Analytics` struct
@@ -93,6 +111,12 @@ impl From<usize> for AnalyticValue {
 impl From<Analytics> for AnalyticValue {
     fn from(analytics: Analytics) -> Self {
         AnalyticValue::Nested(analytics)
+    }
+}
+
+impl From<AnalyticsHash> for AnalyticValue {
+    fn from(hash: AnalyticsHash) -> Self {
+        AnalyticValue::Hash(hash)
     }
 }
 
@@ -130,6 +154,23 @@ pub async fn send_analytics(analytics: Analytics, duration: u32, operator: bool)
         .await;
     if let Err(e) = res {
         info!("Failed to send analytics: {e}");
+    }
+}
+
+mod serde_base64 {
+    use base64::{engine::general_purpose, Engine as _};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &Vec<u8>, s: S) -> Result<S::Ok, S::Error> {
+        let base64 = general_purpose::STANDARD_NO_PAD.encode(v);
+        String::serialize(&base64, s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let base64 = String::deserialize(d)?;
+        general_purpose::STANDARD_NO_PAD
+            .decode(base64.as_bytes())
+            .map_err(serde::de::Error::custom)
     }
 }
 

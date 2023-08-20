@@ -2,6 +2,7 @@ use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
 use kube::{error::ErrorResponse, Api, Client, Resource};
+use mirrord_analytics::{Analytics, AnalyticsHash, CollectAnalytics};
 use mirrord_auth::{credential_store::CredentialStoreSync, error::AuthenticationError};
 use mirrord_config::{
     feature::network::incoming::ConcurrentSteal, target::TargetConfig, LayerConfig,
@@ -52,19 +53,10 @@ pub enum OperatorApiError {
 
 type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
 
-pub struct OperatorApi {
-    client: Client,
-    target_api: Api<TargetCrd>,
-    target_namespace: Option<String>,
-    version_api: Api<MirrordOperatorCrd>,
-    target_config: TargetConfig,
-    on_concurrent_steal: ConcurrentSteal,
-}
-
 /// Data we store into environment variables for the child processes to use.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct OperatorSessionInformation {
-    pub session_id: String,
+    pub session_id: u64,
     pub target: TargetCrd,
     pub fingerprint: Option<String>,
     pub operator_features: Vec<OperatorFeatures>,
@@ -79,7 +71,7 @@ impl OperatorSessionInformation {
         protocol_version: Option<semver::Version>,
     ) -> Self {
         Self {
-            session_id: rand::random::<u64>().to_string(),
+            session_id: rand::random(),
             target,
             fingerprint,
             operator_features,
@@ -102,6 +94,29 @@ impl OperatorSessionInformation {
             })
             .transpose()
     }
+}
+
+impl CollectAnalytics for OperatorSessionInformation {
+    fn collect_analytics(&self, analytics: &mut Analytics) {
+        if let Some(fingerprint) = self
+            .fingerprint
+            .as_deref()
+            .and_then(AnalyticsHash::from_base64)
+        {
+            analytics.add("license_hash", fingerprint);
+        }
+
+        analytics.add("session_id", AnalyticsHash::from_digest(self.session_id));
+    }
+}
+
+pub struct OperatorApi {
+    client: Client,
+    target_api: Api<TargetCrd>,
+    target_namespace: Option<String>,
+    version_api: Api<MirrordOperatorCrd>,
+    target_config: TargetConfig,
+    on_concurrent_steal: ConcurrentSteal,
 }
 
 impl OperatorApi {
@@ -276,7 +291,7 @@ impl OperatorApi {
 
         let mut builder = Request::builder()
             .uri(self.connect_url(session_information))
-            .header("x-session-id", session_information.session_id.clone());
+            .header("x-session-id", session_information.session_id.to_string());
 
         if let Some(credential_name) = &session_information.fingerprint {
             let client_credentials = CredentialStoreSync::get_client_certificate::<
