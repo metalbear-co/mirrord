@@ -248,14 +248,14 @@ impl TcpConnectionStealer {
 
             if HTTP_FRAMED_VERSION.matches(version) {
                 Ok(daemon_tx
-                    .send(DaemonTcp::HttpRequest(
-                        request.into_serializable_fallback().await?,
+                    .send(DaemonTcp::HttpRequestFramed(
+                        request.into_serializable().await?,
                     ))
                     .await?)
             } else {
                 Ok(daemon_tx
-                    .send(DaemonTcp::HttpRequestFramed(
-                        request.into_serializable().await?,
+                    .send(DaemonTcp::HttpRequest(
+                        request.into_serializable_fallback().await?,
                     ))
                     .await?)
             }
