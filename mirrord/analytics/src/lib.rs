@@ -138,6 +138,7 @@ struct AnalyticsReport {
     operator_properties: Option<AnalyticsOperatorProperties>,
 }
 
+#[tracing::instrument(level = "trace")]
 pub async fn send_analytics(
     analytics: Analytics,
     duration: Duration,

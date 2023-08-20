@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
-use tracing::error;
+use tracing::{debug, error};
 
 use crate::crd::{MirrordOperatorCrd, OperatorFeatures, TargetCrd, OPERATOR_STATUS_NAME};
 
@@ -148,21 +148,22 @@ impl OperatorApi {
             }
             version_progress.success(None);
 
-            let client_credentials =
+            let client_hash =
                 if let Some(credential_name) = status.spec.license.fingerprint.as_ref() {
                     CredentialStoreSync::get_client_fingerprint::<MirrordOperatorCrd>(
                         &operator_api.client,
                         credential_name.to_string(),
                     )
                     .await
-                    .map(|certificate_der| general_purpose::STANDARD.encode(certificate_der))
+                    .map(|certificate_der| general_purpose::STANDARD_NO_PAD.encode(certificate_der))
+                    .map_err(|err| debug!("CredentialStore fingerprint error: {err}"))
                     .ok()
                 } else {
                     None
                 };
 
             let operator_session_information = OperatorSessionInformation::new(
-                client_credentials,
+                client_hash,
                 target,
                 status.spec.license.fingerprint,
                 status.spec.features.unwrap_or_default(),
@@ -275,6 +276,7 @@ impl OperatorApi {
     }
 
     /// Create websocket connection to operator
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn connect_target(
         &self,
         session_information: &OperatorSessionInformation,

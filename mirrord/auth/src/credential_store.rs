@@ -66,6 +66,7 @@ impl CredentialStore {
     }
 
     /// Get or create and ready up a certificate at `active_credential` slot
+    #[tracing::instrument(level = "trace", skip(self, client))]
     pub async fn get_or_init<R>(
         &mut self,
         client: &Client,
@@ -180,6 +181,7 @@ impl CredentialStoreSync {
 
     /// Get client certificate while keeping an exclusive lock on `CREDENTIALS_PATH` (and releasing
     /// it regrading of result)
+    #[tracing::instrument(level = "trace", skip(client))]
     pub async fn get_client_certificate<R>(
         client: &Client,
         credential_name: String,
@@ -200,6 +202,7 @@ impl CredentialStoreSync {
 
     /// Get client certificate fingerprint while keeping an exclusive lock on `CREDENTIALS_PATH`
     /// (and releasing it regrading of result)
+    #[tracing::instrument(level = "trace", skip(client))]
     pub async fn get_client_fingerprint<R>(
         client: &Client,
         credential_name: String,
