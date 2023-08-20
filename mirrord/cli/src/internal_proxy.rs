@@ -271,7 +271,10 @@ pub(crate) async fn proxy() -> Result<()> {
             analytics,
             started.elapsed(),
             operator.map(|operator| AnalyticsOperatorProperties {
-                session_id: AnalyticsHash::from_digest(operator.session_id),
+                client_hash: operator
+                    .client_hash
+                    .as_deref()
+                    .and_then(AnalyticsHash::from_base64),
                 license_hash: operator
                     .fingerprint
                     .as_deref()

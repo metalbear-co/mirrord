@@ -101,29 +101,26 @@ impl CredentialStore {
 pub struct CredentialStoreSync;
 
 impl CredentialStoreSync {
-    /// Try and get/create a client certificate used for `get_client_certificate` once a file lock
-    /// is created
-    async fn try_get_client_certificate<R>(
+    /// Try and get/create a client certificate used for `access_store_file` once a file lock is
+    /// created
+    async fn access_store_credential<R, C, V>(
         client: &Client,
         credential_name: String,
         store_file: &mut fs::File,
-    ) -> Result<Vec<u8>>
+        callback: C,
+    ) -> Result<V>
     where
         R: Resource + Clone + Debug,
         R: for<'de> Deserialize<'de>,
         R::DynamicType: Default,
+        C: FnOnce(&mut Credentials) -> Result<V>,
     {
         let mut store = CredentialStore::load(store_file)
             .await
             .inspect_err(|err| info!("CredentialStore Load Error {err:?}"))
             .unwrap_or_default();
 
-        let certificate_der = store
-            .get_or_init::<R>(client, credential_name)
-            .await?
-            .as_ref()
-            .encode_der()
-            .map_err(AuthenticationError::Pem)?;
+        let result = callback(store.get_or_init::<R>(client, credential_name).await?);
 
         // Make sure the store_file's cursor is at the start of the file before sending it to save
         store_file
@@ -133,19 +130,20 @@ impl CredentialStoreSync {
 
         store.save(store_file).await?;
 
-        Ok(certificate_der)
+        result
     }
 
-    /// Get client certificate while keeping an exclusive lock on `CREDENTIALS_PATH` (and releasing
-    /// it regrading of result)
-    pub async fn get_client_certificate<R>(
+    /// Actual implementation for exclusive lock on `CREDENTIALS_PATH`.
+    async fn with_exclusive_lock<R, C, V>(
         client: &Client,
         credential_name: String,
-    ) -> Result<Vec<u8>>
+        callback: C,
+    ) -> Result<V>
     where
         R: Resource + Clone + Debug,
         R: for<'de> Deserialize<'de>,
         R::DynamicType: Default,
+        C: FnOnce(&mut Credentials) -> Result<V>,
     {
         if !CREDENTIALS_DIR.exists() {
             fs::create_dir_all(&*CREDENTIALS_DIR)
@@ -165,13 +163,59 @@ impl CredentialStoreSync {
             .lock_exclusive()
             .map_err(CertificateStoreError::Lockfile)?;
 
-        let result =
-            Self::try_get_client_certificate::<R>(client, credential_name, &mut store_file).await;
+        let result = Self::access_store_credential::<R, C, V>(
+            client,
+            credential_name,
+            &mut store_file,
+            callback,
+        )
+        .await;
 
         store_file
             .unlock()
             .map_err(CertificateStoreError::Lockfile)?;
 
         result
+    }
+
+    /// Get client certificate while keeping an exclusive lock on `CREDENTIALS_PATH` (and releasing
+    /// it regrading of result)
+    pub async fn get_client_certificate<R>(
+        client: &Client,
+        credential_name: String,
+    ) -> Result<Vec<u8>>
+    where
+        R: Resource + Clone + Debug,
+        R: for<'de> Deserialize<'de>,
+        R::DynamicType: Default,
+    {
+        Self::with_exclusive_lock::<R, _, Vec<u8>>(client, credential_name, |credentials| {
+            credentials
+                .as_ref()
+                .encode_der()
+                .map_err(AuthenticationError::Pem)
+        })
+        .await
+    }
+
+    /// Get client certificate fingerprint while keeping an exclusive lock on `CREDENTIALS_PATH`
+    /// (and releasing it regrading of result)
+    pub async fn get_client_fingerprint<R>(
+        client: &Client,
+        credential_name: String,
+    ) -> Result<Vec<u8>>
+    where
+        R: Resource + Clone + Debug,
+        R: for<'de> Deserialize<'de>,
+        R::DynamicType: Default,
+    {
+        Self::with_exclusive_lock::<R, _, Vec<u8>>(client, credential_name, |credentials| {
+            credentials
+                .as_ref()
+                .sha256_fingerprint()
+                .map(|digest| digest.as_ref().to_vec())
+                .map_err(AuthenticationError::Fingerprint)
+        })
+        .await
     }
 }

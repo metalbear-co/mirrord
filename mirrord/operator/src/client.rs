@@ -55,6 +55,7 @@ type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
 /// Data we store into environment variables for the child processes to use.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct OperatorSessionInformation {
+    pub client_hash: Option<String>,
     pub session_id: u64,
     pub target: TargetCrd,
     pub fingerprint: Option<String>,
@@ -64,12 +65,14 @@ pub struct OperatorSessionInformation {
 
 impl OperatorSessionInformation {
     pub fn new(
+        client_hash: Option<String>,
         target: TargetCrd,
         fingerprint: Option<String>,
         operator_features: Vec<OperatorFeatures>,
         protocol_version: Option<semver::Version>,
     ) -> Self {
         Self {
+            client_hash,
             session_id: rand::random(),
             target,
             fingerprint,
@@ -145,7 +148,21 @@ impl OperatorApi {
             }
             version_progress.success(None);
 
+            let client_credentials =
+                if let Some(credential_name) = status.spec.license.fingerprint.as_ref() {
+                    CredentialStoreSync::get_client_fingerprint::<MirrordOperatorCrd>(
+                        &operator_api.client,
+                        credential_name.to_string(),
+                    )
+                    .await
+                    .map(|certificate_der| general_purpose::STANDARD.encode(certificate_der))
+                    .ok()
+                } else {
+                    None
+                };
+
             let operator_session_information = OperatorSessionInformation::new(
+                client_credentials,
                 target,
                 status.spec.license.fingerprint,
                 status.spec.features.unwrap_or_default(),

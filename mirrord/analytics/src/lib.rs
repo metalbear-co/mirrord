@@ -123,7 +123,7 @@ impl<T: CollectAnalytics> From<T> for AnalyticValue {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AnalyticsOperatorProperties {
-    pub session_id: AnalyticsHash,
+    pub client_hash: Option<AnalyticsHash>,
     pub license_hash: Option<AnalyticsHash>,
 }
 
@@ -134,6 +134,7 @@ struct AnalyticsReport {
     duration: u32,
     version: String,
     operator: bool,
+    #[serde(flatten)]
     operator_properties: Option<AnalyticsOperatorProperties>,
 }
 
