@@ -14,7 +14,7 @@ publish.workspace = true
 edition.workspace = true
 
 [features]
-default = ["client"]
+default = []
 license-fetch = ["dep:reqwest"]
 client = [
   "crd",
