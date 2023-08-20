@@ -17,7 +17,9 @@ use std::{
 };
 
 use futures::{stream::StreamExt, SinkExt};
-use mirrord_analytics::{send_analytics, Analytics, CollectAnalytics};
+use mirrord_analytics::{
+    send_analytics, Analytics, AnalyticsHash, AnalyticsOperatorProperties, CollectAnalytics,
+};
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
 use mirrord_operator::client::{OperatorApi, OperatorSessionInformation};
@@ -261,18 +263,20 @@ pub(crate) async fn proxy() -> Result<()> {
     }
     main_connection_cancellation_token.cancel();
 
-    let mut analytics = Analytics::default();
-    (&config).collect_analytics(&mut analytics);
-
-    if let Some(operator) = operator.as_ref() {
-        operator.collect_analytics(&mut analytics);
-    }
-
     if config.telemetry {
+        let mut analytics = Analytics::default();
+        (&config).collect_analytics(&mut analytics);
+
         send_analytics(
             analytics,
-            started.elapsed().as_secs().try_into().unwrap_or(u32::MAX),
-            operator.is_some(),
+            started.elapsed(),
+            operator.map(|operator| AnalyticsOperatorProperties {
+                session_id: AnalyticsHash::from_digest(operator.session_id),
+                license_hash: operator
+                    .fingerprint
+                    .as_deref()
+                    .and_then(AnalyticsHash::from_base64),
+            }),
         )
         .await;
     }

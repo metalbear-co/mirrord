@@ -22,7 +22,6 @@ client = [
   "dep:bincode",
   "dep:http",
   "dep:futures",
-  "dep:mirrord-analytics",
   "dep:mirrord-auth",
   "dep:mirrord-kube",
   "dep:mirrord-progress",
@@ -42,7 +41,6 @@ setup = ["crd", "dep:rcgen", "dep:serde_yaml"]
 
 
 [dependencies]
-mirrord-analytics = { path = "../analytics", optional = true }
 mirrord-auth = { path = "../auth", features = ["client"], optional = true }
 mirrord-config = { path = "../config", optional = true }
 mirrord-kube = { path = "../kube", optional = true }

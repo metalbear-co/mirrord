@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -15,7 +15,6 @@ pub enum AnalyticValue {
     Bool(bool),
     Number(u32),
     Nested(Analytics),
-    Hash(AnalyticsHash),
 }
 
 /// Struct to store analytics data.
@@ -114,12 +113,6 @@ impl From<Analytics> for AnalyticValue {
     }
 }
 
-impl From<AnalyticsHash> for AnalyticValue {
-    fn from(hash: AnalyticsHash) -> Self {
-        AnalyticValue::Hash(hash)
-    }
-}
-
 impl<T: CollectAnalytics> From<T> for AnalyticValue {
     fn from(other: T) -> Self {
         let mut analytics = Analytics::default();
@@ -129,21 +122,33 @@ impl<T: CollectAnalytics> From<T> for AnalyticValue {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct AnalyticsOperatorProperties {
+    pub session_id: AnalyticsHash,
+    pub license_hash: Option<AnalyticsHash>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct AnalyticsReport {
     event_properties: Analytics,
     platform: String,
     duration: u32,
     version: String,
     operator: bool,
+    operator_properties: Option<AnalyticsOperatorProperties>,
 }
 
-pub async fn send_analytics(analytics: Analytics, duration: u32, operator: bool) {
+pub async fn send_analytics(
+    analytics: Analytics,
+    duration: Duration,
+    operator_properties: Option<AnalyticsOperatorProperties>,
+) {
     let report = AnalyticsReport {
         event_properties: analytics,
         platform: std::env::consts::OS.to_string(),
         version: CURRENT_VERSION.to_string(),
-        duration,
-        operator,
+        duration: duration.as_secs().try_into().unwrap_or(u32::MAX),
+        operator: operator_properties.is_some(),
+        operator_properties,
     };
 
     let client = reqwest::Client::new();

@@ -2,7 +2,6 @@ use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
 use kube::{error::ErrorResponse, Api, Client, Resource};
-use mirrord_analytics::{Analytics, AnalyticsHash, CollectAnalytics};
 use mirrord_auth::{credential_store::CredentialStoreSync, error::AuthenticationError};
 use mirrord_config::{
     feature::network::incoming::ConcurrentSteal, target::TargetConfig, LayerConfig,
@@ -93,20 +92,6 @@ impl OperatorSessionInformation {
                     .map_err(|e| OperatorApiError::InvalidOperatorSession(val, e))
             })
             .transpose()
-    }
-}
-
-impl CollectAnalytics for OperatorSessionInformation {
-    fn collect_analytics(&self, analytics: &mut Analytics) {
-        if let Some(fingerprint) = self
-            .fingerprint
-            .as_deref()
-            .and_then(AnalyticsHash::from_base64)
-        {
-            analytics.add("license_hash", fingerprint);
-        }
-
-        analytics.add("session_id", AnalyticsHash::from_digest(self.session_id));
     }
 }
 

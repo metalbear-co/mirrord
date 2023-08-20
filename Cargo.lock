@@ -3480,7 +3480,6 @@ dependencies = [
  "http",
  "k8s-openapi",
  "kube",
- "mirrord-analytics",
  "mirrord-auth",
  "mirrord-config",
  "mirrord-kube",
