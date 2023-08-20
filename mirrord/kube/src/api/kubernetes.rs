@@ -5,7 +5,7 @@ use std::{net::SocketAddr, time::Duration};
 use k8s_openapi::api::core::v1::Pod;
 use kube::{
     config::{KubeConfigOptions, Kubeconfig},
-    Api, Client, Config,
+    Api, Client, Config, Discovery,
 };
 use mirrord_config::{agent::AgentConfig, target::TargetConfig, LayerConfig};
 use mirrord_progress::Progress;
@@ -56,6 +56,22 @@ impl KubernetesAPI {
             agent,
             target,
         }
+    }
+
+    pub async fn detect_openshift<P>(&self, progress: &mut P) -> Result<()>
+    where
+        P: Progress + Send + Sync,
+    {
+        if Discovery::new(self.client.clone())
+            .run()
+            .await?
+            .has_group("route.openshift.io")
+        {
+            progress.warning("mirrord has detected it's running on OpenShift. Due to the default PSP of OpenShift, mirrord may not be able to create the agent. Please refer to the documentation at https://mirrord.dev/docs/overview/faq/#can-i-use-mirrord-with-openshift");
+        } else {
+            progress.success(Some("OpenShift was not detected."))
+        }
+        Ok(())
     }
 }
 
