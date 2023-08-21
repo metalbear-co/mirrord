@@ -90,7 +90,6 @@ pub struct FsConfig {
     /// ### feature.fs.not_found {#feature-fs-not_found}
     ///
     /// Specify file path patterns that if matched will be treated as non-existent.
-    #[config(env = "MIRRORD_FILE_NOT_FOUND_PATTERN")]
     pub not_found: Option<VecOrSingle<String>>,
 }
 
