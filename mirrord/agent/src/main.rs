@@ -452,10 +452,6 @@ impl ClientConnectionHandler {
                 return Ok(false);
             }
             ClientMessage::PauseTargetRequest(pause) => {
-                if self.ephemeral {
-                    Err(AgentError::PauseEphemeralAgent)?;
-                }
-
                 let changed = self
                     .container_handle
                     .as_ref()

@@ -329,6 +329,7 @@ impl ContainerRuntime for EphemeralContainer {
         }
         let freezer_controller: &FreezerController = cgroup.controller_of();
         freezer_controller.freeze()?;
+        Ok(())
     }
 
     async fn unpause(&self) -> Result<()> {
@@ -339,6 +340,7 @@ impl ContainerRuntime for EphemeralContainer {
         );
         let freezer_controller: &FreezerController = cgroup.controller_of();
         freezer_controller.thaw()?;
+        Ok(())
     }
 }
 

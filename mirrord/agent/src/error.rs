@@ -145,8 +145,8 @@ pub enum AgentError {
     #[error("Requested pause, but there is no target container.")]
     PauseAbsentTarget,
 
-    #[error("Pause feature is not supported with ephemeral agent.")]
-    PauseEphemeralAgent,
+    #[error("Pause failed with cgroup error: {0} - make sure agent is set to privileged.")]
+    PauseFailedCgroup(#[from] cgroup_rs::Error),
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;
