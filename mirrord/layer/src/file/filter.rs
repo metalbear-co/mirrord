@@ -102,11 +102,6 @@ fn generate_local_set() -> RegexSet {
 /// List of files that mirrord should use remotely read only
 fn generate_remote_ro_set() -> RegexSet {
     let patterns = [
-        // AWS cli cache
-        // "file not exist" for identity caches (AWS)
-        r"\.aws/cli/cache/.+\.json$",
-        r"\.aws/credentials$",
-        r"\.aws/config$",
         // for dns resolving
         r"^/etc/resolv.conf$",
         r"^/etc/hosts$",
