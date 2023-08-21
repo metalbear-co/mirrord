@@ -25,6 +25,8 @@ use crate::{
 /// 1. `"read_write"` - List of patterns that should be read/write remotely.
 /// 2. `"read_only"` - List of patterns that should be read only remotely.
 /// 3. `"local"` - List of patterns that should be read locally.
+/// 4. `"not_found"` - List of patters that should never be read nor written. These files should be
+/// treated as non-existent.
 ///
 /// The logic for choosing the behavior is as follows:
 ///
@@ -50,7 +52,8 @@ use crate::{
 ///       "mode": "write",
 ///       "read_write": ".+\.json" ,
 ///       "read_only": [ ".+\.yaml", ".+important-file\.txt" ],
-///       "local": [ ".+\.js", ".+\.mjs" ]
+///       "local": [ ".+\.js", ".+\.mjs" ],
+///       "not_found": [ "\.config/gcloud" ]
 ///     }
 ///   }
 /// }
@@ -83,6 +86,12 @@ pub struct FsConfig {
     /// Specify file path patterns that if matched will be opened locally.
     #[config(env = "MIRRORD_FILE_LOCAL_PATTERN")]
     pub local: Option<VecOrSingle<String>>,
+
+    /// ### feature.fs.not_found {#feature-fs-not_found}
+    ///
+    /// Specify file path patterns that if matched will be treated as non-existent.
+    #[config(env = "MIRRORD_FILE_NOT_FOUND_PATTERN")]
+    pub not_found: Option<VecOrSingle<String>>,
 }
 
 impl MirrordToggleableConfig for AdvancedFsUserConfig {
@@ -97,12 +106,16 @@ impl MirrordToggleableConfig for AdvancedFsUserConfig {
         let local = FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN")
             .source_value()
             .transpose()?;
+        let not_found = FromEnv::new("MIRRORD_FILE_NOT_FOUND_PATTERN")
+            .source_value()
+            .transpose()?;
 
         Ok(Self::Generated {
             mode,
             read_write,
             read_only,
             local,
+            not_found,
         })
     }
 }
@@ -138,18 +151,31 @@ impl CollectAnalytics for &FsConfig {
         analytics.add("mode", self.mode);
         analytics.add(
             "local_paths",
-            self.local.as_ref().map(|v| v.len()).unwrap_or_default(),
+            self.local
+                .as_ref()
+                .map(VecOrSingle::len)
+                .unwrap_or_default(),
         );
         analytics.add(
             "read_write_paths",
             self.read_write
                 .as_ref()
-                .map(|v| v.len())
+                .map(VecOrSingle::len)
                 .unwrap_or_default(),
         );
         analytics.add(
             "read_only_paths",
-            self.read_only.as_ref().map(|v| v.len()).unwrap_or_default(),
+            self.read_only
+                .as_ref()
+                .map(VecOrSingle::len)
+                .unwrap_or_default(),
+        );
+        analytics.add(
+            "not_found_paths",
+            self.not_found
+                .as_ref()
+                .map(VecOrSingle::len)
+                .unwrap_or_default(),
         );
     }
 }

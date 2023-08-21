@@ -15,18 +15,10 @@ use mirrord_config::{
 use regex::{RegexSet, RegexSetBuilder};
 use tracing::warn;
 
-use crate::detour::{Bypass, Detour};
-
-/// Shortcut for checking an optional regex set.
-/// Usage is `some_regex_match(Option<RegexSet>, text)`
-macro_rules! some_regex_match {
-    ($regex:expr, $text:expr) => {
-        $regex
-            .as_ref()
-            .map(|__regex| __regex.is_match($text))
-            .unwrap_or_default()
-    };
-}
+use crate::{
+    detour::{Bypass, Detour},
+    error::HookError,
+};
 
 /// List of files that mirrord should use locally, as they probably exist only in the local user
 /// machine, or are system configuration files (that could break the process if we used the remote
@@ -112,9 +104,9 @@ fn generate_remote_ro_set() -> RegexSet {
     let patterns = [
         // AWS cli cache
         // "file not exist" for identity caches (AWS)
-        r".aws/cli/cache/.+\.json$",
-        r".aws/credentials$",
-        r".aws/config$",
+        r"\.aws/cli/cache/.+\.json$",
+        r"\.aws/credentials$",
+        r"\.aws/config$",
         // for dns resolving
         r"^/etc/resolv.conf$",
         r"^/etc/hosts$",
@@ -123,7 +115,16 @@ fn generate_remote_ro_set() -> RegexSet {
     RegexSetBuilder::new(patterns)
         .case_insensitive(true)
         .build()
-        .expect("Building local path regex set failed")
+        .expect("Building remote readonly path regex set failed")
+}
+
+fn generate_not_found_set() -> RegexSet {
+    let patterns = [r"\.aws", r"\.config/gcloud", r"\.kube", r"\.azure"];
+
+    RegexSetBuilder::new(patterns)
+        .case_insensitive(true)
+        .build()
+        .expect("Building not found path regex set failed")
 }
 
 /// Global filter used by file operations to bypass (use local) or continue (use remote).
@@ -131,29 +132,23 @@ pub(crate) static FILE_FILTER: OnceLock<FileFilter> = OnceLock::new();
 
 #[derive(Debug)]
 pub(crate) struct FileFilter {
-    read_only: Option<RegexSet>,
-    read_write: Option<RegexSet>,
-    local: Option<RegexSet>,
+    read_only: RegexSet,
+    read_write: RegexSet,
+    local: RegexSet,
+    not_found: RegexSet,
     default_local: RegexSet,
     default_remote_ro: RegexSet,
+    default_not_found: RegexSet,
     mode: FsModeConfig,
 }
 
-/// Builds case insensitive regexes from a list of patterns.
-/// Returns `None` if the list is empty.
-/// Regex error if fails.
-fn build_regex_or_none(patterns: Vec<String>) -> Result<Option<RegexSet>, regex::Error> {
-    if patterns.is_empty() {
-        Ok(None)
-    } else {
-        RegexSetBuilder::new(patterns)
+impl FileFilter {
+    fn make_regex_set(patterns: Option<VecOrSingle<String>>) -> Result<RegexSet, regex::Error> {
+        RegexSetBuilder::new(patterns.map(VecOrSingle::to_vec).unwrap_or_default())
             .case_insensitive(true)
             .build()
-            .map(Some)
     }
-}
 
-impl FileFilter {
     /// Initializes a `FileFilter` based on the user configuration.
     ///
     /// The filter first checks if the user specified any include/exclude regexes. (This will be
@@ -167,25 +162,29 @@ impl FileFilter {
             read_only,
             local,
             mode,
+            not_found,
         } = fs_config;
 
         let read_write =
-            build_regex_or_none(read_write.map(VecOrSingle::to_vec).unwrap_or_default())
-                .expect("Building read-write regex set failed");
-        let read_only = build_regex_or_none(read_only.map(VecOrSingle::to_vec).unwrap_or_default())
-            .expect("Building read-only regex set failed");
-        let local = build_regex_or_none(local.map(VecOrSingle::to_vec).unwrap_or_default())
-            .expect("Building local path regex set failed");
+            Self::make_regex_set(read_write).expect("building read-write regex set failed");
+        let read_only =
+            Self::make_regex_set(read_only).expect("building read-only regex set failed");
+        let local = Self::make_regex_set(local).expect("building local path regex set failed");
+        let not_found =
+            Self::make_regex_set(not_found).expect("building not-found regex set failed");
 
         let default_local = generate_local_set();
         let default_remote_ro = generate_remote_ro_set();
+        let default_not_found = generate_not_found_set();
 
         Self {
             read_only,
             read_write,
             local,
+            not_found,
             default_local,
             default_remote_ro,
+            default_not_found,
             mode,
         }
     }
@@ -198,31 +197,25 @@ impl FileFilter {
     where
         F: FnOnce() -> Bypass,
     {
-        if matches!(&self.mode, FsModeConfig::Local) {
-            return Detour::Bypass(op());
-        }
-
-        if some_regex_match!(self.read_write, text) {
-            Detour::Success(())
-        } else if some_regex_match!(self.read_only, text) {
-            if !write {
-                Detour::Success(())
-            } else {
-                Detour::Bypass(op())
+        match self.mode {
+            FsModeConfig::Local => Detour::Bypass(op()),
+            _ if self.not_found.is_match(text) => Detour::Error(HookError::FileNotFound),
+            _ if self.read_write.is_match(text) => Detour::Success(()),
+            _ if self.read_only.is_match(text) => {
+                if write {
+                    Detour::Bypass(op())
+                } else {
+                    Detour::Success(())
+                }
             }
-        } else if some_regex_match!(self.local, text) {
-            Detour::Bypass(op())
-        } else if self.default_remote_ro.is_match(text) && !write {
-            Detour::Success(())
-        } else if self.default_local.is_match(text) {
-            Detour::Bypass(op())
-        } else {
-            match self.mode {
-                FsModeConfig::Write => Detour::Success(()),
-                FsModeConfig::Read if !write => Detour::Success(()),
-                FsModeConfig::Read if write => Detour::Bypass(Bypass::ReadOnly(text.into())),
-                _ => Detour::Bypass(op()),
-            }
+            _ if self.local.is_match(text) => Detour::Bypass(op()),
+            _ if self.default_remote_ro.is_match(text) => Detour::Success(()),
+            _ if self.default_local.is_match(text) => Detour::Bypass(op()),
+            _ if self.default_not_found.is_match(text) => Detour::Error(HookError::FileNotFound),
+            FsModeConfig::LocalWithOverrides => Detour::Bypass(op()),
+            FsModeConfig::Write => Detour::Success(()),
+            FsModeConfig::Read if write => Detour::Bypass(Bypass::ReadOnly(text.into())),
+            FsModeConfig::Read => Detour::Success(()),
         }
     }
 }
@@ -322,6 +315,7 @@ mod tests {
     #[case(FsModeConfig::Local, "/pain/write.a", true, true)]
     #[case(FsModeConfig::Local, "/pain/local/test.a", true, true)]
     #[case(FsModeConfig::Local, "/opt/test.a", true, true)]
+    #[case(FsModeConfig::Local, "/pain/not_found/test.a", false, true)]
     fn include_complex_configuration(
         #[case] mode: FsModeConfig,
         #[case] path: &str,
@@ -335,10 +329,12 @@ mod tests {
             r"/pain/read_only.*\.a".to_string()
         ]));
         let local = Some(VecOrSingle::Multiple(vec![r"/pain/local.*\.a".to_string()]));
+        let not_found = Some(VecOrSingle::Single(r"/pain/not_found.*\.a".to_string()));
         let fs_config = FsConfig {
             read_write,
             read_only,
             local,
+            not_found,
             mode,
         };
 
@@ -388,5 +384,12 @@ mod tests {
                 .is_bypass(),
             bypass
         );
+    }
+
+    /// Sanity test for empty [`RegexSet`] behaviour.
+    #[test]
+    fn empty_regex_set() {
+        let set = FileFilter::make_regex_set(None).unwrap();
+        assert!(!set.is_match("/path/to/some/file"));
     }
 }
