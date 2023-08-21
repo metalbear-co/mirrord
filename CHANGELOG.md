@@ -8,6 +8,35 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.60.0](https://github.com/metalbear-co/mirrord/tree/3.60.0) - 2023-08-21
+
+
+### Added
+
+- Detect and warn when cluster is openshift
+  [#1560](https://github.com/metalbear-co/mirrord/issues/1560)
+- Add missing hook for open64, fixing certificate loading on C# + Linux
+  [#1815](https://github.com/metalbear-co/mirrord/issues/1815)
+- Small changes relevant to operator for #1782.
+
+
+### Fixed
+
+- Fixed environment on ephemeral container
+  This is done by two things:
+
+  1. There was an issue where we used `self` instead of `1` to obtain env based
+  on pid.
+  2. We didn't have container runtime to use for fetching, so now we also copy
+  env from the original pod spec and set it to ours.
+  [#1818](https://github.com/metalbear-co/mirrord/issues/1818)
+
+
+### Internal
+
+- Added a missing comma in the documentation
+
+
 ## [3.59.0](https://github.com/metalbear-co/mirrord/tree/3.59.0) - 2023-08-18
 
 
