@@ -203,10 +203,10 @@ impl FileFilter {
                     Detour::Success(())
                 }
             }
-            _ if self.local.is_match(text) => Detour::Bypass(op()),
-            _ if self.default_remote_ro.is_match(text) => Detour::Success(()),
-            _ if self.default_local.is_match(text) => Detour::Bypass(op()),
             _ if self.default_not_found.is_match(text) => Detour::Error(HookError::FileNotFound),
+            _ if self.local.is_match(text) => Detour::Bypass(op()),
+            _ if self.default_remote_ro.is_match(text) && !write => Detour::Success(()),
+            _ if self.default_local.is_match(text) => Detour::Bypass(op()),
             FsModeConfig::LocalWithOverrides => Detour::Bypass(op()),
             FsModeConfig::Write => Detour::Success(()),
             FsModeConfig::Read if write => Detour::Bypass(Bypass::ReadOnly(text.into())),
@@ -344,22 +344,12 @@ mod tests {
     }
 
     #[rstest]
-    #[case(FsModeConfig::Read, "/usr/a/.aws/cli/cache/121.json", true, true)]
-    #[case(FsModeConfig::Write, "/usr/a/.aws/cli/cache/121.json", true, true)]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/usr/a/.aws/cli/cache/121.json",
-        true,
-        true
-    )]
-    #[case(FsModeConfig::Read, "/usr/a/.aws/cli/cache/121.json", false, false)]
-    #[case(FsModeConfig::Write, "/usr/a/.aws/cli/cache/121.json", false, false)]
-    #[case(
-        FsModeConfig::LocalWithOverrides,
-        "/usr/a/.aws/cli/cache/1241.json",
-        false,
-        false
-    )]
+    #[case(FsModeConfig::Read, "/etc/resolv.conf", true, true)]
+    #[case(FsModeConfig::Write, "/etc/resolv.conf", true, true)]
+    #[case(FsModeConfig::LocalWithOverrides, "/etc/resolv.conf", true, true)]
+    #[case(FsModeConfig::Read, "/etc/resolv.conf", false, false)]
+    #[case(FsModeConfig::Write, "/etc/resolv.conf", false, false)]
+    #[case(FsModeConfig::LocalWithOverrides, "/etc/resolv.conf", false, false)]
     fn remote_read_only_set(
         #[case] mode: FsModeConfig,
         #[case] path: &str,
