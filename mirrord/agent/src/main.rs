@@ -89,8 +89,12 @@ struct State {
 impl State {
     /// Return [`Err`] if container runtime operations failed.
     pub async fn new(args: &Args) -> Result<State> {
-        let container =
-            get_container(args.container_id.as_ref(), args.container_runtime.as_ref()).await?;
+        let container = get_container(
+            args.container_id.as_ref(),
+            args.container_runtime.as_ref(),
+            args.ephemeral_container,
+        )
+        .await?;
 
         let container = match container {
             Some(container) => Some(ContainerHandle::new(container).await?),
@@ -99,16 +103,10 @@ impl State {
 
         // If we are in an ephemeral container, we use pid 1.
         // if not, we use the pid of the target container or fallback to self
-        let pid = {
-            if args.ephemeral_container {
-                "1".to_string()
-            } else {
-                container
-                    .as_ref()
-                    .map(|h| h.pid().to_string())
-                    .unwrap_or_else(|| "self".to_string())
-            }
-        };
+        let pid = container
+            .as_ref()
+            .map(|h| h.pid().to_string())
+            .unwrap_or_else(|| "self".to_string());
 
         let mut env: HashMap<String, String> = HashMap::new();
 
@@ -116,11 +114,6 @@ impl State {
 
         if let Some(container) = container.as_ref() {
             env.extend(container.raw_env().clone());
-        }
-
-        // in ephemeral container, we get same env as the target container, so copy our env.
-        if args.ephemeral_container {
-            env.extend(std::env::vars())
         }
 
         match env::get_proc_environ(environ_path).await {

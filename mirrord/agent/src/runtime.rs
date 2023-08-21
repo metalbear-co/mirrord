@@ -75,14 +75,19 @@ pub(crate) enum Container {
     Docker(DockerContainer),
     Containerd(ContainerdContainer),
     CriO(CriOContainer),
+    Ephemeral(EphemeralContainer),
 }
 
 /// get a container object according to args.
 pub(crate) async fn get_container(
     container_id_opt: Option<&String>,
     container_runtime_opt: Option<&String>,
+    ephemeral: bool,
 ) -> Result<Option<Container>> {
-    if let (Some(container_id), Some(container_runtime)) = (container_id_opt, container_runtime_opt)
+    if ephemeral {
+        return Ok(Some(Container::Ephemeral(EphemeralContainer {})));
+    } else if let (Some(container_id), Some(container_runtime)) =
+        (container_id_opt, container_runtime_opt)
     {
         let container_id = container_id.to_string();
         match container_runtime.as_str() {
@@ -285,6 +290,26 @@ impl ContainerRuntime for ContainerdContainer {
         let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
         client.resume(request).await?;
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct EphemeralContainer {}
+
+impl ContainerRuntime for EphemeralContainer {
+    /// When running on ephemeral, root pid is always 1 and env is the current process' env. (we
+    /// copy it from the k8s spec)
+    async fn get_info(&self) -> Result<ContainerInfo> {
+        Ok(ContainerInfo::new(1, std::env::vars().collect()))
+    }
+
+    /// Pause requires root privileges, so if it fails on permission we send a message.
+    async fn pause(&self) -> Result<()> {
+        todo!()
+    }
+
+    async fn unpause(&self) -> Result<()> {
+        todo!()
     }
 }
 
