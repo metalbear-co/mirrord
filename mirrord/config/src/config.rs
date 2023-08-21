@@ -48,6 +48,9 @@ pub enum ConfigError {
         If you are not trying to run targetless, please specify a target instead."
     )]
     TargetNamespaceWithoutTarget,
+
+    #[error("Template rendering failed, check your config file `{0}`.")]
+    TemplateRenderingFailed(#[from] tera::Error),
 }
 
 pub type Result<T, E = ConfigError> = std::result::Result<T, E>;
