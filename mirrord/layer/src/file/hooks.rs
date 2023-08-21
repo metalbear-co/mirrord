@@ -22,7 +22,7 @@ use mirrord_protocol::file::{
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
 use num_traits::Bounded;
-use tracing::trace;
+use tracing::{trace, debug};
 #[cfg(target_os = "linux")]
 use tracing::{error, info, warn};
 
@@ -102,6 +102,7 @@ pub(super) unsafe extern "C" fn open64_detour(
     mut args: ...
 ) -> RawFd {
     let mode: c_int = args.arg();
+    debug!("here!");
     let guard = DetourGuard::new();
     if guard.is_none() {
         FN_OPEN64(raw_path, open_flags, mode)
@@ -126,6 +127,7 @@ pub(super) unsafe extern "C" fn __open64_detour(
 ) -> RawFd {
     let mode: c_int = args.arg();
     let guard = DetourGuard::new();
+    debug!("here2!");
     if guard.is_none() {
         FN___OPEN64(raw_path, open_flags, mode)
     } else {
