@@ -443,8 +443,9 @@ impl OutgoingSelector {
                     .filter(filter_protocol)
                     .any(any_address)
                 {
-                    // Our "local" selector matched (e.g. because of the port), but this `address` might be a remotely resolved
-                    // ip, so we first have to check in our `REMOTE_DNS_REVERSE_MAPPING` to resolve
+                    // Our "local" selector matched (e.g. because of the port), but this `address`
+                    // might be a remotely resolved ip, so we first have to
+                    // check in our `REMOTE_DNS_REVERSE_MAPPING` to resolve
                     // the original hostname locally, and get a local ip we can connect to.
                     Self::get_local_address_to_connect(address)?
                 } else {
