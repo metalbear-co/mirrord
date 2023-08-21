@@ -22,7 +22,7 @@ use mirrord_protocol::file::{
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
 use num_traits::Bounded;
-use tracing::{trace, debug};
+use tracing::trace;
 #[cfg(target_os = "linux")]
 use tracing::{error, info, warn};
 
@@ -90,7 +90,6 @@ pub(super) unsafe extern "C" fn open_detour(
     }
 }
 
-
 /// Hook for `libc::open64`.
 ///
 /// **Bypassed** by `raw_path`s that match what's in the `generate_local_set` regex, see
@@ -102,7 +101,6 @@ pub(super) unsafe extern "C" fn open64_detour(
     mut args: ...
 ) -> RawFd {
     let mode: c_int = args.arg();
-    debug!("here!");
     let guard = DetourGuard::new();
     if guard.is_none() {
         FN_OPEN64(raw_path, open_flags, mode)
@@ -111,30 +109,6 @@ pub(super) unsafe extern "C" fn open64_detour(
             #[cfg(target_os = "macos")]
             let raw_path = update_ptr_from_bypass(raw_path, _bypass);
             FN_OPEN64(raw_path, open_flags, mode)
-        })
-    }
-}
-
-/// Hook for `libc::__open64`.
-///
-/// **Bypassed** by `raw_path`s that match what's in the `generate_local_set` regex, see
-/// [`super::filter`].
-#[hook_fn]
-pub(super) unsafe extern "C" fn __open64_detour(
-    raw_path: *const c_char,
-    open_flags: c_int,
-    mut args: ...
-) -> RawFd {
-    let mode: c_int = args.arg();
-    let guard = DetourGuard::new();
-    debug!("here2!");
-    if guard.is_none() {
-        FN___OPEN64(raw_path, open_flags, mode)
-    } else {
-        open_logic(raw_path, open_flags, mode).unwrap_or_bypass_with(|_bypass| {
-            #[cfg(target_os = "macos")]
-            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
-            FN___OPEN64(raw_path, open_flags, mode)
         })
     }
 }
@@ -821,7 +795,6 @@ unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs) -> c_int {
 pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
     replace!(hook_manager, "open64", open64_detour, FnOpen64, FN_OPEN64);
-    replace!(hook_manager, "__open64", __open64_detour, Fn__open64, FN___OPEN64);
     replace!(
         hook_manager,
         "open$NOCANCEL",
