@@ -48,7 +48,7 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 /// All of the configuration fields have a default value, so a minimal configuration would be no
 /// configuration at all.
 ///
-/// The configuration supports templating using the [Tera](https://tera.netlify.app/) template engine.
+/// The configuration supports templating using the [Tera](https://keats.github.io/tera/docs/) template engine.
 /// Currently we don't provide additional values to the context, if you have anything you want us to
 /// provide please let us know.
 ///
