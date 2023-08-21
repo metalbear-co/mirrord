@@ -135,7 +135,7 @@ impl CredentialStoreSync {
     }
 
     /// Actual implementation for exclusive lock on `CREDENTIALS_PATH`.
-    async fn with_exclusive_lock<R, C, V>(
+    pub async fn with_exclusive_lock<R, C, V>(
         client: &Client,
         credential_name: String,
         callback: C,
@@ -177,48 +177,5 @@ impl CredentialStoreSync {
             .map_err(CertificateStoreError::Lockfile)?;
 
         result
-    }
-
-    /// Get client certificate while keeping an exclusive lock on `CREDENTIALS_PATH` (and releasing
-    /// it regrading of result)
-    #[tracing::instrument(level = "trace", skip(client))]
-    pub async fn get_client_certificate<R>(
-        client: &Client,
-        credential_name: String,
-    ) -> Result<Vec<u8>>
-    where
-        R: Resource + Clone + Debug,
-        R: for<'de> Deserialize<'de>,
-        R::DynamicType: Default,
-    {
-        Self::with_exclusive_lock::<R, _, Vec<u8>>(client, credential_name, |credentials| {
-            credentials
-                .as_ref()
-                .encode_der()
-                .map_err(AuthenticationError::Pem)
-        })
-        .await
-    }
-
-    /// Get client certificate fingerprint while keeping an exclusive lock on `CREDENTIALS_PATH`
-    /// (and releasing it regrading of result)
-    #[tracing::instrument(level = "trace", skip(client))]
-    pub async fn get_client_fingerprint<R>(
-        client: &Client,
-        credential_name: String,
-    ) -> Result<Vec<u8>>
-    where
-        R: Resource + Clone + Debug,
-        R: for<'de> Deserialize<'de>,
-        R::DynamicType: Default,
-    {
-        Self::with_exclusive_lock::<R, _, Vec<u8>>(client, credential_name, |credentials| {
-            credentials
-                .as_ref()
-                .sha256_fingerprint()
-                .map(|digest| digest.as_ref().to_vec())
-                .map_err(AuthenticationError::Fingerprint)
-        })
-        .await
     }
 }

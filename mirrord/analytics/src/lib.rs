@@ -83,6 +83,15 @@ impl AnalyticsHash {
     }
 }
 
+impl FromIterator<u8> for AnalyticsHash {
+    fn from_iter<T>(values: T) -> Self
+    where
+        T: IntoIterator<Item = u8>,
+    {
+        AnalyticsHash(values.into_iter().collect())
+    }
+}
+
 /// Structs that collect analytics about themselves should implement this trait
 pub trait CollectAnalytics {
     /// Write analytics data to the given `Analytics` struct

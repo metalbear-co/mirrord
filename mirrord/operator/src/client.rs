@@ -2,7 +2,9 @@ use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
 use kube::{error::ErrorResponse, Api, Client, Resource};
-use mirrord_auth::{credential_store::CredentialStoreSync, error::AuthenticationError};
+use mirrord_auth::{
+    certificate::Certificate, credential_store::CredentialStoreSync, error::AuthenticationError,
+};
 use mirrord_config::{
     feature::network::incoming::ConcurrentSteal, target::TargetConfig, LayerConfig,
 };
@@ -55,7 +57,7 @@ type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
 /// Data we store into environment variables for the child processes to use.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct OperatorSessionInformation {
-    pub client_hash: Option<String>,
+    pub client_certificate: Option<Certificate>,
     pub session_id: u64,
     pub target: TargetCrd,
     pub fingerprint: Option<String>,
@@ -65,14 +67,14 @@ pub struct OperatorSessionInformation {
 
 impl OperatorSessionInformation {
     pub fn new(
-        client_hash: Option<String>,
+        client_certificate: Option<Certificate>,
         target: TargetCrd,
         fingerprint: Option<String>,
         operator_features: Vec<OperatorFeatures>,
         protocol_version: Option<semver::Version>,
     ) -> Self {
         Self {
-            client_hash,
+            client_certificate,
             session_id: rand::random(),
             target,
             fingerprint,
@@ -148,22 +150,22 @@ impl OperatorApi {
             }
             version_progress.success(None);
 
-            let client_hash =
+            let client_certificate =
                 if let Some(credential_name) = status.spec.license.fingerprint.as_ref() {
-                    CredentialStoreSync::get_client_fingerprint::<MirrordOperatorCrd>(
+                    CredentialStoreSync::with_exclusive_lock::<MirrordOperatorCrd, _, _>(
                         &operator_api.client,
                         credential_name.to_string(),
+                        |credentails| Ok(credentails.as_ref().clone()),
                     )
                     .await
-                    .map(|certificate_der| general_purpose::STANDARD_NO_PAD.encode(certificate_der))
-                    .map_err(|err| debug!("CredentialStore fingerprint error: {err}"))
+                    .map_err(|err| debug!("CredentialStore error: {err}"))
                     .ok()
                 } else {
                     None
                 };
 
             let operator_session_information = OperatorSessionInformation::new(
-                client_hash,
+                client_certificate,
                 target,
                 status.spec.license.fingerprint,
                 status.spec.features.unwrap_or_default(),
@@ -297,14 +299,19 @@ impl OperatorApi {
             .uri(self.connect_url(session_information))
             .header("x-session-id", session_information.session_id.to_string());
 
-        if let Some(credential_name) = &session_information.fingerprint {
-            let client_credentials = CredentialStoreSync::get_client_certificate::<
-                MirrordOperatorCrd,
-            >(&self.client, credential_name.to_string())
-            .await
-            .map(|certificate_der| general_purpose::STANDARD.encode(certificate_der))?;
-
-            builder = builder.header("x-client-der", client_credentials);
+        if let Some(certificate) = &session_information.client_certificate {
+            match certificate
+                .encode_der()
+                .map(|certificate_der| general_purpose::STANDARD.encode(certificate_der))
+                .map_err(AuthenticationError::Pem)
+            {
+                Ok(client_credentials) => {
+                    builder = builder.header("x-client-der", client_credentials);
+                }
+                Err(err) => {
+                    debug!("CredentialStore error: {err}");
+                }
+            }
         }
 
         let connection = self

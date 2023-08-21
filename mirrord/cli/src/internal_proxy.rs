@@ -272,9 +272,10 @@ pub(crate) async fn proxy() -> Result<()> {
             started.elapsed(),
             operator.map(|operator| AnalyticsOperatorProperties {
                 client_hash: operator
-                    .client_hash
-                    .as_deref()
-                    .and_then(AnalyticsHash::from_base64),
+                    .client_certificate
+                    .as_ref()
+                    .and_then(|certificate| certificate.sha256_fingerprint().ok())
+                    .map(|digest| digest.as_ref().iter().copied().collect()),
                 license_hash: operator
                     .fingerprint
                     .as_deref()
