@@ -97,20 +97,32 @@ impl State {
             None => None,
         };
 
-        let environ_path = PathBuf::from("/proc")
-            .join(
+        // If we are in an ephemeral container, we use pid 1.
+        // if not, we use the pid of the target container or fallback to self
+        let pid = {
+            if args.ephemeral_container {
+                "1".to_string()
+            } else {
                 container
                     .as_ref()
                     .map(|h| h.pid().to_string())
-                    .unwrap_or_else(|| "self".to_string()),
-            )
-            .join("environ");
+                    .unwrap_or_else(|| "self".to_string())
+            }
+        };
 
-        let mut env = container
-            .as_ref()
-            .map(ContainerHandle::raw_env)
-            .cloned()
-            .unwrap_or_default();
+        let mut env: HashMap<String, String> = HashMap::new();
+
+        let environ_path = PathBuf::from("/proc").join(pid).join("environ");
+
+        if let Some(container) = container.as_ref() {
+            env.extend(container.raw_env().clone());
+        }
+
+        // in ephemeral container, we get same env as the target container, so copy our env.
+        if args.ephemeral_container {
+            env.extend(std::env::vars())
+        }
+
         match env::get_proc_environ(environ_path).await {
             Ok(environ) => env.extend(environ.into_iter()),
             Err(err) => {
@@ -474,6 +486,7 @@ impl ClientConnectionHandler {
                 self.respond(DaemonMessage::SwitchProtocolVersionResponse(version))
                     .await?;
             }
+            ClientMessage::ReadyForLogs => {}
         }
 
         Ok(true)

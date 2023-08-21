@@ -110,6 +110,7 @@ impl RuntimeData {
         })
     }
 
+    #[tracing::instrument(level = "trace", skip(client), ret)]
     pub async fn check_node(&self, client: &kube::Client) -> NodeCheck {
         let node_api: Api<Node> = Api::all(client.clone());
         let pod_api: Api<Pod> = Api::all(client.clone());
@@ -153,6 +154,7 @@ impl RuntimeData {
     }
 }
 
+#[derive(Debug)]
 pub enum NodeCheck {
     Success,
     Failed(String, usize),
