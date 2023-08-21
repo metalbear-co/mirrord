@@ -232,6 +232,7 @@ pub(super) unsafe extern "C" fn dup3_detour(oldfd: c_int, newfd: c_int, flags: c
         }
     }
 }
+
 /// Turns the raw pointer parameters into Rust types and calls `ops::getaddrinfo`.
 ///
 /// # Warning:

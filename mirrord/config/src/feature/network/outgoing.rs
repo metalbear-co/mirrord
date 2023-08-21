@@ -154,7 +154,7 @@ impl MirrordToggleableConfig for OutgoingFileConfig {
 }
 
 /// <!--${internal}-->
-/// Errors related to parsing an [`OutgoingFilter`].  
+/// Errors related to parsing an [`OutgoingFilter`].
 #[derive(Debug, Error)]
 pub enum OutgoingFilterError {
     #[error("Nom: failed parsing with {0}!")]

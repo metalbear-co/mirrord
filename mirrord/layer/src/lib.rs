@@ -232,12 +232,8 @@ pub(crate) static INCOMING_CONFIG: OnceLock<IncomingConfig> = OnceLock::new();
 /// mirroring/stealing from a targetless agent.
 pub(crate) static TARGETLESS: OnceLock<bool> = OnceLock::new();
 
-// TODO(alex): To support DNS on the selector, change it to `LazyLock<Arc<Mutex>>`, so we can modify
-// the global on `OutgoingSelector::connect_remote`, converting `AddressFilter:Name` to however
-// many addresses we resolve into `AddressFilter::Socket`.
-//
-// Also, we need a global for `REMOTE_DNS`, so we can check it in
-// `OutgoingSelector::connect_remote`, and only resolve DNS through remote if it's `true`.
+/// Whether to resolve DNS locally or through the remote pod.
+pub(crate) static REMOTE_DNS: OnceLock<bool> = OnceLock::new();
 
 /// Selector for how outgoing connection will behave, either sending traffic via the remote or from
 /// local app, according to how the user set up the `remote`, and `local` filter, in
@@ -366,6 +362,9 @@ fn set_globals(config: &LayerConfig) {
     FILE_MODE
         .set(config.feature.fs.clone())
         .expect("Setting FILE_MODE failed.");
+    INCOMING_CONFIG
+        .set(config.feature.network.incoming.clone())
+        .expect("SETTING INCOMING_CONFIG singleton");
 
     // These must come before `OutgoingSelector::new`.
     ENABLED_TCP_OUTGOING
@@ -375,12 +374,12 @@ fn set_globals(config: &LayerConfig) {
         .set(config.feature.network.outgoing.udp)
         .expect("Setting ENABLED_UDP_OUTGOING singleton");
 
-    INCOMING_CONFIG
-        .set(config.feature.network.incoming.clone())
-        .expect("SETTING INCOMING_CONFIG singleton");
+    REMOTE_DNS
+        .set(config.feature.network.dns)
+        .expect("Setting REMOTE_DNS singleton");
 
     {
-        let outgoing_selector = config
+        let outgoing_selector: OutgoingSelector = config
             .feature
             .network
             .outgoing
@@ -1062,13 +1061,11 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
     res
 }
 
-// TODO(alex) [mid] 2023-01-24: What is this?
-///
 /// No need to guard because we call another detour which will do the guard for us.
 ///
 /// ## Hook
 ///
-/// Replaces `?`.
+/// One of the many [`libc::close`]-ish functions.
 #[hook_fn]
 pub(crate) unsafe extern "C" fn close_nocancel_detour(fd: c_int) -> c_int {
     close_detour(fd)
@@ -1084,8 +1081,6 @@ pub(crate) unsafe extern "C" fn __close_detour(fd: c_int) -> c_int {
     close_detour(fd)
 }
 
-// TODO(alex) [mid] 2023-01-24: What is this?
-///
 /// ## Hook
 ///
 /// Needed for libuv that calls the syscall directly.
