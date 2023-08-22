@@ -915,11 +915,6 @@ pub(super) fn recv_from(
     raw_source: *mut sockaddr,
     source_length: *mut socklen_t,
 ) -> Detour<isize> {
-    if errno::errno() == errno::Errno(libc::EAGAIN) {
-        trace!("recvfrom/recvmsg hit EAGAIN, setting errno to 0");
-        errno::set_errno(errno::Errno(0));
-    }
-
     SOCKETS
         .get(&sockfd)
         .and_then(|socket| match &socket.state {
@@ -931,6 +926,7 @@ pub(super) fn recv_from(
         .map(SocketAddress::try_into)?
         .map(|address| fill_address(raw_source, source_length, address))??;
 
+    errno::set_errno(errno::Errno(0));
     Detour::Success(recv_from_result)
 }
 

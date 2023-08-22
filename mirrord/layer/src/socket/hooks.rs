@@ -383,7 +383,7 @@ pub(super) unsafe extern "C" fn recvmsg_detour(
 ) -> ssize_t {
     let recvmsg_result = FN_RECVMSG(sockfd, message_header, flags);
 
-    if recvmsg_result == -1 && errno::errno() != errno::Errno(libc::EAGAIN) {
+    if recvmsg_result == -1 {
         recvmsg_result
     } else {
         // Fills the address, similar to how `recv_from` works.
