@@ -69,6 +69,8 @@ mod sniffer;
 mod steal;
 mod util;
 mod watched_task;
+mod cgroup;
+mod namespace;
 
 const CHANNEL_SIZE: usize = 1024;
 

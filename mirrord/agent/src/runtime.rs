@@ -1,12 +1,11 @@
 use std::{
     collections::HashMap,
     fs::File,
-    os::unix::io::{IntoRawFd, RawFd},
+    os::{unix::io::{IntoRawFd, RawFd}, fd::OwnedFd},
     path::PathBuf,
 };
 
 use bollard::{container::InspectContainerOptions, Docker, API_DEFAULT_VERSION};
-use cgroups_rs::freezer::FreezerController;
 use containerd_client::{
     services::v1::{
         containers_client::ContainersClient, tasks_client::TasksClient, GetContainerRequest,
@@ -351,7 +350,7 @@ impl ContainerRuntime for EphemeralContainer {
 
 #[tracing::instrument(level = "trace")]
 pub fn set_namespace(ns_path: PathBuf) -> Result<()> {
-    let fd: RawFd = File::open(ns_path)?.into_raw_fd();
+    let fd: OwnedFd = File::open(ns_path)?.into();
     trace!("set_namespace -> fd {:#?}", fd);
 
     setns(fd, nix::sched::CloneFlags::CLONE_NEWNET)?;
