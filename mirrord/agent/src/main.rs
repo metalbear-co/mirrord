@@ -82,8 +82,6 @@ struct State {
     /// pausing. When those args are not passed, container is [`None`].
     container: Option<ContainerHandle>,
     env: HashMap<String, String>,
-    /// Whether this agent is run in an ephemeral container.
-    ephemeral: bool,
 }
 
 impl State {

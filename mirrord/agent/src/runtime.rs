@@ -317,17 +317,20 @@ impl ContainerRuntime for EphemeralContainer {
         let root_process_cgroup = cgroups_rs::Cgroup::load(hierarchy, "/proc/1/sys/fs/cgroup");
         let root_pids = root_process_cgroup.procs();
 
+        let hierarchy = cgroups_rs::hierarchies::auto();
         // create new cgroup with freezer only, add this procs - this might exist from previous runs
         // of mirrord.
-        let mut cgroup = cgroups_rs::Cgroup::new_with_specified_controllers(
+        let cgroup = cgroups_rs::Cgroup::new_with_specified_controllers(
             hierarchy,
             MIRRORD_CGROUP_PATH,
             Some(vec!["freezer".to_string()]),
         )?;
         for pid in root_pids {
-            cgroup.add_task(*pid)?;
+            cgroup.add_task(pid)?;
         }
-        let freezer_controller: &FreezerController = cgroup.controller_of();
+        let freezer_controller: &FreezerController = cgroup
+            .controller_of()
+            .ok_or(AgentError::PauseFailedCgroupFreezerNotFound)?;
         freezer_controller.freeze()?;
         Ok(())
     }
@@ -336,9 +339,11 @@ impl ContainerRuntime for EphemeralContainer {
         let cgroup = cgroups_rs::Cgroup::load_with_specified_controllers(
             cgroups_rs::hierarchies::auto(),
             MIRRORD_CGROUP_PATH,
-            Some(vec!["freezer".to_string()]),
+            vec!["freezer".to_string()],
         );
-        let freezer_controller: &FreezerController = cgroup.controller_of();
+        let freezer_controller: &FreezerController = cgroup
+            .controller_of()
+            .ok_or(AgentError::PauseFailedCgroupFreezerNotFound)?;
         freezer_controller.thaw()?;
         Ok(())
     }
