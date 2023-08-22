@@ -53,8 +53,8 @@ impl MirrordExecution {
         P: Progress + Send + Sync,
     {
         let warnings = config.verify()?;
-        for &warning in warnings {
-            progress.warning(warning);
+        for warning in warnings {
+            progress.warning(&warning);
         }
 
         let lib_path = extract_library(None, progress, true)?;
