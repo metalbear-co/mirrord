@@ -70,7 +70,7 @@ impl Analytics {
 /// Type safe abstraction for Bytes to send hash values, should be explicitly created so we woun't
 /// accidentaly send sensitive data
 ///
-/// Serializes to base64 for more optimal size of json
+/// Saved as base64 for more optimal size of json
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AnalyticsHash(String);
 
@@ -124,9 +124,13 @@ impl<T: CollectAnalytics> From<T> for AnalyticValue {
     }
 }
 
+/// Extra fields for `AnalyticsReport` when using mirrord with operator.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AnalyticsOperatorProperties {
+    /// sha256 fingerprint from client certificate
     pub client_hash: Option<AnalyticsHash>,
+
+    /// sha256 fingerprint from operator license
     pub license_hash: Option<AnalyticsHash>,
 }
 
