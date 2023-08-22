@@ -15,7 +15,7 @@ edition.workspace = true
 
 
 [dependencies]
-
+base64 = "0.21"
 serde.workspace = true
 reqwest.workspace = true
 tracing.workspace = true
