@@ -1,9 +1,13 @@
 //! Logic for pausing using cgroup directly
-//! Pause requires privileged 
-use std::path::Path;
+//! Pause requires privileged - assumes ephemeral (hardcoded pid 1)
+use std::{path::Path, fs::{File, OpenOptions}, io::Write};
+
+use enum_dispatch::enum_dispatch;
+use nix::mount::{mount, MsFlags};
 
 use crate::error::Result;
-use enum_dispatch::enum_dispatch;
+
+const CGROUP_MOUNT_PATH: &str = "/mirrord_cgroup";
 
 /// Trait for objects that can be paused
 #[enum_dispatch]
@@ -16,11 +20,28 @@ struct CgroupV1 {}
 
 impl CgroupFreeze for CgroupV1 {
     fn pause(&self) -> Result<()> {
-        unimplemented!()
+        // Enter the namespace, we might be already in it but it doesn't really matter
+        // Note: Entering the cgroup namespace **doesn't** set put our process in the cgroup :phew:
+        set_namespace(1, NamespaceType::Cgroup)?;
+        // Check if our cgroup is mounted, if not, mount it.
+        let cgroup_path = Path::new(CGROUP_MOUNT_PATH);
+        if !cgroup_path.exists() {
+            mount(None, cgroup_path, Some("cgroup"), MsFlags::empty(), None)?;
+        }
+        let open_options = OpenOptions::new().write(true);
+        let file = open_options.open(cgroup_path.join("freezer").join("freezer.state"))?;
+        file.write_all("FROZEN".as_bytes())?;
+
+        Ok(())
     }
 
     fn unpause(&self) -> Result<()> {
-        unimplemented!()
+        // if we're unpausing, mount should exist and we should be in the cgroup namespace
+        let cgroup_path = Path::new(CGROUP_MOUNT_PATH);
+        let open_options = OpenOptions::new().write(true);
+        let mut file = open_options.open(cgroup_path.join("freezer").join("freezer.state"))?;
+        file.write_all("THAWED".as_bytes())?;
+        Ok(())
     }
 }
 

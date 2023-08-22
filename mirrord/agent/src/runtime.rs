@@ -15,7 +15,6 @@ use containerd_client::{
     with_namespace,
 };
 use enum_dispatch::enum_dispatch;
-use nix::sched::setns;
 use oci_spec::runtime::Spec;
 use tokio::net::UnixStream;
 use tonic::transport::{Endpoint, Uri};
@@ -26,6 +25,7 @@ use crate::{
     env::parse_raw_env,
     error::{AgentError, Result},
     runtime::crio::CriOContainer,
+    namespace
 };
 
 mod crio;
@@ -348,11 +348,3 @@ impl ContainerRuntime for EphemeralContainer {
     }
 }
 
-#[tracing::instrument(level = "trace")]
-pub fn set_namespace(ns_path: PathBuf) -> Result<()> {
-    let fd: OwnedFd = File::open(ns_path)?.into();
-    trace!("set_namespace -> fd {:#?}", fd);
-
-    setns(fd, nix::sched::CloneFlags::CLONE_NEWNET)?;
-    Ok(())
-}
