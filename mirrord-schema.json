@@ -156,7 +156,7 @@
   "additionalProperties": false,
   "definitions": {
     "AdvancedFsUserConfig": {
-      "description": "Allows the user to specify the default behavior for file operations:\n\n1. `\"read\"` - Read from the remote file system (default) 2. `\"write\"` - Read/Write from the remote file system. 3. `\"local\"` - Read from the local file system. 5. `\"disable\"` - Disable file operations.\n\nBesides the default behavior, the user can specify behavior for specific regex patterns. Case insensitive.\n\n1. `\"read_write\"` - List of patterns that should be read/write remotely. 2. `\"read_only\"` - List of patterns that should be read only remotely. 3. `\"local\"` - List of patterns that should be read locally.\n\nThe logic for choosing the behavior is as follows:\n\n1. Check if one of the patterns match the file path, do the corresponding action. There's no specified order if two lists match the same path, we will use the first one (and we do not guarantee what is first).\n\n**Warning**: Specifying the same path in two lists is unsupported and can lead to undefined behaviour.\n\n2. Check our \"special list\" - we have an internal at compile time list for different behavior based on patterns to provide better UX.\n\n3. If none of the above match, use the default behavior (mode).\n\nFor more information, check the file operations [technical reference](https://mirrord.dev/docs/reference/fileops/).\n\n```json { \"feature\": { \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\.json\" , \"read_only\": [ \".+\\.yaml\", \".+important-file\\.txt\" ], \"local\": [ \".+\\.js\", \".+\\.mjs\" ] } } } ```",
+      "description": "Allows the user to specify the default behavior for file operations:\n\n1. `\"read\"` - Read from the remote file system (default) 2. `\"write\"` - Read/Write from the remote file system. 3. `\"local\"` - Read from the local file system. 5. `\"disable\"` - Disable file operations.\n\nBesides the default behavior, the user can specify behavior for specific regex patterns. Case insensitive.\n\n1. `\"read_write\"` - List of patterns that should be read/write remotely. 2. `\"read_only\"` - List of patterns that should be read only remotely. 3. `\"local\"` - List of patterns that should be read locally. 4. `\"not_found\"` - List of patters that should never be read nor written. These files should be treated as non-existent.\n\nThe logic for choosing the behavior is as follows:\n\n1. Check if one of the patterns match the file path, do the corresponding action. There's no specified order if two lists match the same path, we will use the first one (and we do not guarantee what is first).\n\n**Warning**: Specifying the same path in two lists is unsupported and can lead to undefined behaviour.\n\n2. Check our \"special list\" - we have an internal at compile time list for different behavior based on patterns to provide better UX.\n\n3. If none of the above match, use the default behavior (mode).\n\nFor more information, check the file operations [technical reference](https://mirrord.dev/docs/reference/fileops/).\n\n```json { \"feature\": { \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\.json\" , \"read_only\": [ \".+\\.yaml\", \".+important-file\\.txt\" ], \"local\": [ \".+\\.js\", \".+\\.mjs\" ], \"not_found\": [ \"\\.config/gcloud\" ] } } } ```",
       "type": "object",
       "properties": {
         "local": {
@@ -176,6 +176,18 @@
           "anyOf": [
             {
               "$ref": "#/definitions/FsModeConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "not_found": {
+          "title": "feature.fs.not_found {#feature-fs-not_found}",
+          "description": "Specify file path patterns that if matched will be treated as non-existent.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
             },
             {
               "type": "null"

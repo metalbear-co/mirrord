@@ -1,7 +1,7 @@
 //! We implement each hook function in a safe function as much as possible, having the unsafe do the
 //! absolute minimum
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::VecDeque,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
     os::unix::io::RawFd,
     str::FromStr,
@@ -9,9 +9,12 @@ use std::{
 };
 
 use dashmap::DashMap;
+use hashbrown::hash_set::HashSet;
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_config::{
-    feature::network::outgoing::{OutgoingFilter, OutgoingFilterConfig},
+    feature::network::outgoing::{
+        AddressFilter, OutgoingFilter, OutgoingFilterConfig, ProtocolFilter,
+    },
     util::VecOrSingle,
 };
 use mirrord_protocol::outgoing::SocketAddress;
@@ -22,9 +25,10 @@ use trust_dns_resolver::config::Protocol;
 use self::id::SocketId;
 use crate::{
     common::{blocking_send_hook_message, HookMessage},
-    detour::{Bypass, Detour, OptionExt},
+    detour::{Bypass, Detour, DetourGuard, OptionExt},
     error::{HookError, HookResult, LayerError},
-    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING,
+    socket::ops::{remote_getaddrinfo, REMOTE_DNS_REVERSE_MAPPING},
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, REMOTE_DNS,
 };
 
 pub(super) mod hooks;
@@ -270,6 +274,16 @@ impl UserSocket {
     }
 }
 
+/// Holds valid address that we should use to `connect_outgoing`.
+#[derive(Debug, Clone, Copy)]
+enum ConnectionThrough {
+    /// Connect locally, this means just call `FN_CONNECT` on the inner [`SokcetAddr`].
+    Local(SocketAddr),
+
+    /// Connect through the agent.
+    Remote(SocketAddr),
+}
+
 /// Holds the [`OutgoingFilter`]s set up by the user, after a little bit of checking, see
 /// [`OutgoingSelector::new`].
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -292,8 +306,6 @@ impl TryFrom<Option<OutgoingFilterConfig>> for OutgoingSelector {
     ///
     /// It also removes duplicated filters, by putting them into a [`HashSet`].
     fn try_from(value: Option<OutgoingFilterConfig>) -> Result<Self, Self::Error> {
-        use mirrord_config::feature::network::outgoing::*;
-
         let enabled_tcp = *ENABLED_TCP_OUTGOING
             .get()
             .expect("ENABLED_TCP_OUTGOING should be set before initializing OutgoingSelector!");
@@ -334,8 +346,10 @@ impl TryFrom<Option<OutgoingFilterConfig>> for OutgoingSelector {
 }
 
 impl OutgoingSelector {
-    /// Checks if the `address` matches the specified outgoing filter, and returns a `bool`
-    /// indicating if this connection should go through the remote pod, or from the local app.
+    /// Checks if the `address` matches the specified outgoing filter.
+    ///
+    /// Returns either a [`ConnectionThrough::Remote`] or [`ConnectionThroughLocal`], with the
+    /// address that should be connected to.
     ///
     /// ## `remote`
     ///
@@ -346,9 +360,8 @@ impl OutgoingSelector {
     /// ## `local`
     ///
     /// Basically the same thing as `remote`, but the result is reversed, meaning that, if
-    /// `address` matches something specified in `local = [":7777"]`, then _negate_ it and return
-    /// `false`, meaning we return "do not connect remote" (or "connect local" if you prefer
-    /// positive thinking).
+    /// `address` matches something specified in `local = [":7777"]`, then we return a
+    /// [`ConnectionThrough::Local`].
     ///
     /// ## Filter rules
     ///
@@ -359,16 +372,22 @@ impl OutgoingSelector {
     ///
     /// So if the user specified a selector with `0.0.0.0:0`, we're going to be always matching on
     /// it.
-    #[tracing::instrument(level = "debug", ret)]
-    fn connect_remote<const PROTOCOL: ConnectProtocol>(&self, address: SocketAddr) -> bool {
-        use mirrord_config::feature::network::outgoing::{AddressFilter, ProtocolFilter};
-
+    #[tracing::instrument(level = "trace", ret)]
+    fn get_connection_through<const PROTOCOL: ConnectProtocol>(
+        &self,
+        address: SocketAddr,
+    ) -> Detour<ConnectionThrough> {
+        // Closure that checks if the current filter matches the enabled protocols.
         let filter_protocol = |outgoing: &&OutgoingFilter| match outgoing.protocol {
             ProtocolFilter::Any => true,
             ProtocolFilter::Tcp if PROTOCOL == TCP => true,
             ProtocolFilter::Udp if PROTOCOL == UDP => true,
             _ => false,
         };
+
+        // Closure to skip hostnames, as these filters will be dealt with after being resolved.
+        let skip_unresolved =
+            |outgoing: &&OutgoingFilter| !matches!(outgoing.address, AddressFilter::Name(_));
 
         // Closure that tries to match `address` with something in the selector set.
         let any_address = |outgoing: &OutgoingFilter| match outgoing.address {
@@ -379,25 +398,178 @@ impl OutgoingSelector {
                     || (select_address.port() == 0 && select_address.ip() == address.ip())
                     || select_address == address
             }
-            // TODO(alex): DNS may not trigger the filter, as the local resolved address may be
-            // different from the remote resolved.
-            AddressFilter::Name((ref name, port)) => format!("{name}:{port}")
-                .to_socket_addrs()
-                .map(|mut resolved| {
-                    resolved.any(|resolved_address| {
-                        resolved_address == SocketAddr::new(address.ip(), 0)
-                    })
-                })
-                .unwrap_or_default(),
+            // TODO(alex): We could enforce this at the type level, by converting `OutgoingWhatever`
+            // to a type that doesn't have `AddressFilter::Name`.
+            AddressFilter::Name(_) => unreachable!("BUG: We skip these in the iterator!"),
             AddressFilter::Subnet((subnet, port)) => {
                 subnet.contains(&address.ip()) && (port == 0 || port == address.port())
             }
         };
 
+        // Resolve the hostnames in the filter.
+        let resolved_hosts = match &self {
+            OutgoingSelector::Unfiltered => HashSet::default(),
+            OutgoingSelector::Remote(_) => self.resolve_dns::<true>()?,
+            OutgoingSelector::Local(_) => self.resolve_dns::<false>()?,
+        };
+        let hosts = resolved_hosts.iter();
+
+        // Return the valid address to connect, in some cases (when DNS resolving is involved),
+        // this address may be different than the one we initially received in this function.
+        Detour::Success(match self {
+            OutgoingSelector::Unfiltered => ConnectionThrough::Remote(address),
+            OutgoingSelector::Remote(list) => {
+                if !list
+                    .iter()
+                    .filter(skip_unresolved)
+                    .chain(hosts)
+                    .filter(filter_protocol)
+                    .any(any_address)
+                {
+                    // No "remote" selector matched `address`, so now we try to get the correct
+                    // address to connect to, either it's a resolved hostname, then we check our
+                    // `REMOTE_DNS_REVERSE_MAPPING` and resolve the hostname locally, or this
+                    // `address` is the one the user wants.
+                    Self::get_local_address_to_connect(address)?
+                } else {
+                    ConnectionThrough::Remote(address)
+                }
+            }
+            OutgoingSelector::Local(list) => {
+                if list
+                    .iter()
+                    .filter(skip_unresolved)
+                    .chain(hosts)
+                    .filter(filter_protocol)
+                    .any(any_address)
+                {
+                    // Our "local" selector matched (e.g. because of the port), but this `address`
+                    // might be a remotely resolved ip, so we first have to
+                    // check in our `REMOTE_DNS_REVERSE_MAPPING` to resolve
+                    // the original hostname locally, and get a local ip we can connect to.
+                    Self::get_local_address_to_connect(address)?
+                } else {
+                    ConnectionThrough::Remote(address)
+                }
+            }
+        })
+    }
+
+    /// Resolves the [`OutgoingFilter`] that are host names using either [`remote_getaddrinfo`] or
+    /// regular `getaddrinfo`, depending if the user set up the `dns` feature to resolve DNS through
+    /// the remote pod or not.
+    ///
+    /// The resolved values are returned in a set as `AddressFilter::Socket`.
+    ///
+    /// `REMOTE` controls whether the named hosts should be resolved remotely, by checking if we're
+    /// dealing with [`OutgoingSelector::Remote`] and [`REMOTE_DNS`] is set.
+    #[tracing::instrument(level = "debug", ret)]
+    fn resolve_dns<const REMOTE: bool>(&self) -> HookResult<HashSet<OutgoingFilter>> {
+        // Closure that tries to match `address` with something in the selector set.
+        let is_name =
+            |outgoing: &&OutgoingFilter| matches!(outgoing.address, AddressFilter::Name(_));
+
+        // Converts `AddressFilter::Name`s into something more convenient to be used in `resolve`.
+        let to_name_and_port = |outgoing: &OutgoingFilter| match &outgoing.address {
+            AddressFilter::Name((name, port)) => (outgoing.protocol, name.clone(), *port),
+            _ => unreachable!("Filter went wrong, we should only have named addresses here!"),
+        };
+
+        // Resolves a list of host names, depending on how the user sets the remote `dns` feature.
+        let resolve = |unresolved: HashSet<(ProtocolFilter, String, u16)>| {
+            const USUAL_AMOUNT_OF_ADDRESSES: usize = 8;
+            let amount_of_addresses = unresolved.len() * USUAL_AMOUNT_OF_ADDRESSES;
+            let mut unresolved = unresolved.into_iter();
+
+            let resolved =
+                if *REMOTE_DNS.get().expect("REMOTE_DNS should be set by now!") && REMOTE {
+                    // Resolve DNS through the agent.
+                    unresolved
+                        .try_fold(
+                            HashSet::with_capacity(amount_of_addresses),
+                            |mut resolved, (protocol, name, port)| {
+                                let addresses = remote_getaddrinfo(name, port)?.into_iter().map(
+                                    |(_, address)| OutgoingFilter {
+                                        protocol,
+                                        address: AddressFilter::Socket(SocketAddr::new(
+                                            address.ip(),
+                                            port,
+                                        )),
+                                    },
+                                );
+
+                                resolved.extend(addresses);
+                                Ok::<_, HookError>(resolved)
+                            },
+                        )?
+                        .into_iter()
+                } else {
+                    // Resolve DNS locally.
+                    unresolved
+                        .try_fold(
+                            HashSet::with_capacity(amount_of_addresses),
+                            |mut resolved: HashSet<OutgoingFilter>, (protocol, name, port)| {
+                                let addresses =
+                                    format!("{name}:{port}").to_socket_addrs()?.map(|address| {
+                                        OutgoingFilter {
+                                            protocol,
+                                            address: AddressFilter::Socket(SocketAddr::new(
+                                                address.ip(),
+                                                port,
+                                            )),
+                                        }
+                                    });
+
+                                resolved.extend(addresses);
+                                Ok::<_, HookError>(resolved)
+                            },
+                        )?
+                        .into_iter()
+                };
+
+            Ok::<_, HookError>(resolved)
+        };
+
         match self {
-            OutgoingSelector::Unfiltered => true,
-            OutgoingSelector::Remote(list) => list.iter().filter(filter_protocol).any(any_address),
-            OutgoingSelector::Local(list) => !list.iter().filter(filter_protocol).any(any_address),
+            OutgoingSelector::Unfiltered => Ok(HashSet::new()),
+            OutgoingSelector::Remote(filter) | OutgoingSelector::Local(filter) => Ok(resolve(
+                filter
+                    .iter()
+                    .filter(is_name)
+                    .map(to_name_and_port)
+                    .collect(),
+            )?
+            .collect()),
+        }
+    }
+
+    /// Helper function that looks into the [`REMOTE_DNS_REVERSE_MAPPING`] for `address`, so we can
+    /// retrieve the hostname and resolve it locally (when applicable).
+    ///
+    /// - `address`: the [`SocketAddr`] that was passed to `connect`;
+    ///
+    /// We only get here when the [`OutgoingSelector::Remote`] matched nothing, or when the
+    /// [`OutgoingSelector::Local`] matched on something.
+    ///
+    /// Returns 1 of 2 possibilities:
+    ///
+    /// 1. `address` is in [`REMOTE_DNS_REVERSE_MAPPING`]: resolves the hostname locally, then
+    /// return it as [`ConnectionThrough::Local`];
+    /// 2. `address` is **NOT** in [`REMOTE_DNS_REVERSE_MAPPING`]: return the `address` as-is;
+    #[tracing::instrument(level = "trace", ret)]
+    fn get_local_address_to_connect(address: SocketAddr) -> Detour<ConnectionThrough> {
+        if let Some((cached_hostname, port)) = REMOTE_DNS_REVERSE_MAPPING
+            .get(&SocketAddr::from((address.ip(), 0)))
+            .map(|addr| (addr.value().clone(), address.port()))
+        {
+            let _guard = DetourGuard::new();
+            let locally_resolved = format!("{cached_hostname}:{port}")
+                .to_socket_addrs()?
+                .find(SocketAddr::is_ipv4)?;
+
+            Detour::Success(ConnectionThrough::Local(locally_resolved))
+        } else {
+            Detour::Success(ConnectionThrough::Local(address))
         }
     }
 }

@@ -33,6 +33,14 @@ use crate::{
     OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR, REMOTE_UNIX_STREAMS, TARGETLESS,
 };
 
+/// Holds the pair of [`SocketAddr`] with their hostnames, resolved remotely through
+/// [`getaddrinfo`].
+///
+/// Used by [`connect_outgoing`] to retrieve the hostname from the address that the user called
+/// [`connect`] with, so we can resolve it locally when neccessary.
+pub(super) static REMOTE_DNS_REVERSE_MAPPING: LazyLock<DashMap<SocketAddr, String>> =
+    LazyLock::new(|| DashMap::with_capacity(8));
+
 /// Hostname initialized from the agent with [`gethostname`].
 pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();
 
@@ -310,11 +318,8 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
 ) -> Detour<ConnectResult> {
-    if remote_address.is_unix()
-        || OUTGOING_SELECTOR
-            .get()?
-            .connect_remote::<PROTOCOL>(remote_address.as_socket()?)
-    {
+    // Closure that performs the connection with mirrord messaging.
+    let remote_connection = |remote_address: SockAddr| {
         // Prepare this socket to be intercepted.
         let (mirror_tx, mirror_rx) = oneshot::channel();
 
@@ -370,8 +375,33 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
         SOCKETS.insert(sockfd, user_socket_info);
 
         Detour::Success(connect_result)
+    };
+
+    if remote_address.is_unix() {
+        let connect_result = remote_connection(remote_address)?;
+        Detour::Success(connect_result)
     } else {
-        Detour::Bypass(Bypass::FilteredConnection)
+        // Can't just connect to whatever `remote_address` is, as it might be a remotely resolved
+        // address, in a local connection context (or vice-versa), so we let `remote_connection`
+        // handle this address trickery.
+        match OUTGOING_SELECTOR
+            .get()?
+            .get_connection_through::<PROTOCOL>(remote_address.as_socket()?)?
+        {
+            ConnectionThrough::Remote(addr) => {
+                let connect_result = remote_connection(SockAddr::from(addr))?;
+                Detour::Success(connect_result)
+            }
+            ConnectionThrough::Local(addr) => {
+                let rawish_local_addr = SockAddr::from(addr);
+
+                let connect_result = ConnectResult::from(unsafe {
+                    FN_CONNECT(sockfd, rawish_local_addr.as_ptr(), rawish_local_addr.len())
+                });
+
+                Detour::Success(connect_result)
+            }
+        }
     }
 }
 
@@ -690,6 +720,29 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
     Ok(())
 }
 
+/// Handles the remote communication part of [`getaddrinfo`], call this if you want to resolve a DNS
+/// through the agent, but don't need to deal with all the [`libc::getaddrinfo`] stuff.
+#[tracing::instrument(level = "trace", ret)]
+pub(super) fn remote_getaddrinfo(
+    node: String,
+    service: u16,
+) -> HookResult<Vec<(String, SocketAddr)>> {
+    let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
+    let hook = GetAddrInfo {
+        node,
+        hook_channel_tx,
+    };
+
+    blocking_send_hook_message(HookMessage::GetAddrinfo(hook))?;
+
+    let addr_info_list = hook_channel_rx.blocking_recv()??;
+
+    Ok(addr_info_list
+        .into_iter()
+        .map(|LookupRecord { name, ip }| (name, SocketAddr::from((ip, service))))
+        .collect())
+}
+
 /// Retrieves the result of calling `getaddrinfo` from a remote host (resolves remote DNS),
 /// converting the result into a `Box` allocated raw pointer of `libc::addrinfo` (which is basically
 /// a linked list of such type).
@@ -707,7 +760,7 @@ pub(super) fn getaddrinfo(
     rawish_service: Option<&CStr>,
     raw_hints: Option<&libc::addrinfo>,
 ) -> Detour<*mut libc::addrinfo> {
-    let node = rawish_node
+    let node: String = rawish_node
         .bypass(Bypass::NullNode)?
         .to_str()
         .map_err(|fail| {
@@ -744,23 +797,19 @@ pub(super) fn getaddrinfo(
         ..
     } = raw_hints;
 
-    let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
-    let hook = GetAddrInfo {
-        node,
-        hook_channel_tx,
-    };
-
-    blocking_send_hook_message(HookMessage::GetAddrinfo(hook))?;
-
-    let addr_info_list = hook_channel_rx.blocking_recv()??;
-
     // Convert `service` into a port.
     let service = service.map_or(0, |s| s.parse().unwrap_or_default());
+
     // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
-    let result = addr_info_list
+    let result = remote_getaddrinfo(node.clone(), service)?
         .into_iter()
-        .map(|LookupRecord { name, ip }| (name, SockAddr::from(SocketAddr::from((ip, service)))))
-        .map(|(name, rawish_sock_addr)| {
+        .map(|(name, address)| {
+            // Cache the resolved hosts to use in the outgoing traffic filter.
+            {
+                let _ = REMOTE_DNS_REVERSE_MAPPING.insert(address, node.clone());
+            }
+
+            let rawish_sock_addr = SockAddr::from(address);
             let ai_addrlen = rawish_sock_addr.len();
             let ai_family = rawish_sock_addr.family() as _;
 
@@ -866,11 +915,6 @@ pub(super) fn recv_from(
     raw_source: *mut sockaddr,
     source_length: *mut socklen_t,
 ) -> Detour<isize> {
-    if errno::errno() == errno::Errno(libc::EAGAIN) {
-        trace!("recvfrom/recvmsg hit EAGAIN, setting errno to 0");
-        errno::set_errno(errno::Errno(0));
-    }
-
     SOCKETS
         .get(&sockfd)
         .and_then(|socket| match &socket.state {
@@ -882,6 +926,7 @@ pub(super) fn recv_from(
         .map(SocketAddress::try_into)?
         .map(|address| fill_address(raw_source, source_length, address))??;
 
+    errno::set_errno(errno::Errno(0));
     Detour::Success(recv_from_result)
 }
 

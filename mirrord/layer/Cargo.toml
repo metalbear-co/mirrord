@@ -57,6 +57,7 @@ hyper-util.workspace = true
 http-body-util  = { workspace = true }
 bimap.workspace = true
 dashmap = "5.4"
+hashbrown = "0.14"
 exec.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]

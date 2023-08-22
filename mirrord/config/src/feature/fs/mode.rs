@@ -46,6 +46,10 @@ pub enum FsModeConfig {
 }
 
 impl FsModeConfig {
+    pub fn is_local(self) -> bool {
+        matches!(self, FsModeConfig::Local)
+    }
+
     pub fn is_read(self) -> bool {
         matches!(self, FsModeConfig::Read | FsModeConfig::LocalWithOverrides)
     }

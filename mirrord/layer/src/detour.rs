@@ -200,10 +200,6 @@ pub(crate) enum Bypass {
     /// Hooked a `connect` to a target that is disabled in the configuration.
     DisabledOutgoing,
 
-    /// Outgoing connection either did not match any `remote` selector, or it matched a `local`
-    /// one.
-    FilteredConnection,
-
     /// Incoming traffic is disabled, bypass.
     DisabledIncoming,
 }
