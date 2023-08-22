@@ -321,14 +321,16 @@ impl LayerConfig {
 
     /// Verify that there are no conflicting settings.
     /// We don't call it from `from_env` since we want to verify it only once (from cli)
-    pub fn verify(&self) -> Result<(), ConfigError> {
+    /// Returns vec of warnings
+    pub fn verify(&self) -> Result<Vec<String>, ConfigError> {
+        let mut warnings = Vec::new();
         if self.pause {
             if self.agent.ephemeral {
                 Err(ConfigError::Conflict("Pausing is not yet supported together with an ephemeral agent container.
                 Mutually exclusive arguments `--pause` and `--ephemeral-container` passed together.".to_string()))?;
             }
             if !self.feature.network.incoming.is_steal() {
-                warn!("{PAUSE_WITHOUT_STEAL_WARNING}");
+                warnings.push(PAUSE_WITHOUT_STEAL_WARNING.to_string());
             }
         }
         if self
@@ -392,7 +394,7 @@ impl LayerConfig {
                 ))?;
             }
         }
-        Ok(())
+        Ok(warnings)
     }
 }
 
