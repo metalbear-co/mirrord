@@ -8,6 +8,10 @@ pub enum AuthenticationError {
     #[error(transparent)]
     Pem(std::io::Error),
 
+    /// Error from from generating sha256 fingerprint for certificate/key-pair
+    #[error(transparent)]
+    Fingerprint(std::io::Error),
+
     /// Error from `x509_certificate` library
     #[error(transparent)]
     X509Certificate(#[from] X509CertificateError),

@@ -17,7 +17,9 @@ use std::{
 };
 
 use futures::{stream::StreamExt, SinkExt};
-use mirrord_analytics::{send_analytics, Analytics, CollectAnalytics};
+use mirrord_analytics::{
+    send_analytics, Analytics, AnalyticsHash, AnalyticsOperatorProperties, CollectAnalytics,
+};
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
 use mirrord_operator::client::{OperatorApi, OperatorSessionInformation};
@@ -261,13 +263,24 @@ pub(crate) async fn proxy() -> Result<()> {
     }
     main_connection_cancellation_token.cancel();
 
-    let mut analytics = Analytics::default();
-    (&config).collect_analytics(&mut analytics);
     if config.telemetry {
+        let mut analytics = Analytics::default();
+        (&config).collect_analytics(&mut analytics);
+
         send_analytics(
             analytics,
-            started.elapsed().as_secs().try_into().unwrap_or(u32::MAX),
-            operator,
+            started.elapsed(),
+            operator.map(|operator| AnalyticsOperatorProperties {
+                client_hash: operator
+                    .client_certificate
+                    .as_ref()
+                    .and_then(|certificate| certificate.sha256_fingerprint().ok())
+                    .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
+                license_hash: operator
+                    .fingerprint
+                    .as_deref()
+                    .map(AnalyticsHash::from_base64),
+            }),
         )
         .await;
     }
@@ -291,7 +304,7 @@ async fn connect_and_ping(
     config: &LayerConfig,
 ) -> Result<(
     (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
-    bool,
+    Option<OperatorSessionInformation>,
 )> {
     let ((mut sender, mut receiver), operator) = connect(config).await?;
     ping(&mut sender, &mut receiver).await?;
@@ -361,18 +374,18 @@ async fn connect(
     config: &LayerConfig,
 ) -> Result<(
     (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
-    bool,
+    Option<OperatorSessionInformation>,
 )> {
     if let Some(operator_session_information) = OperatorSessionInformation::from_env()? {
         Ok((
             OperatorApi::connect(config, &operator_session_information).await?,
-            true,
+            Some(operator_session_information),
         ))
     } else if let Some(address) = &config.connect_tcp {
         let stream = TcpStream::connect(address)
             .await
             .map_err(InternalProxyError::TcpConnectError)?;
-        Ok((wrap_raw_connection(stream), false))
+        Ok((wrap_raw_connection(stream), None))
     } else if let (Some(agent_name), Some(port)) =
         (&config.connect_agent_name, config.connect_agent_port)
     {
@@ -380,7 +393,7 @@ async fn connect(
         let connection = k8s_api
             .create_connection((agent_name.clone(), port))
             .await?;
-        Ok((connection, false))
+        Ok((connection, None))
     } else {
         Err(InternalProxyError::NoConnectionMethod.into())
     }

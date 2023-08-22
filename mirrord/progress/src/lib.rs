@@ -243,7 +243,9 @@ impl Progress for SpinnerProgress {
     }
 
     fn warning(&self, msg: &str) {
-        self.progress.set_message(format!("! {msg}"));
+        let formatted_message = format!("! {msg}");
+        self.print(&formatted_message);
+        self.progress.set_message(formatted_message);
     }
 
     fn failure(&mut self, msg: Option<&str>) {

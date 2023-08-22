@@ -1,0 +1,1 @@
+Changed CLI progress to print warnings and not only set it as the last message of progress

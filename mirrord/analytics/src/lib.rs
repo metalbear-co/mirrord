@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
+use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -66,6 +67,25 @@ impl Analytics {
     }
 }
 
+/// Type safe abstraction for Bytes to send hash values, should be explicitly created so we woun't
+/// accidentaly send sensitive data
+///
+/// Saved as base64 for more optimal size of json
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AnalyticsHash(String);
+
+impl AnalyticsHash {
+    /// Create AnalyticsHash from hash bytes
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        AnalyticsHash(general_purpose::STANDARD_NO_PAD.encode(bytes))
+    }
+
+    /// Create AnalyticsHash from base64 string
+    pub fn from_base64(val: &str) -> Self {
+        AnalyticsHash(val.to_owned())
+    }
+}
+
 /// Structs that collect analytics about themselves should implement this trait
 pub trait CollectAnalytics {
     /// Write analytics data to the given `Analytics` struct
@@ -104,6 +124,16 @@ impl<T: CollectAnalytics> From<T> for AnalyticValue {
     }
 }
 
+/// Extra fields for `AnalyticsReport` when using mirrord with operator.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AnalyticsOperatorProperties {
+    /// sha256 fingerprint from client certificate
+    pub client_hash: Option<AnalyticsHash>,
+
+    /// sha256 fingerprint from operator license
+    pub license_hash: Option<AnalyticsHash>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct AnalyticsReport {
     event_properties: Analytics,
@@ -111,15 +141,24 @@ struct AnalyticsReport {
     duration: u32,
     version: String,
     operator: bool,
+    #[serde(flatten)]
+    operator_properties: Option<AnalyticsOperatorProperties>,
 }
 
-pub async fn send_analytics(analytics: Analytics, duration: u32, operator: bool) {
+/// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.co
+#[tracing::instrument(level = "trace")]
+pub async fn send_analytics(
+    analytics: Analytics,
+    duration: Duration,
+    operator_properties: Option<AnalyticsOperatorProperties>,
+) {
     let report = AnalyticsReport {
         event_properties: analytics,
         platform: std::env::consts::OS.to_string(),
         version: CURRENT_VERSION.to_string(),
-        duration,
-        operator,
+        duration: duration.as_secs().try_into().unwrap_or(u32::MAX),
+        operator: operator_properties.is_some(),
+        operator_properties,
     };
 
     let client = reqwest::Client::new();
