@@ -301,9 +301,9 @@ impl OperatorDeployment {
 
         let container = Container {
             name: OPERATOR_NAME.to_owned(),
-            image: match option_env!("MIRRORD_OPERATOR_IMAGE") {
-                Some(image) => Some(image.to_owned()),
-                None => Some(format!(
+            image: match std::env::var("MIRRORD_OPERATOR_IMAGE") {
+                Ok(image) => Some(image.to_owned()),
+                Err(_) => Some(format!(
                     "ghcr.io/metalbear-co/operator:{}",
                     env!("CARGO_PKG_VERSION")
                 )),
