@@ -394,7 +394,7 @@ impl LayerConfig {
                 ))?;
             }
         }
-        Ok(())
+        Ok(warnings)
     }
 }
 
