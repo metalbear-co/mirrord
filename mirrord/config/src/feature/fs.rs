@@ -87,6 +87,7 @@ impl MirrordConfig for FsUserConfig {
                 local: FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN")
                     .source_value()
                     .transpose()?,
+                not_found: None,
             },
             FsUserConfig::Advanced(advanced) => advanced.generate_config()?,
         };
@@ -113,6 +114,7 @@ impl MirrordToggleableConfig for FsUserConfig {
             read_write,
             read_only,
             local,
+            not_found: None,
         })
     }
 }

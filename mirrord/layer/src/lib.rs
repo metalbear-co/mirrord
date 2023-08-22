@@ -545,6 +545,7 @@ fn sip_only_layer_start(patch_binaries: Vec<String>) {
             read_write: None,
             read_only: None,
             local: None,
+            not_found: None,
         }))
         .expect("FILE_FILTER set failed");
     unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
