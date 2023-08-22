@@ -52,7 +52,11 @@ impl MirrordExecution {
     where
         P: Progress + Send + Sync,
     {
-        config.verify()?;
+        let warnings = config.verify()?;
+        for &warning in warnings {
+            progress.warning(warning);
+        }
+
         let lib_path = extract_library(None, progress, true)?;
         let mut env_vars = HashMap::new();
         let (connect_info, mut connection) = create_and_connect(config, progress).await?;
