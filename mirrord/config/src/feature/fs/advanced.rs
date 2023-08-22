@@ -105,16 +105,13 @@ impl MirrordToggleableConfig for AdvancedFsUserConfig {
         let local = FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN")
             .source_value()
             .transpose()?;
-        let not_found = FromEnv::new("MIRRORD_FILE_NOT_FOUND_PATTERN")
-            .source_value()
-            .transpose()?;
 
         Ok(Self::Generated {
             mode,
             read_write,
             read_only,
             local,
-            not_found,
+            not_found: None,
         })
     }
 }
