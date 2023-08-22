@@ -301,12 +301,14 @@ impl OperatorDeployment {
 
         let container = Container {
             name: OPERATOR_NAME.to_owned(),
-            image: std::env::var("MIRRORD_OPERATOR_IMAGE").ok().unwrap_or(|| {
-                format!(
-                    "ghcr.io/metalbear-co/operator:{}",
-                    env!("CARGO_PKG_VERSION")
-                )
-            }),
+            image: std::env::var("MIRRORD_OPERATOR_IMAGE")
+                .ok()
+                .unwrap_or_else(|| {
+                    format!(
+                        "ghcr.io/metalbear-co/operator:{}",
+                        env!("CARGO_PKG_VERSION")
+                    )
+                }),
             image_pull_policy: Some("IfNotPresent".to_owned()),
             env: Some(envs),
             ports: Some(vec![ContainerPort {
