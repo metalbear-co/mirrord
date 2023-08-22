@@ -145,6 +145,7 @@ struct AnalyticsReport {
     operator_properties: Option<AnalyticsOperatorProperties>,
 }
 
+/// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.co
 #[tracing::instrument(level = "trace")]
 pub async fn send_analytics(
     analytics: Analytics,
