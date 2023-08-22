@@ -185,7 +185,8 @@ pub struct LayerConfig {
     /// With this feature enabled, the remote container is paused while this layer is connected to
     /// the agent.
     ///
-    /// Defaults to `false`.
+    /// Note: It requires agent configuration to be set to privileged when running with the
+    /// ephemeral agent option. Defaults to `false`.
     #[config(env = "MIRRORD_PAUSE", default = false, unstable)]
     pub pause: bool,
 
@@ -325,6 +326,9 @@ impl LayerConfig {
     pub fn verify(&self) -> Result<Vec<String>, ConfigError> {
         let mut warnings = Vec::new();
         if self.pause {
+            if self.agent.ephemeral && !self.agent.privileged {
+                warnings.push("The target pause feature with ephemeral requires to enable the privileged flag on the agent.".to_string());
+            }
             if !self.feature.network.incoming.is_steal() {
                 warnings.push(PAUSE_WITHOUT_STEAL_WARNING.to_string());
             }

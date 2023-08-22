@@ -1,0 +1,1 @@
+Changed config verify to return aggregated warnings list for user to print instead of warn in current progress - can fix issues with extension where we printed to stderr.

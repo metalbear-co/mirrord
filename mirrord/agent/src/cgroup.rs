@@ -25,11 +25,12 @@ pub(crate) trait CgroupFreeze {
         let cgroup_path = Path::new(CGROUP_MOUNT_PATH);
         if !cgroup_path.exists() {
             trace!("mounting cgroup");
+            std::fs::create_dir(cgroup_path)?;
             mount(
                 None::<&str>,
                 cgroup_path,
                 Some(self.type_name()),
-                MsFlags::empty(),
+                MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
                 None::<&str>,
             )?;
         }
@@ -43,7 +44,7 @@ pub(crate) trait CgroupFreeze {
         // if we're unpausing, mount should exist and we should be in the cgroup namespace
         let mut open_options = OpenOptions::new();
         let mut file = open_options.write(true).open(self.freeze_path())?;
-        file.write_all(self.freeze_command().as_bytes())?;
+        file.write_all(self.unfreeze_command().as_bytes())?;
         Ok(())
     }
 
@@ -53,6 +54,7 @@ pub(crate) trait CgroupFreeze {
     fn unfreeze_command(&self) -> &'static str;
 }
 
+#[derive(Debug)]
 pub(crate) struct CgroupV1 {}
 
 impl CgroupFreeze for CgroupV1 {
@@ -73,6 +75,7 @@ impl CgroupFreeze for CgroupV1 {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct CgroupV2 {}
 
 impl CgroupFreeze for CgroupV2 {
@@ -94,15 +97,17 @@ impl CgroupFreeze for CgroupV2 {
 }
 
 #[enum_dispatch(CgroupFreeze)]
+#[derive(Debug)]
 pub(crate) enum Cgroup {
     V1(CgroupV1),
     V2(CgroupV2),
 }
 
 /// Checks which cgroup is being used and returns the `Cgroup` enum
+#[tracing::instrument(level = "trace", ret)]
 pub(crate) fn get_cgroup() -> Result<Cgroup> {
     // if `/sys/fs/cgroup.controllers` exists, it means we're v2
-    if Path::new("/sys/fs/cgroup.controllers").exists() {
+    if Path::new("/sys/fs/cgroup/cgroup.controllers").exists() {
         Ok(Cgroup::V2(CgroupV2 {}))
     } else {
         Ok(Cgroup::V1(CgroupV1 {}))
