@@ -275,11 +275,11 @@ pub(crate) async fn proxy() -> Result<()> {
                     .client_certificate
                     .as_ref()
                     .and_then(|certificate| certificate.sha256_fingerprint().ok())
-                    .map(|digest| digest.as_ref().iter().copied().collect()),
+                    .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
                 license_hash: operator
                     .fingerprint
                     .as_deref()
-                    .and_then(AnalyticsHash::from_base64),
+                    .map(AnalyticsHash::from_base64),
             }),
         )
         .await;

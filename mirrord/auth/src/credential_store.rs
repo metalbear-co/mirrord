@@ -15,6 +15,7 @@ use tokio::{
 use tracing::info;
 
 use crate::{
+    certificate::Certificate,
     credentials::Credentials,
     error::{AuthenticationError, CertificateStoreError, Result},
 };
@@ -114,14 +115,14 @@ impl CredentialStoreSync {
         R: Resource + Clone + Debug,
         R: for<'de> Deserialize<'de>,
         R::DynamicType: Default,
-        C: FnOnce(&mut Credentials) -> Result<V>,
+        C: FnOnce(&mut Credentials) -> V,
     {
         let mut store = CredentialStore::load(store_file)
             .await
             .inspect_err(|err| info!("CredentialStore Load Error {err:?}"))
             .unwrap_or_default();
 
-        let result = callback(store.get_or_init::<R>(client, credential_name).await?);
+        let value = callback(store.get_or_init::<R>(client, credential_name).await?);
 
         // Make sure the store_file's cursor is at the start of the file before sending it to save
         store_file
@@ -131,20 +132,18 @@ impl CredentialStoreSync {
 
         store.save(store_file).await?;
 
-        result
+        Ok(value)
     }
 
-    /// Actual implementation for exclusive lock on `CREDENTIALS_PATH`.
-    pub async fn with_exclusive_lock<R, C, V>(
+    /// Get or create speific client-certificate with an exclusive lock on `CREDENTIALS_PATH`.
+    pub async fn get_client_certificate<R>(
         client: &Client,
         credential_name: String,
-        callback: C,
-    ) -> Result<V>
+    ) -> Result<Certificate>
     where
         R: Resource + Clone + Debug,
         R: for<'de> Deserialize<'de>,
         R::DynamicType: Default,
-        C: FnOnce(&mut Credentials) -> Result<V>,
     {
         if !CREDENTIALS_DIR.exists() {
             fs::create_dir_all(&*CREDENTIALS_DIR)
@@ -164,11 +163,11 @@ impl CredentialStoreSync {
             .lock_exclusive()
             .map_err(CertificateStoreError::Lockfile)?;
 
-        let result = Self::access_store_credential::<R, C, V>(
+        let result = Self::access_store_credential::<R, _, Certificate>(
             client,
             credential_name,
             &mut store_file,
-            callback,
+            |credentials| credentials.as_ref().clone(),
         )
         .await;
 

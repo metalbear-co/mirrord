@@ -67,28 +67,22 @@ impl Analytics {
     }
 }
 
+/// Type safe abstraction for Bytes to send hash values, should be explicitly created so we woun't
+/// accidentaly send sensitive data
+///
+/// Serializes to base64 for more optimal size of json
 #[derive(Debug, Serialize, Deserialize)]
-pub struct AnalyticsHash(#[serde(with = "serde_base64")] Vec<u8>);
+pub struct AnalyticsHash(String);
 
 impl AnalyticsHash {
-    pub fn from_digest(val: u64) -> Self {
-        AnalyticsHash(val.to_be_bytes().to_vec())
+    /// Create AnalyticsHash from hash bytes
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        AnalyticsHash(general_purpose::STANDARD_NO_PAD.encode(bytes))
     }
 
-    pub fn from_base64(val: &str) -> Option<Self> {
-        general_purpose::STANDARD_NO_PAD
-            .decode(val)
-            .map(AnalyticsHash)
-            .ok()
-    }
-}
-
-impl FromIterator<u8> for AnalyticsHash {
-    fn from_iter<T>(values: T) -> Self
-    where
-        T: IntoIterator<Item = u8>,
-    {
-        AnalyticsHash(values.into_iter().collect())
+    /// Create AnalyticsHash from base64 string
+    pub fn from_base64(val: &str) -> Self {
+        AnalyticsHash(val.to_owned())
     }
 }
 
@@ -170,23 +164,6 @@ pub async fn send_analytics(
         .await;
     if let Err(e) = res {
         info!("Failed to send analytics: {e}");
-    }
-}
-
-mod serde_base64 {
-    use base64::{engine::general_purpose, Engine as _};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<S: Serializer>(v: &Vec<u8>, s: S) -> Result<S::Ok, S::Error> {
-        let base64 = general_purpose::STANDARD_NO_PAD.encode(v);
-        String::serialize(&base64, s)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
-        let base64 = String::deserialize(d)?;
-        general_purpose::STANDARD_NO_PAD
-            .decode(base64.as_bytes())
-            .map_err(serde::de::Error::custom)
     }
 }
 

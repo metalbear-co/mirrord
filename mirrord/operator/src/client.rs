@@ -152,10 +152,9 @@ impl OperatorApi {
 
             let client_certificate =
                 if let Some(credential_name) = status.spec.license.fingerprint.as_ref() {
-                    CredentialStoreSync::with_exclusive_lock::<MirrordOperatorCrd, _, _>(
+                    CredentialStoreSync::get_client_certificate::<MirrordOperatorCrd>(
                         &operator_api.client,
                         credential_name.to_string(),
-                        |credentails| Ok(credentails.as_ref().clone()),
                     )
                     .await
                     .map_err(|err| debug!("CredentialStore error: {err}"))
