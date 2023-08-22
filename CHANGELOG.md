@@ -8,6 +8,22 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.61.0](https://github.com/metalbear-co/mirrord/tree/3.61.0) - 2023-08-22
+
+
+### Added
+
+- Support DNS resolution for the outgoing filter config.
+  [#702](https://github.com/metalbear-co/mirrord/issues/702)
+
+
+### Fixed
+
+- Fixed wrong errno being set by mirrord, fixing various flows that rely on
+  errno even when return code is ok
+  [#1828](https://github.com/metalbear-co/mirrord/issues/1828)
+
+
 ## [3.60.0](https://github.com/metalbear-co/mirrord/tree/3.60.0) - 2023-08-21
 
 
