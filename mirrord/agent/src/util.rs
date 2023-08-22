@@ -3,14 +3,16 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     future::Future,
     hash::Hash,
-    path::PathBuf,
     thread::JoinHandle,
 };
 
 use num_traits::{CheckedAdd, Num};
 use tracing::error;
 
-use crate::{error::AgentError, namespace::{set_namespace, NamespaceType}};
+use crate::{
+    error::AgentError,
+    namespace::{set_namespace, NamespaceType},
+};
 
 /// Struct that helps you manage topic -> subscribers
 ///

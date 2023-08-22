@@ -146,12 +146,7 @@ pub enum AgentError {
     PauseAbsentTarget,
 
     #[error("Pause failed with cgroup error: {0} - make sure agent is set to privileged.")]
-    PauseFailedCgroup(#[from] cgroups_rs::error::Error),
-
-    #[error(
-        "Pause failed - cgroup freezer hierarchy not found - kernel/host incompat? Please report"
-    )]
-    PauseFailedCgroupFreezerNotFound,
+    PauseFailedCgroup(String),
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;

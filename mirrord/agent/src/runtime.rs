@@ -1,9 +1,4 @@
-use std::{
-    collections::HashMap,
-    fs::File,
-    os::{unix::io::{IntoRawFd, RawFd}, fd::OwnedFd},
-    path::PathBuf,
-};
+use std::collections::HashMap;
 
 use bollard::{container::InspectContainerOptions, Docker, API_DEFAULT_VERSION};
 use containerd_client::{
@@ -19,13 +14,12 @@ use oci_spec::runtime::Spec;
 use tokio::net::UnixStream;
 use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
-use tracing::{trace, warn};
 
 use crate::{
+    cgroup::{get_cgroup, CgroupFreeze},
     env::parse_raw_env,
     error::{AgentError, Result},
     runtime::crio::CriOContainer,
-    namespace
 };
 
 mod crio;
@@ -296,8 +290,6 @@ impl ContainerRuntime for ContainerdContainer {
 #[derive(Debug)]
 pub(crate) struct EphemeralContainer {}
 
-const MIRRORD_CGROUP_PATH: &str = "mirrord";
-
 impl ContainerRuntime for EphemeralContainer {
     /// When running on ephemeral, root pid is always 1 and env is the current process' env. (we
     /// copy it from the k8s spec)
@@ -311,40 +303,14 @@ impl ContainerRuntime for EphemeralContainer {
     /// to the ephemeral cgroup, which means the processes will not be found on the next run
     /// anyway So we prefer to make those stay in mirrord, then re-pause would work.
     async fn pause(&self) -> Result<()> {
-        let hierarchy = cgroups_rs::hierarchies::auto();
-        // get pids of all processes in the root cgroup
-        let root_process_cgroup = cgroups_rs::Cgroup::load(hierarchy, "/proc/1/sys/fs/cgroup");
-        let root_pids = root_process_cgroup.procs();
-
-        let hierarchy = cgroups_rs::hierarchies::auto();
-        // create new cgroup with freezer only, add this procs - this might exist from previous runs
-        // of mirrord.
-        let cgroup = cgroups_rs::Cgroup::new_with_specified_controllers(
-            hierarchy,
-            MIRRORD_CGROUP_PATH,
-            Some(vec!["freezer".to_string()]),
-        )?;
-        for pid in root_pids {
-            cgroup.add_task(pid)?;
-        }
-        let freezer_controller: &FreezerController = cgroup
-            .controller_of()
-            .ok_or(AgentError::PauseFailedCgroupFreezerNotFound)?;
-        freezer_controller.freeze()?;
-        Ok(())
+        get_cgroup()
+            .and_then(|x| x.pause())
+            .map_err(|e| AgentError::PauseFailedCgroup(e.to_string()))
     }
 
     async fn unpause(&self) -> Result<()> {
-        let cgroup = cgroups_rs::Cgroup::load_with_specified_controllers(
-            cgroups_rs::hierarchies::auto(),
-            MIRRORD_CGROUP_PATH,
-            vec!["freezer".to_string()],
-        );
-        let freezer_controller: &FreezerController = cgroup
-            .controller_of()
-            .ok_or(AgentError::PauseFailedCgroupFreezerNotFound)?;
-        freezer_controller.thaw()?;
-        Ok(())
+        get_cgroup()
+            .and_then(|x| x.unpause())
+            .map_err(|e| AgentError::PauseFailedCgroup(e.to_string()))
     }
 }
-

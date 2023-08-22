@@ -57,20 +57,20 @@ use crate::{
     watched_task::{TaskStatus, WatchedTask},
 };
 
+mod cgroup;
 mod cli;
 mod container_handle;
 mod dns;
 mod env;
 mod error;
 mod file;
+mod namespace;
 mod outgoing;
 mod runtime;
 mod sniffer;
 mod steal;
 mod util;
 mod watched_task;
-mod cgroup;
-mod namespace;
 
 const CHANNEL_SIZE: usize = 1024;
 
@@ -84,6 +84,7 @@ struct State {
     /// pausing. When those args are not passed, container is [`None`].
     container: Option<ContainerHandle>,
     env: HashMap<String, String>,
+    ephemeral: bool,
 }
 
 impl State {
@@ -242,10 +243,6 @@ struct ClientConnectionHandler {
     /// Handle to the target container if there is one.
     /// Used for pausing the container.
     container_handle: Option<ContainerHandle>,
-    /// Whether this agent is run in an ephemeral container.
-    /// TODO this is used only to prevent pausing from an ephemeral container and should be removed
-    /// once this feature is supported
-    ephemeral: bool,
 }
 
 impl ClientConnectionHandler {
@@ -320,7 +317,6 @@ impl ClientConnectionHandler {
             dns_api: bg_tasks.dns_api,
             env,
             container_handle,
-            ephemeral,
         };
 
         Ok(client_handler)
