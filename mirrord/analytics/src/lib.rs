@@ -21,6 +21,7 @@ pub enum AnalyticValue {
 #[serde(rename_all = "snake_case")]
 pub enum AnalyticsError {
     AgentConnection,
+    EnvFetch,
 
     #[default]
     Unknown,
