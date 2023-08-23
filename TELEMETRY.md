@@ -1,7 +1,7 @@
 # Telemetry / Analytics
 
 mirrord sends anonymous usage statistics to our systems.
-We don't store IP addresses, and in the open-source version of mirrord, we don't create any unique identifier for the user. In mirrord for Teams, a random key is used as an identifier for each user.
+We don't store IP addresses, and in the open-source version of mirrord, we don't create any unique identifier for the user. In mirrord for Teams, a random key is used as an identifier for each user, along with the key of the operator used.
 
 Data collected is session duration and what features were used (steal/mirror/fs mode, etc).
 This helps us to improve the product and by better understanding our users.
