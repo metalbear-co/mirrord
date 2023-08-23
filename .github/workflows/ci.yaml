@@ -28,7 +28,7 @@ jobs:
       - name: install towncrier
         run: pip install towncrier
       - name: verify newsfragment exist
-        run: towncrier check
+        run: towncrier check --compare-with main
 
   changed_files:
     runs-on: ubuntu-latest
