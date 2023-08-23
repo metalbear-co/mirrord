@@ -101,7 +101,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    container: ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32
+    container: ghcr.io/metalbear-co/ci-agent-build:9dc6509be1220eaa1f5dad22e012d3411afc05c0
     steps:
       - uses: actions/checkout@v3
       - uses: Swatinem/rust-cache@v2
@@ -145,7 +145,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    container: ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32
+    container: ghcr.io/metalbear-co/ci-agent-build:9dc6509be1220eaa1f5dad22e012d3411afc05c0
     steps:
       - uses: actions/checkout@v3
       - uses: Swatinem/rust-cache@v2
@@ -156,7 +156,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    container: ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32
+    container: ghcr.io/metalbear-co/ci-agent-build:9dc6509be1220eaa1f5dad22e012d3411afc05c0
     steps:
       - uses: actions/checkout@v3
       - uses: Swatinem/rust-cache@v2
@@ -167,7 +167,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    container: ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32
+    container: ghcr.io/metalbear-co/ci-agent-build:9dc6509be1220eaa1f5dad22e012d3411afc05c0
     steps:
       - uses: actions/checkout@v3
       - uses: Swatinem/rust-cache@v2
@@ -188,7 +188,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    container: ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32
+    container: ghcr.io/metalbear-co/ci-agent-build:9dc6509be1220eaa1f5dad22e012d3411afc05c0
     steps:
       - uses: actions/checkout@v3
       - uses: Swatinem/rust-cache@v2
@@ -225,7 +225,7 @@ jobs:
         os: [ubuntu-latest]
         target: [x86_64-unknown-linux-gnu]
     runs-on: ${{ matrix.os }}
-    container: ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32
+    container: ghcr.io/metalbear-co/ci-agent-build:9dc6509be1220eaa1f5dad22e012d3411afc05c0
     steps:
       - uses: actions/checkout@v3
       - uses: Swatinem/rust-cache@v2
@@ -264,7 +264,7 @@ jobs:
     name: build mirrord
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    container: ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32
+    container: ghcr.io/metalbear-co/ci-agent-build:9dc6509be1220eaa1f5dad22e012d3411afc05c0
     steps:
       - uses: actions/checkout@v3
       - uses: Swatinem/rust-cache@v2
@@ -284,7 +284,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_TEST_USE_EXISTING_LIB: /home/runner/work/mirrord/mirrord/target/debug/libmirrord_layer.so
-    container: ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32
+    container: ghcr.io/metalbear-co/ci-agent-build:9dc6509be1220eaa1f5dad22e012d3411afc05c0
     steps:
       - uses: actions/checkout@v3
       - uses: Swatinem/rust-cache@v2
