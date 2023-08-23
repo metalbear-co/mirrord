@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use mirrord_analytics::{send_analytics, AnalyticsError, AnalyticsReporter};
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter};
 use mirrord_config::LayerConfig;
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
@@ -60,10 +60,6 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
 
     if execution_result.is_err() && !analytics.has_error() {
         analytics.set_error(AnalyticsError::Unknown);
-    }
-
-    if analytics.has_error() {
-        send_analytics(analytics).await;
     }
 
     execution_result

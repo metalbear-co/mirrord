@@ -18,7 +18,7 @@ use k8s_openapi::{
 };
 use kube::api::ListParams;
 use miette::JSONReportHandler;
-use mirrord_analytics::{send_analytics, AnalyticsError, AnalyticsReporter, CollectAnalytics};
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics};
 use mirrord_config::{config::MirrordConfig, LayerConfig, LayerFileConfig};
 use mirrord_kube::{
     api::{
@@ -222,10 +222,6 @@ async fn exec(args: &ExecArgs) -> Result<()> {
 
     if execution_result.is_err() && !analytics.has_error() {
         analytics.set_error(AnalyticsError::Unknown);
-    }
-
-    if analytics.has_error() {
-        send_analytics(analytics).await;
     }
 
     execution_result

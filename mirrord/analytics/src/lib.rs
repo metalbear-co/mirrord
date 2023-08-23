@@ -171,24 +171,30 @@ impl AnalyticsReporter {
         self.error.is_some()
     }
 
-    fn into_report(self) -> AnalyticsReport {
+    fn as_report(&self) -> AnalyticsReport<'_> {
         let duration = self
             .start_instant
             .elapsed()
             .as_secs()
             .try_into()
             .unwrap_or(u32::MAX);
-        let platform = std::env::consts::OS.to_string();
-        let version = CURRENT_VERSION.to_string();
 
         AnalyticsReport {
             duration,
-            error: self.error,
-            event_properties: self.analytics,
+            error: &self.error,
+            event_properties: &self.analytics,
             operator: self.operator_properties.is_some(),
-            operator_properties: self.operator_properties,
-            platform,
-            version,
+            operator_properties: &self.operator_properties,
+            platform: std::env::consts::OS,
+            version: CURRENT_VERSION,
+        }
+    }
+}
+
+impl Drop for AnalyticsReporter {
+    fn drop(&mut self) {
+        if self.enabled {
+            send_analytics(self.as_report());
         }
     }
 }
@@ -203,33 +209,26 @@ pub struct AnalyticsOperatorProperties {
     pub license_hash: Option<AnalyticsHash>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct AnalyticsReport {
-    event_properties: Analytics,
-    platform: String,
+#[derive(Debug, Serialize)]
+struct AnalyticsReport<'r> {
+    event_properties: &'r Analytics,
+    platform: &'r str,
     duration: u32,
-    version: String,
+    version: &'r str,
     operator: bool,
     #[serde(flatten)]
-    operator_properties: Option<AnalyticsOperatorProperties>,
-    error: Option<AnalyticsError>,
+    operator_properties: &'r Option<AnalyticsOperatorProperties>,
+    error: &'r Option<AnalyticsError>,
 }
 
 /// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.co
 #[tracing::instrument(level = "trace")]
-pub async fn send_analytics(reporter: AnalyticsReporter) {
-    if !reporter.enabled {
-        return;
-    }
-
-    let report = reporter.into_report();
-
-    let client = reqwest::Client::new();
+fn send_analytics(report: AnalyticsReport) {
+    let client = reqwest::blocking::Client::new();
     let res = client
         .post("https://analytics.metalbear.co/api/v1/event")
         .json(&report)
-        .send()
-        .await;
+        .send();
     if let Err(e) = res {
         info!("Failed to send analytics: {e}");
     }
