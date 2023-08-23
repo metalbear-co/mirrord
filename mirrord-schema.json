@@ -310,7 +310,7 @@
         },
         "namespace": {
           "title": "agent.namespace {#agent-namespace}",
-          "description": "Namespace where the agent shall live.\n\nDefaults to the current kubernetes namespace.",
+          "description": "Namespace where the agent shall live. Note: Doesn't work with ephemeral containers. Defaults to the current kubernetes namespace.",
           "type": [
             "string",
             "null"

@@ -333,6 +333,14 @@ impl LayerConfig {
                 warnings.push(PAUSE_WITHOUT_STEAL_WARNING.to_string());
             }
         }
+
+        if self.agent.ephemeral && self.agent.namespace.is_some() {
+            warnings.push(
+                "Agent namespace is ignored when using an ephemeral container for the agent."
+                    .to_string(),
+            );
+        }
+
         if self
             .feature
             .network
