@@ -37,7 +37,8 @@ impl CgroupV1 {
         let file = std::fs::File::open("/proc/1/cgroup")?;
         let reader = std::io::BufReader::new(file).lines();
         for line in reader {
-            let mut line_iter = line?.split(':');
+            let line = line?;
+            let mut line_iter = line.split(':');
             // we don't care about the number, prefer the string for comparison
             line_iter.next().ok_or(AgentError::PauseFailedCgroup(
                 "malformed ID cgroup v1 file".to_string(),
