@@ -62,6 +62,7 @@ impl CgroupFreeze for CgroupV1 {
         "cgroup"
     }
 
+    #[allow(clippy::indexing-slicing)]
     fn freeze_path(&self) -> &'static str {
         formatcp!("{CGROUP_MOUNT_PATH}/freezer/freezer.state")
     }
@@ -83,6 +84,7 @@ impl CgroupFreeze for CgroupV2 {
         "cgroup2"
     }
 
+    #[allow(clippy::indexing-slicing)]
     fn freeze_path(&self) -> &'static str {
         formatcp!("{CGROUP_MOUNT_PATH}/cgroup.freeze")
     }

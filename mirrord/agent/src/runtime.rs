@@ -79,7 +79,7 @@ pub(crate) async fn get_container(
     ephemeral: bool,
 ) -> Result<Option<Container>> {
     if ephemeral {
-        return Ok(Some(Container::Ephemeral(EphemeralContainer {})));
+        Ok(Some(Container::Ephemeral(EphemeralContainer {})))
     } else if let (Some(container_id), Some(container_runtime)) =
         (container_id_opt, container_runtime_opt)
     {
