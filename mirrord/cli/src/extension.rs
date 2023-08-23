@@ -62,6 +62,7 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
         analytics.set_error(AnalyticsError::Unknown);
     }
 
+    // Only intproxy should send analytic on successful runs
     analytics.enabled = analytics.has_error();
 
     execution_result

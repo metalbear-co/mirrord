@@ -225,6 +225,7 @@ async fn exec(args: &ExecArgs) -> Result<()> {
         analytics.set_error(AnalyticsError::Unknown);
     }
 
+    // Only intproxy should send analytic on successful runs
     analytics.enabled = analytics.has_error();
 
     execution_result
