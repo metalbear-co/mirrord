@@ -2,7 +2,7 @@ use std::{collections::HashMap, time::Instant};
 
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
-// use tracing::info;
+use tracing::info;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -223,20 +223,15 @@ pub async fn send_analytics(reporter: AnalyticsReporter) {
 
     let report = reporter.into_report();
 
-    let _ = std::fs::write(
-        format!("./{}.json", rand::random::<u16>()),
-        serde_json::to_vec_pretty(&report).unwrap(),
-    );
-
-    // let client = reqwest::Client::new();
-    // let res = client
-    //     .post("https://analytics.metalbear.co/api/v1/event")
-    //     .json(&report)
-    //     .send()
-    //     .await;
-    // if let Err(e) = res {
-    //     info!("Failed to send analytics: {e}");
-    // }
+    let client = reqwest::Client::new();
+    let res = client
+        .post("https://analytics.metalbear.co/api/v1/event")
+        .json(&report)
+        .send()
+        .await;
+    if let Err(e) = res {
+        info!("Failed to send analytics: {e}");
+    }
 }
 
 #[cfg(test)]

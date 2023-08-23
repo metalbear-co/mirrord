@@ -61,13 +61,9 @@ impl MirrordExecution {
 
         let lib_path = extract_library(None, progress, true)?;
         let mut env_vars = HashMap::new();
-        let (connect_info, mut connection) = create_and_connect(config, progress)
+        let (connect_info, mut connection) = create_and_connect(config, progress, analytics)
             .await
             .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
-
-        if let AgentConnectInfo::Operator(operator) = &connect_info {
-            analytics.set_operator_properties(operator.into());
-        }
 
         let (env_vars_exclude, env_vars_include) = match (
             config

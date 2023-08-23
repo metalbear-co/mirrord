@@ -72,7 +72,9 @@ fn print_port(listener: &TcpListener) -> Result<()> {
 /// Supposed to run as an async detached task, proxying the connection.
 /// We parse the protocol so we might add some logic here in the future?
 async fn connection_task(config: LayerConfig, stream: TcpStream) {
-    let agent_connection = match connect_and_ping(&config).await {
+    let mut inactive_analytics = AnalyticsReporter::new(false);
+
+    let agent_connection = match connect_and_ping(&config, &mut inactive_analytics).await {
         Ok((agent_connection, _)) => agent_connection,
         Err(err) => {
             error!("connection to agent failed {err:#?}");
@@ -195,13 +197,9 @@ async fn create_listener(
     // Create a main connection, that will be held until proxy is closed.
     // This will guarantee agent staying alive and will enable us to
     // make the agent close on last connection close immediately (will help in tests)
-    let (mut main_connection, operator) = connect_and_ping(&config)
+    let (mut main_connection, _) = connect_and_ping(&config, analytics)
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
-
-    if let Some(operator) = operator {
-        analytics.set_operator_properties(operator.into());
-    }
 
     if config.pause {
         tokio::time::timeout(
@@ -301,11 +299,12 @@ pub(crate) async fn proxy() -> Result<()> {
 /// sending the first message
 async fn connect_and_ping(
     config: &LayerConfig,
+    analytics: &mut AnalyticsReporter,
 ) -> Result<(
     (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
     Option<OperatorSessionInformation>,
 )> {
-    let ((mut sender, mut receiver), operator) = connect(config).await?;
+    let ((mut sender, mut receiver), operator) = connect(config, analytics).await?;
     ping(&mut sender, &mut receiver).await?;
     Ok(((sender, receiver), operator))
 }
@@ -371,13 +370,14 @@ fn create_ping_loop(
 /// Returns the tx/rx and whether the operator is used.
 async fn connect(
     config: &LayerConfig,
+    analytics: &mut AnalyticsReporter,
 ) -> Result<(
     (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
     Option<OperatorSessionInformation>,
 )> {
     if let Some(operator_session_information) = OperatorSessionInformation::from_env()? {
         Ok((
-            OperatorApi::connect(config, &operator_session_information).await?,
+            OperatorApi::connect(config, &operator_session_information, analytics).await?,
             Some(operator_session_information),
         ))
     } else if let Some(address) = &config.connect_tcp {

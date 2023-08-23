@@ -2,7 +2,7 @@ use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
 use kube::{error::ErrorResponse, Api, Client, Resource};
-use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties};
+use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, AnalyticsReporter};
 use mirrord_auth::{
     certificate::Certificate, credential_store::CredentialStoreSync, error::AuthenticationError,
 };
@@ -101,28 +101,6 @@ impl OperatorSessionInformation {
     }
 }
 
-impl From<OperatorSessionInformation> for AnalyticsOperatorProperties {
-    fn from(operator: OperatorSessionInformation) -> Self {
-        (&operator).into()
-    }
-}
-
-impl From<&OperatorSessionInformation> for AnalyticsOperatorProperties {
-    fn from(operator: &OperatorSessionInformation) -> Self {
-        AnalyticsOperatorProperties {
-            client_hash: operator
-                .client_certificate
-                .as_ref()
-                .and_then(|certificate| certificate.sha256_fingerprint().ok())
-                .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
-            license_hash: operator
-                .fingerprint
-                .as_deref()
-                .map(AnalyticsHash::from_base64),
-        }
-    }
-}
-
 pub struct OperatorApi {
     client: Client,
     target_api: Api<TargetCrd>,
@@ -137,6 +115,7 @@ impl OperatorApi {
     pub async fn create_session<P>(
         config: &LayerConfig,
         progress: &P,
+        analytics: &mut AnalyticsReporter,
     ) -> Result<
         Option<(
             mpsc::Sender<ClientMessage>,
@@ -149,43 +128,56 @@ impl OperatorApi {
     {
         let operator_api = OperatorApi::new(config).await?;
 
-        if let Some(target) = operator_api.fetch_target().await? {
-            let status = operator_api.get_status().await?;
+        let status = operator_api.get_status().await?;
 
-            let mut version_progress = progress.subtask("comparing versions");
-            let operator_version = Version::parse(&status.spec.operator_version).unwrap(); // TODO: Remove unwrap
+        let client_certificate =
+            if let Some(credential_name) = status.spec.license.fingerprint.as_ref() {
+                CredentialStoreSync::get_client_certificate::<MirrordOperatorCrd>(
+                    &operator_api.client,
+                    credential_name.to_string(),
+                )
+                .await
+                .map_err(|err| debug!("CredentialStore error: {err}"))
+                .ok()
+            } else {
+                None
+            };
 
-            // This is printed multiple times when the local process forks. Can be solved by e.g.
-            // propagating an env var, don't think it's worth the extra complexity though
-            let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
-            if operator_version > mirrord_version {
-                // we make two sub tasks since it looks best this way
-                version_progress.warning(
+        analytics.set_operator_properties(AnalyticsOperatorProperties {
+            client_hash: client_certificate
+                .as_ref()
+                .and_then(|certificate| certificate.sha256_fingerprint().ok())
+                .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
+            license_hash: status
+                .spec
+                .license
+                .fingerprint
+                .as_deref()
+                .map(AnalyticsHash::from_base64),
+        });
+
+        let mut version_progress = progress.subtask("comparing versions");
+        let operator_version = Version::parse(&status.spec.operator_version).unwrap(); // TODO: Remove unwrap
+
+        // This is printed multiple times when the local process forks. Can be solved by e.g.
+        // propagating an env var, don't think it's worth the extra complexity though
+        let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+        if operator_version > mirrord_version {
+            // we make two sub tasks since it looks best this way
+            version_progress.warning(
                     &format!(
                         "Your mirrord plugin/CLI version {} does not match the operator version {}. This can lead to unforeseen issues.",
                         mirrord_version,
                         operator_version));
-                version_progress.success(None);
-                version_progress = progress.subtask("comparing versions");
-                version_progress.warning(
-                    "Consider updating your mirrord plugin/CLI to match the operator version.",
-                );
-            }
             version_progress.success(None);
+            version_progress = progress.subtask("comparing versions");
+            version_progress.warning(
+                "Consider updating your mirrord plugin/CLI to match the operator version.",
+            );
+        }
+        version_progress.success(None);
 
-            let client_certificate =
-                if let Some(credential_name) = status.spec.license.fingerprint.as_ref() {
-                    CredentialStoreSync::get_client_certificate::<MirrordOperatorCrd>(
-                        &operator_api.client,
-                        credential_name.to_string(),
-                    )
-                    .await
-                    .map_err(|err| debug!("CredentialStore error: {err}"))
-                    .ok()
-                } else {
-                    None
-                };
-
+        if let Some(target) = operator_api.fetch_target().await? {
             let operator_session_information = OperatorSessionInformation::new(
                 client_certificate,
                 target,
@@ -211,7 +203,20 @@ impl OperatorApi {
     pub async fn connect(
         config: &LayerConfig,
         session_information: &OperatorSessionInformation,
+        analytics: &mut AnalyticsReporter,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+        analytics.set_operator_properties(AnalyticsOperatorProperties {
+            client_hash: session_information
+                .client_certificate
+                .as_ref()
+                .and_then(|certificate| certificate.sha256_fingerprint().ok())
+                .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
+            license_hash: session_information
+                .fingerprint
+                .as_deref()
+                .map(AnalyticsHash::from_base64),
+        });
+
         OperatorApi::new(config)
             .await?
             .connect_target(session_information)
