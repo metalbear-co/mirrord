@@ -293,10 +293,9 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_TEST_USE_EXISTING_LIB: /home/runner/work/mirrord/mirrord/target/debug/libmirrord_layer.so
-    container: ghcr.io/metalbear-co/ci-agent-build:a1277a050f5ee5dc4c80898d2798bd3ee7dd77df
     steps:
-      - uses: actions/checkout@v3
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@v3 # Checkout the mirrord repo.
+      - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install rust.
       - run: |
           cd mirrord/layer/tests/apps/issue1123
           rustc issue1123.rs --out-dir target
