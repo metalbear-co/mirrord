@@ -249,7 +249,11 @@ pub(crate) async fn proxy() -> Result<()> {
         listener.accept(),
     )
     .await
-    .map_err(|_| InternalProxyError::FirstConnectionTimeout)?
+    .map_err(|_| {
+        analytics.set_error(AnalyticsError::IntProxyFirstConnection);
+
+        InternalProxyError::FirstConnectionTimeout
+    })?
     .map_err(InternalProxyError::AcceptError)?;
 
     let mut active_connections = JoinSet::new();

@@ -23,6 +23,7 @@ pub enum AnalyticsError {
     AgentConnection,
     EnvFetch,
     BinaryExecuteFailed,
+    IntProxyFirstConnection,
 
     #[default]
     Unknown,
