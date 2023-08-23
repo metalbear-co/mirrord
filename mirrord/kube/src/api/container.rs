@@ -1,4 +1,7 @@
-use std::{collections::HashSet, sync::LazyLock};
+use std::{
+    collections::HashSet,
+    sync::{atomic::AtomicBool, LazyLock},
+};
 
 use futures::{AsyncBufReadExt, StreamExt, TryStreamExt};
 use k8s_openapi::api::{
@@ -25,6 +28,8 @@ use crate::{
     },
     error::{KubeApiError, Result},
 };
+
+pub(super) static CONTAINER_HAS_MESH_SIDECAR: AtomicBool = AtomicBool::new(false);
 
 /// Retrieve a list of Linux capabilities for the agent container.
 fn get_capabilities(config: &AgentConfig) -> Vec<LinuxCapability> {
@@ -79,10 +84,22 @@ static DEFAULT_TOLERATIONS: LazyLock<Vec<Toleration>> = LazyLock::new(|| {
 /// 1. Try to find based on given name
 /// 2. Try to find first container in pod that isn't a mesh side car
 /// 3. Take first container in pod
+#[tracing::instrument(level = "debug", ret)]
 pub fn choose_container<'a>(
     container_name: &Option<String>,
     container_statuses: &'a [ContainerStatus],
 ) -> Option<&'a ContainerStatus> {
+    CONTAINER_HAS_MESH_SIDECAR.store(
+        container_statuses.iter().any(|status| {
+            SKIP_NAMES
+                .iter()
+                .filter(|name| !(name.contains("vault-agent") || name.contains("vault-agent-init")))
+                .any(|name| name.contains(status.name.as_str()))
+        }),
+        std::sync::atomic::Ordering::Release,
+    );
+    tracing::info!("IS MESH {CONTAINER_HAS_MESH_SIDECAR:?}");
+
     if let Some(name) = container_name {
         container_statuses
             .iter()

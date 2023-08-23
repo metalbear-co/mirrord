@@ -1,6 +1,9 @@
 use std::time::Duration;
 
-use mirrord_config::{feature::network::outgoing::OutgoingFilterConfig, LayerConfig};
+use mirrord_config::{
+    feature::network::{incoming::IncomingMode, outgoing::OutgoingFilterConfig},
+    LayerConfig,
+};
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
 use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorSessionInformation};
 use mirrord_progress::Progress;
@@ -107,6 +110,13 @@ where
         if (k8s_api.detect_openshift(&mut detect_openshift_task).await).is_err() {
             detect_openshift_task.warning("couldn't determine OpenShift");
         };
+
+        if matches!(config.feature.network.incoming.mode, IncomingMode::Mirror) {
+            let mut detect_mesh_sidecar_task = progress.subtask("detecting mesh sidecar...");
+            if (k8s_api.detect_mesh_sidecar(&mut detect_mesh_sidecar_task).await).is_err() {
+                detect_mesh_sidecar_task.warning("couldn't determine mesh sidecar");
+            };
+        }
 
         let (pod_agent_name, agent_port) = tokio::time::timeout(
             Duration::from_secs(config.agent.startup_timeout),

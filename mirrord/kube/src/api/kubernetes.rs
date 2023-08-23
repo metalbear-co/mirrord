@@ -1,6 +1,6 @@
-use std::ops::Deref;
 #[cfg(feature = "incluster")]
 use std::{net::SocketAddr, time::Duration};
+use std::{ops::Deref, sync::atomic::Ordering::Acquire};
 
 use k8s_openapi::api::core::v1::Pod;
 use kube::{
@@ -16,6 +16,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tracing::{info, trace};
 
+use super::container::CONTAINER_HAS_MESH_SIDECAR;
 use crate::{
     api::{
         container::{ContainerApi, EphemeralContainer, JobContainer},
@@ -70,6 +71,21 @@ impl KubernetesAPI {
             progress.warning("mirrord has detected it's running on OpenShift. Due to the default PSP of OpenShift, mirrord may not be able to create the agent. Please refer to the documentation at https://mirrord.dev/docs/overview/faq/#can-i-use-mirrord-with-openshift");
         } else {
             progress.success(Some("OpenShift was not detected."))
+        }
+        Ok(())
+    }
+
+    pub async fn detect_mesh_sidecar<P>(&self, progress: &mut P) -> Result<()>
+    where
+        P: Progress + Send + Sync,
+    {
+        if CONTAINER_HAS_MESH_SIDECAR.load(Acquire) {
+            progress.warning(
+                r#"\
+                mirrord is running with `feature.network.incoming.mode = "mirror"` with a sidecar,\
+                which is not supported.
+                "#,
+            );
         }
         Ok(())
     }
