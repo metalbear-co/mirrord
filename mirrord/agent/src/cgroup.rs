@@ -105,6 +105,7 @@ impl CgroupFreeze for CgroupV1 {
 #[derive(Debug)]
 pub(crate) struct CgroupV2 {}
 
+#[allow(clippy::indexing_slicing)]
 const CGROUP_V2_FREEZE_PATH: &str = formatcp!("{CGROUP_MOUNT_PATH}/cgroup.freeze");
 
 /// mkdir, nsenter the target pid's cgroup then mount the cgroup, write freeze.
