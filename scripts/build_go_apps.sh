@@ -19,7 +19,7 @@ do
     cd $directory
 
     1>&2 echo "Building test app $directory/$1.go_test_app"
-    go build -o "$1.go_test_app"
+    go build -buildvcs=false -o "$1.go_test_app"
 
     cd - 1>/dev/null
 done
