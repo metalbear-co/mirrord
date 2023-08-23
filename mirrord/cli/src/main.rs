@@ -18,7 +18,7 @@ use k8s_openapi::{
 };
 use kube::api::ListParams;
 use miette::JSONReportHandler;
-use mirrord_analytics::{send_analytics, AnalyticsReporter, CollectAnalytics};
+use mirrord_analytics::{send_analytics, AnalyticsError, AnalyticsReporter, CollectAnalytics};
 use mirrord_config::{config::MirrordConfig, LayerConfig, LayerFileConfig};
 use mirrord_kube::{
     api::{
@@ -218,13 +218,17 @@ async fn exec(args: &ExecArgs) -> Result<()> {
     let mut analytics = AnalyticsReporter::new(config.telemetry);
     (&config).collect_analytics(analytics.get_mut());
 
-    let exec_result = exec_process(config, args, &progress, &mut analytics).await;
+    let execution_result = exec_process(config, args, &progress, &mut analytics).await;
+
+    if execution_result.is_err() && !analytics.has_error() {
+        analytics.set_error(AnalyticsError::Unknown);
+    }
 
     if analytics.has_error() {
         send_analytics(analytics).await;
     }
 
-    exec_result
+    execution_result
 }
 
 /// Returns a list of (pod name, [container names]) pairs, filtering out mesh side cars

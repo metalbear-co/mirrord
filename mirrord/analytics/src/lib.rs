@@ -19,7 +19,7 @@ pub enum AnalyticValue {
 
 #[derive(Default, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AnalyticError {
+pub enum AnalyticsError {
     AgentConnection,
 
     #[default]
@@ -138,7 +138,7 @@ pub struct AnalyticsReporter {
     pub enabled: bool,
 
     analytics: Analytics,
-    error: Option<AnalyticError>,
+    error: Option<AnalyticsError>,
     start_instant: Instant,
     operator_properties: Option<AnalyticsOperatorProperties>,
 }
@@ -162,7 +162,7 @@ impl AnalyticsReporter {
         self.operator_properties.replace(operator_properties);
     }
 
-    pub fn set_error(&mut self, error: AnalyticError) {
+    pub fn set_error(&mut self, error: AnalyticsError) {
         self.error.replace(error);
     }
 
@@ -211,7 +211,7 @@ struct AnalyticsReport {
     operator: bool,
     #[serde(flatten)]
     operator_properties: Option<AnalyticsOperatorProperties>,
-    error: Option<AnalyticError>,
+    error: Option<AnalyticsError>,
 }
 
 /// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.co
@@ -223,7 +223,10 @@ pub async fn send_analytics(reporter: AnalyticsReporter) {
 
     let report = reporter.into_report();
 
-    let _ = std::fs::write("./result.json", serde_json::to_vec_pretty(&report).unwrap());
+    let _ = std::fs::write(
+        format!("./{}.json", rand::random::<u16>()),
+        serde_json::to_vec_pretty(&report).unwrap(),
+    );
 
     // let client = reqwest::Client::new();
     // let res = client

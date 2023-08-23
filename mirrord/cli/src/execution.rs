@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use mirrord_analytics::AnalyticsReporter;
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter};
 use mirrord_config::LayerConfig;
 use mirrord_operator::client::OperatorSessionInformation;
 use mirrord_progress::Progress;
@@ -61,7 +61,9 @@ impl MirrordExecution {
 
         let lib_path = extract_library(None, progress, true)?;
         let mut env_vars = HashMap::new();
-        let (connect_info, mut connection) = create_and_connect(config, progress).await?;
+        let (connect_info, mut connection) = create_and_connect(config, progress)
+            .await
+            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
         if let AgentConnectInfo::Operator(operator) = &connect_info {
             analytics.set_operator_properties(operator.into());

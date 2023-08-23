@@ -17,7 +17,7 @@ use std::{
 };
 
 use futures::{stream::StreamExt, SinkExt};
-use mirrord_analytics::{send_analytics, AnalyticError, AnalyticsReporter, CollectAnalytics};
+use mirrord_analytics::{send_analytics, AnalyticsError, AnalyticsReporter, CollectAnalytics};
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
 use mirrord_operator::client::{OperatorApi, OperatorSessionInformation};
@@ -197,7 +197,7 @@ async fn create_listener(
     // make the agent close on last connection close immediately (will help in tests)
     let (mut main_connection, operator) = connect_and_ping(&config)
         .await
-        .inspect_err(|_| analytics.set_error(AnalyticError::AgentConnection))?;
+        .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
     if let Some(operator) = operator {
         analytics.set_operator_properties(operator.into());
