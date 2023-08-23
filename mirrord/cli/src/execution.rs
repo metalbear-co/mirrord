@@ -3,6 +3,7 @@ use std::{
     time::Duration,
 };
 
+use mirrord_analytics::AnalyticsReporter;
 use mirrord_config::LayerConfig;
 use mirrord_operator::client::OperatorSessionInformation;
 use mirrord_progress::Progress;
@@ -48,6 +49,7 @@ impl MirrordExecution {
         // We only need the executable on macos, for SIP handling.
         #[cfg(target_os = "macos")] executable: Option<&str>,
         progress: &P,
+        analytics: &mut AnalyticsReporter,
     ) -> Result<Self>
     where
         P: Progress + Send + Sync,
@@ -60,6 +62,11 @@ impl MirrordExecution {
         let lib_path = extract_library(None, progress, true)?;
         let mut env_vars = HashMap::new();
         let (connect_info, mut connection) = create_and_connect(config, progress).await?;
+
+        if let AgentConnectInfo::Operator(operator) = &connect_info {
+            analytics.set_operator_properties(operator.into());
+        }
+
         let (env_vars_exclude, env_vars_include) = match (
             config
                 .feature

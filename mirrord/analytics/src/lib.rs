@@ -1,8 +1,8 @@
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, time::Instant};
 
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
-use tracing::info;
+// use tracing::info;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -15,6 +15,15 @@ pub enum AnalyticValue {
     Bool(bool),
     Number(u32),
     Nested(Analytics),
+}
+
+#[derive(Default, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalyticError {
+    AgentConnection,
+
+    #[default]
+    Unknown,
 }
 
 /// Struct to store analytics data.
@@ -124,6 +133,65 @@ impl<T: CollectAnalytics> From<T> for AnalyticValue {
     }
 }
 
+#[derive(Debug)]
+pub struct AnalyticsReporter {
+    pub enabled: bool,
+
+    analytics: Analytics,
+    error: Option<AnalyticError>,
+    start_instant: Instant,
+    operator_properties: Option<AnalyticsOperatorProperties>,
+}
+
+impl AnalyticsReporter {
+    pub fn new(enabled: bool) -> Self {
+        AnalyticsReporter {
+            analytics: Analytics::default(),
+            enabled,
+            error: None,
+            operator_properties: None,
+            start_instant: Instant::now(),
+        }
+    }
+
+    pub fn get_mut(&mut self) -> &mut Analytics {
+        &mut self.analytics
+    }
+
+    pub fn set_operator_properties(&mut self, operator_properties: AnalyticsOperatorProperties) {
+        self.operator_properties.replace(operator_properties);
+    }
+
+    pub fn set_error(&mut self, error: AnalyticError) {
+        self.error.replace(error);
+    }
+
+    pub fn has_error(&self) -> bool {
+        self.error.is_some()
+    }
+
+    fn into_report(self) -> AnalyticsReport {
+        let duration = self
+            .start_instant
+            .elapsed()
+            .as_secs()
+            .try_into()
+            .unwrap_or(u32::MAX);
+        let platform = std::env::consts::OS.to_string();
+        let version = CURRENT_VERSION.to_string();
+
+        AnalyticsReport {
+            duration,
+            error: self.error,
+            event_properties: self.analytics,
+            operator: self.operator_properties.is_some(),
+            operator_properties: self.operator_properties,
+            platform,
+            version,
+        }
+    }
+}
+
 /// Extra fields for `AnalyticsReport` when using mirrord with operator.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AnalyticsOperatorProperties {
@@ -143,33 +211,29 @@ struct AnalyticsReport {
     operator: bool,
     #[serde(flatten)]
     operator_properties: Option<AnalyticsOperatorProperties>,
+    error: Option<AnalyticError>,
 }
 
 /// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.co
 #[tracing::instrument(level = "trace")]
-pub async fn send_analytics(
-    analytics: Analytics,
-    duration: Duration,
-    operator_properties: Option<AnalyticsOperatorProperties>,
-) {
-    let report = AnalyticsReport {
-        event_properties: analytics,
-        platform: std::env::consts::OS.to_string(),
-        version: CURRENT_VERSION.to_string(),
-        duration: duration.as_secs().try_into().unwrap_or(u32::MAX),
-        operator: operator_properties.is_some(),
-        operator_properties,
-    };
-
-    let client = reqwest::Client::new();
-    let res = client
-        .post("https://analytics.metalbear.co/api/v1/event")
-        .json(&report)
-        .send()
-        .await;
-    if let Err(e) = res {
-        info!("Failed to send analytics: {e}");
+pub async fn send_analytics(reporter: AnalyticsReporter) {
+    if !reporter.enabled {
+        return;
     }
+
+    let report = reporter.into_report();
+
+    let _ = std::fs::write("./result.json", serde_json::to_vec_pretty(&report).unwrap());
+
+    // let client = reqwest::Client::new();
+    // let res = client
+    //     .post("https://analytics.metalbear.co/api/v1/event")
+    //     .json(&report)
+    //     .send()
+    //     .await;
+    // if let Err(e) = res {
+    //     info!("Failed to send analytics: {e}");
+    // }
 }
 
 #[cfg(test)]

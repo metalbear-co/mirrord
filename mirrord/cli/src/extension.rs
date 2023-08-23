@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use mirrord_analytics::{send_analytics, AnalyticsReporter};
 use mirrord_config::LayerConfig;
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
@@ -28,19 +29,38 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
     }
     let config = LayerConfig::from_env()?;
 
-    // extension needs more timeout since it might need to build
-    // or run tasks before actually launching.
-    #[cfg(target_os = "macos")]
-    let mut execution_info =
-        MirrordExecution::start(&config, args.executable.as_deref(), &progress).await?;
-    #[cfg(not(target_os = "macos"))]
-    let mut execution_info = MirrordExecution::start(&config, &progress).await?;
+    let mut analytics = AnalyticsReporter::new(config.telemetry);
 
-    // We don't execute so set envs aren't passed, so we need to add config file and target to env.
-    execution_info.environment.extend(env);
+    let execution_result = async {
+        // extension needs more timeout since it might need to build
+        // or run tasks before actually launching.
+        #[cfg(target_os = "macos")]
+        let mut execution_info = MirrordExecution::start(
+            &config,
+            args.executable.as_deref(),
+            &progress,
+            &mut analytics,
+        )
+        .await?;
+        #[cfg(not(target_os = "macos"))]
+        let mut execution_info =
+            MirrordExecution::start(&config, &progress, &mut analytics).await?;
 
-    let output = serde_json::to_string(&execution_info)?;
-    progress.success(Some(&output));
-    execution_info.wait().await?;
-    Ok(())
+        // We don't execute so set envs aren't passed, so we need to add config file and target to
+        // env.
+        execution_info.environment.extend(env);
+
+        let output = serde_json::to_string(&execution_info)?;
+        progress.success(Some(&output));
+        execution_info.wait().await?;
+
+        Ok(())
+    }
+    .await;
+
+    if analytics.has_error() {
+        send_analytics(analytics).await;
+    }
+
+    execution_result
 }

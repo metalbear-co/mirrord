@@ -2,6 +2,7 @@ use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
 use kube::{error::ErrorResponse, Api, Client, Resource};
+use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties};
 use mirrord_auth::{
     certificate::Certificate, credential_store::CredentialStoreSync, error::AuthenticationError,
 };
@@ -97,6 +98,28 @@ impl OperatorSessionInformation {
                     .map_err(|e| OperatorApiError::InvalidOperatorSession(val, e))
             })
             .transpose()
+    }
+}
+
+impl From<OperatorSessionInformation> for AnalyticsOperatorProperties {
+    fn from(operator: OperatorSessionInformation) -> Self {
+        (&operator).into()
+    }
+}
+
+impl From<&OperatorSessionInformation> for AnalyticsOperatorProperties {
+    fn from(operator: &OperatorSessionInformation) -> Self {
+        AnalyticsOperatorProperties {
+            client_hash: operator
+                .client_certificate
+                .as_ref()
+                .and_then(|certificate| certificate.sha256_fingerprint().ok())
+                .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
+            license_hash: operator
+                .fingerprint
+                .as_deref()
+                .map(AnalyticsHash::from_base64),
+        }
     }
 }
 

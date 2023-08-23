@@ -17,9 +17,7 @@ use std::{
 };
 
 use futures::{stream::StreamExt, SinkExt};
-use mirrord_analytics::{
-    send_analytics, Analytics, AnalyticsHash, AnalyticsOperatorProperties, CollectAnalytics,
-};
+use mirrord_analytics::{send_analytics, AnalyticError, AnalyticsReporter, CollectAnalytics};
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
 use mirrord_operator::client::{OperatorApi, OperatorSessionInformation};
@@ -187,18 +185,24 @@ fn create_listen_socket() -> Result<TcpListener, InternalProxyError> {
     TcpListener::from_std(socket.into()).map_err(InternalProxyError::ListenError)
 }
 
-/// Main entry point for the internal proxy.
-/// It listens for inbound layer connect and forwards to agent.
-pub(crate) async fn proxy() -> Result<()> {
-    let started = std::time::Instant::now();
+async fn create_listener(
+    config: LayerConfig,
+    analytics: &mut AnalyticsReporter,
+) -> Result<JoinHandle<Result<(), InternalProxyError>>> {
     // Let it assign port for us then print it for the user.
     let listener = create_listen_socket()?;
 
-    let config = LayerConfig::from_env()?;
     // Create a main connection, that will be held until proxy is closed.
     // This will guarantee agent staying alive and will enable us to
     // make the agent close on last connection close immediately (will help in tests)
-    let (mut main_connection, operator) = connect_and_ping(&config).await?;
+    let (mut main_connection, operator) = connect_and_ping(&config)
+        .await
+        .inspect_err(|_| analytics.set_error(AnalyticError::AgentConnection))?;
+
+    if let Some(operator) = operator {
+        analytics.set_operator_properties(operator.into());
+    }
+
     if config.pause {
         tokio::time::timeout(
             Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into()),
@@ -263,26 +267,21 @@ pub(crate) async fn proxy() -> Result<()> {
     }
     main_connection_cancellation_token.cancel();
 
-    if config.telemetry {
-        let mut analytics = Analytics::default();
-        (&config).collect_analytics(&mut analytics);
+    Ok(main_connection_task_join)
+}
 
-        send_analytics(
-            analytics,
-            started.elapsed(),
-            operator.map(|operator| AnalyticsOperatorProperties {
-                client_hash: operator
-                    .client_certificate
-                    .as_ref()
-                    .and_then(|certificate| certificate.sha256_fingerprint().ok())
-                    .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
-                license_hash: operator
-                    .fingerprint
-                    .as_deref()
-                    .map(AnalyticsHash::from_base64),
-            }),
-        )
-        .await;
+/// Main entry point for the internal proxy.
+/// It listens for inbound layer connect and forwards to agent.
+pub(crate) async fn proxy() -> Result<()> {
+    let config = LayerConfig::from_env()?;
+
+    let mut analytics = AnalyticsReporter::new(config.telemetry);
+    (&config).collect_analytics(analytics.get_mut());
+
+    let main_connection_task_join = create_listener(config, &mut analytics).await?;
+
+    if analytics.enabled {
+        send_analytics(analytics).await;
     }
 
     trace!("intproxy joining main connection task");
