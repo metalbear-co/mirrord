@@ -175,7 +175,7 @@ impl ContainerApi for JobContainer {
         connection_port: u16,
         progress: &P,
         agent_gid: u16,
-        pod_namespace: Option<String>,
+        _pod_namespace: Option<String>,
     ) -> Result<String>
     where
         P: Progress + Send + Sync,
