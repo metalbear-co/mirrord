@@ -17,6 +17,7 @@ const CGROUP_MOUNT_PATH: &str = "/mirrord_cgroup";
 /// Trait for objects that can be paused
 #[enum_dispatch]
 pub(crate) trait CgroupFreeze {
+    #[tracing::instrument(level = "trace", ret, skip(self))]
     fn pause(&self) -> Result<()> {
         // Enter the namespace, we might be already in it but it doesn't really matter
         // Note: Entering the cgroup namespace **doesn't** set put our process in the cgroup :phew:
@@ -40,6 +41,7 @@ pub(crate) trait CgroupFreeze {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", ret, skip(self))]
     fn unpause(&self) -> Result<()> {
         // if we're unpausing, mount should exist and we should be in the cgroup namespace
         let mut open_options = OpenOptions::new();
@@ -98,6 +100,8 @@ impl CgroupFreeze for CgroupV2 {
     }
 }
 
+/// V1 Docs: https://docs.kernel.org/admin-guide/cgroup-v1/index.html
+/// V2 Docs: https://docs.kernel.org/admin-guide/cgroup-v2.html
 #[enum_dispatch(CgroupFreeze)]
 #[derive(Debug)]
 pub(crate) enum Cgroup {

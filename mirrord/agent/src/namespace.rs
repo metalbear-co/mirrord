@@ -12,6 +12,7 @@ pub(crate) enum NamespaceType {
 }
 
 impl NamespaceType {
+    #[tracing::instrument(level = "trace", ret)]
     fn path_from_pid(&self, pid: u64) -> String {
         match self {
             NamespaceType::Net => format!("/proc/{}/ns/net", pid),
