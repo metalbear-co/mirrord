@@ -52,6 +52,7 @@ pub trait ContainerApi {
         connection_port: u16,
         progress: &P,
         agent_gid: u16,
+        pod_namespace: Option<String>,
     ) -> Result<String>
     where
         P: Progress + Send + Sync;
@@ -174,6 +175,7 @@ impl ContainerApi for JobContainer {
         connection_port: u16,
         progress: &P,
         agent_gid: u16,
+        pod_namespace: Option<String>,
     ) -> Result<String>
     where
         P: Progress + Send + Sync,
@@ -393,6 +395,7 @@ impl ContainerApi for EphemeralContainer {
         connection_port: u16,
         progress: &P,
         agent_gid: u16,
+        pod_namespace: Option<String>,
     ) -> Result<String>
     where
         P: Progress + Send + Sync,
@@ -437,7 +440,7 @@ impl ContainerApi for EphemeralContainer {
         }))?;
         debug!("Requesting ephemeral_containers_subresource");
 
-        let pod_api = get_k8s_resource_api(client, agent.namespace.as_deref());
+        let pod_api = get_k8s_resource_api(client, pod_namespace.as_deref());
         let pod: Pod = pod_api.get(&runtime_data.pod_name).await?;
         let pod_spec = pod.spec.ok_or(KubeApiError::PodSpecNotFound)?;
 
