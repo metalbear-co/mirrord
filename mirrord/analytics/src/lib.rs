@@ -22,6 +22,7 @@ pub enum AnalyticValue {
 pub enum AnalyticsError {
     AgentConnection,
     EnvFetch,
+    BinaryExecuteFailed,
 
     #[default]
     Unknown,

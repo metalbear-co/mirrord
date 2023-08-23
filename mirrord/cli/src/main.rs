@@ -90,6 +90,7 @@ where
     // The execve hook is not yet active and does not hijack this call.
     let err = execvp(binary.clone(), binary_args.clone());
     error!("Couldn't execute {:?}", err);
+    analytics.set_error(AnalyticsError::BinaryExecuteFailed);
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     if let exec::Error::Errno(errno) = err {
         if Into::<i32>::into(errno) == 86 {
