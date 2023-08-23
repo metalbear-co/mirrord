@@ -182,4 +182,136 @@ mod pause {
         let url = get_service_url(kube_client.clone(), &service).await;
         assert!(reqwest::get(url).await.unwrap().status().is_success());
     }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    pub async fn pause_ephemeral_log_requests(
+        #[future] pause_services: (KubeService, KubeService),
+        #[future] kube_client: Client,
+    ) {
+        let (requester_service, logger_service) = pause_services.await;
+        let kube_client = kube_client.await;
+        let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &requester_service.namespace);
+
+        let target_parts = logger_service.target.split('/').collect::<Vec<&str>>();
+        let pod_name = target_parts[1];
+        let container_name = target_parts[3];
+        let lp = LogParams {
+            container: Some(container_name.to_string()), // Default to first, we only have 1.
+            follow: true,
+            limit_bytes: None,
+            pretty: false,
+            previous: false,
+            since_seconds: None,
+            tail_lines: None,
+            timestamps: false,
+        };
+
+        println!("getting log stream.");
+
+        let log_stream = pod_api.log_stream(pod_name, &lp).await.unwrap();
+
+        let log_lines = log_stream.lines();
+
+        // skip 2 lines of flask prints.
+        let mut log_lines = log_lines.skip(2);
+
+        let command = vec!["pause/send_reqs.sh"];
+        let mirrord_pause_arg = vec!["--pause"];
+
+        let hi_from_deployed_app = "hi-from-deployed-app";
+        let hi_from_local_app = "hi-from-local-app";
+        let hi_again_from_local_app = "hi-again-from-local-app";
+
+        println!("Waiting for first log by deployed app.");
+        let first_log = log_lines.next().await.unwrap().unwrap();
+
+        assert_eq!(first_log, hi_from_deployed_app);
+
+        println!("Running local app with mirrord.");
+        let env = vec![("MIRRORD_CONFIG_FILE", "pause/pause_ephemeral.json")];
+
+        let mut process = run_exec_with_target(
+            command.clone(),
+            &requester_service.target,
+            Some(&requester_service.namespace),
+            Some(mirrord_pause_arg),
+            Some(env),
+        )
+        .await;
+        let res = process.child.wait().await.unwrap();
+        println!("mirrord done running.");
+        assert!(res.success());
+
+        println!("Spooling logs forward to get to local app's first log.");
+        // Skip all the logs by the deployed app from before we ran local.
+        let mut next_log = log_lines.next().await.unwrap().unwrap();
+        while next_log == hi_from_deployed_app {
+            println!("Skipping log: {next_log:?}");
+            next_log = log_lines.next().await.unwrap().unwrap();
+        }
+
+        // Verify first log from local app.
+        assert_eq!(next_log, hi_from_local_app);
+        println!("verified first log from local app.");
+
+        // Verify that the second log from local app comes right after it - the deployed requester
+        // was paused.
+        let log_from_local = log_lines.next().await.unwrap().unwrap();
+        assert_eq!(log_from_local, hi_again_from_local_app);
+        println!("verified second log from local app. Now verifying that the deployed app resumes (the target pod is unpaused).");
+
+        // Verify that the deployed app resumes after the local app is done.
+        let log_from_deployed_after_resume = log_lines.next().await.unwrap().unwrap();
+        assert_eq!(log_from_deployed_after_resume, hi_from_deployed_app);
+    }
+
+    /// Verify that when running mirrord with the pause feature, and the agent exits early due to an
+    /// error, that it unpauses the container before exiting.
+    ///
+    /// Test Plan:
+    ///
+    /// 1. Run mirrord with pause and agent error.
+    /// 2. Wait for the local child process to exit.
+    /// 3. Wait for the agent jobs to complete.
+    /// 4. Verify the target pod is unpaused.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(60))]
+    pub async fn unpause_ephemeral_after_error(
+        #[future] random_namespace_self_deleting_service: KubeService,
+        #[future] kube_client: Client,
+    ) {
+        // Using a new random namespace so that we can find the right agent pod.
+        let service = random_namespace_self_deleting_service.await;
+        let kube_client = kube_client.await;
+        let jobs: Api<Job> = Api::namespaced(kube_client.clone(), &service.namespace);
+
+        println!("Running local app with mirrord.");
+        let env = vec![
+            ("MIRRORD_CONFIG_FILE", "pause/pause_ephemeral.json"),
+            ("MIRRORD_AGENT_TEST_ERROR", "true"),
+            ("MIRRORD_AGENT_NAMESPACE", &service.namespace),
+        ];
+
+        let mut process = run_exec_with_target(
+            // not specifying so grep waits on stdin.
+            vec!["grep", "nothing"],
+            &service.target,
+            Some(&service.namespace),
+            None,
+            Some(env),
+        )
+        .await;
+
+        let res = process.child.wait().await.unwrap();
+        println!("mirrord done running.");
+        // Expecting the local process with mirrord to fail due to the agent disconnecting.
+        assert!(!res.success());
+
+        // Now verify the remote pod is unpaused after being paused and exiting early with an error.
+        let url = get_service_url(kube_client.clone(), &service).await;
+        assert!(reqwest::get(url).await.unwrap().status().is_success());
+    }
 }
