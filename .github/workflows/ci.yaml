@@ -218,21 +218,29 @@ jobs:
           name: test
           path: /tmp/test.tar
 
-  test_mirrord_layer_cli:
+  test_mirrord_layer_cli_linux:
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-12, macos-11]
+        os: [ubuntu-latest]
+        target: [x86_64-unknown-linux-gnu]
+    runs-on: ${{ matrix.os }}
+    container: ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32
+    steps:
+      - uses: actions/checkout@v3
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p mirrord-layer -p mirrord --target=${{matrix.target}}
+
+  test_mirrord_layer_cli_macos:
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    strategy:
+      matrix:
+        os: [macos-12, macos-11]
         target:
-          [x86_64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin]
+          [x86_64-apple-darwin, aarch64-apple-darwin]
         exclude:
-          - os: ubuntu-latest
-            target: x86_64-apple-darwin
-            container: ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32}
-          - os: ubuntu-latest
-            target: aarch64-apple-darwin
-            container: ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32}
           - os: macos-12
             target: x86_64-unknown-linux-gnu
           - os: macos-11
@@ -240,18 +248,12 @@ jobs:
           - os: macos-11
             target: x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
-    container: ${{ matrix.container }}
     steps:
       - uses: actions/checkout@v3
       # the setup rust toolchain action ignores the input if file exists.. so remove it
       - if: ${{ matrix.target == 'aarch64-apple-darwin' }}
         run: rm rust-toolchain.toml
-      # need this only on linux, since setup-rust-toolchain does cache
-      - if: ${{ matrix.os == 'ubuntu-latest' }}
-        uses: Swatinem/rust-cache@v2
-      # need this step only on macos
-      - if: ${{ matrix.os != 'ubuntu-latest' }}
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{matrix.target}}
           toolchain: nightly-2023-04-19
@@ -510,7 +512,8 @@ jobs:
         integration_tests_macos,
         integration_tests,
         e2e,
-        test_mirrord_layer_cli,
+        test_mirrord_layer_cli_linux,
+        test_mirrord_layer_cli_macos,
         test_agent,
         lint,
         lint_macos,
@@ -532,7 +535,8 @@ jobs:
             (needs.integration_tests_macos.result == 'success' || needs.integration_tests_macos.result == 'skipped') &&
             (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped') &&
             (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
-            (needs.test_mirrord_layer_cli.result == 'success' || needs.test_mirrord_layer_cli.result == 'skipped') &&
+            (needs.test_mirrord_layer_cli_linux.result == 'success' || needs.test_mirrord_layer_cli_linux.result == 'skipped') &&
+            (needs.test_mirrord_layer_cli_macos.result == 'success' || needs.test_mirrord_layer_cli_macos.result == 'skipped') &&
             (needs.test_agent.result == 'success' || needs.test_agent.result == 'skipped') &&
             (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
             (needs.lint_macos.result == 'success' || needs.lint_macos.result == 'skipped') &&
