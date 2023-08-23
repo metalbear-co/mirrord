@@ -1,5 +1,12 @@
 name: CI
 
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  MIRRORD_TELEMETRY: false
+  AGENT_BUILDER_IMAGE: "ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32"
+  DOCS_BUILDER_IMAGE: "ghcr.io/metalbear-co/ci-docs-build:latest"
+
+
 on:
   workflow_dispatch:
   push:
@@ -12,12 +19,6 @@ on:
 concurrency:
   group: ${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
-
-env:
-  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-  MIRRORD_TELEMETRY: false
-  AGENT_BUILDER_IMAGE: "ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32"
-  DOCS_BUILDER_IMAGE: "ghcr.io/metalbear-co/ci-docs-build:latest"
 
 jobs:
   towncrier_check:
