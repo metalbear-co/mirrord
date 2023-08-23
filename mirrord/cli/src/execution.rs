@@ -119,7 +119,7 @@ impl MirrordExecution {
         proxy_command
             .arg("intproxy")
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::inherit())
             .stdin(std::process::Stdio::null());
 
         match &connect_info {

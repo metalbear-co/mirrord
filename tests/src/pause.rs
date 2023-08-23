@@ -286,7 +286,6 @@ mod pause {
         // Using a new random namespace so that we can find the right agent pod.
         let service = random_namespace_self_deleting_service.await;
         let kube_client = kube_client.await;
-        let jobs: Api<Job> = Api::namespaced(kube_client.clone(), &service.namespace);
 
         println!("Running local app with mirrord.");
         let env = vec![
