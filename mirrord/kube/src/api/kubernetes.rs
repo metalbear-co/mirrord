@@ -175,6 +175,7 @@ impl AgentManagment for KubernetesAPI {
                 agent_port,
                 progress,
                 agent_gid,
+                None,
             )
             .await?
         };
