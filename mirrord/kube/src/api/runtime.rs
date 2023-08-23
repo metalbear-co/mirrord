@@ -40,6 +40,7 @@ impl Display for ContainerRuntime {
 #[derive(Debug)]
 pub struct RuntimeData {
     pub pod_name: String,
+    pub pod_namespace: Option<String>,
     pub node_name: String,
     pub container_id: String,
     pub container_runtime: ContainerRuntime,
@@ -103,6 +104,7 @@ impl RuntimeData {
 
         Ok(RuntimeData {
             pod_name,
+            pod_namespace: pod.metadata.namespace.clone(),
             node_name,
             container_id,
             container_runtime,
