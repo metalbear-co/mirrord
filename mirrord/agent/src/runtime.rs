@@ -298,10 +298,6 @@ impl ContainerRuntime for EphemeralContainer {
     }
 
     /// Pause requires root privileges, so if it fails on permission we send a message.
-    /// Note about pausing in Ephemeral - we don't restore the processes back into the original
-    /// cgroup as we don't have access to it and moving it to the parent cgroup, would move it
-    /// to the ephemeral cgroup, which means the processes will not be found on the next run
-    /// anyway So we prefer to make those stay in mirrord, then re-pause would work.
     async fn pause(&self) -> Result<()> {
         get_cgroup()
             .and_then(|x| x.pause())
