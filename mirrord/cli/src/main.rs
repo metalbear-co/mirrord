@@ -216,7 +216,7 @@ async fn exec(args: &ExecArgs) -> Result<()> {
 
     let config = LayerConfig::from_env()?;
 
-    let mut analytics = AnalyticsReporter::new(config.telemetry);
+    let mut analytics = AnalyticsReporter::only_error(config.telemetry);
     (&config).collect_analytics(analytics.get_mut());
 
     let execution_result = exec_process(config, args, &progress, &mut analytics).await;
@@ -224,9 +224,6 @@ async fn exec(args: &ExecArgs) -> Result<()> {
     if execution_result.is_err() && !analytics.has_error() {
         analytics.set_error(AnalyticsError::Unknown);
     }
-
-    // Only intproxy should send analytic on successful runs
-    analytics.enabled = analytics.has_error();
 
     execution_result
 }

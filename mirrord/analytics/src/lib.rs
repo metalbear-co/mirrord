@@ -139,6 +139,7 @@ impl<T: CollectAnalytics> From<T> for AnalyticValue {
 #[derive(Debug)]
 pub struct AnalyticsReporter {
     pub enabled: bool,
+    error_only_send: bool,
 
     analytics: Analytics,
     error: Option<AnalyticsError>,
@@ -150,6 +151,18 @@ impl AnalyticsReporter {
     pub fn new(enabled: bool) -> Self {
         AnalyticsReporter {
             analytics: Analytics::default(),
+            error_only_send: false,
+            enabled,
+            error: None,
+            operator_properties: None,
+            start_instant: Instant::now(),
+        }
+    }
+
+    pub fn only_error(enabled: bool) -> Self {
+        AnalyticsReporter {
+            analytics: Analytics::default(),
+            error_only_send: true,
             enabled,
             error: None,
             operator_properties: None,
@@ -195,7 +208,7 @@ impl AnalyticsReporter {
 
 impl Drop for AnalyticsReporter {
     fn drop(&mut self) {
-        if self.enabled {
+        if self.enabled && (self.error.is_some() || !self.error_only_send) {
             send_analytics(self.as_report());
         }
     }

@@ -29,7 +29,7 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
     }
     let config = LayerConfig::from_env()?;
 
-    let mut analytics = AnalyticsReporter::new(config.telemetry);
+    let mut analytics = AnalyticsReporter::only_error(config.telemetry);
 
     let execution_result = async {
         // extension needs more timeout since it might need to build
@@ -61,9 +61,6 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
     if execution_result.is_err() && !analytics.has_error() {
         analytics.set_error(AnalyticsError::Unknown);
     }
-
-    // Only intproxy should send analytic on successful runs
-    analytics.enabled = analytics.has_error();
 
     execution_result
 }
