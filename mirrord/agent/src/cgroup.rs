@@ -77,7 +77,7 @@ impl CgroupFreeze for CgroupV1 {
                 cgroup_path,
                 Some("cgroup"),
                 MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
-                "freezer",
+                Some("freezer"),
             )?;
         }
 
