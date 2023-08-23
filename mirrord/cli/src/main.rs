@@ -225,6 +225,8 @@ async fn exec(args: &ExecArgs) -> Result<()> {
         analytics.set_error(AnalyticsError::Unknown);
     }
 
+    analytics.enabled = analytics.has_error();
+
     execution_result
 }
 

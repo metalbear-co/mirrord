@@ -62,5 +62,7 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
         analytics.set_error(AnalyticsError::Unknown);
     }
 
+    analytics.enabled = analytics.has_error();
+
     execution_result
 }
