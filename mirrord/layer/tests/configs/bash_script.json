@@ -1,0 +1,8 @@
+{
+    "feature": {
+        "fs": {
+            "mode":"localwithoverrides",
+            "local": ["/var/db"]
+        }
+    }
+}
