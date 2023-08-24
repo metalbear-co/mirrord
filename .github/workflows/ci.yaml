@@ -109,6 +109,10 @@ jobs:
       - uses: actions/checkout@v3
       # Otherwise the arguments to the setup-rust-toolchain action are ignored.
       - uses: Swatinem/rust-cache@v2
+      # rustcache disables cargo incremental and we run different compilations on the same time so this can be useful
+      - name: enable CARGO_INCREMENTAL
+        run: |
+          export CARGO_INCREMENTAL=1
       # Needed for agent
       - name: cargo fmt check
         run: cargo fmt --all -- --check
@@ -192,7 +196,7 @@ jobs:
       - run: cargo doc --document-private-items
 
   macos_check:
-    runs-on: macos-latest
+    runs-on: macos-13
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
@@ -202,6 +206,10 @@ jobs:
         with:
           toolchain: nightly-2023-04-19
           target: x86_64-apple-darwin,aarch64-apple-darwin
+      # rustcache disables cargo incremental and we run different compilations on the same time so this can be useful
+      - name: enable CARGO_INCREMENTAL
+        run: |
+          export CARGO_INCREMENTAL=1
       - name: test mirrord-sip
         run: |
           cargo test -p mirrord-sip
