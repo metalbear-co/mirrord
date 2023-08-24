@@ -33,9 +33,14 @@ use tokio::{
     time::timeout,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, log::trace};
+use tracing::{error, info, log::trace, warn};
 
-use crate::error::{InternalProxyError, Result};
+use crate::{
+    connection::AgentConnectInfo,
+    error::{InternalProxyError, Result},
+};
+
+const PING_INTERVAL_DURATION: Duration = Duration::from_secs(30);
 
 unsafe fn redirect_fd_to_dev_null(fd: libc::c_int) {
     let devnull_fd = libc::open(b"/dev/null\0" as *const [u8; 10] as _, libc::O_RDWR);
@@ -73,6 +78,9 @@ fn print_port(listener: &TcpListener) -> Result<()> {
 
 /// Supposed to run as an async detached task, proxying the connection.
 /// We parse the protocol so we might add some logic here in the future?
+/// We also handle pings here, meaning that if layer is too quiet (for example if it has a
+/// breakpoint hit and someone is holding it) It will keep the agent alive and send pings on its
+/// behalf.
 async fn connection_task(config: LayerConfig, stream: TcpStream) {
     let agent_connection = match connect_and_ping(&config).await {
         Ok((agent_connection, _)) => agent_connection,
@@ -83,9 +91,13 @@ async fn connection_task(config: LayerConfig, stream: TcpStream) {
     };
     let mut layer_connection = actix_codec::Framed::new(stream, DaemonCodec::new());
     let (agent_sender, mut agent_receiver) = agent_connection;
+    let mut ping = false;
+    let mut ping_interval = tokio::time::interval(PING_INTERVAL_DURATION);
+    ping_interval.tick().await;
     loop {
         select! {
             layer_message = layer_connection.next() => {
+                ping_interval.reset();
                 match layer_message {
                     Some(Ok(layer_message)) => {
                         if let Err(err) = agent_sender.send(layer_message).await {
@@ -109,16 +121,31 @@ async fn connection_task(config: LayerConfig, stream: TcpStream) {
             },
             agent_message = agent_receiver.recv() => {
                 match agent_message {
+                    Some(DaemonMessage::Pong) => {
+                        ping = false;
+                    },
                     Some(agent_message) => {
                         if let Err(err) = layer_connection.send(agent_message).await {
                             trace!("Error sending agent message to layer: {err:#?}");
                             break;
                         }
-                    },
+                    }
                     None => {
                         trace!("agent connection closed");
                         break;
                     }
+                }
+            },
+            _ = ping_interval.tick() => {
+                if !ping {
+                    if let Err(err) = agent_sender.send(ClientMessage::Ping).await {
+                        trace!("Error sending ping to agent: {err:#?}");
+                        break;
+                    }
+                    ping = true;
+                } else {
+                    warn!("Unmatched ping, timeout!");
+                    break;
                 }
             }
         }
@@ -376,25 +403,26 @@ async fn connect(
     (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
     Option<OperatorSessionInformation>,
 )> {
-    if let Some(operator_session_information) = OperatorSessionInformation::from_env()? {
-        Ok((
+    let agent_connect_info = AgentConnectInfo::from_env()?;
+    match agent_connect_info {
+        Some(AgentConnectInfo::Operator(operator_session_information)) => Ok((
             OperatorApi::connect(config, &operator_session_information).await?,
             Some(operator_session_information),
-        ))
-    } else if let Some(address) = &config.connect_tcp {
-        let stream = TcpStream::connect(address)
-            .await
-            .map_err(InternalProxyError::TcpConnectError)?;
-        Ok((wrap_raw_connection(stream), None))
-    } else if let (Some(agent_name), Some(port)) =
-        (&config.connect_agent_name, config.connect_agent_port)
-    {
-        let k8s_api = KubernetesAPI::create(config).await?;
-        let connection = k8s_api
-            .create_connection((agent_name.clone(), port))
-            .await?;
-        Ok((connection, None))
-    } else {
-        Err(InternalProxyError::NoConnectionMethod.into())
+        )),
+        Some(AgentConnectInfo::DirectKubernetes(connect_info)) => {
+            let k8s_api = KubernetesAPI::create(config).await?;
+            let connection = k8s_api.create_connection(connect_info).await?;
+            Ok((connection, None))
+        }
+        None => {
+            if let Some(address) = &config.connect_tcp {
+                let stream = TcpStream::connect(address)
+                    .await
+                    .map_err(InternalProxyError::TcpConnectError)?;
+                Ok((wrap_raw_connection(stream), None))
+            } else {
+                Err(InternalProxyError::NoConnectionMethod.into())
+            }
+        }
     }
 }

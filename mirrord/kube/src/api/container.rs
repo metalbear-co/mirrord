@@ -18,6 +18,7 @@ use serde_json::json;
 use tokio::pin;
 use tracing::{debug, warn};
 
+use super::kubernetes::AgentKubernetesConnectInfo;
 use crate::{
     api::{
         get_k8s_resource_api,
@@ -52,7 +53,7 @@ pub trait ContainerApi {
         connection_port: u16,
         progress: &P,
         agent_gid: u16,
-    ) -> Result<String>
+    ) -> Result<AgentKubernetesConnectInfo>
     where
         P: Progress + Send + Sync;
 }
@@ -174,7 +175,7 @@ impl ContainerApi for JobContainer {
         connection_port: u16,
         progress: &P,
         agent_gid: u16,
-    ) -> Result<String>
+    ) -> Result<AgentKubernetesConnectInfo>
     where
         P: Progress + Send + Sync,
     {
@@ -378,7 +379,11 @@ impl ContainerApi for JobContainer {
 
         pod_progress.success(Some("pod is ready"));
 
-        Ok(pod_name)
+        Ok(AgentKubernetesConnectInfo {
+            pod_name,
+            agent_port: connection_port,
+            namespace: agent.namespace.clone(),
+        })
     }
 }
 
@@ -393,7 +398,7 @@ impl ContainerApi for EphemeralContainer {
         connection_port: u16,
         progress: &P,
         agent_gid: u16,
-    ) -> Result<String>
+    ) -> Result<AgentKubernetesConnectInfo>
     where
         P: Progress + Send + Sync,
     {
@@ -437,7 +442,7 @@ impl ContainerApi for EphemeralContainer {
         }))?;
         debug!("Requesting ephemeral_containers_subresource");
 
-        let pod_api = get_k8s_resource_api(client, agent.namespace.as_deref());
+        let pod_api = get_k8s_resource_api(client, runtime_data.pod_namespace.as_deref());
         let pod: Pod = pod_api.get(&runtime_data.pod_name).await?;
         let pod_spec = pod.spec.ok_or(KubeApiError::PodSpecNotFound)?;
 
@@ -524,7 +529,11 @@ impl ContainerApi for EphemeralContainer {
         container_progress.success(Some("container is ready"));
 
         debug!("container is ready");
-        Ok(runtime_data.pod_name.to_string())
+        Ok(AgentKubernetesConnectInfo {
+            pod_name: runtime_data.pod_name.to_string(),
+            agent_port: connection_port,
+            namespace: runtime_data.pod_namespace.clone(),
+        })
     }
 }
 

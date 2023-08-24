@@ -23,22 +23,6 @@
         }
       ]
     },
-    "connect_agent_name": {
-      "description": "<!--${internal}-->\n\n## connect_agent_name {#root-connect_agent_name}\n\nAgent name that already exists that we can connect to.\n\nKeep in mind that the intention here is to allow reusing a long living mirrord-agent pod, and **not** to connect multiple (simultaneos) mirrord instances to a single mirrord-agent, as the later is not properly supported without the use of [mirrord-operator](https://metalbear.co/#waitlist-form).\n\n```json { \"connect_agent_name\": \"mirrord-agent-still-alive\" } ```",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "connect_agent_port": {
-      "description": "<!--${internal}-->\n\n## connect_agent_port {#root-connect_agent_port}\n\nAgent listen port that already exists that we can connect to.\n\n```json { \"connect_agent_port\": \"8888\" } ```",
-      "type": [
-        "integer",
-        "null"
-      ],
-      "format": "uint16",
-      "minimum": 0.0
-    },
     "connect_tcp": {
       "title": "connect_tcp {#root-connect_tpc}",
       "description": "IP:PORT to connect to instead of using k8s api, for testing purposes.\n\n```json { \"connect_tcp\": \"10.10.0.100:7777\" } ```",
@@ -310,7 +294,7 @@
         },
         "namespace": {
           "title": "agent.namespace {#agent-namespace}",
-          "description": "Namespace where the agent shall live.\n\nDefaults to the current kubernetes namespace.",
+          "description": "Namespace where the agent shall live. Note: Doesn't work with ephemeral containers. Defaults to the current kubernetes namespace.",
           "type": [
             "string",
             "null"

@@ -76,7 +76,7 @@ pub struct AgentConfig {
     /// ### agent.namespace {#agent-namespace}
     ///
     /// Namespace where the agent shall live.
-    ///
+    /// Note: Doesn't work with ephemeral containers.
     /// Defaults to the current kubernetes namespace.
     #[config(env = "MIRRORD_AGENT_NAMESPACE")]
     pub namespace: Option<String>,
