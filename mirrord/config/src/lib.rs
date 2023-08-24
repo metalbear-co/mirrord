@@ -201,53 +201,6 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_CONNECT_TCP")]
     pub connect_tcp: Option<String>,
 
-    /// <!--${internal}-->
-    ///
-    /// ## connect_agent_name {#root-connect_agent_name}
-    ///
-    /// Agent name that already exists that we can connect to.
-    ///
-    /// Keep in mind that the intention here is to allow reusing a long living mirrord-agent pod,
-    /// and **not** to connect multiple (simultaneos) mirrord instances to a single
-    /// mirrord-agent, as the later is not properly supported without the use of
-    /// [mirrord-operator](https://metalbear.co/#waitlist-form).
-    ///
-    /// ```json
-    /// {
-    ///   "connect_agent_name": "mirrord-agent-still-alive"
-    /// }
-    /// ```
-    #[config(env = "MIRRORD_CONNECT_AGENT")]
-    pub connect_agent_name: Option<String>,
-
-    /// <!--${internal}-->
-    ///
-    /// ## connect_agent_port {#root-connect_agent_port}
-    ///
-    /// Agent listen port that already exists that we can connect to.
-    ///
-    /// ```json
-    /// {
-    ///   "connect_agent_port": "8888"
-    /// }
-    /// ```
-    #[config(env = "MIRRORD_CONNECT_PORT")]
-    pub connect_agent_port: Option<u16>,
-
-    /// <!--${internal}-->
-    ///
-    /// ## connect_agent_port {#root-connect_agent_port}
-    ///
-    /// Agent namespace that already exists that we can connect to.
-    ///
-    /// ```json
-    /// {
-    ///   "connect_agent_namespace": "8888"
-    /// }
-    /// ```
-    #[config(env = "MIRRORD_CONNECT_NAMESPACE")]
-    pub connect_agent_namespace: Option<String>,
-
     /// ## operator {#root-operator}
     ///
     /// Allow to lookup if operator is installed on cluster and use it.

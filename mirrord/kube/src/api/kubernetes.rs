@@ -11,6 +11,7 @@ use mirrord_config::{agent::AgentConfig, target::TargetConfig, LayerConfig};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "incluster")]
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -75,7 +76,7 @@ impl KubernetesAPI {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentKubernetesConnectInfo {
     pub pod_name: String,
     pub agent_port: u16,

@@ -8,17 +8,37 @@ use mirrord_kube::api::{
 use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorSessionInformation};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::trace;
 
 use crate::{CliError, Result};
 
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum AgentConnectInfo {
     Operator(OperatorSessionInformation),
     /// Connect directly to an agent by name and port using k8s port forward.
     DirectKubernetes(AgentKubernetesConnectInfo),
 }
 
+const AGENT_CONNECT_INFO_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
+
+impl AgentConnectInfo {
+    /// Returns environment variable holding the information
+    pub const fn env_key() -> &'static str {
+        AGENT_CONNECT_INFO_KEY
+    }
+
+    /// Loads the information from environment variables
+    pub fn from_env() -> Result<Option<Self>> {
+        std::env::var(Self::env_key())
+            .ok()
+            .map(|val| {
+                serde_json::from_str(&val).map_err(|e| CliError::ConnectInfoLoadFailed(val, e))
+            })
+            .transpose()
+    }
+}
 pub(crate) struct AgentConnection {
     pub sender: mpsc::Sender<ClientMessage>,
     pub receiver: mpsc::Receiver<DaemonMessage>,
