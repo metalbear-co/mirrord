@@ -21,7 +21,10 @@ use mirrord_analytics::{
     send_analytics, Analytics, AnalyticsHash, AnalyticsOperatorProperties, CollectAnalytics,
 };
 use mirrord_config::LayerConfig;
-use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
+use mirrord_kube::api::{
+    kubernetes::{AgentKubernetesConnectInfo, KubernetesAPI},
+    wrap_raw_connection, AgentManagment,
+};
 use mirrord_operator::client::{OperatorApi, OperatorSessionInformation};
 use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonCodec, DaemonMessage};
 use nix::libc;
@@ -414,9 +417,13 @@ async fn connect(
         (&config.connect_agent_name, config.connect_agent_port)
     {
         let k8s_api = KubernetesAPI::create(config).await?;
-        let connection = k8s_api
-            .create_connection((agent_name.clone(), port))
-            .await?;
+        let agent_connect_info = AgentKubernetesConnectInfo {
+            pod_name: agent_name.clone(),
+            agent_port: port,
+            namespace: config.connect_agent_namespace.clone(),
+        };
+
+        let connection = k8s_api.create_connection(agent_connect_info).await?;
         Ok((connection, None))
     } else {
         Err(InternalProxyError::NoConnectionMethod.into())

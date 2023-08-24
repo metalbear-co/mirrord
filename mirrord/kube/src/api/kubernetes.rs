@@ -75,8 +75,15 @@ impl KubernetesAPI {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct AgentKubernetesConnectInfo {
+    pub pod_name: String,
+    pub agent_port: u16,
+    pub namespace: Option<String>,
+}
+
 impl AgentManagment for KubernetesAPI {
-    type AgentRef = (String, u16);
+    type AgentRef = AgentKubernetesConnectInfo;
     type Err = KubeApiError;
 
     #[cfg(feature = "incluster")]
@@ -115,15 +122,18 @@ impl AgentManagment for KubernetesAPI {
     #[cfg(not(feature = "incluster"))]
     async fn create_connection(
         &self,
-        (pod_agent_name, agent_port): Self::AgentRef,
+        connect_info: Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, self.agent.namespace.as_deref());
-        trace!("port-forward to pod {}:{}", &pod_agent_name, &agent_port);
-        let mut port_forwarder = pod_api.portforward(&pod_agent_name, &[agent_port]).await?;
+        let pod_api: Api<Pod> =
+            get_k8s_resource_api(&self.client, connect_info.namespace.as_deref());
+        trace!("port-forward to pod {:?}", &connect_info);
+        let mut port_forwarder = pod_api
+            .portforward(&connect_info.pod_name, &[connect_info.agent_port])
+            .await?;
 
         Ok(wrap_raw_connection(
             port_forwarder
-                .take_stream(agent_port)
+                .take_stream(connect_info.agent_port)
                 .ok_or(KubeApiError::PortForwardFailed)?,
         ))
     }
@@ -156,7 +166,7 @@ impl AgentManagment for KubernetesAPI {
         let agent_gid: u16 = rand::thread_rng().gen_range(3000..u16::MAX);
         info!("Using group-id `{agent_gid:?}`");
 
-        let pod_agent_name = if self.agent.ephemeral {
+        let agent_connect_info = if self.agent.ephemeral {
             EphemeralContainer::create_agent(
                 &self.client,
                 &self.agent,
@@ -178,8 +188,8 @@ impl AgentManagment for KubernetesAPI {
             .await?
         };
 
-        info!("Created agent pod {pod_agent_name:?}");
-        Ok((pod_agent_name, agent_port))
+        info!("Created agent pod {agent_connect_info:?}");
+        Ok(agent_connect_info)
     }
 }
 

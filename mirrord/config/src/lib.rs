@@ -234,6 +234,20 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_CONNECT_PORT")]
     pub connect_agent_port: Option<u16>,
 
+    /// <!--${internal}-->
+    ///
+    /// ## connect_agent_port {#root-connect_agent_port}
+    ///
+    /// Agent namespace that already exists that we can connect to.
+    ///
+    /// ```json
+    /// {
+    ///   "connect_agent_namespace": "8888"
+    /// }
+    /// ```
+    #[config(env = "MIRRORD_CONNECT_NAMESPACE")]
+    pub connect_agent_namespace: Option<String>,
+
     /// ## operator {#root-operator}
     ///
     /// Allow to lookup if operator is installed on cluster and use it.

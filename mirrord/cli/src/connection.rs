@@ -1,7 +1,10 @@
 use std::time::Duration;
 
 use mirrord_config::{feature::network::outgoing::OutgoingFilterConfig, LayerConfig};
-use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
+use mirrord_kube::api::{
+    kubernetes::{AgentKubernetesConnectInfo, KubernetesAPI},
+    AgentManagment,
+};
 use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorSessionInformation};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
@@ -13,7 +16,7 @@ use crate::{CliError, Result};
 pub(crate) enum AgentConnectInfo {
     Operator(OperatorSessionInformation),
     /// Connect directly to an agent by name and port using k8s port forward.
-    DirectKubernetes(String, u16),
+    DirectKubernetes(AgentKubernetesConnectInfo),
 }
 
 pub(crate) struct AgentConnection {
@@ -108,7 +111,7 @@ where
             detect_openshift_task.warning("couldn't determine OpenShift");
         };
 
-        let (pod_agent_name, agent_port) = tokio::time::timeout(
+        let agent_connect_info = tokio::time::timeout(
             Duration::from_secs(config.agent.startup_timeout),
             k8s_api.create_agent(progress),
         )
@@ -117,12 +120,12 @@ where
         .map_err(CliError::CreateAgentFailed)?;
 
         let (sender, receiver) = k8s_api
-            .create_connection((pod_agent_name.clone(), agent_port))
+            .create_connection(agent_connect_info.clone())
             .await
             .map_err(CliError::AgentConnectionFailed)?;
 
         Ok((
-            AgentConnectInfo::DirectKubernetes(pod_agent_name, agent_port),
+            AgentConnectInfo::DirectKubernetes(agent_connect_info),
             AgentConnection { sender, receiver },
         ))
     }

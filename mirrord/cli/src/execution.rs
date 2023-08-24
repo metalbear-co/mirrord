@@ -4,6 +4,7 @@ use std::{
 };
 
 use mirrord_config::LayerConfig;
+use mirrord_kube::api::kubernetes::AgentKubernetesConnectInfo;
 use mirrord_operator::client::OperatorSessionInformation;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
@@ -123,9 +124,16 @@ impl MirrordExecution {
             .stdin(std::process::Stdio::null());
 
         match &connect_info {
-            AgentConnectInfo::DirectKubernetes(name, port) => {
-                proxy_command.env("MIRRORD_CONNECT_AGENT", name);
-                proxy_command.env("MIRRORD_CONNECT_PORT", port.to_string());
+            AgentConnectInfo::DirectKubernetes(AgentKubernetesConnectInfo {
+                pod_name,
+                agent_port,
+                namespace,
+            }) => {
+                proxy_command.env("MIRRORD_CONNECT_AGENT", pod_name);
+                proxy_command.env("MIRRORD_CONNECT_PORT", agent_port.to_string());
+                if let Some(namespace) = namespace {
+                    proxy_command.env("MIRRORD_CONNECT_NAMESPACE", namespace);
+                }
             }
             AgentConnectInfo::Operator(session) => {
                 proxy_command.env(
