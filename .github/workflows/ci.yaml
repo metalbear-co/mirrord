@@ -109,6 +109,12 @@ jobs:
       options: --user root
     steps:
       - uses: actions/checkout@v3
+      - name: enable CARGO_INCREMENTAL && set PATH to not use github's Rust
+        run: |
+          echo "CARGO_INCREMENTAL=1" >> "$GITHUB_ENV"
+          which cargo
+          echo "PATH=/root/.cargo/bin:$PATH" >> "$PATH"
+          which cargo
       # Otherwise the arguments to the setup-rust-toolchain action are ignored.
       - uses: Swatinem/rust-cache@v2
         with:
@@ -118,6 +124,9 @@ jobs:
       - name: enable CARGO_INCREMENTAL && set PATH to not use github's Rust
         run: |
           echo "CARGO_INCREMENTAL=1" >> "$GITHUB_ENV"
+          which cargo
+          echo "PATH=/root/.cargo/bin:$PATH" >> "$PATH"
+          which cargo
       - name: cargo fmt check
         run: cargo fmt --all -- --check
       # Check that agent compiles for the supported targets (aarch64)
