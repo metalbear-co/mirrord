@@ -134,18 +134,6 @@ where
             detect_openshift_task.warning("couldn't determine OpenShift");
         };
 
-        let mut cat_subtask= progress.subtask("meow...");
-        if (k8s_api.meow(&mut cat_subtask).await).is_err() {
-            cat_subtask.warning("cant meow");
-        };
-
-        let mut detect_mesh_sidecar_task = progress.subtask("detecting mesh sidecar...");
-        if matches!(config.feature.network.incoming.mode, IncomingMode::Mirror) {
-            if (k8s_api.detect_mesh_sidecar(&mut detect_mesh_sidecar_task).await).is_err() {
-                detect_mesh_sidecar_task.warning("couldn't determine mesh sidecar");
-            };
-        }
-
         let agent_connect_info = tokio::time::timeout(
             Duration::from_secs(config.agent.startup_timeout),
             k8s_api.create_agent(progress),
@@ -153,6 +141,15 @@ where
         .await
         .map_err(|_| CliError::AgentReadyTimeout)?
         .map_err(CliError::CreateAgentFailed)?;
+
+        // Has to happen as late as possible, otherwise `CONTAINER_HAS_MESH_SIDECAR` may not be
+        // actually initialized yet! 
+        let mut detect_mesh_sidecar_task = progress.subtask("detecting mesh sidecar...");
+        if matches!(config.feature.network.incoming.mode, IncomingMode::Mirror) {
+            if (k8s_api.detect_mesh_sidecar(&mut detect_mesh_sidecar_task).await).is_err() {
+                detect_mesh_sidecar_task.warning("couldn't determine mesh sidecar");
+            };
+        }
 
         let (sender, receiver) = k8s_api
             .create_connection(agent_connect_info.clone())

@@ -76,27 +76,19 @@ impl KubernetesAPI {
         Ok(())
     }
 
+    /// Checks the [`CONTAINER_HAS_MESH_SIDECAR`] that is initialized in
+    /// [`super::container::choose_container`], and warns the user when they're running an
+    /// unsupported config.
     pub async fn detect_mesh_sidecar<P>(&self, progress: &mut P) -> Result<()>
     where
         P: Progress + Send + Sync,
     {
         if CONTAINER_HAS_MESH_SIDECAR.load(Acquire) {
-            progress.warning(
-                r#"\
-                mirrord is running with `feature.network.incoming.mode = "mirror"` with a sidecar,\
-                which is not supported.
-                "#,
-            );
+            progress
+                .warning("mesh/sidecar detected with `feature.network.incoming.mode = \"mirror\"`");
+        } else {
+            progress.success(Some("No mesh/sidecar detected."))
         }
-        Ok(())
-    }
-
-    pub async fn meow<P>(&self, progress: &mut P) -> Result<()>
-    where
-        P: Progress + Send + Sync,
-    {
-        progress.warning("warning meow!");
-        progress.success(Some("success meow!"));
         Ok(())
     }
 }
