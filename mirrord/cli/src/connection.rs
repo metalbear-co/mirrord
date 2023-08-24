@@ -2,21 +2,44 @@ use std::time::Duration;
 
 use mirrord_analytics::AnalyticsReporter;
 use mirrord_config::{feature::network::outgoing::OutgoingFilterConfig, LayerConfig};
-use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
+use mirrord_kube::api::{
+    kubernetes::{AgentKubernetesConnectInfo, KubernetesAPI},
+    AgentManagment,
+};
 use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorSessionInformation};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::trace;
 
 use crate::{CliError, Result};
 
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum AgentConnectInfo {
     Operator(OperatorSessionInformation),
     /// Connect directly to an agent by name and port using k8s port forward.
-    DirectKubernetes(String, u16),
+    DirectKubernetes(AgentKubernetesConnectInfo),
 }
 
+const AGENT_CONNECT_INFO_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
+
+impl AgentConnectInfo {
+    /// Returns environment variable holding the information
+    pub const fn env_key() -> &'static str {
+        AGENT_CONNECT_INFO_KEY
+    }
+
+    /// Loads the information from environment variables
+    pub fn from_env() -> Result<Option<Self>> {
+        std::env::var(Self::env_key())
+            .ok()
+            .map(|val| {
+                serde_json::from_str(&val).map_err(|e| CliError::ConnectInfoLoadFailed(val, e))
+            })
+            .transpose()
+    }
+}
 pub(crate) struct AgentConnection {
     pub sender: mpsc::Sender<ClientMessage>,
     pub receiver: mpsc::Receiver<DaemonMessage>,
@@ -111,7 +134,7 @@ where
             detect_openshift_task.warning("couldn't determine OpenShift");
         };
 
-        let (pod_agent_name, agent_port) = tokio::time::timeout(
+        let agent_connect_info = tokio::time::timeout(
             Duration::from_secs(config.agent.startup_timeout),
             k8s_api.create_agent(progress),
         )
@@ -120,12 +143,12 @@ where
         .map_err(CliError::CreateAgentFailed)?;
 
         let (sender, receiver) = k8s_api
-            .create_connection((pod_agent_name.clone(), agent_port))
+            .create_connection(agent_connect_info.clone())
             .await
             .map_err(CliError::AgentConnectionFailed)?;
 
         Ok((
-            AgentConnectInfo::DirectKubernetes(pod_agent_name, agent_port),
+            AgentConnectInfo::DirectKubernetes(agent_connect_info),
             AgentConnection { sender, receiver },
         ))
     }

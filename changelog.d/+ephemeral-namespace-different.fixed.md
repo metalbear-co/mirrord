@@ -1,0 +1,1 @@
+Fixed issue connecting to ephemeral container when target is in different namespace
