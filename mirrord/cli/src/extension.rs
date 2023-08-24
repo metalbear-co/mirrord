@@ -7,7 +7,7 @@ use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 use crate::{config::ExtensionExecArgs, error::CliError, execution::MirrordExecution, Result};
 
 async fn mirrord_exec<P>(
-    args: &ExtensionExecArgs,
+    #[cfg(target_os = "macos")] executable: Option<&str>,
     env: HashMap<String, String>,
     config: LayerConfig,
     mut progress: P,
@@ -20,7 +20,7 @@ where
     // or run tasks before actually launching.
     #[cfg(target_os = "macos")]
     let mut execution_info =
-        MirrordExecution::start(&config, args.executable.as_deref(), &progress, analytics).await?;
+        MirrordExecution::start(&config, executable, &progress, analytics).await?;
     #[cfg(not(target_os = "macos"))]
     let mut execution_info = MirrordExecution::start(&config, &progress, analytics).await?;
 
@@ -60,7 +60,17 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry);
 
-    let execution_result = mirrord_exec(&args, env, config, progress, &mut analytics).await;
+    #[cfg(target_os = "macos")]
+    let execution_result = mirrord_exec(
+        args.executable.as_deref(),
+        env,
+        config,
+        progress,
+        &mut analytics,
+    )
+    .await;
+    #[cfg(not(target_os = "macos"))]
+    let execution_result = mirrord_exec(env, config, progress, &mut analytics).await;
 
     if execution_result.is_err() && !analytics.has_error() {
         analytics.set_error(AnalyticsError::Unknown);
