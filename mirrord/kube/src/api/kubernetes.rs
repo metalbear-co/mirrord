@@ -90,14 +90,18 @@ impl AgentManagment for KubernetesAPI {
     #[cfg(feature = "incluster")]
     async fn create_connection(
         &self,
-        (pod_agent_name, agent_port): Self::AgentRef,
+        AgentKubernetesConnectInfo {
+            pod_name,
+            agent_port,
+            namespace,
+        }: Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, self.agent.namespace.as_deref());
+        let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, namespace.as_deref());
 
-        let pod = pod_api.get(&pod_agent_name).await?;
+        let pod = pod_api.get(pod_name).await?;
 
         let conn = if let Some(pod_ip) = pod.status.and_then(|status| status.pod_ip) {
-            trace!("connecting to pod_ip {pod_ip}:{agent_port}");
+            trace!("connecting to pod_ip {pod_ip}:{}", agent_port);
 
             // When pod_ip is available we directly create it as SocketAddr to prevent tokio from
             // performing a DNS lookup
@@ -107,11 +111,15 @@ impl AgentManagment for KubernetesAPI {
             )
             .await
         } else {
-            trace!("connecting to pod {pod_agent_name}:{agent_port}");
-
+            trace!("connecting to pod {pod_name}:{agent_port}");
+            let connection_string = if let Some(namespace) = namespace {
+                format!("{pod_name}.{namespace}:{agent_port}")
+            } else {
+                format!("{pod_name}:{agent_port}")
+            };
             tokio::time::timeout(
                 Duration::from_secs(self.agent.startup_timeout),
-                TcpStream::connect(format!("{}:{}", pod_agent_name, agent_port)),
+                TcpStream::connect(connection_string),
             )
             .await
         }

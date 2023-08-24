@@ -591,8 +591,6 @@ mod tests {
             pause: Some(false),
             kubeconfig: None,
             telemetry: None,
-            connect_agent_name: None,
-            connect_agent_port: None,
             target: Some(TargetFileConfig::Advanced {
                 path: Some(Target::Pod(PodTarget {
                     pod: "test-service-abcdefg-abcd".to_owned(),
