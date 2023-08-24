@@ -484,7 +484,7 @@ jobs:
         uses: medyagh/setup-minikube@master
         with:
           container-runtime: ${{matrix.container-runtime}}
-          start-args: '--force'
+          start-args: '--force --wait-timeout 2m'
       - run: minikube image load /tmp/test.tar
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run targetless E2E test.
