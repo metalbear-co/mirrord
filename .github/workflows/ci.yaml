@@ -104,7 +104,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    container: ghcr.io/metalbear-co/ci-tests-runner-build:latest
+    container:
+      image: ghcr.io/metalbear-co/ci-tests-runner-build:latest
+      options: --user root
     steps:
       - uses: actions/checkout@v3
       # Otherwise the arguments to the setup-rust-toolchain action are ignored.
@@ -113,14 +115,14 @@ jobs:
           # remove before merge
           cache-on-failure: "true"
       # rustcache disables cargo incremental and we run different compilations on the same time so this can be useful
-      - name: enable CARGO_INCREMENTAL
+      - name: enable CARGO_INCREMENTAL && set PATH to not use github's Rust
         run: |
           echo "CARGO_INCREMENTAL=1" >> "$GITHUB_ENV"
+      - name: cargo fmt check
+        run: cargo fmt --all -- --check
       # Check that agent compiles for the supported targets (aarch64)
       - name: cargo clippy agent check for aarch64
         run: cargo clippy -p mirrord-agent --target aarch64-unknown-linux-gnu -- -Wclippy::indexing_slicing -D warnings
-      - name: cargo fmt check
-        run: cargo fmt --all -- --check
       - name: cargo clippy check
         run: cargo clippy --lib --bins --all-features -- -Wclippy::indexing_slicing -D warnings
       - name: cargo clippy check for macos x64
