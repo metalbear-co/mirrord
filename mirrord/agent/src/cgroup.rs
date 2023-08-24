@@ -51,7 +51,10 @@ impl CgroupV1 {
                     "malformed path cgroup v1 file".to_string(),
                 ))?;
                 return Ok(Self {
-                    cgroup_path: PathBuf::from(cgroup_path),
+                    // strip / since joining "/a" and "/b" results in "/b"
+                    cgroup_path: Path::new(CGROUP_MOUNT_PATH).join(PathBuf::from(
+                        cgroup_path.strip_prefix("/").unwrap_or(cgroup_path),
+                    )),
                 });
             }
         }
