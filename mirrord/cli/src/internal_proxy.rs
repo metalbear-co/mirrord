@@ -35,7 +35,10 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, log::trace, warn};
 
-use crate::error::{InternalProxyError, Result};
+use crate::{
+    connection::AgentConnectInfo,
+    error::{InternalProxyError, Result},
+};
 
 const PING_INTERVAL_DURATION: Duration = Duration::from_secs(30);
 
@@ -400,25 +403,26 @@ async fn connect(
     (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
     Option<OperatorSessionInformation>,
 )> {
-    if let Some(operator_session_information) = OperatorSessionInformation::from_env()? {
-        Ok((
+    let agent_connect_info = AgentConnectInfo::from_env()?;
+    match agent_connect_info {
+        Some(AgentConnectInfo::Operator(operator_session_information)) => Ok((
             OperatorApi::connect(config, &operator_session_information).await?,
             Some(operator_session_information),
-        ))
-    } else if let Some(address) = &config.connect_tcp {
-        let stream = TcpStream::connect(address)
-            .await
-            .map_err(InternalProxyError::TcpConnectError)?;
-        Ok((wrap_raw_connection(stream), None))
-    } else if let (Some(agent_name), Some(port)) =
-        (&config.connect_agent_name, config.connect_agent_port)
-    {
-        let k8s_api = KubernetesAPI::create(config).await?;
-        let connection = k8s_api
-            .create_connection((agent_name.clone(), port))
-            .await?;
-        Ok((connection, None))
-    } else {
-        Err(InternalProxyError::NoConnectionMethod.into())
+        )),
+        Some(AgentConnectInfo::DirectKubernetes(connect_info)) => {
+            let k8s_api = KubernetesAPI::create(config).await?;
+            let connection = k8s_api.create_connection(connect_info).await?;
+            Ok((connection, None))
+        }
+        None => {
+            if let Some(address) = &config.connect_tcp {
+                let stream = TcpStream::connect(address)
+                    .await
+                    .map_err(InternalProxyError::TcpConnectError)?;
+                Ok((wrap_raw_connection(stream), None))
+            } else {
+                Err(InternalProxyError::NoConnectionMethod.into())
+            }
+        }
     }
 }
