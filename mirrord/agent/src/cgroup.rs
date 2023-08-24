@@ -53,7 +53,7 @@ impl CgroupV1 {
                 return Ok(Self {
                     // strip / since joining "/a" and "/b" results in "/b"
                     cgroup_path: Path::new(CGROUP_MOUNT_PATH).join(PathBuf::from(
-                        cgroup_path.strip_prefix("/").unwrap_or(cgroup_path),
+                        cgroup_path.strip_prefix('/').unwrap_or(cgroup_path),
                     )),
                 });
             }
