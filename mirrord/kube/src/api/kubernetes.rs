@@ -79,7 +79,7 @@ impl KubernetesAPI {
     /// Checks the [`CONTAINER_HAS_MESH_SIDECAR`] that is initialized in
     /// [`super::container::choose_container`], and warns the user when they're running an
     /// unsupported config.
-    #[tracing::instrument(level = trace, ret)]
+    #[tracing::instrument(level = "trace", ret, skip(self, progress))]
     pub async fn detect_mesh_sidecar<P>(&self, progress: &mut P) -> Result<()>
     where
         P: Progress + Send + Sync,
