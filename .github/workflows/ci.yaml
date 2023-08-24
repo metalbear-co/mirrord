@@ -468,6 +468,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
+    container: ghcr.io/metalbear-co/ci-tests-runner-build:latest
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/setup_e2e.sh
