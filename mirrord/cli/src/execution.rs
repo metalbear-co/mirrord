@@ -4,7 +4,6 @@ use std::{
 };
 
 use mirrord_config::LayerConfig;
-use mirrord_operator::client::OperatorSessionInformation;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
 #[cfg(target_os = "macos")]
@@ -122,18 +121,8 @@ impl MirrordExecution {
             .stderr(std::process::Stdio::null())
             .stdin(std::process::Stdio::null());
 
-        match &connect_info {
-            AgentConnectInfo::DirectKubernetes(name, port) => {
-                proxy_command.env("MIRRORD_CONNECT_AGENT", name);
-                proxy_command.env("MIRRORD_CONNECT_PORT", port.to_string());
-            }
-            AgentConnectInfo::Operator(session) => {
-                proxy_command.env(
-                    OperatorSessionInformation::env_key(),
-                    serde_json::to_string(&session)?,
-                );
-            }
-        };
+        let connect_info = serde_json::to_string(&connect_info)?;
+        proxy_command.env(AgentConnectInfo::env_key(), connect_info);
 
         let mut proxy_process = proxy_command
             .spawn()

@@ -214,4 +214,9 @@ pub(crate) enum CliError {
     #[error("Waitlist registration failed.")]
     #[diagnostic(help("Please check the email provided and internet connection.{GENERAL_HELP}"))]
     WaitlistError(reqwest::Error),
+    #[error("Connection info deserialization failed: please report it. value: `{0}` err: `{1}`")]
+    #[diagnostic(help(
+        r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
+    ))]
+    ConnectInfoLoadFailed(String, serde_json::Error),
 }

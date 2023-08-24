@@ -11,6 +11,7 @@ use mirrord_config::{agent::AgentConfig, target::TargetConfig, LayerConfig};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "incluster")]
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -75,21 +76,32 @@ impl KubernetesAPI {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentKubernetesConnectInfo {
+    pub pod_name: String,
+    pub agent_port: u16,
+    pub namespace: Option<String>,
+}
+
 impl AgentManagment for KubernetesAPI {
-    type AgentRef = (String, u16);
+    type AgentRef = AgentKubernetesConnectInfo;
     type Err = KubeApiError;
 
     #[cfg(feature = "incluster")]
     async fn create_connection(
         &self,
-        (pod_agent_name, agent_port): Self::AgentRef,
+        AgentKubernetesConnectInfo {
+            pod_name,
+            agent_port,
+            namespace,
+        }: Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, self.agent.namespace.as_deref());
+        let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, namespace.as_deref());
 
-        let pod = pod_api.get(&pod_agent_name).await?;
+        let pod = pod_api.get(&pod_name).await?;
 
         let conn = if let Some(pod_ip) = pod.status.and_then(|status| status.pod_ip) {
-            trace!("connecting to pod_ip {pod_ip}:{agent_port}");
+            trace!("connecting to pod_ip {pod_ip}:{}", agent_port);
 
             // When pod_ip is available we directly create it as SocketAddr to prevent tokio from
             // performing a DNS lookup
@@ -99,11 +111,15 @@ impl AgentManagment for KubernetesAPI {
             )
             .await
         } else {
-            trace!("connecting to pod {pod_agent_name}:{agent_port}");
-
+            trace!("connecting to pod {pod_name}:{agent_port}");
+            let connection_string = if let Some(namespace) = namespace {
+                format!("{pod_name}.{namespace}:{agent_port}")
+            } else {
+                format!("{pod_name}:{agent_port}")
+            };
             tokio::time::timeout(
                 Duration::from_secs(self.agent.startup_timeout),
-                TcpStream::connect(format!("{}:{}", pod_agent_name, agent_port)),
+                TcpStream::connect(connection_string),
             )
             .await
         }
@@ -115,15 +131,18 @@ impl AgentManagment for KubernetesAPI {
     #[cfg(not(feature = "incluster"))]
     async fn create_connection(
         &self,
-        (pod_agent_name, agent_port): Self::AgentRef,
+        connect_info: Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, self.agent.namespace.as_deref());
-        trace!("port-forward to pod {}:{}", &pod_agent_name, &agent_port);
-        let mut port_forwarder = pod_api.portforward(&pod_agent_name, &[agent_port]).await?;
+        let pod_api: Api<Pod> =
+            get_k8s_resource_api(&self.client, connect_info.namespace.as_deref());
+        trace!("port-forward to pod {:?}", &connect_info);
+        let mut port_forwarder = pod_api
+            .portforward(&connect_info.pod_name, &[connect_info.agent_port])
+            .await?;
 
         Ok(wrap_raw_connection(
             port_forwarder
-                .take_stream(agent_port)
+                .take_stream(connect_info.agent_port)
                 .ok_or(KubeApiError::PortForwardFailed)?,
         ))
     }
@@ -156,7 +175,7 @@ impl AgentManagment for KubernetesAPI {
         let agent_gid: u16 = rand::thread_rng().gen_range(3000..u16::MAX);
         info!("Using group-id `{agent_gid:?}`");
 
-        let pod_agent_name = if self.agent.ephemeral {
+        let agent_connect_info = if self.agent.ephemeral {
             EphemeralContainer::create_agent(
                 &self.client,
                 &self.agent,
@@ -178,8 +197,8 @@ impl AgentManagment for KubernetesAPI {
             .await?
         };
 
-        info!("Created agent pod {pod_agent_name:?}");
-        Ok((pod_agent_name, agent_port))
+        info!("Created agent pod {agent_connect_info:?}");
+        Ok(agent_connect_info)
     }
 }
 

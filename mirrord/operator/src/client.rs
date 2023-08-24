@@ -24,7 +24,6 @@ use tracing::{debug, error};
 use crate::crd::{MirrordOperatorCrd, OperatorFeatures, TargetCrd, OPERATOR_STATUS_NAME};
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
-const MIRRORD_OPERATOR_SESSION: &str = "MIRRORD_OPERATOR_SESSION";
 
 #[derive(Debug, Error)]
 pub enum OperatorApiError {
@@ -48,8 +47,6 @@ pub enum OperatorApiError {
     Authentication(#[from] AuthenticationError),
     #[error("Can't start proccess because other locks exist on target")]
     ConcurrentStealAbort,
-    #[error("Invalid operator session - this is a bug, please report it. value: `{0}` err: `{1}`")]
-    InvalidOperatorSession(String, serde_json::Error),
 }
 
 type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
@@ -81,22 +78,6 @@ impl OperatorSessionInformation {
             operator_features,
             protocol_version,
         }
-    }
-
-    /// Returns environment variable holding the information
-    pub const fn env_key() -> &'static str {
-        MIRRORD_OPERATOR_SESSION
-    }
-
-    /// Loads the information from environment variables
-    pub fn from_env() -> Result<Option<Self>> {
-        std::env::var(Self::env_key())
-            .ok()
-            .map(|val| {
-                serde_json::from_str(&val)
-                    .map_err(|e| OperatorApiError::InvalidOperatorSession(val, e))
-            })
-            .transpose()
     }
 }
 
