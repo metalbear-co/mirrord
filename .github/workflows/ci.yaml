@@ -109,6 +109,9 @@ jobs:
       - uses: actions/checkout@v3
       # Otherwise the arguments to the setup-rust-toolchain action are ignored.
       - uses: Swatinem/rust-cache@v2
+        with:
+          # remove before merge
+          cache-on-failure: "true"
       # rustcache disables cargo incremental and we run different compilations on the same time so this can be useful
       - name: enable CARGO_INCREMENTAL
         run: |
@@ -120,7 +123,7 @@ jobs:
         run: cargo-zigbuild clippy --lib --bins --all-features -- -Wclippy::indexing_slicing -D warnings
       # Check that agent compiles for the supported targets (aarch64)
       - name: cargo clippy agent check for aarch64
-        run: cargo clippy -p mirrord-agent --target aarch64-unknown-linux-gnu -- -Wclippy::indexing_slicing -D warnings
+        run: cargo clippy +nightly-2023-04-19 -p mirrord-agent --target aarch64-unknown-linux-gnu -- -Wclippy::indexing_slicing -D warnings
       - name: cargo clippy check for macos x64
         run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
       - name: cargo clippy check for macos aarch
