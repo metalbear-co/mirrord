@@ -112,7 +112,7 @@ jobs:
       # rustcache disables cargo incremental and we run different compilations on the same time so this can be useful
       - name: enable CARGO_INCREMENTAL
         run: |
-          export CARGO_INCREMENTAL=1
+          echo "CARGO_INCREMENTAL=1" >> "$GITHUB_ENV"
       # Needed for agent
       - name: cargo fmt check
         run: cargo fmt --all -- --check
@@ -209,7 +209,7 @@ jobs:
       # rustcache disables cargo incremental and we run different compilations on the same time so this can be useful
       - name: enable CARGO_INCREMENTAL
         run: |
-          export CARGO_INCREMENTAL=1
+          echo "CARGO_INCREMENTAL=1" >> "$GITHUB_ENV"
       - name: test mirrord-sip
         run: |
           cargo test -p mirrord-sip
