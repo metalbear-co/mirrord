@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    path::PathBuf,
     time::Duration,
 };
 
@@ -64,62 +65,9 @@ impl MirrordExecution {
             .await
             .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
-        let mut env_vars = async {
-            let mut env_vars = HashMap::new();
-
-            let (env_vars_exclude, env_vars_include) = match (
-                config
-                    .feature
-                    .env
-                    .exclude
-                    .clone()
-                    .map(|exclude| exclude.join(";")),
-                config
-                    .feature
-                    .env
-                    .include
-                    .clone()
-                    .map(|include| include.join(";")),
-            ) {
-                (Some(exclude), Some(include)) => {
-                    return Err(CliError::InvalidEnvConfig(include, exclude))
-                }
-                (Some(exclude), None) => (HashSet::from(EnvVars(exclude)), HashSet::new()),
-                (None, Some(include)) => (HashSet::new(), HashSet::from(EnvVars(include))),
-                (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
-            };
-
-            let communication_timeout =
-                Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into());
-
-            if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
-                let remote_env = tokio::time::timeout(
-                    communication_timeout,
-                    Self::get_remote_env(&mut connection, env_vars_exclude, env_vars_include),
-                )
-                .await
-                .map_err(|_| {
-                    CliError::InitialCommFailed("Timeout waiting for remote environment variables.")
-                })??;
-                env_vars.extend(remote_env);
-                if let Some(overrides) = &config.feature.env.r#override {
-                    env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
-                }
-            }
-
-            let lib_path: String = lib_path.to_string_lossy().into();
-            // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
-            // If already exists, we append.
-            if let Ok(v) = std::env::var(INJECTION_ENV_VAR) {
-                env_vars.insert(INJECTION_ENV_VAR.to_string(), format!("{v}:{lib_path}"))
-            } else {
-                env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
-            };
-
-            Ok(env_vars)
-        }
-        .await
-        .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?;
+        let mut env_vars = Self::fetch_env_vars(lib_path, config, &mut connection)
+            .await
+            .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?;
 
         // stderr is inherited so we can see logs/errors.
         let mut proxy_command =
@@ -193,6 +141,65 @@ impl MirrordExecution {
             child: proxy_process,
             patched_path,
         })
+    }
+
+    async fn fetch_env_vars(
+        lib_path: PathBuf,
+        config: &LayerConfig,
+        connection: &mut AgentConnection,
+    ) -> Result<HashMap<String, String>> {
+        let mut env_vars = HashMap::new();
+
+        let (env_vars_exclude, env_vars_include) = match (
+            config
+                .feature
+                .env
+                .exclude
+                .clone()
+                .map(|exclude| exclude.join(";")),
+            config
+                .feature
+                .env
+                .include
+                .clone()
+                .map(|include| include.join(";")),
+        ) {
+            (Some(exclude), Some(include)) => {
+                return Err(CliError::InvalidEnvConfig(include, exclude))
+            }
+            (Some(exclude), None) => (HashSet::from(EnvVars(exclude)), HashSet::new()),
+            (None, Some(include)) => (HashSet::new(), HashSet::from(EnvVars(include))),
+            (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
+        };
+
+        let communication_timeout =
+            Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into());
+
+        if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
+            let remote_env = tokio::time::timeout(
+                communication_timeout,
+                Self::get_remote_env(connection, env_vars_exclude, env_vars_include),
+            )
+            .await
+            .map_err(|_| {
+                CliError::InitialCommFailed("Timeout waiting for remote environment variables.")
+            })??;
+            env_vars.extend(remote_env);
+            if let Some(overrides) = &config.feature.env.r#override {
+                env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
+            }
+        }
+
+        let lib_path: String = lib_path.to_string_lossy().into();
+        // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
+        // If already exists, we append.
+        if let Ok(v) = std::env::var(INJECTION_ENV_VAR) {
+            env_vars.insert(INJECTION_ENV_VAR.to_string(), format!("{v}:{lib_path}"))
+        } else {
+            env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
+        };
+
+        Ok(env_vars)
     }
 
     /// Retrieve remote environment from the connected agent.
