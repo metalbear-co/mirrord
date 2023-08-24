@@ -88,7 +88,7 @@ static DEFAULT_TOLERATIONS: LazyLock<Vec<Toleration>> = LazyLock::new(|| {
 /// 1. Try to find based on given name
 /// 2. Try to find first container in pod that isn't a mesh side car
 /// 3. Take first container in pod
-#[tracing::instrument(level = "debug", ret)]
+#[tracing::instrument(level = "trace", ret)]
 pub fn choose_container<'a>(
     container_name: &Option<String>,
     container_statuses: &'a [ContainerStatus],
@@ -99,7 +99,6 @@ pub fn choose_container<'a>(
             .any(|status| CHECK_MESH_SIDECAR.contains(status.name.as_str())),
         std::sync::atomic::Ordering::Release,
     );
-    tracing::info!("IS MESH {CONTAINER_HAS_MESH_SIDECAR:?}");
 
     if let Some(name) = container_name {
         container_statuses
