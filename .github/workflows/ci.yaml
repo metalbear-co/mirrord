@@ -191,7 +191,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --document-private-items
 
-  macos_checks:
+  macos_check:
     runs-on: macos-latest
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
@@ -313,7 +313,7 @@ jobs:
       matrix:
         container-runtime: ["docker", "containerd"]
     name: e2e
-    needs: [linux_checks, test_agent_image, changed_files]
+    needs: [linux_check, test_agent_image, changed_files]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
@@ -368,8 +368,8 @@ jobs:
       [
         towncrier_check,
         changed_files,
-        linux_checks,
-        macos_checks,
+        linux_check,
+        macos_check,
         test_agent_image,
         e2e,
         lint_markdown,
@@ -382,8 +382,8 @@ jobs:
         env:
           CI_SUCCESS: ${{ (needs.changed_files.result == 'success') &&
             (needs.towncrier_check.result == 'success') &&
-            (needs.linux_checks.result == 'success' || needs.linux_checks.result == 'skipped') &&
-            (needs.macos_checks.result == 'success' || needs.macos_checks.result == 'skipped') &&
+            (needs.linux_check.result == 'success' || needs.linux_check.result == 'skipped') &&
+            (needs.macos_check.result == 'success' || needs.macos_check.result == 'skipped') &&
             (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
             (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
             (needs.lint_markdown.result == 'success' || needs.lint_markdown.result == 'skipped') }}
