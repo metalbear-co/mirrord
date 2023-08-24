@@ -89,6 +89,15 @@ impl KubernetesAPI {
         }
         Ok(())
     }
+
+    pub async fn meow<P>(&self, progress: &mut P) -> Result<()>
+    where
+        P: Progress + Send + Sync,
+    {
+        progress.warning("warning meow!");
+        progress.success(Some("success meow!"));
+        Ok(())
+    }
 }
 
 impl AgentManagment for KubernetesAPI {

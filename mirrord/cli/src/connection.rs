@@ -111,8 +111,13 @@ where
             detect_openshift_task.warning("couldn't determine OpenShift");
         };
 
+        let mut cat_subtask= progress.subtask("meow...");
+        if (k8s_api.meow(&mut cat_subtask).await).is_err() {
+            cat_subtask.warning("cant meow");
+        };
+
+        let mut detect_mesh_sidecar_task = progress.subtask("detecting mesh sidecar...");
         if matches!(config.feature.network.incoming.mode, IncomingMode::Mirror) {
-            let mut detect_mesh_sidecar_task = progress.subtask("detecting mesh sidecar...");
             if (k8s_api.detect_mesh_sidecar(&mut detect_mesh_sidecar_task).await).is_err() {
                 detect_mesh_sidecar_task.warning("couldn't determine mesh sidecar");
             };

@@ -73,6 +73,9 @@ pub static SKIP_NAMES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     ])
 });
 
+pub static CHECK_MESH_SIDECAR: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| HashSet::from(["istio-proxy", "istio-init", "linkerd-proxy", "linkerd-init"]));
+
 static DEFAULT_TOLERATIONS: LazyLock<Vec<Toleration>> = LazyLock::new(|| {
     vec![Toleration {
         operator: Some("Exists".to_owned()),
@@ -90,12 +93,9 @@ pub fn choose_container<'a>(
     container_statuses: &'a [ContainerStatus],
 ) -> Option<&'a ContainerStatus> {
     CONTAINER_HAS_MESH_SIDECAR.store(
-        container_statuses.iter().any(|status| {
-            SKIP_NAMES
-                .iter()
-                .filter(|name| !(name.contains("vault-agent") || name.contains("vault-agent-init")))
-                .any(|name| name.contains(status.name.as_str()))
-        }),
+        container_statuses
+            .iter()
+            .any(|status| CHECK_MESH_SIDECAR.contains(status.name.as_str())),
         std::sync::atomic::Ordering::Release,
     );
     tracing::info!("IS MESH {CONTAINER_HAS_MESH_SIDECAR:?}");
