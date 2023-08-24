@@ -118,7 +118,7 @@ jobs:
           echo "CARGO_INCREMENTAL=1" >> "$GITHUB_ENV"
       # Check that agent compiles for the supported targets (aarch64)
       - name: cargo clippy agent check for aarch64
-        run: cargo clippy +nightly-2023-04-19 -p mirrord-agent --target aarch64-unknown-linux-gnu -- -Wclippy::indexing_slicing -D warnings
+        run: cargo +nightly-2023-04-19 clippy -p mirrord-agent --target aarch64-unknown-linux-gnu -- -Wclippy::indexing_slicing -D warnings
       - name: cargo fmt check
         run: cargo fmt --all -- --check
       - name: cargo clippy check
