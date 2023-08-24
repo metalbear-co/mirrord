@@ -22,7 +22,7 @@ where
     let mut execution_info =
         MirrordExecution::start(&config, args.executable.as_deref(), &progress, analytics).await?;
     #[cfg(not(target_os = "macos"))]
-    let mut execution_info = MirrordExecution::start(&config, &progress, &mut analytics).await?;
+    let mut execution_info = MirrordExecution::start(&config, &progress, analytics).await?;
 
     // We don't execute so set envs aren't passed, so we need to add config file and target to
     // env.
