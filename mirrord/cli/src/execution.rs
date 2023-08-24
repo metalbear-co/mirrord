@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, HashSet},
-    path::PathBuf,
     time::Duration,
 };
 
@@ -65,9 +64,18 @@ impl MirrordExecution {
             .await
             .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
-        let mut env_vars = Self::fetch_env_vars(lib_path, config, &mut connection)
+        let mut env_vars = Self::fetch_env_vars(config, &mut connection)
             .await
             .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?;
+
+        let lib_path: String = lib_path.to_string_lossy().into();
+        // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
+        // If already exists, we append.
+        if let Ok(v) = std::env::var(INJECTION_ENV_VAR) {
+            env_vars.insert(INJECTION_ENV_VAR.to_string(), format!("{v}:{lib_path}"))
+        } else {
+            env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
+        };
 
         // stderr is inherited so we can see logs/errors.
         let mut proxy_command =
@@ -143,8 +151,9 @@ impl MirrordExecution {
         })
     }
 
+    /// Construct filter and retrieve remote environment from the connected agent using
+    /// `MirrordExecution::get_remote_env`.
     async fn fetch_env_vars(
-        lib_path: PathBuf,
         config: &LayerConfig,
         connection: &mut AgentConnection,
     ) -> Result<HashMap<String, String>> {
@@ -189,15 +198,6 @@ impl MirrordExecution {
                 env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
             }
         }
-
-        let lib_path: String = lib_path.to_string_lossy().into();
-        // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
-        // If already exists, we append.
-        if let Ok(v) = std::env::var(INJECTION_ENV_VAR) {
-            env_vars.insert(INJECTION_ENV_VAR.to_string(), format!("{v}:{lib_path}"))
-        } else {
-            env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
-        };
 
         Ok(env_vars)
     }
