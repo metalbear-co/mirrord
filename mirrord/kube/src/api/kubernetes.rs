@@ -98,7 +98,7 @@ impl AgentManagment for KubernetesAPI {
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
         let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, namespace.as_deref());
 
-        let pod = pod_api.get(pod_name).await?;
+        let pod = pod_api.get(&pod_name).await?;
 
         let conn = if let Some(pod_ip) = pod.status.and_then(|status| status.pod_ip) {
             trace!("connecting to pod_ip {pod_ip}:{}", agent_port);
