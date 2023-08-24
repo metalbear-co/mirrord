@@ -2,8 +2,12 @@ use std::ops::Deref;
 #[cfg(feature = "incluster")]
 use std::{net::SocketAddr, time::Duration};
 
-use k8s_openapi::api::core::v1::Pod;
+use k8s_openapi::{
+    api::core::v1::{Namespace, Pod},
+    NamespaceResourceScope,
+};
 use kube::{
+    api::ListParams,
     config::{KubeConfigOptions, Kubeconfig},
     Api, Client, Config, Discovery,
 };
@@ -19,8 +23,7 @@ use tracing::{info, trace};
 
 use crate::{
     api::{
-        container::{ContainerApi, EphemeralContainer, JobContainer},
-        get_k8s_resource_api,
+        container::{ephemeral::EphemeralContainer, job::JobContainer, ContainerApi},
         runtime::RuntimeDataProvider,
         wrap_raw_connection, AgentManagment,
     },
@@ -229,4 +232,38 @@ where
     };
     config.accept_invalid_certs = accept_invalid_certificates;
     Client::try_from(config).map_err(KubeApiError::from)
+}
+
+pub fn get_k8s_resource_api<K>(client: &Client, namespace: Option<&str>) -> Api<K>
+where
+    K: kube::Resource<Scope = NamespaceResourceScope>,
+    <K as kube::Resource>::DynamicType: Default,
+{
+    if let Some(namespace) = namespace {
+        Api::namespaced(client.clone(), namespace)
+    } else {
+        Api::default_namespaced(client.clone())
+    }
+}
+
+/// Get a vector of namespaces from an optional namespace. If the given namespace is Some, then
+/// fetch its Namespace object, and return a vector only with that.
+/// If the namespace is None - return all namespaces.
+pub async fn get_namespaces(
+    client: &Client,
+    namespace: Option<&str>,
+    lp: &ListParams,
+) -> Result<Vec<Namespace>> {
+    let api: Api<Namespace> = Api::all(client.clone());
+    Ok(if let Some(namespace) = namespace {
+        vec![api.get(namespace).await?]
+    } else {
+        api.list(lp).await?.items
+    })
+}
+
+/// Check if the client can see a given namespace.
+pub async fn namespace_exists_for_client(namespace: &str, client: &Client) -> bool {
+    let api: Api<Namespace> = Api::all(client.clone());
+    api.get(namespace).await.is_ok()
 }
