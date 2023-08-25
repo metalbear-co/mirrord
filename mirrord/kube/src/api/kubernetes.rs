@@ -1,13 +1,19 @@
+use std::{
+    collections::HashSet,
+    ops::Deref,
+    sync::{atomic::Ordering::Acquire, LazyLock},
+};
 #[cfg(feature = "incluster")]
 use std::{net::SocketAddr, time::Duration};
-use std::{ops::Deref, sync::atomic::Ordering::Acquire};
 
-use k8s_openapi::api::core::v1::Pod;
+use k8s_openapi::api::core::v1::{ContainerStatus, Pod};
 use kube::{
     config::{KubeConfigOptions, Kubeconfig},
     Api, Client, Config, Discovery,
 };
-use mirrord_config::{agent::AgentConfig, target::TargetConfig, LayerConfig};
+use mirrord_config::{
+    agent::AgentConfig, feature::network::incoming::IncomingMode, target::TargetConfig, LayerConfig,
+};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use rand::Rng;
@@ -17,7 +23,6 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tracing::{info, trace};
 
-use super::container::CONTAINER_HAS_MESH_SIDECAR;
 use crate::{
     api::{
         container::{ContainerApi, EphemeralContainer, JobContainer},
@@ -29,6 +34,9 @@ use crate::{
 };
 
 pub mod rollout;
+
+pub static CHECK_MESH_SIDECAR: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| HashSet::from(["istio-proxy", "istio-init", "linkerd-proxy", "linkerd-init"]));
 
 pub struct KubernetesAPI {
     client: Client,
@@ -80,11 +88,20 @@ impl KubernetesAPI {
     /// [`super::container::choose_container`], and warns the user when they're running an
     /// unsupported config.
     #[tracing::instrument(level = "trace", ret, skip(self, progress))]
-    pub async fn detect_mesh_sidecar<P>(&self, progress: &mut P) -> Result<()>
+    pub async fn detect_mesh_sidecar<P>(
+        &self,
+        progress: &mut P,
+        incoming_mode: IncomingMode,
+        container_statuses: &[ContainerStatus],
+    ) -> Result<()>
     where
         P: Progress + Send + Sync,
     {
-        if CONTAINER_HAS_MESH_SIDECAR.load(Acquire) {
+        if matches!(incoming_mode, IncomingMode::Mirror)
+            && container_statuses
+                .iter()
+                .any(|status| CHECK_MESH_SIDECAR.contains(status.name.as_str()))
+        {
             progress
                 .warning("mesh/sidecar detected with `feature.network.incoming.mode = \"mirror\"`");
         } else {
@@ -185,6 +202,13 @@ impl AgentManagment for KubernetesAPI {
             );
             None
         };
+
+        if let Some(container_statuses) = runtime_data
+            .as_ref()
+            .map(|runtime| runtime.container_statuses.as_slice())
+        {
+            self.detect_mesh_sidecar(progress, incoming_mode, container_statuses);
+        }
 
         info!("Spawning new agent.");
         let agent_port: u16 = rand::thread_rng().gen_range(30000..=65535);

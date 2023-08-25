@@ -8,7 +8,7 @@ use std::{
 use k8s_openapi::{
     api::{
         apps::v1::Deployment,
-        core::v1::{Node, Pod},
+        core::v1::{ContainerStatus, Node, Pod},
     },
     apimachinery::pkg::api::resource::Quantity,
 };
@@ -45,6 +45,7 @@ pub struct RuntimeData {
     pub container_id: String,
     pub container_runtime: ContainerRuntime,
     pub container_name: String,
+    pub container_statuses: Vec<ContainerStatus>,
 }
 
 impl RuntimeData {
@@ -68,10 +69,10 @@ impl RuntimeData {
             .as_ref()
             .ok_or(KubeApiError::PodStatusNotFound)?
             .container_statuses
-            .as_ref()
+            .clone()
             .ok_or(KubeApiError::ContainerStatusNotFound)?;
-        let chosen_status =
-            choose_container(container_name, container_statuses).ok_or_else(|| {
+        let chosen_status = choose_container(container_name, container_statuses.as_ref())
+            .ok_or_else(|| {
                 KubeApiError::ContainerNotFound(
                     container_name.clone().unwrap_or_else(|| "None".to_string()),
                 )
@@ -109,6 +110,7 @@ impl RuntimeData {
             container_id,
             container_runtime,
             container_name,
+            container_statuses,
         })
     }
 

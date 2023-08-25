@@ -1,7 +1,4 @@
-use std::{
-    collections::HashSet,
-    sync::{atomic::AtomicBool, LazyLock},
-};
+use std::{collections::HashSet, sync::LazyLock};
 
 use futures::{AsyncBufReadExt, StreamExt, TryStreamExt};
 use k8s_openapi::api::{
@@ -29,8 +26,6 @@ use crate::{
     },
     error::{KubeApiError, Result},
 };
-
-pub(super) static CONTAINER_HAS_MESH_SIDECAR: AtomicBool = AtomicBool::new(false);
 
 /// Retrieve a list of Linux capabilities for the agent container.
 fn get_capabilities(config: &AgentConfig) -> Vec<LinuxCapability> {
@@ -74,9 +69,6 @@ pub static SKIP_NAMES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     ])
 });
 
-pub static CHECK_MESH_SIDECAR: LazyLock<HashSet<&'static str>> =
-    LazyLock::new(|| HashSet::from(["istio-proxy", "istio-init", "linkerd-proxy", "linkerd-init"]));
-
 static DEFAULT_TOLERATIONS: LazyLock<Vec<Toleration>> = LazyLock::new(|| {
     vec![Toleration {
         operator: Some("Exists".to_owned()),
@@ -93,13 +85,6 @@ pub fn choose_container<'a>(
     container_name: &Option<String>,
     container_statuses: &'a [ContainerStatus],
 ) -> Option<&'a ContainerStatus> {
-    CONTAINER_HAS_MESH_SIDECAR.store(
-        container_statuses
-            .iter()
-            .any(|status| CHECK_MESH_SIDECAR.contains(status.name.as_str())),
-        std::sync::atomic::Ordering::Release,
-    );
-
     if let Some(name) = container_name {
         container_statuses
             .iter()
