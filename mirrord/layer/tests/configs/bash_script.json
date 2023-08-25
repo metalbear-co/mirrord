@@ -2,7 +2,7 @@
     "feature": {
         "fs": {
             "mode": "read",
-            "local": ["/var/db/timezone/icutz"]
+            "local": ["/var/db/"]
         }
     }
 }
