@@ -320,30 +320,31 @@ jobs:
           node-version: 14
       - run: npm install express # For http mirroring test with node.
       - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
-      - run: pip3 install flask # For http mirroring test with Flask.
-      - run: pip3 install fastapi # For http mirroring test with FastAPI.
-      - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
-      - uses: actions/setup-go@v3
+      - run: pip3 install flask fasatapi uvicorn[standard] # For http mirroring test with Flask.
+      - uses: actions/setup-go@v4
         with:
-          go-version: "1.20.0-rc.3"
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 20
-      - uses: actions/setup-go@v3
-        with:
-          go-version: "1.19.5"
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 19
-      - uses: actions/setup-go@v3
-        with:
-          go-version: "1.18.10"
+          go-version: "1.18"
+          cache-dependency-path: tests/go-e2e/go.sum
       - run: |
           go version
       - run: | # Build Go test apps.
           ./scripts/build_go_apps.sh 18
+      - uses: actions/setup-go@v4
+        with:
+          go-version: "1.19"
+          cache-dependency-path: tests/go-e2e/go.sum
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 19
+      - uses: actions/setup-go@v4
+        with:
+          go-version: "1.20"
+          cache-dependency-path: tests/go-e2e/go.sum
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 20
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
@@ -397,23 +398,26 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/issue1458portnot53
           rustc issue1458portnot53.rs --out-dir target
-      - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
+      - uses: actions/setup-go@v4
         with:
           go-version: "1.18"
+          cache-dependency-path: tests/go-e2e/go.sum
       - run: |
           go version
       - run: | # Build Go test apps.
           ./scripts/build_go_apps.sh 18
-      - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
+      - uses: actions/setup-go@v4
         with:
           go-version: "1.19"
+          cache-dependency-path: tests/go-e2e/go.sum
       - run: |
           go version
       - run: | # Build Go test apps.
           ./scripts/build_go_apps.sh 19
-      - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
+      - uses: actions/setup-go@v4
         with:
-          go-version: "1.20.0-rc.3"
+          go-version: "1.20"
+          cache-dependency-path: tests/go-e2e/go.sum
       - run: |
           go version
       - run: | # Build Go test apps.

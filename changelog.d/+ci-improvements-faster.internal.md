@@ -1,0 +1,1 @@
+Use go cache for integration tests
