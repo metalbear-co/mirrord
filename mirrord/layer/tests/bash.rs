@@ -34,6 +34,7 @@ use tokio_stream::StreamExt;
 async fn bash_script(dylib_path: &Path, config_dir: &PathBuf) {
     let mut config_path = config_dir.clone();
     config_path.push("bash_script.json");
+    println!("Using config: {}", config_path.to_str().unwrap());
     let application = Application::EnvBashCat;
     let executable = application.get_executable().await; // Own it.
     println!("Using executable: {}", &executable);
