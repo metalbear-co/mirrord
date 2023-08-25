@@ -94,7 +94,7 @@ impl OperatorApi {
     /// Creates a new operator session, setting the session information in environment variables.
     pub async fn create_session<P>(
         config: &LayerConfig,
-        progress: &P,
+        progress: &mut P,
     ) -> Result<
         Option<(
             mpsc::Sender<ClientMessage>,

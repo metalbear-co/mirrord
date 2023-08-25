@@ -1,9 +1,6 @@
 use std::time::Duration;
 
-use mirrord_config::{
-    feature::network::{incoming::IncomingMode, outgoing::OutgoingFilterConfig},
-    LayerConfig,
-};
+use mirrord_config::{feature::network::outgoing::OutgoingFilterConfig, LayerConfig};
 use mirrord_kube::api::{
     kubernetes::{AgentKubernetesConnectInfo, KubernetesAPI},
     AgentManagment,
@@ -49,7 +46,7 @@ pub(crate) struct AgentConnection {
 
 pub(crate) async fn create_operator_session<P>(
     config: &LayerConfig,
-    progress: &P,
+    progress: &mut P,
 ) -> Result<
     Option<(
         mpsc::Sender<ClientMessage>,
@@ -96,7 +93,7 @@ where
 /// Creates an agent if needed then connects to it.
 pub(crate) async fn create_and_connect<P>(
     config: &LayerConfig,
-    progress: &P,
+    progress: &mut P,
 ) -> Result<(AgentConnectInfo, AgentConnection)>
 where
     P: Progress + Send + Sync,
@@ -136,20 +133,11 @@ where
 
         let agent_connect_info = tokio::time::timeout(
             Duration::from_secs(config.agent.startup_timeout),
-            k8s_api.create_agent(progress),
+            k8s_api.create_agent(progress, Some(config)),
         )
         .await
         .map_err(|_| CliError::AgentReadyTimeout)?
         .map_err(CliError::CreateAgentFailed)?;
-
-        // Has to happen as late as possible, otherwise `CONTAINER_HAS_MESH_SIDECAR` may not be
-        // actually initialized yet! 
-        let mut detect_mesh_sidecar_task = progress.subtask("detecting mesh sidecar...");
-        if matches!(config.feature.network.incoming.mode, IncomingMode::Mirror) {
-            if (k8s_api.detect_mesh_sidecar(&mut detect_mesh_sidecar_task).await).is_err() {
-                detect_mesh_sidecar_task.warning("couldn't determine mesh sidecar");
-            };
-        }
 
         let (sender, receiver) = k8s_api
             .create_connection(agent_connect_info.clone())

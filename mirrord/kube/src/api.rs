@@ -2,6 +2,7 @@ use actix_codec::{AsyncRead, AsyncWrite};
 use futures::{SinkExt, StreamExt};
 use k8s_openapi::{api::core::v1::Namespace, NamespaceResourceScope};
 use kube::{api::ListParams, Api, Client};
+use mirrord_config::LayerConfig;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage, LogLevel};
 use tokio::{
@@ -123,14 +124,14 @@ pub trait AgentManagment {
 
     async fn connect<P>(
         &self,
-        progress: &P,
+        progress: &mut P,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), Self::Err>
     where
         P: Progress + Send + Sync,
         Self::AgentRef: Send + Sync,
         Self::Err: Send + Sync,
     {
-        self.create_connection(self.create_agent(progress).await?)
+        self.create_connection(self.create_agent(progress, None).await?)
             .await
     }
 
@@ -139,7 +140,11 @@ pub trait AgentManagment {
         agent_ref: Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), Self::Err>;
 
-    async fn create_agent<P>(&self, progress: &P) -> Result<Self::AgentRef, Self::Err>
+    async fn create_agent<P>(
+        &self,
+        progress: &mut P,
+        config: Option<&LayerConfig>,
+    ) -> Result<Self::AgentRef, Self::Err>
     where
         P: Progress + Send + Sync;
 }
@@ -160,7 +165,11 @@ where
         Ok(wrap_raw_connection(stream))
     }
 
-    async fn create_agent<P>(&self, _: &P) -> Result<Self::AgentRef, Self::Err>
+    async fn create_agent<P>(
+        &self,
+        _: &mut P,
+        _: Option<&LayerConfig>,
+    ) -> Result<Self::AgentRef, Self::Err>
     where
         P: Progress + Send + Sync,
     {
