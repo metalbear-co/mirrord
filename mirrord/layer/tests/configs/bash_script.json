@@ -2,7 +2,8 @@
     "feature": {
         "fs": {
             "mode": "read",
-            "local": ["/var/db"]
+            "local": ["/var/db"],
+            "read_only": ["/very_interesting_file"]
         }
     }
 }

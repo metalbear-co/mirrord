@@ -108,6 +108,7 @@ jobs:
       image: ghcr.io/metalbear-co/ci-tests-runner-build:latest
       options: --user root
     steps:
+      # github modifies our home, making us not use image's rustup
       - shell: bash
         run: 'echo HOME=/root | tee -a $GITHUB_ENV'
       - uses: actions/checkout@v3
@@ -122,17 +123,17 @@ jobs:
           echo "CARGO_INCREMENTAL=1" >> "$GITHUB_ENV"
       - name: cargo fmt check
         run: cargo fmt --all -- --check
+      - name: cargo clippy check
+        run: cargo clippy --target=x86_64-unknown-linux-gnu --lib --bins --all-features -- -Wclippy::indexing_slicing -D warnings
+      - name: cargo clippy check for macos x64
+        run: cargo-zigbuild clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
+      - name: cargo clippy check for macos aarch
+        run: cargo-zigbuild clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
+      - name: check that we can build layer for x86_64
+        run: cargo build -p mirrord -p mirrord-layer --target=x86_64-unknown-linux-gnu
       # Check that agent compiles for the supported targets (aarch64)
       - name: cargo clippy agent check for aarch64
         run: cargo clippy -p mirrord-agent --target aarch64-unknown-linux-gnu -- -Wclippy::indexing_slicing -D warnings
-      - name: cargo clippy check
-        run: cargo clippy --lib --bins --all-features -- -Wclippy::indexing_slicing -D warnings
-      - name: cargo clippy check for macos x64
-        run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
-      - name: cargo clippy check for macos aarch
-        run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
-      - name: check that we can build layer for x86_64
-        run: cargo build -p mirrord -p mirrord-layer --target=x86_64-unknown-linux-gnu
       - name: test mirrord-kube
         run: |
           cargo test -p mirrord-kube --all-features
@@ -218,7 +219,7 @@ jobs:
           echo "CARGO_INCREMENTAL=1" >> "$GITHUB_ENV"
       - name: test mirrord-sip
         run: |
-          cargo test -p mirrord-sip
+          cargo test -p mirrord-sip --target=x86_64-apple-darwin
       - name: check that we can build mirrord for x64 macos
         run: cargo build -p mirrord --target=x86_64-apple-darwin
       - name: check that we can build mirrord for aarch macos
@@ -293,11 +294,12 @@ jobs:
       - uses: actions/setup-node@v3 # version 19 spawns processes with `posix_spawn`, so test that also.
         with:
           node-version: 19
+      # specify target to re-use the same target cache.
       - name: run integration tests
         env:
           MIRRORD_TEST_USE_EXISTING_LIB: ../../target/debug/libmirrord_layer.dylib
           RUST_LOG: warn,mirrord=trace
-        run: cargo test -p mirrord-layer
+        run: cargo test -p mirrord-layer --target=x86_64-apple-darwin
 
   test_agent_image:
     runs-on: ubuntu-latest
@@ -333,9 +335,11 @@ jobs:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     container:
       image: ghcr.io/metalbear-co/ci-tests-runner-build:latest
-      volumes:
-        - /var/run/docker.sock:/var/run/docker.sock
+      options: --user root
     steps:
+      # github modifies our home, making us not use image's rustup
+      - shell: bash
+        run: 'echo HOME=/root | tee -a $GITHUB_ENV'
       - uses: actions/checkout@v3
       - run: ./scripts/setup_e2e.sh
       - name: download image
