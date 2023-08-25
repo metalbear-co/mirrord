@@ -109,7 +109,7 @@ jobs:
       options: --user root
     steps:
       - shell: bash
-        run: 'echo HOME=/root | sudo tee -a $GITHUB_ENV'
+        run: 'echo HOME=/root | tee -a $GITHUB_ENV'
       - uses: actions/checkout@v3
       # Otherwise the arguments to the setup-rust-toolchain action are ignored.
       - uses: Swatinem/rust-cache@v2
