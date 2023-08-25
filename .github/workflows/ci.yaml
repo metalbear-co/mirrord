@@ -108,25 +108,18 @@ jobs:
       image: ghcr.io/metalbear-co/ci-tests-runner-build:latest
       options: --user root
     steps:
+      - shell: bash
+        run: 'echo HOME=/root | sudo tee -a $GITHUB_ENV'
       - uses: actions/checkout@v3
-      - name: enable CARGO_INCREMENTAL && set PATH to not use github's Rust
-        run: |
-          echo "CARGO_INCREMENTAL=1" >> "$GITHUB_ENV"
-          which cargo
-          echo "PATH=/root/.cargo/bin:$PATH" >> "$GITHUB_ENV"
-          which cargo
       # Otherwise the arguments to the setup-rust-toolchain action are ignored.
       - uses: Swatinem/rust-cache@v2
         with:
           # remove before merge
           cache-on-failure: "true"
       # rustcache disables cargo incremental and we run different compilations on the same time so this can be useful
-      - name: enable CARGO_INCREMENTAL && set PATH to not use github's Rust
+      - name: enable CARGO_INCREMENTAL
         run: |
           echo "CARGO_INCREMENTAL=1" >> "$GITHUB_ENV"
-          which cargo
-          echo "PATH=/root/.cargo/bin:$PATH" >> "$GITHUB_ENV"
-          which cargo
       - name: cargo fmt check
         run: cargo fmt --all -- --check
       # Check that agent compiles for the supported targets (aarch64)
