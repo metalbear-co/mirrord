@@ -470,16 +470,14 @@ jobs:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
       - uses: actions/checkout@v3
-      - run: ./scripts/setup_e2e.sh
+      - uses: metalbear-co/ci/e2e-setup-action@main
+        with:
+          container-runtime: ${{matrix.container-runtime}}
       - name: download image
         uses: actions/download-artifact@v3
         with:
           name: test
           path: /tmp
-      - name: start minikube
-        uses: medyagh/setup-minikube@master
-        with:
-          container-runtime: ${{matrix.container-runtime}}
       - run: minikube image load /tmp/test.tar
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run targetless E2E test.

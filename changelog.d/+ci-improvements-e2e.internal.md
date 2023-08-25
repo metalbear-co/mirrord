@@ -1,0 +1,1 @@
+Changed e2e to use a shared setup e2e action to leverage all GitHub caches, reduce e2e time by half.
