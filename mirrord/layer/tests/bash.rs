@@ -16,7 +16,6 @@ use mirrord_protocol::{
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
 use rstest::rstest;
-use tests::utils::config_dir;
 use tokio::net::TcpListener;
 
 mod common;
