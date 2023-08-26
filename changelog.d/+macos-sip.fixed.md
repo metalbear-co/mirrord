@@ -1,0 +1,1 @@
+Fix macOS SIP potential issues from exec having mirrord loaded into the code sign binary.
