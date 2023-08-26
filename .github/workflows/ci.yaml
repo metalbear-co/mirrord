@@ -230,38 +230,6 @@ jobs:
           name: test
           path: /tmp/test.tar
 
-  test_mirrord_layer_cli:
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-13]
-        target:
-          [x86_64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin]
-        exclude:
-          - os: ubuntu-latest
-            target: x86_64-apple-darwin
-          - os: ubuntu-latest
-            target: aarch64-apple-darwin
-          - os: macos-13
-            target: x86_64-unknown-linux-gnu
-          - os: macos-11
-            target: aarch64-apple-darwin
-          - os: macos-11
-            target: x86_64-unknown-linux-gnu
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v3
-      # the setup rust toolchain action ignores the input if file exists.. so remove it
-      - if: ${{matrix.target == 'aarch64-apple-darwin'}}
-        run: rm rust-toolchain.toml
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          target: ${{matrix.target}}
-          toolchain: nightly-2023-04-19
-      # For now, just verify it compiles.
-      - run: cargo build -p mirrord-layer -p mirrord --target=${{matrix.target}}
-
   build_mirrord:
     runs-on: ubuntu-latest
     name: build mirrord
@@ -521,7 +489,6 @@ jobs:
         integration_tests_macos,
         integration_tests,
         e2e,
-        test_mirrord_layer_cli,
         test_agent,
         lint,
         lint_macos,
@@ -543,7 +510,6 @@ jobs:
             (needs.integration_tests_macos.result == 'success' || needs.integration_tests_macos.result == 'skipped') &&
             (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped') &&
             (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
-            (needs.test_mirrord_layer_cli.result == 'success' || needs.test_mirrord_layer_cli.result == 'skipped') &&
             (needs.test_agent.result == 'success' || needs.test_agent.result == 'skipped') &&
             (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
             (needs.lint_macos.result == 'success' || needs.lint_macos.result == 'skipped') &&
