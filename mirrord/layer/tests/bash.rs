@@ -62,13 +62,13 @@ async fn bash_script(dylib_path: &Path, config_dir: &PathBuf) {
 
     bash_layer_connection.expect_gethostname(fd).await;
 
+    let mut cat_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     // After the process forks we create a new main loop layer task in the child process.
     // That connection will die as soon as the new process calls execve, then a new layer will be
     // initialized.
     let mut _layer_after_fork_before_exec =
         LayerConnection::get_initialized_connection(&listener).await;
 
-    let mut cat_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
     // TODO: theoretically the connections arrival order could be different, should we handle it?
 
     cat_layer_connection
