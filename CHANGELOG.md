@@ -15,6 +15,9 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 - Add analytics collection to operator session information.
   [#1805](https://github.com/metalbear-co/mirrord/issues/1805)
+- Added an extra `not-found` file filter to improve experience when using cloud
+  services under mirrord.
+  [#1694](https://github.com/metalbear-co/mirrord/issues/1694)
 
 
 ### Changed
@@ -33,9 +36,6 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Fixed
 
-- Added an extra `not-found` file filter to improve experience when using cloud
-  services under mirrord.
-  [#1694](https://github.com/metalbear-co/mirrord/issues/1694)
 - Fix ephemeral agent creation api using agent namespace instead of target.
   Add note about agent namespace being irrelevant in ephemeral.
 - Fix macOS SIP potential issues from exec having mirrord loaded into the code
