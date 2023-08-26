@@ -113,11 +113,11 @@ jobs:
           components: rustfmt, clippy
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
       - run: python3 -m pip install cargo-zigbuild
-      # Needed for agent
       - run: cargo fmt --all -- --check
+      # x64
       - run: cargo-zigbuild clippy --lib --bins --all-features -- -Wclippy::indexing_slicing -D warnings
-      # Check that agent compiles for the supported targets (aarch64)
-      - run: cargo-zigbuild clippy -p mirrord-agent --target aarch64-unknown-linux-gnu -- -Wclippy::indexing_slicing -D warnings
+      # Check that compiles for the supported linux targets (aarch64)
+      - run: cargo-zigbuild clippy --lib --bins --all-features --target aarch64-unknown-linux-gnu -- -Wclippy::indexing_slicing -D warnings
 
   check-rust-docs:
     runs-on: ubuntu-latest
@@ -442,6 +442,7 @@ jobs:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
       - uses: actions/checkout@v3
+      - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install Rust.
       - uses: metalbear-co/ci/e2e-setup-action@main
         with:
           container-runtime: ${{matrix.container-runtime}}
