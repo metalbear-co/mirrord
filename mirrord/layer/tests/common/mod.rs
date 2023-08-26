@@ -1025,6 +1025,7 @@ pub fn get_env<'a>(
     env.insert("MIRRORD_CONNECT_TCP", addr);
     env.insert("MIRRORD_REMOTE_DNS", "false");
     if let Some(config) = config {
+        println!("using config file: {config}");
         env.insert("MIRRORD_CONFIG_FILE", config);
     }
     env.insert("DYLD_INSERT_LIBRARIES", dylib_path_str);
