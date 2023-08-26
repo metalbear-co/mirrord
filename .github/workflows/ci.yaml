@@ -235,7 +235,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-12, macos-11]
+        os: [ubuntu-latest, macos-13]
         target:
           [x86_64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin]
         exclude:
@@ -243,7 +243,7 @@ jobs:
             target: x86_64-apple-darwin
           - os: ubuntu-latest
             target: aarch64-apple-darwin
-          - os: macos-12
+          - os: macos-13
             target: x86_64-unknown-linux-gnu
           - os: macos-11
             target: aarch64-apple-darwin
@@ -320,30 +320,31 @@ jobs:
           node-version: 14
       - run: npm install express # For http mirroring test with node.
       - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
-      - run: pip3 install flask # For http mirroring test with Flask.
-      - run: pip3 install fastapi # For http mirroring test with FastAPI.
-      - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
-      - uses: actions/setup-go@v3
+      - run: pip3 install flask fastapi uvicorn[standard] # For http mirroring test with Flask.
+      - uses: actions/setup-go@v4
         with:
-          go-version: "1.20.0-rc.3"
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 20
-      - uses: actions/setup-go@v3
-        with:
-          go-version: "1.19.5"
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 19
-      - uses: actions/setup-go@v3
-        with:
-          go-version: "1.18.10"
+          go-version: "1.18"
+          cache-dependency-path: tests/go-e2e/go.sum
       - run: |
           go version
       - run: | # Build Go test apps.
           ./scripts/build_go_apps.sh 18
+      - uses: actions/setup-go@v4
+        with:
+          go-version: "1.19"
+          cache-dependency-path: tests/go-e2e/go.sum
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 19
+      - uses: actions/setup-go@v4
+        with:
+          go-version: "1.20"
+          cache-dependency-path: tests/go-e2e/go.sum
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 20
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
@@ -374,7 +375,7 @@ jobs:
       - run: cargo test -p mirrord-layer
 
   integration_tests_macos:
-    runs-on: macos-12
+    runs-on: macos-13
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
@@ -397,23 +398,26 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/issue1458portnot53
           rustc issue1458portnot53.rs --out-dir target
-      - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
+      - uses: actions/setup-go@v4
         with:
           go-version: "1.18"
+          cache-dependency-path: tests/go-e2e/go.sum
       - run: |
           go version
       - run: | # Build Go test apps.
           ./scripts/build_go_apps.sh 18
-      - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
+      - uses: actions/setup-go@v4
         with:
           go-version: "1.19"
+          cache-dependency-path: tests/go-e2e/go.sum
       - run: |
           go version
       - run: | # Build Go test apps.
           ./scripts/build_go_apps.sh 19
-      - uses: actions/setup-go@v3 # Install Go for http mirroring tests with a Go webserver.
+      - uses: actions/setup-go@v4
         with:
-          go-version: "1.20.0-rc.3"
+          go-version: "1.20"
+          cache-dependency-path: tests/go-e2e/go.sum
       - run: |
           go version
       - run: | # Build Go test apps.

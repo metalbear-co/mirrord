@@ -1,7 +1,10 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::Path, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 #[cfg(not(target_os = "macos"))]
 use futures::SinkExt;
@@ -27,14 +30,24 @@ use tokio_stream::StreamExt;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn bash_script(dylib_path: &Path) {
+async fn bash_script(dylib_path: &Path, config_dir: &PathBuf) {
+    let mut config_path = config_dir.clone();
+    // use a config file since cat sometimes opens some weird paths
+    // before opening the file we want to read, and it makes testing easier
+    // to ignore those paths.
+    config_path.push("bash_script.json");
     let application = Application::EnvBashCat;
     let executable = application.get_executable().await; // Own it.
     println!("Using executable: {}", &executable);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();
     println!("Listening for messages from the layer on {addr}");
-    let env = get_env(dylib_path.to_str().unwrap(), &addr, vec![], None);
+    let env = get_env(
+        dylib_path.to_str().unwrap(),
+        &addr,
+        vec![],
+        Some(config_path.to_str().unwrap()),
+    );
     #[cfg(target_os = "macos")]
     let executable = sip_patch(&executable, &Vec::new()).unwrap().unwrap();
     let test_process = TestProcess::start_process(executable, application.get_args(), env).await;
