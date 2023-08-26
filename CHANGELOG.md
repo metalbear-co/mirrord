@@ -8,6 +8,52 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.62.0](https://github.com/metalbear-co/mirrord/tree/3.62.0) - 2023-08-26
+
+
+### Added
+
+- Add analytics collection to operator session information.
+  [#1805](https://github.com/metalbear-co/mirrord/issues/1805)
+- Added an extra `not-found` file filter to improve experience when using cloud
+  services under mirrord.
+  [#1694](https://github.com/metalbear-co/mirrord/issues/1694)
+
+
+### Changed
+
+- Update telemetry.md with new info about mirrord for Teams
+  [#1837](https://github.com/metalbear-co/mirrord/issues/1837)
+- Changed keep alive to happen from internal proxy to support cases where layer
+  process is stuck [breakpoint/etc]
+  [#1839](https://github.com/metalbear-co/mirrord/issues/1839)
+- Changed CLI progress to print warnings and not only set it as the last
+  message of progress
+- Changed config verify to return aggregated warnings list for user to print
+  instead of warn in current progress - can fix issues with extension where we
+  printed to stderr.
+
+
+### Fixed
+
+- Fix ephemeral agent creation api using agent namespace instead of target.
+  Add note about agent namespace being irrelevant in ephemeral.
+- Fix macOS SIP potential issues from exec having mirrord loaded into the code
+  sign binary.
+- Fix operator setup so `MIRRORD_OPERATOR_IMAGE` will function properly.
+- Fixed issue connecting to ephemeral container when target is in different
+  namespace
+
+
+### Internal
+
+- Changed e2e to use a shared setup e2e action to leverage all GitHub caches,
+  reduce e2e time by half.
+- Changes to the CI to make it fater:
+  - Use go cache for integration test
+  - use mac-13 runner for tests
+
+
 ## [3.61.0](https://github.com/metalbear-co/mirrord/tree/3.61.0) - 2023-08-22
 
 
