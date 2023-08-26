@@ -1,11 +1,19 @@
+# Hello traveler!
+# This is the CI workflow for mirrord.
+# It is a bit complicated, but it is also very powerful.
+# We try to optimize for speed, but sometimes there are limitations.
+# Please try to document it here so people won't try repeating your errors.
+# 1. GitHub cache is limited to 10GB, so we try to have less jobs to not exceed it, since if we get over 10GB
+#    the cache will be evicted then builds will be slower, so it's better to have less jobs.
+# 2. I (Aviram) tried to use a container to build the Linux stuff, but couldn't get the e2e to work and (minikube in container)
+#    and the benefit seemed little.
 name: CI
 
 on:
   workflow_dispatch:
   push:
-    branches-ignore: [staging-squash-merge.tmp]
   pull_request:
-    branches: [main, staging, trying]
+    branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
 
 # Cancel previous runs on the same PR.
