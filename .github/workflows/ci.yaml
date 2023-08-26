@@ -7,6 +7,8 @@
 #    the cache will be evicted then builds will be slower, so it's better to have less jobs.
 # 2. I (Aviram) tried to use a container to build the Linux stuff, but couldn't get the e2e to work and (minikube in container)
 #    and the benefit seemed little.
+# 3. Please be mindful, we try to target less than 30 minutes for the CI to run. In a perfect world it'd be less than 5m.
+#     If you're adding something, please make sure it doesn't impact too much, and if you're reviewing please have it in mind.
 name: CI
 
 on:
