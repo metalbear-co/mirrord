@@ -32,6 +32,9 @@ use tokio_stream::StreamExt;
 #[timeout(Duration::from_secs(60))]
 async fn bash_script(dylib_path: &Path, config_dir: &PathBuf) {
     let mut config_path = config_dir.clone();
+    // use a config file since cat sometimes opens some weird paths
+    // before opening the file we want to read, and it makes testing easier
+    // to ignore those paths.
     config_path.push("bash_script.json");
     let application = Application::EnvBashCat;
     let executable = application.get_executable().await; // Own it.
