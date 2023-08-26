@@ -1,4 +1,4 @@
-use std::{collections::HashMap, os::unix::process::ExitStatusExt, path::Path, process::Command};
+use std::{os::unix::process::ExitStatusExt, path::Path, process::Command};
 
 use crate::error::{Result, SipError};
 
