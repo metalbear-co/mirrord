@@ -194,6 +194,11 @@ pub(crate) enum CliError {
         r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
     ))]
     InternalProxyStdoutError,
+    #[error("Couldn't get stdderr of internal proxy")]
+    #[diagnostic(help(
+        r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
+    ))]
+    InternalProxyStderrError,
     #[error("Couldn't get port of internal proxy")]
     #[diagnostic(help(
         r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
