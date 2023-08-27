@@ -147,8 +147,9 @@ impl CgroupFreeze for CgroupV2 {
             .write(true)
             .open(CGROUP_V2_FREEZE_PATH)
             .map_err(|_| AgentError::PauseFailedCgroup("open cgroup v2 failed".to_string()))?;
-        file.write_all("1".as_bytes())
-            .map_err(|_| AgentError::PauseFailedCgroup("writing 1 failed".to_string()))?;
+        file.write_all("1".as_bytes()).map_err(|_| {
+            AgentError::PauseFailedCgroup(format!("writing 1 failed {CGROUP_V2_FREEZE_PATH}"))
+        })?;
         Ok(())
     }
 
