@@ -112,6 +112,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v3
+      - run: mount # remove
       - uses: arduino/setup-protoc@v1
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -423,6 +424,7 @@ jobs:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
       - uses: actions/checkout@v3
+      - run: mount # remove
       - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install Rust.
       - uses: metalbear-co/ci/e2e-setup-action@main
         with:
@@ -434,6 +436,7 @@ jobs:
           path: /tmp
       - run: minikube image load /tmp/test.tar
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
+      - run: mount # remove
       - name: Run targetless E2E test.
         run: cargo test -p tests targetless
       - name: Run all E2E test
