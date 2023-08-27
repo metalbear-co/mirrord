@@ -17,9 +17,7 @@ use std::{
 };
 
 use futures::{stream::StreamExt, SinkExt};
-use mirrord_analytics::{
-    send_analytics, Analytics, AnalyticsHash, AnalyticsOperatorProperties, CollectAnalytics,
-};
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics};
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
 use mirrord_operator::client::{OperatorApi, OperatorSessionInformation};
@@ -82,13 +80,12 @@ fn print_port(listener: &TcpListener) -> Result<()> {
 /// breakpoint hit and someone is holding it) It will keep the agent alive and send pings on its
 /// behalf.
 async fn connection_task(config: LayerConfig, stream: TcpStream) {
-    let agent_connection = match connect_and_ping(&config).await {
-        Ok((agent_connection, _)) => agent_connection,
-        Err(err) => {
-            error!("connection to agent failed {err:#?}");
-            return;
-        }
-    };
+    let mut inactive_analytics = AnalyticsReporter::new(false);
+
+    let Ok(agent_connection) = connect_and_ping(&config, &mut inactive_analytics)
+        .await
+        .inspect_err(|err| error!("connection to agent failed {err:#?}")) else { return; };
+
     let mut layer_connection = actix_codec::Framed::new(stream, DaemonCodec::new());
     let (agent_sender, mut agent_receiver) = agent_connection;
     let mut ping = false;
@@ -217,15 +214,21 @@ fn create_listen_socket() -> Result<TcpListener, InternalProxyError> {
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
 pub(crate) async fn proxy() -> Result<()> {
-    let started = std::time::Instant::now();
+    let config = LayerConfig::from_env()?;
+
+    let mut analytics = AnalyticsReporter::new(config.telemetry);
+    (&config).collect_analytics(analytics.get_mut());
+
     // Let it assign port for us then print it for the user.
     let listener = create_listen_socket()?;
 
-    let config = LayerConfig::from_env()?;
     // Create a main connection, that will be held until proxy is closed.
     // This will guarantee agent staying alive and will enable us to
     // make the agent close on last connection close immediately (will help in tests)
-    let (mut main_connection, operator) = connect_and_ping(&config).await?;
+    let mut main_connection = connect_and_ping(&config, &mut analytics)
+        .await
+        .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+
     if config.pause {
         tokio::time::timeout(
             Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into()),
@@ -249,7 +252,11 @@ pub(crate) async fn proxy() -> Result<()> {
         listener.accept(),
     )
     .await
-    .map_err(|_| InternalProxyError::FirstConnectionTimeout)?
+    .map_err(|_| {
+        analytics.set_error(AnalyticsError::IntProxyFirstConnection);
+
+        InternalProxyError::FirstConnectionTimeout
+    })?
     .map_err(InternalProxyError::AcceptError)?;
 
     let mut active_connections = JoinSet::new();
@@ -290,28 +297,6 @@ pub(crate) async fn proxy() -> Result<()> {
     }
     main_connection_cancellation_token.cancel();
 
-    if config.telemetry {
-        let mut analytics = Analytics::default();
-        (&config).collect_analytics(&mut analytics);
-
-        send_analytics(
-            analytics,
-            started.elapsed(),
-            operator.map(|operator| AnalyticsOperatorProperties {
-                client_hash: operator
-                    .client_certificate
-                    .as_ref()
-                    .and_then(|certificate| certificate.sha256_fingerprint().ok())
-                    .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
-                license_hash: operator
-                    .fingerprint
-                    .as_deref()
-                    .map(AnalyticsHash::from_base64),
-            }),
-        )
-        .await;
-    }
-
     trace!("intproxy joining main connection task");
     match main_connection_task_join.await {
         Ok(Err(err)) => Err(err.into()),
@@ -329,13 +314,11 @@ pub(crate) async fn proxy() -> Result<()> {
 /// sending the first message
 async fn connect_and_ping(
     config: &LayerConfig,
-) -> Result<(
-    (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
-    Option<OperatorSessionInformation>,
-)> {
-    let ((mut sender, mut receiver), operator) = connect(config).await?;
+    analytics: &mut AnalyticsReporter,
+) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+    let ((mut sender, mut receiver), _) = connect(config, analytics).await?;
     ping(&mut sender, &mut receiver).await?;
-    Ok(((sender, receiver), operator))
+    Ok((sender, receiver))
 }
 
 /// Sends a ping the connection and expects a pong.
@@ -399,6 +382,7 @@ fn create_ping_loop(
 /// Returns the tx/rx and whether the operator is used.
 async fn connect(
     config: &LayerConfig,
+    analytics: &mut AnalyticsReporter,
 ) -> Result<(
     (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
     Option<OperatorSessionInformation>,
@@ -406,7 +390,7 @@ async fn connect(
     let agent_connect_info = AgentConnectInfo::from_env()?;
     match agent_connect_info {
         Some(AgentConnectInfo::Operator(operator_session_information)) => Ok((
-            OperatorApi::connect(config, &operator_session_information).await?,
+            OperatorApi::connect(config, &operator_session_information, analytics).await?,
             Some(operator_session_information),
         )),
         Some(AgentConnectInfo::DirectKubernetes(connect_info)) => {
