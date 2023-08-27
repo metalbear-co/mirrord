@@ -1,0 +1,1 @@
+Fix openshift detection taking too long by querying a subset instead of all APIs
