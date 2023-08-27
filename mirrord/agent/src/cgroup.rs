@@ -123,23 +123,32 @@ impl CgroupFreeze for CgroupV2 {
     fn pause(&self) -> Result<()> {
         // Enter the namespace, we might be already in it but it doesn't really matter
         // Note: Entering the cgroup namespace **doesn't** set put our process in the cgroup :phew:
-        set_namespace(1, NamespaceType::Cgroup)?;
+        set_namespace(1, NamespaceType::Cgroup).map_err(|_| {
+            AgentError::PauseFailedCgroup("set_namespace failed cgroup v2".to_string())
+        })?;
         // Check if our cgroup is mounted, if not, mount it.
         let cgroup_path = Path::new(CGROUP_MOUNT_PATH);
         if !cgroup_path.exists() {
             trace!("mounting cgroup");
-            std::fs::create_dir(cgroup_path)?;
+            std::fs::create_dir(cgroup_path).map_err(|_| {
+                AgentError::PauseFailedCgroup("create dir cgroup v2 failed".to_string())
+            })?;
             mount(
                 None::<&str>,
                 cgroup_path,
                 Some("cgroup2"),
                 MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
                 None::<&str>,
-            )?;
+            )
+            .map_err(|_| AgentError::PauseFailedCgroup("mount cgroup v2 failed".to_string()))?;
         }
         let mut open_options = OpenOptions::new();
-        let mut file = open_options.write(true).open(CGROUP_V2_FREEZE_PATH)?;
-        file.write_all("1".as_bytes())?;
+        let mut file = open_options
+            .write(true)
+            .open(CGROUP_V2_FREEZE_PATH)
+            .map_err(|_| AgentError::PauseFailedCgroup("open cgroup v2 failed".to_string()))?;
+        file.write_all("1".as_bytes())
+            .map_err(|_| AgentError::PauseFailedCgroup("writing 1 failed".to_string()))?;
         Ok(())
     }
 
