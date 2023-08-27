@@ -16,6 +16,7 @@ use crate::{
 
 pub mod ephemeral;
 pub mod job;
+pub mod targetless;
 pub mod util;
 
 pub static SKIP_NAMES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
@@ -37,6 +38,12 @@ pub trait ContainerUpdater {
     fn connection_port(&self) -> u16;
 
     fn runtime_data(&self) -> Option<&RuntimeData>;
+
+    fn as_update(&self, agent: &AgentConfig) -> Result<Self::Update>;
+}
+
+pub trait ContainerVariant {
+    type Update;
 
     fn as_update(&self, agent: &AgentConfig) -> Result<Self::Update>;
 }

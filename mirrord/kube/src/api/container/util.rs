@@ -4,7 +4,10 @@ use futures::{AsyncBufReadExt, TryStreamExt};
 use k8s_openapi::api::core::v1::{Pod, Toleration};
 use kube::{api::LogParams, Api};
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
-use rand::distributions::{Alphanumeric, DistString};
+use rand::{
+    distributions::{Alphanumeric, DistString},
+    Rng,
+};
 use regex::Regex;
 
 use crate::error::{KubeApiError, Result};
@@ -80,6 +83,35 @@ pub(super) async fn wait_for_agent_startup(
     }
 
     Err(KubeApiError::AgentReadyMessageMissing)
+}
+
+#[derive(Debug)]
+pub struct ContainerParams {
+    pub name: String,
+    pub gid: u16,
+    pub port: u16,
+}
+
+impl ContainerParams {
+    pub fn new() -> ContainerParams {
+        let port: u16 = rand::thread_rng().gen_range(30000..=65535);
+        let gid: u16 = rand::thread_rng().gen_range(3000..u16::MAX);
+
+        let name = format!(
+            "mirrord-agent-{}",
+            Alphanumeric
+                .sample_string(&mut rand::thread_rng(), 10)
+                .to_lowercase()
+        );
+
+        ContainerParams { name, gid, port }
+    }
+}
+
+impl Default for ContainerParams {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
