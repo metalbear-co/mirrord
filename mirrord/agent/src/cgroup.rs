@@ -2,14 +2,13 @@
 //! Pause requires privileged - assumes ephemeral (hardcoded pid 1)
 use std::{
     fs::OpenOptions,
-    io::{BufRead, Write},
+    io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
 };
 
-use const_format::formatcp;
 use enum_dispatch::enum_dispatch;
 use nix::mount::{mount, MsFlags};
-use tracing::trace;
+use tracing::{trace, warn};
 
 use crate::{
     error::{AgentError, Result},
@@ -17,6 +16,9 @@ use crate::{
 };
 
 const CGROUP_MOUNT_PATH: &str = "/mirrord_cgroup";
+const CGROUP_SUBGROUP_MOUNT_PATH: &str = "/mirrord_cgroup/subgroup";
+const CGROUPV2_PROCS_FILE: &str = "cgroup.procs";
+const CGROUPV2_FREEZE_FILE: &str = "";
 
 /// Trait for objects that can be paused
 #[enum_dispatch]
@@ -114,10 +116,55 @@ impl CgroupFreeze for CgroupV1 {
 #[derive(Debug)]
 pub(crate) struct CgroupV2 {}
 
-#[allow(clippy::indexing_slicing)]
-const CGROUP_V2_FREEZE_PATH: &str = formatcp!("{CGROUP_MOUNT_PATH}/cgroup.freeze");
+/// Reads given path's "cgroup.procs" file and returns the pids in it
+fn read_pids_cgroupv2(cgroup_path: &Path) -> Vec<u64> {
+    let file_name = cgroup_path.join(CGROUPV2_PROCS_FILE);
+    std::fs::File::open(file_name)
+        .map(|file| {
+            let bf = BufReader::new(file);
+            let mut v = Vec::new();
+            for line in bf.lines() {
+                match line {
+                    Ok(line) => match line.trim().parse() {
+                        Ok(n) => v.push(n),
+                        Err(_) => {
+                            warn!("Failed to parse pid {line}")
+                        }
+                    },
+                    Err(_) => break,
+                }
+            }
+            v
+        })
+        .unwrap_or_default()
+}
 
-/// mkdir, nsenter the target pid's cgroup then mount the cgroup, write freeze.
+/// Write given pids to given path's "cgroup.procs" file
+#[tracing::instrument(level = "trace", ret)]
+fn move_pids_to_cgroupv2(cgroup_path: &Path, pids: Vec<u64>) -> Result<()> {
+    for pid in pids {
+        std::fs::write(cgroup_path.join(CGROUPV2_PROCS_FILE), format!("{pid}")).map_err(|_| {
+            AgentError::PauseFailedCgroup("write pid to subgroup failed".to_string())
+        })?;
+    }
+    Ok(())
+}
+
+/// (Un)Freeze the given cgroup
+#[tracing::instrument(level = "trace", ret)]
+fn freeze_cgroupv2(cgroup_path: &Path, on: bool) -> Result<()> {
+    let mut open_options = OpenOptions::new();
+    let freeze_path = cgroup_path.join(CGROUPV2_FREEZE_FILE);
+    let mut file = open_options
+        .write(true)
+        .open(freeze_path)
+        .map_err(|_| AgentError::PauseFailedCgroup("open cgroup v2 failed".to_string()))?;
+
+    let command = if on { "1" } else { "0" };
+    file.write_all(command.as_bytes())
+        .map_err(|_| AgentError::PauseFailedCgroup(format!("writing 1 failed {freeze_path:?}")))
+}
+
 impl CgroupFreeze for CgroupV2 {
     #[tracing::instrument(level = "trace", ret, skip(self))]
     fn pause(&self) -> Result<()> {
@@ -142,24 +189,49 @@ impl CgroupFreeze for CgroupV2 {
             )
             .map_err(|_| AgentError::PauseFailedCgroup("mount cgroup v2 failed".to_string()))?;
         }
-        let mut open_options = OpenOptions::new();
-        let mut file = open_options
-            .write(true)
-            .open(CGROUP_V2_FREEZE_PATH)
-            .map_err(|_| AgentError::PauseFailedCgroup("open cgroup v2 failed".to_string()))?;
-        file.write_all("1".as_bytes()).map_err(|_| {
-            AgentError::PauseFailedCgroup(format!("writing 1 failed {CGROUP_V2_FREEZE_PATH}"))
-        })?;
-        Ok(())
+        // On nsdelegate hosts (where cgroup2 is mounted with nsdelegate option),
+        // we can't write to the cgroup.freeze file directly
+        // so we have to create a sub group, move process there then we can freeze it.
+        // In theory we could just create a brand new one, move the process into it but then
+        // other cgroup rules won't affect it, so we want it to be under the same hierarchy.
+        let sub_cgroup_path = Path::new(CGROUP_SUBGROUP_MOUNT_PATH);
+        if !sub_cgroup_path.exists() {
+            trace!("creating subgroup");
+            std::fs::create_dir(sub_cgroup_path).map_err(|_| {
+                AgentError::PauseFailedCgroup("create dir subgroup failed".to_string())
+            })?;
+        }
+
+        // Move cgroup processes' to the subgroup
+        let pids = read_pids_cgroupv2(cgroup_path);
+        if pids.len() == 0 {
+            warn!("No pids found in cgroup v2 {cgroup_path:?}");
+            return Err(AgentError::PauseFailedCgroup("no pids found".to_string()));
+        }
+
+        move_pids_to_cgroupv2(sub_cgroup_path, pids)?;
+
+        freeze_cgroupv2(sub_cgroup_path, true)
     }
 
     #[tracing::instrument(level = "trace", ret, skip(self))]
     fn unpause(&self) -> Result<()> {
         // if we're unpausing, mount should exist and we should be in the cgroup namespace
-        let mut open_options = OpenOptions::new();
-        let mut file = open_options.write(true).open(CGROUP_V2_FREEZE_PATH)?;
-        file.write_all("0".as_bytes())?;
-        Ok(())
+        // do reverse order - first unfreeze then move back to root cgroup
+        // Move cgroup processes' to the subgroup
+        let cgroup_path = Path::new(CGROUP_MOUNT_PATH);
+        let sub_cgroup_path = Path::new(CGROUP_SUBGROUP_MOUNT_PATH);
+
+        freeze_cgroupv2(sub_cgroup_path, false)?;
+
+        let pids = read_pids_cgroupv2(sub_cgroup_path);
+
+        if pids.len() == 0 {
+            warn!("No pids found in cgroup v2 {cgroup_path:?}");
+            return Err(AgentError::PauseFailedCgroup("no pids found".to_string()));
+        }
+
+        move_pids_to_cgroupv2(cgroup_path, pids)
     }
 }
 
