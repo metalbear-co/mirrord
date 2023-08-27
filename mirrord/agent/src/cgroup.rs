@@ -18,7 +18,6 @@ use crate::{
 const CGROUP_MOUNT_PATH: &str = "/mirrord_cgroup";
 const CGROUP_SUBGROUP_MOUNT_PATH: &str = "/mirrord_cgroup/subgroup";
 const CGROUPV2_PROCS_FILE: &str = "cgroup.procs";
-const CGROUPV2_FREEZE_FILE: &str = "";
 
 /// Trait for objects that can be paused
 #[enum_dispatch]
@@ -154,11 +153,12 @@ fn move_pids_to_cgroupv2(cgroup_path: &Path, pids: Vec<u64>) -> Result<()> {
 #[tracing::instrument(level = "trace", ret)]
 fn freeze_cgroupv2(cgroup_path: &Path, on: bool) -> Result<()> {
     let mut open_options = OpenOptions::new();
-    let freeze_path = cgroup_path.join(CGROUPV2_FREEZE_FILE);
+    let freeze_path = cgroup_path.join("cgroup.freeze");
+    trace!("freeze path {freeze_path:?}");
     let mut file = open_options
         .write(true)
         .open(&freeze_path)
-        .map_err(|_| AgentError::PauseFailedCgroup("open cgroup v2 failed".to_string()))?;
+        .map_err(|e| AgentError::PauseFailedCgroup(format!("{e} open cgroup v2 failed")))?;
 
     let command = if on { "1" } else { "0" };
     file.write_all(command.as_bytes())
