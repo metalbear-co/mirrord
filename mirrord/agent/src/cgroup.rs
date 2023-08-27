@@ -157,7 +157,7 @@ fn freeze_cgroupv2(cgroup_path: &Path, on: bool) -> Result<()> {
     let freeze_path = cgroup_path.join(CGROUPV2_FREEZE_FILE);
     let mut file = open_options
         .write(true)
-        .open(freeze_path)
+        .open(&freeze_path)
         .map_err(|_| AgentError::PauseFailedCgroup("open cgroup v2 failed".to_string()))?;
 
     let command = if on { "1" } else { "0" };
