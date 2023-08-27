@@ -9,6 +9,8 @@
 #    and the benefit seemed little.
 # 3. Please be mindful, we try to target less than 30 minutes for the CI to run. In a perfect world it'd be less than 5m.
 #     If you're adding something, please make sure it doesn't impact too much, and if you're reviewing please have it in mind.
+# 4. Make sure to specify target for cargo invocations, to re-use cache (cargo build --target X while host is X then cargo build will not use cache
+#    since it's different targets from it's perspective - https://doc.rust-lang.org/cargo/guide/build-cache.html
 name: CI
 
 on:
@@ -125,7 +127,7 @@ jobs:
       - run: python3 -m pip install cargo-zigbuild
       - run: cargo fmt --all -- --check
       # x64
-      - run: cargo-zigbuild clippy --lib --bins --all-features -- -Wclippy::indexing_slicing -D warnings
+      - run: cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-gnu -- -Wclippy::indexing_slicing -D warnings
       # Check that compiles for the supported linux targets (aarch64)
       - run: cargo-zigbuild clippy --lib --bins --all-features --target aarch64-unknown-linux-gnu -- -Wclippy::indexing_slicing -D warnings
 
@@ -159,7 +161,7 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: test
-        run: cargo test -p mirrord-agent
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent
 
   test_agent_image:
     runs-on: ubuntu-latest
@@ -183,35 +185,10 @@ jobs:
           name: test
           path: /tmp/test.tar
 
-  build_mirrord:
-    runs-on: ubuntu-latest
-    name: build mirrord
-    needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    steps:
-      - uses: actions/checkout@v3
-      - uses: arduino/setup-protoc@v1
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          components: rustfmt
-      - run: cargo build --manifest-path=./Cargo.toml
-      - name: upload layer
-        uses: actions/upload-artifact@v3
-        with:
-          name: mirrord-artifacts
-          path: |
-            target/debug/libmirrord_layer.so
-            target/debug/mirrord
-          if-no-files-found: error
-
   integration_tests:
     runs-on: ubuntu-latest
-    needs: [build_mirrord, changed_files]
+    needs: [changed_files]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
-    env:
-      MIRRORD_TEST_USE_EXISTING_LIB: /home/runner/work/mirrord/mirrord/target/debug/libmirrord_layer.so
     steps:
       - uses: actions/checkout@v3 # Checkout the mirrord repo.
       - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install rust.
@@ -289,18 +266,13 @@ jobs:
           cd mirrord/layer/tests/apps/issue1776portnot53
           cargo build
       - run: ./scripts/build_c_apps.sh
-      - name: download layer # Download layer lib built in the `build_mirrord` job.
-        uses: actions/download-artifact@v3
-        with:
-          name: mirrord-artifacts
-          path: target/debug/
-      - run: cargo test -p mirrord-layer
+      - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
       - name: mirrord protocol UT
-        run: cargo test -p mirrord-protocol
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-protocol
       - name: mirrord config UT
-        run: cargo test -p mirrord-config
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-config
       - name: mirrord kube UT
-        run: cargo test -p mirrord-kube --all-features
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features
 
   macos_tests:
     runs-on: macos-13
@@ -322,7 +294,7 @@ jobs:
       - name: clippy aarch64
         run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
       - name: mirrord SIP UT
-        run: cargo test -p mirrord-sip
+        run: cargo test --target=x86_64-apple-darwin -p mirrord-sip
       # prepare stuff needed for integration tests
       - run: |
           cd mirrord/layer/tests/apps/issue1123
@@ -397,7 +369,7 @@ jobs:
           node-version: 18
       - run: npm install express # For http mirroring test with node.
       - name: mirrord layer tests
-        run: cargo test -p mirrord-layer
+        run: cargo test --target=x86_64-apple-darwin -p mirrord-layer
 
   e2e:
     runs-on: ubuntu-latest
@@ -405,7 +377,7 @@ jobs:
       matrix:
         container-runtime: ["docker", "containerd"]
     name: e2e
-    needs: [build_mirrord, test_agent_image, changed_files]
+    needs: [test_agent_image, changed_files]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
@@ -423,9 +395,9 @@ jobs:
       - run: minikube image load /tmp/test.tar
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run targetless E2E test.
-        run: cargo test -p tests targetless
+        run: cargo test --target=x86_64-apple-darwin -p tests targetless
       - name: Run all E2E test
-        run: cargo test -p tests -- --test-threads=6
+        run: cargo test --target=x86_64-apple-darwin -p tests -- --test-threads=6
       - name: Collect logs
         if: ${{ failure() }}
         run: |
@@ -454,7 +426,6 @@ jobs:
       [
         towncrier_check,
         changed_files,
-        build_mirrord,
         test_agent_image,
         macos_tests,
         integration_tests,
@@ -471,7 +442,6 @@ jobs:
         env:
           CI_SUCCESS: ${{ (needs.changed_files.result == 'success') &&
             (needs.towncrier_check.result == 'success') &&
-            (needs.build_mirrord.result == 'success' || needs.build_mirrord.result == 'skipped') &&
             (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
             (needs.macos_tests.result == 'success' || needs.macos_tests.result == 'skipped') &&
             (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped') &&
