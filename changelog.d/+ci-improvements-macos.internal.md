@@ -1,0 +1,1 @@
+Unify lint and integration for macOS to save cache and runner. Remove trace logging from integration tests on macos
