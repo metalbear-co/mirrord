@@ -76,7 +76,7 @@ impl KubernetesAPI {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct AgentKubernetesConnectInfo {
     pub pod_name: String,
     pub agent_port: u16,
