@@ -93,7 +93,7 @@ where
     let caller_token = our_token.clone();
     let (message_sender, message_receiver) = tokio::sync::oneshot::channel();
 
-    let _ = tokio::spawn(async move {
+    tokio::spawn(async move {
         let mut warnings = Vec::new();
         let mut stderr = BufReader::new(stderr).lines();
         loop {
