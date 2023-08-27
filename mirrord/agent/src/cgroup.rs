@@ -204,7 +204,7 @@ impl CgroupFreeze for CgroupV2 {
 
         // Move cgroup processes' to the subgroup
         let pids = read_pids_cgroupv2(cgroup_path);
-        if pids.len() == 0 {
+        if pids.is_empty() {
             warn!("No pids found in cgroup v2 {cgroup_path:?}");
             return Err(AgentError::PauseFailedCgroup("no pids found".to_string()));
         }
