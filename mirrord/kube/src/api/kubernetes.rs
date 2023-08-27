@@ -14,7 +14,6 @@ use kube::{
 use mirrord_config::{agent::AgentConfig, target::TargetConfig, LayerConfig};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "incluster")]
 use tokio::net::TcpStream;
@@ -23,7 +22,7 @@ use tracing::{info, trace};
 
 use crate::{
     api::{
-        container::{ephemeral::EphemeralContainer, job::JobContainer, ContainerApi},
+        container::{ContainerApi, ContainerUpdateParams, ContainerUpdateVariant},
         runtime::RuntimeDataProvider,
         wrap_raw_connection, AgentManagment,
     },
@@ -171,33 +170,28 @@ impl AgentManagment for KubernetesAPI {
             None
         };
 
-        info!("Spawning new agent.");
-        let agent_port: u16 = rand::thread_rng().gen_range(30000..=65535);
-        info!("Using port `{agent_port:?}` for communication");
+        let params = ContainerUpdateParams::new(runtime_data);
 
-        let agent_gid: u16 = rand::thread_rng().gen_range(3000..u16::MAX);
-        info!("Using group-id `{agent_gid:?}`");
+        info!("Spawning new agent.");
+
+        info!(
+            "Using port `{:?}` for communication",
+            params.connection_port
+        );
+        if let ContainerUpdateVariant::Target { gid, .. } = &params.variant {
+            info!("Using group-id `{gid:?}`");
+        }
 
         let agent_connect_info = if self.agent.ephemeral {
-            EphemeralContainer::create_agent(
-                &self.client,
-                &self.agent,
-                runtime_data,
-                agent_port,
-                progress,
-                agent_gid,
-            )
-            .await?
+            params
+                .ephemeral()
+                .create_agent(&self.client, &self.agent, progress)
+                .await?
         } else {
-            JobContainer::create_agent(
-                &self.client,
-                &self.agent,
-                runtime_data,
-                agent_port,
-                progress,
-                agent_gid,
-            )
-            .await?
+            params
+                .job()
+                .create_agent(&self.client, &self.agent, progress)
+                .await?
         };
 
         info!("Created agent pod {agent_connect_info:?}");
