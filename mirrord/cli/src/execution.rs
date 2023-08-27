@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    sync::Arc,
     time::Duration,
 };
 
@@ -11,9 +12,12 @@ use mirrord_sip::sip_patch;
 use serde::Serialize;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    process::{Child, Command},
+    process::{Child, ChildStderr, Command},
+    select,
+    sync::RwLock,
 };
-use tracing::trace;
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, trace};
 
 use crate::{
     connection::{create_and_connect, AgentConnectInfo, AgentConnection},
@@ -39,6 +43,79 @@ pub(crate) struct MirrordExecution {
 
     /// The path to the patched binary, if patched for SIP sidestepping.
     pub patched_path: Option<String>,
+}
+
+/// Struct that when dropped will cancel the token and wait on the join handle
+/// then update progress with the warnings returned.
+struct DropProgress<'a, P>
+where
+    P: Progress + Send + Sync,
+{
+    progress: &'a P,
+    cancellation_token: CancellationToken,
+    // option so we can `.take()` it in Drop
+    messages: Arc<RwLock<Vec<String>>>,
+}
+
+impl<'a, P> Drop for DropProgress<'a, P>
+where
+    P: Progress + Send + Sync,
+{
+    fn drop(&mut self) {
+        self.cancellation_token.cancel();
+        match self.messages.try_read() {
+            Ok(messages) => messages.iter().for_each(|msg| {
+                self.progress
+                    .warning(&format!("internal proxy stderr: {}", &msg));
+            }),
+            Err(e) => error!("internal proxy lock stderr: {e}"),
+        }
+    }
+}
+
+/// Creates a task that reads stderr and returns a vector of warnings at the end.
+/// Caller should cancel the token and wait on join handle.
+async fn watch_stderr<P>(stderr: ChildStderr, progress: &P) -> DropProgress<P>
+where
+    P: Progress + Send + Sync,
+{
+    let our_token = CancellationToken::new();
+    let caller_token = our_token.clone();
+    let messages = Arc::new(RwLock::new(Vec::new()));
+    let caller_messages = messages.clone();
+
+    tokio::spawn(async move {
+        let mut stderr = BufReader::new(stderr).lines();
+        loop {
+            select! {
+                    _ = our_token.cancelled() => {
+                        trace!("watch_stderr cancelled");
+                        break;
+                    }
+                    line = stderr.next_line() => {
+                        match line {
+                            Ok(Some(line)) => {
+                                debug!("watch_stderr got line: {line}",);
+                                messages.write().await.push(line.to_string());
+                            },
+                            Ok(None) => {
+                                trace!("watch_stderr finished");
+                                break;
+                            }
+                            Err(e) => {
+                                trace!("watch_stderr error: {e}");
+                                break;
+                            }
+                        }
+                    }
+            }
+        }
+    });
+    DropProgress {
+        cancellation_token: caller_token,
+        messages: caller_messages,
+        progress,
+    }
 }
 
 impl MirrordExecution {
@@ -118,7 +195,7 @@ impl MirrordExecution {
         proxy_command
             .arg("intproxy")
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
             .stdin(std::process::Stdio::null());
 
         let connect_info = serde_json::to_string(&connect_info)?;
@@ -127,6 +204,12 @@ impl MirrordExecution {
         let mut proxy_process = proxy_command
             .spawn()
             .map_err(CliError::InternalProxyExecutionFailed)?;
+
+        let stderr = proxy_process
+            .stderr
+            .take()
+            .ok_or(CliError::InternalProxyStderrError)?;
+        let _stderr_guard = watch_stderr(stderr, progress).await;
 
         let stdout = proxy_process
             .stdout
