@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    sync::Arc,
     time::Duration,
 };
 
@@ -13,6 +14,7 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::{Child, ChildStderr, Command},
     select,
+    sync::RwLock,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, trace};
@@ -52,7 +54,7 @@ where
     progress: &'a P,
     cancellation_token: CancellationToken,
     // option so we can `.take()` it in Drop
-    messages: Option<tokio::sync::oneshot::Receiver<Vec<String>>>,
+    messages: Arc<RwLock<Vec<String>>>,
 }
 
 impl<'a, P> Drop for DropProgress<'a, P>
@@ -61,24 +63,12 @@ where
 {
     fn drop(&mut self) {
         self.cancellation_token.cancel();
-        if let Some(messages) = self.messages.take() {
-            match messages.blocking_recv() {
-                Ok(warnings) => {
-                    for warning in warnings {
-                        self.progress
-                            .warning(&format!("internal proxy stderr: {}", &warning));
-                    }
-                }
-                Err(e) => {
-                    trace!("Failed to get warnings from stderr: {e}");
-                    self.progress
-                        .warning(&format!("Failed to get warnings from stderr: {e}"));
-                }
-            }
-        } else {
-            trace!("Failed to get warnings from stderr: channel closed");
-            self.progress
-                .warning("Failed to get warnings from stderr: channel closed");
+        match self.messages.try_read() {
+            Ok(messages) => messages.iter().for_each(|msg| {
+                self.progress
+                    .warning(&format!("internal proxy stderr: {}", &msg));
+            }),
+            Err(e) => error!("internal proxy lock stderr: {e}"),
         }
     }
 }
@@ -91,10 +81,10 @@ where
 {
     let our_token = CancellationToken::new();
     let caller_token = our_token.clone();
-    let (message_sender, message_receiver) = tokio::sync::oneshot::channel();
+    let messages = Arc::new(RwLock::new(Vec::new()));
+    let caller_messages = messages.clone();
 
     tokio::spawn(async move {
-        let mut warnings = Vec::new();
         let mut stderr = BufReader::new(stderr).lines();
         loop {
             select! {
@@ -106,7 +96,7 @@ where
                         match line {
                             Ok(Some(line)) => {
                                 debug!("watch_stderr got line: {line}",);
-                                warnings.push(line.to_string());
+                                messages.write().await.push(line.to_string());
                             },
                             Ok(None) => {
                                 trace!("watch_stderr finished");
@@ -120,13 +110,10 @@ where
                     }
             }
         }
-        if let Err(e) = message_sender.send(warnings) {
-            error!("Failed to send warnings: {e:?}");
-        }
     });
     DropProgress {
         cancellation_token: caller_token,
-        messages: Some(message_receiver),
+        messages: caller_messages,
         progress,
     }
 }
