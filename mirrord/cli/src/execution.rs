@@ -4,6 +4,7 @@ use std::{
     time::Duration,
 };
 
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter};
 use mirrord_config::LayerConfig;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
@@ -124,6 +125,7 @@ impl MirrordExecution {
         // We only need the executable on macos, for SIP handling.
         #[cfg(target_os = "macos")] executable: Option<&str>,
         progress: &P,
+        analytics: &mut AnalyticsReporter,
     ) -> Result<Self>
     where
         P: Progress + Send + Sync,
@@ -134,47 +136,14 @@ impl MirrordExecution {
         }
 
         let lib_path = extract_library(None, progress, true)?;
-        let mut env_vars = HashMap::new();
-        let (connect_info, mut connection) = create_and_connect(config, progress).await?;
-        let (env_vars_exclude, env_vars_include) = match (
-            config
-                .feature
-                .env
-                .exclude
-                .clone()
-                .map(|exclude| exclude.join(";")),
-            config
-                .feature
-                .env
-                .include
-                .clone()
-                .map(|include| include.join(";")),
-        ) {
-            (Some(exclude), Some(include)) => {
-                return Err(CliError::InvalidEnvConfig(include, exclude))
-            }
-            (Some(exclude), None) => (HashSet::from(EnvVars(exclude)), HashSet::new()),
-            (None, Some(include)) => (HashSet::new(), HashSet::from(EnvVars(include))),
-            (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
-        };
 
-        let communication_timeout =
-            Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into());
-
-        if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
-            let remote_env = tokio::time::timeout(
-                communication_timeout,
-                Self::get_remote_env(&mut connection, env_vars_exclude, env_vars_include),
-            )
+        let (connect_info, mut connection) = create_and_connect(config, progress, analytics)
             .await
-            .map_err(|_| {
-                CliError::InitialCommFailed("Timeout waiting for remote environment variables.")
-            })??;
-            env_vars.extend(remote_env);
-            if let Some(overrides) = &config.feature.env.r#override {
-                env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
-            }
-        }
+            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+
+        let mut env_vars = Self::fetch_env_vars(config, &mut connection)
+            .await
+            .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?;
 
         let lib_path: String = lib_path.to_string_lossy().into();
         // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
@@ -263,6 +232,57 @@ impl MirrordExecution {
             child: proxy_process,
             patched_path,
         })
+    }
+
+    /// Construct filter and retrieve remote environment from the connected agent using
+    /// `MirrordExecution::get_remote_env`.
+    async fn fetch_env_vars(
+        config: &LayerConfig,
+        connection: &mut AgentConnection,
+    ) -> Result<HashMap<String, String>> {
+        let mut env_vars = HashMap::new();
+
+        let (env_vars_exclude, env_vars_include) = match (
+            config
+                .feature
+                .env
+                .exclude
+                .clone()
+                .map(|exclude| exclude.join(";")),
+            config
+                .feature
+                .env
+                .include
+                .clone()
+                .map(|include| include.join(";")),
+        ) {
+            (Some(exclude), Some(include)) => {
+                return Err(CliError::InvalidEnvConfig(include, exclude))
+            }
+            (Some(exclude), None) => (HashSet::from(EnvVars(exclude)), HashSet::new()),
+            (None, Some(include)) => (HashSet::new(), HashSet::from(EnvVars(include))),
+            (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
+        };
+
+        let communication_timeout =
+            Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into());
+
+        if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
+            let remote_env = tokio::time::timeout(
+                communication_timeout,
+                Self::get_remote_env(connection, env_vars_exclude, env_vars_include),
+            )
+            .await
+            .map_err(|_| {
+                CliError::InitialCommFailed("Timeout waiting for remote environment variables.")
+            })??;
+            env_vars.extend(remote_env);
+            if let Some(overrides) = &config.feature.env.r#override {
+                env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
+            }
+        }
+
+        Ok(env_vars)
     }
 
     /// Retrieve remote environment from the connected agent.

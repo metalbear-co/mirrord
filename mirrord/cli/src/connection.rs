@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use mirrord_analytics::AnalyticsReporter;
 use mirrord_config::{feature::network::outgoing::OutgoingFilterConfig, LayerConfig};
 use mirrord_kube::api::{
     kubernetes::{AgentKubernetesConnectInfo, KubernetesAPI},
@@ -47,6 +48,7 @@ pub(crate) struct AgentConnection {
 pub(crate) async fn create_operator_session<P>(
     config: &LayerConfig,
     progress: &P,
+    analytics: &mut AnalyticsReporter,
 ) -> Result<
     Option<(
         mpsc::Sender<ClientMessage>,
@@ -60,7 +62,7 @@ where
 {
     let mut sub_progress = progress.subtask("checking operator");
 
-    match OperatorApi::create_session(config, progress).await {
+    match OperatorApi::create_session(config, progress, analytics).await {
         Ok(Some(connection)) => {
             sub_progress.success(Some("connected to operator"));
             Ok(Some(connection))
@@ -94,6 +96,7 @@ where
 pub(crate) async fn create_and_connect<P>(
     config: &LayerConfig,
     progress: &P,
+    analytics: &mut AnalyticsReporter,
 ) -> Result<(AgentConnectInfo, AgentConnection)>
 where
     P: Progress + Send + Sync,
@@ -110,7 +113,7 @@ where
         }
     }
 
-    if config.operator && let Some((sender, receiver, operator_information)) = create_operator_session(config, progress).await? {
+    if config.operator && let Some((sender, receiver, operator_information)) = create_operator_session(config, progress, analytics).await? {
         Ok((
             AgentConnectInfo::Operator(operator_information),
             AgentConnection { sender, receiver },
