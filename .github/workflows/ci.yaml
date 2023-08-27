@@ -387,18 +387,15 @@ jobs:
           candidate: java
           version: 17.0.6-tem
       - run: java -version
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 14
-      - run: npm install express # For http mirroring test with node.
       - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
       - run: pip3 install flask # For http mirroring test with Flask.
       - run: pip3 install fastapi # For http mirroring test with FastAPI.
       - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
       - run: cargo build -p mirrord-layer # Build layer lib. The tests load it into the apps.
-      - uses: actions/setup-node@v3 # version 19 spawns processes with `posix_spawn`, so test that also.
+      - uses: actions/setup-node@v3
         with:
-          node-version: 19
+          node-version: 18
+      - run: npm install express # For http mirroring test with node.
       - name: mirrord layer tests
         run: cargo test -p mirrord-layer
 
