@@ -436,8 +436,6 @@ jobs:
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run targetless E2E test.
         run: cargo test -p tests targetless
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
       - name: Run all E2E test
         run: cargo test -p tests -- --test-threads=6
       - name: Collect logs
