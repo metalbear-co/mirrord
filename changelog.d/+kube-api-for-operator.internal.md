@@ -1,0 +1,1 @@
+Fix regression in kube api blocking operator from compiling
