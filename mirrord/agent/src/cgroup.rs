@@ -34,7 +34,8 @@ pub(crate) struct CgroupV1 {
 impl CgroupV1 {
     #[tracing::instrument(level = "trace", ret)]
     pub(crate) fn new() -> Result<Self> {
-        let file = std::fs::File::open("/proc/1/cgroup").map_err(| _| AgentError::PauseFailedCgroup("opening proc cgroup failed".to_string()))?;
+        let file = std::fs::File::open("/proc/1/cgroup")
+            .map_err(|_| AgentError::PauseFailedCgroup("opening proc cgroup failed".to_string()))?;
         let reader = std::io::BufReader::new(file).lines();
         for line in reader {
             let line = line?;
@@ -43,13 +44,13 @@ impl CgroupV1 {
             line_iter.next().ok_or(AgentError::PauseFailedCgroup(
                 "malformed ID cgroup v1 file".to_string(),
             ))?;
-            let cgroup_type = line_iter.next().ok_or_else(|| AgentError::PauseFailedCgroup(
-                "malformed cgroup type cgroup v1 file".to_string(),
-            ))?;
+            let cgroup_type = line_iter.next().ok_or_else(|| {
+                AgentError::PauseFailedCgroup("malformed cgroup type cgroup v1 file".to_string())
+            })?;
             if cgroup_type == "freezer" {
-                let cgroup_path = line_iter.next().ok_or_else( || AgentError::PauseFailedCgroup(
-                    "malformed path cgroup v1 file".to_string(),
-                ))?;
+                let cgroup_path = line_iter.next().ok_or_else(|| {
+                    AgentError::PauseFailedCgroup("malformed path cgroup v1 file".to_string())
+                })?;
                 return Ok(Self {
                     // strip / since joining "/a" and "/b" results in "/b"
                     cgroup_path: Path::new(CGROUP_MOUNT_PATH).join(PathBuf::from(
@@ -75,21 +76,26 @@ impl CgroupFreeze for CgroupV1 {
         let cgroup_path = Path::new(CGROUP_MOUNT_PATH);
         if !cgroup_path.exists() {
             trace!("mounting cgroup");
-            std::fs::create_dir(cgroup_path).map_err(|_| AgentError::PauseFailedCgroup("create dir failed cgroupv1".to_string()))?;
+            std::fs::create_dir(cgroup_path).map_err(|_| {
+                AgentError::PauseFailedCgroup("create dir failed cgroupv1".to_string())
+            })?;
             mount(
                 Some("cgroup"),
                 cgroup_path,
                 Some("cgroup"),
                 MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
                 Some("freezer"),
-            ).map_err(|_| AgentError::PauseFailedCgroup("mount failed cgroupv1".to_string()))?;
+            )
+            .map_err(|_| AgentError::PauseFailedCgroup("mount failed cgroupv1".to_string()))?;
         }
 
         let mut open_options = OpenOptions::new();
         let mut file = open_options
             .write(true)
-            .open(self.cgroup_path.join(CGROUP_V1_FREEZE_PATH)).map_err(|_| AgentError::PauseFailedCgroup("open file cgroupv1 failed".to_string()))?;
-        file.write_all("FROZEN".as_bytes()).map_err(|_| AgentError::PauseFailedCgroup("writing frozen failed".to_string()))?;
+            .open(self.cgroup_path.join(CGROUP_V1_FREEZE_PATH))
+            .map_err(|_| AgentError::PauseFailedCgroup("open file cgroupv1 failed".to_string()))?;
+        file.write_all("FROZEN".as_bytes())
+            .map_err(|_| AgentError::PauseFailedCgroup("writing frozen failed".to_string()))?;
         Ok(())
     }
 
