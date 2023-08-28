@@ -16,7 +16,7 @@ use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
 
 use crate::{
-    cgroup::{self, Cgroup},
+    cgroup::Cgroup,
     env::parse_raw_env,
     error::{AgentError, Result},
     runtime::crio::CriOContainer,
