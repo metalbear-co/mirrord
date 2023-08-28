@@ -18,7 +18,11 @@ use k8s_openapi::{
 };
 use kube::api::ListParams;
 use miette::JSONReportHandler;
-use mirrord_config::{config::MirrordConfig, LayerConfig, LayerFileConfig};
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics};
+use mirrord_config::{
+    config::{ConfigContext, MirrordConfig},
+    LayerConfig, LayerFileConfig,
+};
 use mirrord_kube::{
     api::{
         container::SKIP_NAMES,
@@ -45,6 +49,61 @@ mod internal_proxy;
 mod operator;
 
 pub(crate) use error::{CliError, Result};
+
+async fn exec_process<P>(
+    config: LayerConfig,
+    args: &ExecArgs,
+    progress: &P,
+    analytics: &mut AnalyticsReporter,
+) -> Result<()>
+where
+    P: Progress + Send + Sync,
+{
+    let mut sub_progress = progress.subtask("preparing to launch process");
+
+    #[cfg(target_os = "macos")]
+    let execution_info =
+        MirrordExecution::start(&config, Some(&args.binary), &sub_progress, analytics).await?;
+    #[cfg(not(target_os = "macos"))]
+    let execution_info = MirrordExecution::start(&config, &sub_progress, analytics).await?;
+
+    #[cfg(target_os = "macos")]
+    let (_did_sip_patch, binary) = match execution_info.patched_path {
+        None => (false, args.binary.clone()),
+        Some(sip_result) => (true, sip_result),
+    };
+
+    #[cfg(not(target_os = "macos"))]
+    let binary = args.binary.clone();
+
+    // Stop confusion with layer
+    std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
+
+    // Set environment variables from agent + layer settings.
+    for (key, value) in &execution_info.environment {
+        std::env::set_var(key, value);
+    }
+
+    let mut binary_args = args.binary_args.clone();
+    // Put original executable in argv[0] even if actually running patched version.
+    binary_args.insert(0, args.binary.clone());
+
+    sub_progress.success(Some("ready to launch process"));
+    // The execve hook is not yet active and does not hijack this call.
+    let err = execvp(binary.clone(), binary_args.clone());
+    error!("Couldn't execute {:?}", err);
+    analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    if let exec::Error::Errno(errno) = err {
+        if Into::<i32>::into(errno) == 86 {
+            // "Bad CPU type in executable"
+            if _did_sip_patch {
+                return Err(CliError::RosettaMissing(binary));
+            }
+        }
+    }
+    Err(CliError::BinaryExecuteFailed(binary, binary_args))
+}
 
 async fn exec(args: &ExecArgs) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord exec");
@@ -157,51 +216,23 @@ async fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_CONFIG_FILE", full_path);
     }
 
-    let mut sub_progress = progress.subtask("preparing to launch process");
+    let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
-    let config = LayerConfig::from_env()?;
+    let mut analytics = AnalyticsReporter::only_error(config.telemetry);
+    (&config).collect_analytics(analytics.get_mut());
 
-    #[cfg(target_os = "macos")]
-    let execution_info =
-        MirrordExecution::start(&config, Some(&args.binary), &sub_progress).await?;
-    #[cfg(not(target_os = "macos"))]
-    let execution_info = MirrordExecution::start(&config, &sub_progress).await?;
-
-    #[cfg(target_os = "macos")]
-    let (_did_sip_patch, binary) = match execution_info.patched_path {
-        None => (false, args.binary.clone()),
-        Some(sip_result) => (true, sip_result),
-    };
-
-    #[cfg(not(target_os = "macos"))]
-    let binary = args.binary.clone();
-
-    // Stop confusion with layer
-    std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
-
-    // Set environment variables from agent + layer settings.
-    for (key, value) in &execution_info.environment {
-        std::env::set_var(key, value);
+    config.verify(&mut context)?;
+    for warning in context.get_warnings() {
+        progress.warning(warning);
     }
 
-    let mut binary_args = args.binary_args.clone();
-    // Put original executable in argv[0] even if actually running patched version.
-    binary_args.insert(0, args.binary.clone());
+    let execution_result = exec_process(config, args, &progress, &mut analytics).await;
 
-    sub_progress.success(Some("ready to launch process"));
-    // The execve hook is not yet active and does not hijack this call.
-    let err = execvp(binary.clone(), binary_args.clone());
-    error!("Couldn't execute {:?}", err);
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    if let exec::Error::Errno(errno) = err {
-        if Into::<i32>::into(errno) == 86 {
-            // "Bad CPU type in executable"
-            if _did_sip_patch {
-                return Err(CliError::RosettaMissing(binary));
-            }
-        }
+    if execution_result.is_err() && !analytics.has_error() {
+        analytics.set_error(AnalyticsError::Unknown);
     }
-    Err(CliError::BinaryExecuteFailed(binary, binary_args))
+
+    execution_result
 }
 
 /// Returns a list of (pod name, [container names]) pairs, filtering out mesh side cars
@@ -303,18 +334,20 @@ where
 ///  "pod/py-serv-deployment-5c57fbdc98-pdbn4/container/py-serv",
 /// ]```
 async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
-    let (accept_invalid_certificates, kubeconfig, namespace, kube_context) =
-        if let Some(config) = &args.config_file {
-            let layer_config = LayerFileConfig::from_path(config)?.generate_config()?;
-            (
-                layer_config.accept_invalid_certificates,
-                layer_config.kubeconfig,
-                layer_config.target.namespace,
-                layer_config.kube_context,
-            )
-        } else {
-            (false, None, None, None)
-        };
+    let (accept_invalid_certificates, kubeconfig, namespace, kube_context) = if let Some(config) =
+        &args.config_file
+    {
+        let mut cfg_context = ConfigContext::default();
+        let layer_config = LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?;
+        (
+            layer_config.accept_invalid_certificates,
+            layer_config.kubeconfig,
+            layer_config.target.namespace,
+            layer_config.kube_context,
+        )
+    } else {
+        (false, None, None, None)
+    };
 
     let client = create_kube_api(accept_invalid_certificates, kubeconfig, kube_context)
         .await

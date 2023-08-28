@@ -17,7 +17,7 @@ edition.workspace = true
 [dependencies]
 base64 = "0.21"
 serde.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["blocking"] }
 tracing.workspace = true
 
 [dev-dependencies]

@@ -76,7 +76,10 @@ fn fgets() {
 
     unsafe {
         let mode = CString::new("r").expect("valid C string");
+        #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
         let (buffer, _length, _capacity) = vec![0i8; 1500].into_raw_parts();
+        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+        let (buffer, _length, _capacity) = vec![0u8; 1500].into_raw_parts();
         let file_stream = libc::fdopen(fd, mode.as_ptr());
 
         if libc::fgets(buffer, 12, file_stream).is_null() {

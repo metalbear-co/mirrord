@@ -71,7 +71,9 @@ impl KubernetesAPI {
     where
         P: Progress + Send + Sync,
     {
+        // filter openshift to make it a lot faster
         if Discovery::new(self.client.clone())
+            .filter(&["route.openshift.io"])
             .run()
             .await?
             .has_group("route.openshift.io")
@@ -84,7 +86,7 @@ impl KubernetesAPI {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct AgentKubernetesConnectInfo {
     pub pod_name: String,
     pub agent_port: u16,

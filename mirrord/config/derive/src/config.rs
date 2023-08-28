@@ -92,7 +92,7 @@ impl ToTokens for ConfigStruct {
             impl crate::config::MirrordConfig for #ident {
                 type Generated = #source;
 
-                fn generate_config(self) -> crate::config::Result<Self::Generated> {
+                fn generate_config(self, context: &mut crate::config::ConfigContext) -> crate::config::Result<Self::Generated> {
                     Ok(#source {
                         #(#field_impl),*
                     })
