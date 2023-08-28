@@ -1,3 +1,5 @@
+use std::hash::Hash;
+
 use actix_codec::{AsyncRead, AsyncWrite};
 use futures::{SinkExt, StreamExt};
 use k8s_openapi::{api::core::v1::Namespace, NamespaceResourceScope};
@@ -5,13 +7,10 @@ use kube::{api::ListParams, Api, Client};
 use mirrord_config::LayerConfig;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage, LogLevel};
-use tokio::{
-    net::{TcpStream, ToSocketAddrs},
-    sync::mpsc,
-};
+use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
-use crate::error::{KubeApiError, Result};
+use crate::error::Result;
 
 pub mod container;
 pub mod kubernetes;
@@ -119,7 +118,7 @@ pub fn wrap_raw_connection(
 }
 
 pub trait AgentManagment {
-    type AgentRef;
+    type AgentRef: Hash + Eq;
     type Err;
 
     async fn connect<P>(
@@ -147,34 +146,4 @@ pub trait AgentManagment {
     ) -> Result<Self::AgentRef, Self::Err>
     where
         P: Progress + Send + Sync;
-}
-
-pub struct Connection<T: ToSocketAddrs>(pub T); // TODO: Replace with generic address
-
-impl<T> AgentManagment for Connection<T>
-where
-    T: ToSocketAddrs + Send + Sync,
-{
-    type AgentRef = TcpStream;
-    type Err = KubeApiError;
-
-    async fn create_connection(
-        &self,
-        stream: Self::AgentRef,
-    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        Ok(wrap_raw_connection(stream))
-    }
-
-    async fn create_agent<P>(
-        &self,
-        _: &mut P,
-        _: Option<&LayerConfig>,
-    ) -> Result<Self::AgentRef, Self::Err>
-    where
-        P: Progress + Send + Sync,
-    {
-        TcpStream::connect(&self.0)
-            .await
-            .map_err(KubeApiError::from)
-    }
 }

@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 
 use super::{FsModeConfig, FsUserConfig};
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
+    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError},
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
@@ -94,16 +94,16 @@ pub struct FsConfig {
 }
 
 impl MirrordToggleableConfig for AdvancedFsUserConfig {
-    fn disabled_config() -> Result<Self::Generated, ConfigError> {
-        let mode = FsModeConfig::disabled_config()?;
+    fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
+        let mode = FsModeConfig::disabled_config(context)?;
         let read_write = FromEnv::new("MIRRORD_FILE_READ_WRITE_PATTERN")
-            .source_value()
+            .source_value(context)
             .transpose()?;
         let read_only = FromEnv::new("MIRRORD_FILE_READ_ONLY_PATTERN")
-            .source_value()
+            .source_value(context)
             .transpose()?;
         let local = FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN")
-            .source_value()
+            .source_value(context)
             .transpose()?;
 
         Ok(Self::Generated {
@@ -190,7 +190,10 @@ mod tests {
             ..Default::default()
         };
 
-        let fs_config = AdvancedFsUserConfig::default().generate_config().unwrap();
+        let mut cfg_context = ConfigContext::default();
+        let fs_config = AdvancedFsUserConfig::default()
+            .generate_config(&mut cfg_context)
+            .unwrap();
 
         assert_eq!(fs_config, expect);
     }

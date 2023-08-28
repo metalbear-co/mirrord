@@ -114,7 +114,16 @@ fn generate_remote_ro_set() -> RegexSet {
 }
 
 fn generate_not_found_set() -> RegexSet {
-    let patterns = [r"\.aws", r"\.config/gcloud", r"\.kube", r"\.azure"];
+    let Ok(home) = env::var("HOME") else {
+        tracing::warn!("Unable to resolve $HOME directory, generating empty not-found set");
+        return Default::default();
+    };
+
+    let home_clean = home.trim_end_matches('/');
+
+    let patterns = [r"\.aws", r"\.config/gcloud", r"\.kube", r"\.azure"]
+        .into_iter()
+        .map(|cloud_dir| format!("^{home_clean}/{cloud_dir}"));
 
     RegexSetBuilder::new(patterns)
         .case_insensitive(true)
@@ -511,5 +520,22 @@ mod tests {
     fn empty_regex_set() {
         let set = FileFilter::make_regex_set(None).unwrap();
         assert!(!set.is_match("/path/to/some/file"));
+    }
+
+    /// Return path to the $HOME directory without trailing slash.
+    fn clean_home() -> String {
+        env::var("HOME").unwrap().trim_end_matches('/').into()
+    }
+
+    #[rstest]
+    #[case(&format!("{}/.config/gcloud/some_file", clean_home()), DetourKind::Error)]
+    #[case("/root/.config/gcloud/some_file", DetourKind::Success)]
+    #[case("/root/.nuget/packages/microsoft.azure.amqp", DetourKind::Success)]
+    fn not_found_set(#[case] path: &str, #[case] expected: DetourKind) {
+        let filter = FileFilter::new(Default::default());
+        let res = filter.continue_or_bypass_with(path, false, || Bypass::IgnoredFile("".into()));
+        println!("filter result: {res:?}");
+
+        assert_eq!(res.kind(), expected);
     }
 }
