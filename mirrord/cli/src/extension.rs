@@ -61,8 +61,10 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry);
 
-    let mut warnings = config.verify()?;
-    warnings.extend(context.get_warnings().iter().cloned());
+    config.verify(&mut context)?;
+    for warning in context.get_warnings() {
+        progress.warning(&warning);
+    }
 
     #[cfg(target_os = "macos")]
     let execution_result = mirrord_exec(

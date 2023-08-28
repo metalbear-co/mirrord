@@ -19,7 +19,10 @@ use k8s_openapi::{
 use kube::api::ListParams;
 use miette::JSONReportHandler;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics};
-use mirrord_config::{config::MirrordConfig, LayerConfig, LayerFileConfig};
+use mirrord_config::{
+    config::{ConfigContext, MirrordConfig},
+    LayerConfig, LayerFileConfig,
+};
 use mirrord_kube::{
     api::{
         container::SKIP_NAMES,
@@ -214,14 +217,13 @@ async fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_CONFIG_FILE", full_path);
     }
 
-    let (config, context) = LayerConfig::from_env_with_warnings()?;
+    let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry);
     (&config).collect_analytics(analytics.get_mut());
 
-    let mut warnings = config.verify()?;
-    warnings.extend(context.get_warnings().iter().cloned());
-    for warning in warnings {
+    config.verify(&mut context)?;
+    for warning in context.get_warnings() {
         progress.warning(&warning);
     }
 
@@ -336,7 +338,7 @@ async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
     let (accept_invalid_certificates, kubeconfig, namespace, kube_context) = if let Some(config) =
         &args.config_file
     {
-        let mut warnings = Vec::new();
+        let mut cfg_context = ConfigContext::default();
         let layer_config = LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?;
         (
             layer_config.accept_invalid_certificates,
