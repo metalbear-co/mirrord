@@ -93,8 +93,14 @@ impl KubernetesAPI {
         P: Progress + Send + Sync,
     {
         if matches!(incoming_mode, IncomingMode::Mirror) && is_mesh {
-            progress
-                .warning("mesh/sidecar detected with `feature.network.incoming.mode = \"mirror\"`");
+            progress.warning(
+                "mirrord has detected that you might be running on a cluster with a \
+                 service mesh and `network.incoming.mode = \"mirror\"`, which is currently \
+                 unsupported. You can set `network.incoming.mode` to \"steal\" (check out the\
+                 `http_filter` configuration value if you only want to steal some of the traffic).\
+                 \nYou can follow this issue [https://github.com/metalbear-co/mirrord/issues/397] \
+                 for updates about support for mirroring in clusters with service mesh.",
+            );
         } else {
             progress.success(None)
         }
