@@ -305,7 +305,7 @@ impl LayerConfig {
     pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
         if self.pause {
             if self.agent.ephemeral && !self.agent.privileged {
-                warnings.push("The target pause feature with ephemeral requires to enable the privileged flag on the agent.".to_string());
+                context.add_warning("The target pause feature with ephemeral requires to enable the privileged flag on the agent.".to_string());
             }
             if !self.feature.network.incoming.is_steal() {
                 context.add_warning(PAUSE_WITHOUT_STEAL_WARNING.to_string());
