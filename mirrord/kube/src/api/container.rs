@@ -12,7 +12,7 @@ use crate::{api::kubernetes::AgentKubernetesConnectInfo, error::Result};
 
 pub mod ephemeral;
 pub mod job;
-pub mod target;
+pub mod targeted;
 pub mod targetless;
 pub mod util;
 

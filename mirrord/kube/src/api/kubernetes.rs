@@ -23,8 +23,9 @@ use tracing::{info, trace};
 use crate::{
     api::{
         container::{
+            ephemeral::EphemeralTargetedVariant,
             job::{JobTargetedVariant, JobVariant},
-            target::Target,
+            targeted::Targeted,
             targetless::Targetless,
             ContainerApi, ContainerParams,
         },
@@ -193,11 +194,18 @@ impl AgentManagment for KubernetesAPI {
             (Some(runtime_data), false) => {
                 let variant = JobTargetedVariant::new(&params, &runtime_data);
 
-                Target::new(&self.client, &self.agent, &params, &runtime_data, &variant)
+                Targeted::new(&self.client, &self.agent, &params, &runtime_data, &variant)
                     .create_agent(progress)
                     .await?
             }
-            _ => todo!(),
+            (Some(runtime_data), true) => {
+                let variant = EphemeralTargetedVariant::new(&params, &runtime_data);
+
+                Targeted::new(&self.client, &self.agent, &params, &runtime_data, &variant)
+                    .create_agent(progress)
+                    .await?
+            }
+            (None, true) => return Err(KubeApiError::MissingRuntimeData),
         };
 
         info!("Created agent pod {agent_connect_info:?}");

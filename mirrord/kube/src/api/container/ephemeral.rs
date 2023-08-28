@@ -155,14 +155,14 @@ where
     })
 }
 
-pub struct TargetedEphemeralUpdate<'c> {
-    params: &'c ContainerParams,
+pub struct EphemeralTargetedVariant<'c> {
     command_line: Vec<String>,
-    runtime_data: RuntimeData,
+    params: &'c ContainerParams,
+    runtime_data: &'c RuntimeData,
 }
 
-impl<'c> TargetedEphemeralUpdate<'c> {
-    pub fn new(params: &'c ContainerParams, runtime_data: RuntimeData) -> Self {
+impl<'c> EphemeralTargetedVariant<'c> {
+    pub fn new(params: &'c ContainerParams, runtime_data: &'c RuntimeData) -> Self {
         let command_line = vec![
             "./mirrord-agent".to_string(),
             "-l".to_string(),
@@ -170,7 +170,7 @@ impl<'c> TargetedEphemeralUpdate<'c> {
             "-e".to_string(),
         ];
 
-        TargetedEphemeralUpdate {
+        EphemeralTargetedVariant {
             params,
             command_line,
             runtime_data,
@@ -178,11 +178,11 @@ impl<'c> TargetedEphemeralUpdate<'c> {
     }
 }
 
-impl ContainerVariant for TargetedEphemeralUpdate<'_> {
+impl ContainerVariant for EphemeralTargetedVariant<'_> {
     type Update = KubeEphemeralContainer;
 
     fn as_update(&self, agent: &AgentConfig) -> Result<KubeEphemeralContainer> {
-        let TargetedEphemeralUpdate {
+        let EphemeralTargetedVariant {
             params,
             runtime_data,
             command_line,

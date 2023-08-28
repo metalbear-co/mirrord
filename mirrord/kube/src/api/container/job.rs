@@ -106,7 +106,7 @@ where
 
 pub struct JobVariant<'c> {
     command_line: Vec<String>,
-    name: &'c str,
+    params: &'c ContainerParams,
 }
 
 impl<'c> JobVariant<'c> {
@@ -119,7 +119,7 @@ impl<'c> JobVariant<'c> {
 
         JobVariant {
             command_line,
-            name: &params.name,
+            params,
         }
     }
 }
@@ -129,7 +129,8 @@ impl ContainerVariant for JobVariant<'_> {
 
     fn as_update(&self, agent: &AgentConfig) -> Result<Job> {
         let JobVariant {
-            command_line, name, ..
+            command_line,
+            params,
         } = self;
 
         let mut command_line = command_line.clone();
@@ -149,7 +150,7 @@ impl ContainerVariant for JobVariant<'_> {
         // Only Jobs support self deletion after completion
         serde_json::from_value(json!({
             "metadata": {
-                "name": name,
+                "name": params.name,
                 "labels": {
                     "app": "mirrord"
                 },
@@ -210,7 +211,6 @@ impl ContainerVariant for JobVariant<'_> {
 
 pub struct JobTargetedVariant<'c> {
     inner: JobVariant<'c>,
-    gid: u16,
     runtime_data: &'c RuntimeData,
 }
 
@@ -227,7 +227,6 @@ impl<'c> JobTargetedVariant<'c> {
 
         JobTargetedVariant {
             inner,
-            gid: params.gid,
             runtime_data,
         }
     }
@@ -239,13 +238,12 @@ impl ContainerVariant for JobTargetedVariant<'_> {
     fn as_update(&self, agent: &AgentConfig) -> Result<Job> {
         let JobTargetedVariant {
             inner,
-            gid,
             runtime_data,
         } = self;
 
         let update = serde_json::from_value(json!({
             "metadata": {
-                "name": inner.name,
+                "name": inner.params.name,
             },
             "spec": {
                 "template": {
@@ -270,7 +268,7 @@ impl ContainerVariant for JobTargetedVariant<'_> {
                             {
                                 "name": "mirrord-agent",
                                 "securityContext": {
-                                    "runAsGroup": gid,
+                                    "runAsGroup": inner.params.gid,
                                     "privileged": agent.privileged,
                                     "capabilities": {
                                         "add": get_capabilities(agent),

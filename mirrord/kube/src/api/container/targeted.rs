@@ -6,7 +6,7 @@ use tracing::debug;
 use crate::{
     api::{
         container::{
-            ephemeral::{create_ephemeral_agent, TargetedEphemeralUpdate},
+            ephemeral::{create_ephemeral_agent, EphemeralTargetedVariant},
             job::{create_job_agent, JobTargetedVariant},
             ContainerApi, ContainerParams,
         },
@@ -16,7 +16,7 @@ use crate::{
     error::{KubeApiError, Result},
 };
 
-pub struct Target<'c, V> {
+pub struct Targeted<'c, V> {
     agent: &'c AgentConfig,
     client: &'c Client,
     params: &'c ContainerParams,
@@ -24,7 +24,7 @@ pub struct Target<'c, V> {
     variant: &'c V,
 }
 
-impl<'c, V> Target<'c, V> {
+impl<'c, V> Targeted<'c, V> {
     pub fn new(
         client: &'c Client,
         agent: &'c AgentConfig,
@@ -32,7 +32,7 @@ impl<'c, V> Target<'c, V> {
         runtime_data: &'c RuntimeData,
         variant: &'c V,
     ) -> Self {
-        Target {
+        Targeted {
             agent,
             client,
             params,
@@ -42,12 +42,12 @@ impl<'c, V> Target<'c, V> {
     }
 }
 
-impl<'c> ContainerApi<JobTargetedVariant<'c>> for Target<'c, JobTargetedVariant<'c>> {
+impl<'c> ContainerApi<JobTargetedVariant<'c>> for Targeted<'c, JobTargetedVariant<'c>> {
     async fn create_agent<P>(&self, progress: &P) -> Result<AgentKubernetesConnectInfo>
     where
         P: Progress + Send + Sync,
     {
-        let Target {
+        let Targeted {
             agent,
             client,
             params,
@@ -71,16 +71,17 @@ impl<'c> ContainerApi<JobTargetedVariant<'c>> for Target<'c, JobTargetedVariant<
             }
         }
 
-        create_job_agent::<P, JobTargetedVariant>(client, agent, params, variant, progress).await
+        create_job_agent::<P, JobTargetedVariant<'c>>(client, agent, params, variant, progress)
+            .await
     }
 }
 
-impl<'c> ContainerApi<TargetedEphemeralUpdate<'c>> for Target<'c, TargetedEphemeralUpdate<'c>> {
+impl<'c> ContainerApi<EphemeralTargetedVariant<'c>> for Targeted<'c, EphemeralTargetedVariant<'c>> {
     async fn create_agent<P>(&self, progress: &P) -> Result<AgentKubernetesConnectInfo>
     where
         P: Progress + Send + Sync,
     {
-        let Target {
+        let Targeted {
             agent,
             client,
             params,
@@ -88,7 +89,7 @@ impl<'c> ContainerApi<TargetedEphemeralUpdate<'c>> for Target<'c, TargetedEpheme
             variant,
         } = self;
 
-        create_ephemeral_agent::<P, TargetedEphemeralUpdate>(
+        create_ephemeral_agent::<P, EphemeralTargetedVariant<'c>>(
             client,
             agent,
             params,
