@@ -414,7 +414,10 @@ mod tests {
                 ("MIRRORD_UDP_OUTGOING", udp.0),
             ],
             || {
-                let outgoing = OutgoingFileConfig::default().generate_config().unwrap();
+                let mut warnings = Vec::new();
+                let outgoing = OutgoingFileConfig::default()
+                    .generate_config(&mut warnings)
+                    .unwrap();
 
                 assert_eq!(outgoing.tcp, tcp.1);
                 assert_eq!(outgoing.udp, udp.1);
@@ -439,8 +442,9 @@ mod tests {
                 ("MIRRORD_UDP_OUTGOING", udp.0),
             ],
             || {
+                let mut warnings = Vec::new();
                 let outgoing = ToggleableConfig::<OutgoingFileConfig>::Enabled(false)
-                    .generate_config()
+                    .generate_config(&mut warnings)
                     .unwrap();
 
                 assert_eq!(outgoing.tcp, tcp.1);

@@ -332,19 +332,20 @@ where
 ///  "pod/py-serv-deployment-5c57fbdc98-pdbn4/container/py-serv",
 /// ]```
 async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
-    let (accept_invalid_certificates, kubeconfig, namespace, kube_context) =
-        if let Some(config) = &args.config_file {
-            let mut warnings = Vec::new();
-            let layer_config = LayerFileConfig::from_path(config)?.generate_config(&mut warnings)?;
-            (
-                layer_config.accept_invalid_certificates,
-                layer_config.kubeconfig,
-                layer_config.target.namespace,
-                layer_config.kube_context,
-            )
-        } else {
-            (false, None, None, None)
-        };
+    let (accept_invalid_certificates, kubeconfig, namespace, kube_context) = if let Some(config) =
+        &args.config_file
+    {
+        let mut warnings = Vec::new();
+        let layer_config = LayerFileConfig::from_path(config)?.generate_config(&mut warnings)?;
+        (
+            layer_config.accept_invalid_certificates,
+            layer_config.kubeconfig,
+            layer_config.target.namespace,
+            layer_config.kube_context,
+        )
+    } else {
+        (false, None, None, None)
+    };
 
     let client = create_kube_api(accept_invalid_certificates, kubeconfig, kube_context)
         .await

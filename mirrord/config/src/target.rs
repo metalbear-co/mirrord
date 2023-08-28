@@ -412,8 +412,10 @@ mod tests {
                 ("MIRRORD_TARGET_NAMESPACE", namespace_env),
             ],
             || {
-                let generated_target_config =
-                    TargetFileConfig::default().generate_config().unwrap();
+                let mut warnings = Vec::new();
+                let generated_target_config = TargetFileConfig::default()
+                    .generate_config(&mut warnings)
+                    .unwrap();
 
                 assert_eq!(expected_target_config, generated_target_config);
             },
@@ -424,7 +426,9 @@ mod tests {
     fn verify_config(config_json_string: &str, expected_target_config: &TargetConfig) {
         let target_file_config: TargetFileConfig =
             serde_json::from_str(config_json_string).unwrap();
-        let target_config: TargetConfig = target_file_config.generate_config().unwrap();
+        let mut warnings = Vec::new();
+        let target_config: TargetConfig =
+            target_file_config.generate_config(&mut warnings).unwrap();
         assert_eq!(&target_config, expected_target_config);
     }
 

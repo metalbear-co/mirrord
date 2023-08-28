@@ -190,7 +190,10 @@ mod tests {
             ..Default::default()
         };
 
-        let fs_config = AdvancedFsUserConfig::default().generate_config().unwrap();
+        let mut warnings = Vec::new();
+        let fs_config = AdvancedFsUserConfig::default()
+            .generate_config(&mut warnings)
+            .unwrap();
 
         assert_eq!(fs_config, expect);
     }

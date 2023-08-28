@@ -150,7 +150,10 @@ mod tests {
         with_env_vars(
             vec![("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)],
             || {
-                let fs = FsModeConfig::default().generate_config().unwrap();
+                let mut warnings = Vec::new();
+                let fs = FsModeConfig::default()
+                    .generate_config(&mut warnings)
+                    .unwrap();
 
                 assert_eq!(fs, expect);
             },
@@ -166,8 +169,9 @@ mod tests {
         with_env_vars(
             vec![("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)],
             || {
+                let mut warnings = Vec::new();
                 let fs = ToggleableConfig::<FsModeConfig>::Enabled(false)
-                    .generate_config()
+                    .generate_config(&mut warnings)
                     .unwrap();
 
                 assert_eq!(fs, expect);

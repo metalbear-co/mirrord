@@ -60,11 +60,13 @@ mod tests {
     #[rstest]
     fn basic() {
         with_env_vars(vec![("TEST_VALUE", Some("13"))], || {
+            let mut warnings = Vec::new();
             let value = FromEnv::<i32>::new("TEST_VALUE");
 
-            assert_eq!(value.source_value().unwrap().unwrap(), 13);
+            assert_eq!(value.source_value(&mut warnings).unwrap().unwrap(), 13);
         });
+        let mut warnings = Vec::new();
         let value = FromEnv::<i32>::new("TEST_VALUE");
-        assert!(value.source_value().is_none());
+        assert!(value.source_value(&mut warnings).is_none());
     }
 }

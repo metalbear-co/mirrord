@@ -287,7 +287,10 @@ mod tests {
                 ("MIRRORD_AGENT_STARTUP_TIMEOUT", startup_timeout.0),
             ],
             || {
-                let agent = AgentFileConfig::default().generate_config().unwrap();
+                let mut warnings = Vec::new();
+                let agent = AgentFileConfig::default()
+                    .generate_config(&mut warnings)
+                    .unwrap();
 
                 assert_eq!(agent.log_level, log_level.1);
                 assert_eq!(agent.namespace.as_deref(), namespace.1);

@@ -133,7 +133,10 @@ mod tests {
                 ("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE", exclude.0),
             ],
             || {
-                let env = EnvFileConfig::default().generate_config().unwrap();
+                let mut warnings = Vec::new();
+                let env = EnvFileConfig::default()
+                    .generate_config(&mut warnings)
+                    .unwrap();
 
                 assert_eq!(env.include.map(|vec| vec.join(";")).as_deref(), include.1);
                 assert_eq!(env.exclude.map(|vec| vec.join(";")).as_deref(), exclude.1);
@@ -158,8 +161,9 @@ mod tests {
                 ("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE", exclude.0),
             ],
             || {
+                let mut warnings = Vec::new();
                 let env = ToggleableConfig::<EnvFileConfig>::Enabled(false)
-                    .generate_config()
+                    .generate_config(&mut warnings)
                     .unwrap();
 
                 assert_eq!(env.include.map(|vec| vec.join(";")).as_deref(), include.1);
