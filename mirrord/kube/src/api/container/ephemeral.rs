@@ -44,7 +44,6 @@ fn is_ephemeral_container_running(pod: Pod, container_name: &str) -> bool {
 pub async fn create_ephemeral_agent<P, V>(
     client: &Client,
     agent: &AgentConfig,
-    params: &ContainerParams,
     runtime_data: &RuntimeData,
     variant: &V,
     progress: &P,
@@ -53,6 +52,7 @@ where
     P: Progress + Send + Sync,
     V: ContainerVariant<Update = KubeEphemeralContainer>,
 {
+    let params = variant.params();
     // Ephemeral should never be targetless, so there should be runtime data.
     let mut container_progress = progress.subtask("creating ephemeral container...");
 
@@ -180,6 +180,10 @@ impl<'c> EphemeralTargetedVariant<'c> {
 
 impl ContainerVariant for EphemeralTargetedVariant<'_> {
     type Update = KubeEphemeralContainer;
+
+    fn params(&self) -> &ContainerParams {
+        self.params
+    }
 
     fn as_update(&self, agent: &AgentConfig) -> Result<KubeEphemeralContainer> {
         let EphemeralTargetedVariant {

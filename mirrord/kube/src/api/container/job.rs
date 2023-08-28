@@ -31,7 +31,6 @@ use crate::{
 pub async fn create_job_agent<P, V>(
     client: &Client,
     agent: &AgentConfig,
-    params: &ContainerParams,
     variant: &V,
     progress: &P,
 ) -> Result<AgentKubernetesConnectInfo>
@@ -39,6 +38,7 @@ where
     P: Progress + Send + Sync,
     V: ContainerVariant<Update = Job>,
 {
+    let params = variant.params();
     let mut pod_progress = progress.subtask("creating agent pod...");
 
     let agent_pod: Job = variant.as_update(agent)?;
@@ -126,6 +126,10 @@ impl<'c> JobVariant<'c> {
 
 impl ContainerVariant for JobVariant<'_> {
     type Update = Job;
+
+    fn params(&self) -> &ContainerParams {
+        self.params
+    }
 
     fn as_update(&self, agent: &AgentConfig) -> Result<Job> {
         let JobVariant {
@@ -235,6 +239,10 @@ impl<'c> JobTargetedVariant<'c> {
 impl ContainerVariant for JobTargetedVariant<'_> {
     type Update = Job;
 
+    fn params(&self) -> &ContainerParams {
+        self.inner.params()
+    }
+
     fn as_update(&self, agent: &AgentConfig) -> Result<Job> {
         let JobTargetedVariant {
             inner,
@@ -300,14 +308,18 @@ impl ContainerVariant for JobTargetedVariant<'_> {
 #[cfg(test)]
 mod test {
 
-    use mirrord_config::{agent::AgentFileConfig, config::MirrordConfig};
+    use mirrord_config::{
+        agent::AgentFileConfig,
+        config::{ConfigContext, MirrordConfig},
+    };
 
     use super::*;
     use crate::api::runtime::ContainerRuntime;
 
     #[test]
     fn targetless() -> Result<(), Box<dyn std::error::Error>> {
-        let agent = AgentFileConfig::default().generate_config()?;
+        let mut config_context = ConfigContext::default();
+        let agent = AgentFileConfig::default().generate_config(&mut config_context)?;
         let params = ContainerParams {
             name: "foobar".to_string(),
             port: 3000,
@@ -382,7 +394,8 @@ mod test {
 
     #[test]
     fn targeted() -> Result<(), Box<dyn std::error::Error>> {
-        let agent = AgentFileConfig::default().generate_config()?;
+        let mut config_context = ConfigContext::default();
+        let agent = AgentFileConfig::default().generate_config(&mut config_context)?;
         let params = ContainerParams {
             name: "foobar".to_string(),
             port: 3000,

@@ -8,7 +8,7 @@ use crate::{
         container::{
             ephemeral::{create_ephemeral_agent, EphemeralTargetedVariant},
             job::{create_job_agent, JobTargetedVariant},
-            ContainerApi, ContainerParams,
+            ContainerApi,
         },
         kubernetes::AgentKubernetesConnectInfo,
         runtime::{NodeCheck, RuntimeData},
@@ -19,7 +19,6 @@ use crate::{
 pub struct Targeted<'c, V> {
     agent: &'c AgentConfig,
     client: &'c Client,
-    params: &'c ContainerParams,
     runtime_data: &'c RuntimeData,
     variant: &'c V,
 }
@@ -28,14 +27,12 @@ impl<'c, V> Targeted<'c, V> {
     pub fn new(
         client: &'c Client,
         agent: &'c AgentConfig,
-        params: &'c ContainerParams,
         runtime_data: &'c RuntimeData,
         variant: &'c V,
     ) -> Self {
         Targeted {
             agent,
             client,
-            params,
             runtime_data,
             variant,
         }
@@ -50,7 +47,6 @@ impl<'c> ContainerApi<JobTargetedVariant<'c>> for Targeted<'c, JobTargetedVarian
         let Targeted {
             agent,
             client,
-            params,
             runtime_data,
             variant,
         } = self;
@@ -71,8 +67,7 @@ impl<'c> ContainerApi<JobTargetedVariant<'c>> for Targeted<'c, JobTargetedVarian
             }
         }
 
-        create_job_agent::<P, JobTargetedVariant<'c>>(client, agent, params, variant, progress)
-            .await
+        create_job_agent::<P, JobTargetedVariant<'c>>(client, agent, variant, progress).await
     }
 }
 
@@ -84,7 +79,6 @@ impl<'c> ContainerApi<EphemeralTargetedVariant<'c>> for Targeted<'c, EphemeralTa
         let Targeted {
             agent,
             client,
-            params,
             runtime_data,
             variant,
         } = self;
@@ -92,7 +86,6 @@ impl<'c> ContainerApi<EphemeralTargetedVariant<'c>> for Targeted<'c, EphemeralTa
         create_ephemeral_agent::<P, EphemeralTargetedVariant<'c>>(
             client,
             agent,
-            params,
             runtime_data,
             variant,
             progress,

@@ -7,7 +7,7 @@ use crate::{
     api::{
         container::{
             job::{create_job_agent, JobVariant},
-            ContainerApi, ContainerParams, ContainerVariant,
+            ContainerApi, ContainerVariant,
         },
         kubernetes::AgentKubernetesConnectInfo,
     },
@@ -17,7 +17,6 @@ use crate::{
 pub struct Targetless<'c, V> {
     agent: &'c AgentConfig,
     client: &'c Client,
-    params: &'c ContainerParams,
     variant: &'c V,
 }
 
@@ -25,16 +24,10 @@ impl<'c, V> Targetless<'c, V>
 where
     V: ContainerVariant<Update = Job>,
 {
-    pub fn new(
-        client: &'c Client,
-        agent: &'c AgentConfig,
-        params: &'c ContainerParams,
-        variant: &'c V,
-    ) -> Self {
+    pub fn new(client: &'c Client, agent: &'c AgentConfig, variant: &'c V) -> Self {
         Targetless {
             agent,
             client,
-            params,
             variant,
         }
     }
@@ -45,13 +38,6 @@ impl<'c> ContainerApi<JobVariant<'c>> for Targetless<'c, JobVariant<'c>> {
     where
         P: Progress + Send + Sync,
     {
-        create_job_agent::<P, JobVariant>(
-            self.client,
-            self.agent,
-            self.params,
-            self.variant,
-            progress,
-        )
-        .await
+        create_job_agent::<P, JobVariant>(self.client, self.agent, self.variant, progress).await
     }
 }
