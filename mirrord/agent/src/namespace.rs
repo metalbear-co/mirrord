@@ -31,6 +31,8 @@ impl From<NamespaceType> for CloneFlags {
 }
 
 /// Set namespace by cloneflags and pid.
+/// NOTE: don't make it async in the case we're in an multi-thread scheduler and we want it to
+/// happen on the same thread always.
 #[tracing::instrument(level = "trace")]
 pub(crate) fn set_namespace(pid: u64, namespace_type: NamespaceType) -> Result<()> {
     let fd = File::open(namespace_type.path_from_pid(pid))?;

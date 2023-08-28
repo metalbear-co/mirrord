@@ -16,7 +16,7 @@ use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
 
 use crate::{
-    cgroup::{get_cgroup, CgroupFreeze},
+    cgroup::{self, Cgroup},
     env::parse_raw_env,
     error::{AgentError, Result},
     runtime::crio::CriOContainer,
@@ -299,14 +299,18 @@ impl ContainerRuntime for EphemeralContainer {
 
     /// Pause requires root privileges, so if it fails on permission we send a message.
     async fn pause(&self) -> Result<()> {
-        get_cgroup()
-            .and_then(|x| x.pause())
+        let cgroup = Cgroup::new().await?;
+        cgroup
+            .pause()
+            .await
             .map_err(|e| AgentError::PauseFailedCgroup(e.to_string()))
     }
 
     async fn unpause(&self) -> Result<()> {
-        get_cgroup()
-            .and_then(|x| x.unpause())
+        let cgroup = Cgroup::new().await?;
+        cgroup
+            .unpause()
+            .await
             .map_err(|e| AgentError::PauseFailedCgroup(e.to_string()))
     }
 }
