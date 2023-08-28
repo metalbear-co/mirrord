@@ -18,181 +18,118 @@ use crate::{
     api::{
         container::{
             util::{
-                get_agent_image, get_agent_name, get_capabilities, wait_for_agent_startup,
-                DEFAULT_TOLERATIONS,
+                get_agent_image, get_capabilities, wait_for_agent_startup, DEFAULT_TOLERATIONS,
             },
-            ContainerApi, ContainerUpdateParams, ContainerUpdateVariant, ContainerUpdater,
+            ContainerParams, ContainerVariant,
         },
         kubernetes::{get_k8s_resource_api, AgentKubernetesConnectInfo},
-        runtime::{NodeCheck, RuntimeData},
+        runtime::RuntimeData,
     },
     error::{KubeApiError, Result},
 };
 
-impl ContainerUpdateParams {
-    pub fn job(self) -> JobContainer<Box<dyn ContainerUpdater<Update = Job>>> {
-        JobContainer::new(match self.variant {
-            ContainerUpdateVariant::Targetless => {
-                Box::new(JobUpdate::new(&self.name, self.connection_port))
-            }
-            ContainerUpdateVariant::Target { gid, runtime_data } => Box::new(
-                TargetedJobUpdate::new(&self.name, self.connection_port, gid, runtime_data),
-            ),
-        })
-    }
-}
-
-#[derive(Debug)]
-pub struct JobContainer<U> {
-    updater: U,
-}
-
-impl<U> JobContainer<U> {
-    fn new(updater: U) -> Self {
-        JobContainer { updater }
-    }
-}
-
-impl<U: ?Sized> ContainerApi for JobContainer<Box<U>>
+pub async fn create_job_agent<P, V>(
+    client: &Client,
+    agent: &AgentConfig,
+    params: &ContainerParams,
+    variant: &V,
+    progress: &P,
+) -> Result<AgentKubernetesConnectInfo>
 where
-    U: ContainerUpdater<Update = Job>,
+    P: Progress + Send + Sync,
+    V: ContainerVariant<Update = Job>,
 {
-    /// runtime_data is `None` when targetless.
-    async fn create_agent<P>(
-        &self,
-        client: &Client,
-        agent: &AgentConfig,
-        progress: &P,
-    ) -> Result<AgentKubernetesConnectInfo>
-    where
-        P: Progress + Send + Sync,
-    {
-        if agent.check_out_of_pods && let Some(runtime_data) = self.updater.runtime_data() {
-            let mut check_node = progress.subtask("checking if node is allocatable...");
-            match runtime_data.check_node(client).await {
-                NodeCheck::Success => check_node.success(Some("node is allocatable")),
-                NodeCheck::Error(err) => {
-                    debug!("{err}");
-                    check_node.warning("unable to check if node is allocatable");
-                },
-                NodeCheck::Failed(node_name, pods) => {
-                    check_node.failure(Some("node is not allocatable"));
+    let mut pod_progress = progress.subtask("creating agent pod...");
 
-                    return Err(KubeApiError::NodePodLimitExceeded(node_name, pods));
+    let agent_pod: Job = variant.as_update(agent)?;
+
+    let job_api = get_k8s_resource_api(client, agent.namespace.as_deref());
+
+    job_api
+        .create(&PostParams::default(), &agent_pod)
+        .await
+        .map_err(KubeApiError::KubeError)?;
+
+    let watcher_config = watcher::Config::default()
+        .labels(&format!("job-name={}", params.name))
+        .timeout(60);
+
+    pod_progress.success(Some("agent pod created"));
+
+    let mut pod_progress = progress.subtask("waiting for pod to be ready...");
+
+    let pod_api: Api<Pod> = get_k8s_resource_api(client, agent.namespace.as_deref());
+
+    let stream = watcher(pod_api.clone(), watcher_config).applied_objects();
+    pin!(stream);
+
+    while let Some(Ok(pod)) = stream.next().await {
+        if let Some(status) = &pod.status && let Some(phase) = &status.phase {
+                debug!("Pod Phase = {phase:?}");
+                if phase == "Running" {
+                    break;
                 }
             }
-        }
+    }
 
-        let mut pod_progress = progress.subtask("creating agent pod...");
-        let mirrord_agent_job_name = get_agent_name();
+    let pods = pod_api
+        .list(&ListParams::default().labels(&format!("job-name={}", params.name)))
+        .await
+        .map_err(KubeApiError::KubeError)?;
 
-        let agent_pod: Job = self.updater.as_update(agent)?;
+    let pod_name = pods
+        .items
+        .first()
+        .and_then(|pod| pod.metadata.name.clone())
+        .ok_or(KubeApiError::JobPodNotFound(params.name.clone()))?;
 
-        let job_api = get_k8s_resource_api(client, agent.namespace.as_deref());
-
-        job_api
-            .create(&PostParams::default(), &agent_pod)
-            .await
-            .map_err(KubeApiError::KubeError)?;
-
-        let watcher_config = watcher::Config::default()
-            .labels(&format!("job-name={mirrord_agent_job_name}"))
-            .timeout(60);
-
-        pod_progress.success(Some("agent pod created"));
-
-        let mut pod_progress = progress.subtask("waiting for pod to be ready...");
-
-        let pod_api: Api<Pod> = get_k8s_resource_api(client, agent.namespace.as_deref());
-
-        let stream = watcher(pod_api.clone(), watcher_config).applied_objects();
-        pin!(stream);
-
-        while let Some(Ok(pod)) = stream.next().await {
-            if let Some(status) = &pod.status && let Some(phase) = &status.phase {
-                        debug!("Pod Phase = {phase:?}");
-                    if phase == "Running" {
-                        break;
-                    }
-                }
-        }
-
-        let pods = pod_api
-            .list(&ListParams::default().labels(&format!("job-name={mirrord_agent_job_name}")))
-            .await
-            .map_err(KubeApiError::KubeError)?;
-
-        let pod_name = pods
-            .items
-            .first()
-            .and_then(|pod| pod.metadata.name.clone())
-            .ok_or(KubeApiError::JobPodNotFound(mirrord_agent_job_name))?;
-
-        let version =
-            wait_for_agent_startup(&pod_api, &pod_name, "mirrord-agent".to_string()).await?;
-        match version {
-            Some(version) if version != env!("CARGO_PKG_VERSION") => {
-                let message = format!(
+    let version = wait_for_agent_startup(&pod_api, &pod_name, "mirrord-agent".to_string()).await?;
+    match version {
+        Some(version) if version != env!("CARGO_PKG_VERSION") => {
+            let message = format!(
                     "Agent version {version} does not match the local mirrord version {}. This may lead to unexpected errors.",
                     env!("CARGO_PKG_VERSION"),
                 );
-                pod_progress.warning(&message);
-            }
-            _ => {}
+            pod_progress.warning(&message);
         }
-
-        pod_progress.success(Some("pod is ready"));
-
-        Ok(AgentKubernetesConnectInfo {
-            pod_name,
-            agent_port: self.updater.connection_port(),
-            namespace: agent.namespace.clone(),
-        })
+        _ => {}
     }
+
+    pod_progress.success(Some("pod is ready"));
+
+    Ok(AgentKubernetesConnectInfo {
+        pod_name,
+        agent_port: params.port,
+        namespace: agent.namespace.clone(),
+    })
 }
 
-pub struct JobUpdate {
-    agent_port: u16,
+pub struct JobVariant<'c> {
     command_line: Vec<String>,
-    job_name: String,
+    name: &'c str,
 }
 
-impl JobUpdate {
-    fn new(job_name: &str, agent_port: u16) -> Self {
+impl<'c> JobVariant<'c> {
+    pub fn new(params: &'c ContainerParams) -> Self {
         let command_line = vec![
             "./mirrord-agent".to_owned(),
             "-l".to_owned(),
-            agent_port.to_string(),
+            params.port.to_string(),
         ];
 
-        JobUpdate {
-            agent_port,
+        JobVariant {
             command_line,
-            job_name: job_name.to_string(),
+            name: &params.name,
         }
     }
 }
 
-impl ContainerUpdater for JobUpdate {
+impl ContainerVariant for JobVariant<'_> {
     type Update = Job;
 
-    fn name(&self) -> &str {
-        &self.job_name
-    }
-
-    fn connection_port(&self) -> u16 {
-        self.agent_port
-    }
-
-    fn runtime_data(&self) -> Option<&RuntimeData> {
-        None
-    }
-
-    fn as_update(&self, agent: &AgentConfig) -> Result<Self::Update> {
-        let JobUpdate {
-            command_line,
-            job_name,
-            ..
+    fn as_update(&self, agent: &AgentConfig) -> Result<Job> {
+        let JobVariant {
+            command_line, name, ..
         } = self;
 
         let mut command_line = command_line.clone();
@@ -212,7 +149,7 @@ impl ContainerUpdater for JobUpdate {
         // Only Jobs support self deletion after completion
         serde_json::from_value(json!({
             "metadata": {
-                "name": job_name,
+                "name": name,
                 "labels": {
                     "app": "mirrord"
                 },
@@ -271,16 +208,15 @@ impl ContainerUpdater for JobUpdate {
     }
 }
 
-pub struct TargetedJobUpdate {
-    inner: JobUpdate,
-
+pub struct JobTargetedVariant<'c> {
+    inner: JobVariant<'c>,
     gid: u16,
-    runtime_data: RuntimeData,
+    runtime_data: &'c RuntimeData,
 }
 
-impl TargetedJobUpdate {
-    fn new(job_name: &str, connection_port: u16, gid: u16, runtime_data: RuntimeData) -> Self {
-        let mut inner = JobUpdate::new(job_name, connection_port);
+impl<'c> JobTargetedVariant<'c> {
+    pub fn new(params: &'c ContainerParams, runtime_data: &'c RuntimeData) -> Self {
+        let mut inner = JobVariant::new(params);
 
         inner.command_line.extend([
             "--container-id".to_owned(),
@@ -289,31 +225,19 @@ impl TargetedJobUpdate {
             runtime_data.container_runtime.to_string(),
         ]);
 
-        TargetedJobUpdate {
+        JobTargetedVariant {
             inner,
-            gid,
+            gid: params.gid,
             runtime_data,
         }
     }
 }
 
-impl ContainerUpdater for TargetedJobUpdate {
+impl ContainerVariant for JobTargetedVariant<'_> {
     type Update = Job;
 
-    fn name(&self) -> &str {
-        self.inner.name()
-    }
-
-    fn connection_port(&self) -> u16 {
-        self.inner.connection_port()
-    }
-
-    fn runtime_data(&self) -> Option<&RuntimeData> {
-        Some(&self.runtime_data)
-    }
-
-    fn as_update(&self, agent: &AgentConfig) -> Result<Self::Update> {
-        let TargetedJobUpdate {
+    fn as_update(&self, agent: &AgentConfig) -> Result<Job> {
+        let JobTargetedVariant {
             inner,
             gid,
             runtime_data,
@@ -321,7 +245,7 @@ impl ContainerUpdater for TargetedJobUpdate {
 
         let update = serde_json::from_value(json!({
             "metadata": {
-                "name": inner.job_name,
+                "name": inner.name,
             },
             "spec": {
                 "template": {
@@ -386,11 +310,13 @@ mod test {
     #[test]
     fn targetless() -> Result<(), Box<dyn std::error::Error>> {
         let agent = AgentFileConfig::default().generate_config()?;
+        let params = ContainerParams {
+            name: "foobar".to_string(),
+            port: 3000,
+            gid: 13,
+        };
 
-        let update = ContainerUpdateParams::targetless("foobar".to_string(), 3000)
-            .job()
-            .updater
-            .as_update(&agent)?;
+        let update = JobVariant::new(&params).as_update(&agent)?;
 
         let expected: Job = serde_json::from_value(json!({
             "metadata": {
@@ -459,12 +385,15 @@ mod test {
     #[test]
     fn targeted() -> Result<(), Box<dyn std::error::Error>> {
         let agent = AgentFileConfig::default().generate_config()?;
+        let params = ContainerParams {
+            name: "foobar".to_string(),
+            port: 3000,
+            gid: 13,
+        };
 
-        let update = TargetedJobUpdate::new(
-            "foobar",
-            3000,
-            13,
-            RuntimeData {
+        let update = JobTargetedVariant::new(
+            &params,
+            &RuntimeData {
                 pod_name: "pod".to_string(),
                 pod_namespace: None,
                 node_name: "foobaz".to_string(),

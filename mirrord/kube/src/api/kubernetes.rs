@@ -22,7 +22,12 @@ use tracing::{info, trace};
 
 use crate::{
     api::{
-        container::{ContainerApi, ContainerUpdateParams, ContainerUpdateVariant},
+        container::{
+            job::{JobTargetedVariant, JobVariant},
+            target::Target,
+            targetless::Targetless,
+            ContainerApi, ContainerParams,
+        },
         runtime::RuntimeDataProvider,
         wrap_raw_connection, AgentManagment,
     },
@@ -170,28 +175,29 @@ impl AgentManagment for KubernetesAPI {
             None
         };
 
-        let params = ContainerUpdateParams::new(runtime_data);
+        let params = ContainerParams::new();
 
         info!("Spawning new agent.");
 
-        info!(
-            "Using port `{:?}` for communication",
-            params.connection_port
-        );
-        if let ContainerUpdateVariant::Target { gid, .. } = &params.variant {
-            info!("Using group-id `{gid:?}`");
-        }
+        info!("Using port `{:?}` for communication", params.port);
+        info!("Using group-id `{:?}`", params.gid);
 
-        let agent_connect_info = if self.agent.ephemeral {
-            params
-                .ephemeral()
-                .create_agent(&self.client, &self.agent, progress)
-                .await?
-        } else {
-            params
-                .job()
-                .create_agent(&self.client, &self.agent, progress)
-                .await?
+        let agent_connect_info = match (runtime_data, self.agent.ephemeral) {
+            (None, false) => {
+                let variant = JobVariant::new(&params);
+
+                Targetless::new(&self.client, &self.agent, &params, &variant)
+                    .create_agent(progress)
+                    .await?
+            }
+            (Some(runtime_data), false) => {
+                let variant = JobTargetedVariant::new(&params, &runtime_data);
+
+                Target::new(&self.client, &self.agent, &params, &runtime_data, &variant)
+                    .create_agent(progress)
+                    .await?
+            }
+            _ => todo!(),
         };
 
         info!("Created agent pod {agent_connect_info:?}");
