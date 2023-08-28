@@ -8,6 +8,56 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.63.0](https://github.com/metalbear-co/mirrord/tree/3.63.0) - 2023-08-28
+
+
+### Added
+
+- Add the ability to send analytics on errors and not only on successful runs.
+  [#1785](https://github.com/metalbear-co/mirrord/issues/1785)
+- Report back internal proxy error stream to cli
+  [#1855](https://github.com/metalbear-co/mirrord/issues/1855)
+
+
+### Changed
+
+- Changed config unstable/deprecations to be aggregated with other config
+  warnings [#1860](https://github.com/metalbear-co/mirrord/issues/1860)
+
+
+### Fixed
+
+- `not-found` file filter fixed to only match files inside the `$HOME`
+  directory. [#1863](https://github.com/metalbear-co/mirrord/issues/1863)
+- Fix openshift detection taking too long by querying a subset instead of all
+  APIs
+
+
+### Internal
+
+- CI Improvements:
+  - Unify lint and integration for macOS to save cache and runner.
+  - Remove trace logging from integration tests on macos
+  - use node 18 for testing since installing 19 in CI takes hours.
+  - remove `build_mirrord` job - quite useless as it's used only in other
+  workflow, so have it there and re-use cache
+    also save some cache,
+  - specify target for all cargo invocations to re-use cache efficiently.
+  - fix flake with node server closing before time
+- Fix regression in kube api blocking operator from compiling
+- Reorganize the CI with the following objective of unifying as much as we can
+  CI that can run on the same host, this is to have less caches and have better
+  compilation time (as there's overlap). Things done:
+
+  - Remove the build layer CI, since we now have an integration tests that
+  check it + clippy for aarch darwin / Linux
+  - Make clippy run for all of the project for aarch64 linux instead of agent
+  only
+  - Revert removal of Rust cache from e2e (was by mistake)
+  - Don't use "cache" for other Gos since it will try to overwrite and have bad
+  results.
+
+
 ## [3.62.0](https://github.com/metalbear-co/mirrord/tree/3.62.0) - 2023-08-26
 
 
