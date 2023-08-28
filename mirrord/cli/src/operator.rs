@@ -72,7 +72,7 @@ async fn operator_setup(
 async fn get_status_api(config: Option<String>) -> Result<Api<MirrordOperatorCrd>> {
     let kube_api = if let Some(config_path) = config {
         let mut warnings = Vec::new();
-        let config = LayerFileConfig::from_path(config_path)?.generate_config(&mut warnings)?;
+        let config = LayerFileConfig::from_path(config_path)?.generate_config(&mut cfg_context)?;
         create_kube_api(
             config.accept_invalid_certificates,
             config.kubeconfig,

@@ -1,3 +1,4 @@
+use super::ConfigContext;
 use crate::config::{source::MirrordConfigSource, Result};
 
 #[derive(Clone)]
@@ -15,9 +16,9 @@ where
 {
     type Value = T::Value;
 
-    fn source_value(self, warnings: &mut Vec<String>) -> Option<Result<Self::Value>> {
-        self.2.source_value(warnings).map(|result| {
-            warnings.push(format!(
+    fn source_value(self, context: &mut ConfigContext) -> Option<Result<Self::Value>> {
+        self.2.source_value(context).map(|result| {
+            context.add_warning(format!(
                 "Warning: field {}.{} is marked as unstable. Please note API may change",
                 self.0, self.1
             ));

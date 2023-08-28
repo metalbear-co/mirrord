@@ -17,7 +17,7 @@ pub mod util;
 
 use std::path::Path;
 
-use config::{ConfigError, MirrordConfig};
+use config::{ConfigContext, ConfigError, MirrordConfig};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -281,14 +281,14 @@ impl LayerConfig {
     /// Generate a config from the environment variables and/or a config file.
     /// On success, returns the config and a vec of warnings.
     /// To be used from CLI to verify config and print warnings
-    pub fn from_env_with_warnings() -> Result<(Self, Vec<String>), ConfigError> {
-        let mut warnings = Vec::new();
+    pub fn from_env_with_warnings() -> Result<(Self, ConfigContext), ConfigError> {
+        let mut cfg_context = ConfigContext::default();
         if let Ok(path) = std::env::var("MIRRORD_CONFIG_FILE") {
-            LayerFileConfig::from_path(path)?.generate_config(&mut warnings)
+            LayerFileConfig::from_path(path)?.generate_config(&mut cfg_context)
         } else {
-            LayerFileConfig::default().generate_config(&mut warnings)
+            LayerFileConfig::default().generate_config(&mut cfg_context)
         }
-        .map(|config| (config, warnings))
+        .map(|config| (config, cfg_context))
     }
 
     /// Generate a config from the environment variables and/or a config file.

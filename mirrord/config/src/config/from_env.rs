@@ -1,5 +1,6 @@
 use std::{marker::PhantomData, str::FromStr};
 
+use super::ConfigContext;
 use crate::config::{source::MirrordConfigSource, ConfigError, Result};
 
 #[derive(Clone)]
@@ -17,7 +18,7 @@ where
 {
     type Value = T;
 
-    fn source_value(self, _warnings: &mut Vec<String>) -> Option<Result<Self::Value>> {
+    fn source_value(self, _context: &mut ConfigContext) -> Option<Result<Self::Value>> {
         std::env::var(self.0).ok().map(|var| {
             var.parse()
                 .map_err(|_| ConfigError::InvalidValue(var.to_string(), self.0))
@@ -45,7 +46,7 @@ where
 {
     type Value = T;
 
-    fn source_value(self, _warnings: &mut Vec<String>) -> Option<Result<Self::Value>> {
+    fn source_value(self, _context: &mut ConfigContext) -> Option<Result<Self::Value>> {
         std::env::var(self.0).ok().map(|var| var.parse())
     }
 }
@@ -60,13 +61,13 @@ mod tests {
     #[rstest]
     fn basic() {
         with_env_vars(vec![("TEST_VALUE", Some("13"))], || {
-            let mut warnings = Vec::new();
+            let mut cfg_context = ConfigContext::default();
             let value = FromEnv::<i32>::new("TEST_VALUE");
 
-            assert_eq!(value.source_value(&mut warnings).unwrap().unwrap(), 13);
+            assert_eq!(value.source_value(&mut cfg_context).unwrap().unwrap(), 13);
         });
-        let mut warnings = Vec::new();
+        let mut cfg_context = ConfigContext::default();
         let value = FromEnv::<i32>::new("TEST_VALUE");
-        assert!(value.source_value(&mut warnings).is_none());
+        assert!(value.source_value(&mut cfg_context).is_none());
     }
 }

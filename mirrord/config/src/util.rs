@@ -6,14 +6,14 @@ use serde::{
     Deserialize, Deserializer, Serialize,
 };
 
-use crate::config::{ConfigError, FromMirrordConfig, MirrordConfig, Result};
+use crate::config::{ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result};
 
 pub trait MirrordToggleableConfig: MirrordConfig + Default {
-    fn enabled_config(warnings: &mut Vec<String>) -> Result<Self::Generated, ConfigError> {
-        Self::default().generate_config(warnings)
+    fn enabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
+        Self::default().generate_config(context)
     }
 
-    fn disabled_config(warnings: &mut Vec<String>) -> Result<Self::Generated, ConfigError>;
+    fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError>;
 }
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
@@ -35,11 +35,11 @@ where
 {
     type Generated = T::Generated;
 
-    fn generate_config(self, warnings: &mut Vec<String>) -> Result<Self::Generated, ConfigError> {
+    fn generate_config(self, context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
         match self {
-            ToggleableConfig::Enabled(true) => T::enabled_config(warnings),
-            ToggleableConfig::Enabled(false) => T::disabled_config(warnings),
-            ToggleableConfig::Config(inner) => inner.generate_config(warnings),
+            ToggleableConfig::Enabled(true) => T::enabled_config(context),
+            ToggleableConfig::Enabled(false) => T::disabled_config(context),
+            ToggleableConfig::Config(inner) => inner.generate_config(context),
         }
     }
 }

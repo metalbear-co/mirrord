@@ -253,7 +253,10 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{config::MirrordConfig, util::testing::with_env_vars};
+    use crate::{
+        config::{ConfigContext, MirrordConfig},
+        util::testing::with_env_vars,
+    };
 
     #[rstest]
     fn default(
@@ -287,9 +290,9 @@ mod tests {
                 ("MIRRORD_AGENT_STARTUP_TIMEOUT", startup_timeout.0),
             ],
             || {
-                let mut warnings = Vec::new();
+                let mut cfg_context = ConfigContext::default();
                 let agent = AgentFileConfig::default()
-                    .generate_config(&mut warnings)
+                    .generate_config(&mut cfg_context)
                     .unwrap();
 
                 assert_eq!(agent.log_level, log_level.1);

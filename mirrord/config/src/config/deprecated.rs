@@ -1,4 +1,4 @@
-use crate::config::{source::MirrordConfigSource, Result};
+use crate::config::{source::MirrordConfigSource, ConfigContext, Result};
 
 #[derive(Clone)]
 pub struct Deprecated<T>(String, T);
@@ -15,9 +15,9 @@ where
 {
     type Value = T::Value;
 
-    fn source_value(self, warnings: &mut Vec<String>) -> Option<Result<Self::Value>> {
-        self.1.source_value(warnings).map(|result| {
-            warnings.push(format!("{}", self.0));
+    fn source_value(self, context: &mut ConfigContext) -> Option<Result<Self::Value>> {
+        self.1.source_value(context).map(|result| {
+            context.add_warning(format!("{}", self.0));
             result
         })
     }

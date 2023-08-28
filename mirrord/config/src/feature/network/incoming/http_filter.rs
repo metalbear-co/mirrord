@@ -6,7 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
+    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError},
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
@@ -121,13 +121,13 @@ pub struct HttpFilterConfig {
 pub struct PortList(VecOrSingle<u16>);
 
 impl MirrordToggleableConfig for HttpHeaderFilterFileConfig {
-    fn disabled_config(warnings: &mut Vec<String>) -> Result<Self::Generated, ConfigError> {
+    fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
         let filter = FromEnv::new("MIRRORD_HTTP_HEADER_FILTER")
-            .source_value(warnings)
+            .source_value(context)
             .transpose()?;
 
         let ports = FromEnv::new("MIRRORD_HTTP_HEADER_FILTER_PORTS")
-            .source_value(warnings)
+            .source_value(context)
             .transpose()?
             .unwrap_or_default();
 
@@ -136,7 +136,7 @@ impl MirrordToggleableConfig for HttpHeaderFilterFileConfig {
 }
 
 impl MirrordToggleableConfig for HttpFilterFileConfig {
-    fn disabled_config(_warnings: &mut Vec<String>) -> Result<Self::Generated, ConfigError> {
+    fn disabled_config(_context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
         Ok(HttpFilterConfig::default())
     }
 }

@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 
 use self::{incoming::*, outgoing::*};
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
+    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError},
     util::MirrordToggleableConfig,
 };
 
@@ -66,16 +66,16 @@ pub struct NetworkConfig {
 }
 
 impl MirrordToggleableConfig for NetworkFileConfig {
-    fn disabled_config(warnings: &mut Vec<String>) -> Result<Self::Generated, ConfigError> {
+    fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
         let dns = FromEnv::new("MIRRORD_REMOTE_DNS")
-            .source_value(warnings)
+            .source_value(context)
             .transpose()?
             .unwrap_or(false);
 
         Ok(NetworkConfig {
-            incoming: IncomingFileConfig::disabled_config(warnings)?,
+            incoming: IncomingFileConfig::disabled_config(context)?,
             dns,
-            outgoing: OutgoingFileConfig::disabled_config(warnings)?,
+            outgoing: OutgoingFileConfig::disabled_config(context)?,
         })
     }
 }
@@ -120,9 +120,9 @@ mod tests {
                 ("MIRRORD_REMOTE_DNS", dns.0),
             ],
             || {
-                let mut warnings = Vec::new();
+                let mut cfg_context = ConfigContext::default();
                 let env = NetworkFileConfig::default()
-                    .generate_config(&mut warnings)
+                    .generate_config(&mut cfg_context)
                     .unwrap();
 
                 assert_eq!(env.incoming, incoming.1);

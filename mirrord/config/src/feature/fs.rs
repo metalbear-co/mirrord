@@ -12,7 +12,9 @@ use serde::Deserialize;
 
 pub use self::{advanced::*, mode::*};
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError, MirrordConfig},
+    config::{
+        from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError, MirrordConfig,
+    },
     util::MirrordToggleableConfig,
 };
 
@@ -74,22 +76,22 @@ impl Default for FsUserConfig {
 impl MirrordConfig for FsUserConfig {
     type Generated = FsConfig;
 
-    fn generate_config(self, warnings: &mut Vec<String>) -> Result<Self::Generated, ConfigError> {
+    fn generate_config(self, context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
         let config = match self {
             FsUserConfig::Simple(mode) => FsConfig {
-                mode: mode.generate_config(warnings)?,
+                mode: mode.generate_config(context)?,
                 read_write: FromEnv::new("MIRRORD_FILE_READ_WRITE_PATTERN")
-                    .source_value(warnings)
+                    .source_value(context)
                     .transpose()?,
                 read_only: FromEnv::new("MIRRORD_FILE_READ_ONLY_PATTERN")
-                    .source_value(warnings)
+                    .source_value(context)
                     .transpose()?,
                 local: FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN")
-                    .source_value(warnings)
+                    .source_value(context)
                     .transpose()?,
                 not_found: None,
             },
-            FsUserConfig::Advanced(advanced) => advanced.generate_config(warnings)?,
+            FsUserConfig::Advanced(advanced) => advanced.generate_config(context)?,
         };
 
         Ok(config)
@@ -97,16 +99,16 @@ impl MirrordConfig for FsUserConfig {
 }
 
 impl MirrordToggleableConfig for FsUserConfig {
-    fn disabled_config(warnings: &mut Vec<String>) -> Result<Self::Generated, ConfigError> {
-        let mode = FsModeConfig::disabled_config(warnings)?;
+    fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
+        let mode = FsModeConfig::disabled_config(context)?;
         let read_write = FromEnv::new("MIRRORD_FILE_READ_WRITE_PATTERN")
-            .source_value(warnings)
+            .source_value(context)
             .transpose()?;
         let read_only = FromEnv::new("MIRRORD_FILE_READ_ONLY_PATTERN")
-            .source_value(warnings)
+            .source_value(context)
             .transpose()?;
         let local = FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN")
-            .source_value(warnings)
+            .source_value(context)
             .transpose()?;
 
         Ok(FsConfig {
@@ -128,14 +130,14 @@ mod tests {
 
     #[rstest]
     fn fs_config_default() {
-        let mut warnings = Vec::new();
+        let mut cfg_context = ConfigContext::default();
         let expect = FsConfig {
             mode: FsModeConfig::Read,
             ..Default::default()
         };
 
         let fs_config = FsUserConfig::default()
-            .generate_config(&mut warnings)
+            .generate_config(&mut cfg_context)
             .unwrap();
 
         assert_eq!(fs_config, expect);

@@ -5,7 +5,7 @@ use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, Result},
+    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigContext, Result},
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
@@ -68,13 +68,13 @@ pub struct EnvConfig {
 }
 
 impl MirrordToggleableConfig for EnvFileConfig {
-    fn disabled_config(warnings: &mut Vec<String>) -> Result<Self::Generated> {
+    fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated> {
         Ok(EnvConfig {
             include: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_INCLUDE")
-                .source_value(warnings)
+                .source_value(context)
                 .transpose()?,
             exclude: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE")
-                .source_value(warnings)
+                .source_value(context)
                 .transpose()?
                 .or_else(|| Some(VecOrSingle::Single("*".to_owned()))),
             r#override: None,
@@ -133,9 +133,9 @@ mod tests {
                 ("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE", exclude.0),
             ],
             || {
-                let mut warnings = Vec::new();
+                let mut cfg_context = ConfigContext::default();
                 let env = EnvFileConfig::default()
-                    .generate_config(&mut warnings)
+                    .generate_config(&mut cfg_context)
                     .unwrap();
 
                 assert_eq!(env.include.map(|vec| vec.join(";")).as_deref(), include.1);
@@ -161,9 +161,9 @@ mod tests {
                 ("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE", exclude.0),
             ],
             || {
-                let mut warnings = Vec::new();
+                let mut cfg_context = ConfigContext::default();
                 let env = ToggleableConfig::<EnvFileConfig>::Enabled(false)
-                    .generate_config(&mut warnings)
+                    .generate_config(&mut cfg_context)
                     .unwrap();
 
                 assert_eq!(env.include.map(|vec| vec.join(";")).as_deref(), include.1);
