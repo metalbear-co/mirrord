@@ -71,12 +71,12 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
         args.executable.as_deref(),
         env,
         config,
-        &mut progress,
+        progress,
         &mut analytics,
     )
     .await;
     #[cfg(not(target_os = "macos"))]
-    let execution_result = mirrord_exec(env, config, &mut progress, &mut analytics).await;
+    let execution_result = mirrord_exec(env, config, progress, &mut analytics).await;
 
     if execution_result.is_err() && !analytics.has_error() {
         analytics.set_error(AnalyticsError::Unknown);
