@@ -1,7 +1,10 @@
 use std::{fs::File, path::PathBuf, time::Duration};
 
 use kube::Api;
-use mirrord_config::{config::MirrordConfig, LayerFileConfig};
+use mirrord_config::{
+    config::{ConfigContext, MirrordConfig},
+    LayerFileConfig,
+};
 use mirrord_kube::{api::kubernetes::create_kube_api, error::KubeApiError};
 use mirrord_operator::{
     client::OperatorApiError,
@@ -71,7 +74,8 @@ async fn operator_setup(
 
 async fn get_status_api(config: Option<String>) -> Result<Api<MirrordOperatorCrd>> {
     let kube_api = if let Some(config_path) = config {
-        let config = LayerFileConfig::from_path(config_path)?.generate_config()?;
+        let mut cfg_context = ConfigContext::default();
+        let config = LayerFileConfig::from_path(config_path)?.generate_config(&mut cfg_context)?;
         create_kube_api(
             config.accept_invalid_certificates,
             config.kubeconfig,

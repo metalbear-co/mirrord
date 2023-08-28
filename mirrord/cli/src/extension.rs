@@ -57,9 +57,14 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_IMPERSONATED_TARGET", target.clone());
         env.insert("MIRRORD_IMPERSONATED_TARGET".into(), target.to_string());
     }
-    let config = LayerConfig::from_env()?;
+    let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry);
+
+    config.verify(&mut context)?;
+    for warning in context.get_warnings() {
+        progress.warning(warning);
+    }
 
     #[cfg(target_os = "macos")]
     let execution_result = mirrord_exec(
