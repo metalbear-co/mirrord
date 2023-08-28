@@ -224,6 +224,14 @@ pub struct AgentConfig {
     #[config(default = true)]
     pub check_out_of_pods: bool,
 
+    /// ### agent.check_openshift {#agent-check_openshift}
+    ///
+    /// Check if cluster is OpenShift to warn user about possible issues.
+    ///
+    /// Can be disabled if the check takes too long and you don't care about this check.
+    #[config(default = true)]
+    pub check_openshift: bool,
+
     /// ### agent.privileged {#agent-privileged}
     ///
     /// Run the mirror agent as privileged container.

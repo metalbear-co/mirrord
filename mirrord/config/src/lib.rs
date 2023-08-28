@@ -630,6 +630,7 @@ mod tests {
                 disabled_capabilities: None,
                 tolerations: None,
                 check_out_of_pods: None,
+                check_openshift: None,
             }),
             feature: Some(FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true).into(),

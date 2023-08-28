@@ -1,0 +1,1 @@
+Add flag to disable openshift check under `agent` configuration called `check_openshift`.
