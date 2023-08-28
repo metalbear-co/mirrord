@@ -16,6 +16,20 @@ use crate::{
 };
 
 #[derive(Debug, Error)]
+enum CgroupSharedError {
+    #[error("Failed to check existence of mount: {0}")]
+    FailedMountExistsCheck(std::io::Error),
+    #[error("Failed creating cgroup mount dir: {0}")]
+    FailedCreatingCgroupMountDir(std::io::Error),
+    #[error("Failed mounting cgroup: {0}")]
+    FailedMountingCgroup(nix::Error),
+    #[error("Failed opening freezer file: {0}")]
+    FailedOpeningFreezerFile(std::io::Error),
+    #[error("Failed writing to freezer file: {0}")]
+    FailedWritingFreezerFile(std::io::Error),
+}
+
+#[derive(Debug, Error)]
 enum CgroupV1Error {
     #[error("Failed to open pid's cgroup file: {0}")]
     FailedOpenPidCgroup(std::io::Error),
@@ -25,12 +39,15 @@ enum CgroupV1Error {
     MalformedPidCgroupFile(String),
     #[error("Couldn't find freezer controller in pid's cgroup file")]
     NoFreezerController,
-    #[error("Failed to check existence of mount: {0}")]
-    FailedMountExistsCheck(std::io::Error),
+    #[error(transparent)]
+    CgroupSharedError(#[from] CgroupSharedError),
 }
 
 #[derive(Debug, Error)]
-enum CgroupV2Error {}
+enum CgroupV2Error {
+    #[error(transparent)]
+    CgroupSharedError(#[from] CgroupSharedError),
+}
 
 #[derive(Debug, Error)]
 enum CgroupError {
@@ -55,7 +72,7 @@ impl CgroupV1 {
     const FREEZE_PATH: &str = "freezer.state";
 
     #[tracing::instrument(level = "trace", ret)]
-    pub(crate) async fn new() -> Result<Self, CgroupV1Error> {
+    pub(crate) async fn new() -> Result<Self, CgroupError> {
         let file = File::open("/proc/1/cgroup")
             .await
             .map_err(CgroupV1Error::FailedOpenPidCgroup)?;
@@ -92,14 +109,18 @@ impl CgroupV1 {
     }
 
     #[tracing::instrument(level = "trace", ret, skip(self))]
-    async fn pause(&self) -> Result<(), CgroupV1Error> {
+    async fn pause(&self) -> Result<(), CgroupError> {
         // Check if our cgroup is mounted, if not, mount it.
         let cgroup_path = Path::new(CGROUP_MOUNT_PATH);
-        if !try_exists(cgroup_path).await.map_err(CgroupV1Error::FailedMountExistsCheck)? {
+        if !try_exists(cgroup_path)
+            .await
+            .map_err(CgroupSharedError::FailedMountExistsCheck)?
+        {
             trace!("mounting cgroup");
-            create_dir(cgroup_path).await.map_err(|_| {
-                AgentError::PauseFailedCgroup("create dir failed cgroupv1".to_string())
-            })?;
+            create_dir(cgroup_path)
+                .await
+                .map_err(CgroupSharedError::FailedCreatingCgroupMountDir)?;
+
             mount(
                 Some("cgroup"),
                 cgroup_path,
@@ -107,7 +128,7 @@ impl CgroupV1 {
                 MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
                 Some("freezer"),
             )
-            .map_err(|_| AgentError::PauseFailedCgroup("mount failed cgroupv1".to_string()))?;
+            .map_err(CgroupSharedError::FailedMountingCgroup)?;
         }
 
         let mut open_options = OpenOptions::new();
@@ -115,10 +136,10 @@ impl CgroupV1 {
             .write(true)
             .open(self.cgroup_path.join(Self::FREEZE_PATH))
             .await
-            .map_err(|_| AgentError::PauseFailedCgroup("open file cgroupv1 failed".to_string()))?;
+            .map_err(CgroupSharedError::FailedOpeningFreezerFile)?;
         file.write_all("FROZEN".as_bytes())
             .await
-            .map_err(|_| AgentError::PauseFailedCgroup("writing frozen failed".to_string()))?;
+            .map_err(CgroupSharedError::FailedWritingFreezerFile)?;
         Ok(())
     }
 
