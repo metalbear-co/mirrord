@@ -17,7 +17,7 @@ pub mod util;
 
 use std::path::Path;
 
-use config::{ConfigError, MirrordConfig};
+use config::{ConfigContext, ConfigError, MirrordConfig};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -279,30 +279,41 @@ pub struct LayerConfig {
 }
 
 impl LayerConfig {
-    pub fn from_env() -> Result<Self, ConfigError> {
+    /// Generate a config from the environment variables and/or a config file.
+    /// On success, returns the config and a vec of warnings.
+    /// To be used from CLI to verify config and print warnings
+    pub fn from_env_with_warnings() -> Result<(Self, ConfigContext), ConfigError> {
+        let mut cfg_context = ConfigContext::default();
         if let Ok(path) = std::env::var("MIRRORD_CONFIG_FILE") {
-            LayerFileConfig::from_path(path)?.generate_config()
+            LayerFileConfig::from_path(path)?.generate_config(&mut cfg_context)
         } else {
-            LayerFileConfig::default().generate_config()
+            LayerFileConfig::default().generate_config(&mut cfg_context)
         }
+        .map(|config| (config, cfg_context))
+    }
+
+    /// Generate a config from the environment variables and/or a config file.
+    /// On success, returns the config.
+    /// To be used from parts that load configuration but aren't the first one to do so
+    pub fn from_env() -> Result<Self, ConfigError> {
+        Self::from_env_with_warnings().map(|(config, _)| config)
     }
 
     /// Verify that there are no conflicting settings.
     /// We don't call it from `from_env` since we want to verify it only once (from cli)
     /// Returns vec of warnings
-    pub fn verify(&self) -> Result<Vec<String>, ConfigError> {
-        let mut warnings = Vec::new();
+    pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
         if self.pause {
             if self.agent.ephemeral && !self.agent.privileged {
                 warnings.push("The target pause feature with ephemeral requires to enable the privileged flag on the agent.".to_string());
             }
             if !self.feature.network.incoming.is_steal() {
-                warnings.push(PAUSE_WITHOUT_STEAL_WARNING.to_string());
+                context.add_warning(PAUSE_WITHOUT_STEAL_WARNING.to_string());
             }
         }
 
         if self.agent.ephemeral && self.agent.namespace.is_some() {
-            warnings.push(
+            context.add_warning(
                 "Agent namespace is ignored when using an ephemeral container for the agent."
                     .to_string(),
             );
@@ -369,7 +380,7 @@ impl LayerConfig {
                 ))?;
             }
         }
-        Ok(warnings)
+        Ok(())
     }
 }
 

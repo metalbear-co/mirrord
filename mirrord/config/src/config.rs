@@ -52,6 +52,21 @@ pub enum ConfigError {
 
 pub type Result<T, E = ConfigError> = std::result::Result<T, E>;
 
+/// Struct used for storing context during building of configuration
+#[derive(Default)]
+pub struct ConfigContext {
+    warnings: Vec<String>,
+}
+
+impl ConfigContext {
+    pub fn add_warning(&mut self, warning: String) {
+        self.warnings.push(warning);
+    }
+    pub fn get_warnings(&self) -> &Vec<String> {
+        &self.warnings
+    }
+}
+
 /// <!--${internal}-->
 /// Main configuration creation trait of mirrord-config
 pub trait MirrordConfig {
@@ -61,7 +76,8 @@ pub trait MirrordConfig {
 
     /// <!--${internal}-->
     /// Load configuration from all sources and output as [Self::Generated]
-    fn generate_config(self) -> Result<Self::Generated>;
+    /// Pass reference to list of warnings which callee can add warnings into.
+    fn generate_config(self, context: &mut ConfigContext) -> Result<Self::Generated>;
 }
 
 impl<T> MirrordConfig for Option<T>
@@ -70,8 +86,8 @@ where
 {
     type Generated = T::Generated;
 
-    fn generate_config(self) -> Result<Self::Generated> {
-        self.unwrap_or_default().generate_config()
+    fn generate_config(self, context: &mut ConfigContext) -> Result<Self::Generated> {
+        self.unwrap_or_default().generate_config(context)
     }
 }
 
