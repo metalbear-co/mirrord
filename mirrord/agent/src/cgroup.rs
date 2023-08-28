@@ -16,7 +16,6 @@ use crate::{
 
 const CGROUP_MOUNT_PATH: &str = "/mirrord_cgroup";
 const CGROUP_SUBGROUP_MOUNT_PATH: &str = "/mirrord_cgroup/subgroup";
-const CGROUPV2_PROCS_FILE: &str = "cgroup.procs";
 
 #[derive(Debug)]
 pub(crate) struct CgroupV1 {
@@ -24,7 +23,11 @@ pub(crate) struct CgroupV1 {
     cgroup_path: PathBuf,
 }
 
+/// We mkdir, mount the cgroup, which mounts the root for some reason
+/// then find the cgroup path, join it and write freeze to it.
 impl CgroupV1 {
+    const FREEZE_PATH: &str = "freezer.state";
+
     #[tracing::instrument(level = "trace", ret)]
     pub(crate) async fn new() -> Result<Self> {
         let file = File::open("/proc/1/cgroup")
@@ -56,13 +59,7 @@ impl CgroupV1 {
             "no freezer cgroup found".to_string(),
         ))
     }
-}
 
-const CGROUP_V1_FREEZE_PATH: &str = "freezer.state";
-
-/// We mkdir, mount the cgroup, which mounts the root for some reason
-/// then find the cgroup path, join it and write freeze to it.
-impl CgroupV1 {
     #[tracing::instrument(level = "trace", ret, skip(self))]
     async fn pause(&self) -> Result<()> {
         // Check if our cgroup is mounted, if not, mount it.
@@ -85,7 +82,7 @@ impl CgroupV1 {
         let mut open_options = OpenOptions::new();
         let mut file = open_options
             .write(true)
-            .open(self.cgroup_path.join(CGROUP_V1_FREEZE_PATH))
+            .open(self.cgroup_path.join(Self::FREEZE_PATH))
             .await
             .map_err(|_| AgentError::PauseFailedCgroup("open file cgroupv1 failed".to_string()))?;
         file.write_all("FROZEN".as_bytes())
@@ -100,7 +97,7 @@ impl CgroupV1 {
         let mut open_options = OpenOptions::new();
         let mut file = open_options
             .write(true)
-            .open(self.cgroup_path.join(CGROUP_V1_FREEZE_PATH))
+            .open(self.cgroup_path.join(Self::FREEZE_PATH))
             .await?;
         file.write_all("THAWED".as_bytes()).await?;
         Ok(())
@@ -113,7 +110,7 @@ pub(crate) struct CgroupV2 {}
 /// Reads given path's "cgroup.procs" file and returns the pids in it
 #[tracing::instrument(level = "trace", ret)]
 async fn read_pids_cgroupv2(cgroup_path: &Path) -> Result<Vec<u64>> {
-    let file_name = cgroup_path.join(CGROUPV2_PROCS_FILE);
+    let file_name = cgroup_path.join(CgroupV2::PROCS_FILE);
     let file = File::open(file_name).await?;
     let buf_reader = BufReader::new(file);
     let mut pids = Vec::new();
@@ -131,7 +128,7 @@ async fn read_pids_cgroupv2(cgroup_path: &Path) -> Result<Vec<u64>> {
 #[tracing::instrument(level = "trace", ret)]
 async fn move_pids_to_cgroupv2(cgroup_path: &Path, pids: Vec<u64>) -> Result<()> {
     for pid in pids {
-        tokio::fs::write(cgroup_path.join(CGROUPV2_PROCS_FILE), format!("{pid}"))
+        tokio::fs::write(cgroup_path.join(CgroupV2::PROCS_FILE), format!("{pid}"))
             .await
             .map_err(|_| {
                 AgentError::PauseFailedCgroup("write pid to subgroup failed".to_string())
@@ -159,6 +156,8 @@ async fn freeze_cgroupv2(cgroup_path: &Path, on: bool) -> Result<()> {
 }
 
 impl CgroupV2 {
+    const PROCS_FILE: &str = "cgroup.procs";
+
     #[tracing::instrument(level = "trace", ret, skip(self))]
     async fn pause(&self) -> Result<()> {
         // Enter the namespace, we might be already in it but it doesn't really matter
