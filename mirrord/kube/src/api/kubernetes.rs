@@ -97,7 +97,7 @@ impl KubernetesAPI {
                 "mirrord has detected that you might be running on a cluster with a \
                  service mesh and `network.incoming.mode = \"mirror\"`, which is currently \
                  unsupported. You can set `network.incoming.mode` to \"steal\" (check out the\
-                 `http_filter` configuration value if you only want to steal some of the traffic).
+                 `http_filter` configuration value if you only want to steal some of the traffic).",
             );
         } else {
             progress.success(None)
