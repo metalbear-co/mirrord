@@ -63,7 +63,7 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
 
     config.verify(&mut context)?;
     for warning in context.get_warnings() {
-        progress.warning(&warning);
+        progress.warning(warning);
     }
 
     #[cfg(target_os = "macos")]

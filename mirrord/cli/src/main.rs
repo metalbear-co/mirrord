@@ -224,7 +224,7 @@ async fn exec(args: &ExecArgs) -> Result<()> {
 
     config.verify(&mut context)?;
     for warning in context.get_warnings() {
-        progress.warning(&warning);
+        progress.warning(warning);
     }
 
     let execution_result = exec_process(config, args, &progress, &mut analytics).await;
