@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use nix::mount::{mount, MsFlags};
+use thiserror::Error;
 use tokio::{
     fs::{create_dir, try_exists, File, OpenOptions},
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -10,9 +11,34 @@ use tokio::{
 use tracing::{trace, warn};
 
 use crate::{
-    error::{AgentError, Result},
+    error::AgentError,
     namespace::{set_namespace, NamespaceType},
 };
+
+#[derive(Debug, Error)]
+enum CgroupV1Error {
+    #[error("Failed to open pid's cgroup file: {0}")]
+    FailedOpenPidCgroup(std::io::Error),
+    #[error("Failed to read pid's cgroup file: {0}")]
+    FailedReadingPidCgroupFile(std::io::Error),
+    #[error("Malformed pid's cgroup file had unexpected line: {0}")]
+    MalformedPidCgroupFile(String),
+    #[error("Couldn't find freezer controller in pid's cgroup file")]
+    NoFreezerController,
+    #[error("Failed to check existence of mount: {0}")]
+    FailedMountExistsCheck(std::io::Error),
+}
+
+#[derive(Debug, Error)]
+enum CgroupV2Error {}
+
+#[derive(Debug, Error)]
+enum CgroupError {
+    #[error("cgroup v1 error: {0}")]
+    CgroupV1Error(#[from] CgroupV1Error),
+    #[error("cgroup v2 error: {0}")]
+    CgroupV2Error(#[from] CgroupV2Error),
+}
 
 const CGROUP_MOUNT_PATH: &str = "/mirrord_cgroup";
 const CGROUP_SUBGROUP_MOUNT_PATH: &str = "/mirrord_cgroup/subgroup";
@@ -29,24 +55,31 @@ impl CgroupV1 {
     const FREEZE_PATH: &str = "freezer.state";
 
     #[tracing::instrument(level = "trace", ret)]
-    pub(crate) async fn new() -> Result<Self> {
+    pub(crate) async fn new() -> Result<Self, CgroupV1Error> {
         let file = File::open("/proc/1/cgroup")
             .await
-            .map_err(|_| AgentError::PauseFailedCgroup("opening proc cgroup failed".to_string()))?;
+            .map_err(CgroupV1Error::FailedOpenPidCgroup)?;
+
         let mut reader = BufReader::new(file).lines();
-        while let Some(line) = reader.next_line().await? {
+
+        while let Some(line) = reader
+            .next_line()
+            .await
+            .map_err(CgroupV1Error::FailedReadingPidCgroupFile)?
+        {
             let mut line_iter = line.split(':');
             // we don't care about the number, prefer the string for comparison
-            line_iter.next().ok_or(AgentError::PauseFailedCgroup(
-                "malformed ID cgroup v1 file".to_string(),
-            ))?;
-            let cgroup_type = line_iter.next().ok_or_else(|| {
-                AgentError::PauseFailedCgroup("malformed cgroup type cgroup v1 file".to_string())
-            })?;
+            line_iter
+                .next()
+                .ok_or_else(|| CgroupV1Error::MalformedPidCgroupFile(line))?;
+            let cgroup_type = line_iter
+                .next()
+                .ok_or_else(|| CgroupV1Error::MalformedPidCgroupFile(line))?;
+
             if cgroup_type == "freezer" {
-                let cgroup_path = line_iter.next().ok_or_else(|| {
-                    AgentError::PauseFailedCgroup("malformed path cgroup v1 file".to_string())
-                })?;
+                let cgroup_path = line_iter
+                    .next()
+                    .ok_or_else(|| CgroupV1Error::MalformedPidCgroupFile(line))?;
                 return Ok(Self {
                     // strip / since joining "/a" and "/b" results in "/b"
                     cgroup_path: Path::new(CGROUP_MOUNT_PATH).join(PathBuf::from(
@@ -55,16 +88,14 @@ impl CgroupV1 {
                 });
             }
         }
-        Err(AgentError::PauseFailedCgroup(
-            "no freezer cgroup found".to_string(),
-        ))
+        Err(CgroupV1Error::NoFreezerController)
     }
 
     #[tracing::instrument(level = "trace", ret, skip(self))]
-    async fn pause(&self) -> Result<()> {
+    async fn pause(&self) -> Result<(), CgroupV1Error> {
         // Check if our cgroup is mounted, if not, mount it.
         let cgroup_path = Path::new(CGROUP_MOUNT_PATH);
-        if !try_exists(cgroup_path).await? {
+        if !try_exists(cgroup_path).await.map_err(CgroupV1Error::FailedMountExistsCheck)? {
             trace!("mounting cgroup");
             create_dir(cgroup_path).await.map_err(|_| {
                 AgentError::PauseFailedCgroup("create dir failed cgroupv1".to_string())

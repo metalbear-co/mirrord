@@ -287,8 +287,8 @@ impl ContainerRuntime for ContainerdContainer {
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct EphemeralContainer {}
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct EphemeralContainer;
 
 impl ContainerRuntime for EphemeralContainer {
     /// When running on ephemeral, root pid is always 1 and env is the current process' env. (we
