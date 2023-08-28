@@ -89,15 +89,15 @@ impl FsModeConfig {
 impl MirrordConfig for FsModeConfig {
     type Generated = FsModeConfig;
 
-    fn generate_config(self) -> Result<Self::Generated> {
+    fn generate_config(self, warnings: &mut Vec<String>) -> Result<Self::Generated> {
         let fs = FromEnv::new("MIRRORD_FILE_OPS")
-            .source_value()
+            .source_value(warnings)
             .transpose()?;
         let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS")
-            .source_value()
+            .source_value(warnings)
             .transpose()?;
         let mode = FromEnv::new("MIRRORD_FILE_MODE")
-            .source_value()
+            .source_value(warnings)
             .transpose()?;
 
         if let Some(mode) = mode {
@@ -109,15 +109,15 @@ impl MirrordConfig for FsModeConfig {
 }
 
 impl MirrordToggleableConfig for FsModeConfig {
-    fn disabled_config() -> Result<Self::Generated> {
+    fn disabled_config(warnings: &mut Vec<String>) -> Result<Self::Generated> {
         let fs = FromEnv::new("MIRRORD_FILE_OPS")
-            .source_value()
+            .source_value(warnings)
             .transpose()?;
         let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS")
-            .source_value()
+            .source_value(warnings)
             .transpose()?;
         let mode = FromEnv::new("MIRRORD_FILE_MODE")
-            .source_value()
+            .source_value(warnings)
             .transpose()?;
         if let Some(mode) = mode {
             Ok(mode)

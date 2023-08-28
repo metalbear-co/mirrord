@@ -74,22 +74,22 @@ impl Default for FsUserConfig {
 impl MirrordConfig for FsUserConfig {
     type Generated = FsConfig;
 
-    fn generate_config(self) -> Result<Self::Generated, ConfigError> {
+    fn generate_config(self, warnings: &mut Vec<String>) -> Result<Self::Generated, ConfigError> {
         let config = match self {
             FsUserConfig::Simple(mode) => FsConfig {
-                mode: mode.generate_config()?,
+                mode: mode.generate_config(warnings)?,
                 read_write: FromEnv::new("MIRRORD_FILE_READ_WRITE_PATTERN")
-                    .source_value()
+                    .source_value(warnings)
                     .transpose()?,
                 read_only: FromEnv::new("MIRRORD_FILE_READ_ONLY_PATTERN")
-                    .source_value()
+                    .source_value(warnings)
                     .transpose()?,
                 local: FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN")
-                    .source_value()
+                    .source_value(warnings)
                     .transpose()?,
                 not_found: None,
             },
-            FsUserConfig::Advanced(advanced) => advanced.generate_config()?,
+            FsUserConfig::Advanced(advanced) => advanced.generate_config(warnings)?,
         };
 
         Ok(config)
@@ -97,16 +97,16 @@ impl MirrordConfig for FsUserConfig {
 }
 
 impl MirrordToggleableConfig for FsUserConfig {
-    fn disabled_config() -> Result<Self::Generated, ConfigError> {
-        let mode = FsModeConfig::disabled_config()?;
+    fn disabled_config(warnings: &mut Vec<String>) -> Result<Self::Generated, ConfigError> {
+        let mode = FsModeConfig::disabled_config(warnings)?;
         let read_write = FromEnv::new("MIRRORD_FILE_READ_WRITE_PATTERN")
-            .source_value()
+            .source_value(warnings)
             .transpose()?;
         let read_only = FromEnv::new("MIRRORD_FILE_READ_ONLY_PATTERN")
-            .source_value()
+            .source_value(warnings)
             .transpose()?;
         let local = FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN")
-            .source_value()
+            .source_value(warnings)
             .transpose()?;
 
         Ok(FsConfig {
@@ -128,12 +128,15 @@ mod tests {
 
     #[rstest]
     fn fs_config_default() {
+        let mut warnings = Vec::new();
         let expect = FsConfig {
             mode: FsModeConfig::Read,
             ..Default::default()
         };
 
-        let fs_config = FsUserConfig::default().generate_config().unwrap();
+        let fs_config = FsUserConfig::default()
+            .generate_config(&mut warnings)
+            .unwrap();
 
         assert_eq!(fs_config, expect);
     }

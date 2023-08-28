@@ -130,11 +130,6 @@ impl MirrordExecution {
     where
         P: Progress + Send + Sync,
     {
-        let warnings = config.verify()?;
-        for warning in warnings {
-            progress.warning(&warning);
-        }
-
         let lib_path = extract_library(None, progress, true)?;
 
         let (connect_info, mut connection) = create_and_connect(config, progress, analytics)

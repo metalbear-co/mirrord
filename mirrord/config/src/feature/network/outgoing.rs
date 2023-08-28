@@ -137,16 +137,16 @@ pub struct OutgoingConfig {
 }
 
 impl MirrordToggleableConfig for OutgoingFileConfig {
-    fn disabled_config() -> Result<Self::Generated, ConfigError> {
+    fn disabled_config(warnings: &mut Vec<String>) -> Result<Self::Generated, ConfigError> {
         Ok(OutgoingConfig {
             tcp: FromEnv::new("MIRRORD_TCP_OUTGOING")
-                .source_value()
+                .source_value(warnings)
                 .unwrap_or(Ok(false))?,
             udp: FromEnv::new("MIRRORD_UDP_OUTGOING")
-                .source_value()
+                .source_value(warnings)
                 .unwrap_or(Ok(false))?,
             unix_streams: FromEnv::new("MIRRORD_OUTGOING_REMOTE_UNIX_STREAMS")
-                .source_value()
+                .source_value(warnings)
                 .transpose()?,
             ..Default::default()
         })

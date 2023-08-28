@@ -214,10 +214,15 @@ async fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_CONFIG_FILE", full_path);
     }
 
-    let config = LayerConfig::from_env()?;
+    let (config, mut warnings) = LayerConfig::from_env_with_warnings()?;
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry);
     (&config).collect_analytics(analytics.get_mut());
+
+    warnings.extend(config.verify()?);
+    for warning in warnings {
+        progress.warning(&warning);
+    }
 
     let execution_result = exec_process(config, args, &progress, &mut analytics).await;
 
@@ -329,7 +334,8 @@ where
 async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
     let (accept_invalid_certificates, kubeconfig, namespace, kube_context) =
         if let Some(config) = &args.config_file {
-            let layer_config = LayerFileConfig::from_path(config)?.generate_config()?;
+            let mut warnings = Vec::new();
+            let layer_config = LayerFileConfig::from_path(config)?.generate_config(&mut warnings)?;
             (
                 layer_config.accept_invalid_certificates,
                 layer_config.kubeconfig,

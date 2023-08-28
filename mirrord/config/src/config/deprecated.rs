@@ -15,9 +15,9 @@ where
 {
     type Value = T::Value;
 
-    fn source_value(self) -> Option<Result<Self::Value>> {
-        self.1.source_value().map(|result| {
-            tracing::warn!("{}", self.0);
+    fn source_value(self, warnings: &mut Vec<String>) -> Option<Result<Self::Value>> {
+        self.1.source_value(warnings).map(|result| {
+            warnings.push(format!("{}", self.0));
             result
         })
     }

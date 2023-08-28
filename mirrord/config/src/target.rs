@@ -103,16 +103,16 @@ impl FromMirrordConfig for TargetConfig {
 
 impl TargetFileConfig {
     /// Get the target path from the env var, `Ok(None)` if not set, `Err` if invalid value.
-    fn get_target_path_from_env() -> Result<Option<Target>> {
+    fn get_target_path_from_env(warnings: &mut Vec<String>) -> Result<Option<Target>> {
         FromEnvWithError::new("MIRRORD_IMPERSONATED_TARGET")
-            .source_value()
+            .source_value(warnings)
             .transpose()
     }
 
     /// Get the target namespace from the env var, `Ok(None)` if not set, `Err` if invalid value.
-    fn get_target_namespace_from_env() -> Result<Option<String>> {
+    fn get_target_namespace_from_env(warnings: &mut Vec<String>) -> Result<Option<String>> {
         FromEnv::new("MIRRORD_TARGET_NAMESPACE")
-            .source_value()
+            .source_value(warnings)
             .transpose()
     }
 }
@@ -122,15 +122,15 @@ impl MirrordConfig for TargetFileConfig {
 
     /// Generate the final config object, out of the configuration parsed from a configuration file,
     /// factoring in environment variables (which are also set by the front end - CLI/IDE-plugin).
-    fn generate_config(self) -> Result<Self::Generated> {
+    fn generate_config(self, warnings: &mut Vec<String>) -> Result<Self::Generated> {
         let (path_from_conf_file, namespace_from_conf_file) = match self {
             TargetFileConfig::Simple(path) => (path, None),
             TargetFileConfig::Advanced { path, namespace } => (path, namespace),
         };
 
         // Env overrides configuration if both there.
-        let path = Self::get_target_path_from_env()?.or(path_from_conf_file);
-        let namespace = Self::get_target_namespace_from_env()?.or(namespace_from_conf_file);
+        let path = Self::get_target_path_from_env(warnings)?.or(path_from_conf_file);
+        let namespace = Self::get_target_namespace_from_env(warnings)?.or(namespace_from_conf_file);
         Ok(TargetConfig { path, namespace })
     }
 }

@@ -61,7 +61,8 @@ pub trait MirrordConfig {
 
     /// <!--${internal}-->
     /// Load configuration from all sources and output as [Self::Generated]
-    fn generate_config(self) -> Result<Self::Generated>;
+    /// Pass reference to list of warnings which callee can add warnings into.
+    fn generate_config(self, warnings: &mut Vec<String>) -> Result<Self::Generated>;
 }
 
 impl<T> MirrordConfig for Option<T>
@@ -70,8 +71,8 @@ where
 {
     type Generated = T::Generated;
 
-    fn generate_config(self) -> Result<Self::Generated> {
-        self.unwrap_or_default().generate_config()
+    fn generate_config(self, warnings: &mut Vec<String>) -> Result<Self::Generated> {
+        self.unwrap_or_default().generate_config(warnings)
     }
 }
 

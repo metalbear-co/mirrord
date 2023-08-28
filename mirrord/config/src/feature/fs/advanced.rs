@@ -94,16 +94,16 @@ pub struct FsConfig {
 }
 
 impl MirrordToggleableConfig for AdvancedFsUserConfig {
-    fn disabled_config() -> Result<Self::Generated, ConfigError> {
-        let mode = FsModeConfig::disabled_config()?;
+    fn disabled_config(warnings: &mut Vec<String>) -> Result<Self::Generated, ConfigError> {
+        let mode = FsModeConfig::disabled_config(warnings)?;
         let read_write = FromEnv::new("MIRRORD_FILE_READ_WRITE_PATTERN")
-            .source_value()
+            .source_value(warnings)
             .transpose()?;
         let read_only = FromEnv::new("MIRRORD_FILE_READ_ONLY_PATTERN")
-            .source_value()
+            .source_value(warnings)
             .transpose()?;
         let local = FromEnv::new("MIRRORD_FILE_LOCAL_PATTERN")
-            .source_value()
+            .source_value(warnings)
             .transpose()?;
 
         Ok(Self::Generated {

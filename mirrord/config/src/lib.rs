@@ -278,12 +278,24 @@ pub struct LayerConfig {
 }
 
 impl LayerConfig {
-    pub fn from_env() -> Result<Self, ConfigError> {
+    /// Generate a config from the environment variables and/or a config file.
+    /// On success, returns the config and a vec of warnings.
+    /// To be used from CLI to verify config and print warnings
+    pub fn from_env_with_warnings() -> Result<(Self, Vec<String>), ConfigError> {
+        let mut warnings = Vec::new();
         if let Ok(path) = std::env::var("MIRRORD_CONFIG_FILE") {
-            LayerFileConfig::from_path(path)?.generate_config()
+            LayerFileConfig::from_path(path)?.generate_config(&mut warnings)
         } else {
-            LayerFileConfig::default().generate_config()
+            LayerFileConfig::default().generate_config(&mut warnings)
         }
+        .map(|config| (config, warnings))
+    }
+
+    /// Generate a config from the environment variables and/or a config file.
+    /// On success, returns the config.
+    /// To be used from parts that load configuration but aren't the first one to do so
+    pub fn from_env() -> Result<Self, ConfigError> {
+        Self::from_env_with_warnings().map(|(config, _)| config)
     }
 
     /// Verify that there are no conflicting settings.

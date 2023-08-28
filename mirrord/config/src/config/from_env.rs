@@ -17,7 +17,7 @@ where
 {
     type Value = T;
 
-    fn source_value(self) -> Option<Result<Self::Value>> {
+    fn source_value(self, _warnings: &mut Vec<String>) -> Option<Result<Self::Value>> {
         std::env::var(self.0).ok().map(|var| {
             var.parse()
                 .map_err(|_| ConfigError::InvalidValue(var.to_string(), self.0))
@@ -45,7 +45,7 @@ where
 {
     type Value = T;
 
-    fn source_value(self) -> Option<Result<Self::Value>> {
+    fn source_value(self, _warnings: &mut Vec<String>) -> Option<Result<Self::Value>> {
         std::env::var(self.0).ok().map(|var| var.parse())
     }
 }

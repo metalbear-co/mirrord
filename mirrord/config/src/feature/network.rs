@@ -66,16 +66,16 @@ pub struct NetworkConfig {
 }
 
 impl MirrordToggleableConfig for NetworkFileConfig {
-    fn disabled_config() -> Result<Self::Generated, ConfigError> {
+    fn disabled_config(warnings: &mut Vec<String>) -> Result<Self::Generated, ConfigError> {
         let dns = FromEnv::new("MIRRORD_REMOTE_DNS")
-            .source_value()
+            .source_value(warnings)
             .transpose()?
             .unwrap_or(false);
 
         Ok(NetworkConfig {
-            incoming: IncomingFileConfig::disabled_config()?,
+            incoming: IncomingFileConfig::disabled_config(warnings)?,
             dns,
-            outgoing: OutgoingFileConfig::disabled_config()?,
+            outgoing: OutgoingFileConfig::disabled_config(warnings)?,
         })
     }
 }
@@ -120,7 +120,10 @@ mod tests {
                 ("MIRRORD_REMOTE_DNS", dns.0),
             ],
             || {
-                let env = NetworkFileConfig::default().generate_config().unwrap();
+                let mut warnings = Vec::new();
+                let env = NetworkFileConfig::default()
+                    .generate_config(&mut warnings)
+                    .unwrap();
 
                 assert_eq!(env.incoming, incoming.1);
                 assert_eq!(env.dns, dns.1);

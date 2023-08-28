@@ -9,11 +9,11 @@ use serde::{
 use crate::config::{ConfigError, FromMirrordConfig, MirrordConfig, Result};
 
 pub trait MirrordToggleableConfig: MirrordConfig + Default {
-    fn enabled_config() -> Result<Self::Generated, ConfigError> {
-        Self::default().generate_config()
+    fn enabled_config(warnings: &mut Vec<String>) -> Result<Self::Generated, ConfigError> {
+        Self::default().generate_config(warnings)
     }
 
-    fn disabled_config() -> Result<Self::Generated, ConfigError>;
+    fn disabled_config(warnings: &mut Vec<String>) -> Result<Self::Generated, ConfigError>;
 }
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
@@ -35,11 +35,11 @@ where
 {
     type Generated = T::Generated;
 
-    fn generate_config(self) -> Result<Self::Generated, ConfigError> {
+    fn generate_config(self, warnings: &mut Vec<String>) -> Result<Self::Generated, ConfigError> {
         match self {
-            ToggleableConfig::Enabled(true) => T::enabled_config(),
-            ToggleableConfig::Enabled(false) => T::disabled_config(),
-            ToggleableConfig::Config(inner) => inner.generate_config(),
+            ToggleableConfig::Enabled(true) => T::enabled_config(warnings),
+            ToggleableConfig::Enabled(false) => T::disabled_config(warnings),
+            ToggleableConfig::Config(inner) => inner.generate_config(warnings),
         }
     }
 }
