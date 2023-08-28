@@ -77,9 +77,12 @@ static DEFAULT_TOLERATIONS: LazyLock<Vec<Toleration>> = LazyLock::new(|| {
 });
 
 /// Choose container logic:
+///
 /// 1. Try to find based on given name
 /// 2. Try to find first container in pod that isn't a mesh side car
 /// 3. Take first container in pod
+///
+/// We also check if we're in a mesh based on `MESH_LIST`, returning whether we are or not.
 #[tracing::instrument(level = "trace", ret)]
 pub fn choose_container<'a>(
     container_name: &Option<String>,

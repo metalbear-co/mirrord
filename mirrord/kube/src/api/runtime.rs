@@ -46,7 +46,7 @@ pub struct RuntimeData {
     pub container_runtime: ContainerRuntime,
     pub container_name: String,
 
-    /// Used to check if we're running with a mesh/sidecar in `detect_mesh_sidecar`.
+    /// Used to check if we're running with a mesh/sidecar in `detect_mesh_mirror_mode`.
     pub is_mesh: bool,
 }
 
