@@ -1,8 +1,8 @@
-use std::{collections::HashSet, ops::Deref, sync::LazyLock};
+use std::ops::Deref;
 #[cfg(feature = "incluster")]
 use std::{net::SocketAddr, time::Duration};
 
-use k8s_openapi::api::core::v1::{ContainerStatus, Pod};
+use k8s_openapi::api::core::v1::Pod;
 use kube::{
     config::{KubeConfigOptions, Kubeconfig},
     Api, Client, Config, Discovery,
@@ -30,9 +30,6 @@ use crate::{
 };
 
 pub mod rollout;
-
-pub static MESH_SIDECAR_LIST: LazyLock<HashSet<&'static str>> =
-    LazyLock::new(|| HashSet::from(["istio-proxy", "istio-init", "linkerd-proxy", "linkerd-init"]));
 
 pub struct KubernetesAPI {
     client: Client,
@@ -80,24 +77,20 @@ impl KubernetesAPI {
         Ok(())
     }
 
-    /// Checks if any [`ContainerStatus`] matches a mesh/sidecar name from our
-    /// [`MESH_SIDECAR_LIST`], and the user is running incoming traffic in `IncomigMode::Mirror`
-    /// mode, printing a warning if it does.
+    /// Checks if any [`ContainerStatus`] matches a mesh/sidecar name from our `MESH_LIST`, and the
+    /// user is running incoming traffic in `IncomigMode::Mirror` mode, printing a warning if it
+    /// does.
     #[tracing::instrument(level = "trace", ret, skip(self, progress))]
-    pub async fn detect_mesh_sidecar<P>(
+    pub async fn detect_mesh_mirror_mode<P>(
         &self,
         progress: &mut P,
         incoming_mode: IncomingMode,
-        container_statuses: &[ContainerStatus],
+        is_mesh: bool,
     ) -> Result<()>
     where
         P: Progress + Send + Sync,
     {
-        if matches!(incoming_mode, IncomingMode::Mirror)
-            && container_statuses
-                .iter()
-                .any(|status| MESH_SIDECAR_LIST.contains(status.name.as_str()))
-        {
+        if matches!(incoming_mode, IncomingMode::Mirror) && is_mesh {
             progress
                 .warning("mesh/sidecar detected with `feature.network.incoming.mode = \"mirror\"`");
         } else {
@@ -206,17 +199,18 @@ impl AgentManagment for KubernetesAPI {
         let incoming_mode = config
             .map(|config| config.feature.network.incoming.mode)
             .unwrap_or_default();
-        if let Some(container_statuses) = runtime_data
+
+        let is_mesh = runtime_data
             .as_ref()
-            .map(|runtime| runtime.container_statuses.as_slice())
+            .map(|runtime| runtime.is_mesh)
+            .unwrap_or_default();
+
+        if self
+            .detect_mesh_mirror_mode(progress, incoming_mode, is_mesh)
+            .await
+            .is_err()
         {
-            if self
-                .detect_mesh_sidecar(progress, incoming_mode, container_statuses)
-                .await
-                .is_err()
-            {
-                progress.warning("couldn't determine mesh / sidecar with mirror mode");
-            }
+            progress.warning("couldn't determine mesh / sidecar with mirror mode");
         }
 
         info!("Spawning new agent.");

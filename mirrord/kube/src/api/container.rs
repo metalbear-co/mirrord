@@ -84,8 +84,13 @@ static DEFAULT_TOLERATIONS: LazyLock<Vec<Toleration>> = LazyLock::new(|| {
 pub fn choose_container<'a>(
     container_name: &Option<String>,
     container_statuses: &'a [ContainerStatus],
-) -> Option<&'a ContainerStatus> {
-    if let Some(name) = container_name {
+) -> (Option<&'a ContainerStatus>, bool) {
+    const MESH_LIST: [&str; 4] = ["istio-proxy", "istio-init", "linkerd-proxy", "linkerd-init"];
+    let is_mesh = container_statuses
+        .iter()
+        .any(|status| MESH_LIST.contains(&status.name.as_str()));
+
+    let container = if let Some(name) = container_name {
         container_statuses
             .iter()
             .find(|&status| &status.name == name)
@@ -95,7 +100,9 @@ pub fn choose_container<'a>(
             .iter()
             .find(|&status| !SKIP_NAMES.contains(status.name.as_str()))
             .or_else(|| container_statuses.first())
-    }
+    };
+
+    (container, is_mesh)
 }
 
 fn is_ephemeral_container_running(pod: Pod, container_name: &String) -> bool {

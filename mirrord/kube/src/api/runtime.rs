@@ -8,7 +8,7 @@ use std::{
 use k8s_openapi::{
     api::{
         apps::v1::Deployment,
-        core::v1::{ContainerStatus, Node, Pod},
+        core::v1::{Node, Pod},
     },
     apimachinery::pkg::api::resource::Quantity,
 };
@@ -47,7 +47,7 @@ pub struct RuntimeData {
     pub container_name: String,
 
     /// Used to check if we're running with a mesh/sidecar in `detect_mesh_sidecar`.
-    pub container_statuses: Vec<ContainerStatus>,
+    pub is_mesh: bool,
 }
 
 impl RuntimeData {
@@ -73,12 +73,14 @@ impl RuntimeData {
             .container_statuses
             .clone()
             .ok_or(KubeApiError::ContainerStatusNotFound)?;
-        let chosen_status = choose_container(container_name, container_statuses.as_ref())
-            .ok_or_else(|| {
-                KubeApiError::ContainerNotFound(
-                    container_name.clone().unwrap_or_else(|| "None".to_string()),
-                )
-            })?;
+        let (chosen_container, is_mesh) =
+            choose_container(container_name, container_statuses.as_ref());
+
+        let chosen_status = chosen_container.ok_or_else(|| {
+            KubeApiError::ContainerNotFound(
+                container_name.clone().unwrap_or_else(|| "None".to_string()),
+            )
+        })?;
 
         let container_name = chosen_status.name.clone();
         let container_id_full = chosen_status
@@ -112,7 +114,7 @@ impl RuntimeData {
             container_id,
             container_runtime,
             container_name,
-            container_statuses,
+            is_mesh,
         })
     }
 
