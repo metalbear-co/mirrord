@@ -54,7 +54,7 @@ pub(crate) use error::{CliError, Result};
 async fn exec_process<P>(
     config: LayerConfig,
     args: &ExecArgs,
-    progress: &mut P,
+    progress: &P,
     analytics: &mut AnalyticsReporter,
 ) -> Result<()>
 where

@@ -47,7 +47,7 @@ pub(crate) struct AgentConnection {
 
 pub(crate) async fn create_operator_session<P>(
     config: &LayerConfig,
-    progress: &mut P,
+    progress: &P,
     analytics: &mut AnalyticsReporter,
 ) -> Result<
     Option<(
