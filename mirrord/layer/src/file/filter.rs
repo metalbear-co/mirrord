@@ -114,12 +114,16 @@ fn generate_remote_ro_set() -> RegexSet {
 }
 
 fn generate_not_found_set() -> RegexSet {
-    let home = env::var("HOME").expect("failed to resolve $HOME");
+    let Ok(home) = env::var("HOME") else {
+        tracing::warn!("Unable to resolve $HOME directory, generating empty not-found set");
+        return Default::default();
+    };
+
     let home_clean = home.trim_end_matches('/');
 
     let patterns = [r"\.aws", r"\.config/gcloud", r"\.kube", r"\.azure"]
         .into_iter()
-        .map(|cloud_dir| format!("{home_clean}/{cloud_dir}"));
+        .map(|cloud_dir| format!("^{home_clean}/{cloud_dir}"));
 
     RegexSetBuilder::new(patterns)
         .case_insensitive(true)
