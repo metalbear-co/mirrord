@@ -319,10 +319,10 @@ pub(crate) enum Cgroup {
 impl Cgroup {
     pub(crate) async fn new() -> Result<Self, CgroupError> {
         // if `/sys/fs/cgroup.controllers` exists, it means we're v2
-        if tokio::fs::try_exists("/sys/fs/cgroup/cgroup.controllers")
+        let v2 = tokio::fs::try_exists("/sys/fs/cgroup/cgroup.controllers")
             .await
-            .unwrap_or(false)?
-        {
+            .unwrap_or(false);
+        if v2 {
             Ok(Self::V2(CgroupV2 {}))
         } else {
             Ok(Self::V1(CgroupV1::new().await?))
