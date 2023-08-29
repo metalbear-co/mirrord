@@ -107,7 +107,7 @@ where
 }
 
 async fn exec(args: &ExecArgs) -> Result<()> {
-    let mut progress = ProgressTracker::from_env("mirrord exec");
+    let progress = ProgressTracker::from_env("mirrord exec");
     if !args.disable_version_check {
         prompt_outdated_version(&progress).await;
     }
