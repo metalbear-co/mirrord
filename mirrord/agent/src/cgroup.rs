@@ -19,15 +19,15 @@ use crate::namespace::{set_namespace, NamespaceError, NamespaceType};
 #[derive(Debug, Error)]
 pub(crate) enum CgroupSharedError {
     #[error("Failed to check existence of mount: {0}")]
-    FailedMountExistsCheck(std::io::Error),
+    MountExistsCheck(std::io::Error),
     #[error("Failed creating cgroup mount dir: {0}")]
-    FailedCreatingCgroupMountDir(std::io::Error),
+    CreatingCgroupMountDir(std::io::Error),
     #[error("Failed mounting cgroup: {0}")]
-    FailedMountingCgroup(nix::Error),
+    MountingCgroup(nix::Error),
     #[error("Failed opening freezer file: {0}")]
-    FailedOpeningFreezerFile(std::io::Error),
+    OpeningFreezerFile(std::io::Error),
     #[error("Failed writing to freezer file: {0}")]
-    FailedWritingFreezerFile(std::io::Error),
+    WritingFreezerFile(std::io::Error),
 }
 
 #[derive(Debug, Error)]
@@ -47,19 +47,19 @@ pub(crate) enum CgroupV1Error {
 #[derive(Debug, Error)]
 pub(crate) enum CgroupV2Error {
     #[error("Failed to open cgroup.procs file: {0}")]
-    FailedOpenCgroupProcs(std::io::Error),
+    OpenCgroupProcs(std::io::Error),
     #[error("Failed to read cgroup.procs file: {0}")]
-    FailedReadingCgroupProcs(std::io::Error),
+    ReadingCgroupProcs(std::io::Error),
     #[error("Malformed cgroup.procs file: {0}")]
     MalformedCgroupProcs(<u64 as FromStr>::Err, String),
     #[error("Failed to write process to cgroup.procs file: {0}")]
-    FailedWritingCgroupProcs(std::io::Error),
+    WritingCgroupProcs(std::io::Error),
     #[error("Failed entering cgroup namespace {0}")]
-    FailedEnteringCgroupNamespace(#[from] NamespaceError),
+    EnteringCgroupNamespace(#[from] NamespaceError),
     #[error("Failed to check existence of cgroup subdir: {0}")]
-    FailedSubgroupDirExistsCheck(std::io::Error),
+    SubgroupDirExistsCheck(std::io::Error),
     #[error("Failed creating cgroup subdir: {0}")]
-    FailedCreatingSubgroupDir(std::io::Error),
+    CreatingSubgroupDir(std::io::Error),
     #[error("No pids found in cgroup")]
     NoPidsFoundInCgroup,
     #[error(transparent)]
@@ -122,7 +122,7 @@ impl CgroupV1 {
                 });
             }
         }
-        Err(CgroupV1Error::NoFreezerController.into())
+        Err(CgroupV1Error::NoFreezerController)
     }
 
     #[tracing::instrument(level = "trace", ret, skip(self))]
@@ -131,12 +131,12 @@ impl CgroupV1 {
         let cgroup_path = Path::new(CGROUP_MOUNT_PATH);
         if !try_exists(cgroup_path)
             .await
-            .map_err(CgroupSharedError::FailedMountExistsCheck)?
+            .map_err(CgroupSharedError::MountExistsCheck)?
         {
             trace!("mounting cgroup");
             create_dir(cgroup_path)
                 .await
-                .map_err(CgroupSharedError::FailedCreatingCgroupMountDir)?;
+                .map_err(CgroupSharedError::CreatingCgroupMountDir)?;
 
             mount(
                 Some("cgroup"),
@@ -145,7 +145,7 @@ impl CgroupV1 {
                 MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
                 Some("freezer"),
             )
-            .map_err(CgroupSharedError::FailedMountingCgroup)?
+            .map_err(CgroupSharedError::MountingCgroup)?
         }
 
         let mut open_options = OpenOptions::new();
@@ -153,10 +153,10 @@ impl CgroupV1 {
             .write(true)
             .open(self.cgroup_path.join(Self::FREEZE_PATH))
             .await
-            .map_err(CgroupSharedError::FailedOpeningFreezerFile)?;
+            .map_err(CgroupSharedError::OpeningFreezerFile)?;
         file.write_all("FROZEN".as_bytes())
             .await
-            .map_err(CgroupSharedError::FailedWritingFreezerFile)?;
+            .map_err(CgroupSharedError::WritingFreezerFile)?;
         Ok(())
     }
 
@@ -168,10 +168,10 @@ impl CgroupV1 {
             .write(true)
             .open(self.cgroup_path.join(Self::FREEZE_PATH))
             .await
-            .map_err(CgroupSharedError::FailedOpeningFreezerFile)?;
+            .map_err(CgroupSharedError::OpeningFreezerFile)?;
         file.write_all("THAWED".as_bytes())
             .await
-            .map_err(CgroupSharedError::FailedWritingFreezerFile)?;
+            .map_err(CgroupSharedError::WritingFreezerFile)?;
         Ok(())
     }
 }
@@ -185,14 +185,14 @@ async fn read_pids_cgroupv2(cgroup_path: &Path) -> Result<Vec<u64>, CgroupV2Erro
     let file_name = cgroup_path.join(CgroupV2::PROCS_FILE);
     let file = File::open(file_name)
         .await
-        .map_err(CgroupV2Error::FailedOpenCgroupProcs)?;
+        .map_err(CgroupV2Error::OpenCgroupProcs)?;
     let buf_reader = BufReader::new(file);
     let mut pids = Vec::new();
     let mut lines = buf_reader.lines();
     while let Some(line) = lines
         .next_line()
         .await
-        .map_err(CgroupV2Error::FailedReadingCgroupProcs)?
+        .map_err(CgroupV2Error::ReadingCgroupProcs)?
     {
         let pid = line
             .trim()
@@ -209,7 +209,7 @@ async fn move_pids_to_cgroupv2(cgroup_path: &Path, pids: Vec<u64>) -> Result<(),
     for pid in pids {
         tokio::fs::write(cgroup_path.join(CgroupV2::PROCS_FILE), format!("{pid}"))
             .await
-            .map_err(CgroupV2Error::FailedWritingCgroupProcs)?;
+            .map_err(CgroupV2Error::WritingCgroupProcs)?;
     }
     Ok(())
 }
@@ -224,12 +224,12 @@ async fn freeze_cgroupv2(cgroup_path: &Path, on: bool) -> Result<(), CgroupV2Err
         .write(true)
         .open(&freeze_path)
         .await
-        .map_err(CgroupSharedError::FailedOpeningFreezerFile)?;
+        .map_err(CgroupSharedError::OpeningFreezerFile)?;
 
     let command = if on { "1" } else { "0" };
     file.write_all(command.as_bytes())
         .await
-        .map_err(CgroupSharedError::FailedWritingFreezerFile)?;
+        .map_err(CgroupSharedError::WritingFreezerFile)?;
     Ok(())
 }
 
@@ -245,12 +245,12 @@ impl CgroupV2 {
         let cgroup_path = Path::new(CGROUP_MOUNT_PATH);
         if !try_exists(cgroup_path)
             .await
-            .map_err(CgroupSharedError::FailedMountExistsCheck)?
+            .map_err(CgroupSharedError::MountExistsCheck)?
         {
             trace!("mounting cgroup");
             create_dir(cgroup_path)
                 .await
-                .map_err(CgroupSharedError::FailedCreatingCgroupMountDir)?;
+                .map_err(CgroupSharedError::CreatingCgroupMountDir)?;
             mount(
                 None::<&str>,
                 cgroup_path,
@@ -258,7 +258,7 @@ impl CgroupV2 {
                 MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
                 None::<&str>,
             )
-            .map_err(CgroupSharedError::FailedMountingCgroup)?;
+            .map_err(CgroupSharedError::MountingCgroup)?;
         }
         // On nsdelegate hosts (where cgroup2 is mounted with nsdelegate option),
         // we can't write to the cgroup.freeze file directly
@@ -268,12 +268,12 @@ impl CgroupV2 {
         let sub_cgroup_path = Path::new(CGROUP_SUBGROUP_MOUNT_PATH);
         if !try_exists(sub_cgroup_path)
             .await
-            .map_err(CgroupV2Error::FailedSubgroupDirExistsCheck)?
+            .map_err(CgroupV2Error::SubgroupDirExistsCheck)?
         {
             trace!("creating subgroup");
             create_dir(sub_cgroup_path)
                 .await
-                .map_err(CgroupV2Error::FailedCreatingSubgroupDir)?;
+                .map_err(CgroupV2Error::CreatingSubgroupDir)?;
         }
 
         // Move cgroup processes' to the subgroup

@@ -6,7 +6,7 @@ use crate::error::AgentError;
 
 /// A shared clonable view on a background task's status.
 #[derive(Debug, Clone)]
-pub struct TaskStatus {
+pub(crate) struct TaskStatus {
     /// Name of the task.
     task_name: &'static str,
     /// Channel to receive the result of the task.
