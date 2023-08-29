@@ -17,7 +17,7 @@ use crate::namespace::{set_namespace, NamespaceError, NamespaceType};
 
 /// Errors that are common for both cgroup versions.
 #[derive(Debug, Error)]
-enum CgroupSharedError {
+pub(crate) enum CgroupSharedError {
     #[error("Failed to check existence of mount: {0}")]
     FailedMountExistsCheck(std::io::Error),
     #[error("Failed creating cgroup mount dir: {0}")]
@@ -31,7 +31,7 @@ enum CgroupSharedError {
 }
 
 #[derive(Debug, Error)]
-enum CgroupV1Error {
+pub(crate) enum CgroupV1Error {
     #[error("Failed to open pid's cgroup file: {0}")]
     FailedOpenPidCgroup(std::io::Error),
     #[error("Failed to read pid's cgroup file: {0}")]
@@ -45,7 +45,7 @@ enum CgroupV1Error {
 }
 
 #[derive(Debug, Error)]
-enum CgroupV2Error {
+pub(crate) enum CgroupV2Error {
     #[error("Failed to open cgroup.procs file: {0}")]
     FailedOpenCgroupProcs(std::io::Error),
     #[error("Failed to read cgroup.procs file: {0}")]
