@@ -14,7 +14,7 @@ use crate::{
 };
 
 #[derive(Debug, Error)]
-pub enum AgentError {
+pub(crate) enum AgentError {
     #[error("Agent failed with `{0:?}`")]
     IO(#[from] std::io::Error),
 
