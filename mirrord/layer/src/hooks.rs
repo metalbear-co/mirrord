@@ -105,8 +105,10 @@ impl<'a> HookManager<'a> {
     }
 
     /// Resolve symbol in main module
-    #[cfg(target_os = "linux")]
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
     pub(crate) fn resolve_symbol_main_module(&self, symbol: &str) -> Option<NativePointer> {
         // This can't fail
         let module = self.modules.first().unwrap().clone();

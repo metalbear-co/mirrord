@@ -42,6 +42,7 @@ use crate::{
 
 /// Take the original raw c_char pointer and a resulting bypass, and either the original pointer or
 /// a different one according to the bypass.
+/// We pass reference to bypass to make sure the bypass lives with the pointer.
 #[cfg(target_os = "macos")]
 fn update_ptr_from_bypass(ptr: *const c_char, bypass: Bypass) -> *const c_char {
     match bypass {
@@ -56,7 +57,7 @@ fn update_ptr_from_bypass(ptr: *const c_char, bypass: Bypass) -> *const c_char {
 
 /// Implementation of open_detour, used in open_detour and openat_detour
 /// We ignore mode in case we don't bypass the call.
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "trace", ret)]
 unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, mode: c_int) -> Detour<RawFd> {
     let path = raw_path.checked_into();
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
@@ -85,6 +86,29 @@ pub(super) unsafe extern "C" fn open_detour(
             #[cfg(target_os = "macos")]
             let raw_path = update_ptr_from_bypass(raw_path, _bypass);
             FN_OPEN(raw_path, open_flags, mode)
+        })
+    }
+}
+
+/// Hook for `libc::open64`.
+///
+/// **Bypassed** by `raw_path`s that match what's in the `generate_local_set` regex, see
+/// [`super::filter`].
+#[hook_fn]
+pub(super) unsafe extern "C" fn open64_detour(
+    raw_path: *const c_char,
+    open_flags: c_int,
+    mut args: ...
+) -> RawFd {
+    let mode: c_int = args.arg();
+    let guard = DetourGuard::new();
+    if guard.is_none() {
+        FN_OPEN64(raw_path, open_flags, mode)
+    } else {
+        open_logic(raw_path, open_flags, mode).unwrap_or_bypass_with(|_bypass| {
+            #[cfg(target_os = "macos")]
+            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+            FN_OPEN64(raw_path, open_flags, mode)
         })
     }
 }
@@ -333,6 +357,31 @@ pub(crate) unsafe extern "C" fn _read_nocancel_detour(
             ssize_t::try_from(read_amount).unwrap()
         })
         .unwrap_or_bypass_with(|_| FN__READ_NOCANCEL(fd, out_buffer, count))
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn read_nocancel_detour(
+    fd: RawFd,
+    out_buffer: *mut c_void,
+    count: size_t,
+) -> ssize_t {
+    read(fd, count as u64)
+        .map(|read_file| {
+            let ReadFileResponse { bytes, read_amount } = read_file;
+
+            // There is no distinction between reading 0 bytes or if we hit EOF, but we only copy to
+            // buffer if we have something to copy.
+            if read_amount > 0 {
+                let read_ptr = bytes.as_ptr();
+                let out_buffer = out_buffer.cast();
+                ptr::copy(read_ptr, out_buffer, read_amount as usize);
+            }
+
+            // WARN: Must be careful when it comes to `EOF`, incorrect handling may appear as the
+            // `read` call being repeated.
+            ssize_t::try_from(read_amount).unwrap()
+        })
+        .unwrap_or_bypass_with(|_| FN_READ_NOCANCEL(fd, out_buffer, count))
 }
 
 #[hook_guard_fn]
@@ -745,6 +794,7 @@ unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs) -> c_int {
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
+    replace!(hook_manager, "open64", open64_detour, FnOpen64, FN_OPEN64);
     replace!(
         hook_manager,
         "open$NOCANCEL",
@@ -769,6 +819,14 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         _read_nocancel_detour,
         Fn_read_nocancel,
         FN__READ_NOCANCEL
+    );
+
+    replace!(
+        hook_manager,
+        "read$NOCANCEL",
+        read_nocancel_detour,
+        FnRead_nocancel,
+        FN_READ_NOCANCEL
     );
 
     replace!(

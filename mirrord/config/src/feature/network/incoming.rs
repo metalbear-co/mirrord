@@ -8,8 +8,8 @@ use thiserror::Error;
 
 use crate::{
     config::{
-        from_env::FromEnv, source::MirrordConfigSource, unstable::Unstable, ConfigError,
-        FromMirrordConfig, MirrordConfig, Result,
+        from_env::FromEnv, source::MirrordConfigSource, unstable::Unstable, ConfigContext,
+        ConfigError, FromMirrordConfig, MirrordConfig, Result,
     },
     util::{MirrordToggleableConfig, ToggleableConfig},
 };
@@ -87,20 +87,21 @@ impl FromMirrordConfig for IncomingConfig {
 impl MirrordConfig for IncomingFileConfig {
     type Generated = IncomingConfig;
 
-    fn generate_config(self) -> Result<Self::Generated> {
+    fn generate_config(self, context: &mut ConfigContext) -> Result<Self::Generated> {
         let config = match self {
             IncomingFileConfig::Simple(mode) => IncomingConfig {
                 mode: FromEnv::new("MIRRORD_AGENT_TCP_STEAL_TRAFFIC")
                     .or(mode)
-                    .source_value()
+                    .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
-                http_header_filter: HttpHeaderFilterFileConfig::default().generate_config()?,
+                http_header_filter: HttpHeaderFilterFileConfig::default()
+                    .generate_config(context)?,
                 on_concurrent_steal: FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
                     .layer(|layer| {
                         Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer)
                     })
-                    .source_value()
+                    .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
                 ..Default::default()
@@ -108,14 +109,17 @@ impl MirrordConfig for IncomingFileConfig {
             IncomingFileConfig::Advanced(advanced) => IncomingConfig {
                 mode: FromEnv::new("MIRRORD_AGENT_TCP_STEAL_TRAFFIC")
                     .or(advanced.mode)
-                    .source_value()
+                    .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
                 http_header_filter: advanced
                     .http_header_filter
                     .unwrap_or_default()
-                    .generate_config()?,
-                http_filter: advanced.http_filter.unwrap_or_default().generate_config()?,
+                    .generate_config(context)?,
+                http_filter: advanced
+                    .http_filter
+                    .unwrap_or_default()
+                    .generate_config(context)?,
                 port_mapping: advanced
                     .port_mapping
                     .map(|m| m.into_iter().collect())
@@ -127,7 +131,7 @@ impl MirrordConfig for IncomingFileConfig {
                 ignore_localhost: advanced
                     .ignore_localhost
                     .layer(|layer| Unstable::new("IncomingFileConfig", "ignore_localhost", layer))
-                    .source_value()
+                    .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
                 listen_ports: advanced
@@ -139,7 +143,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .layer(|layer| {
                         Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer)
                     })
-                    .source_value()
+                    .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
             },
@@ -149,21 +153,21 @@ impl MirrordConfig for IncomingFileConfig {
     }
 }
 impl MirrordToggleableConfig for IncomingFileConfig {
-    fn disabled_config() -> Result<Self::Generated, ConfigError> {
+    fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
         let mode = FromEnv::new("MIRRORD_AGENT_TCP_STEAL_TRAFFIC")
-            .source_value()
+            .source_value(context)
             .unwrap_or_else(|| Ok(Default::default()))?;
 
         let on_concurrent_steal = FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
             .layer(|layer| Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer))
-            .source_value()
+            .source_value(context)
             .transpose()?
             .unwrap_or_default();
 
         Ok(IncomingConfig {
             mode,
             on_concurrent_steal,
-            http_header_filter: HttpHeaderFilterFileConfig::disabled_config()?,
+            http_header_filter: HttpHeaderFilterFileConfig::disabled_config(context)?,
             ..Default::default()
         })
     }
@@ -243,7 +247,7 @@ pub struct IncomingAdvancedFileConfig {
 /// See the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more
 /// details.
 ///
-/// Incoming traffic supports 2 modes of operation:
+/// Incoming traffic supports 3 modes of operation:
 ///
 /// 1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested
 /// listeners;
@@ -251,6 +255,7 @@ pub struct IncomingAdvancedFileConfig {
 /// 2. Steal: Captures the TCP data from a port, and forwards it to the local process, see
 /// [`"mode": "steal"`](#feature-network-incoming-mode);
 ///
+/// 3. Off: Disables the incoming network feature.
 /// Steals all the incoming traffic:
 ///
 /// ```json
@@ -278,7 +283,7 @@ pub struct IncomingAdvancedFileConfig {
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
-///         "ignore_ports": [9999, 10000]
+///         "ignore_ports": [9999, 10000],
 ///         "listen_ports": [[80, 8111]]
 ///       }
 ///     }
@@ -349,9 +354,10 @@ impl IncomingConfig {
 
 /// Allows selecting between mirrorring or stealing traffic.
 ///
-/// Can be set to either `"mirror"` (default) or `"steal"`.
+/// Can be set to either `"mirror"` (default), `"steal"` or `"off"`.
 ///
 /// - `"mirror"`: Sniffs on TCP port, and send a copy of the data to listeners.
+/// - `"off"`: Disables the incoming network feature.
 /// - `"steal"`: Supports 2 modes of operation:
 ///
 /// 1. Port traffic stealing: Steals all TCP data from a
@@ -385,6 +391,12 @@ pub enum IncomingMode {
     /// data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and
     /// steals the traffic on the port if it is HTTP;
     Steal,
+
+    /// <!--${internal}-->
+    /// ### Off
+    ///
+    /// Disables the incoming network feature.
+    Off,
 }
 
 #[derive(Error, Debug)]
@@ -397,10 +409,11 @@ impl FromStr for IncomingMode {
     fn from_str(val: &str) -> Result<Self, Self::Err> {
         match val.parse::<bool>() {
             Ok(true) => Ok(Self::Steal),
-            Ok(false) => Ok(Self::Mirror),
+            Ok(false) => Ok(Self::Off),
             Err(_) => match val {
                 "steal" => Ok(Self::Steal),
                 "mirror" => Ok(Self::Mirror),
+                "off" => Ok(Self::Off),
                 _ => Err(IncomingConfigParseError),
             },
         }
@@ -468,6 +481,7 @@ impl From<&IncomingMode> for AnalyticValue {
         match value {
             IncomingMode::Mirror => AnalyticValue::Number(0),
             IncomingMode::Steal => AnalyticValue::Number(1),
+            IncomingMode::Off => AnalyticValue::Number(2),
         }
     }
 }

@@ -39,7 +39,14 @@ impl LayerConnection {
     async fn accept_library_connection(listener: &TcpListener) -> Framed<TcpStream, DaemonCodec> {
         let (stream, _) = listener.accept().await.unwrap();
         println!("Got connection from library.");
-        Framed::new(stream, DaemonCodec::new())
+        let mut codec = Framed::new(stream, DaemonCodec::new());
+
+        assert!(matches!(
+            codec.next().await,
+            None | Some(Ok(ClientMessage::SwitchProtocolVersion(_)))
+        ));
+
+        codec
     }
 
     /// Accept the library's connection and verify initial ENV message
@@ -623,14 +630,14 @@ pub enum Application {
     RustIssue1054,
     RustIssue1458,
     RustIssue1458PortNot53,
+    RustIssue1776,
+    RustIssue1776PortNot53,
     RustDnsResolve,
     RustRecvFrom,
     RustListenPorts,
     Fork,
+    OpenFile,
     // For running applications with the executable and arguments determined at runtime.
-    // Compiled only on macos just because it's currently only used there, but could be used also
-    // on Linux.
-    #[cfg(target_os = "macos")]
     DynamicApp(String, Vec<String>),
 }
 
@@ -732,8 +739,26 @@ impl Application {
                     "../../target/debug/listen_ports"
                 )
             }
-            #[cfg(target_os = "macos")]
-            Application::DynamicApp(exe, _args) => exe.clone(),
+            Application::RustIssue1776 => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/issue1776"
+                )
+            }
+            Application::RustIssue1776PortNot53 => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/issue1776portnot53"
+                )
+            }
+            Application::OpenFile => format!(
+                "{}/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                "tests/apps/open_file/out.c_test_app",
+            ), // String::from("tests/apps/open_file/out.c_test_app"),
+            Application::DynamicApp(exe, _) => exe.clone(),
         }
     }
 
@@ -809,6 +834,8 @@ impl Application {
             | Application::RustIssue1054
             | Application::RustIssue1458
             | Application::RustIssue1458PortNot53
+            | Application::RustIssue1776
+            | Application::RustIssue1776PortNot53
             | Application::RustDnsResolve
             | Application::RustRecvFrom
             | Application::RustListenPorts
@@ -816,7 +843,8 @@ impl Application {
             | Application::BashShebang
             | Application::Go19SelfOpen
             | Application::Go19DirBypass
-            | Application::Go20DirBypass => vec![],
+            | Application::Go20DirBypass
+            | Application::OpenFile => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
@@ -825,8 +853,7 @@ impl Application {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
-            #[cfg(target_os = "macos")]
-            Application::DynamicApp(_exe, args) => args.to_owned(),
+            Application::DynamicApp(_, args) => args.to_owned(),
         }
     }
 
@@ -875,10 +902,12 @@ impl Application {
             | Application::RustOutgoingTcp
             | Application::RustIssue1458
             | Application::RustIssue1458PortNot53
+            | Application::RustIssue1776
+            | Application::RustIssue1776PortNot53
             | Application::RustListenPorts
-            | Application::RustRecvFrom => unimplemented!("shouldn't get here"),
-            #[cfg(target_os = "macos")]
-            Application::DynamicApp(_, _) => unimplemented!("shouldn't get here"),
+            | Application::RustRecvFrom
+            | Application::OpenFile
+            | Application::DynamicApp(..) => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
         }
     }
@@ -996,6 +1025,7 @@ pub fn get_env<'a>(
     env.insert("MIRRORD_CONNECT_TCP", addr);
     env.insert("MIRRORD_REMOTE_DNS", "false");
     if let Some(config) = config {
+        println!("using config file: {config}");
         env.insert("MIRRORD_CONFIG_FILE", config);
     }
     env.insert("DYLD_INSERT_LIBRARIES", dylib_path_str);

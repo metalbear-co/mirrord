@@ -1,12 +1,14 @@
 use std::{
     collections::{HashMap, HashSet},
     io,
+    sync::LazyLock,
 };
 
 use actix_codec::{Decoder, Encoder};
 use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
 use mirrord_macros::protocol_break;
+use semver::VersionReq;
 
 use crate::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
@@ -80,6 +82,10 @@ pub enum FileRequest {
     GetDEnts64(GetDEnts64Request),
 }
 
+/// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
+pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.3.1".parse().expect("Bad Identifier"));
+
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
@@ -94,6 +100,8 @@ pub enum ClientMessage {
     GetAddrInfoRequest(GetAddrInfoRequest),
     /// Whether to pause or unpause the target container.
     PauseTargetRequest(bool),
+    SwitchProtocolVersion(#[bincode(with_serde)] semver::Version),
+    ReadyForLogs,
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
@@ -131,6 +139,7 @@ pub enum DaemonMessage {
     GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
     GetAddrInfoResponse(GetAddrInfoResponse),
     PauseTarget(DaemonPauseTarget),
+    SwitchProtocolVersionResponse(#[bincode(with_serde)] semver::Version),
 }
 
 pub struct ClientCodec {

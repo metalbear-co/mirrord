@@ -10,7 +10,7 @@ use std::{
 
 use bimap::BiMap;
 use mirrord_protocol::{
-    tcp::{DaemonTcp, HttpRequest, NewTcpConnection, TcpClose, TcpData},
+    tcp::{DaemonTcp, HttpRequestFallback, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, Port, ResponseError,
 };
 use tokio::{net::TcpStream, sync::mpsc::Sender};
@@ -132,9 +132,14 @@ pub(crate) trait TcpHandler<const IS_STEAL: bool> {
                 error!("Port subscription failed with unexpected error: {other_error}.");
                 Err(UnexpectedResponseError(other_error))
             }
-            DaemonTcp::HttpRequest(request) => {
-                self.handle_http_request(request).await.map_err(From::from)
-            }
+            DaemonTcp::HttpRequest(request) => self
+                .handle_http_request(HttpRequestFallback::Fallback(request))
+                .await
+                .map_err(From::from),
+            DaemonTcp::HttpRequestFramed(request) => self
+                .handle_http_request(HttpRequestFallback::Framed(request))
+                .await
+                .map_err(From::from),
         }
     }
 
@@ -207,7 +212,8 @@ pub(crate) trait TcpHandler<const IS_STEAL: bool> {
     async fn handle_new_data(&mut self, data: TcpData) -> Result<(), LayerError>;
 
     /// Handle New Data messages
-    async fn handle_http_request(&mut self, request: HttpRequest) -> Result<(), LayerError>;
+    async fn handle_http_request(&mut self, request: HttpRequestFallback)
+        -> Result<(), LayerError>;
 
     /// Handle connection close from the client side (notified via agent message).
     fn handle_close(&mut self, close: TcpClose) -> Result<(), LayerError>;

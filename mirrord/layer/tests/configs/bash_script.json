@@ -1,0 +1,8 @@
+{
+    "feature": {
+        "fs": {
+            "mode": "read",
+            "local": ["/var/db/"]
+        }
+    }
+}

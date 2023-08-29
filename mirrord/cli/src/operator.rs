@@ -1,14 +1,17 @@
 use std::{fs::File, path::PathBuf, time::Duration};
 
 use kube::Api;
-use mirrord_config::{config::MirrordConfig, LayerFileConfig};
+use mirrord_config::{
+    config::{ConfigContext, MirrordConfig},
+    LayerFileConfig,
+};
 use mirrord_kube::{api::kubernetes::create_kube_api, error::KubeApiError};
 use mirrord_operator::{
     client::OperatorApiError,
     crd::{LicenseInfoOwned, MirrordOperatorCrd, MirrordOperatorSpec, OPERATOR_STATUS_NAME},
     setup::{LicenseType, Operator, OperatorNamespace, OperatorSetup, SetupOptions},
 };
-use mirrord_progress::{Progress, TaskProgress};
+use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{row, Table};
 use tokio::fs;
 use tracing::warn;
@@ -71,10 +74,15 @@ async fn operator_setup(
 
 async fn get_status_api(config: Option<String>) -> Result<Api<MirrordOperatorCrd>> {
     let kube_api = if let Some(config_path) = config {
-        let config = LayerFileConfig::from_path(config_path)?.generate_config()?;
-        create_kube_api(config.accept_invalid_certificates, config.kubeconfig)
+        let mut cfg_context = ConfigContext::default();
+        let config = LayerFileConfig::from_path(config_path)?.generate_config(&mut cfg_context)?;
+        create_kube_api(
+            config.accept_invalid_certificates,
+            config.kubeconfig,
+            config.kube_context,
+        )
     } else {
-        create_kube_api(false, None)
+        create_kube_api(false, None, None)
     }
     .await
     .map_err(CliError::KubernetesApiFailed)?;
@@ -83,11 +91,11 @@ async fn get_status_api(config: Option<String>) -> Result<Api<MirrordOperatorCrd
 }
 
 async fn operator_status(config: Option<String>) -> Result<()> {
-    let progress = TaskProgress::new("Operator Status").fail_on_drop(true);
+    let mut progress = ProgressTracker::from_env("Operator Status");
 
     let status_api = get_status_api(config).await?;
 
-    let status_progress = progress.subtask("fetching status");
+    let mut status_progress = progress.subtask("fetching status");
 
     let mirrord_status = match status_api
         .get(OPERATOR_STATUS_NAME)
@@ -98,15 +106,15 @@ async fn operator_status(config: Option<String>) -> Result<()> {
     {
         Ok(status) => status,
         Err(err) => {
-            status_progress.fail_with("unable to get status");
+            status_progress.failure(Some("unable to get status"));
 
             return Err(err);
         }
     };
 
-    status_progress.done_with("fetched status");
+    status_progress.success(Some("fetched status"));
 
-    progress.done();
+    progress.success(None);
 
     let MirrordOperatorSpec {
         operator_version,

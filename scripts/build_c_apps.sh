@@ -13,7 +13,7 @@ else
   name=$1
 fi
 
-for source_file in $(find . -name "*.c" -not -path "./target/*" -not -path "*/venv/*")
+for source_file in $(find . -name "*.c" -not -path "./target/*" -not -path "*/venv/*" -not -path "*/node_modules/*")
 do
     directory=$(dirname "$source_file")
     out_file="$directory/$name"

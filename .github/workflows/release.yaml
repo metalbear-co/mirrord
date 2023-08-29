@@ -48,7 +48,7 @@ jobs:
             target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so
           if-no-files-found: error
   build_binaries_macos:
-    runs-on: macos-12
+    runs-on: macos-13
     steps:
       - uses: actions/checkout@v3
       - run: rm rust-toolchain.toml

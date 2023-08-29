@@ -11,12 +11,13 @@
 pub mod agent;
 pub mod config;
 pub mod feature;
+pub mod internal_proxy;
 pub mod target;
 pub mod util;
 
 use std::path::Path;
 
-use config::{ConfigError, MirrordConfig};
+use config::{ConfigContext, ConfigError, MirrordConfig};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -24,7 +25,7 @@ use tracing::warn;
 
 use crate::{
     agent::AgentConfig, config::source::MirrordConfigSource, feature::FeatureConfig,
-    target::TargetConfig, util::VecOrSingle,
+    internal_proxy::InternalProxyConfig, target::TargetConfig, util::VecOrSingle,
 };
 
 const PAUSE_WITHOUT_STEAL_WARNING: &str =
@@ -64,6 +65,8 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///
 /// ### Complete `config.json` {#root-complete}
 ///
+///  Don't use this example as a starting point, it's just here to show you all the available
+/// options.
 /// ```json
 /// {
 ///   "accept_invalid_certificates": false,
@@ -128,7 +131,8 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///   "operator": true,
 ///   "kubeconfig": "~/.kube/config",
 ///   "sip_binaries": "bash",
-///   "telemetry": true
+///   "telemetry": true,
+///   "kube_context": "my-cluster"
 /// }
 /// ```
 ///
@@ -197,39 +201,6 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_CONNECT_TCP")]
     pub connect_tcp: Option<String>,
 
-    /// <!--${internal}-->
-    ///
-    /// ## connect_agent_name {#root-connect_agent_name}
-    ///
-    /// Agent name that already exists that we can connect to.
-    ///
-    /// Keep in mind that the intention here is to allow reusing a long living mirrord-agent pod,
-    /// and **not** to connect multiple (simultaneos) mirrord instances to a single
-    /// mirrord-agent, as the later is not properly supported without the use of
-    /// [mirrord-operator](https://metalbear.co/#waitlist-form).
-    ///
-    /// ```json
-    /// {
-    ///   "connect_agent_name": "mirrord-agent-still-alive"
-    /// }
-    /// ```
-    #[config(env = "MIRRORD_CONNECT_AGENT")]
-    pub connect_agent_name: Option<String>,
-
-    /// <!--${internal}-->
-    ///
-    /// ## connect_agent_port {#root-connect_agent_port}
-    ///
-    /// Agent listen port that already exists that we can connect to.
-    ///
-    /// ```json
-    /// {
-    ///   "connect_agent_port": "8888"
-    /// }
-    /// ```
-    #[config(env = "MIRRORD_CONNECT_PORT")]
-    pub connect_agent_port: Option<u16>,
-
     /// ## operator {#root-operator}
     ///
     /// Allow to lookup if operator is installed on cluster and use it.
@@ -287,29 +258,67 @@ pub struct LayerConfig {
     /// [For more information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md)
     #[config(env = "MIRRORD_TELEMETRY", default = true)]
     pub telemetry: bool,
+
+    /// ## kube_context {#root-kube_context}
+    ///
+    /// Kube context to use from the kubeconfig file.
+    /// Will use current context if not specified.
+    ///
+    /// ```json
+    /// {
+    ///  "kube_context": "mycluster"
+    /// }
+    /// ```
+    #[config(env = "MIRRORD_KUBE_CONTEXT")]
+    pub kube_context: Option<String>,
+
+    /// # internal_proxy {#root-internal_proxy}
+    #[config(nested)]
+    pub internal_proxy: InternalProxyConfig,
 }
 
 impl LayerConfig {
-    pub fn from_env() -> Result<Self, ConfigError> {
+    /// Generate a config from the environment variables and/or a config file.
+    /// On success, returns the config and a vec of warnings.
+    /// To be used from CLI to verify config and print warnings
+    pub fn from_env_with_warnings() -> Result<(Self, ConfigContext), ConfigError> {
+        let mut cfg_context = ConfigContext::default();
         if let Ok(path) = std::env::var("MIRRORD_CONFIG_FILE") {
-            LayerFileConfig::from_path(path)?.generate_config()
+            LayerFileConfig::from_path(path)?.generate_config(&mut cfg_context)
         } else {
-            LayerFileConfig::default().generate_config()
+            LayerFileConfig::default().generate_config(&mut cfg_context)
         }
+        .map(|config| (config, cfg_context))
+    }
+
+    /// Generate a config from the environment variables and/or a config file.
+    /// On success, returns the config.
+    /// To be used from parts that load configuration but aren't the first one to do so
+    pub fn from_env() -> Result<Self, ConfigError> {
+        Self::from_env_with_warnings().map(|(config, _)| config)
     }
 
     /// Verify that there are no conflicting settings.
     /// We don't call it from `from_env` since we want to verify it only once (from cli)
-    pub fn verify(&self) -> Result<(), ConfigError> {
+    /// Returns vec of warnings
+    pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
         if self.pause {
             if self.agent.ephemeral {
                 Err(ConfigError::Conflict("Pausing is not yet supported together with an ephemeral agent container.
                 Mutually exclusive arguments `--pause` and `--ephemeral-container` passed together.".to_string()))?;
             }
             if !self.feature.network.incoming.is_steal() {
-                warn!("{PAUSE_WITHOUT_STEAL_WARNING}");
+                context.add_warning(PAUSE_WITHOUT_STEAL_WARNING.to_string());
             }
         }
+
+        if self.agent.ephemeral && self.agent.namespace.is_some() {
+            context.add_warning(
+                "Agent namespace is ignored when using an ephemeral container for the agent."
+                    .to_string(),
+            );
+        }
+
         if self
             .feature
             .network
@@ -593,8 +602,6 @@ mod tests {
             pause: Some(false),
             kubeconfig: None,
             telemetry: None,
-            connect_agent_name: None,
-            connect_agent_port: None,
             target: Some(TargetFileConfig::Advanced {
                 path: Some(Target::Pod(PodTarget {
                     pod: "test-service-abcdefg-abcd".to_owned(),
@@ -605,6 +612,7 @@ mod tests {
             skip_processes: None,
             skip_build_tools: None,
             agent: Some(AgentFileConfig {
+                privileged: None,
                 log_level: Some("info".to_owned()),
                 namespace: Some("default".to_owned()),
                 image: Some("".to_owned()),
@@ -621,6 +629,7 @@ mod tests {
                 flush_connections: Some(false),
                 disabled_capabilities: None,
                 tolerations: None,
+                check_out_of_pods: None,
             }),
             feature: Some(FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true).into(),
@@ -649,6 +658,8 @@ mod tests {
             connect_tcp: None,
             operator: None,
             sip_binaries: None,
+            kube_context: None,
+            internal_proxy: None,
         };
 
         assert_eq!(config, expect);

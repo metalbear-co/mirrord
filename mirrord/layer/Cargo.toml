@@ -26,10 +26,11 @@ nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 # change to upstream once https://github.com/frida/frida-rust/pull/99 is merged
-frida-gum = { git = "https://github.com/metalbear-co/frida-rust", version = "0.12", features = ["auto-download"], branch="capstone_remove" }
+frida-gum = { git = "https://github.com/metalbear-co/frida-rust", version = "0.13", features = ["auto-download"], branch="capstone_remove" }
 futures.workspace = true
 
-tokio = { workspace = true, features = ["fs"] }
+tokio = { workspace = true, features = ["fs", "rt", "rt-multi-thread", "macros", "process"] }
+serde.workspace = true
 serde_json.workspace = true
 
 actix-codec.workspace = true
@@ -52,9 +53,11 @@ itertools = "0.10"
 os_info = "3"
 bytemuck = "1"
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
+hyper-util.workspace = true
 http-body-util  = { workspace = true }
 bimap.workspace = true
 dashmap = "5.4"
+hashbrown = "0.14"
 exec.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -70,9 +73,8 @@ hyper = { workspace = true }
 rstest = "*"
 test-cdylib = "*"
 tower = "0.4"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros", "process"] }
+tokio = { version = "1", features = ["rt", "net", "macros"] }
 tests = { path = "../../tests" }
 
 [lib]
 crate_type = ["cdylib"]
-

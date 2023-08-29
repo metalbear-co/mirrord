@@ -1,9 +1,10 @@
+use super::ConfigContext;
 use crate::config::Result;
 
 pub trait MirrordConfigSource: Sized {
     type Value;
 
-    fn source_value(self) -> Option<Result<Self::Value>>;
+    fn source_value(self, context: &mut ConfigContext) -> Option<Result<Self::Value>>;
 
     fn layer<L>(self, layer_fn: impl Fn(Self) -> L) -> L
     where
@@ -37,8 +38,10 @@ where
 {
     type Value = A::Value;
 
-    fn source_value(self) -> Option<Result<Self::Value>> {
-        self.0.source_value().or_else(|| self.1.source_value())
+    fn source_value(self, context: &mut ConfigContext) -> Option<Result<Self::Value>> {
+        self.0
+            .source_value(context)
+            .or_else(|| self.1.source_value(context))
     }
 }
 
@@ -48,7 +51,7 @@ where
 {
     type Value = V;
 
-    fn source_value(self) -> Option<Result<Self::Value>> {
+    fn source_value(self, _context: &mut ConfigContext) -> Option<Result<Self::Value>> {
         self.map(Ok)
     }
 }
@@ -65,10 +68,14 @@ mod tests {
     #[case(Some("13"), 13)]
     fn basic(#[case] env: Option<&str>, #[case] outcome: i32) {
         with_env_vars(vec![("TEST_VALUE", env), ("FALLBACK", Some("10"))], || {
+            let mut cfg_context = ConfigContext::default();
             let val = FromEnv::<i32>::new("TEST_VALUE")
                 .or(None)
                 .or(FromEnv::new("FALLBACK"));
-            assert_eq!(val.source_value().unwrap().unwrap(), outcome);
+            assert_eq!(
+                val.source_value(&mut cfg_context).unwrap().unwrap(),
+                outcome
+            );
         });
     }
 }

@@ -1,36 +1,43 @@
 //! # [`HttpV2`]
 //!
 //! Handles HTTP/2 requests.
-use std::future::{self, Future};
+use std::{
+    convert::Infallible,
+    future::{self, Future},
+};
 
 use bytes::Bytes;
-use http_body_util::Full;
+use http_body_util::combinators::BoxBody;
 use hyper::{
     client::conn::http2::{self, Connection, SendRequest},
     rt::Executor,
 };
-use mirrord_protocol::tcp::HttpRequest;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use mirrord_protocol::tcp::HttpRequestFallback;
 use tokio::net::TcpStream;
 use tracing::trace;
 
 use super::HttpV;
 use crate::{detour::DetourGuard, tcp_steal::http_forwarding::HttpForwarderError};
 
-// TODO(alex): Import this from `hyper-util` when the crate is actually published.
-/// Future executor that utilises `tokio` threads.
+/// Thin wrapper over [`TokioExecutor`].
+/// Makes sure that detours are bypassed when executing futures.
 #[non_exhaustive]
 #[derive(Default, Debug, Clone)]
-pub struct TokioExecutor;
+pub struct DetourGuardExecutor {
+    inner: TokioExecutor,
+}
 
-impl<Fut> Executor<Fut> for TokioExecutor
+impl<Fut> Executor<Fut> for DetourGuardExecutor
 where
     Fut: Future + Send + 'static,
     Fut::Output: Send + 'static,
 {
     fn execute(&self, fut: Fut) {
         trace!("starting tokio executor for hyper HTTP/2");
-        tokio::spawn(async move {
-            let _ = DetourGuard::new();
+
+        self.inner.execute(async move {
+            let _guard = DetourGuard::new();
             fut.await
         });
     }
@@ -41,12 +48,13 @@ where
 /// Sends the request to `destination`, and gets back a response.
 ///
 /// See [`ConnectionTask`] for usage.
-pub(crate) struct HttpV2(http2::SendRequest<Full<Bytes>>);
+pub(crate) struct HttpV2(http2::SendRequest<BoxBody<Bytes, Infallible>>);
 
 impl HttpV for HttpV2 {
-    type Sender = SendRequest<Full<Bytes>>;
+    type Sender = SendRequest<BoxBody<Bytes, Infallible>>;
 
-    type Connection = Connection<TcpStream, Full<Bytes>>;
+    type Connection =
+        Connection<TokioIo<TcpStream>, BoxBody<Bytes, Infallible>, DetourGuardExecutor>;
 
     #[tracing::instrument(level = "trace")]
     fn new(http_request_sender: Self::Sender) -> Self {
@@ -57,13 +65,13 @@ impl HttpV for HttpV2 {
     async fn handshake(
         target_stream: TcpStream,
     ) -> Result<(Self::Sender, Self::Connection), HttpForwarderError> {
-        Ok(http2::handshake(TokioExecutor::default(), target_stream).await?)
+        Ok(http2::handshake(DetourGuardExecutor::default(), TokioIo::new(target_stream)).await?)
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
     async fn send_request(
         &mut self,
-        request: HttpRequest,
+        request: HttpRequestFallback,
     ) -> hyper::Result<hyper::Response<hyper::body::Incoming>> {
         let request_sender = &mut self.0;
 
@@ -71,9 +79,7 @@ impl HttpV for HttpV2 {
         // https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/barbara_tries_unix_socket.html#the-single-magical-line
         future::poll_fn(|cx| request_sender.poll_ready(cx)).await?;
 
-        request_sender
-            .send_request(request.internal_request.into())
-            .await
+        request_sender.send_request(request.into_hyper()).await
     }
 
     fn take_sender(self) -> Self::Sender {

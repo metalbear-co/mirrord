@@ -96,6 +96,11 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: Socket address `{0}` is already bound!")]
     AddressAlreadyBound(SocketAddr),
+
+    /// When the user's application tries to access a file filtered out by the `not-found` file
+    /// filter.
+    #[error("mirrord-layer: Ignored file")]
+    FileNotFound,
 }
 
 /// Errors internal to mirrord-layer.
@@ -158,9 +163,6 @@ pub(crate) enum LayerError {
         "mirrord-layer: Got new connection from daemon after layer already closed that socket."
     )]
     NewConnectionAfterSocketClose(ConnectionId),
-
-    #[error("mirrord-layer: Unmatched pong!")]
-    UnmatchedPong,
 
     #[error("mirrord-layer: JSON convert error")]
     JSONConvertError(#[from] serde_json::Error),
@@ -307,6 +309,7 @@ impl From<HookError> for i64 {
             HookError::UnsupportedSocketType => libc::EAFNOSUPPORT,
             HookError::BadPointer => libc::EFAULT,
             HookError::AddressAlreadyBound(_) => libc::EADDRINUSE,
+            HookError::FileNotFound => libc::ENOENT,
         };
 
         set_errno(errno::Errno(libc_error));

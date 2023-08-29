@@ -76,7 +76,7 @@ pub struct AgentConfig {
     /// ### agent.namespace {#agent-namespace}
     ///
     /// Namespace where the agent shall live.
-    ///
+    /// Note: Doesn't work with ephemeral containers.
     /// Defaults to the current kubernetes namespace.
     #[config(env = "MIRRORD_AGENT_NAMESPACE")]
     pub namespace: Option<String>,
@@ -214,6 +214,25 @@ pub struct AgentConfig {
     /// Set to an empty array to have no tolerations at all
     pub tolerations: Option<Vec<Toleration>>,
 
+    /// ### agent.check_out_of_pods {#agent-check_out_of_pods}
+    ///
+    /// Determine if to check whether there is room for agent job in target node. (Not applicable
+    /// when using ephemeral containers feature)
+    ///
+    /// Can be disabled if the check takes too long and you are sure there is enough resources on
+    /// each node
+    #[config(default = true)]
+    pub check_out_of_pods: bool,
+
+    /// ### agent.privileged {#agent-privileged}
+    ///
+    /// Run the mirror agent as privileged container.
+    /// Defaults to `false`.
+    ///
+    /// Might be needed in strict environments such as Bottlerocket.
+    #[config(default = false)]
+    pub privileged: bool,
+
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).
@@ -234,7 +253,10 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{config::MirrordConfig, util::testing::with_env_vars};
+    use crate::{
+        config::{ConfigContext, MirrordConfig},
+        util::testing::with_env_vars,
+    };
 
     #[rstest]
     fn default(
@@ -268,7 +290,10 @@ mod tests {
                 ("MIRRORD_AGENT_STARTUP_TIMEOUT", startup_timeout.0),
             ],
             || {
-                let agent = AgentFileConfig::default().generate_config().unwrap();
+                let mut cfg_context = ConfigContext::default();
+                let agent = AgentFileConfig::default()
+                    .generate_config(&mut cfg_context)
+                    .unwrap();
 
                 assert_eq!(agent.log_level, log_level.1);
                 assert_eq!(agent.namespace.as_deref(), namespace.1);

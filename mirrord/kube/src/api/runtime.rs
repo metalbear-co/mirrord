@@ -1,9 +1,17 @@
 use std::{
     collections::BTreeMap,
+    convert::Infallible,
     fmt::{Display, Formatter},
+    ops::FromResidual,
 };
 
-use k8s_openapi::api::{apps::v1::Deployment, core::v1::Pod};
+use k8s_openapi::{
+    api::{
+        apps::v1::Deployment,
+        core::v1::{Node, Pod},
+    },
+    apimachinery::pkg::api::resource::Quantity,
+};
 use kube::{api::ListParams, Api, Client};
 use mirrord_config::target::{DeploymentTarget, PodTarget, RolloutTarget, Target};
 
@@ -32,6 +40,7 @@ impl Display for ContainerRuntime {
 #[derive(Debug)]
 pub struct RuntimeData {
     pub pod_name: String,
+    pub pod_namespace: Option<String>,
     pub node_name: String,
     pub container_id: String,
     pub container_runtime: ContainerRuntime,
@@ -95,11 +104,79 @@ impl RuntimeData {
 
         Ok(RuntimeData {
             pod_name,
+            pod_namespace: pod.metadata.namespace.clone(),
             node_name,
             container_id,
             container_runtime,
             container_name,
         })
+    }
+
+    #[tracing::instrument(level = "trace", skip(client), ret)]
+    pub async fn check_node(&self, client: &kube::Client) -> NodeCheck {
+        let node_api: Api<Node> = Api::all(client.clone());
+        let pod_api: Api<Pod> = Api::all(client.clone());
+
+        let node = node_api.get(&self.node_name).await?;
+
+        let allocatable = node
+            .status
+            .and_then(|status| status.allocatable)
+            .ok_or_else(|| KubeApiError::NodeBadAllocatable(self.node_name.clone()))?;
+
+        let allowed: usize = allocatable
+            .get("pods")
+            .and_then(|Quantity(quantity)| quantity.parse().ok())
+            .ok_or_else(|| KubeApiError::NodeBadAllocatable(self.node_name.clone()))?;
+
+        let mut pod_count = 0;
+        let mut list_params = ListParams {
+            field_selector: Some(format!("spec.nodeName={}", self.node_name)),
+            ..Default::default()
+        };
+
+        loop {
+            let pods_on_node = pod_api.list(&list_params).await?;
+
+            pod_count += pods_on_node.items.len();
+
+            match pods_on_node.metadata.continue_ {
+                Some(next) => {
+                    list_params = list_params.continue_token(&next);
+                }
+                None => break,
+            }
+        }
+
+        if allowed <= pod_count {
+            NodeCheck::Failed(self.node_name.clone(), pod_count)
+        } else {
+            NodeCheck::Success
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum NodeCheck {
+    Success,
+    Failed(String, usize),
+    Error(KubeApiError),
+}
+
+impl<E> FromResidual<Result<Infallible, E>> for NodeCheck
+where
+    E: Into<KubeApiError>,
+{
+    fn from_residual(error: Result<Infallible, E>) -> Self {
+        match error {
+            Ok(_) => unreachable!(),
+            Err(err) => match err.into() {
+                KubeApiError::NodePodLimitExceeded(node_name, pods) => {
+                    NodeCheck::Failed(node_name, pods)
+                }
+                err => NodeCheck::Error(err),
+            },
+        }
     }
 }
 

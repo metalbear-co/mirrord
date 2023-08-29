@@ -41,9 +41,10 @@ bytes = "1.2"
 regex = "1"
 socket2.workspace = true
 wildmatch = "2"
-enum_dispatch = "0.3"
+enum_dispatch.workspace = true
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["full"] }
+hyper-util.workspace = true
 httparse = "1"
 fancy-regex = { workspace = true }
 dashmap = { version = "5" }
@@ -55,6 +56,7 @@ tower = "0.4"
 http = "0.2"
 k8s-cri = "0.7"
 once_cell.workspace = true
+semver.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 iptables = "0.5"

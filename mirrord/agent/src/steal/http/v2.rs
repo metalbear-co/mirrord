@@ -4,19 +4,22 @@
 //!
 //! Handles HTTP/2 requests.
 use core::{fmt::Debug, future::Future, pin::Pin};
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::SocketAddr,
+    sync::{atomic::Ordering, Arc},
+};
 
-use bytes::Bytes;
 use dashmap::DashMap;
 use futures::TryFutureExt;
-use http_body_util::Full;
+use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::{
     body::Incoming,
     client::{self, conn::http2::SendRequest},
     server::conn::http2,
     service::Service,
-    Request, Response,
+    Request,
 };
+use hyper_util::rt::TokioIo;
 use mirrord_protocol::{ConnectionId, Port};
 use tokio::{
     net::TcpStream,
@@ -26,8 +29,8 @@ use tracing::error;
 
 use super::{
     filter::{close_connection, HttpFilter, TokioExecutor},
-    hyper_handler::{collect_response, prepare_response, HyperHandler},
-    DefaultReversibleStream, HttpV, RawHyperConnection,
+    hyper_handler::HyperHandler,
+    DefaultReversibleStream, HttpV, RawHyperConnection, Response,
 };
 use crate::{
     steal::{http::error::HttpTrafficError, HandlerHttpRequest},
@@ -53,7 +56,7 @@ impl HttpV for HttpV2 {
     ) -> Result<(), HttpTrafficError> {
         http2::Builder::new(TokioExecutor::default())
             .serve_connection(
-                stream,
+                TokioIo::new(stream),
                 HyperHandler::<HttpV2>::new(
                     filters,
                     matched_tx,
@@ -73,7 +76,7 @@ impl HttpV for HttpV2 {
         _: Option<oneshot::Sender<RawHyperConnection>>,
     ) -> Result<Self::Sender, HttpTrafficError> {
         let (request_sender, connection) =
-            client::conn::http2::handshake(TokioExecutor::default(), target_stream)
+            client::conn::http2::handshake(TokioExecutor::default(), TokioIo::new(target_stream))
                 .await
                 .inspect_err(|fail| error!("Handshake failed with {fail:#?}"))?;
 
@@ -91,17 +94,13 @@ impl HttpV for HttpV2 {
     async fn send_request(
         sender: &mut Self::Sender,
         request: Request<Incoming>,
-    ) -> Result<Response<Full<Bytes>>, HttpTrafficError> {
-        // Send the request to the original destination.
-        prepare_response(
-            sender
-                .send_request(request)
-                .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))
-                .map_err(HttpTrafficError::from)
-                .and_then(collect_response)
-                .await?,
-        )
-        .await
+    ) -> Result<Response, HttpTrafficError> {
+        sender
+            .send_request(request)
+            .inspect_err(|fail| error!("Failed hyper request sender with {fail:#?}"))
+            .map_err(HttpTrafficError::from)
+            .await
+            .map(|response| response.map(|body| BoxBody::new(body.map_err(HttpTrafficError::from))))
     }
 
     #[tracing::instrument(level = "trace")]
@@ -126,22 +125,22 @@ impl HyperHandler<HttpV2> {
             connection_id,
             port,
             original_destination,
-            request_id: 0,
+            next_request_id: Default::default(),
             handle_version: HttpV2,
         }
     }
 }
 
 impl Service<Request<Incoming>> for HyperHandler<HttpV2> {
-    type Response = Response<Full<Bytes>>;
+    type Response = Response;
 
     type Error = HttpTrafficError;
 
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     #[tracing::instrument(level = "trace", skip(self))]
-    fn call(&mut self, request: Request<Incoming>) -> Self::Future {
-        self.request_id += 1;
+    fn call(&self, request: Request<Incoming>) -> Self::Future {
+        let request_id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
 
         Box::pin(HyperHandler::<HttpV2>::handle_request(
             request,
@@ -150,7 +149,7 @@ impl Service<Request<Incoming>> for HyperHandler<HttpV2> {
             self.filters.clone(),
             self.port,
             self.connection_id,
-            self.request_id,
+            request_id,
             self.matched_tx.clone(),
         ))
     }

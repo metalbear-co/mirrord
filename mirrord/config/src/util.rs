@@ -6,14 +6,14 @@ use serde::{
     Deserialize, Deserializer, Serialize,
 };
 
-use crate::config::{ConfigError, FromMirrordConfig, MirrordConfig, Result};
+use crate::config::{ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result};
 
 pub trait MirrordToggleableConfig: MirrordConfig + Default {
-    fn enabled_config() -> Result<Self::Generated, ConfigError> {
-        Self::default().generate_config()
+    fn enabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
+        Self::default().generate_config(context)
     }
 
-    fn disabled_config() -> Result<Self::Generated, ConfigError>;
+    fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError>;
 }
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
@@ -35,11 +35,11 @@ where
 {
     type Generated = T::Generated;
 
-    fn generate_config(self) -> Result<Self::Generated, ConfigError> {
+    fn generate_config(self, context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
         match self {
-            ToggleableConfig::Enabled(true) => T::enabled_config(),
-            ToggleableConfig::Enabled(false) => T::disabled_config(),
-            ToggleableConfig::Config(inner) => inner.generate_config(),
+            ToggleableConfig::Enabled(true) => T::enabled_config(context),
+            ToggleableConfig::Enabled(false) => T::disabled_config(context),
+            ToggleableConfig::Config(inner) => inner.generate_config(context),
         }
     }
 }
@@ -59,6 +59,13 @@ pub enum VecOrSingle<T> {
 }
 
 impl<T> VecOrSingle<T> {
+    pub fn as_slice(&self) -> &[T] {
+        match self {
+            Self::Single(v) => std::slice::from_ref(v),
+            Self::Multiple(v) => v.as_slice(),
+        }
+    }
+
     pub fn join<Separator>(self, sep: Separator) -> <[T] as Join<Separator>>::Output
     where
         [T]: Join<Separator>,

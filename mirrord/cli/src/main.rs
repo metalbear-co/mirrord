@@ -3,7 +3,7 @@
 #![feature(result_option_inspect)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{collections::HashMap, sync::LazyLock, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
 use clap::Parser;
 use config::*;
@@ -18,7 +18,11 @@ use k8s_openapi::{
 };
 use kube::api::ListParams;
 use miette::JSONReportHandler;
-use mirrord_config::{config::MirrordConfig, LayerConfig, LayerFileConfig};
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics};
+use mirrord_config::{
+    config::{ConfigContext, MirrordConfig},
+    LayerConfig, LayerFileConfig,
+};
 use mirrord_kube::{
     api::{
         container::SKIP_NAMES,
@@ -27,7 +31,7 @@ use mirrord_kube::{
     },
     error::KubeApiError,
 };
-use mirrord_progress::{Progress, ProgressMode, TaskProgress};
+use mirrord_progress::{Progress, ProgressTracker};
 use operator::operator_command;
 use semver::Version;
 use serde::de::DeserializeOwned;
@@ -47,9 +51,65 @@ mod operator;
 
 pub(crate) use error::{CliError, Result};
 
-async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
+async fn exec_process<P>(
+    config: LayerConfig,
+    args: &ExecArgs,
+    progress: &P,
+    analytics: &mut AnalyticsReporter,
+) -> Result<()>
+where
+    P: Progress + Send + Sync,
+{
+    let mut sub_progress = progress.subtask("preparing to launch process");
+
+    #[cfg(target_os = "macos")]
+    let execution_info =
+        MirrordExecution::start(&config, Some(&args.binary), &sub_progress, analytics).await?;
+    #[cfg(not(target_os = "macos"))]
+    let execution_info = MirrordExecution::start(&config, &sub_progress, analytics).await?;
+
+    #[cfg(target_os = "macos")]
+    let (_did_sip_patch, binary) = match execution_info.patched_path {
+        None => (false, args.binary.clone()),
+        Some(sip_result) => (true, sip_result),
+    };
+
+    #[cfg(not(target_os = "macos"))]
+    let binary = args.binary.clone();
+
+    // Stop confusion with layer
+    std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
+
+    // Set environment variables from agent + layer settings.
+    for (key, value) in &execution_info.environment {
+        std::env::set_var(key, value);
+    }
+
+    let mut binary_args = args.binary_args.clone();
+    // Put original executable in argv[0] even if actually running patched version.
+    binary_args.insert(0, args.binary.clone());
+
+    sub_progress.success(Some("ready to launch process"));
+    // The execve hook is not yet active and does not hijack this call.
+    let err = execvp(binary.clone(), binary_args.clone());
+    error!("Couldn't execute {:?}", err);
+    analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    if let exec::Error::Errno(errno) = err {
+        if Into::<i32>::into(errno) == 86 {
+            // "Bad CPU type in executable"
+            if _did_sip_patch {
+                return Err(CliError::RosettaMissing(binary));
+            }
+        }
+    }
+    Err(CliError::BinaryExecuteFailed(binary, binary_args))
+}
+
+async fn exec(args: &ExecArgs) -> Result<()> {
+    let progress = ProgressTracker::from_env("mirrord exec");
     if !args.disable_version_check {
-        prompt_outdated_version().await;
+        prompt_outdated_version(&progress).await;
     }
     info!(
         "Launching {:?} with arguments {:?}",
@@ -145,6 +205,10 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
         std::env::set_var("MIRRORD_UDP_OUTGOING", "false");
     }
 
+    if let Some(context) = &args.context {
+        std::env::set_var("MIRRORD_KUBE_CONTEXT", context);
+    }
+
     if let Some(config_file) = &args.config_file {
         // Set canoncialized path to config file, in case forks/children are in different
         // working directories.
@@ -153,51 +217,23 @@ async fn exec(args: &ExecArgs, progress: &TaskProgress) -> Result<()> {
         std::env::set_var("MIRRORD_CONFIG_FILE", full_path);
     }
 
-    let sub_progress = progress.subtask("preparing to launch process");
+    let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
-    let config = LayerConfig::from_env()?;
+    let mut analytics = AnalyticsReporter::only_error(config.telemetry);
+    (&config).collect_analytics(analytics.get_mut());
 
-    #[cfg(target_os = "macos")]
-    let execution_info =
-        MirrordExecution::start(&config, Some(&args.binary), progress, None).await?;
-    #[cfg(not(target_os = "macos"))]
-    let execution_info = MirrordExecution::start(&config, progress, None).await?;
-
-    #[cfg(target_os = "macos")]
-    let (_did_sip_patch, binary) = match execution_info.patched_path {
-        None => (false, args.binary.clone()),
-        Some(sip_result) => (true, sip_result),
-    };
-
-    #[cfg(not(target_os = "macos"))]
-    let binary = args.binary.clone();
-
-    // Stop confusion with layer
-    std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
-
-    // Set environment variables from agent + layer settings.
-    for (key, value) in &execution_info.environment {
-        std::env::set_var(key, value);
+    config.verify(&mut context)?;
+    for warning in context.get_warnings() {
+        progress.warning(warning);
     }
 
-    let mut binary_args = args.binary_args.clone();
-    // Put original executable in argv[0] even if actually running patched version.
-    binary_args.insert(0, args.binary.clone());
+    let execution_result = exec_process(config, args, &progress, &mut analytics).await;
 
-    sub_progress.done_with("ready to launch process");
-    // The execve hook is not yet active and does not hijack this call.
-    let err = execvp(binary.clone(), binary_args.clone());
-    error!("Couldn't execute {:?}", err);
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    if let exec::Error::Errno(errno) = err {
-        if Into::<i32>::into(errno) == 86 {
-            // "Bad CPU type in executable"
-            if _did_sip_patch {
-                return Err(CliError::RosettaMissing(binary));
-            }
-        }
+    if execution_result.is_err() && !analytics.has_error() {
+        analytics.set_error(AnalyticsError::Unknown);
     }
-    Err(CliError::BinaryExecuteFailed(binary, binary_args))
+
+    execution_result
 }
 
 /// Returns a list of (pod name, [container names]) pairs, filtering out mesh side cars
@@ -299,19 +335,22 @@ where
 ///  "pod/py-serv-deployment-5c57fbdc98-pdbn4/container/py-serv",
 /// ]```
 async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
-    let (accept_invalid_certificates, kubeconfig, namespace) =
-        if let Some(config) = &args.config_file {
-            let layer_config = LayerFileConfig::from_path(config)?.generate_config()?;
-            (
-                layer_config.accept_invalid_certificates,
-                layer_config.kubeconfig,
-                layer_config.target.namespace,
-            )
-        } else {
-            (false, None, None)
-        };
+    let (accept_invalid_certificates, kubeconfig, namespace, kube_context) = if let Some(config) =
+        &args.config_file
+    {
+        let mut cfg_context = ConfigContext::default();
+        let layer_config = LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?;
+        (
+            layer_config.accept_invalid_certificates,
+            layer_config.kubeconfig,
+            layer_config.target.namespace,
+            layer_config.kube_context,
+        )
+    } else {
+        (false, None, None, None)
+    };
 
-    let client = create_kube_api(accept_invalid_certificates, kubeconfig)
+    let client = create_kube_api(accept_invalid_certificates, kubeconfig, kube_context)
         .await
         .map_err(CliError::KubernetesApiFailed)?;
 
@@ -381,20 +420,19 @@ async fn main() -> miette::Result<()> {
             .init();
     }
 
-    static MAIN_PROGRESS_TASK: LazyLock<TaskProgress> =
-        LazyLock::new(|| TaskProgress::new("mirrord cli starting..."));
-
     match cli.commands {
-        Commands::Exec(args) => exec(&args, &MAIN_PROGRESS_TASK.subtask("exec")).await?,
+        Commands::Exec(args) => exec(&args).await?,
         Commands::Extract { path } => {
-            extract_library(Some(path), &MAIN_PROGRESS_TASK.subtask("extract"), false)?;
+            extract_library(
+                Some(path),
+                &ProgressTracker::from_env("mirrord extract library..."),
+                false,
+            )?;
         }
         Commands::ListTargets(args) => print_pod_targets(&args).await?,
         Commands::Operator(args) => operator_command(*args).await?,
-        Commands::ExtensionExec(args) => {
-            extension_exec(*args, &MAIN_PROGRESS_TASK.subtask("ext")).await?
-        }
-        Commands::InternalProxy(args) => internal_proxy::proxy(*args).await?,
+        Commands::ExtensionExec(args) => extension_exec(*args).await?,
+        Commands::InternalProxy => internal_proxy::proxy().await?,
         Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
     }
 
@@ -406,21 +444,15 @@ async fn main() -> miette::Result<()> {
 fn init_ext_error_handler(commands: &Commands) -> bool {
     match commands {
         Commands::ListTargets(_) | Commands::ExtensionExec(_) => {
-            mirrord_progress::init_from_env(ProgressMode::Json);
             let _ = miette::set_hook(Box::new(|_| Box::new(JSONReportHandler::new())));
-            true
-        }
-        Commands::InternalProxy(_) => {
-            // Don't setup logs in case of internal proxy, because it's an orphan proces
-            // and we need to close stderr/stdout (in case caller waits for stdout/err to close),
-            // if we enable tracing it'd crash on writing to stderr/out.
             true
         }
         _ => false,
     }
 }
 
-async fn prompt_outdated_version() {
+async fn prompt_outdated_version(progress: &ProgressTracker) {
+    let mut progress = progress.subtask("version check");
     let check_version: bool = std::env::var("MIRRORD_CHECK_VERSION")
         .map(|s| s.parse().unwrap_or(true))
         .unwrap_or(true);
@@ -440,8 +472,11 @@ async fn prompt_outdated_version() {
                     if latest_version > Version::parse(CURRENT_VERSION).unwrap() {
                         let is_homebrew = which("mirrord").ok().map(|mirrord_path| mirrord_path.to_string_lossy().contains("homebrew")).unwrap_or_default();
                         let command = if is_homebrew { "brew upgrade metalbear-co/mirrord/mirrord" } else { "curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash" };
-                        println!("New mirrord version available: {latest_version}. To update, run: `{command:?}`.");
-                        println!("To disable version checks, set env variable MIRRORD_CHECK_VERSION to 'false'.")
+                        progress.print(&format!("New mirrord version available: {}. To update, run: `{:?}`.", latest_version, command));
+                        progress.print("To disable version checks, set env variable MIRRORD_CHECK_VERSION to 'false'.");
+                        progress.success(Some(&format!("Update to {latest_version} available")));
+                    } else {
+                        progress.success(Some(&format!("Running on latest ({latest_version})!")));
                     }
                 }
             }

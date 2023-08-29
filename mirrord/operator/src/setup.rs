@@ -28,6 +28,7 @@ static OPERATOR_NAME: &str = "mirrord-operator";
 static OPERATOR_PORT: i32 = 3000;
 static OPERATOR_ROLE_NAME: &str = "mirrord-operator";
 static OPERATOR_ROLE_BINDING_NAME: &str = "mirrord-operator";
+static OPERATOR_CLUSTER_USER_ROLE_NAME: &str = "mirrord-operator-user";
 static OPERATOR_LICENSE_SECRET_NAME: &str = "mirrord-operator-license";
 static OPERATOR_LICENSE_SECRET_FILE_NAME: &str = "license.pem";
 static OPERATOR_LICENSE_SECRET_VOLUME_NAME: &str = "license-volume";
@@ -95,6 +96,7 @@ pub struct Operator {
     role_binding: OperatorRoleBinding,
     service: OperatorService,
     service_account: OperatorServiceAccount,
+    user_cluster_role: OperatorClusterUserRole,
     tls_secret: OperatorTlsSecret,
 }
 
@@ -115,6 +117,7 @@ impl Operator {
 
         let role = OperatorRole::new();
         let role_binding = OperatorRoleBinding::new(&role, &service_account);
+        let user_cluster_role = OperatorClusterUserRole::new();
 
         let deployment = OperatorDeployment::new(
             &namespace,
@@ -137,6 +140,7 @@ impl Operator {
             role_binding,
             service,
             service_account,
+            user_cluster_role,
             tls_secret,
         }
     }
@@ -156,6 +160,9 @@ impl OperatorSetup for Operator {
 
         writer.write_all(b"---\n")?;
         self.role.to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        self.user_cluster_role.to_writer(&mut writer)?;
 
         writer.write_all(b"---\n")?;
         self.role_binding.to_writer(&mut writer)?;
@@ -294,13 +301,16 @@ impl OperatorDeployment {
 
         let container = Container {
             name: OPERATOR_NAME.to_owned(),
-            image: match option_env!("MIRRORD_OPERATOR_IMAGE") {
-                Some(image) => Some(image.to_owned()),
-                None => Some(format!(
-                    "ghcr.io/metalbear-co/operator:{}",
-                    env!("CARGO_PKG_VERSION")
-                )),
-            },
+            image: Some(
+                std::env::var("MIRRORD_OPERATOR_IMAGE")
+                    .ok()
+                    .unwrap_or_else(|| {
+                        format!(
+                            "ghcr.io/metalbear-co/operator:{}",
+                            env!("CARGO_PKG_VERSION")
+                        )
+                    }),
+            ),
             image_pull_policy: Some("IfNotPresent".to_owned()),
             env: Some(envs),
             ports: Some(vec![ContainerPort {
@@ -405,12 +415,20 @@ impl OperatorRole {
             },
             rules: Some(vec![
                 PolicyRule {
-                    api_groups: Some(vec!["".to_owned(), "apps".to_owned(), "batch".to_owned()]),
+                    api_groups: Some(vec![
+                        "".to_owned(),
+                        "apps".to_owned(),
+                        "batch".to_owned(),
+                        "argoproj.io".to_owned(),
+                    ]),
                     resources: Some(vec![
+                        "nodes".to_owned(),
                         "pods".to_owned(),
+                        "pods/log".to_owned(),
                         "pods/ephemeralcontainers".to_owned(),
                         "deployments".to_owned(),
                         "jobs".to_owned(),
+                        "rollouts".to_owned(),
                     ]),
                     verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
                     ..Default::default()
@@ -438,6 +456,7 @@ impl OperatorRole {
                         "userextras/sessionname".to_owned(),
                         "userextras/iam.gke.io/user-assertion".to_owned(),
                         "userextras/user-assertion.cloud.google.com".to_owned(),
+                        "userextras/principalid".to_owned(),
                     ]),
                     verbs: vec!["impersonate".to_owned()],
                     ..Default::default()
@@ -617,6 +636,53 @@ impl OperatorApiService {
     }
 }
 
+#[derive(Debug)]
+pub struct OperatorClusterUserRole(ClusterRole);
+
+impl OperatorClusterUserRole {
+    pub fn new() -> Self {
+        let role = ClusterRole {
+            metadata: ObjectMeta {
+                name: Some(OPERATOR_CLUSTER_USER_ROLE_NAME.to_owned()),
+                ..Default::default()
+            },
+            rules: Some(vec![
+                PolicyRule {
+                    api_groups: Some(vec!["operator.metalbear.co".to_owned()]),
+                    resources: Some(vec![
+                        "mirrordoperators".to_owned(),
+                        "targets".to_owned(),
+                        "targets/port-locks".to_owned(),
+                    ]),
+                    verbs: vec!["get".to_owned(), "list".to_owned()],
+                    ..Default::default()
+                },
+                PolicyRule {
+                    api_groups: Some(vec!["operator.metalbear.co".to_owned()]),
+                    resources: Some(vec!["mirrordoperators/certificate".to_owned()]),
+                    verbs: vec!["create".to_owned()],
+                    ..Default::default()
+                },
+                PolicyRule {
+                    api_groups: Some(vec!["operator.metalbear.co".to_owned()]),
+                    resources: Some(vec!["targets".to_owned()]),
+                    verbs: vec!["proxy".to_owned()],
+                    ..Default::default()
+                },
+            ]),
+            ..Default::default()
+        };
+
+        OperatorClusterUserRole(role)
+    }
+}
+
+impl Default for OperatorClusterUserRole {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 writer_impl![
     OperatorNamespace,
     OperatorDeployment,
@@ -626,5 +692,6 @@ writer_impl![
     OperatorLicenseSecret,
     OperatorService,
     OperatorTlsSecret,
-    OperatorApiService
+    OperatorApiService,
+    OperatorClusterUserRole
 ];

@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Instant};
 
+use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -14,6 +15,18 @@ pub enum AnalyticValue {
     Bool(bool),
     Number(u32),
     Nested(Analytics),
+}
+
+#[derive(Default, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalyticsError {
+    AgentConnection,
+    EnvFetch,
+    BinaryExecuteFailed,
+    IntProxyFirstConnection,
+
+    #[default]
+    Unknown,
 }
 
 /// Struct to store analytics data.
@@ -66,6 +79,25 @@ impl Analytics {
     }
 }
 
+/// Type safe abstraction for Bytes to send hash values, should be explicitly created so we woun't
+/// accidentaly send sensitive data
+///
+/// Saved as base64 for more optimal size of json
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AnalyticsHash(String);
+
+impl AnalyticsHash {
+    /// Create AnalyticsHash from hash bytes
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        AnalyticsHash(general_purpose::STANDARD_NO_PAD.encode(bytes))
+    }
+
+    /// Create AnalyticsHash from base64 string
+    pub fn from_base64(val: &str) -> Self {
+        AnalyticsHash(val.to_owned())
+    }
+}
+
 /// Structs that collect analytics about themselves should implement this trait
 pub trait CollectAnalytics {
     /// Write analytics data to the given `Analytics` struct
@@ -104,30 +136,114 @@ impl<T: CollectAnalytics> From<T> for AnalyticValue {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct AnalyticsReport {
-    event_properties: Analytics,
-    platform: String,
-    duration: u32,
-    version: String,
-    operator: bool,
+#[derive(Debug)]
+pub struct AnalyticsReporter {
+    pub enabled: bool,
+    error_only_send: bool,
+
+    analytics: Analytics,
+    error: Option<AnalyticsError>,
+    start_instant: Instant,
+    operator_properties: Option<AnalyticsOperatorProperties>,
 }
 
-pub async fn send_analytics(analytics: Analytics, duration: u32, operator: bool) {
-    let report = AnalyticsReport {
-        event_properties: analytics,
-        platform: std::env::consts::OS.to_string(),
-        version: CURRENT_VERSION.to_string(),
-        duration,
-        operator,
-    };
+impl AnalyticsReporter {
+    pub fn new(enabled: bool) -> Self {
+        AnalyticsReporter {
+            analytics: Analytics::default(),
+            error_only_send: false,
+            enabled,
+            error: None,
+            operator_properties: None,
+            start_instant: Instant::now(),
+        }
+    }
 
-    let client = reqwest::Client::new();
+    pub fn only_error(enabled: bool) -> Self {
+        AnalyticsReporter {
+            analytics: Analytics::default(),
+            error_only_send: true,
+            enabled,
+            error: None,
+            operator_properties: None,
+            start_instant: Instant::now(),
+        }
+    }
+
+    pub fn get_mut(&mut self) -> &mut Analytics {
+        &mut self.analytics
+    }
+
+    pub fn set_operator_properties(&mut self, operator_properties: AnalyticsOperatorProperties) {
+        self.operator_properties.replace(operator_properties);
+    }
+
+    pub fn set_error(&mut self, error: AnalyticsError) {
+        self.error.replace(error);
+    }
+
+    pub fn has_error(&self) -> bool {
+        self.error.is_some()
+    }
+
+    fn as_report(&self) -> AnalyticsReport<'_> {
+        let duration = self
+            .start_instant
+            .elapsed()
+            .as_secs()
+            .try_into()
+            .unwrap_or(u32::MAX);
+
+        AnalyticsReport {
+            duration,
+            error: &self.error,
+            event_properties: &self.analytics,
+            operator: self.operator_properties.is_some(),
+            operator_properties: &self.operator_properties,
+            platform: std::env::consts::OS,
+            version: CURRENT_VERSION,
+        }
+    }
+}
+
+impl Drop for AnalyticsReporter {
+    fn drop(&mut self) {
+        if self.enabled && (self.error.is_some() || !self.error_only_send) {
+            send_analytics(self.as_report());
+        }
+    }
+}
+
+/// Extra fields for `AnalyticsReport` when using mirrord with operator.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AnalyticsOperatorProperties {
+    /// sha256 fingerprint from client certificate
+    pub client_hash: Option<AnalyticsHash>,
+
+    /// sha256 fingerprint from operator license
+    pub license_hash: Option<AnalyticsHash>,
+}
+
+#[derive(Debug, Serialize)]
+struct AnalyticsReport<'r> {
+    event_properties: &'r Analytics,
+    platform: &'r str,
+    duration: u32,
+    version: &'r str,
+    operator: bool,
+    #[serde(flatten)]
+    operator_properties: &'r Option<AnalyticsOperatorProperties>,
+    error: &'r Option<AnalyticsError>,
+}
+
+/// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.co
+#[tracing::instrument(level = "trace")]
+fn send_analytics(report: AnalyticsReport) {
+    let client = reqwest::blocking::Client::new();
     let res = client
         .post("https://analytics.metalbear.co/api/v1/event")
         .json(&report)
-        .send()
-        .await;
+        .send();
     if let Err(e) = res {
         info!("Failed to send analytics: {e}");
     }

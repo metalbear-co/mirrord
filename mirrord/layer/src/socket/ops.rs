@@ -10,13 +10,14 @@ use std::{
 };
 
 use libc::{c_int, c_void, sockaddr, socklen_t};
+use mirrord_config::feature::network::incoming::IncomingMode;
 use mirrord_protocol::{
     dns::LookupRecord,
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
 use socket2::SockAddr;
 use tokio::sync::oneshot;
-use tracing::{debug, error, info, trace};
+use tracing::{error, info, trace};
 
 use super::{hooks::*, *};
 use crate::{
@@ -28,9 +29,17 @@ use crate::{
     is_debugger_port,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
     tcp::{Listen, TcpIncoming},
-    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_IGNORE_LOCALHOST, LISTEN_PORTS,
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_CONFIG, LISTEN_PORTS,
     OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR, REMOTE_UNIX_STREAMS, TARGETLESS,
 };
+
+/// Holds the pair of [`SocketAddr`] with their hostnames, resolved remotely through
+/// [`getaddrinfo`].
+///
+/// Used by [`connect_outgoing`] to retrieve the hostname from the address that the user called
+/// [`connect`] with, so we can resolve it locally when neccessary.
+pub(super) static REMOTE_DNS_REVERSE_MAPPING: LazyLock<DashMap<SocketAddr, String>> =
+    LazyLock::new(|| DashMap::with_capacity(8));
 
 /// Hostname initialized from the agent with [`gethostname`].
 pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();
@@ -140,11 +149,11 @@ pub(super) fn bind(
 ) -> Detour<i32> {
     let requested_address = SocketAddr::try_from_raw(raw_address, address_length)?;
     let requested_port = requested_address.port();
-
-    let ignore_localhost = INCOMING_IGNORE_LOCALHOST
+    let incoming_config = INCOMING_CONFIG
         .get()
-        .copied()
-        .expect("Should be set during initialization!");
+        .expect("`INCOMING_CONFIG` not set. Please report a bug");
+
+    let ignore_localhost = incoming_config.ignore_localhost;
 
     let mut socket = {
         SOCKETS
@@ -166,26 +175,9 @@ pub(super) fn bind(
     // To handle #1458, we don't ignore port `0` for UDP.
     if (is_ignored_port(&requested_address) && matches!(socket.kind, SocketKind::Tcp(_)))
         || is_debugger_port(&requested_address)
-        || INCOMING_IGNORE_PORTS
-            .get()
-            .expect("`INCOMING_IGNORE_PORTS` not set. Please report a bug")
-            .contains(&requested_port)
+        || incoming_config.ignore_ports.contains(&requested_port)
     {
         Err(Bypass::Port(requested_address.port()))?;
-    }
-
-    if TARGETLESS
-        .get()
-        .copied()
-        .expect("Should be set during initialization!")
-    {
-        warn!(
-            "Binding a port ({}) while running targetless. A targetless agent is not exposed by \
-            any service. Therefore, letting this port bind happen locally instead of on the \
-            cluster.",
-            requested_address.port()
-        );
-        return Detour::Bypass(Bypass::BindWhenTargetless);
     }
 
     // Check if the user's requested address isn't already in use, even though it's not actually
@@ -262,7 +254,26 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
             .map(|(_, socket)| socket)
             .bypass(Bypass::LocalFdNotFound(sockfd))?
     };
+    let incoming = INCOMING_CONFIG
+        .get()
+        .expect("`INCOMING_CONFIG` not set. Please report a bug");
 
+    if matches!(incoming.mode, IncomingMode::Off) {
+        return Detour::Bypass(Bypass::DisabledIncoming);
+    }
+
+    if TARGETLESS
+        .get()
+        .copied()
+        .expect("Should be set during initialization!")
+    {
+        warn!(
+            "Listening while running targetless. A targetless agent is not exposed by \
+        any service. Therefore, letting this port bind happen locally instead of on the \
+        cluster.",
+        );
+        return Detour::Bypass(Bypass::BindWhenTargetless);
+    }
     match socket.state {
         SocketState::Bound(Bound {
             requested_address,
@@ -301,17 +312,14 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
 /// interception procedure.
 /// This returns errno so we can restore the correct errno in case result is -1 (until we get
 /// back to the hook we might call functions that will corrupt errno)
-#[tracing::instrument(level = "debug", ret)]
+#[tracing::instrument(level = "trace", ret)]
 fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
     sockfd: RawFd,
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
 ) -> Detour<ConnectResult> {
-    if remote_address.is_unix()
-        || OUTGOING_SELECTOR
-            .get()?
-            .connect_remote::<PROTOCOL>(remote_address.as_socket()?)
-    {
+    // Closure that performs the connection with mirrord messaging.
+    let remote_connection = |remote_address: SockAddr| {
         // Prepare this socket to be intercepted.
         let (mirror_tx, mirror_rx) = oneshot::channel();
 
@@ -361,12 +369,39 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
             layer_address: Some(layer_address.try_into()?),
         };
 
+        trace!("we are connected {connected:#?}");
+
         Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
         SOCKETS.insert(sockfd, user_socket_info);
 
         Detour::Success(connect_result)
+    };
+
+    if remote_address.is_unix() {
+        let connect_result = remote_connection(remote_address)?;
+        Detour::Success(connect_result)
     } else {
-        Detour::Bypass(Bypass::FilteredConnection)
+        // Can't just connect to whatever `remote_address` is, as it might be a remotely resolved
+        // address, in a local connection context (or vice-versa), so we let `remote_connection`
+        // handle this address trickery.
+        match OUTGOING_SELECTOR
+            .get()?
+            .get_connection_through::<PROTOCOL>(remote_address.as_socket()?)?
+        {
+            ConnectionThrough::Remote(addr) => {
+                let connect_result = remote_connection(SockAddr::from(addr))?;
+                Detour::Success(connect_result)
+            }
+            ConnectionThrough::Local(addr) => {
+                let rawish_local_addr = SockAddr::from(addr);
+
+                let connect_result = ConnectResult::from(unsafe {
+                    FN_CONNECT(sockfd, rawish_local_addr.as_ptr(), rawish_local_addr.len())
+                });
+
+                Detour::Success(connect_result)
+            }
+        }
     }
 }
 
@@ -549,7 +584,7 @@ pub(super) fn getpeername(
             })?
     };
 
-    debug!("getpeername -> remote_address {:#?}", remote_address);
+    trace!("getpeername -> remote_address {:#?}", remote_address);
 
     fill_address(address, address_len, remote_address.try_into()?)
 }
@@ -685,6 +720,29 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
     Ok(())
 }
 
+/// Handles the remote communication part of [`getaddrinfo`], call this if you want to resolve a DNS
+/// through the agent, but don't need to deal with all the [`libc::getaddrinfo`] stuff.
+#[tracing::instrument(level = "trace", ret)]
+pub(super) fn remote_getaddrinfo(
+    node: String,
+    service: u16,
+) -> HookResult<Vec<(String, SocketAddr)>> {
+    let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
+    let hook = GetAddrInfo {
+        node,
+        hook_channel_tx,
+    };
+
+    blocking_send_hook_message(HookMessage::GetAddrinfo(hook))?;
+
+    let addr_info_list = hook_channel_rx.blocking_recv()??;
+
+    Ok(addr_info_list
+        .into_iter()
+        .map(|LookupRecord { name, ip }| (name, SocketAddr::from((ip, service))))
+        .collect())
+}
+
 /// Retrieves the result of calling `getaddrinfo` from a remote host (resolves remote DNS),
 /// converting the result into a `Box` allocated raw pointer of `libc::addrinfo` (which is basically
 /// a linked list of such type).
@@ -702,7 +760,7 @@ pub(super) fn getaddrinfo(
     rawish_service: Option<&CStr>,
     raw_hints: Option<&libc::addrinfo>,
 ) -> Detour<*mut libc::addrinfo> {
-    let node = rawish_node
+    let node: String = rawish_node
         .bypass(Bypass::NullNode)?
         .to_str()
         .map_err(|fail| {
@@ -739,23 +797,19 @@ pub(super) fn getaddrinfo(
         ..
     } = raw_hints;
 
-    let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
-    let hook = GetAddrInfo {
-        node,
-        hook_channel_tx,
-    };
-
-    blocking_send_hook_message(HookMessage::GetAddrinfo(hook))?;
-
-    let addr_info_list = hook_channel_rx.blocking_recv()??;
-
     // Convert `service` into a port.
     let service = service.map_or(0, |s| s.parse().unwrap_or_default());
+
     // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
-    let result = addr_info_list
+    let result = remote_getaddrinfo(node.clone(), service)?
         .into_iter()
-        .map(|LookupRecord { name, ip }| (name, SockAddr::from(SocketAddr::from((ip, service)))))
-        .map(|(name, rawish_sock_addr)| {
+        .map(|(name, address)| {
+            // Cache the resolved hosts to use in the outgoing traffic filter.
+            {
+                let _ = REMOTE_DNS_REVERSE_MAPPING.insert(address, node.clone());
+            }
+
+            let rawish_sock_addr = SockAddr::from(address);
             let ai_addrlen = rawish_sock_addr.len();
             let ai_family = rawish_sock_addr.family() as _;
 
@@ -790,7 +844,7 @@ pub(super) fn getaddrinfo(
         })
         .ok_or(HookError::DNSNoName)?;
 
-    debug!("getaddrinfo -> result {:#?}", result);
+    trace!("getaddrinfo -> result {:#?}", result);
 
     Detour::Success(result)
 }
@@ -872,7 +926,57 @@ pub(super) fn recv_from(
         .map(SocketAddress::try_into)?
         .map(|address| fill_address(raw_source, source_length, address))??;
 
+    errno::set_errno(errno::Errno(0));
     Detour::Success(recv_from_result)
+}
+
+/// Helps manually resolving DNS on port `53` with UDP, see [`send_to`] and [`sendmsg`].
+#[tracing::instrument(level = "trace", ret)]
+fn send_dns_patch(
+    sockfd: RawFd,
+    user_socket_info: Arc<UserSocket>,
+    destination: SocketAddr,
+) -> Detour<SockAddr> {
+    // We want to keep holding this socket.
+    SOCKETS.insert(sockfd, user_socket_info);
+
+    // Sending a packet on port NOT 53.
+    let destination = SOCKETS
+        .iter()
+        .filter(|socket| socket.kind.is_udp())
+        // Is the `destination` one of our sockets? If so, then we grab the actual address,
+        // instead of the, possibly fake address from mirrord.
+        .find_map(|receiver_socket| match &receiver_socket.state {
+            SocketState::Bound(Bound {
+                requested_address,
+                address,
+            }) => {
+                // Special case for port `0`, see `getsockname`.
+                if requested_address.port() == 0 {
+                    (SocketAddr::new(requested_address.ip(), address.port()) == destination)
+                        .then_some(*address)
+                } else {
+                    (*requested_address == destination).then_some(*address)
+                }
+            }
+            SocketState::Connected(Connected {
+                remote_address,
+                layer_address,
+                ..
+            }) => {
+                let remote_address: SocketAddr = remote_address.clone().try_into().ok()?;
+                let layer_address: SocketAddr = layer_address.clone()?.try_into().ok()?;
+
+                if remote_address == destination {
+                    Some(layer_address)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })?;
+
+    Detour::Success(SockAddr::from(destination))
 }
 
 /// ## DNS resolution on port `53`
@@ -929,48 +1033,7 @@ pub(super) fn send_to(
         .as_socket()
         .filter(|destination| destination.port() != 53)
     {
-        // We want to keep holding this socket.
-        SOCKETS.insert(sockfd, user_socket_info);
-
-        // Sending a packet on port NOT 53.
-        let destination = SOCKETS
-            .iter()
-            .filter(|socket| socket.kind.is_udp())
-            // Is the `destination` one of our sockets? If so, then we grab the actual address,
-            // instead of the, possibly fake address from mirrord.
-            .find_map(|receiver_socket| match &receiver_socket.state {
-                SocketState::Bound(Bound {
-                    requested_address,
-                    address,
-                }) => {
-                    // Special case for port `0`, see `getsockname`.
-                    if requested_address.port() == 0 {
-                        (SocketAddr::new(requested_address.ip(), address.port()) == destination)
-                            .then_some(*address)
-                    } else {
-                        (*requested_address == destination).then_some(*address)
-                    }
-                }
-                SocketState::Connected(Connected {
-                    remote_address,
-                    layer_address,
-                    ..
-                }) => {
-                    let remote_address: SocketAddr = remote_address.clone().try_into().ok()?;
-                    let layer_address: SocketAddr = layer_address.clone()?.try_into().ok()?;
-
-                    if remote_address == destination {
-                        Some(layer_address)
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            })?;
-
-        let rawish_true_destination = SockAddr::from(destination);
-        let raw_true_destination = rawish_true_destination.as_ptr();
-        let raw_true_destination_length = rawish_true_destination.len();
+        let rawish_true_destination = send_dns_patch(sockfd, user_socket_info, destination)?;
 
         unsafe {
             FN_SEND_TO(
@@ -978,8 +1041,8 @@ pub(super) fn send_to(
                 raw_message,
                 message_length,
                 flags,
-                raw_true_destination,
-                raw_true_destination_length,
+                rawish_true_destination.as_ptr(),
+                rawish_true_destination.len(),
             )
         }
     } else {
@@ -1006,6 +1069,81 @@ pub(super) fn send_to(
                 raw_interceptor_length,
             )
         }
+    };
+
+    Detour::Success(sent_result)
+}
+
+/// Same behavior as [`send_to`], the only difference is that here we deal with [`libc::msghdr`],
+/// instead of directly with socket addresses.
+#[tracing::instrument(level = "trace", ret, skip(raw_message_header))]
+pub(super) fn sendmsg(
+    sockfd: RawFd,
+    raw_message_header: *const libc::msghdr,
+    flags: i32,
+) -> Detour<isize> {
+    // We have a destination, so apply our fake `connect` patch.
+    let destination = (!unsafe { *raw_message_header }.msg_name.is_null()).then(|| {
+        let raw_destination = unsafe { *raw_message_header }.msg_name as *const libc::sockaddr;
+        let destination_length = unsafe { *raw_message_header }.msg_namelen;
+        SockAddr::try_from_raw(raw_destination, destination_length)
+    })??;
+
+    trace!("destination {:?}", destination.as_socket());
+
+    let (_, user_socket_info) = SOCKETS
+        .remove(&sockfd)
+        .ok_or(Bypass::LocalFdNotFound(sockfd))?;
+
+    // Currently this flow only handles DNS resolution.
+    // So here we have to check for 2 things:
+    //
+    // 1. Are we sending something port 53? Then we use mirrord flow;
+    // 2. Is the destination a socket that we have bound? Then we send it to the real address that
+    // we've bound the destination socket.
+    //
+    // If none of the above are true, then the destination is some real address outside our scope.
+    let sent_result = if let Some(destination) = destination
+        .as_socket()
+        .filter(|destination| destination.port() != 53)
+    {
+        let rawish_true_destination = send_dns_patch(sockfd, user_socket_info, destination)?;
+
+        let mut true_message_header = Box::new(unsafe { *raw_message_header });
+
+        unsafe {
+            true_message_header.as_mut().msg_name.copy_from(
+                rawish_true_destination.as_ptr() as *const _,
+                rawish_true_destination.len() as usize,
+            )
+        };
+        true_message_header.as_mut().msg_namelen = rawish_true_destination.len();
+
+        unsafe { FN_SENDMSG(sockfd, true_message_header.as_ref(), flags) }
+    } else {
+        connect_outgoing::<UDP, false>(sockfd, destination, user_socket_info)?;
+
+        let layer_address: SockAddr = SOCKETS
+            .get(&sockfd)
+            .and_then(|socket| match &socket.state {
+                SocketState::Connected(connected) => connected.layer_address.clone(),
+                _ => unreachable!(),
+            })
+            .map(SocketAddress::try_into)??;
+
+        let raw_interceptor_address = layer_address.as_ptr() as *const _;
+        let raw_interceptor_length = layer_address.len();
+        let mut true_message_header = Box::new(unsafe { *raw_message_header });
+
+        unsafe {
+            true_message_header
+                .as_mut()
+                .msg_name
+                .copy_from(raw_interceptor_address, raw_interceptor_length as usize)
+        };
+        true_message_header.as_mut().msg_namelen = raw_interceptor_length;
+
+        unsafe { FN_SENDMSG(sockfd, true_message_header.as_ref(), flags) }
     };
 
     Detour::Success(sent_result)

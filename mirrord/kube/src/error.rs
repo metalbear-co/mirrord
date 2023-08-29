@@ -21,7 +21,7 @@ pub enum KubeApiError {
     #[error("mirrord-layer: JSON convert error")]
     JSONConvertError(#[from] serde_json::Error),
 
-    #[error("mirrord-layer: Invalid target proivded `{0}`!")]
+    #[error("mirrord-layer: Invalid target provided `{0}`!")]
     InvalidTarget(String),
 
     #[error("mirrord-layer: Failed to get `Spec` for Pod!")]
@@ -69,4 +69,13 @@ pub enum KubeApiError {
 
     #[error("Kube incluster error `{0}`!")]
     KubeInclusterError(#[from] kube::config::InClusterError),
+
+    #[error("mirrord-layer: Failed to wait for agent startup")]
+    AgentReadyMessageMissing,
+
+    #[error("Unable to fetch node limits for {0:?}")]
+    NodeBadAllocatable(String),
+
+    #[error("Node {0:?} is too full with {1} pods")]
+    NodePodLimitExceeded(String, usize),
 }

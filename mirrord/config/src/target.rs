@@ -8,7 +8,7 @@ use crate::{
     config::{
         from_env::{FromEnv, FromEnvWithError},
         source::MirrordConfigSource,
-        ConfigError, FromMirrordConfig, MirrordConfig, Result,
+        ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result,
     },
     util::string_or_struct_option,
 };
@@ -72,6 +72,9 @@ pub struct TargetConfig {
     ///
     /// Specifies the running pod (or deployment) to mirror.
     ///
+    /// Note: Deployment level steal/mirroring is available only in mirrord for Teams
+    /// If you use it without it, it will choose a random pod replica to work with.
+    ///
     /// Supports:
     /// - `pod/{sample-pod}`;
     /// - `podname/{sample-pod}`;
@@ -100,16 +103,16 @@ impl FromMirrordConfig for TargetConfig {
 
 impl TargetFileConfig {
     /// Get the target path from the env var, `Ok(None)` if not set, `Err` if invalid value.
-    fn get_target_path_from_env() -> Result<Option<Target>> {
+    fn get_target_path_from_env(context: &mut ConfigContext) -> Result<Option<Target>> {
         FromEnvWithError::new("MIRRORD_IMPERSONATED_TARGET")
-            .source_value()
+            .source_value(context)
             .transpose()
     }
 
     /// Get the target namespace from the env var, `Ok(None)` if not set, `Err` if invalid value.
-    fn get_target_namespace_from_env() -> Result<Option<String>> {
+    fn get_target_namespace_from_env(context: &mut ConfigContext) -> Result<Option<String>> {
         FromEnv::new("MIRRORD_TARGET_NAMESPACE")
-            .source_value()
+            .source_value(context)
             .transpose()
     }
 }
@@ -119,15 +122,15 @@ impl MirrordConfig for TargetFileConfig {
 
     /// Generate the final config object, out of the configuration parsed from a configuration file,
     /// factoring in environment variables (which are also set by the front end - CLI/IDE-plugin).
-    fn generate_config(self) -> Result<Self::Generated> {
+    fn generate_config(self, context: &mut ConfigContext) -> Result<Self::Generated> {
         let (path_from_conf_file, namespace_from_conf_file) = match self {
             TargetFileConfig::Simple(path) => (path, None),
             TargetFileConfig::Advanced { path, namespace } => (path, namespace),
         };
 
         // Env overrides configuration if both there.
-        let path = Self::get_target_path_from_env()?.or(path_from_conf_file);
-        let namespace = Self::get_target_namespace_from_env()?.or(namespace_from_conf_file);
+        let path = Self::get_target_path_from_env(context)?.or(path_from_conf_file);
+        let namespace = Self::get_target_namespace_from_env(context)?.or(namespace_from_conf_file);
         Ok(TargetConfig { path, namespace })
     }
 }
@@ -343,7 +346,10 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{config::MirrordConfig, util::testing::with_env_vars};
+    use crate::{
+        config::{ConfigContext, MirrordConfig},
+        util::testing::with_env_vars,
+    };
 
     #[rstest]
     #[case(None, None,
@@ -409,8 +415,10 @@ mod tests {
                 ("MIRRORD_TARGET_NAMESPACE", namespace_env),
             ],
             || {
-                let generated_target_config =
-                    TargetFileConfig::default().generate_config().unwrap();
+                let mut cfg_context = ConfigContext::default();
+                let generated_target_config = TargetFileConfig::default()
+                    .generate_config(&mut cfg_context)
+                    .unwrap();
 
                 assert_eq!(expected_target_config, generated_target_config);
             },
@@ -421,7 +429,10 @@ mod tests {
     fn verify_config(config_json_string: &str, expected_target_config: &TargetConfig) {
         let target_file_config: TargetFileConfig =
             serde_json::from_str(config_json_string).unwrap();
-        let target_config: TargetConfig = target_file_config.generate_config().unwrap();
+        let mut cfg_context = ConfigContext::default();
+        let target_config: TargetConfig = target_file_config
+            .generate_config(&mut cfg_context)
+            .unwrap();
         assert_eq!(&target_config, expected_target_config);
     }
 

@@ -8,6 +8,392 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.63.0](https://github.com/metalbear-co/mirrord/tree/3.63.0) - 2023-08-28
+
+
+### Added
+
+- Add the ability to send analytics on errors and not only on successful runs.
+  [#1785](https://github.com/metalbear-co/mirrord/issues/1785)
+- Report back internal proxy error stream to cli
+  [#1855](https://github.com/metalbear-co/mirrord/issues/1855)
+
+
+### Changed
+
+- Changed config unstable/deprecations to be aggregated with other config
+  warnings [#1860](https://github.com/metalbear-co/mirrord/issues/1860)
+
+
+### Fixed
+
+- `not-found` file filter fixed to only match files inside the `$HOME`
+  directory. [#1863](https://github.com/metalbear-co/mirrord/issues/1863)
+- Fix openshift detection taking too long by querying a subset instead of all
+  APIs
+
+
+### Internal
+
+- CI Improvements:
+  - Unify lint and integration for macOS to save cache and runner.
+  - Remove trace logging from integration tests on macos
+  - use node 18 for testing since installing 19 in CI takes hours.
+  - remove `build_mirrord` job - quite useless as it's used only in other
+  workflow, so have it there and re-use cache
+    also save some cache,
+  - specify target for all cargo invocations to re-use cache efficiently.
+  - fix flake with node server closing before time
+- Fix regression in kube api blocking operator from compiling
+- Reorganize the CI with the following objective of unifying as much as we can
+  CI that can run on the same host, this is to have less caches and have better
+  compilation time (as there's overlap). Things done:
+
+  - Remove the build layer CI, since we now have an integration tests that
+  check it + clippy for aarch darwin / Linux
+  - Make clippy run for all of the project for aarch64 linux instead of agent
+  only
+  - Revert removal of Rust cache from e2e (was by mistake)
+  - Don't use "cache" for other Gos since it will try to overwrite and have bad
+  results.
+
+
+## [3.62.0](https://github.com/metalbear-co/mirrord/tree/3.62.0) - 2023-08-26
+
+
+### Added
+
+- Add analytics collection to operator session information.
+  [#1805](https://github.com/metalbear-co/mirrord/issues/1805)
+- Added an extra `not-found` file filter to improve experience when using cloud
+  services under mirrord.
+  [#1694](https://github.com/metalbear-co/mirrord/issues/1694)
+
+
+### Changed
+
+- Update telemetry.md with new info about mirrord for Teams
+  [#1837](https://github.com/metalbear-co/mirrord/issues/1837)
+- Changed keep alive to happen from internal proxy to support cases where layer
+  process is stuck [breakpoint/etc]
+  [#1839](https://github.com/metalbear-co/mirrord/issues/1839)
+- Changed CLI progress to print warnings and not only set it as the last
+  message of progress
+- Changed config verify to return aggregated warnings list for user to print
+  instead of warn in current progress - can fix issues with extension where we
+  printed to stderr.
+
+
+### Fixed
+
+- Fix ephemeral agent creation api using agent namespace instead of target.
+  Add note about agent namespace being irrelevant in ephemeral.
+- Fix macOS SIP potential issues from exec having mirrord loaded into the code
+  sign binary.
+- Fix operator setup so `MIRRORD_OPERATOR_IMAGE` will function properly.
+- Fixed issue connecting to ephemeral container when target is in different
+  namespace
+
+
+### Internal
+
+- Changed e2e to use a shared setup e2e action to leverage all GitHub caches,
+  reduce e2e time by half.
+- Changes to the CI to make it fater:
+  - Use go cache for integration test
+  - use mac-13 runner for tests
+
+
+## [3.61.0](https://github.com/metalbear-co/mirrord/tree/3.61.0) - 2023-08-22
+
+
+### Added
+
+- Support DNS resolution for the outgoing filter config.
+  [#702](https://github.com/metalbear-co/mirrord/issues/702)
+
+
+### Fixed
+
+- Fixed wrong errno being set by mirrord, fixing various flows that rely on
+  errno even when return code is ok
+  [#1828](https://github.com/metalbear-co/mirrord/issues/1828)
+
+
+## [3.60.0](https://github.com/metalbear-co/mirrord/tree/3.60.0) - 2023-08-21
+
+
+### Added
+
+- Detect and warn when cluster is openshift
+  [#1560](https://github.com/metalbear-co/mirrord/issues/1560)
+- Add missing hook for open64, fixing certificate loading on C# + Linux
+  [#1815](https://github.com/metalbear-co/mirrord/issues/1815)
+- Small changes relevant to operator for #1782.
+
+
+### Fixed
+
+- Fixed environment on ephemeral container
+  This is done by two things:
+
+  1. There was an issue where we used `self` instead of `1` to obtain env based
+  on pid.
+  2. We didn't have container runtime to use for fetching, so now we also copy
+  env from the original pod spec and set it to ours.
+  [#1818](https://github.com/metalbear-co/mirrord/issues/1818)
+
+
+### Internal
+
+- Added a missing comma in the documentation
+
+
+## [3.59.0](https://github.com/metalbear-co/mirrord/tree/3.59.0) - 2023-08-18
+
+
+### Added
+
+- Add option to run agent container as privileged - `"agent" : {"privileged":
+  true}`
+  Should help with Bottlerocket or other secured k8s environments.
+  Applicable for both job/ephemeral.
+  [#1806](https://github.com/metalbear-co/mirrord/issues/1806)
+
+
+### Fixed
+
+- Send only ResponseError::DnsLookup for all errors during DNS lookups
+  [#1809](https://github.com/metalbear-co/mirrord/issues/1809)
+
+
+### Internal
+
+- Update Frida dependency
+
+
+## [3.58.0](https://github.com/metalbear-co/mirrord/tree/3.58.0) - 2023-08-17
+
+
+### Added
+
+- Introduced hooks for sendmsg and recvmsg, so mongodb+srv protocol (Csharp)
+  may resolve DNS (implementation follows previous sendto and recvfrom patch).
+  [#1776](https://github.com/metalbear-co/mirrord/issues/1776)
+
+
+### Fixed
+
+- Fixed more complicated scenarios using Go on Linux Arm
+
+
+### Internal
+
+- Move e2e setup to a bash script
+
+
+## [3.57.2](https://github.com/metalbear-co/mirrord/tree/3.57.2) - 2023-08-16
+
+
+### Fixed
+
+- Fix crash on forks by leaking HOOK_SENDER
+  [#1792](https://github.com/metalbear-co/mirrord/issues/1792)
+- CLI now uses the json progress tracker as default.
+
+
+## [3.57.1](https://github.com/metalbear-co/mirrord/tree/3.57.1) - 2023-08-15
+
+
+### Internal
+
+- Add `nodes` and `pods/log` resource permissions to `mirrord-operator`
+  ClusterRole.
+
+
+## [3.57.0](https://github.com/metalbear-co/mirrord/tree/3.57.0) - 2023-08-15
+
+
+### Added
+
+- Add hooks for Go 1.19 >= on Linux Arm
+  [#563](https://github.com/metalbear-co/mirrord/issues/563)
+- Add node allocatabillity check to prevent OutOfPods error on agent job.
+  [#1782](https://github.com/metalbear-co/mirrord/issues/1782)
+
+
+### Changed
+
+- Incoming config now supports off mode, which is also used when `"incoming":
+  "off"`.
+  When incoming is off, listen requests go through.
+  Changed targetless to warn on listen, since bind can happen on outgoing
+  sockets as well.
+
+
+### Fixed
+
+- Replaced termspin with indicatif, fix multi line issues and refactored
+  progress. [#1664](https://github.com/metalbear-co/mirrord/issues/1664)
+
+
+### Internal
+
+- Add trace only mode for layer for easier debugging
+- Agent now prints its version in the initial "agent ready" message.
+
+
+## [3.56.1](https://github.com/metalbear-co/mirrord/tree/3.56.1) - 2023-08-09
+
+
+### Fixed
+
+- Add missing hook for `read$NOCANCEL`, fixes reading remote files in some
+  scenarios. [#1747](https://github.com/metalbear-co/mirrord/issues/1747)
+
+
+### Internal
+
+- Updated `hyper` version.
+  [#1774](https://github.com/metalbear-co/mirrord/issues/1774)
+
+
+## [3.56.0](https://github.com/metalbear-co/mirrord/tree/3.56.0) - 2023-08-07
+
+
+### Added
+
+- Added `internal_proxy` timeout configurations to allow users specify timeouts
+  in edge cases. [#1761](https://github.com/metalbear-co/mirrord/issues/1761)
+
+
+### Changed
+
+- Change operator / cli version mismatch to show only when mirrord is older
+  than operator
+
+
+### Fixed
+
+- Fix grpc errors caused by missing trailers on filtered http responses.
+  [#1731](https://github.com/metalbear-co/mirrord/issues/1731)
+
+
+## [3.55.2](https://github.com/metalbear-co/mirrord/tree/3.55.2) - 2023-08-06
+
+
+### Fixed
+
+- macOS - Running Go build with mirrord while Go binary is SIP protected is
+  fixed by enabling file hooks on SIP load mode.
+  [#1764](https://github.com/metalbear-co/mirrord/issues/1764)
+
+
+## [3.55.1](https://github.com/metalbear-co/mirrord/tree/3.55.1) - 2023-08-06
+
+
+### Fixed
+
+- Try to resolve an issue where internal proxy is under heavy load since bash
+  scripts does a lot of fork/exec by:
+  1. Increasing internal proxy's listen backlog (might not help on macOS)
+  2. Change internal proxy to create the upstream (agent) connection in a
+  different task, allowing it to keep accepting.
+  [#1716](https://github.com/metalbear-co/mirrord/issues/1716)
+- Fixed detecting skipped processes during layer injection.
+  [#1752](https://github.com/metalbear-co/mirrord/issues/1752)
+- Fix fork issues by changing layer runtime to be current thread
+  [#1759](https://github.com/metalbear-co/mirrord/issues/1759)
+
+
+## [3.55.0](https://github.com/metalbear-co/mirrord/tree/3.55.0) - 2023-08-03
+
+
+### Added
+
+- Add support for selecting Kubeconfig context to use by either using:
+  1. Configuration option `kube_context`.
+  2. mirrord exec argument `--context`
+  3. Environment variable `MIRRORD_KUBE_CONTEXT`
+  [#1735](https://github.com/metalbear-co/mirrord/issues/1735)
+
+
+### Changed
+
+- Add userextras/prinicipalid to operators cluster role
+- Document behavior of deployment in OSS vs mirrord for Teams
+- Skip HashiCorp Vault supporting containers
+
+
+### Fixed
+
+- Fix fork issue on macOS
+  [#1745](https://github.com/metalbear-co/mirrord/issues/1745)
+- Add access for the operator's cluster role to argoproj rollouts
+  [#1751](https://github.com/metalbear-co/mirrord/issues/1751)
+- Fixed warning on using deployment target with no operator
+
+
+### Internal
+
+- Attempt to fix fork issue on macOS by avoiding access to CF on fork
+  [#1745](https://github.com/metalbear-co/mirrord/issues/1745)
+- Add note to the HttpRequest message with information to add when we break the
+  protocol.
+- Change deployment warning to be emit on cli only
+- Refactor the organization of go hooks in preparation for support for arm
+
+
+## [3.54.1](https://github.com/metalbear-co/mirrord/tree/3.54.1) - 2023-08-01
+
+
+### Fixed
+
+- Sometimes the internal proxy doesn't flush before we do redirection then
+  caller can't read port
+  leading to "Couldn't get port of internal proxy"
+
+
+### Internal
+
+- Remove signal dependency from layer
+
+
+## [3.54.0](https://github.com/metalbear-co/mirrord/tree/3.54.0) - 2023-07-31
+
+
+### Added
+
+- Added mirrord-operator-user `ClusterRole` to operator setup with RBAC
+  permissions to use operator.
+  [#1428](https://github.com/metalbear-co/mirrord/issues/1428)
+
+
+### Fixed
+
+- Exclude environment variable COMPLUS_EnableDiagnostics, fixes [mirrord
+  intellij #67](https://github.com/metalbear-co/mirrord-intellij/issues/67)
+  [#1728](https://github.com/metalbear-co/mirrord/issues/1728)
+
+
+### Internal
+
+- Redirect stderr and stdout of internal proxy to /dev/null (stdout only after
+  printing port).
+  [#int-proxy-dev-null](https://github.com/metalbear-co/mirrord/issues/int-proxy-dev-null)
+
+
+## [3.53.3](https://github.com/metalbear-co/mirrord/tree/3.53.3) - 2023-07-26
+
+
+### Fixed
+
+- Add `jspawnhelper` to build-tool list & fix skip_processes detection
+  [#1709](https://github.com/metalbear-co/mirrord/issues/1709)
+- Use `shellexpand` to resolve tilde for `kubeconfig`.
+  [#1721](https://github.com/metalbear-co/mirrord/issues/1721)
+
+
 ## [3.53.2](https://github.com/metalbear-co/mirrord/tree/3.53.2) - 2023-07-24
 
 

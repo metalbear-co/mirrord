@@ -14,12 +14,15 @@ server.on('request', (request, response) => {
 
   response.on('finish', () => {
     console.log(`> response is done ${JSON.stringify(response.getHeaders())}`);
-    
+
     if (request.method == 'DELETE') {
       console.log('> DELETE request, closing the app');
 
-      server.close();
-      process.exit();
+      // close server in 1 second, give it time to actually send the response upstream.
+      setTimeout(function () {
+        server.close();
+        process.exit();
+      }, 1000);
     }
   });
 });
