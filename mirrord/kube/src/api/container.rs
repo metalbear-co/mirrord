@@ -59,9 +59,11 @@ impl Default for ContainerParams {
 pub trait ContainerVariant {
     type Update;
 
+    fn agent_config(&self) -> &AgentConfig;
+
     fn params(&self) -> &ContainerParams;
 
-    fn as_update(&self, agent: &AgentConfig) -> Result<Self::Update>;
+    fn as_update(&self) -> Result<Self::Update>;
 }
 
 pub trait ContainerApi<V>

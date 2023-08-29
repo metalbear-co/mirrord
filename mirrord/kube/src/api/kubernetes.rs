@@ -187,23 +187,23 @@ impl AgentManagment for KubernetesAPI {
 
         let agent_connect_info = match (runtime_data, self.agent.ephemeral) {
             (None, false) => {
-                let variant = JobVariant::new(&params);
+                let variant = JobVariant::new(&self.agent, &params);
 
-                Targetless::new(&self.client, &self.agent, &variant)
+                Targetless::new(&self.client, &variant)
                     .create_agent(progress)
                     .await?
             }
             (Some(runtime_data), false) => {
-                let variant = JobTargetedVariant::new(&params, &runtime_data);
+                let variant = JobTargetedVariant::new(&self.agent, &params, &runtime_data);
 
-                Targeted::new(&self.client, &self.agent, &runtime_data, &variant)
+                Targeted::new(&self.client, &runtime_data, &variant)
                     .create_agent(progress)
                     .await?
             }
             (Some(runtime_data), true) => {
-                let variant = EphemeralTargetedVariant::new(&params, &runtime_data);
+                let variant = EphemeralTargetedVariant::new(&self.agent, &params, &runtime_data);
 
-                Targeted::new(&self.client, &self.agent, &runtime_data, &variant)
+                Targeted::new(&self.client, &runtime_data, &variant)
                     .create_agent(progress)
                     .await?
             }

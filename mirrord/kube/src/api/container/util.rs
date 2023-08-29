@@ -6,7 +6,10 @@ use kube::{api::LogParams, Api};
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
 use regex::Regex;
 
-use crate::error::{KubeApiError, Result};
+use crate::{
+    api::container::ContainerParams,
+    error::{KubeApiError, Result},
+};
 
 static AGENT_READY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new("agent ready( - version (\\S+))?").expect("failed to create regex")
@@ -27,14 +30,33 @@ pub(super) fn get_agent_image(agent: &AgentConfig) -> String {
 }
 
 /// Retrieve a list of Linux capabilities for the agent container.
-pub(super) fn get_capabilities(config: &AgentConfig) -> Vec<LinuxCapability> {
-    let disabled = config.disabled_capabilities.clone().unwrap_or_default();
+pub(super) fn get_capabilities(agent: &AgentConfig) -> Vec<LinuxCapability> {
+    let disabled = agent.disabled_capabilities.clone().unwrap_or_default();
 
     LinuxCapability::all()
         .iter()
         .copied()
         .filter(|c| !disabled.contains(c))
         .collect()
+}
+
+pub(super) fn base_command_line(agent: &AgentConfig, params: &ContainerParams) -> Vec<String> {
+    let mut command_line = vec![
+        "./mirrord-agent".to_owned(),
+        "-l".to_owned(),
+        params.port.to_string(),
+    ];
+    if let Some(timeout) = agent.communication_timeout {
+        command_line.push("-t".to_owned());
+        command_line.push(timeout.to_string());
+    }
+
+    #[cfg(debug_assertions)]
+    if agent.test_error {
+        command_line.push("--test-error".to_owned());
+    }
+
+    command_line
 }
 
 /**

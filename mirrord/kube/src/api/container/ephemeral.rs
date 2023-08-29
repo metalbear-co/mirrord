@@ -14,7 +14,7 @@ use tracing::{debug, warn};
 use crate::{
     api::{
         container::{
-            util::{get_agent_image, get_capabilities, wait_for_agent_startup},
+            util::{base_command_line, get_agent_image, get_capabilities, wait_for_agent_startup},
             ContainerParams, ContainerVariant,
         },
         kubernetes::{get_k8s_resource_api, AgentKubernetesConnectInfo},
@@ -43,7 +43,6 @@ fn is_ephemeral_container_running(pod: Pod, container_name: &str) -> bool {
 
 pub async fn create_ephemeral_agent<P, V>(
     client: &Client,
-    agent: &AgentConfig,
     runtime_data: &RuntimeData,
     variant: &V,
     progress: &P,
@@ -59,7 +58,7 @@ where
     warn!("Ephemeral Containers is an experimental feature
                   >> Refer https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/ for more info");
 
-    let mut ephemeral_container: KubeEphemeralContainer = variant.as_update(agent)?;
+    let mut ephemeral_container: KubeEphemeralContainer = variant.as_update()?;
     debug!("Requesting ephemeral_containers_subresource");
 
     let pod_api = get_k8s_resource_api(client, runtime_data.pod_namespace.as_deref());
@@ -156,21 +155,24 @@ where
 }
 
 pub struct EphemeralTargetedVariant<'c> {
+    agent: &'c AgentConfig,
     command_line: Vec<String>,
     params: &'c ContainerParams,
     runtime_data: &'c RuntimeData,
 }
 
 impl<'c> EphemeralTargetedVariant<'c> {
-    pub fn new(params: &'c ContainerParams, runtime_data: &'c RuntimeData) -> Self {
-        let command_line = vec![
-            "./mirrord-agent".to_string(),
-            "-l".to_string(),
-            params.port.to_string(),
-            "-e".to_string(),
-        ];
+    pub fn new(
+        agent: &'c AgentConfig,
+        params: &'c ContainerParams,
+        runtime_data: &'c RuntimeData,
+    ) -> Self {
+        let mut command_line = base_command_line(agent, params);
+
+        command_line.extend(["-e".to_string(), "targeted".to_string()]);
 
         EphemeralTargetedVariant {
+            agent,
             params,
             command_line,
             runtime_data,
@@ -181,29 +183,21 @@ impl<'c> EphemeralTargetedVariant<'c> {
 impl ContainerVariant for EphemeralTargetedVariant<'_> {
     type Update = KubeEphemeralContainer;
 
+    fn agent_config(&self) -> &AgentConfig {
+        self.agent
+    }
+
     fn params(&self) -> &ContainerParams {
         self.params
     }
 
-    fn as_update(&self, agent: &AgentConfig) -> Result<KubeEphemeralContainer> {
+    fn as_update(&self) -> Result<KubeEphemeralContainer> {
         let EphemeralTargetedVariant {
+            agent,
             params,
             runtime_data,
             command_line,
-            ..
         } = self;
-
-        let mut command_line = command_line.clone();
-
-        if let Some(timeout) = agent.communication_timeout {
-            command_line.push("-t".to_owned());
-            command_line.push(timeout.to_string());
-        }
-
-        #[cfg(debug_assertions)]
-        if agent.test_error {
-            command_line.push("--test-error".to_owned());
-        }
 
         serde_json::from_value(json!({
             "name": params.name,
