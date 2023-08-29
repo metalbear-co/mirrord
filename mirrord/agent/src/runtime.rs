@@ -300,17 +300,11 @@ impl ContainerRuntime for EphemeralContainer {
     /// Pause requires root privileges, so if it fails on permission we send a message.
     async fn pause(&self) -> Result<()> {
         let cgroup = Cgroup::new().await?;
-        cgroup
-            .pause()
-            .await
-            .map_err(|e| AgentError::PauseFailedCgroup(e.to_string()))
+        cgroup.pause().await.map_err(From::from)
     }
 
     async fn unpause(&self) -> Result<()> {
         let cgroup = Cgroup::new().await?;
-        cgroup
-            .unpause()
-            .await
-            .map_err(|e| AgentError::PauseFailedCgroup(e.to_string()))
+        cgroup.unpause().await.map_err(From::from)
     }
 }
