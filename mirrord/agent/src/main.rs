@@ -15,7 +15,7 @@ use std::{
 };
 
 use actix_codec::Framed;
-use cli::parse_args;
+use clap::Parser;
 use dns::DnsApi;
 use error::{AgentError, Result};
 use file::FileManager;
@@ -89,12 +89,17 @@ struct State {
 impl State {
     /// Return [`Err`] if container runtime operations failed.
     pub async fn new(args: &Args) -> Result<State> {
-        let container =
-            get_container(args.container_id.as_ref(), args.container_runtime.as_ref()).await?;
+        let container = match &args.mode {
+            cli::Mode::Targetless => None,
+            cli::Mode::Targeted {
+                container_id,
+                container_runtime,
+            } => {
+                let container =
+                    get_container(container_id.clone(), container_runtime.as_deref()).await?;
 
-        let container = match container {
-            Some(container) => Some(ContainerHandle::new(container).await?),
-            None => None,
+                Some(ContainerHandle::new(container).await?)
+            }
         };
 
         // If we are in an ephemeral container, we use pid 1.
@@ -495,8 +500,7 @@ impl ClientConnectionHandler {
 
 /// Initializes the agent's [`State`], channels, threads, and runs [`ClientConnectionHandler`]s.
 #[tracing::instrument(level = "trace")]
-async fn start_agent() -> Result<()> {
-    let args = parse_args();
+async fn start_agent(args: Args) -> Result<()> {
     trace!("Starting agent with args: {args:?}");
 
     let listener = TcpListener::bind(SocketAddrV4::new(
@@ -679,10 +683,9 @@ fn spawn_child_agent() -> Result<()> {
     Ok(())
 }
 
-async fn start_iptable_guard() -> Result<()> {
+async fn start_iptable_guard(args: Args) -> Result<()> {
     debug!("start_iptable_guard -> Initializing iptable-guard.");
 
-    let args = parse_args();
     let state = State::new(&args).await?;
     let pid = state.container_pid();
 
@@ -721,12 +724,15 @@ async fn main() -> Result<()> {
         env!("CARGO_PKG_VERSION")
     );
 
-    let agent_result = if std::env::var(IPTABLE_PREROUTING_ENV).is_ok()
-        && std::env::var(IPTABLE_MESH_ENV).is_ok()
+    let args = cli::Args::parse();
+
+    let agent_result = if matches!(args.mode, cli::Mode::Targetless)
+        || (std::env::var(IPTABLE_PREROUTING_ENV).is_ok()
+            && std::env::var(IPTABLE_MESH_ENV).is_ok())
     {
-        start_agent().await
+        start_agent(args).await
     } else {
-        start_iptable_guard().await
+        start_iptable_guard(args).await
     };
 
     match agent_result {
