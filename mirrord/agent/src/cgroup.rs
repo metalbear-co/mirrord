@@ -15,6 +15,7 @@ use tracing::{trace, warn};
 
 use crate::namespace::{set_namespace, NamespaceError, NamespaceType};
 
+/// Errors that are common for both cgroup versions.
 #[derive(Debug, Error)]
 enum CgroupSharedError {
     #[error("Failed to check existence of mount: {0}")]
