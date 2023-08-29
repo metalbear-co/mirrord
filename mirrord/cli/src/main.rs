@@ -227,7 +227,7 @@ async fn exec(args: &ExecArgs) -> Result<()> {
         progress.warning(warning);
     }
 
-    let execution_result = exec_process(config, args, &mut progress, &mut analytics).await;
+    let execution_result = exec_process(config, args, &progress, &mut analytics).await;
 
     if execution_result.is_err() && !analytics.has_error() {
         analytics.set_error(AnalyticsError::Unknown);
