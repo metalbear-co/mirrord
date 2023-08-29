@@ -3,9 +3,10 @@ mod file_ops {
 
     use std::time::Duration;
 
+    use kube::Client;
     use rstest::*;
 
-    use crate::utils::{run_exec_with_target, service, Agent, FileOps, KubeService};
+    use crate::utils::{kube_client, run_exec_with_target, service, Agent, FileOps, KubeService};
 
     #[cfg(target_os = "linux")]
     #[rstest]
@@ -16,6 +17,7 @@ mod file_ops {
         #[future]
         #[notrace]
         service: KubeService,
+        #[future] kube_client: Client,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
         #[values(FileOps::Python, FileOps::Rust)] ops: FileOps,
     ) {
@@ -27,6 +29,7 @@ mod file_ops {
 
         if let Some(ephemeral_flag) = agent.flag() {
             args.extend(ephemeral_flag);
+            Agent::patch_operator(&kube_client).await;
         }
 
         let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/**")];
@@ -199,6 +202,9 @@ mod file_ops {
         #[future]
         #[notrace]
         service: KubeService,
+        #[notrace]
+        #[future]
+        kube_client: Client,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
         #[values(FileOps::GoDir18, FileOps::GoDir19, FileOps::GoDir20)] ops: FileOps,
     ) {
@@ -209,6 +215,7 @@ mod file_ops {
 
         if let Some(ephemeral_flag) = agent.flag() {
             args.extend(ephemeral_flag);
+            Agent::patch_operator(&kube_client.await).await;
         }
 
         let mut process = run_exec_with_target(

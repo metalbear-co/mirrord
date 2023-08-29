@@ -20,7 +20,7 @@ use k8s_openapi::api::{
     core::v1::{Namespace, Pod, Service},
 };
 use kube::{
-    api::{DeleteParams, ListParams, PostParams, WatchParams},
+    api::{DeleteParams, ListParams, Patch, PatchParams, PostParams, WatchParams},
     core::WatchEvent,
     runtime::wait::{await_condition, conditions::is_pod_running},
     Api, Client, Config, Error,
@@ -363,11 +363,52 @@ impl Application {
     }
 }
 
+use std::sync::atomic::{AtomicBool, Ordering};
+static OPERATOR_PATCHED: AtomicBool = AtomicBool::new(false);
+
 impl Agent {
     pub fn flag(&self) -> Option<Vec<&str>> {
         match self {
             Agent::Ephemeral => Some(vec!["--ephemeral-container"]),
             Agent::Job => None,
+        }
+    }
+
+    pub async fn patch_operator(kube_client: &Client) {
+        if let Ok(_) = std::env::var("MIRRORD_OPERATOR_TESTS") && OPERATOR_PATCHED.compare_exchange(false,true, Ordering::Acquire,Ordering::Relaxed).unwrap() {
+            println!("Patching operator to use ephemeral container for agent");
+            let patch = serde_json::json!({
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "spec": {
+                    "template": {
+                        "spec": {
+                            "containers": [
+                                {
+                                    "name": "mirrord-operator",
+                                    "env": [
+                                        {
+                                            "name": "MIRRORD_EPHEMERAL_CONTAINER",
+                                            "value": "true"
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                }
+            });
+
+            let patch = Patch::Apply(patch);
+            let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), "mirrord");
+            deployment_api
+                .patch(
+                    "mirrord-operator",
+                    &PatchParams::apply("mirrord-operator"),
+                    &patch,
+                )
+                .await
+                .unwrap();
         }
     }
 }
