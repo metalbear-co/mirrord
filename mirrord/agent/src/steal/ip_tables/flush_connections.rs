@@ -28,7 +28,8 @@ where
         let managed =
             IPTableChain::create(ipt.with_table("filter").into(), IPTABLE_INPUT.to_string())?;
 
-        managed.add_rule("-p tcp -m state --state INVALID -j REJECT --reject-with tcp-reset")?;
+        managed.add_rule("-p tcp -m state --state INVALID,UNTRACKED -j REJECT --reject-with tcp-reset")?;
+        managed.add_rule("-p tcp -m conntrack --ctstatus NONE -j REJECT --reject-with tcp-reset")?;
 
         Ok(FlushConnections { managed, inner })
     }
