@@ -6,9 +6,6 @@ use std::{
 
 use bytes::Bytes;
 use fancy_regex::Regex;
-use http_body_util::Full;
-use hyper::Response;
-use iptables::IPTables;
 use mirrord_protocol::{
     tcp::{HttpResponseFallback, NewTcpConnection, TcpClose, HTTP_FRAMED_VERSION},
     RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
@@ -29,7 +26,7 @@ use crate::{
     error::Result,
     steal::{
         connection::StealSubscription::{HttpFiltered, Unfiltered},
-        http::{HttpFilter, HttpFilterManager, Response},
+        http::{HttpFilter, HttpFilterManager},
         ip_tables::IPTablesWrapper,
     },
     AgentError::{AgentInvariantViolated, HttpRequestReceiverClosed},

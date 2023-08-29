@@ -23,16 +23,17 @@ where
 {
     const ENTRYPOINT: &'static str = "INPUT";
 
+    #[tracing::instrument(level = "trace", skip(ipt, inner))]
     pub fn create(ipt: Arc<IPT>, inner: Box<T>) -> Result<Self> {
         let managed =
             IPTableChain::create(ipt.with_table("filter").into(), IPTABLE_INPUT.to_string())?;
 
-        managed.add_rule("-p tcp -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT")?;
-        managed.add_rule("-p tcp -j DROP")?;
+            managed.add_rule("-p tcp -m state --state INVALID -j REJECT --reject-with tcp-reset")?;
 
         Ok(FlushConnections { managed, inner })
     }
 
+    #[tracing::instrument(level = "trace", skip(ipt, inner))]
     pub fn load(ipt: Arc<IPT>, inner: Box<T>) -> Result<Self> {
         let managed =
             IPTableChain::create(ipt.with_table("filter").into(), IPTABLE_INPUT.to_string())?;
@@ -47,6 +48,7 @@ where
     IPT: IPTables + Send + Sync,
     T: Redirect + Send + Sync,
 {
+    #[tracing::instrument(level = "trace", skip(self), ret)]
     async fn mount_entrypoint(&self) -> Result<()> {
         self.inner.mount_entrypoint().await?;
 
@@ -58,6 +60,7 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), ret)]
     async fn unmount_entrypoint(&self) -> Result<()> {
         self.inner.unmount_entrypoint().await?;
 
@@ -69,6 +72,7 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), ret)]
     async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.inner
             .add_redirect(redirected_port, target_port)
@@ -92,6 +96,7 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip(self), ret)]
     async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.inner
             .remove_redirect(redirected_port, target_port)

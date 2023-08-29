@@ -1,4 +1,4 @@
-use std::sync::{Arc, LazyLock};
+use std::{sync::{Arc, LazyLock}, fmt::Debug};
 
 use enum_dispatch::enum_dispatch;
 use mirrord_protocol::Port;
@@ -114,6 +114,14 @@ pub struct IPTablesWrapper {
     tables: Arc<iptables::IPTables>,
 }
 
+impl Debug for IPTablesWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IPTablesWrapper")
+            .field("table_name", &self.table_name)
+            .finish()
+    }
+}
+
 impl From<iptables::IPTables> for IPTablesWrapper {
     fn from(tables: iptables::IPTables) -> Self {
         IPTablesWrapper {
@@ -124,7 +132,7 @@ impl From<iptables::IPTables> for IPTablesWrapper {
 }
 
 impl IPTables for IPTablesWrapper {
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     fn with_table(&self, table_name: &'static str) -> Self
     where
         Self: Sized,
@@ -135,7 +143,7 @@ impl IPTables for IPTablesWrapper {
         }
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     fn create_chain(&self, name: &str) -> Result<()> {
         self.tables
             .new_chain(self.table_name, name)
@@ -147,7 +155,7 @@ impl IPTables for IPTablesWrapper {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     fn remove_chain(&self, name: &str) -> Result<()> {
         self.tables
             .flush_chain(self.table_name, name)
@@ -159,28 +167,28 @@ impl IPTables for IPTablesWrapper {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", ret)]
     fn add_rule(&self, chain: &str, rule: &str) -> Result<()> {
         self.tables
             .append(self.table_name, chain, rule)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace", ret)]
     fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> Result<()> {
         self.tables
             .insert(self.table_name, chain, rule, index)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     fn list_rules(&self, chain: &str) -> Result<Vec<String>> {
         self.tables
             .list(self.table_name, chain)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "trace")]
     fn remove_rule(&self, chain: &str, rule: &str) -> Result<()> {
         self.tables
             .delete(self.table_name, chain, rule)
