@@ -7,7 +7,10 @@ use std::{
     net::Ipv4Addr,
     path::PathBuf,
     process::{ExitStatus, Stdio},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -363,7 +366,6 @@ impl Application {
     }
 }
 
-use std::sync::atomic::{AtomicBool, Ordering};
 static OPERATOR_PATCHED: AtomicBool = AtomicBool::new(false);
 
 impl Agent {
@@ -375,7 +377,7 @@ impl Agent {
     }
 
     pub async fn patch_operator(kube_client: &Client) {
-        if let Ok(_) = std::env::var("MIRRORD_OPERATOR_TESTS") && OPERATOR_PATCHED.compare_exchange(false,true, Ordering::Acquire,Ordering::Relaxed).unwrap() {
+        if let Ok(_) = std::env::var("MIRRORD_OPERATOR_TESTS") && OPERATOR_PATCHED.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).unwrap() {
             println!("Patching operator to use ephemeral container for agent");
             let patch = serde_json::json!({
                 "apiVersion": "apps/v1",
