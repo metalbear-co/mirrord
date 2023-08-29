@@ -45,6 +45,9 @@ pub struct RuntimeData {
     pub container_id: String,
     pub container_runtime: ContainerRuntime,
     pub container_name: String,
+
+    /// Used to check if we're running with a mesh/sidecar in `detect_mesh_mirror_mode`.
+    pub is_mesh: bool,
 }
 
 impl RuntimeData {
@@ -68,14 +71,16 @@ impl RuntimeData {
             .as_ref()
             .ok_or(KubeApiError::PodStatusNotFound)?
             .container_statuses
-            .as_ref()
+            .clone()
             .ok_or(KubeApiError::ContainerStatusNotFound)?;
-        let chosen_status =
-            choose_container(container_name, container_statuses).ok_or_else(|| {
-                KubeApiError::ContainerNotFound(
-                    container_name.clone().unwrap_or_else(|| "None".to_string()),
-                )
-            })?;
+        let (chosen_container, is_mesh) =
+            choose_container(container_name, container_statuses.as_ref());
+
+        let chosen_status = chosen_container.ok_or_else(|| {
+            KubeApiError::ContainerNotFound(
+                container_name.clone().unwrap_or_else(|| "None".to_string()),
+            )
+        })?;
 
         let container_name = chosen_status.name.clone();
         let container_id_full = chosen_status
@@ -109,6 +114,7 @@ impl RuntimeData {
             container_id,
             container_runtime,
             container_name,
+            is_mesh,
         })
     }
 
