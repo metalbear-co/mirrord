@@ -6,7 +6,7 @@ mod operator {
     use tempfile::{tempdir, TempDir};
     use tokio::{io::AsyncWriteExt, process::Command};
 
-    use crate::utils::{run_mirrord, TestProcess};
+    use crate::utils::{run_mirrord, service, Application, KubeService, TestProcess};
 
     pub enum OperatorSetup {
         Online,
@@ -118,5 +118,46 @@ mod operator {
         assert!(res.success());
 
         check_install_file_result(setup_file, temp_dir).await;
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn two_clients_steal_same_target(
+        #[future]
+        #[notrace]
+        service: KubeService,
+        #[values(Application::PythonFlaskHTTP)] application: Application,
+    ) {
+        if let Ok(_) = std::env::var("MIRRORD_OPERATOR_TESTS") {
+            let service = service.await;
+
+            let flags = vec!["--steal"];
+
+            let mut client_a = application
+                .run(
+                    &service.target,
+                    Some(&service.namespace),
+                    Some(flags.clone()),
+                    None,
+                )
+                .await;
+
+            client_a
+                .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+                .await;
+
+            let mut client_b = application
+                .run(&service.target, Some(&service.namespace), Some(flags), None)
+                .await;
+
+            client_b
+                .wait_for_line(Duration::from_secs(40), "Someone else is stealing traffic")
+                .await;
+
+            client_a.child.kill().await.unwrap();
+
+            let res = client_b.child.wait().await.unwrap();
+            assert!(!res.success());
+        }
     }
 }
