@@ -368,7 +368,7 @@ impl IncomingConfig {
 /// 2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming
 /// data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and
 /// steals the traffic on the port if it is HTTP;
-#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema, Default)]
+#[derive(Deserialize, PartialEq, Eq, Clone, Copy, Debug, JsonSchema, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum IncomingMode {
     /// <!--${internal}-->

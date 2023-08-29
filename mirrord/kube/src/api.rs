@@ -2,6 +2,7 @@ use std::hash::Hash;
 
 use actix_codec::{AsyncRead, AsyncWrite};
 use futures::{SinkExt, StreamExt};
+use mirrord_config::LayerConfig;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage, LogLevel};
 use tokio::sync::mpsc;
@@ -86,14 +87,14 @@ pub trait AgentManagment {
 
     async fn connect<P>(
         &self,
-        progress: &P,
+        progress: &mut P,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), Self::Err>
     where
         P: Progress + Send + Sync,
         Self::AgentRef: Send + Sync,
         Self::Err: Send + Sync,
     {
-        self.create_connection(self.create_agent(progress).await?)
+        self.create_connection(self.create_agent(progress, None).await?)
             .await
     }
 
@@ -102,7 +103,11 @@ pub trait AgentManagment {
         agent_ref: Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), Self::Err>;
 
-    async fn create_agent<P>(&self, progress: &P) -> Result<Self::AgentRef, Self::Err>
+    async fn create_agent<P>(
+        &self,
+        progress: &mut P,
+        config: Option<&LayerConfig>,
+    ) -> Result<Self::AgentRef, Self::Err>
     where
         P: Progress + Send + Sync;
 }

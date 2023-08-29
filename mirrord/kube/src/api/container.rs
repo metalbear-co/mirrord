@@ -76,14 +76,23 @@ where
 }
 
 /// Choose container logic:
+///
 /// 1. Try to find based on given name
 /// 2. Try to find first container in pod that isn't a mesh side car
 /// 3. Take first container in pod
+///
+/// We also check if we're in a mesh based on `MESH_LIST`, returning whether we are or not.
+#[tracing::instrument(level = "trace", ret)]
 pub fn choose_container<'a>(
     container_name: &Option<String>,
     container_statuses: &'a [ContainerStatus],
-) -> Option<&'a ContainerStatus> {
-    if let Some(name) = container_name {
+) -> (Option<&'a ContainerStatus>, bool) {
+    const MESH_LIST: [&str; 4] = ["istio-proxy", "istio-init", "linkerd-proxy", "linkerd-init"];
+    let is_mesh = container_statuses
+        .iter()
+        .any(|status| MESH_LIST.contains(&status.name.as_str()));
+
+    let container = if let Some(name) = container_name {
         container_statuses
             .iter()
             .find(|&status| &status.name == name)
@@ -93,5 +102,7 @@ pub fn choose_container<'a>(
             .iter()
             .find(|&status| !SKIP_NAMES.contains(status.name.as_str()))
             .or_else(|| container_statuses.first())
-    }
+    };
+
+    (container, is_mesh)
 }
