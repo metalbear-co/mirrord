@@ -59,7 +59,6 @@ where
         &self.inner
     }
 
-    #[tracing::instrument(skip(self))]
     pub fn add_rule(&self, rule: &str) -> Result<i32> {
         self.inner
             .insert_rule(

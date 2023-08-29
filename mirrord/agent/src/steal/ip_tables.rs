@@ -1,4 +1,7 @@
-use std::{sync::{Arc, LazyLock}, fmt::Debug};
+use std::{
+    fmt::Debug,
+    sync::{Arc, LazyLock},
+};
 
 use enum_dispatch::enum_dispatch;
 use mirrord_protocol::Port;
