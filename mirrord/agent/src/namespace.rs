@@ -1,8 +1,15 @@
 use std::{fs::File, os::fd::AsRawFd};
 
 use nix::sched::{setns, CloneFlags};
+use thiserror::Error;
 
-use crate::error::Result;
+#[derive(Debug, Error)]
+pub(crate) enum NamespaceError {
+    #[error("Failed opening pid's namespace file: {0}")]
+    FailedNamespaceOpen(#[from] std::io::Error),
+    #[error("Failed to enter namespace: {0}")]
+    FailedNamespaceEnter(#[from] nix::Error),
+}
 
 /// Non exhaustive namespace type enum. Add as needed
 #[derive(Debug)]
@@ -34,7 +41,7 @@ impl From<NamespaceType> for CloneFlags {
 /// NOTE: don't make it async in the case we're in an multi-thread scheduler and we want it to
 /// happen on the same thread always.
 #[tracing::instrument(level = "trace")]
-pub(crate) fn set_namespace(pid: u64, namespace_type: NamespaceType) -> Result<()> {
+pub(crate) fn set_namespace(pid: u64, namespace_type: NamespaceType) -> Result<(), NamespaceError> {
     let fd = File::open(namespace_type.path_from_pid(pid))?;
 
     // use as_raw_fd to get reference so it will drop after setns

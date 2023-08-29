@@ -1,6 +1,9 @@
 //! Logic for pausing using cgroup directly
 //! Pause requires privileged - assumes ephemeral (hardcoded pid 1)
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use nix::mount::{mount, MsFlags};
 use thiserror::Error;
@@ -12,7 +15,7 @@ use tracing::{trace, warn};
 
 use crate::{
     error::AgentError,
-    namespace::{set_namespace, NamespaceType},
+    namespace::{set_namespace, NamespaceError, NamespaceType},
 };
 
 #[derive(Debug, Error)]
@@ -45,6 +48,22 @@ enum CgroupV1Error {
 
 #[derive(Debug, Error)]
 enum CgroupV2Error {
+    #[error("Failed to open cgroup.procs file: {0}")]
+    FailedOpenCgroupProcs(std::io::Error),
+    #[error("Failed to read cgroup.procs file: {0}")]
+    FailedReadingCgroupProcs(std::io::Error),
+    #[error("Malformed cgroup.procs file: {0}")]
+    MalformedCgroupProcs(<u64 as FromStr>::Err, String),
+    #[error("Failed to write process to cgroup.procs file: {0}")]
+    FailedWritingCgroupProcs(std::io::Error),
+    #[error("Failed entering cgroup namespace {0}")]
+    FailedEnteringCgroupNamespace(#[from] NamespaceError),
+    #[error("Failed to check existence of cgroup subdir: {0}")]
+    FailedSubgroupDirExistsCheck(std::io::Error),
+    #[error("Failed creating cgroup subdir: {0}")]
+    FailedCreatingSubgroupDir(std::io::Error),
+    #[error("No pids found in cgroup")]
+    NoPidsFoundInCgroup,
     #[error(transparent)]
     CgroupSharedError(#[from] CgroupSharedError),
 }
@@ -72,7 +91,7 @@ impl CgroupV1 {
     const FREEZE_PATH: &str = "freezer.state";
 
     #[tracing::instrument(level = "trace", ret)]
-    pub(crate) async fn new() -> Result<Self, CgroupError> {
+    pub(crate) async fn new() -> Result<Self, CgroupV1Error> {
         let file = File::open("/proc/1/cgroup")
             .await
             .map_err(CgroupV1Error::FailedOpenPidCgroup)?;
@@ -88,15 +107,15 @@ impl CgroupV1 {
             // we don't care about the number, prefer the string for comparison
             line_iter
                 .next()
-                .ok_or_else(|| CgroupV1Error::MalformedPidCgroupFile(line))?;
+                .ok_or_else(|| CgroupV1Error::MalformedPidCgroupFile(line.clone()))?;
             let cgroup_type = line_iter
                 .next()
-                .ok_or_else(|| CgroupV1Error::MalformedPidCgroupFile(line))?;
+                .ok_or_else(|| CgroupV1Error::MalformedPidCgroupFile(line.clone()))?;
 
             if cgroup_type == "freezer" {
                 let cgroup_path = line_iter
                     .next()
-                    .ok_or_else(|| CgroupV1Error::MalformedPidCgroupFile(line))?;
+                    .ok_or_else(|| CgroupV1Error::MalformedPidCgroupFile(line.clone()))?;
                 return Ok(Self {
                     // strip / since joining "/a" and "/b" results in "/b"
                     cgroup_path: Path::new(CGROUP_MOUNT_PATH).join(PathBuf::from(
@@ -105,11 +124,11 @@ impl CgroupV1 {
                 });
             }
         }
-        Err(CgroupV1Error::NoFreezerController)
+        Err(CgroupV1Error::NoFreezerController.into())
     }
 
     #[tracing::instrument(level = "trace", ret, skip(self))]
-    async fn pause(&self) -> Result<(), CgroupError> {
+    async fn pause(&self) -> Result<(), CgroupV1Error> {
         // Check if our cgroup is mounted, if not, mount it.
         let cgroup_path = Path::new(CGROUP_MOUNT_PATH);
         if !try_exists(cgroup_path)
@@ -128,7 +147,7 @@ impl CgroupV1 {
                 MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
                 Some("freezer"),
             )
-            .map_err(CgroupSharedError::FailedMountingCgroup)?;
+            .map_err(CgroupSharedError::FailedMountingCgroup)?
         }
 
         let mut open_options = OpenOptions::new();
@@ -144,14 +163,17 @@ impl CgroupV1 {
     }
 
     #[tracing::instrument(level = "trace", ret, skip(self))]
-    async fn unpause(&self) -> Result<()> {
+    async fn unpause(&self) -> Result<(), CgroupV1Error> {
         // if we're unpausing, mount should exist and we should be in the cgroup namespace
         let mut open_options = OpenOptions::new();
         let mut file = open_options
             .write(true)
             .open(self.cgroup_path.join(Self::FREEZE_PATH))
-            .await?;
-        file.write_all("THAWED".as_bytes()).await?;
+            .await
+            .map_err(CgroupSharedError::FailedOpeningFreezerFile)?;
+        file.write_all("THAWED".as_bytes())
+            .await
+            .map_err(CgroupSharedError::FailedWritingFreezerFile)?;
         Ok(())
     }
 }
@@ -161,16 +183,23 @@ pub(crate) struct CgroupV2 {}
 
 /// Reads given path's "cgroup.procs" file and returns the pids in it
 #[tracing::instrument(level = "trace", ret)]
-async fn read_pids_cgroupv2(cgroup_path: &Path) -> Result<Vec<u64>> {
+async fn read_pids_cgroupv2(cgroup_path: &Path) -> Result<Vec<u64>, CgroupV2Error> {
     let file_name = cgroup_path.join(CgroupV2::PROCS_FILE);
-    let file = File::open(file_name).await?;
+    let file = File::open(file_name)
+        .await
+        .map_err(CgroupV2Error::FailedOpenCgroupProcs)?;
     let buf_reader = BufReader::new(file);
     let mut pids = Vec::new();
     let mut lines = buf_reader.lines();
-    while let Some(line) = lines.next_line().await? {
-        let pid = line.trim().parse().map_err(|_| {
-            AgentError::PauseFailedCgroup(format!("failed to parse pid line {line}"))
-        })?;
+    while let Some(line) = lines
+        .next_line()
+        .await
+        .map_err(CgroupV2Error::FailedReadingCgroupProcs)?
+    {
+        let pid = line
+            .trim()
+            .parse()
+            .map_err(|e| CgroupV2Error::MalformedCgroupProcs(e, line.clone()))?;
         pids.push(pid)
     }
     Ok(pids)
@@ -178,20 +207,18 @@ async fn read_pids_cgroupv2(cgroup_path: &Path) -> Result<Vec<u64>> {
 
 /// Write given pids to given path's "cgroup.procs" file
 #[tracing::instrument(level = "trace", ret)]
-async fn move_pids_to_cgroupv2(cgroup_path: &Path, pids: Vec<u64>) -> Result<()> {
+async fn move_pids_to_cgroupv2(cgroup_path: &Path, pids: Vec<u64>) -> Result<(), CgroupV2Error> {
     for pid in pids {
         tokio::fs::write(cgroup_path.join(CgroupV2::PROCS_FILE), format!("{pid}"))
             .await
-            .map_err(|_| {
-                AgentError::PauseFailedCgroup("write pid to subgroup failed".to_string())
-            })?;
+            .map_err(CgroupV2Error::FailedWritingCgroupProcs)?;
     }
     Ok(())
 }
 
 /// (Un)Freeze the given cgroup
 #[tracing::instrument(level = "trace", ret)]
-async fn freeze_cgroupv2(cgroup_path: &Path, on: bool) -> Result<()> {
+async fn freeze_cgroupv2(cgroup_path: &Path, on: bool) -> Result<(), CgroupV2Error> {
     let mut open_options = OpenOptions::new();
     let freeze_path = cgroup_path.join("cgroup.freeze");
     trace!("freeze path {freeze_path:?}");
@@ -199,31 +226,33 @@ async fn freeze_cgroupv2(cgroup_path: &Path, on: bool) -> Result<()> {
         .write(true)
         .open(&freeze_path)
         .await
-        .map_err(|e| AgentError::PauseFailedCgroup(format!("{e} open cgroup v2 failed")))?;
+        .map_err(CgroupSharedError::FailedOpeningFreezerFile)?;
 
     let command = if on { "1" } else { "0" };
     file.write_all(command.as_bytes())
         .await
-        .map_err(|_| AgentError::PauseFailedCgroup(format!("writing 1 failed {freeze_path:?}")))
+        .map_err(CgroupSharedError::FailedWritingFreezerFile)?;
+    Ok(())
 }
 
 impl CgroupV2 {
     const PROCS_FILE: &str = "cgroup.procs";
 
     #[tracing::instrument(level = "trace", ret, skip(self))]
-    async fn pause(&self) -> Result<()> {
+    async fn pause(&self) -> Result<(), CgroupV2Error> {
         // Enter the namespace, we might be already in it but it doesn't really matter
         // Note: Entering the cgroup namespace **doesn't** set put our process in the cgroup :phew:
-        set_namespace(1, NamespaceType::Cgroup).map_err(|_| {
-            AgentError::PauseFailedCgroup("set_namespace failed cgroup v2".to_string())
-        })?;
+        set_namespace(1, NamespaceType::Cgroup)?;
         // Check if our cgroup is mounted, if not, mount it.
         let cgroup_path = Path::new(CGROUP_MOUNT_PATH);
-        if !try_exists(cgroup_path).await? {
+        if !try_exists(cgroup_path)
+            .await
+            .map_err(CgroupSharedError::FailedMountExistsCheck)?
+        {
             trace!("mounting cgroup");
-            create_dir(cgroup_path).await.map_err(|_| {
-                AgentError::PauseFailedCgroup("create dir cgroup v2 failed".to_string())
-            })?;
+            create_dir(cgroup_path)
+                .await
+                .map_err(CgroupSharedError::FailedCreatingCgroupMountDir)?;
             mount(
                 None::<&str>,
                 cgroup_path,
@@ -231,7 +260,7 @@ impl CgroupV2 {
                 MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
                 None::<&str>,
             )
-            .map_err(|_| AgentError::PauseFailedCgroup("mount cgroup v2 failed".to_string()))?;
+            .map_err(CgroupSharedError::FailedMountingCgroup)?;
         }
         // On nsdelegate hosts (where cgroup2 is mounted with nsdelegate option),
         // we can't write to the cgroup.freeze file directly
@@ -239,18 +268,21 @@ impl CgroupV2 {
         // In theory we could just create a brand new one, move the process into it but then
         // other cgroup rules won't affect it, so we want it to be under the same hierarchy.
         let sub_cgroup_path = Path::new(CGROUP_SUBGROUP_MOUNT_PATH);
-        if !try_exists(sub_cgroup_path).await? {
+        if !try_exists(sub_cgroup_path)
+            .await
+            .map_err(CgroupV2Error::FailedSubgroupDirExistsCheck)?
+        {
             trace!("creating subgroup");
-            create_dir(sub_cgroup_path).await.map_err(|_| {
-                AgentError::PauseFailedCgroup("create dir subgroup failed".to_string())
-            })?;
+            create_dir(sub_cgroup_path)
+                .await
+                .map_err(CgroupV2Error::FailedCreatingSubgroupDir)?;
         }
 
         // Move cgroup processes' to the subgroup
         let pids = read_pids_cgroupv2(cgroup_path).await?;
         if pids.is_empty() {
             warn!("No pids found in cgroup v2 {cgroup_path:?}");
-            return Err(AgentError::PauseFailedCgroup("no pids found".to_string()));
+            return Err(CgroupV2Error::NoPidsFoundInCgroup);
         }
 
         move_pids_to_cgroupv2(sub_cgroup_path, pids).await?;
@@ -259,7 +291,7 @@ impl CgroupV2 {
     }
 
     #[tracing::instrument(level = "trace", ret, skip(self))]
-    async fn unpause(&self) -> Result<()> {
+    async fn unpause(&self) -> Result<(), CgroupV2Error> {
         // if we're unpausing, mount should exist and we should be in the cgroup namespace
         // do reverse order - first unfreeze then move back to root cgroup
         // Move cgroup processes' to the subgroup
@@ -272,7 +304,7 @@ impl CgroupV2 {
 
         if pids.is_empty() {
             warn!("No pids found in cgroup v2 {cgroup_path:?}");
-            return Err(AgentError::PauseFailedCgroup("no pids found".to_string()));
+            return Err(CgroupV2Error::NoPidsFoundInCgroup);
         }
 
         move_pids_to_cgroupv2(cgroup_path, pids).await
@@ -288,26 +320,31 @@ pub(crate) enum Cgroup {
 }
 
 impl Cgroup {
-    pub(crate) async fn new() -> Result<Self> {
+    pub(crate) async fn new() -> Result<Self, CgroupError> {
         // if `/sys/fs/cgroup.controllers` exists, it means we're v2
-        if tokio::fs::try_exists("/sys/fs/cgroup/cgroup.controllers").await? {
+        if tokio::fs::try_exists("/sys/fs/cgroup/cgroup.controllers")
+            .await
+            .unwrap_or(false)?
+        {
             Ok(Self::V2(CgroupV2 {}))
         } else {
             Ok(Self::V1(CgroupV1::new().await?))
         }
     }
 
-    pub(crate) async fn pause(&self) -> Result<()> {
+    pub(crate) async fn pause(&self) -> Result<(), CgroupError> {
         match self {
-            Cgroup::V1(cgroup) => cgroup.pause().await,
-            Cgroup::V2(cgroup) => cgroup.pause().await,
+            Cgroup::V1(cgroup) => cgroup.pause().await?,
+            Cgroup::V2(cgroup) => cgroup.pause().await?,
         }
+        Ok(())
     }
 
-    pub(crate) async fn unpause(&self) -> Result<()> {
+    pub(crate) async fn unpause(&self) -> Result<(), CgroupError> {
         match self {
-            Cgroup::V1(cgroup) => cgroup.unpause().await,
-            Cgroup::V2(cgroup) => cgroup.unpause().await,
+            Cgroup::V1(cgroup) => cgroup.unpause().await?,
+            Cgroup::V2(cgroup) => cgroup.unpause().await?,
         }
+        Ok(())
     }
 }

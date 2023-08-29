@@ -9,7 +9,7 @@ use mirrord_protocol::{
 };
 use thiserror::Error;
 
-use crate::{sniffer::SnifferCommand, steal::StealerCommand};
+use crate::{namespace::NamespaceError, sniffer::SnifferCommand, steal::StealerCommand};
 
 #[derive(Debug, Error)]
 pub enum AgentError {
@@ -147,6 +147,9 @@ pub enum AgentError {
 
     #[error("Pause failed with cgroup error: {0} - make sure agent is set to privileged.")]
     PauseFailedCgroup(String),
+
+    #[error(transparent)]
+    FailedNamespaceEnter(#[from] NamespaceError),
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;
