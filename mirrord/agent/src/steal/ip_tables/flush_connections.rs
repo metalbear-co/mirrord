@@ -6,7 +6,7 @@ use tracing::warn;
 use crate::{error::Result, steal::ip_tables::redirect::Redirect};
 
 #[derive(Debug)]
-pub struct FlushConnections<T> {
+pub(crate) struct FlushConnections<T> {
     inner: Box<T>,
 }
 
