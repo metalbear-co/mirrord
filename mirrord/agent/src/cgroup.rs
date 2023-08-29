@@ -13,10 +13,7 @@ use tokio::{
 };
 use tracing::{trace, warn};
 
-use crate::{
-    error::AgentError,
-    namespace::{set_namespace, NamespaceError, NamespaceType},
-};
+use crate::namespace::{set_namespace, NamespaceError, NamespaceType};
 
 #[derive(Debug, Error)]
 enum CgroupSharedError {
@@ -69,7 +66,7 @@ enum CgroupV2Error {
 }
 
 #[derive(Debug, Error)]
-enum CgroupError {
+pub(crate) enum CgroupError {
     #[error("cgroup v1 error: {0}")]
     CgroupV1Error(#[from] CgroupV1Error),
     #[error("cgroup v2 error: {0}")]
