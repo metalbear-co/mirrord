@@ -21,9 +21,9 @@ where
     // or run tasks before actually launching.
     #[cfg(target_os = "macos")]
     let mut execution_info =
-        MirrordExecution::start(&config, executable, &progress, analytics).await?;
+        MirrordExecution::start(&config, executable, &mut progress, analytics).await?;
     #[cfg(not(target_os = "macos"))]
-    let mut execution_info = MirrordExecution::start(&config, &progress, analytics).await?;
+    let mut execution_info = MirrordExecution::start(&config, &mut progress, analytics).await?;
 
     // We don't execute so set envs aren't passed, so we need to add config file and target to
     // env.
