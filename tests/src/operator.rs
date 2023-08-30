@@ -201,5 +201,4 @@ mod operator {
             assert!(!res.success());
         }
     }
-
 }

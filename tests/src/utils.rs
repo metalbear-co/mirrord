@@ -639,7 +639,8 @@ impl Drop for KubeService {
     }
 }
 
-/// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
+/// Create a new [`
+/// `] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
 /// This behavior can be changed, see [`FORCE_CLEANUP_ENV_NAME`].
 /// * `randomize_name` - whether a random suffix should be added to the end of the resource names
@@ -812,7 +813,9 @@ pub async fn service(
     let target = get_pod_instance(kube_client.clone(), &name, namespace)
         .await
         .unwrap();
+
     let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
+
     await_condition(pod_api, &target, is_pod_running())
         .await
         .unwrap();
@@ -1014,6 +1017,23 @@ pub async fn get_pod_instance(client: Client, app_name: &str, namespace: &str) -
         .unwrap()
         .into_iter()
         .find_map(|pod| pod.metadata.name)
+}
+
+pub async fn get_instance_name<T>(client: Client, app_name: &str, namespace: &str) -> Option<String>
+where
+    T: kube::Resource<Scope = k8s_openapi::NamespaceResourceScope>
+        + k8s_openapi::Metadata
+        + Clone
+        + DeserializeOwned
+        + Debug,
+    <T as kube::Resource>::DynamicType: Default,
+{
+    let api: Api<T> = Api::namespaced(client, namespace);
+    api.list(&ListParams::default().labels(&format!("app={}", app_name)))
+        .await
+        .unwrap()
+        .into_iter()
+        .find_map(|item| item.meta().name.clone())
 }
 
 /// Take a request builder of any method, add headers, send the request, verify success, and
