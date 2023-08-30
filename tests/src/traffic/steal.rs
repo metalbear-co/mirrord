@@ -39,8 +39,10 @@ mod steal {
         let mut flags = vec!["--steal"];
         if let Some(flag) = agent.flag() {
             flags.extend(flag);
-            Agent::patch_operator(&kube_client).await;
         }
+
+        agent.patch_operator(&kube_client).await;
+
         let mut process = application
             .run(&service.target, Some(&service.namespace), Some(flags), None)
             .await;
@@ -77,8 +79,10 @@ mod steal {
         let mut flags = vec!["--steal"];
         if let Some(flag) = agent.flag() {
             flags.extend(flag);
-            Agent::patch_operator(&kube_client).await;
         }
+
+        agent.patch_operator(&kube_client).await;
+
         let mut process = application
             .run(
                 &service.target,
@@ -116,8 +120,9 @@ mod steal {
         let mut flags = vec!["--steal"];
         if let Some(flag) = agent.flag() {
             flags.extend(flag);
-            Agent::patch_operator(&kube_client).await;
         }
+
+        agent.patch_operator(&kube_client).await;
 
         let mut process = application
             .run(&service.target, Some(&service.namespace), Some(flags), None)
@@ -199,8 +204,9 @@ mod steal {
         let mut flags = vec!["--steal"];
         if let Some(flag) = agent.flag() {
             flags.extend(flag);
-            Agent::patch_operator(&kube_client).await;
         }
+
+        agent.patch_operator(&kube_client).await;
 
         let mut process = application
             .run(

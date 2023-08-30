@@ -31,8 +31,8 @@ mod file_ops {
 
         if let Some(ephemeral_flag) = agent.flag() {
             args.extend(ephemeral_flag);
-            Agent::patch_operator(&kube_client.await).await;
         }
+        agent.patch_operator(&kube_client.await).await;
 
         let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/**")];
         let mut process = run_exec_with_target(
@@ -217,8 +217,8 @@ mod file_ops {
 
         if let Some(ephemeral_flag) = agent.flag() {
             args.extend(ephemeral_flag);
-            Agent::patch_operator(&kube_client.await).await;
         }
+        agent.patch_operator(&kube_client.await).await;
 
         let mut process = run_exec_with_target(
             command,

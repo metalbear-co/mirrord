@@ -100,7 +100,7 @@ pub enum Application {
     PythonCloseSocketKeepConnection,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Agent {
     Ephemeral,
     Job,
@@ -376,9 +376,10 @@ impl Agent {
         }
     }
 
-    pub async fn patch_operator(kube_client: &Client) {
-        if let Ok(_) = std::env::var("MIRRORD_OPERATOR_TESTS") && OPERATOR_PATCHED.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).unwrap() {
-            println!("Patching operator to use ephemeral container for agent");
+    pub async fn patch_operator(&self, kube_client: &Client) {
+        if let Ok(_) = std::env::var("MIRRORD_OPERATOR_TESTS") &&
+            *self == Agent::Ephemeral &&
+            OPERATOR_PATCHED.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).unwrap() {
             let patch = serde_json::json!({
                 "apiVersion": "apps/v1",
                 "kind": "Deployment",
