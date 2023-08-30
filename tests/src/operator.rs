@@ -10,8 +10,8 @@ mod operator {
     use tokio::{io::AsyncWriteExt, process::Command};
 
     use crate::utils::{
-        config_dir, get_instance_name, get_service_url, kube_client, run_mirrord, send_request,
-        service, Agent, Application, KubeService, TestProcess,
+        get_instance_name, get_service_url, kube_client, run_mirrord, send_request, service,
+        Application, KubeService, TestProcess,
     };
 
     pub enum OperatorSetup {
@@ -227,7 +227,6 @@ mod operator {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn two_clients_steal_with_http_filter(
-        config_dir: &std::path::PathBuf,
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(Application::NodeHTTP)] application: Application,
