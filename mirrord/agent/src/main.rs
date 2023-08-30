@@ -15,10 +15,6 @@ use std::{
 };
 
 use actix_codec::Framed;
-use clap::Parser;
-use dns::DnsApi;
-use error::{AgentError, Result};
-use file::FileManager;
 use futures::{
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
@@ -27,9 +23,6 @@ use mirrord_protocol::{
     pause::DaemonPauseTarget, ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
     LogMessage,
 };
-use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
-use sniffer::{SnifferCommand, TcpConnectionSniffer, TcpSnifferApi};
-use steal::api::TcpStealerApi;
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -44,8 +37,14 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use crate::{
     cli::Args,
     container_handle::ContainerHandle,
+    dns::DnsApi,
+    error::{AgentError, Result},
+    file::FileManager,
+    outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi},
     runtime::get_container,
+    sniffer::{SnifferCommand, TcpConnectionSniffer, TcpSnifferApi},
     steal::{
+        api::TcpStealerApi,
         connection::TcpConnectionStealer,
         ip_tables::{
             SafeIpTables, IPTABLE_MESH, IPTABLE_MESH_ENV, IPTABLE_PREROUTING,

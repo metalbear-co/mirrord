@@ -62,7 +62,7 @@ pub enum Mode {
 }
 
 pub fn parse_args() -> Args {
-    let args = Args::try_parse().and_then(|args| {
+    let args = Args::try_parse().and_then(|mut args| {
         if let Mode::Targeted {
             container_id,
             container_runtime,
