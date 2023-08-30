@@ -104,7 +104,7 @@ impl HttpV for HttpV1 {
             // HTTP, to the original destination.
             agent_remote.write_all(&agent_unprocessed).await?;
 
-            let mut client_agent = client_agent.inner();
+            let mut client_agent = client_agent.into_inner();
             // Send the data we received from the original destination, and have not
             // processed as HTTP, to the client.
             client_agent.write_all(&client_unprocessed).await?;
@@ -142,7 +142,7 @@ impl HttpV for HttpV1 {
 
                 let _ = sender
                     .send(RawHyperConnection {
-                        stream: io.inner(),
+                        stream: io.into_inner(),
                         unprocessed_bytes: read_buf,
                     })
                     .inspect_err(|_| error!("Failed sending interceptor connection!"));

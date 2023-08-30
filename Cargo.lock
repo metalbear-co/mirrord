@@ -2507,7 +2507,7 @@ dependencies = [
 [[package]]
 name = "hyper-util"
 version = "0.0.0"
-source = "git+https://github.com/meowjesty/hyper-util?branch=issue/1869/update-runtime#ae51362986cdfd93caf723f990ba5a081aea3a2e"
+source = "git+https://github.com/meowjesty/hyper-util?branch=issue/1869/update-runtime#fc9d572f0e8ce4a9f1c01f3420bf26ad4f2ab65e"
 dependencies = [
  "futures-channel",
  "futures-util",

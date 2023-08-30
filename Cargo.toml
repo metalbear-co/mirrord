@@ -60,8 +60,10 @@ miette = "5"
 fancy-regex = { version = "0.10" }
 enum_dispatch = "0.3"
 
+# TODO(alex): Waiting for a new RC release with the fix for #1869.
 hyper = { git = "https://github.com/meowjesty/hyper", branch = "master", features = ["full"] }
-# TODO switch to release when available
+# TODO(alex): This has a dependency on `hyper`, so we're blocked until new RC and the `hyper-util`
+# crate itself is updated to depend on newer `hyper`.
 hyper-util = { git = "https://github.com/meowjesty/hyper-util", branch = "issue/1869/update-runtime" }
 http-body = "1.0.0-rc.2"
 http-body-util = "0.1.0-rc.3"
