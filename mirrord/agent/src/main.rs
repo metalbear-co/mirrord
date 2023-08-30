@@ -90,9 +90,8 @@ impl State {
     /// Return [`Err`] if container runtime operations failed.
     pub async fn new(args: &Args) -> Result<State> {
         let container = match &args.mode {
-            cli::Mode::Targetless => None,
             cli::Mode::Targeted {
-                container_id,
+                container_id: Some(container_id),
                 container_runtime,
             } => {
                 let container =
@@ -100,6 +99,7 @@ impl State {
 
                 Some(ContainerHandle::new(container).await?)
             }
+            _ => None,
         };
 
         // If we are in an ephemeral container, we use pid 1.
@@ -772,7 +772,7 @@ async fn main() -> Result<()> {
         env!("CARGO_PKG_VERSION")
     );
 
-    let args = cli::Args::parse();
+    let args = cli::parse_args();
 
     let agent_result = if matches!(args.mode, cli::Mode::Targetless)
         || (std::env::var(IPTABLE_PREROUTING_ENV).is_ok()

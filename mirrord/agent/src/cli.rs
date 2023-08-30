@@ -1,6 +1,9 @@
 #![deny(missing_docs)]
 
-use clap::{Parser, Subcommand};
+use clap::{
+    error::{Error, ErrorKind},
+    Parser, Subcommand,
+};
 
 const DEFAULT_RUNTIME: &str = "containerd";
 
@@ -48,12 +51,41 @@ pub enum Mode {
     Targeted {
         /// Container id to get traffic from
         #[arg(short, long)]
-        container_id: String,
+        container_id: Option<String>,
 
         /// Container runtime to use
-        #[arg(short = 'r', long, default_value = DEFAULT_RUNTIME)]
+        #[arg(short = 'r', long)]
         container_runtime: Option<String>,
     },
     #[default]
     Targetless,
+}
+
+pub fn parse_args() -> Args {
+    let args = Args::try_parse().and_then(|args| {
+        if let Mode::Targeted {
+            container_id,
+            container_runtime,
+        } = &mut args.mode
+        {
+            if container_runtime.is_some() && container_id.is_none() {
+                Err(Error::raw(
+                    ErrorKind::InvalidValue,
+                    "container_id is required when container_runtime is specified",
+                ))
+            } else {
+                if container_runtime.is_none() {
+                    *container_runtime = Some(DEFAULT_RUNTIME.to_string());
+                }
+
+                Ok(args)
+            }
+        } else {
+            Ok(args)
+        }
+    });
+    match args {
+        Ok(args) => args,
+        Err(e) => e.exit(),
+    }
 }
