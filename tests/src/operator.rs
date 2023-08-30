@@ -4,12 +4,14 @@ mod operator {
 
     use k8s_openapi::api::apps::v1::Deployment;
     use kube::Client;
+    use reqwest::header::HeaderMap;
     use rstest::*;
     use tempfile::{tempdir, TempDir};
     use tokio::{io::AsyncWriteExt, process::Command};
 
     use crate::utils::{
-        get_instance_name, kube_client, run_mirrord, service, Application, KubeService, TestProcess,
+        config_dir, get_instance_name, get_service_url, kube_client, run_mirrord, send_request,
+        service, Agent, Application, KubeService, TestProcess,
     };
 
     pub enum OperatorSetup {
@@ -176,46 +178,118 @@ mod operator {
         kube_client: Client,
         #[values(Application::PythonFlaskHTTP)] application: Application,
     ) {
-        // if let Ok(_) = std::env::var("MIRRORD_OPERATOR_TESTS") {
-        let service = service.await;
+        if let Ok(_) = std::env::var("MIRRORD_OPERATOR_TESTS") {
+            let service = service.await;
 
-        let flags = vec!["--steal"];
+            let flags = vec!["--steal"];
 
-        let mut client_a = application
-            .run(
-                &service.target,
-                Some(&service.namespace),
-                Some(flags.clone()),
-                None,
+            let mut client_a = application
+                .run(
+                    &service.target,
+                    Some(&service.namespace),
+                    Some(flags.clone()),
+                    None,
+                )
+                .await;
+
+            client_a
+                .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+                .await;
+
+            let target = get_instance_name::<Deployment>(
+                kube_client.await,
+                &service.name,
+                &service.namespace,
             )
-            .await;
+            .await
+            .unwrap();
 
-        client_a
-            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
-            .await;
+            let mut client_b = application
+                .run(
+                    &format!("deployment/{target}"),
+                    Some(&service.namespace),
+                    Some(flags.clone()),
+                    None,
+                )
+                .await;
 
-        let target =
-            get_instance_name::<Deployment>(kube_client.await, &service.name, &service.namespace)
+            client_b
+                .wait_for_line(Duration::from_secs(40), "Someone else is stealing traffic")
+                .await;
+
+            client_a.child.kill().await.unwrap();
+
+            let res = client_b.child.wait().await.unwrap();
+            assert!(!res.success());
+        }
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn two_clients_steal_with_http_filter(
+        config_dir: &std::path::PathBuf,
+        #[future] service: KubeService,
+        #[future] kube_client: Client,
+        #[values(Application::NodeHTTP)] application: Application,
+    ) {
+        if let Ok(_) = std::env::var("MIRRORD_OPERATOR_TESTS") {
+            let service = service.await;
+            let kube_client = kube_client.await;
+            let url = get_service_url(kube_client.clone(), &service).await;
+
+            let flags = vec!["--steal"];
+
+            let mut client_a = application
+                .run(
+                    &service.target,
+                    Some(&service.namespace),
+                    Some(flags.clone()),
+                    Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
+                )
+                .await;
+
+            client_a
+                .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+                .await;
+
+            let mut client_b = application
+                .run(
+                    &service.target,
+                    Some(&service.namespace),
+                    Some(flags),
+                    Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: no")]),
+                )
+                .await;
+
+            client_b
+                .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+                .await;
+
+            let client = reqwest::Client::new();
+            let req_builder = client.delete(&url);
+            let mut headers = HeaderMap::default();
+            headers.insert("x-filter", "yes".parse().unwrap());
+
+            send_request(req_builder, Some("DELETE"), headers.clone()).await;
+
+            tokio::time::timeout(Duration::from_secs(10), client_a.wait())
                 .await
                 .unwrap();
 
-        let mut client_b = application
-            .run(
-                &format!("deployment/{target}"),
-                Some(&service.namespace),
-                Some(flags.clone()),
-                None,
-            )
-            .await;
+            application.assert(&client_a).await;
 
-        client_b
-            .wait_for_line(Duration::from_secs(40), "Someone else is stealing traffic")
-            .await;
+            let client = reqwest::Client::new();
+            let req_builder = client.delete(&url);
+            let mut headers = HeaderMap::default();
+            headers.insert("x-filter", "no".parse().unwrap());
 
-        client_a.child.kill().await.unwrap();
+            send_request(req_builder, Some("DELETE"), headers.clone()).await;
 
-        let res = client_b.child.wait().await.unwrap();
-        assert!(!res.success());
+            tokio::time::timeout(Duration::from_secs(10), client_b.wait())
+                .await
+                .unwrap();
+
+            application.assert(&client_a).await;
+        }
     }
-    // }
 }
