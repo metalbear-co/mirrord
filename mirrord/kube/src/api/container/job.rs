@@ -419,6 +419,7 @@ mod test {
             &agent,
             &params,
             &RuntimeData {
+                is_mesh: false,
                 pod_name: "pod".to_string(),
                 pod_namespace: None,
                 node_name: "foobaz".to_string(),
