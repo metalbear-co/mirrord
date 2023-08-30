@@ -17,7 +17,9 @@ mod file_ops {
         #[future]
         #[notrace]
         service: KubeService,
-        #[future] kube_client: Client,
+        #[notrace]
+        #[future]
+        kube_client: Client,
         #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
         #[values(FileOps::Python, FileOps::Rust)] ops: FileOps,
     ) {
@@ -29,7 +31,7 @@ mod file_ops {
 
         if let Some(ephemeral_flag) = agent.flag() {
             args.extend(ephemeral_flag);
-            Agent::patch_operator(&kube_client).await;
+            Agent::patch_operator(&kube_client.await).await;
         }
 
         let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/**")];

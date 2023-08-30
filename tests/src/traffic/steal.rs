@@ -41,7 +41,6 @@ mod steal {
             flags.extend(flag);
             Agent::patch_operator(&kube_client).await;
         }
-        agent.patch_operator().await;
         let mut process = application
             .run(&service.target, Some(&service.namespace), Some(flags), None)
             .await;
@@ -80,7 +79,6 @@ mod steal {
             flags.extend(flag);
             Agent::patch_operator(&kube_client).await;
         }
-        agent.patch_operator().await;
         let mut process = application
             .run(
                 &service.target,
