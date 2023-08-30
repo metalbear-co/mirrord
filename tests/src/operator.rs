@@ -10,8 +10,8 @@ mod operator {
     use tokio::{io::AsyncWriteExt, process::Command};
 
     use crate::utils::{
-        get_instance_name, get_service_url, kube_client, run_mirrord, send_request, service,
-        Application, KubeService, TestProcess,
+        config_dir, get_instance_name, get_service_url, kube_client, run_mirrord, send_request,
+        service, Application, KubeService, TestProcess,
     };
 
     pub enum OperatorSetup {
@@ -233,6 +233,7 @@ mod operator {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn two_clients_steal_with_http_filter(
+        config_dir: &std::path::PathBuf,
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(Application::NodeHTTP)] application: Application,
@@ -242,6 +243,9 @@ mod operator {
             let kube_client = kube_client.await;
             let url = get_service_url(kube_client.clone(), &service).await;
 
+            let mut config_path = config_dir.clone();
+            config_path.push("http_filter_header.json");
+
             let flags = vec!["--steal"];
 
             let mut client_a = application
@@ -249,7 +253,7 @@ mod operator {
                     &service.target,
                     Some(&service.namespace),
                     Some(flags.clone()),
-                    Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
+                    Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
                 )
                 .await;
 
@@ -257,12 +261,15 @@ mod operator {
                 .wait_for_line(Duration::from_secs(40), "daemon subscribed")
                 .await;
 
+            let mut config_path = config_dir.clone();
+            config_path.push("http_filter_header_no.json");
+
             let mut client_b = application
                 .run(
                     &service.target,
                     Some(&service.namespace),
                     Some(flags),
-                    Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: no")]),
+                    Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
                 )
                 .await;
 
