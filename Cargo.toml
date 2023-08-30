@@ -60,9 +60,9 @@ miette = "5"
 fancy-regex = { version = "0.10" }
 enum_dispatch = "0.3"
 
-hyper = { version = "1.0.0-rc.4", features = ["full"] }
+hyper = { git = "https://github.com/meowjesty/hyper", branch = "master", features = ["full"] }
 # TODO switch to release when available
-hyper-util = { git = "https://github.com/hyperium/hyper-util", commit = "f898015fc9eca9f459ddac521db278d904099e89" }
+hyper-util = { git = "https://github.com/meowjesty/hyper-util", branch = "issue/1869/update-runtime" }
 http-body = "1.0.0-rc.2"
 http-body-util = "0.1.0-rc.3"
 libc = "0.2"
