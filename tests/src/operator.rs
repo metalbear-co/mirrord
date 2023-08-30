@@ -178,57 +178,57 @@ mod operator {
         kube_client: Client,
         #[values(Application::PythonFlaskHTTP)] application: Application,
     ) {
-        // if let Ok(_) = std::env::var("MIRRORD_OPERATOR_TESTS") {
-        let service = service.await;
-        let client = kube_client.await;
+        if let Ok(_) = std::env::var("MIRRORD_OPERATOR_TESTS") {
+            let service = service.await;
+            let client = kube_client.await;
 
-        let flags = vec!["--steal"];
+            let flags = vec!["--steal"];
 
-        let mut client_a = application
-            .run(
-                &service.target,
-                Some(&service.namespace),
-                Some(flags.clone()),
-                None,
-            )
-            .await;
+            let mut client_a = application
+                .run(
+                    &service.target,
+                    Some(&service.namespace),
+                    Some(flags.clone()),
+                    None,
+                )
+                .await;
 
-        client_a
-            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
-            .await;
+            client_a
+                .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+                .await;
 
-        let target =
-            get_instance_name::<Deployment>(client.clone(), &service.name, &service.namespace)
-                .await
-                .unwrap();
+            let target =
+                get_instance_name::<Deployment>(client.clone(), &service.name, &service.namespace)
+                    .await
+                    .unwrap();
 
-        let mut client_b = application
-            .run(
-                &format!("deployment/{target}"),
-                Some(&service.namespace),
-                Some(flags.clone()),
-                None,
-            )
-            .await;
+            let mut client_b = application
+                .run(
+                    &format!("deployment/{target}"),
+                    Some(&service.namespace),
+                    Some(flags.clone()),
+                    None,
+                )
+                .await;
 
-        client_b
-            .wait_for_line(Duration::from_secs(40), "Someone else is stealing traffic")
-            .await;
+            client_b
+                .wait_for_line(Duration::from_secs(40), "Someone else is stealing traffic")
+                .await;
 
-        // check if client_a is stealing
-        let url = get_service_url(client, &service).await;
-        let client = reqwest::Client::new();
-        let req_builder = client.get(&url);
-        let mut headers = HeaderMap::default();
-        headers.insert("x-filter", "yes".parse().unwrap());
-        send_request(req_builder, Some("GET"), headers.clone()).await;
+            // check if client_a is stealing
+            let url = get_service_url(client, &service).await;
+            let client = reqwest::Client::new();
+            let req_builder = client.get(&url);
+            let mut headers = HeaderMap::default();
+            headers.insert("x-filter", "yes".parse().unwrap());
+            send_request(req_builder, Some("GET"), headers.clone()).await;
 
-        client_a.child.kill().await.unwrap();
+            client_a.child.kill().await.unwrap();
 
-        let res = client_b.child.wait().await.unwrap();
-        assert!(!res.success());
+            let res = client_b.child.wait().await.unwrap();
+            assert!(!res.success());
+        }
     }
-    // }
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
