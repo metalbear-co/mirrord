@@ -2443,8 +2443,7 @@ dependencies = [
 [[package]]
 name = "hyper"
 version = "1.0.0-rc.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d280a71f348bcc670fc55b02b63c53a04ac0bf2daff2980795aeaf53edae10e6"
+source = "git+https://github.com/meowjesty/hyper?branch=master#d4a61e3da87a08a25772cd3aa2f503cb4346c81f"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -2508,7 +2507,7 @@ dependencies = [
 [[package]]
 name = "hyper-util"
 version = "0.0.0"
-source = "git+https://github.com/hyperium/hyper-util#f898015fc9eca9f459ddac521db278d904099e89"
+source = "git+https://github.com/meowjesty/hyper-util?branch=issue/1869/update-runtime#fc9d572f0e8ce4a9f1c01f3420bf26ad4f2ab65e"
 dependencies = [
  "futures-channel",
  "futures-util",
