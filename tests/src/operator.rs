@@ -2,11 +2,15 @@
 mod operator {
     use std::{process::Stdio, time::Duration};
 
+    use k8s_openapi::api::apps::v1::Deployment;
+    use kube::Client;
     use rstest::*;
     use tempfile::{tempdir, TempDir};
     use tokio::{io::AsyncWriteExt, process::Command};
 
-    use crate::utils::{run_mirrord, service, Application, KubeService, TestProcess};
+    use crate::utils::{
+        get_instance_name, kube_client, run_mirrord, service, Application, KubeService, TestProcess,
+    };
 
     pub enum OperatorSetup {
         Online,
@@ -167,38 +171,51 @@ mod operator {
         #[future]
         #[notrace]
         service: KubeService,
+        #[future]
+        #[notrace]
+        kube_client: Client,
         #[values(Application::PythonFlaskHTTP)] application: Application,
     ) {
-        if let Ok(_) = std::env::var("MIRRORD_OPERATOR_TESTS") {
-            let service = service.await;
+        // if let Ok(_) = std::env::var("MIRRORD_OPERATOR_TESTS") {
+        let service = service.await;
 
-            let flags = vec!["--steal"];
+        let flags = vec!["--steal"];
 
-            let mut client_a = application
-                .run(
-                    &service.target,
-                    Some(&service.namespace),
-                    Some(flags.clone()),
-                    None,
-                )
-                .await;
+        let mut client_a = application
+            .run(
+                &service.target,
+                Some(&service.namespace),
+                Some(flags.clone()),
+                None,
+            )
+            .await;
 
-            client_a
-                .wait_for_line(Duration::from_secs(40), "daemon subscribed")
-                .await;
+        client_a
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
 
-            let mut client_b = application
-                .run(&service.target, Some(&service.namespace), Some(flags), None)
-                .await;
+        let target =
+            get_instance_name::<Deployment>(kube_client.await, &service.name, &service.namespace)
+                .await
+                .unwrap();
 
-            client_b
-                .wait_for_line(Duration::from_secs(40), "Someone else is stealing traffic")
-                .await;
+        let mut client_b = application
+            .run(
+                &format!("deployment/{target}"),
+                Some(&service.namespace),
+                Some(flags.clone()),
+                None,
+            )
+            .await;
 
-            client_a.child.kill().await.unwrap();
+        client_b
+            .wait_for_line(Duration::from_secs(40), "Someone else is stealing traffic")
+            .await;
 
-            let res = client_b.child.wait().await.unwrap();
-            assert!(!res.success());
-        }
+        client_a.child.kill().await.unwrap();
+
+        let res = client_b.child.wait().await.unwrap();
+        assert!(!res.success());
     }
+    // }
 }

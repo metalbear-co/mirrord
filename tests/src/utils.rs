@@ -810,7 +810,7 @@ pub async fn service(
     .unwrap();
     watch_resource_exists(&service_api, "default").await;
 
-    let target = get_pod_instance(kube_client.clone(), &name, namespace)
+    let target = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
         .await
         .unwrap();
 
