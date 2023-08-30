@@ -1008,17 +1008,7 @@ pub async fn get_service_url(kube_client: Client, service: &KubeService) -> Stri
     format!("http://{host_ip}:{port}")
 }
 
-/// Returns a name of any pod belonging to the given app.
-pub async fn get_pod_instance(client: Client, app_name: &str, namespace: &str) -> Option<String> {
-    let pod_api: Api<Pod> = Api::namespaced(client, namespace);
-    pod_api
-        .list(&ListParams::default().labels(&format!("app={app_name}")))
-        .await
-        .unwrap()
-        .into_iter()
-        .find_map(|pod| pod.metadata.name)
-}
-
+/// Returns a name of any pod/deployment belonging to the given app.
 pub async fn get_instance_name<T>(client: Client, app_name: &str, namespace: &str) -> Option<String>
 where
     T: kube::Resource<Scope = k8s_openapi::NamespaceResourceScope>
