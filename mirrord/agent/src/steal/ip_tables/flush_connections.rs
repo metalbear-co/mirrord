@@ -1,3 +1,10 @@
+//! Flush connections - feature that enables the agent to steal connections that are in progress
+//! What do you mean? Imagine there was an ongoing session between Client and Server, then the
+//! agent starts, the layer asks to listen on the same port as the Server, and then the agent
+//! will only get **the next connection** since the redirection happens on the nat table
+//! which is hit only for new connections.
+//! Flush connections overcomes this by marking all existing connections of a specific port,
+//! and adding a rule that marked connections will be rejected.
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -9,6 +16,8 @@ use crate::{
     error::Result,
     steal::ip_tables::{chain::IPTableChain, redirect::Redirect, IPTables, IPTABLE_INPUT},
 };
+
+const MARK: &str = "0x1";
 
 #[derive(Debug)]
 pub struct FlushConnections<IPT: IPTables, T> {
@@ -28,11 +37,10 @@ where
         let managed =
             IPTableChain::create(ipt.with_table("filter").into(), IPTABLE_INPUT.to_string())?;
 
-        managed.add_rule(
-            "-p tcp -m state --state INVALID,UNTRACKED -j REJECT --reject-with tcp-reset",
-        )?;
-        managed
-            .add_rule("-p tcp -m conntrack --ctstatus NONE -j REJECT --reject-with tcp-reset")?;
+        // specify tcp protocol, if we don't we can't reject with tcp-reset
+        managed.add_rule(&format!(
+            "-p tcp -m connmark --mark {MARK} -j REJECT --reject-with tcp-reset"
+        ))?;
 
         Ok(FlushConnections { managed, inner })
     }
@@ -82,13 +90,17 @@ where
             .add_redirect(redirected_port, target_port)
             .await?;
 
+        // Update existing connections of specific port to be marked
+        // so that they will be rejected by the rule we added in `create`
         let conntrack = Command::new("conntrack")
             .args([
-                "--delete",
-                "--proto",
+                "-U",
+                "-p",
                 "tcp",
-                "--orig-port-dst",
+                "-dport",
                 &redirected_port.to_string(),
+                "-m",
+                MARK,
             ])
             .output()
             .await?;
