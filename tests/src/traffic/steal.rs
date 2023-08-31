@@ -36,10 +36,7 @@ mod steal {
         let service = service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
-        let mut flags = vec!["--steal"];
-        if let Some(flag) = agent.flag() {
-            flags.extend(flag)
-        }
+        let flags = vec!["--steal"];
         let mut process = application
             .run(&service.target, Some(&service.namespace), Some(flags), None)
             .await;
@@ -73,10 +70,7 @@ mod steal {
         let service = service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
-        let mut flags = vec!["--steal"];
-        if let Some(flag) = agent.flag() {
-            flags.extend(flag)
-        }
+        let flags = vec!["--steal"];
         let mut process = application
             .run(
                 &service.target,

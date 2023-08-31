@@ -23,14 +23,14 @@ mod file_ops {
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let command = ops.command();
 
-        let mut args = vec!["--fs-mode", "write"];
+        let args = vec!["--fs-mode", "write"];
 
         let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/**")];
         let mut process = run_exec_with_target(
             command,
             &service.target,
             Some(&service.namespace),
-            None,
+            Some(args),
             Some(env),
         )
         .await;
