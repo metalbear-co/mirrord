@@ -48,7 +48,7 @@ where
     #[tracing::instrument(level = "trace", skip(ipt, inner))]
     pub fn load(ipt: Arc<IPT>, inner: Box<T>) -> Result<Self> {
         let managed =
-            IPTableChain::create(ipt.with_table("filter").into(), IPTABLE_INPUT.to_string())?;
+            IPTableChain::load(ipt.with_table("filter").into(), IPTABLE_INPUT.to_string())?;
 
         Ok(FlushConnections { managed, inner })
     }
