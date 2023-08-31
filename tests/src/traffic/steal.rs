@@ -577,7 +577,8 @@ mod steal {
         let mut buf = String::new();
         reader.read_line(&mut buf).unwrap();
         println!("Got response: {buf}");
-        // replace "remote: " with empty string
+        // replace "remote: " with empty string, since the response can be split into frames
+        // and we just need assert the final response
         buf = buf.replace("remote: ", "");
         assert_eq!(&buf, tcp_data); // The correct data was sent there and back.
 
