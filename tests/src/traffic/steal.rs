@@ -578,7 +578,7 @@ mod steal {
         reader.read_line(&mut buf).unwrap();
         println!("Got response: {buf}");
         // replace "remote: " with empty string
-        buf = buf.replacen("remote: ", "", 3);
+        buf = buf.replace("remote: ", "");
         assert_eq!(&buf, tcp_data); // The correct data was sent there and back.
 
         // Verify the data was passed through and nothing was sent to the local app.
