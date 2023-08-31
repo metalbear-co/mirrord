@@ -1,0 +1,1 @@
+Regex meta characters are now escaped in `$HOME` (`not-found` file filter).
