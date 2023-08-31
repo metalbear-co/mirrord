@@ -119,7 +119,7 @@ fn generate_not_found_set() -> RegexSet {
         return Default::default();
     };
 
-    let home_clean = home.trim_end_matches('/');
+    let home_clean = regex::escape(home.trim_end_matches('/'));
 
     let patterns = [r"\.aws", r"\.config/gcloud", r"\.kube", r"\.azure"]
         .into_iter()
