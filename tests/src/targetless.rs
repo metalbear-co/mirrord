@@ -16,7 +16,11 @@ mod targetless {
     ///
     /// Running this test on a cluster that does not have any pods, also proves that we don't use
     /// any existing pod and the agent pod is completely independent.
-    #[cfg(any(feature = "job", not(feature = "ephemeral")))]
+    #[cfg(any(
+        feature = "targetless",
+        not(feature = "ephemeral"),
+        not(feature = "job")
+    ))]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(30))]

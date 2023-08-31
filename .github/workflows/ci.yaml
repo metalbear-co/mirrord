@@ -394,10 +394,12 @@ jobs:
           path: /tmp
       - run: minikube image load /tmp/test.tar
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
-      - name: Run targetless E2E test.
-        run: cargo test --target=x86_64-unknown-linux-gnu -p tests targetless
-      - name: Run all E2E test
-        run: cargo test --target=x86_64-unknown-linux-gnu -p tests -- --test-threads=6
+      - name: Run E2E tests - Targetless
+        run: cargo test --target=x86_64-unknown-linux-gnu --p tests --no-default-features --features targetless  --lib
+      - name: Run E2E tests - Job
+        run: cargo test --target=x86_64-unknown-linux-gnu --p tests --no-default-features --features job  --lib
+      - name: Run E2E tests - Ephemeral
+        run: cargo test --target=x86_64-unknown-linux-gnu --p tests --no-default-features --features ephemeral  --lib        
       - name: Collect logs
         if: ${{ failure() }}
         run: |
