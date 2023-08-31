@@ -206,8 +206,15 @@ async fn read_pids_cgroupv2(cgroup_path: &Path) -> Result<Vec<u64>, CgroupV2Erro
 /// Write given pids to given path's "cgroup.procs" file
 #[tracing::instrument(level = "trace", ret)]
 async fn move_pids_to_cgroupv2(cgroup_path: &Path, pids: Vec<u64>) -> Result<(), CgroupV2Error> {
+    let mut open_options = OpenOptions::new();
+    let mut file = open_options
+        .write(true)
+        .open(cgroup_path.join(CgroupV2::PROCS_FILE))
+        .await
+        .map_err(CgroupV2Error::WritingCgroupProcs)?;
+
     for pid in pids {
-        tokio::fs::write(cgroup_path.join(CgroupV2::PROCS_FILE), format!("{pid}"))
+        file.write_all(pid.to_string().as_bytes())
             .await
             .map_err(CgroupV2Error::WritingCgroupProcs)?;
     }
