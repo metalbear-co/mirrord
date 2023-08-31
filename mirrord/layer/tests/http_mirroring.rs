@@ -32,6 +32,7 @@ async fn mirroring_with_http(
             vec![
                 ("MIRRORD_FILE_MODE", "local"),
                 ("MIRRORD_UDP_OUTGOING", "false"),
+                ("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
             ],
             Some(config_dir.join("port_mapping.json").to_str().unwrap()),
         )
