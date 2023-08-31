@@ -9,7 +9,7 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Possible values for analytic data
 /// This is strict so we won't send sensitive data by accident.
 /// (Don't add strings)
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
 pub enum AnalyticValue {
     Bool(bool),
@@ -17,7 +17,7 @@ pub enum AnalyticValue {
     Nested(Analytics),
 }
 
-#[derive(Default, Debug, Serialize, Deserialize)]
+#[derive(Default, Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalyticsError {
     AgentConnection,
@@ -67,7 +67,7 @@ pub enum AnalyticsError {
 /// let b = B {};
 /// analytics.add("extra", b);
 /// ```
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Analytics {
     #[serde(flatten)]
     data: HashMap<String, AnalyticValue>,
@@ -83,7 +83,7 @@ impl Analytics {
 /// accidentaly send sensitive data
 ///
 /// Saved as base64 for more optimal size of json
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AnalyticsHash(String);
 
 impl AnalyticsHash {
@@ -136,6 +136,7 @@ impl<T: CollectAnalytics> From<T> for AnalyticValue {
     }
 }
 
+/// Due to the drop nature using tokio::spawn, runtime must be started.
 #[derive(Debug)]
 pub struct AnalyticsReporter {
     pub enabled: bool,
@@ -186,7 +187,7 @@ impl AnalyticsReporter {
         self.error.is_some()
     }
 
-    fn as_report(&self) -> AnalyticsReport<'_> {
+    fn as_report(&self) -> AnalyticsReport {
         let duration = self
             .start_instant
             .elapsed()
@@ -196,26 +197,29 @@ impl AnalyticsReporter {
 
         AnalyticsReport {
             duration,
-            error: &self.error,
-            event_properties: &self.analytics,
+            error: self.error,
+            event_properties: self.analytics.clone(),
             operator: self.operator_properties.is_some(),
-            operator_properties: &self.operator_properties,
+            operator_properties: self.operator_properties.clone(),
             platform: std::env::consts::OS,
             version: CURRENT_VERSION,
         }
     }
 }
 
+/// Must be called in tokio runtime
+/// We rely on the main tokio runtime to be started using the macro,
+/// meaning it will wait for all ongoing tasks to finish before exiting.
 impl Drop for AnalyticsReporter {
     fn drop(&mut self) {
         if self.enabled && (self.error.is_some() || !self.error_only_send) {
-            send_analytics(self.as_report());
+            tokio::spawn(send_analytics(self.as_report()));
         }
     }
 }
 
 /// Extra fields for `AnalyticsReport` when using mirrord with operator.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AnalyticsOperatorProperties {
     /// sha256 fingerprint from client certificate
     pub client_hash: Option<AnalyticsHash>,
@@ -225,25 +229,26 @@ pub struct AnalyticsOperatorProperties {
 }
 
 #[derive(Debug, Serialize)]
-struct AnalyticsReport<'r> {
-    event_properties: &'r Analytics,
-    platform: &'r str,
+struct AnalyticsReport {
+    event_properties: Analytics,
+    platform: &'static str,
     duration: u32,
-    version: &'r str,
+    version: &'static str,
     operator: bool,
     #[serde(flatten)]
-    operator_properties: &'r Option<AnalyticsOperatorProperties>,
-    error: &'r Option<AnalyticsError>,
+    operator_properties: Option<AnalyticsOperatorProperties>,
+    error: Option<AnalyticsError>,
 }
 
 /// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.co
 #[tracing::instrument(level = "trace")]
-fn send_analytics(report: AnalyticsReport) {
-    let client = reqwest::blocking::Client::new();
+async fn send_analytics(report: AnalyticsReport) {
+    let client = reqwest::Client::new();
     let res = client
         .post("https://analytics.metalbear.co/api/v1/event")
         .json(&report)
-        .send();
+        .send()
+        .await;
     if let Err(e) = res {
         info!("Failed to send analytics: {e}");
     }
