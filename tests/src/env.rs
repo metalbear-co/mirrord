@@ -1,3 +1,4 @@
+#![allow(dead_code, unused)]
 #[cfg(test)]
 
 mod env {
