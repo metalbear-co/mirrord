@@ -135,7 +135,7 @@ async fn resolve_interface() -> Result<Option<String>, AgentError> {
 //
 // And to make matters worse, the error reported back to the user is the very generic:
 // "mirrord-layer received an unexpected response from the agent pod!"
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "debug")]
 async fn prepare_sniffer(network_interface: Option<String>) -> Result<RawCapture, AgentError> {
     // Priority is whatever the user set as an option to mirrord, otherwise we try to get the
     // appropriate interface.
@@ -350,7 +350,7 @@ impl TcpConnectionSniffer {
     /// The capture uses a network interface specified by the user, if there is none, then it tries
     /// to find a proper one by starting a connection. If this fails, we use "eth0" as a last
     /// resort.
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = "debug")]
     pub async fn new(
         receiver: Receiver<SnifferCommand>,
         network_interface: Option<String>,
@@ -369,11 +369,16 @@ impl TcpConnectionSniffer {
         })
     }
 
-    #[tracing::instrument(level = "trace", skip(self, sender))]
+    /// TODO(alex): Improve docs.
+    /// New layer is connecting to this agent sniffer?
+    #[tracing::instrument(level = "debug", ret, skip(self, sender))]
     fn handle_new_client(&mut self, client_id: ClientId, sender: Sender<DaemonTcp>) {
         self.client_senders.insert(client_id, sender);
     }
 
+    /// TODO(alex): Improve docs.
+    /// layer with `client_id` wants to sniff on `port`?
+    #[tracing::instrument(level = "debug", ret, skip(self))]
     async fn handle_subscribe(
         &mut self,
         client_id: ClientId,
@@ -393,7 +398,7 @@ impl TcpConnectionSniffer {
         self.update_sniffer()
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "debug", ret, skip(self))]
     fn update_sniffer(&mut self) -> Result<(), AgentError> {
         let ports = self.port_subscriptions.get_subscribed_topics();
 
@@ -414,6 +419,7 @@ impl TcpConnectionSniffer {
             .contains(&port)
     }
 
+    #[tracing::instrument(level = "debug", ret, skip(self))]
     async fn handle_command(&mut self, command: SnifferCommand) -> Result<(), AgentError> {
         match command {
             SnifferCommand {
@@ -472,7 +478,7 @@ impl TcpConnectionSniffer {
     }
 
     /// Sends a [`DaemonTcp`] message back to the client with `client_id`.
-    #[tracing::instrument(level = "trace", skip(self, message))]
+    #[tracing::instrument(level = "debug", ret, skip(self, message))]
     async fn send_message_to_client(
         &mut self,
         client_id: &ClientId,
@@ -491,7 +497,7 @@ impl TcpConnectionSniffer {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self, eth_packet), fields(bytes = %eth_packet.len()))]
+    #[tracing::instrument(level = "debug", ret, skip(self, eth_packet), fields(bytes = %eth_packet.len()))]
     async fn handle_packet(&mut self, eth_packet: Vec<u8>) -> Result<(), AgentError> {
         let (identifier, tcp_packet) = match get_tcp_packet(eth_packet) {
             Some(res) => res,
@@ -501,11 +507,9 @@ impl TcpConnectionSniffer {
         let dest_port = identifier.dest_port;
         let source_port = identifier.source_port;
         let tcp_flags = tcp_packet.flags;
-        trace!(
+        debug!(
             "dest_port {:#?} | source_port {:#?} | tcp_flags {:#?}",
-            dest_port,
-            source_port,
-            tcp_flags
+            dest_port, source_port, tcp_flags
         );
 
         let is_client_packet = self.qualified_port(dest_port);
@@ -514,8 +518,9 @@ impl TcpConnectionSniffer {
             Some(session) => session,
             None => {
                 if !is_new_connection(tcp_flags) {
-                    debug!("not new connection {tcp_flags:?}");
-                    return Ok(());
+                    let packet_contents = String::from_utf8_lossy(&tcp_packet.bytes);
+                    debug!("not new connection {tcp_flags:?} \n{packet_contents:?}");
+                    // return Ok(());
                 }
 
                 if !is_client_packet {
@@ -553,7 +558,7 @@ impl TcpConnectionSniffer {
                 }
             }
         };
-        trace!("session {:#?}", session);
+        debug!("session {:#?}", session);
 
         if is_client_packet && !tcp_packet.bytes.is_empty() {
             let message = DaemonTcp::Data(TcpData {
@@ -582,7 +587,6 @@ impl TcpConnectionSniffer {
             self.sessions.insert(identifier, session);
         }
 
-        trace!("TcpConnectionSniffer::handle_packet -> finished");
         Ok(())
     }
 }
