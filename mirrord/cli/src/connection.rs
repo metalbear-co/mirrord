@@ -95,7 +95,7 @@ where
 /// Creates an agent if needed then connects to it.
 pub(crate) async fn create_and_connect<P>(
     config: &LayerConfig,
-    progress: &P,
+    progress: &mut P,
     analytics: &mut AnalyticsReporter,
 ) -> Result<(AgentConnectInfo, AgentConnection)>
 where
@@ -136,7 +136,7 @@ where
 
         let agent_connect_info = tokio::time::timeout(
             Duration::from_secs(config.agent.startup_timeout),
-            k8s_api.create_agent(progress),
+            k8s_api.create_agent(progress, Some(config)),
         )
         .await
         .map_err(|_| CliError::AgentReadyTimeout)?

@@ -124,7 +124,7 @@ impl MirrordExecution {
         config: &LayerConfig,
         // We only need the executable on macos, for SIP handling.
         #[cfg(target_os = "macos")] executable: Option<&str>,
-        progress: &P,
+        progress: &mut P,
         analytics: &mut AnalyticsReporter,
     ) -> Result<Self>
     where

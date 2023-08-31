@@ -7,7 +7,9 @@ use kube::{
     config::{KubeConfigOptions, Kubeconfig},
     Api, Client, Config, Discovery,
 };
-use mirrord_config::{agent::AgentConfig, target::TargetConfig, LayerConfig};
+use mirrord_config::{
+    agent::AgentConfig, feature::network::incoming::IncomingMode, target::TargetConfig, LayerConfig,
+};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use rand::Rng;
@@ -73,6 +75,32 @@ impl KubernetesAPI {
             progress.warning("mirrord has detected it's running on OpenShift. Due to the default PSP of OpenShift, mirrord may not be able to create the agent. Please refer to the documentation at https://mirrord.dev/docs/overview/faq/#can-i-use-mirrord-with-openshift");
         } else {
             progress.success(Some("OpenShift was not detected."))
+        }
+        Ok(())
+    }
+
+    /// Checks if any [`ContainerStatus`] matches a mesh/sidecar name from our `MESH_LIST`, and the
+    /// user is running incoming traffic in `IncomigMode::Mirror` mode, printing a warning if it
+    /// does.
+    #[tracing::instrument(level = "trace", ret, skip(self, progress))]
+    pub async fn detect_mesh_mirror_mode<P>(
+        &self,
+        progress: &mut P,
+        incoming_mode: IncomingMode,
+        is_mesh: bool,
+    ) -> Result<()>
+    where
+        P: Progress + Send + Sync,
+    {
+        if matches!(incoming_mode, IncomingMode::Mirror) && is_mesh {
+            progress.warning(
+                "mirrord has detected that you might be running on a cluster with a \
+                 service mesh and `network.incoming.mode = \"mirror\"`, which is currently \
+                 unsupported. You can set `network.incoming.mode` to \"steal\" (check out the\
+                 `http_filter` configuration value if you only want to steal some of the traffic).",
+            );
+        } else {
+            progress.success(None)
         }
         Ok(())
     }
@@ -149,7 +177,11 @@ impl AgentManagment for KubernetesAPI {
         ))
     }
 
-    async fn create_agent<P>(&self, progress: &P) -> Result<Self::AgentRef, Self::Err>
+    async fn create_agent<P>(
+        &self,
+        progress: &mut P,
+        config: Option<&LayerConfig>,
+    ) -> Result<Self::AgentRef, Self::Err>
     where
         P: Progress + Send + Sync,
     {
@@ -169,6 +201,23 @@ impl AgentManagment for KubernetesAPI {
             );
             None
         };
+
+        let incoming_mode = config
+            .map(|config| config.feature.network.incoming.mode)
+            .unwrap_or_default();
+
+        let is_mesh = runtime_data
+            .as_ref()
+            .map(|runtime| runtime.is_mesh)
+            .unwrap_or_default();
+
+        if self
+            .detect_mesh_mirror_mode(progress, incoming_mode, is_mesh)
+            .await
+            .is_err()
+        {
+            progress.warning("couldn't determine mesh / sidecar with mirror mode");
+        }
 
         info!("Spawning new agent.");
         let agent_port: u16 = rand::thread_rng().gen_range(30000..=65535);
