@@ -28,7 +28,6 @@ tokio-tungstenite = { version = "0.19" }
 fancy-regex.workspace = true
 
 [features]
-default = ["ephemeral", "job", "targetless"]
+default = ["ephemeral", "job"]
 ephemeral = []
 job = []
-targetless = []

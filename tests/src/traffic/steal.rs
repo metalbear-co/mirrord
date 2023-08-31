@@ -18,7 +18,7 @@ mod steal {
         KubeService,
     };
 
-    #[cfg(any(feature = "ephemeral", not(feature = "job")))]
+    #[cfg(any(feature = "ephemeral", feature = "job"))]
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -32,7 +32,6 @@ mod steal {
             Application::NodeHTTP
         )]
         application: Application,
-        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
@@ -56,7 +55,7 @@ mod steal {
         application.assert(&process).await;
     }
 
-    #[cfg(any(feature = "ephemeral", not(feature = "job")))]
+    #[cfg(any(feature = "ephemeral", feature = "job"))]
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -70,7 +69,6 @@ mod steal {
             Application::NodeHTTP
         )]
         application: Application,
-        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
@@ -101,7 +99,7 @@ mod steal {
 
     /// Test the app continues running with mirrord and traffic is no longer stolen after the app
     /// closes a socket.
-    #[cfg(any(feature = "ephemeral", not(feature = "job")))]
+    #[cfg(any(feature = "ephemeral", feature = "job"))]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
@@ -250,7 +248,7 @@ mod steal {
 
     /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
-    #[cfg(any(feature = "job", not(feature = "ephemeral")))]
+    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
@@ -293,7 +291,7 @@ mod steal {
         application.assert(&client).await;
     }
 
-    #[cfg(any(feature = "job", not(feature = "ephemeral")))]
+    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
@@ -334,7 +332,7 @@ mod steal {
         application.assert(&client).await;
     }
 
-    #[cfg(any(feature = "job", not(feature = "ephemeral")))]
+    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
@@ -390,7 +388,7 @@ mod steal {
         application.assert(&client).await;
     }
 
-    #[cfg(any(feature = "job", not(feature = "ephemeral")))]
+    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
@@ -455,7 +453,7 @@ mod steal {
 
     /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
-    #[cfg(any(feature = "job", not(feature = "ephemeral")))]
+    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
@@ -524,7 +522,7 @@ mod steal {
     /// connection of an unsupported protocol.
     /// We verify that the traffic is forwarded to- and handled by the deployed app, and the local
     /// app does not see the traffic.
-    #[cfg(any(feature = "job", not(feature = "ephemeral")))]
+    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
@@ -587,7 +585,7 @@ mod steal {
     ///
     /// We verify that the traffic is forwarded to- and handled by the deployed app, and the local
     /// app does not see the traffic.
-    #[cfg(any(feature = "job", not(feature = "ephemeral")))]
+    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]

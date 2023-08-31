@@ -7,6 +7,7 @@ mod file_ops {
 
     use crate::utils::{run_exec_with_target, service, FileOps, KubeService};
 
+    #[cfg(any(feature = "job", feature = "ephemeral"))]
     #[cfg(target_os = "linux")]
     #[rstest]
     #[trace]
@@ -38,7 +39,7 @@ mod file_ops {
         ops.assert(process).await;
     }
 
-    #[cfg(feature = "ephemeral")]
+    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
     #[cfg(target_os = "macos")]
     #[rstest]
     #[trace]
@@ -68,7 +69,7 @@ mod file_ops {
         process.assert_python_fileops_stderr().await;
     }
 
-    #[cfg(any(feature = "job", not(feature = "ephemeral")))]
+    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -102,7 +103,7 @@ mod file_ops {
         process.assert_python_fileops_stderr().await;
     }
 
-    #[cfg(any(feature = "job", not(feature = "ephemeral")))]
+    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
