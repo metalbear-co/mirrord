@@ -1,3 +1,4 @@
+#![allow(dead_code, unused)]
 #[cfg(test)]
 /// Test the targetless execution mode, where an independent agent is spawned - not targeting any
 /// existing pod/container/deployment.
@@ -16,6 +17,7 @@ mod targetless {
     ///
     /// Running this test on a cluster that does not have any pods, also proves that we don't use
     /// any existing pod and the agent pod is completely independent.    
+    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(30))]
