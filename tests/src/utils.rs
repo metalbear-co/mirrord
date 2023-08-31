@@ -7,10 +7,7 @@ use std::{
     net::Ipv4Addr,
     path::PathBuf,
     process::{ExitStatus, Stdio},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::Arc,
     time::Duration,
 };
 
@@ -23,7 +20,7 @@ use k8s_openapi::api::{
     core::v1::{Namespace, Pod, Service},
 };
 use kube::{
-    api::{DeleteParams, ListParams, Patch, PatchParams, PostParams, WatchParams},
+    api::{DeleteParams, ListParams, PostParams, WatchParams},
     core::WatchEvent,
     runtime::wait::{await_condition, conditions::is_pod_running},
     Api, Client, Config, Error,
@@ -98,12 +95,6 @@ pub enum Application {
     CurlToKubeApi,
     PythonCloseSocket,
     PythonCloseSocketKeepConnection,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum Agent {
-    Ephemeral,
-    Job,
 }
 
 #[derive(Debug)]
@@ -366,56 +357,6 @@ impl Application {
     }
 }
 
-static OPERATOR_PATCHED: AtomicBool = AtomicBool::new(false);
-
-impl Agent {
-    pub fn flag(&self) -> Option<Vec<&str>> {
-        match self {
-            Agent::Ephemeral => Some(vec!["--ephemeral-container"]),
-            Agent::Job => None,
-        }
-    }
-
-    pub async fn patch_operator(&self, kube_client: &Client) {
-        if let Ok(_) = std::env::var("MIRRORD_OPERATOR_TESTS") &&
-            *self == Agent::Ephemeral &&
-            OPERATOR_PATCHED.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).unwrap() {
-            let patch = serde_json::json!({
-                "apiVersion": "apps/v1",
-                "kind": "Deployment",
-                "spec": {
-                    "template": {
-                        "spec": {
-                            "containers": [
-                                {
-                                    "name": "mirrord-operator",
-                                    "env": [
-                                        {
-                                            "name": "MIRRORD_EPHEMERAL_CONTAINER",
-                                            "value": "true"
-                                        }
-                                    ]
-                                }
-                            ]
-                        }
-                    }
-                }
-            });
-
-            let patch = Patch::Apply(patch);
-            let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), "mirrord");
-            deployment_api
-                .patch(
-                    "mirrord-operator",
-                    &PatchParams::apply("mirrord-operator"),
-                    &patch,
-                )
-                .await
-                .unwrap();
-        }
-    }
-}
-
 impl FileOps {
     pub fn command(&self) -> Vec<&str> {
         match self {
@@ -528,6 +469,9 @@ pub async fn run_exec(
     if let Some(namespace) = namespace {
         mirrord_args.extend(["--target-namespace", namespace].into_iter());
     }
+    #[cfg(feature = "ephemeral")]
+    mirrord_args.extend(["--ephemeral-container"].into_iter());
+
     if let Some(args) = args {
         mirrord_args.extend(args.into_iter());
     }
