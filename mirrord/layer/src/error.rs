@@ -260,7 +260,7 @@ impl From<HookError> for i64 {
             }
             HookError::SocketUnsuportedIpv6 => {
                 info!("{fail}")
-            },
+            }
             _ => error!("Error occured in Layer >> {fail:?}"),
         };
 
