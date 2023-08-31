@@ -97,7 +97,7 @@ where
                 "-U",
                 "-p",
                 "tcp",
-                "-dport",
+                "--dport",
                 &redirected_port.to_string(),
                 "-m",
                 MARK,
