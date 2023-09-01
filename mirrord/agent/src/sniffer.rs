@@ -531,8 +531,9 @@ impl TcpConnectionSniffer {
                             // The error here can be ignored as we just want to see if this is an
                             // HTTP request, not what headers/body it has.
                             matches!(
-                                httparse::Request::new(&mut empty_headers)
-                                    .parse(packet_contents[offset..].as_bytes()),
+                                httparse::Request::new(&mut empty_headers).parse(
+                                    packet_contents.get(offset..).unwrap_or_default().as_bytes()
+                                ),
                                 Ok(_) | Err(httparse::Error::TooManyHeaders)
                             )
                         })
