@@ -100,7 +100,7 @@ struct TCPSession {
 
 type TCPSessionMap = HashMap<TcpSessionIdentifier, TCPSession>;
 
-fn is_new_connection(flags: u16) -> bool {
+const fn is_new_connection(flags: u16) -> bool {
     0 != (flags & TcpFlags::SYN) && 0 == (flags & (TcpFlags::ACK | TcpFlags::RST | TcpFlags::FIN))
 }
 
@@ -508,6 +508,40 @@ impl TcpConnectionSniffer {
         Ok(())
     }
 
+    /// First it checks the `tcp_flags` with [`is_new_connection`], if that's not the case, meaning
+    /// we have traffic from some existing connection from before mirrord started, then it tries to
+    /// see if `bytes` contains an HTTP request (HTTP/1) of some sort. When an HTTP request is
+    /// detected, then the agent should start mirroring as if it was a new connection.
+    #[tracing::instrument(level = "debug", ret, skip(bytes))]
+    fn treat_as_new_session(tcp_flags: u16, bytes: &[u8]) -> bool {
+        if is_new_connection(tcp_flags) {
+            true
+        } else {
+            let packet_contents = String::from_utf8_lossy(bytes);
+
+            // Does this packet contain an HTTP request?
+            Self::HTTP_REGEX
+                .find(&packet_contents)
+                .map(|matched| {
+                    matched
+                        .map(|range| {
+                            let offset = range.start();
+                            let mut empty_headers = [httparse::EMPTY_HEADER; 0];
+
+                            // The error here can be ignored as we just want to see if this is an
+                            // HTTP request, not what headers/body it has.
+                            matches!(
+                                httparse::Request::new(&mut empty_headers)
+                                    .parse(packet_contents[offset..].as_bytes()),
+                                Ok(_) | Err(httparse::Error::TooManyHeaders)
+                            )
+                        })
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default()
+        }
+    }
+
     #[tracing::instrument(level = "debug", ret, skip(self, eth_packet), fields(bytes = %eth_packet.len()))]
     async fn handle_packet(&mut self, eth_packet: Vec<u8>) -> Result<(), AgentError> {
         let (identifier, tcp_packet) = match get_tcp_packet(eth_packet) {
@@ -528,35 +562,12 @@ impl TcpConnectionSniffer {
         let session = match self.sessions.remove(&identifier) {
             Some(session) => session,
             None => {
-                // TODO(alex) [high] 2023-08-31: Here is where we should try and read HTTP, then
-                // proceed as if it's a new connection (it's new for mirrord).
-                //
-                // TODO(alex) [high] 2023-09-01: Looks like this works for HTTP/1, now to test it
-                // out in mesh + clean this up.
-                if !is_new_connection(tcp_flags) {
-                    let packet_contents = String::from_utf8_lossy(&tcp_packet.bytes);
-                    debug!("not new connection {tcp_flags:?} \n{packet_contents:?}");
-
-                    match Self::HTTP_REGEX.find(&packet_contents).unwrap() {
-                        Some(range) => {
-                            let offset = range.start();
-                            let mut empty_headers = [httparse::EMPTY_HEADER; 0];
-
-                            let is_http = matches!(
-                                httparse::Request::new(&mut empty_headers)
-                                    .parse(packet_contents[offset..].as_bytes()),
-                                Ok(_) | Err(httparse::Error::TooManyHeaders)
-                            );
-                            debug!("it's an HTTP packet!");
-
-                            if !is_http {
-                                return Ok(());
-                            }
-                        }
-                        None => {
-                            return Ok(());
-                        }
-                    }
+                // Performs a check on the `tcp_flags` and on the packet contents to see if this
+                // should be treated as a new connection.
+                if !Self::treat_as_new_session(tcp_flags, &tcp_packet.bytes) {
+                    // Either it's an existing session, or some sort of existing traffic we don't
+                    // care to start mirroring.
+                    return Ok(());
                 }
 
                 if !is_client_packet {
