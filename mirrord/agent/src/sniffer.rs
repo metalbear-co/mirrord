@@ -517,6 +517,8 @@ impl TcpConnectionSniffer {
         let session = match self.sessions.remove(&identifier) {
             Some(session) => session,
             None => {
+                // TODO(alex) [high] 2023-08-31: Here is where we should try and read HTTP, then
+                // proceed as if it's a new connection (it's new for mirrord).
                 if !is_new_connection(tcp_flags) {
                     let packet_contents = String::from_utf8_lossy(&tcp_packet.bytes);
                     debug!("not new connection {tcp_flags:?} \n{packet_contents:?}");
