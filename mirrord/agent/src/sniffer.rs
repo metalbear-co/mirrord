@@ -2,8 +2,10 @@ use std::{
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::LazyLock,
 };
 
+use fancy_regex::Regex;
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ConnectionId, Port,
@@ -322,6 +324,15 @@ pub struct TcpConnectionSniffer {
 impl TcpConnectionSniffer {
     pub const TASK_NAME: &'static str = "Sniffer";
 
+    /// Used to detect if an existing connection packet contains HTTP traffic that we should be
+    /// mirroring, but we're currently NOT.
+    ///
+    /// **Attention**: Whitespace at the end of this regex is significant!
+    const HTTP_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new("(?i)(get|head|post|put|delete|connect|options|trace|patch) ")
+            .expect("Failed initializing HTTP detection regex for sniffer!")
+    });
+
     /// Runs the sniffer loop, capturing packets.
     #[tracing::instrument(level = "trace", skip(self))]
     pub async fn start(mut self, cancel_token: CancellationToken) -> Result<(), AgentError> {
@@ -519,10 +530,33 @@ impl TcpConnectionSniffer {
             None => {
                 // TODO(alex) [high] 2023-08-31: Here is where we should try and read HTTP, then
                 // proceed as if it's a new connection (it's new for mirrord).
+                //
+                // TODO(alex) [high] 2023-09-01: Looks like this works for HTTP/1, now to test it
+                // out in mesh + clean this up.
                 if !is_new_connection(tcp_flags) {
                     let packet_contents = String::from_utf8_lossy(&tcp_packet.bytes);
                     debug!("not new connection {tcp_flags:?} \n{packet_contents:?}");
-                    // return Ok(());
+
+                    match Self::HTTP_REGEX.find(&packet_contents).unwrap() {
+                        Some(range) => {
+                            let offset = range.start();
+                            let mut empty_headers = [httparse::EMPTY_HEADER; 0];
+
+                            let is_http = matches!(
+                                httparse::Request::new(&mut empty_headers)
+                                    .parse(packet_contents[offset..].as_bytes()),
+                                Ok(_) | Err(httparse::Error::TooManyHeaders)
+                            );
+                            debug!("it's an HTTP packet!");
+
+                            if !is_http {
+                                return Ok(());
+                            }
+                        }
+                        None => {
+                            return Ok(());
+                        }
+                    }
                 }
 
                 if !is_client_packet {
