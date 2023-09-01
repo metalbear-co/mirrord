@@ -577,8 +577,10 @@ mod steal {
         let mut buf = String::new();
         reader.read_line(&mut buf).unwrap();
         println!("Got response: {buf}");
-        assert_eq!(&buf[..8], "remote: "); // The data was passed through to remote app.
-        assert_eq!(&buf[8..], tcp_data); // The correct data was sent there and back.
+        // replace "remote: " with empty string, since the response can be split into frames
+        // and we just need assert the final response
+        buf = buf.replace("remote: ", "");
+        assert_eq!(&buf, tcp_data); // The correct data was sent there and back.
 
         // Verify the data was passed through and nothing was sent to the local app.
         let stdout_after = mirrorded_process.get_stdout().await;
