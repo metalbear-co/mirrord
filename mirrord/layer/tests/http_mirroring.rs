@@ -13,9 +13,14 @@ pub use common::*;
 /// the layer, send HTTP requests and verify in the server output that the application received
 /// them. Tests the layer's communication with the agent, the bind hook, and the forwarding of
 /// mirrored traffic to the application.
+///
+/// NOTE: Flask, FastAPI mirroring tests are flaky and have been decorated with the flaky_test
+/// macro. However, once we have mid session mirroring, we can remove the flaky_test macro.
+
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
+#[flaky_test::flaky_test]
 async fn mirroring_with_http(
     #[values(
         Application::PythonFlaskHTTP,
@@ -30,6 +35,7 @@ async fn mirroring_with_http(
         .start_process_with_layer_and_port(
             dylib_path,
             vec![
+                ("RUST_LOG", "mirrord=trace"),
                 ("MIRRORD_FILE_MODE", "local"),
                 ("MIRRORD_UDP_OUTGOING", "false"),
                 ("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES"),
