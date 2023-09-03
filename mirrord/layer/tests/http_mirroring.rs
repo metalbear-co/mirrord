@@ -17,7 +17,7 @@ pub use common::*;
 ///
 /// NOTE: Flask, FastAPI mirroring tests are flaky and have been decorated with the flaky_test
 /// macro. Some speculation is that it is because of lack of mid session mirroring. flaky_test can
-/// be removed once https://github.com/metalbear-co/mirrord/pull/1889 is merged.
+/// be removed once https://github.com/metalbear-co/mirrord/pull/1887 is merged.
 
 #[rstest]
 #[tokio::test]
