@@ -99,8 +99,6 @@ impl KubernetesAPI {
                  unsupported. You can set `network.incoming.mode` to \"steal\" (check out the\
                  `http_filter` configuration value if you only want to steal some of the traffic).",
             );
-        } else {
-            progress.success(None)
         }
         Ok(())
     }
