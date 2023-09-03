@@ -73,15 +73,13 @@ impl ContainerHandle {
     /// Otherwise, return false.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn set_paused(&self, paused: bool) -> Result<bool> {
-        let guard = self.0.paused.read().await;
+        let mut guard = self.0.paused.write().await;
 
         match (*guard, paused) {
             (false, true) => self.0.container.pause().await?,
             (true, false) => self.0.container.unpause().await?,
             _ => return Ok(false),
         }
-        drop(guard);
-        let mut guard = self.0.paused.write().await;
         *guard = paused;
 
         Ok(true)
