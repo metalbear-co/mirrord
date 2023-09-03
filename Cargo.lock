@@ -1965,6 +1965,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
+name = "flaky_test"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "479cde5eb168cf5a056dd98f311cbfab7494c216394e4fb9eba0336827a8db93"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "flate2"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3393,7 +3404,7 @@ dependencies = [
  "mirrord-protocol",
  "rand",
  "regex",
- "rstest 0.17.0",
+ "rstest 0.18.2",
  "serde",
  "serde_json",
  "shellexpand",
@@ -3419,6 +3430,7 @@ dependencies = [
  "errno 0.3.2",
  "exec",
  "fancy-regex",
+ "flaky_test",
  "frida-gum",
  "futures",
  "hashbrown 0.14.0",
@@ -3440,7 +3452,7 @@ dependencies = [
  "os_info",
  "rand",
  "regex",
- "rstest 0.17.0",
+ "rstest 0.18.2",
  "serde",
  "serde_json",
  "socket2 0.5.3",
