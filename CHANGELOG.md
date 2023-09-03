@@ -8,6 +8,15 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.64.1](https://github.com/metalbear-co/mirrord/tree/3.64.1) - 2023-09-03
+
+
+### Fixed
+
+- Remove extra message of `{"type":"FinishedTask","name":"mirrord preparing to
+  launch","success":true,"message":null}` that causes breakage in extensions.
+
+
 ## [3.64.0](https://github.com/metalbear-co/mirrord/tree/3.64.0) - 2023-09-02
 
 
