@@ -707,7 +707,6 @@ async fn start_iptable_guard() -> Result<()> {
     result
 }
 
-
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     tracing_subscriber::registry()
