@@ -109,7 +109,13 @@ impl OperatorApi {
     {
         let operator_api = OperatorApi::new(config).await?;
 
-        let status = operator_api.get_status().await?;
+        let status = match operator_api.get_status().await.transpose()? {
+            Some(status) => status,
+            None => {
+                // No operator found
+                return Ok(None);
+            }
+        };
 
         let client_certificate =
             if let Some(credential_name) = status.spec.license.fingerprint.as_ref() {
@@ -237,12 +243,12 @@ impl OperatorApi {
         })
     }
 
-    async fn get_status(&self) -> Result<MirrordOperatorCrd> {
-        self.version_api
-            .get(OPERATOR_STATUS_NAME)
-            .await
-            .map_err(KubeApiError::KubeError)
-            .map_err(OperatorApiError::KubeApiError)
+    async fn get_status(&self) -> Option<Result<MirrordOperatorCrd>> {
+        match self.version_api.get(OPERATOR_STATUS_NAME).await {
+            Ok(status) => Some(Ok(status)),
+            Err(kube::Error::Api(ErrorResponse { code: 404, .. })) => None,
+            Err(err) => Some(Err(OperatorApiError::from(KubeApiError::from(err)))),
+        }
     }
 
     async fn fetch_target(&self) -> Result<Option<TargetCrd>> {
