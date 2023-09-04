@@ -265,6 +265,9 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/issue1776portnot53
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue1899
+          cargo build
       - run: ./scripts/build_c_apps.sh
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
       - name: mirrord protocol UT
@@ -350,6 +353,9 @@ jobs:
           cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue1776portnot53
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue1899
           cargo build
       - run: ./scripts/build_c_apps.sh
       # For the `java_temurin_sip` test.

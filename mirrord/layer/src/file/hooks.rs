@@ -11,7 +11,7 @@ use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
 use errno::{set_errno, Errno};
 use libc::{
     self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
-    AT_FDCWD, DIR,
+    AT_FDCWD, DIR, O_RDONLY, O_RDWR,
 };
 #[cfg(target_os = "linux")]
 use libc::{EBADF, EINVAL, ENOENT, ENOTDIR};
@@ -131,6 +131,14 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
             FN_OPEN_NOCANCEL(raw_path, open_flags, mode)
         })
     }
+}
+
+/// TODO(alex) [mid] 2023-09-04: Docs.
+#[hook_guard_fn]
+pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> usize {
+    open_logic(raw_filename, O_RDONLY, 0)
+        .and_then(fdopendir)
+        .unwrap_or_bypass_with(|_| FN_OPENDIR(raw_filename))
 }
 
 #[hook_guard_fn]
@@ -801,6 +809,13 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         open_nocancel_detour,
         FnOpen_nocancel,
         FN_OPEN_NOCANCEL
+    );
+    replace!(
+        hook_manager,
+        "opendir",
+        opendir_detour,
+        FnOpendir,
+        FN_OPENDIR
     );
 
     replace!(hook_manager, "openat", openat_detour, FnOpenat, FN_OPENAT);
