@@ -51,11 +51,7 @@ async fn test_issue1899(
         // lstat test
         assert_eq!(
             layer_connection.codec.next().await.unwrap().unwrap(),
-            ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
-                path: Some("/tmp".to_string().into()),
-                fd: None,
-                follow_symlink: false
-            }))
+            ClientMessage::FileRequest(FileRequest::XstatFs(XstatFsRequest { fd }))
         );
 
         let metadata = MetadataInternal {
