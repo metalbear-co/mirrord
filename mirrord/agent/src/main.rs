@@ -732,6 +732,9 @@ async fn main() -> Result<()> {
         start_iptable_guard().await
     };
 
+    // wait for background tasks to finish
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
     match agent_result {
         Ok(_) => {
             info!("main -> mirrord-agent `start` exiting successfully.")
