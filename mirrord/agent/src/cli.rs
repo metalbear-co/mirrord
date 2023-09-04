@@ -1,9 +1,6 @@
 #![deny(missing_docs)]
 
-use clap::{
-    error::{Error, ErrorKind},
-    Parser, Subcommand,
-};
+use clap::{Parser, Subcommand};
 
 const DEFAULT_RUNTIME: &str = "containerd";
 
@@ -50,7 +47,7 @@ pub enum Mode {
         container_id: String,
 
         /// Container runtime to use
-        #[arg(short = 'r', long)]
+        #[arg(short = 'r', long, default_value = DEFAULT_RUNTIME)]
         container_runtime: String,
     },
     /// Inform the agent to use `proc/1/root` as the root directory.

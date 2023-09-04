@@ -169,7 +169,7 @@ impl<'c> EphemeralTargetedVariant<'c> {
     ) -> Self {
         let mut command_line = base_command_line(agent, params);
 
-        command_line.extend(["-e".to_string(), "targeted".to_string()]);
+        command_line.extend(["ephemeral".to_string()]);
 
         EphemeralTargetedVariant {
             agent,
