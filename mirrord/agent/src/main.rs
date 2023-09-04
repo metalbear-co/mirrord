@@ -494,7 +494,7 @@ impl ClientConnectionHandler {
                 if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
                     tcp_stealer_api.handle_client_message(message).await?
                 } else {
-                    warn!("received tcp sniffer request while not available");
+                    warn!("received tcp steal request while not available");
                     Err(AgentError::SnifferApiError)?
                 }
             }

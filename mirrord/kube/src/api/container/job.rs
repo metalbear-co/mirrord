@@ -153,7 +153,6 @@ impl ContainerVariant for JobVariant<'_> {
 
         let tolerations = agent.tolerations.as_ref().unwrap_or(&DEFAULT_TOLERATIONS);
 
-        // Only Jobs support self deletion after completion
         serde_json::from_value(json!({
             "metadata": {
                 "name": params.name,
