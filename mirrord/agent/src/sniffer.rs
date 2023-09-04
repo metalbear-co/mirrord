@@ -29,6 +29,7 @@ use tracing::{debug, error, trace, warn};
 
 use crate::{
     error::AgentError,
+    steal::http::HttpVersion,
     util::{ClientId, IndexAllocator, Subscriptions},
     watched_task::TaskStatus,
 };
@@ -514,33 +515,8 @@ impl TcpConnectionSniffer {
     /// detected, then the agent should start mirroring as if it was a new connection.
     #[tracing::instrument(level = "debug", ret, skip(bytes))]
     fn treat_as_new_session(tcp_flags: u16, bytes: &[u8]) -> bool {
-        if is_new_connection(tcp_flags) {
-            true
-        } else {
-            let packet_contents = String::from_utf8_lossy(bytes);
-
-            // Does this packet contain an HTTP request?
-            Self::HTTP_REGEX
-                .find(&packet_contents)
-                .map(|matched| {
-                    matched
-                        .map(|range| {
-                            let offset = range.start();
-                            let mut empty_headers = [httparse::EMPTY_HEADER; 0];
-
-                            // The error here can be ignored as we just want to see if this is an
-                            // HTTP request, not what headers/body it has.
-                            matches!(
-                                httparse::Request::new(&mut empty_headers).parse(
-                                    packet_contents.get(offset..).unwrap_or_default().as_bytes()
-                                ),
-                                Ok(_) | Err(httparse::Error::TooManyHeaders)
-                            )
-                        })
-                        .unwrap_or_default()
-                })
-                .unwrap_or_default()
-        }
+        is_new_connection(tcp_flags)
+            || matches!(HttpVersion::new(bytes), HttpVersion::V1 | HttpVersion::V2)
     }
 
     #[tracing::instrument(level = "debug", ret, skip(self, eth_packet), fields(bytes = %eth_packet.len()))]

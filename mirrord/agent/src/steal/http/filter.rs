@@ -31,7 +31,7 @@ use crate::{steal::HandlerHttpRequest, util::ClientId};
 /// Default start of an HTTP/2 request.
 ///
 /// Used by [`HttpVersion`] to check if the connection should be treated as HTTP/2.
-const H2_PREFACE: &[u8; 14] = b"PRI * HTTP/2.0";
+pub(super) const H2_PREFACE: &[u8; 14] = b"PRI * HTTP/2.0";
 
 /// Timeout value for how long we wait for a stream to contain enough bytes to assert which HTTP
 /// version we're dealing with.
@@ -217,77 +217,72 @@ pub(super) async fn filter_task(
     )
     .await
     {
-        Ok(mut reversible_stream) => {
-            match HttpVersion::new(
-                reversible_stream.get_header(),
-                &H2_PREFACE[..MINIMAL_HEADER_SIZE],
-            ) {
-                HttpVersion::V1 => {
-                    HttpV1::serve_connection(
-                        reversible_stream,
-                        original_destination,
-                        connection_id,
-                        filters,
-                        matched_tx,
-                        connection_close_sender,
-                    )
-                    .await
-                }
-                HttpVersion::V2 => {
-                    HttpV2::serve_connection(
-                        reversible_stream,
-                        original_destination,
-                        connection_id,
-                        filters,
-                        matched_tx,
-                        connection_close_sender,
-                    )
-                    .await
-                }
-                HttpVersion::NotHttp => {
-                    trace!(
-                        "Got a connection with unsupported protocol version, passing it through \
+        Ok(mut reversible_stream) => match HttpVersion::new(reversible_stream.get_header()) {
+            HttpVersion::V1 => {
+                HttpV1::serve_connection(
+                    reversible_stream,
+                    original_destination,
+                    connection_id,
+                    filters,
+                    matched_tx,
+                    connection_close_sender,
+                )
+                .await
+            }
+            HttpVersion::V2 => {
+                HttpV2::serve_connection(
+                    reversible_stream,
+                    original_destination,
+                    connection_id,
+                    filters,
+                    matched_tx,
+                    connection_close_sender,
+                )
+                .await
+            }
+            HttpVersion::NotHttp => {
+                trace!(
+                    "Got a connection with unsupported protocol version, passing it through \
                         to its original destination."
-                    );
-                    match TcpStream::connect(original_destination).await {
-                        Ok(mut interceptor_to_original) => {
-                            match copy_bidirectional(
-                                &mut reversible_stream,
-                                &mut interceptor_to_original,
-                            )
-                            .await
-                            {
-                                Ok((incoming, outgoing)) => {
-                                    trace!(
-                                        "Forwarded {incoming} incoming bytes and {outgoing} \
+                );
+                match TcpStream::connect(original_destination).await {
+                    Ok(mut interceptor_to_original) => {
+                        match copy_bidirectional(
+                            &mut reversible_stream,
+                            &mut interceptor_to_original,
+                        )
+                        .await
+                        {
+                            Ok((incoming, outgoing)) => {
+                                trace!(
+                                    "Forwarded {incoming} incoming bytes and {outgoing} \
                                         outgoing bytes in passthrough connection"
-                                    );
+                                );
 
-                                    Ok(())
-                                }
-                                Err(err) => {
-                                    error!(
-                                        "Encountered error while forwarding unsupported \
+                                Ok(())
+                            }
+                            Err(err) => {
+                                error!(
+                                    "Encountered error while forwarding unsupported \
                                     connection to its original destination: {err:?}"
-                                    );
+                                );
 
-                                    Err(err)?
-                                }
+                                Err(err)?
                             }
                         }
-                        Err(err) => {
-                            error!(
+                    }
+                    Err(err) => {
+                        error!(
                             "Could not connect to original destination {original_destination:?}\
                                  . Received a connection with an unsupported protocol version to a \
                                  filtered HTTP port, but cannot forward the connection because of \
                                  the connection error: {err:?}"
                         );
-                            Err(err)?
-                        }
+                        Err(err)?
                     }
                 }
             }
-        }
+        },
 
         Err(read_error) => {
             error!("Got error while trying to read first bytes of TCP stream: {read_error:?}");
