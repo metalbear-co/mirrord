@@ -11,7 +11,7 @@ use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
 use errno::{set_errno, Errno};
 use libc::{
     self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
-    AT_FDCWD, DIR, O_RDONLY, O_RDWR,
+    AT_FDCWD, DIR, O_RDONLY,
 };
 #[cfg(target_os = "linux")]
 use libc::{EBADF, EINVAL, ENOENT, ENOTDIR};
