@@ -281,51 +281,9 @@ impl ClientConnectionHandler {
 
         let file_manager = FileManager::new(pid.or_else(|| ephemeral.then_some(1)));
 
-        let tcp_sniffer_api =
-            if let BackgroundTask::Running(sniffer_status, sniffer_sender) = bg_tasks.sniffer {
-                match TcpSnifferApi::new(id, sniffer_sender, sniffer_status, CHANNEL_SIZE).await {
-                    Ok(api) => Some(api),
-                    Err(e) => {
-                        let message = format!(
-                        "Failed to create TcpSnifferApi: {e}, this could be due to kernel version."
-                    );
-                        warn!(message);
-                        let _ = stream
-                            .send(DaemonMessage::LogMessage(LogMessage::warn(message)))
-                            .await; // Ignore message send error.
-
-                        None
-                    }
-                }
-            } else {
-                None
-            };
-
+        let tcp_sniffer_api = Self::ceate_sniffer_api(id, bg_tasks.sniffer, &mut stream).await;
         let tcp_stealer_api =
-            if let BackgroundTask::Running(stealer_status, stealer_sender) = bg_tasks.stealer {
-                match TcpStealerApi::new(
-                    id,
-                    stealer_sender,
-                    stealer_status,
-                    CHANNEL_SIZE,
-                    protocol_version,
-                )
-                .await
-                {
-                    Ok(api) => Some(api),
-                    Err(e) => {
-                        let _ = stream
-                            .send(DaemonMessage::Close(format!(
-                                "Failed to create TcpStealerApi: {e}."
-                            )))
-                            .await; // Ignore message send error.
-
-                        Err(e)?
-                    }
-                }
-            } else {
-                None
-            };
+            Self::ceate_stealer_api(id, bg_tasks.stealer, protocol_version, &mut stream).await?;
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
         let udp_outgoing_api = UdpOutgoingApi::new(pid);
@@ -345,6 +303,66 @@ impl ClientConnectionHandler {
         };
 
         Ok(client_handler)
+    }
+
+    async fn ceate_sniffer_api(
+        id: ClientId,
+        task: BackgroundTask<SnifferCommand>,
+        stream: &mut Framed<TcpStream, DaemonCodec>,
+    ) -> Option<TcpSnifferApi> {
+        if let BackgroundTask::Running(sniffer_status, sniffer_sender) = task {
+            match TcpSnifferApi::new(id, sniffer_sender, sniffer_status, CHANNEL_SIZE).await {
+                Ok(api) => Some(api),
+                Err(e) => {
+                    let message = format!(
+                        "Failed to create TcpSnifferApi: {e}, this could be due to kernel version."
+                    );
+
+                    warn!(message);
+
+                    // Ignore message send error.
+                    let _ = stream
+                        .send(DaemonMessage::LogMessage(LogMessage::warn(message)))
+                        .await;
+
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    }
+
+    async fn ceate_stealer_api(
+        id: ClientId,
+        task: BackgroundTask<StealerCommand>,
+        protocol_version: semver::Version,
+        stream: &mut Framed<TcpStream, DaemonCodec>,
+    ) -> Result<Option<TcpStealerApi>> {
+        if let BackgroundTask::Running(stealer_status, stealer_sender) = task {
+            match TcpStealerApi::new(
+                id,
+                stealer_sender,
+                stealer_status,
+                CHANNEL_SIZE,
+                protocol_version,
+            )
+            .await
+            {
+                Ok(api) => Ok(Some(api)),
+                Err(e) => {
+                    let _ = stream
+                        .send(DaemonMessage::Close(format!(
+                            "Failed to create TcpStealerApi: {e}."
+                        )))
+                        .await; // Ignore message send error.
+
+                    Err(e)?
+                }
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     /// Starts a loop that handles client connection and state.
