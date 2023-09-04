@@ -364,15 +364,11 @@ fn parse_docs_into_tree(files: Vec<syn::File>) -> Result<BTreeSet<PartialType>, 
                             .any(|doc| doc.contains(r"<!--${internal}-->"));
 
                         // We only care about types that have docs.
-                        if !thing_docs_untreated.is_empty() && !is_internal {
-                            Some(PartialType {
-                                ident: item.ident.to_string(),
-                                docs: thing_docs_untreated,
-                                fields: Default::default(),
-                            })
-                        } else {
-                            None
-                        }
+                        (!thing_docs_untreated.is_empty() && !is_internal).then(|| PartialType {
+                            ident: item.ident.to_string(),
+                            docs: thing_docs_untreated,
+                            fields: Default::default(),
+                        })
                     }
                     syn::Item::Struct(item) => {
                         let fields = item
@@ -396,18 +392,14 @@ fn parse_docs_into_tree(files: Vec<syn::File>) -> Result<BTreeSet<PartialType>, 
                         public_fields.sort();
 
                         // We only care about types that have docs.
-                        if !thing_docs_untreated.is_empty()
+                        (!thing_docs_untreated.is_empty()
                             && !public_fields.is_empty()
-                            && !is_internal
-                        {
-                            Some(PartialType {
+                            && !is_internal)
+                            .then(|| PartialType {
                                 ident: item.ident.to_string(),
                                 docs: thing_docs_untreated,
                                 fields: public_fields,
                             })
-                        } else {
-                            None
-                        }
                     }
                     _ => None,
                 })
