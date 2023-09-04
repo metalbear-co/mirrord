@@ -114,6 +114,8 @@ impl State {
             }
             // if not, we use the pid of the target container or fallback to self
             cli::Mode::Targetless => (false, None, "self".to_string()),
+            #[cfg(test)]
+            cli::Mode::Test => (false, None, "self".to_string()),
         };
 
         let environ_path = PathBuf::from("/proc").join(pid).join("environ");

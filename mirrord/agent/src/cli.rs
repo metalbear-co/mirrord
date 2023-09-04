@@ -52,6 +52,8 @@ pub enum Mode {
     },
     /// Inform the agent to use `proc/1/root` as the root directory.
     Ephemeral,
+    #[cfg(test)]
+    Test,
     #[default]
     Targetless,
 }
