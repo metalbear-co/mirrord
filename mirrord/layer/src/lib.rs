@@ -888,7 +888,11 @@ fn start_layer_thread(
 ) {
     std::thread::spawn(move || {
         let _guard = DetourGuard::new();
-        runtime.block_on(thread_loop(receiver, tx, rx, config))
+        runtime.block_on(thread_loop(receiver, tx, rx, config));
+        runtime.block_on(async move {
+            // wait for background tasks to finish
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        });
     });
 }
 
