@@ -133,7 +133,10 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
     }
 }
 
-/// TODO(alex) [mid] 2023-09-04: Docs.
+/// Hook for [`libc::opendir`].
+///
+/// Opens the directory with `read` permission using the [`open_logic`] flow, then calls
+/// [`fdopendir`] to convert the [`RawFd`] into a `*DIR` stream (which we treat as `usize`).
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> usize {
     open_logic(raw_filename, O_RDONLY, 0)
