@@ -25,10 +25,6 @@ pub struct Args {
     #[arg(short = 'i', long)]
     pub network_interface: Option<String>,
 
-    /// Inform the agent to use `proc/1/root` as the root directory.
-    #[arg(short = 'e', long, default_value_t = false)]
-    pub ephemeral_container: bool,
-
     /// Pause the target container while clients are connected.
     #[arg(short = 'p', long, default_value_t = false)]
     pub pause: bool,
@@ -51,41 +47,18 @@ pub enum Mode {
     Targeted {
         /// Container id to get traffic from
         #[arg(short, long)]
-        container_id: Option<String>,
+        container_id: String,
 
         /// Container runtime to use
         #[arg(short = 'r', long)]
-        container_runtime: Option<String>,
+        container_runtime: String,
     },
+    /// Inform the agent to use `proc/1/root` as the root directory.
+    Ephemeral,
     #[default]
     Targetless,
 }
 
 pub fn parse_args() -> Args {
-    let args = Args::try_parse().and_then(|mut args| {
-        if let Mode::Targeted {
-            container_id,
-            container_runtime,
-        } = &mut args.mode
-        {
-            if container_runtime.is_some() && container_id.is_none() {
-                Err(Error::raw(
-                    ErrorKind::InvalidValue,
-                    "container_id is required when container_runtime is specified",
-                ))
-            } else {
-                if container_runtime.is_none() {
-                    *container_runtime = Some(DEFAULT_RUNTIME.to_string());
-                }
-
-                Ok(args)
-            }
-        } else {
-            Ok(args)
-        }
-    });
-    match args {
-        Ok(args) => args,
-        Err(e) => e.exit(),
-    }
+    Args::try_parse().unwrap_or_else(|err| err.exit())
 }

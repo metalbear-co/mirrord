@@ -88,44 +88,35 @@ struct State {
 impl State {
     /// Return [`Err`] if container runtime operations failed.
     pub async fn new(args: &Args) -> Result<State> {
-        let container = match &args.mode {
+        let mut env: HashMap<String, String> = HashMap::new();
+
+        let (ephemeral, container, pid) = match &args.mode {
             cli::Mode::Targeted {
-                container_id: Some(container_id),
+                container_id,
                 container_runtime,
             } => {
                 let container =
-                    get_container(container_id.clone(), container_runtime.as_deref()).await?;
+                    get_container(container_id.clone(), Some(container_runtime)).await?;
 
-                Some(ContainerHandle::new(container).await?)
+                let container_handle = ContainerHandle::new(container).await?;
+                let pid = container_handle.pid().to_string();
+
+                env.extend(container_handle.raw_env().clone());
+
+                (false, Some(container_handle), pid)
             }
-            _ => None,
-        };
+            cli::Mode::Ephemeral => {
+                // in ephemeral container, we get same env as the target container, so copy our env.
+                env.extend(std::env::vars());
 
-        // If we are in an ephemeral container, we use pid 1.
-        // if not, we use the pid of the target container or fallback to self
-        let pid = {
-            if args.ephemeral_container {
-                "1".to_string()
-            } else {
-                container
-                    .as_ref()
-                    .map(|h| h.pid().to_string())
-                    .unwrap_or_else(|| "self".to_string())
+                // If we are in an ephemeral container, we use pid 1.
+                (true, None, "1".to_string())
             }
+            // if not, we use the pid of the target container or fallback to self
+            cli::Mode::Targetless => (false, None, "self".to_string()),
         };
-
-        let mut env: HashMap<String, String> = HashMap::new();
 
         let environ_path = PathBuf::from("/proc").join(pid).join("environ");
-
-        if let Some(container) = container.as_ref() {
-            env.extend(container.raw_env().clone());
-        }
-
-        // in ephemeral container, we get same env as the target container, so copy our env.
-        if args.ephemeral_container {
-            env.extend(std::env::vars())
-        }
 
         match env::get_proc_environ(environ_path).await {
             Ok(environ) => env.extend(environ.into_iter()),
@@ -139,7 +130,7 @@ impl State {
             index_allocator: Default::default(),
             container,
             env,
-            ephemeral: args.ephemeral_container,
+            ephemeral,
         })
     }
 
