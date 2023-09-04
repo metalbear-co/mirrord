@@ -18,7 +18,7 @@ use crate::{
 
 static CRIO_DEFAULT_SOCK_PATH: &str = "/host/run/crio/crio.sock";
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct CriOContainer {
     pub container_id: String,
 }

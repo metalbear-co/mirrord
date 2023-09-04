@@ -701,8 +701,6 @@ async fn start_iptable_guard() -> Result<()> {
     result
 }
 
-// if you decide to change it from current_thread for some reason,
-// pay attention to the cgroup code which relies on staying on same thread.
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     tracing_subscriber::registry()
@@ -727,6 +725,9 @@ async fn main() -> Result<()> {
     } else {
         start_iptable_guard().await
     };
+
+    // wait for background tasks to finish
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     match agent_result {
         Ok(_) => {
