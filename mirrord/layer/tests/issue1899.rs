@@ -60,9 +60,9 @@ async fn test_issue1899(
 
     test_process.wait_assert_success().await;
     test_process
-        .assert_stdout_contains("test issue 1776: START")
+        .assert_stdout_contains("test issue 1899: START")
         .await;
     test_process
-        .assert_stdout_contains("test issue 1776: SUCCESS")
+        .assert_stdout_contains("test issue 1899: SUCCESS")
         .await;
 }
