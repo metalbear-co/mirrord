@@ -10,10 +10,9 @@ mod common;
 
 pub use common::*;
 
-/// Verify that issue [#1776](https://github.com/metalbear-co/mirrord/issues/1776) is fixed.
+/// Verify that issue [#1899](https://github.com/metalbear-co/mirrord/issues/1899) is fixed.
 ///
-/// We test this with `outgoing.udp = false`, as we're just trying to resolve DNS, and not full UDP
-/// outgoing traffic.
+/// Test the `opendir` hook by calling it and asserting that `*DIR` is not `null`.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
@@ -22,14 +21,18 @@ async fn test_issue1899(
     dylib_path: &PathBuf,
 ) {
     let (mut test_process, mut layer_connection) = application
-        .start_process_with_layer(dylib_path, vec![], None)
+        .start_process_with_layer(
+            dylib_path,
+            vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp")],
+            None,
+        )
         .await;
 
     let fd = 1;
 
     layer_connection
         .expect_file_open_with_options(
-            "/tmp/test_file.txt",
+            "/tmp",
             fd,
             OpenOptionsInternal {
                 read: true,
