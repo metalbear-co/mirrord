@@ -1,1 +1,0 @@
-Fix analytics not being sent on drop
