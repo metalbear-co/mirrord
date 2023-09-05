@@ -24,7 +24,11 @@ mod file_ops {
         let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let command = ops.command();
 
-        let args = vec!["--fs-mode", "write"];
+        let mut args = vec!["--fs-mode", "write"];
+
+        if cfg!(feature = "ephemeral") {
+            args.extend(["-e"].into_iter());
+        }
 
         let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/**")];
         let mut process = run_exec_with_target(
@@ -205,7 +209,11 @@ mod file_ops {
         let service = service.await;
         let command = ops.command();
 
-        let args = vec!["--fs-mode", "read"];
+        let mut args = vec!["--fs-mode", "read"];
+
+        if cfg!(feature = "ephemeral") {
+            args.extend(["-e"].into_iter());
+        }
 
         let mut process = run_exec_with_target(
             command,

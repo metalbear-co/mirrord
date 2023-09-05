@@ -37,7 +37,12 @@ mod steal {
         let service = service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
-        let flags = vec!["--steal"];
+        let mut flags = vec!["--steal"];
+
+        if cfg!(feature = "ephemeral") {
+            flags.extend(["-e"].into_iter());
+        }
+
         let mut process = application
             .run(&service.target, Some(&service.namespace), Some(flags), None)
             .await;
@@ -71,7 +76,12 @@ mod steal {
         let service = service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
-        let flags = vec!["--steal"];
+        let mut flags = vec!["--steal"];
+
+        if cfg!(feature = "ephemeral") {
+            flags.extend(["-e"].into_iter());
+        }
+
         let mut process = application
             .run(
                 &service.target,
@@ -103,7 +113,12 @@ mod steal {
         // Start the test app with mirrord
         let service = service.await;
         let kube_client = kube_client.await;
-        let flags = vec!["--steal"];
+        let mut flags = vec!["--steal"];
+
+        if cfg!(feature = "ephemeral") {
+            flags.extend(["-e"].into_iter());
+        }
+
         let mut process = application
             .run(&service.target, Some(&service.namespace), Some(flags), None)
             .await;
@@ -180,7 +195,11 @@ mod steal {
         // Start the test app with mirrord
         let service = service.await;
         let kube_client = kube_client.await;
-        let flags = vec!["--steal"];
+        let mut flags = vec!["--steal"];
+
+        if cfg!(feature = "ephemeral") {
+            flags.extend(["-e"].into_iter());
+        }
 
         let mut process = application
             .run(

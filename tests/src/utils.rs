@@ -469,8 +469,6 @@ pub async fn run_exec(
     if let Some(namespace) = namespace {
         mirrord_args.extend(["--target-namespace", namespace].into_iter());
     }
-    #[cfg(feature = "ephemeral")]
-    mirrord_args.extend(["--ephemeral-container"].into_iter());
 
     if let Some(args) = args {
         mirrord_args.extend(args.into_iter());
