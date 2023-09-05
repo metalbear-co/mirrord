@@ -34,7 +34,7 @@ use crate::error::HookError::ResponseError;
 use crate::{
     common::CheckedInto,
     detour::{Detour, DetourGuard},
-    error::{HookError, HookResult},
+    error::HookError,
     file::ops::{access, lseek, open, read, write},
     hooks::HookManager,
     replace,
@@ -672,40 +672,54 @@ unsafe extern "C" fn fill_statfs(out_stat: *mut statfs, metadata: &FsMetadataInt
     out.f_ffree = metadata.files_free;
 }
 
-fn stat_logic(ver: c_int, raw_path: *const c_char, out_stat: *mut stat64) -> c_int {
+fn stat_logic<const FOLLOW_SYMLINK: bool>(
+    _ver: c_int,
+    fd: Option<RawFd>,
+    raw_path: Option<*const c_char>,
+    out_stat: *mut stat64,
+) -> Detour<c_int> {
     if out_stat.is_null() {
-        HookError::BadPointer.into()
+        Detour::Error(HookError::BadPointer)
     } else {
-        xstat(Some(raw_path.checked_into()), None, true)
-            .map(|res| {
-                let res = res.metadata;
-                unsafe { fill_stat(out_stat, &res) };
-                0
-            })
-            .unwrap_or_bypass_with(|_bypass| {
-                #[cfg(target_os = "macos")]
-                let raw_path = update_ptr_from_bypass(raw_path, _bypass);
-                unsafe { FN___XSTAT(ver, raw_path, out_stat as *mut _) }
-            })
+        let path = raw_path.map(CheckedInto::checked_into);
+
+        xstat(path, fd, FOLLOW_SYMLINK).map(|res| {
+            let res = res.metadata;
+            unsafe { fill_stat(out_stat, &res) };
+            0
+        })
     }
 }
 
 /// Hook for `libc::lstat`.
 #[hook_guard_fn]
 unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
-    stat_logic(0, raw_path, out_stat as *mut _)
+    stat_logic::<false>(0, None, Some(raw_path), out_stat as *mut _).unwrap_or_bypass_with(
+        |_bypass| {
+            #[cfg(target_os = "macos")]
+            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+            FN_LSTAT(raw_path, out_stat)
+        },
+    )
 }
 
 /// Hook for `libc::fstat`.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> c_int {
-    stat_logic(0, raw_path, out_stat as *mut _)
+    stat_logic::<true>(0, Some(fd), None, out_stat as *mut _)
+        .unwrap_or_bypass_with(|_| FN_FSTAT(fd, out_stat))
 }
 
 /// Hook for `libc::stat`.
 #[hook_guard_fn]
 unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
-    stat_logic(0, raw_path, out_stat as *mut _)
+    stat_logic::<true>(0, None, Some(raw_path), out_stat as *mut _).unwrap_or_bypass_with(
+        |_bypass| {
+            #[cfg(target_os = "macos")]
+            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+            FN_LSTAT(raw_path, out_stat)
+        },
+    )
 }
 
 /// Hook for libc's stat syscall wrapper.
@@ -715,7 +729,13 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
     raw_path: *const c_char,
     out_stat: *mut stat,
 ) -> c_int {
-    stat_logic(ver, raw_path, out_stat as *mut _)
+    stat_logic::<true>(ver, None, Some(raw_path), out_stat as *mut _).unwrap_or_bypass_with(
+        |_bypass| {
+            #[cfg(target_os = "macos")]
+            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+            FN___XSTAT(ver, raw_path, out_stat)
+        },
+    )
 }
 
 /// Hook for libc's stat syscall wrapper.
@@ -725,7 +745,13 @@ pub(crate) unsafe extern "C" fn __lxstat_detour(
     raw_path: *const c_char,
     out_stat: *mut stat,
 ) -> c_int {
-    stat_logic(ver, raw_path, out_stat as *mut _)
+    stat_logic::<true>(ver, None, Some(raw_path), out_stat as *mut _).unwrap_or_bypass_with(
+        |_bypass| {
+            #[cfg(target_os = "macos")]
+            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+            FN___LXSTAT(ver, raw_path, out_stat)
+        },
+    )
 }
 
 /// Hook for libc's stat syscall wrapper.
@@ -735,7 +761,11 @@ pub(crate) unsafe extern "C" fn __xstat64_detour(
     raw_path: *const c_char,
     out_stat: *mut stat64,
 ) -> c_int {
-    stat_logic(ver, raw_path, out_stat)
+    stat_logic::<true>(ver, None, Some(raw_path), out_stat).unwrap_or_bypass_with(|_bypass| {
+        #[cfg(target_os = "macos")]
+        let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+        FN___XSTAT64(ver, raw_path, out_stat)
+    })
 }
 
 /// Hook for libc's stat syscall wrapper.
@@ -745,7 +775,11 @@ pub(crate) unsafe extern "C" fn __lxstat64_detour(
     raw_path: *const c_char,
     out_stat: *mut stat64,
 ) -> c_int {
-    stat_logic(ver, raw_path, out_stat)
+    stat_logic::<true>(ver, None, Some(raw_path), out_stat).unwrap_or_bypass_with(|_bypass| {
+        #[cfg(target_os = "macos")]
+        let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+        FN___LXSTAT64(ver, raw_path, out_stat)
+    })
 }
 
 /// Separated out logic for `fstatat` so that it can be used by go to match on the xstat result.
@@ -762,7 +796,7 @@ pub(crate) unsafe fn fstatat_logic(
     let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
     xstat(Some(raw_path.checked_into()), Some(fd), follow_symlink).map(|res| {
         let res = res.metadata;
-        fill_stat(out_stat, &res);
+        fill_stat(out_stat as *mut _, &res);
         0
     })
 }
