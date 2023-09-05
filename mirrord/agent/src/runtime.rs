@@ -70,7 +70,7 @@ pub(crate) trait ContainerRuntime {
 }
 
 #[enum_dispatch(ContainerRuntime)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Container {
     Docker(DockerContainer),
     Containerd(ContainerdContainer),
@@ -94,7 +94,7 @@ pub(crate) async fn get_container(
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct DockerContainer {
     container_id: String,
     client: Docker,
@@ -160,7 +160,7 @@ impl ContainerRuntime for DockerContainer {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ContainerdContainer {
     container_id: String,
 }

@@ -766,7 +766,7 @@ async fn start_iptable_guard(args: Args) -> Result<()> {
     result
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     tracing_subscriber::registry()
         .with(
@@ -793,6 +793,9 @@ async fn main() -> Result<()> {
     } else {
         start_iptable_guard(args).await
     };
+
+    // wait for background tasks to finish
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     match agent_result {
         Ok(_) => {
