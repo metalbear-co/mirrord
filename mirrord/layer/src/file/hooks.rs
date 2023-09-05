@@ -11,7 +11,7 @@ use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
 use errno::{set_errno, Errno};
 use libc::{
     self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
-    AT_FDCWD, DIR, O_RDONLY,
+    AT_FDCWD, DIR, O_DIRECTORY, O_RDONLY,
 };
 #[cfg(target_os = "linux")]
 use libc::{dirent64, stat64, EBADF, EINVAL, ENOENT, ENOTDIR};
@@ -143,7 +143,7 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
 /// [`fdopendir`] to convert the [`RawFd`] into a `*DIR` stream (which we treat as `usize`).
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> usize {
-    open_logic(raw_filename, O_RDONLY, 0)
+    open_logic(raw_filename, O_RDONLY, O_DIRECTORY)
         .and_then(fdopendir)
         .unwrap_or_bypass_with(|_| FN_OPENDIR(raw_filename))
 }
