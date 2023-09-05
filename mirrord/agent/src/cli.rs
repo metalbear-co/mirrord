@@ -54,6 +54,8 @@ pub enum Mode {
     Ephemeral,
     #[default]
     Targetless,
+    #[clap(hide = true)]
+    BlackboxTest,
 }
 
 impl Mode {
