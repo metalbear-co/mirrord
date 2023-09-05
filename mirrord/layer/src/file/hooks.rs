@@ -32,6 +32,7 @@ use crate::detour::Bypass;
 #[cfg(target_os = "linux")]
 use crate::error::HookError::ResponseError;
 use crate::{
+    close_layer_fd,
     common::CheckedInto,
     detour::{Detour, DetourGuard},
     error::HookError,
@@ -144,7 +145,14 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> usize {
     open_logic(raw_filename, O_RDONLY, O_DIRECTORY)
-        .and_then(fdopendir)
+        .and_then(|fd| match fdopendir(fd) {
+            Detour::Success(success) => Detour::Success(success),
+            Detour::Bypass(bypass) => Detour::Bypass(bypass),
+            Detour::Error(fail) => {
+                close_layer_fd(fd);
+                Detour::Error(fail)
+            }
+        })
         .unwrap_or_bypass_with(|_| FN_OPENDIR(raw_filename))
 }
 
