@@ -40,6 +40,9 @@ use crate::{
     replace,
 };
 
+#[cfg(target_os = "macos")]
+type stat64 = stat;
+
 /// Take the original raw c_char pointer and a resulting bypass, and either the original pointer or
 /// a different one according to the bypass.
 /// We pass reference to bypass to make sure the bypass lives with the pointer.
@@ -245,7 +248,6 @@ pub(crate) unsafe extern "C" fn readdir64_r_detour(
     entry: *mut dirent64,
     result: *mut *mut dirent64,
 ) -> c_int {
-    warn!("cake");
     readdir_r(dirp as usize)
         .map(|resp| {
             if let Some(direntry) = resp {
