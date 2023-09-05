@@ -8,6 +8,51 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.64.1](https://github.com/metalbear-co/mirrord/tree/3.64.1) - 2023-09-03
+
+
+### Fixed
+
+- Remove extra message of `{"type":"FinishedTask","name":"mirrord preparing to
+  launch","success":true,"message":null}` that causes breakage in extensions.
+
+
+## [3.64.0](https://github.com/metalbear-co/mirrord/tree/3.64.0) - 2023-09-02
+
+
+### Added
+
+- Warn when running in a mesh service with mirror mode.
+  [#1768](https://github.com/metalbear-co/mirrord/issues/1768)
+
+
+### Fixed
+
+- Fixed detecting operator not found as an error
+  [#1868](https://github.com/metalbear-co/mirrord/issues/1868)
+- Update hyper and hyper-util to fix double select call (and properly handle
+  large http traffic).
+  [#1869](https://github.com/metalbear-co/mirrord/issues/1869)
+- Fixed ongoing connections not being stolen by changing our flush mechanism -
+  add a rule to drop marked connections and then mark existing connections when
+  starting to steal.
+  [#1870](https://github.com/metalbear-co/mirrord/issues/1870)
+- Fixed panic on crash analytics
+  [#1872](https://github.com/metalbear-co/mirrord/issues/1872)
+- Fixed showing error on each file not found triggered by the file not found
+  configuration
+- Regex meta characters are now escaped in `$HOME` (`not-found` file filter).
+
+
+### Internal
+
+- Set fork env in integration tests using uvicorn
+  [#1627](https://github.com/metalbear-co/mirrord/issues/1627)
+- Fix complete_passthrough response flake
+  [#1811](https://github.com/metalbear-co/mirrord/issues/1811)
+- Fix typo in flush connections conntrack command
+
+
 ## [3.63.0](https://github.com/metalbear-co/mirrord/tree/3.63.0) - 2023-08-28
 
 

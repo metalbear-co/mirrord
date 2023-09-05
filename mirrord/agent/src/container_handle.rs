@@ -1,6 +1,5 @@
 use std::{collections::HashMap, sync::Arc};
 
-use futures::executor;
 use tokio::sync::RwLock;
 use tracing::{error, info};
 
@@ -24,17 +23,15 @@ struct Inner {
 /// This is to make sure we don't leave the target container paused when the agent exits.
 impl Drop for Inner {
     fn drop(&mut self) {
-        let result = executor::block_on(async {
-            if *self.paused.read().await {
+        // use try_read to avoid deadlocks
+        if let Ok(true) = self.paused.try_read().as_deref() {
+            let container = self.container.clone();
+            tokio::spawn(async move {
                 info!("Agent exiting with target container paused. Unpausing target container.");
-                self.container.unpause().await
-            } else {
-                Ok(())
-            }
-        });
-
-        if let Err(err) = result {
-            error!("Could not unpause target container while exiting, got error: {err:?}");
+                if let Err(err) = container.unpause().await {
+                    error!("Could not unpause target container while exiting, got error: {err:?}");
+                }
+            });
         }
     }
 }
@@ -83,7 +80,6 @@ impl ContainerHandle {
             (true, false) => self.0.container.unpause().await?,
             _ => return Ok(false),
         }
-
         *guard = paused;
 
         Ok(true)
