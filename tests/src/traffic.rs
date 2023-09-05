@@ -17,7 +17,7 @@ mod traffic {
         udp_logger_service, KubeService, CONTAINER_NAME,
     };
 
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
@@ -34,7 +34,7 @@ mod traffic {
         assert!(res.success());
     }
 
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
@@ -54,7 +54,7 @@ mod traffic {
     // TODO: change outgoing TCP tests to use the same setup as in the outgoing UDP test so that
     //       they actually verify that the traffic is intercepted and forwarded (and isn't just
     //       directly sent out from the local application).
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
@@ -70,7 +70,7 @@ mod traffic {
         assert!(res.success());
     }
 
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[should_panic]
@@ -87,7 +87,7 @@ mod traffic {
         assert!(res.success());
     }
 
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn outgoing_traffic_single_request_disabled(#[future] service: KubeService) {
@@ -110,7 +110,7 @@ mod traffic {
         assert!(res.success());
     }
 
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn outgoing_traffic_make_request_after_listen(#[future] service: KubeService) {
@@ -125,7 +125,7 @@ mod traffic {
         assert!(res.success());
     }
 
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn outgoing_traffic_make_request_localhost(#[future] service: KubeService) {
@@ -143,7 +143,7 @@ mod traffic {
     /// Currently, mirrord only intercepts and forwards outgoing udp traffic if the application
     /// binds a non-0 port and calls `connect`. This test runs with mirrord a node app that does
     /// that and verifies that mirrord intercepts and forwards the outgoing udp message.
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
@@ -227,7 +227,7 @@ mod traffic {
 
     /// Very similar to [`outgoing_traffic_udp_with_connect`], but it uses the outgoing traffic
     /// filter to resolve the remote host names.
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
@@ -344,7 +344,7 @@ mod traffic {
 
     /// Test that the process does not crash and messages are sent out normally when the
     /// application calls `connect` on a UDP socket with outgoing traffic disabled on mirrord.
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(30))]
@@ -387,7 +387,7 @@ mod traffic {
         assert!(res.success());
     }
 
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn go18_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
@@ -395,7 +395,7 @@ mod traffic {
         test_go(service, command).await;
     }
 
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn go19_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
@@ -403,7 +403,7 @@ mod traffic {
         test_go(service, command).await;
     }
 
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
@@ -412,7 +412,7 @@ mod traffic {
         test_go(service, command).await;
     }
 
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
@@ -421,7 +421,7 @@ mod traffic {
         test_go(service, command).await;
     }
 
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
@@ -430,7 +430,7 @@ mod traffic {
         test_go(service, command).await;
     }
 
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
@@ -439,7 +439,7 @@ mod traffic {
         test_go(service, command).await;
     }
 
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn listen_localhost(#[future] service: KubeService) {
@@ -451,7 +451,7 @@ mod traffic {
         assert!(res.success());
     }
 
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
@@ -472,7 +472,7 @@ mod traffic {
     /// 2. Run with mirrord a client application that connects to that socket, sends data, verifies
     /// its echo and panics if anything went wrong
     /// 3. Verify the client app did not panic.
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
@@ -509,7 +509,7 @@ mod traffic {
     /// Verify that mirrord does not interfere with ignored unix sockets and connecting to a unix
     /// socket that is NOT configured to happen remotely works fine locally (testing the Bypass
     /// case of connections to unix sockets).
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]

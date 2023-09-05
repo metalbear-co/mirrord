@@ -1,4 +1,3 @@
-#![allow(dead_code, unused)]
 #[cfg(test)]
 
 mod env {
@@ -8,7 +7,7 @@ mod env {
 
     use crate::utils::{run_exec_with_target, service, EnvApp, KubeService};
 
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
@@ -19,7 +18,7 @@ mod env {
         remote_env_vars_works(service, application).await;
     }
 
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]

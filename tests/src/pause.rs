@@ -44,7 +44,7 @@ mod pause {
     /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
     /// Because the test runs a bash script with mirrord and that requires the universal binary.
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
@@ -136,7 +136,7 @@ mod pause {
     /// 2. Wait for the local child process to exit.
     /// 3. Wait for the agent jobs to complete.
     /// 4. Verify the target pod is unpaused.
-    #[cfg(all(feature = "job", not(feature = "ephemeral")))]
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
