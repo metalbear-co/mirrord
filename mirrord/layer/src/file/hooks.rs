@@ -200,7 +200,7 @@ unsafe fn assign_direntry64(
         // The structs written by the kernel for the getdents syscall do not have a fixed size.
         in_entry.get_d_reclen64()
     } else {
-        std::mem::size_of::<dirent>() as u16
+        std::mem::size_of::<dirent64>() as u16
     };
     (*out_entry).d_type = in_entry.file_type;
 
