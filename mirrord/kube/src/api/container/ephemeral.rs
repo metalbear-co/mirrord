@@ -55,9 +55,6 @@ where
     // Ephemeral should never be targetless, so there should be runtime data.
     let mut container_progress = progress.subtask("creating ephemeral container...");
 
-    warn!("Ephemeral Containers is an experimental feature
-                  >> Refer https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/ for more info");
-
     let mut ephemeral_container: KubeEphemeralContainer = variant.as_update()?;
     debug!("Requesting ephemeral_containers_subresource");
 
