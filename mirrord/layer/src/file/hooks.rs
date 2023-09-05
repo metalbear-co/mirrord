@@ -10,11 +10,11 @@ use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
 #[cfg(target_os = "linux")]
 use errno::{set_errno, Errno};
 use libc::{
-    self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, stat64, statfs, AT_EACCESS,
+    self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
     AT_FDCWD, DIR, O_RDONLY,
 };
 #[cfg(target_os = "linux")]
-use libc::{dirent64, EBADF, EINVAL, ENOENT, ENOTDIR};
+use libc::{dirent64, stat64, EBADF, EINVAL, ENOENT, ENOTDIR};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
     DirEntryInternal, FsMetadataInternal, MetadataInternal, ReadFileResponse, WriteFileResponse,
@@ -41,6 +41,7 @@ use crate::{
 };
 
 #[cfg(target_os = "macos")]
+#[allow(non_camel_case_types)]
 type stat64 = stat;
 
 /// Take the original raw c_char pointer and a resulting bypass, and either the original pointer or
