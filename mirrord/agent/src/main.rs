@@ -222,13 +222,13 @@ impl State {
 
 enum BackgroundTask<Command> {
     Running(TaskStatus, Sender<Command>),
-    Closed,
+    Disabled,
 }
 
 impl<Command> Clone for BackgroundTask<Command> {
     fn clone(&self) -> Self {
         match self {
-            BackgroundTask::Closed => BackgroundTask::Closed,
+            BackgroundTask::Disabled => BackgroundTask::Disabled,
             BackgroundTask::Running(status, sender) => {
                 BackgroundTask::Running(status.clone(), sender.clone())
             }
@@ -613,10 +613,10 @@ async fn start_agent(args: Args) -> Result<()> {
     let bg_tasks = BackgroundTasks {
         sniffer: sniffer_status
             .map(|status| BackgroundTask::Running(status, sniffer_command_tx))
-            .unwrap_or(BackgroundTask::Closed),
+            .unwrap_or(BackgroundTask::Disabled),
         stealer: stealer_status
             .map(|status| BackgroundTask::Running(status, stealer_command_tx))
-            .unwrap_or(BackgroundTask::Closed),
+            .unwrap_or(BackgroundTask::Disabled),
         dns_api,
     };
 
