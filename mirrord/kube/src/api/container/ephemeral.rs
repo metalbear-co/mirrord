@@ -9,7 +9,7 @@ use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
 use serde_json::json;
 use tokio::pin;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::{
     api::{
