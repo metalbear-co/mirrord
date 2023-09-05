@@ -302,6 +302,26 @@ pub(crate) unsafe extern "C" fn openat_detour(
     })
 }
 
+/// Equivalent to `open_detour`, **except** when `raw_path` specifies a relative path.
+///
+/// If `fd == AT_FDCWD`, the current working directory is used, and the behavior is the same as
+/// `open_detour`.
+/// `fd` for a file descriptor with the `O_DIRECTORY` flag.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn openat64_detour(
+    fd: RawFd,
+    raw_path: *const c_char,
+    open_flags: c_int,
+) -> RawFd {
+    let open_options = OpenOptionsInternalExt::from_flags(open_flags);
+
+    openat(fd, raw_path.checked_into(), open_options).unwrap_or_bypass_with(|_bypass| {
+        #[cfg(target_os = "macos")]
+        let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+        FN_OPENAT64(fd, raw_path, open_flags)
+    })
+}
+
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn _openat_nocancel_detour(
     fd: RawFd,
@@ -907,7 +927,13 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     );
 
     replace!(hook_manager, "openat", openat_detour, FnOpenat, FN_OPENAT);
-    replace!(hook_manager, "openat64", openat_detour, FnOpenat, FN_OPENAT);
+    replace!(
+        hook_manager,
+        "openat64",
+        openat64_detour,
+        FnOpenat64,
+        FN_OPENAT64
+    );
     replace!(
         hook_manager,
         "_openat$NOCANCEL",
