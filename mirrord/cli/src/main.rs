@@ -26,8 +26,7 @@ use mirrord_config::{
 use mirrord_kube::{
     api::{
         container::SKIP_NAMES,
-        get_k8s_resource_api,
-        kubernetes::{create_kube_api, rollout::Rollout},
+        kubernetes::{create_kube_api, get_k8s_resource_api, rollout::Rollout},
     },
     error::KubeApiError,
 };

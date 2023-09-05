@@ -10,7 +10,7 @@ use mirrord_config::{
     feature::network::incoming::ConcurrentSteal, target::TargetConfig, LayerConfig,
 };
 use mirrord_kube::{
-    api::{get_k8s_resource_api, kubernetes::create_kube_api},
+    api::kubernetes::{create_kube_api, get_k8s_resource_api},
     error::KubeApiError,
 };
 use mirrord_progress::Progress;
