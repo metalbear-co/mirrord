@@ -560,7 +560,7 @@ async fn start_agent(args: Args) -> Result<()> {
 
     let dns_api = DnsApi::new(state.container_pid(), 1000);
 
-    let (sniffer_task, sniffer_status) = if matches!(args.mode, cli::Mode::Targetless) {
+    let (sniffer_task, sniffer_status) = if args.mode.is_targetless() {
         (None, None)
     } else {
         let cancellation_token = cancellation_token.clone();
@@ -587,7 +587,7 @@ async fn start_agent(args: Args) -> Result<()> {
         (Some(task), Some(status))
     };
 
-    let (stealer_task, stealer_status) = if matches!(args.mode, cli::Mode::Targetless) {
+    let (stealer_task, stealer_status) = if args.mode.is_targetless() {
         (None, None)
     } else {
         let cancellation_token = cancellation_token.clone();
@@ -787,7 +787,7 @@ async fn main() -> Result<()> {
 
     let args = cli::parse_args();
 
-    let agent_result = if matches!(args.mode, cli::Mode::Targetless)
+    let agent_result = if args.mode.is_targetless()
         || (std::env::var(IPTABLE_PREROUTING_ENV).is_ok()
             && std::env::var(IPTABLE_MESH_ENV).is_ok())
     {

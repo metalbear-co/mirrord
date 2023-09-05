@@ -58,6 +58,12 @@ pub enum Mode {
     Targetless,
 }
 
+impl Mode {
+    pub fn is_targetless(&self) -> bool {
+        matches!(self, Mode::Targetless)
+    }
+}
+
 pub fn parse_args() -> Args {
     Args::try_parse().unwrap_or_else(|err| err.exit())
 }
