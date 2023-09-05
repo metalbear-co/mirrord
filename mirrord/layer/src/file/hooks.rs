@@ -14,7 +14,7 @@ use libc::{
     AT_FDCWD, DIR, O_RDONLY,
 };
 #[cfg(target_os = "linux")]
-use libc::{EBADF, EINVAL, ENOENT, ENOTDIR};
+use libc::{dirent64, EBADF, EINVAL, ENOENT, ENOTDIR};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
     DirEntryInternal, FsMetadataInternal, MetadataInternal, ReadFileResponse, WriteFileResponse,
@@ -186,6 +186,34 @@ unsafe fn assign_direntry(
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+unsafe fn assign_direntry64(
+    in_entry: DirEntryInternal,
+    out_entry: *mut dirent64,
+    getdents: bool,
+) -> Result<(), HookError> {
+    (*out_entry).d_ino = in_entry.inode;
+    (*out_entry).d_reclen = if getdents {
+        // The structs written by the kernel for the getdents syscall do not have a fixed size.
+        in_entry.get_d_reclen64()
+    } else {
+        std::mem::size_of::<dirent>() as u16
+    };
+    (*out_entry).d_type = in_entry.file_type;
+
+    let dir_name = CString::new(in_entry.name)?;
+    let dir_name_bytes = dir_name.as_bytes_with_nul();
+    (*out_entry)
+        .d_name
+        .get_mut(..dir_name_bytes.len())
+        .expect("directory name length exceeds limit")
+        .copy_from_slice(bytemuck::cast_slice(dir_name_bytes));
+
+    (*out_entry).d_off = in_entry.position as i64;
+
+    Ok(())
+}
+
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn readdir_r_detour(
     dirp: *mut DIR,
@@ -209,6 +237,32 @@ pub(crate) unsafe extern "C" fn readdir_r_detour(
             0
         })
         .unwrap_or_bypass_with(|_| FN_READDIR_R(dirp, entry, result))
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn readdir64_r_detour(
+    dirp: *mut DIR,
+    entry: *mut dirent64,
+    result: *mut *mut dirent64,
+) -> c_int {
+    warn!("cake");
+    readdir_r(dirp as usize)
+        .map(|resp| {
+            if let Some(direntry) = resp {
+                match assign_direntry64(direntry, entry, false) {
+                    Err(e) => return c_int::from(e),
+                    Ok(()) => {
+                        *result = entry;
+                    }
+                }
+            } else {
+                {
+                    *result = std::ptr::null_mut();
+                }
+            }
+            0
+        })
+        .unwrap_or_bypass_with(|_| FN_READDIR64_R(dirp, entry, result))
 }
 
 #[hook_guard_fn]
@@ -813,15 +867,9 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         FnOpen_nocancel,
         FN_OPEN_NOCANCEL
     );
-    replace!(
-        hook_manager,
-        "opendir",
-        opendir_detour,
-        FnOpendir,
-        FN_OPENDIR
-    );
 
     replace!(hook_manager, "openat", openat_detour, FnOpenat, FN_OPENAT);
+    replace!(hook_manager, "openat64", openat_detour, FnOpenat, FN_OPENAT);
     replace!(
         hook_manager,
         "_openat$NOCANCEL",
@@ -939,6 +987,20 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FnReaddir_r,
             FN_READDIR_R
         );
+        replace!(
+            hook_manager,
+            "readdir64_r",
+            readdir64_r_detour,
+            FnReaddir64_r,
+            FN_READDIR64_R
+        );
+        replace!(
+            hook_manager,
+            "opendir",
+            opendir_detour,
+            FnOpendir,
+            FN_OPENDIR
+        );
     }
     // on non aarch64 (Intel) we need to hook also $INODE64 variants
     #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
@@ -985,6 +1047,13 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             readdir_r_detour,
             FnReaddir_r,
             FN_READDIR_R
+        );
+        replace!(
+            hook_manager,
+            "opendir$INODE64",
+            opendir_detour,
+            FnOpendir,
+            FN_OPENDIR
         );
     }
 }
