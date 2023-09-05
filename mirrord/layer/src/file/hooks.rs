@@ -242,6 +242,7 @@ pub(crate) unsafe extern "C" fn readdir_r_detour(
         .unwrap_or_bypass_with(|_| FN_READDIR_R(dirp, entry, result))
 }
 
+#[cfg(target_os = "linux")]
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn readdir64_r_detour(
     dirp: *mut DIR,
