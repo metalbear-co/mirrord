@@ -1,4 +1,3 @@
-#![allow(dead_code, unused)]
 #[cfg(test)]
 
 /// The pause tests use predefined resource names (service/deployment), so they can't be run at the

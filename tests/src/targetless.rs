@@ -1,4 +1,3 @@
-#![allow(dead_code, unused)]
 #[cfg(test)]
 /// Test the targetless execution mode, where an independent agent is spawned - not targeting any
 /// existing pod/container/deployment.
