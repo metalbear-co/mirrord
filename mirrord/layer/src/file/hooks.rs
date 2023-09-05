@@ -34,7 +34,7 @@ use crate::error::HookError::ResponseError;
 use crate::{
     common::CheckedInto,
     detour::{Detour, DetourGuard},
-    error::HookError,
+    error::{HookError, HookResult},
     file::ops::{access, lseek, open, read, write},
     hooks::HookManager,
     replace,
@@ -634,30 +634,7 @@ fn nano_to_secs(nano: i64) -> i64 {
 }
 
 /// Fills the `stat` struct with the metadata
-unsafe extern "C" fn fill_stat(out_stat: *mut stat, metadata: &MetadataInternal) {
-    out_stat.write_bytes(0, 1);
-    let out = &mut *out_stat;
-    // on macOS the types might be different, so we try to cast and do our best..
-    out.st_mode = best_effort_cast(metadata.mode);
-    out.st_size = best_effort_cast(metadata.size);
-    out.st_atime_nsec = metadata.access_time;
-    out.st_mtime_nsec = metadata.modification_time;
-    out.st_ctime_nsec = metadata.creation_time;
-    out.st_atime = nano_to_secs(metadata.access_time);
-    out.st_mtime = nano_to_secs(metadata.modification_time);
-    out.st_ctime = nano_to_secs(metadata.creation_time);
-    out.st_nlink = best_effort_cast(metadata.hard_links);
-    out.st_uid = metadata.user_id;
-    out.st_gid = metadata.group_id;
-    out.st_dev = best_effort_cast(metadata.device_id);
-    out.st_ino = best_effort_cast(metadata.inode);
-    out.st_rdev = best_effort_cast(metadata.rdevice_id);
-    out.st_blksize = best_effort_cast(metadata.block_size);
-    out.st_blocks = best_effort_cast(metadata.blocks);
-}
-
-/// Fills the `stat` struct with the metadata
-unsafe extern "C" fn fill_stat64(out_stat: *mut stat64, metadata: &MetadataInternal) {
+unsafe extern "C" fn fill_stat(out_stat: *mut stat64, metadata: &MetadataInternal) {
     out_stat.write_bytes(0, 1);
     let out = &mut *out_stat;
     // on macOS the types might be different, so we try to cast and do our best..
@@ -695,60 +672,40 @@ unsafe extern "C" fn fill_statfs(out_stat: *mut statfs, metadata: &FsMetadataInt
     out.f_ffree = metadata.files_free;
 }
 
+fn stat_logic(ver: c_int, raw_path: *const c_char, out_stat: *mut stat64) -> c_int {
+    if out_stat.is_null() {
+        HookError::BadPointer.into()
+    } else {
+        xstat(Some(raw_path.checked_into()), None, true)
+            .map(|res| {
+                let res = res.metadata;
+                unsafe { fill_stat(out_stat, &res) };
+                0
+            })
+            .unwrap_or_bypass_with(|_bypass| {
+                #[cfg(target_os = "macos")]
+                let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+                unsafe { FN___XSTAT(ver, raw_path, out_stat as *mut _) }
+            })
+    }
+}
+
 /// Hook for `libc::lstat`.
 #[hook_guard_fn]
 unsafe extern "C" fn lstat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
-    if out_stat.is_null() {
-        return HookError::BadPointer.into();
-    }
-
-    xstat(Some(raw_path.checked_into()), None, false)
-        .map(|res| {
-            let res = res.metadata;
-            fill_stat(out_stat, &res);
-            0
-        })
-        .unwrap_or_bypass_with(|_bypass| {
-            #[cfg(target_os = "macos")]
-            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
-            FN_LSTAT(raw_path, out_stat)
-        })
+    stat_logic(0, raw_path, out_stat as *mut _)
 }
 
 /// Hook for `libc::fstat`.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fstat_detour(fd: RawFd, out_stat: *mut stat) -> c_int {
-    if out_stat.is_null() {
-        return HookError::BadPointer.into();
-    }
-
-    xstat(None, Some(fd), true)
-        .map(|res| {
-            let res = res.metadata;
-            fill_stat(out_stat, &res);
-            0
-        })
-        .unwrap_or_bypass_with(|_| FN_FSTAT(fd, out_stat))
+    stat_logic(0, raw_path, out_stat as *mut _)
 }
 
 /// Hook for `libc::stat`.
 #[hook_guard_fn]
 unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -> c_int {
-    if out_stat.is_null() {
-        return HookError::BadPointer.into();
-    }
-
-    xstat(Some(raw_path.checked_into()), None, true)
-        .map(|res| {
-            let res = res.metadata;
-            fill_stat(out_stat, &res);
-            0
-        })
-        .unwrap_or_bypass_with(|_bypass| {
-            #[cfg(target_os = "macos")]
-            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
-            FN_STAT(raw_path, out_stat)
-        })
+    stat_logic(0, raw_path, out_stat as *mut _)
 }
 
 /// Hook for libc's stat syscall wrapper.
@@ -758,25 +715,7 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
     raw_path: *const c_char,
     out_stat: *mut stat,
 ) -> c_int {
-    if out_stat.is_null() {
-        return HookError::BadPointer.into();
-    }
-
-    if ver != 1 {
-        // TODO: strip temp dir also here? What is this case?
-        return FN___XSTAT(ver, raw_path, out_stat);
-    }
-    xstat(Some(raw_path.checked_into()), None, true)
-        .map(|res| {
-            let res = res.metadata;
-            fill_stat(out_stat, &res);
-            0
-        })
-        .unwrap_or_bypass_with(|_bypass| {
-            #[cfg(target_os = "macos")]
-            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
-            FN___XSTAT(ver, raw_path, out_stat)
-        })
+    stat_logic(ver, raw_path, out_stat as *mut _)
 }
 
 /// Hook for libc's stat syscall wrapper.
@@ -786,25 +725,7 @@ pub(crate) unsafe extern "C" fn __lxstat_detour(
     raw_path: *const c_char,
     out_stat: *mut stat,
 ) -> c_int {
-    if out_stat.is_null() {
-        return HookError::BadPointer.into();
-    }
-
-    if ver != 1 {
-        // TODO: strip temp dir also here? What is this case?
-        return FN___LXSTAT(ver, raw_path, out_stat);
-    }
-    xstat(Some(raw_path.checked_into()), None, true)
-        .map(|res| {
-            let res = res.metadata;
-            fill_stat(out_stat, &res);
-            0
-        })
-        .unwrap_or_bypass_with(|_bypass| {
-            #[cfg(target_os = "macos")]
-            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
-            FN___LXSTAT(ver, raw_path, out_stat)
-        })
+    stat_logic(ver, raw_path, out_stat as *mut _)
 }
 
 /// Hook for libc's stat syscall wrapper.
@@ -814,25 +735,7 @@ pub(crate) unsafe extern "C" fn __xstat64_detour(
     raw_path: *const c_char,
     out_stat: *mut stat64,
 ) -> c_int {
-    if out_stat.is_null() {
-        return HookError::BadPointer.into();
-    }
-
-    if ver != 1 {
-        // TODO: strip temp dir also here? What is this case?
-        return FN___XSTAT64(ver, raw_path, out_stat);
-    }
-    xstat(Some(raw_path.checked_into()), None, true)
-        .map(|res| {
-            let res = res.metadata;
-            fill_stat64(out_stat, &res);
-            0
-        })
-        .unwrap_or_bypass_with(|_bypass| {
-            #[cfg(target_os = "macos")]
-            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
-            FN___XSTAT64(ver, raw_path, out_stat)
-        })
+    stat_logic(ver, raw_path, out_stat)
 }
 
 /// Hook for libc's stat syscall wrapper.
@@ -842,25 +745,7 @@ pub(crate) unsafe extern "C" fn __lxstat64_detour(
     raw_path: *const c_char,
     out_stat: *mut stat64,
 ) -> c_int {
-    if out_stat.is_null() {
-        return HookError::BadPointer.into();
-    }
-
-    if ver != 1 {
-        // TODO: strip temp dir also here? What is this case?
-        return FN___LXSTAT64(ver, raw_path, out_stat);
-    }
-    xstat(Some(raw_path.checked_into()), None, true)
-        .map(|res| {
-            let res = res.metadata;
-            fill_stat64(out_stat, &res);
-            0
-        })
-        .unwrap_or_bypass_with(|_bypass| {
-            #[cfg(target_os = "macos")]
-            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
-            FN___LXSTAT64(ver, raw_path, out_stat)
-        })
+    stat_logic(ver, raw_path, out_stat)
 }
 
 /// Separated out logic for `fstatat` so that it can be used by go to match on the xstat result.
