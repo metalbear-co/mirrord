@@ -420,7 +420,12 @@ async fn main() -> miette::Result<()> {
     }
 
     match cli.commands {
-        Commands::Exec(args) => exec(&args).await?,
+        Commands::Exec(args) => {
+            let res = exec(&args).await;
+            // let the drop implementation have some time to send.
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            res?
+        }
         Commands::Extract { path } => {
             extract_library(
                 Some(path),
@@ -430,8 +435,18 @@ async fn main() -> miette::Result<()> {
         }
         Commands::ListTargets(args) => print_pod_targets(&args).await?,
         Commands::Operator(args) => operator_command(*args).await?,
-        Commands::ExtensionExec(args) => extension_exec(*args).await?,
-        Commands::InternalProxy => internal_proxy::proxy().await?,
+        Commands::ExtensionExec(args) => {
+            let res = extension_exec(*args).await;
+            // let the drop implementation have some time to send.
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            res?
+        }
+        Commands::InternalProxy => {
+            let res = internal_proxy::proxy().await;
+            // let the drop implementation have some time to send.
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            res?
+        }
         Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
     }
 

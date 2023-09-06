@@ -8,6 +8,36 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.64.2](https://github.com/metalbear-co/mirrord/tree/3.64.2) - 2023-09-05
+
+
+### Changed
+
+- Changed the targeted and non targeted flows for creating agent.
+  [#1844](https://github.com/metalbear-co/mirrord/issues/1844)
+- Add info about errors to TELEMETRY.md
+
+
+### Fixed
+
+- Change agent to use current thread runtime, multi thread is enabled by
+  mistake.
+  * Added a sleep before exiting both in layer and agent to allow
+  `tokio::spawn` tasks spawned from `Drop` finish.
+  * Changed implementation of pause guard to use `tokio::spawn` - fixes pause
+  in combination with above change.
+- Fix analytics not being sent on drop
+
+
+### Internal
+
+- Refactor [if Some / else None] pattern to use [bool.then()] in medschool.
+  [#1890](https://github.com/metalbear-co/mirrord/issues/1890)
+- Add a "Try to reduce the use of non-optional `Option`s" rule to the mirrord
+  style guide.
+- Label mirroring integration tests as flaky
+
+
 ## [3.64.1](https://github.com/metalbear-co/mirrord/tree/3.64.1) - 2023-09-03
 
 
