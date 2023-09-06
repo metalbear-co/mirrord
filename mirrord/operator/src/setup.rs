@@ -84,6 +84,7 @@ pub enum LicenseType {
 pub struct SetupOptions {
     pub license: LicenseType,
     pub namespace: OperatorNamespace,
+    pub image: String,
 }
 
 #[derive(Debug)]
@@ -102,7 +103,11 @@ pub struct Operator {
 
 impl Operator {
     pub fn new(options: SetupOptions) -> Self {
-        let SetupOptions { license, namespace } = options;
+        let SetupOptions {
+            license,
+            namespace,
+            image,
+        } = options;
 
         let (license_secret, license_key) = match license {
             LicenseType::Online(license_key) => (None, Some(license_key)),
@@ -125,6 +130,7 @@ impl Operator {
             license_secret.as_ref(),
             license_key,
             &tls_secret,
+            image,
         );
 
         let service = OperatorService::new(&namespace);
@@ -218,6 +224,7 @@ impl OperatorDeployment {
         license_secret: Option<&OperatorLicenseSecret>,
         license_key: Option<String>,
         tls_secret: &OperatorTlsSecret,
+        image: String,
     ) -> Self {
         let mut envs = vec![
             EnvVar {
@@ -301,16 +308,7 @@ impl OperatorDeployment {
 
         let container = Container {
             name: OPERATOR_NAME.to_owned(),
-            image: Some(
-                std::env::var("MIRRORD_OPERATOR_IMAGE")
-                    .ok()
-                    .unwrap_or_else(|| {
-                        format!(
-                            "ghcr.io/metalbear-co/operator:{}",
-                            env!("CARGO_PKG_VERSION")
-                        )
-                    }),
-            ),
+            image: Some(image),
             image_pull_policy: Some("IfNotPresent".to_owned()),
             env: Some(envs),
             ports: Some(vec![ContainerPort {
