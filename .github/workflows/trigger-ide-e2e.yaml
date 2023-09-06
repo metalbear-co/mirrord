@@ -1,4 +1,4 @@
-name: Trigger IDE e2e on release
+name: Run IDE e2e on release
 on:
   push:
     branches:
