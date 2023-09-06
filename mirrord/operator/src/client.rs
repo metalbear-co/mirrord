@@ -10,7 +10,7 @@ use mirrord_config::{
     feature::network::incoming::ConcurrentSteal, target::TargetConfig, LayerConfig,
 };
 use mirrord_kube::{
-    api::{get_k8s_resource_api, kubernetes::create_kube_api},
+    api::kubernetes::{create_kube_api, get_k8s_resource_api},
     error::KubeApiError,
 };
 use mirrord_progress::Progress;
@@ -190,18 +190,21 @@ impl OperatorApi {
     pub async fn connect(
         config: &LayerConfig,
         session_information: &OperatorSessionInformation,
-        analytics: &mut AnalyticsReporter,
+        analytics: Option<&mut AnalyticsReporter>,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        analytics.set_operator_properties(AnalyticsOperatorProperties {
-            client_hash: session_information
-                .client_certificate
-                .as_ref()
-                .and_then(|certificate| certificate.sha256_fingerprint().ok())
-                .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
-            license_hash: session_information
-                .fingerprint
-                .as_deref()
-                .map(AnalyticsHash::from_base64),
+        analytics.map(|analytics| {
+            analytics.set_operator_properties(AnalyticsOperatorProperties {
+                client_hash: session_information
+                    .client_certificate
+                    .as_ref()
+                    .and_then(|certificate| certificate.sha256_fingerprint().ok())
+                    .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
+                license_hash: session_information
+                    .fingerprint
+                    .as_deref()
+                    .map(AnalyticsHash::from_base64),
+            });
+            analytics
         });
 
         OperatorApi::new(config)

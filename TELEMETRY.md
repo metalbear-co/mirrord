@@ -10,6 +10,8 @@ Types of data sent:
 2. Feature enum value (steal/mirror, read/write)
 3. Feature count (how many ports in listen_ports)
 
+When there's an error, we send the name of the error (out of a hard-coded list, so there's no risk of any sensitive data being sent).
+
 ## Disabling
 
 Telemetry can be disabled by specifying the following in the mirrord config file:

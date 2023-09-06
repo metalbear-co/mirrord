@@ -9,6 +9,7 @@ members = [
     "mirrord/layer/tests/apps/recv_from",
     "mirrord/layer/tests/apps/issue1776",
     "mirrord/layer/tests/apps/issue1776portnot53",
+    "mirrord/layer/tests/apps/issue1899",
     "sample/rust",
     "medschool",
     "tests",
@@ -20,7 +21,7 @@ resolver = "2"
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.63.0"
+version = "3.64.2"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -74,6 +75,7 @@ which = "4"
 semver = "1"
 once_cell = "1"
 exec = "0.3"
+drain = "0.1"
 
 [patch.crates-io]
 tracing = { git = "https://github.com/metalbear-co/tracing", package = "tracing", branch = "worker_options_non_blocking_v1" }
