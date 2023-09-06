@@ -1,0 +1,18 @@
+name: Trigger IDE e2e on release
+on:
+  release:
+    types: [released]
+
+jobs:
+  trigger-ide-e2e:    
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ide: [ vscode, intellij ]
+    steps:
+      - name: Trigger IDE e2e              
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.GITHUB_PAT }}
+          repository: metalbear-co/mirrord-${{ matrix.ide }}
+          event-type: e2e
