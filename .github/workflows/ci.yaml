@@ -265,6 +265,9 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/issue1776portnot53
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue1899
+          cargo build
       - run: ./scripts/build_c_apps.sh
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
       - name: mirrord protocol UT
@@ -289,10 +292,14 @@ jobs:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
           toolchain: nightly-2023-04-19
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v2
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: clippy x64
-        run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
+        run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=x86_64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
       - name: clippy aarch64
-        run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
+        run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=aarch64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
       - name: mirrord SIP UT
         run: cargo test --target=x86_64-apple-darwin -p mirrord-sip
       # prepare stuff needed for integration tests
@@ -350,6 +357,9 @@ jobs:
           cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue1776portnot53
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue1899
           cargo build
       - run: ./scripts/build_c_apps.sh
       # For the `java_temurin_sip` test.

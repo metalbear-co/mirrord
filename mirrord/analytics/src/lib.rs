@@ -141,15 +141,15 @@ impl<T: CollectAnalytics> From<T> for AnalyticValue {
 pub struct AnalyticsReporter {
     pub enabled: bool,
     error_only_send: bool,
-
     analytics: Analytics,
     error: Option<AnalyticsError>,
     start_instant: Instant,
     operator_properties: Option<AnalyticsOperatorProperties>,
+    watch: drain::Watch,
 }
 
 impl AnalyticsReporter {
-    pub fn new(enabled: bool) -> Self {
+    pub fn new(enabled: bool, watch: drain::Watch) -> Self {
         AnalyticsReporter {
             analytics: Analytics::default(),
             error_only_send: false,
@@ -157,10 +157,11 @@ impl AnalyticsReporter {
             error: None,
             operator_properties: None,
             start_instant: Instant::now(),
+            watch,
         }
     }
 
-    pub fn only_error(enabled: bool) -> Self {
+    pub fn only_error(enabled: bool, watch: drain::Watch) -> Self {
         AnalyticsReporter {
             analytics: Analytics::default(),
             error_only_send: true,
@@ -168,6 +169,7 @@ impl AnalyticsReporter {
             error: None,
             operator_properties: None,
             start_instant: Instant::now(),
+            watch,
         }
     }
 
@@ -213,7 +215,14 @@ impl AnalyticsReporter {
 impl Drop for AnalyticsReporter {
     fn drop(&mut self) {
         if self.enabled && (self.error.is_some() || !self.error_only_send) {
-            tokio::spawn(send_analytics(self.as_report()));
+            let report = self.as_report();
+            let watch = self.watch.clone();
+            tokio::spawn(async move {
+                send_analytics(report).await;
+                // hold clone of watch to prevent it from being dropped
+                // allowing our task to finish
+                drop(watch);
+            });
         }
     }
 }

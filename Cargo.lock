@@ -1736,6 +1736,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 
 [[package]]
+name = "drain"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f1a0abf3fcefad9b4dd0e414207a7408e12b68414a01e6bb19b897d5bd7632d"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "dyn-clone"
 version = "1.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2731,6 +2740,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "issue1899"
+version = "3.64.2"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "itertools"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3220,6 +3236,7 @@ dependencies = [
  "anyhow",
  "clap",
  "const-random",
+ "drain",
  "email_address",
  "exec",
  "futures",
@@ -3312,6 +3329,7 @@ version = "3.64.2"
 dependencies = [
  "assert-json-diff",
  "base64 0.21.2",
+ "drain",
  "reqwest",
  "serde",
  "serde_json",
@@ -3404,7 +3422,7 @@ dependencies = [
  "mirrord-protocol",
  "rand",
  "regex",
- "rstest 0.17.0",
+ "rstest 0.18.2",
  "serde",
  "serde_json",
  "shellexpand",
@@ -3452,7 +3470,7 @@ dependencies = [
  "os_info",
  "rand",
  "regex",
- "rstest 0.17.0",
+ "rstest 0.18.2",
  "serde",
  "serde_json",
  "socket2 0.5.3",

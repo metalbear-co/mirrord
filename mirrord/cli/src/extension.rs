@@ -37,7 +37,7 @@ where
 }
 
 /// Facilitate the execution of a process using mirrord by an IDE extension
-pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
+pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch) -> Result<()> {
     let progress = ProgressTracker::try_from_env("mirrord preparing to launch")
         .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
     let mut env: HashMap<String, String> = HashMap::new();
@@ -59,7 +59,7 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs) -> Result<()> {
     }
     let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
-    let mut analytics = AnalyticsReporter::only_error(config.telemetry);
+    let mut analytics = AnalyticsReporter::only_error(config.telemetry, watch);
 
     config.verify(&mut context)?;
     for warning in context.get_warnings() {
