@@ -8,14 +8,15 @@ on:
     types:
       - opened
     branches:
-      - 'releases/**'
-      - '*.*.*'
-jobs:  
+      - "releases/**"
+      - "*.*.*"
+      - "ide-workflow-trigger"
+jobs:
   intellij-e2e:
     runs-on: ubuntu-latest
     env:
       CI_BUILD_PLUGIN: "true"
-    steps:                
+    steps:
       - name: Public IP
         id: ip
         uses: haythem/public-ip@v1.3
@@ -29,7 +30,7 @@ jobs:
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
       - uses: actions/checkout@v3
         with:
-          repository: "metalbear-co/mirrord-intellij"     
+          repository: "metalbear-co/mirrord-intellij"
       - name: checkout into the last released tag
         run: git checkout tags/$(grep 'pluginVersion =' gradle.properties | cut -d '=' -f 2 | xargs)
       - uses: actions/checkout@v3
@@ -84,13 +85,12 @@ jobs:
         with:
           name: mirrord-plugin-fail-report
           path: |
-            build/reports        
-
+            build/reports
 
   vscode-e2e:
     runs-on: ubuntu-latest
     env:
-      CI_BUILD_PLUGIN: "true"      
+      CI_BUILD_PLUGIN: "true"
     steps:
       - name: Public IP
         id: ip
@@ -100,6 +100,10 @@ jobs:
           echo ${{ steps.ip.outputs.ipv4 }}
           echo ${{ steps.ip.outputs.ipv6 }}
       - uses: actions/checkout@v3
+        with:
+          repository: "metalbear-co/mirrord-vscode"
+      - name: checkout into the last released tag
+        run: git checkout tags/$(grep 'pluginVersion =' gradle.properties | cut -d '=' -f 2 | xargs)
       - uses: actions/setup-node@v3
         with:
           node-version: 18
@@ -131,5 +135,3 @@ jobs:
           KUBE_SERVICE: ${{ env.KUBE_SERVICE }}
         with:
           run: npm run test
-
-    
