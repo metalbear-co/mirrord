@@ -57,6 +57,7 @@ http = "0.2"
 k8s-cri = "0.7"
 once_cell.workspace = true
 semver.workspace = true
+drain.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 iptables = "0.5"

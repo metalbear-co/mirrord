@@ -29,3 +29,8 @@ fancy-regex.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 http-body-util.workspace = true
+
+[features]
+default = ["ephemeral", "job"]
+ephemeral = []
+job = []
