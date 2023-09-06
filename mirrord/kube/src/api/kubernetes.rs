@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "incluster")]
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+#[cfg(not(feature = "incluster"))]
 use tokio_retry::{
     strategy::{jitter, ExponentialBackoff},
     Retry,
