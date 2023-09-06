@@ -38,9 +38,11 @@ where
             IPTableChain::create(ipt.with_table("filter").into(), IPTABLE_INPUT.to_string())?;
 
         // specify tcp protocol, if we don't we can't reject with tcp-reset
-        managed.add_rule(&format!(
+        if let Err(e) = managed.add_rule(&format!(
             "-p tcp -m connmark --mark {MARK} -j REJECT --reject-with tcp-reset"
-        ))?;
+        )) {
+            warn!("Failed to add rule to reject connections: {e}");
+        }
 
         Ok(FlushConnections { managed, inner })
     }
