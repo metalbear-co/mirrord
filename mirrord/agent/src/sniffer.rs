@@ -421,7 +421,7 @@ impl TcpConnectionSniffer {
             .contains(&port)
     }
 
-    #[tracing::instrument(level = "debug", ret, skip(self))]
+    #[tracing::instrument(level = "trace", ret, skip(self))]
     async fn handle_command(&mut self, command: SnifferCommand) -> Result<(), AgentError> {
         match command {
             SnifferCommand {
