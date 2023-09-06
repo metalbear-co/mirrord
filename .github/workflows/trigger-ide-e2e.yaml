@@ -1,18 +1,135 @@
 name: Trigger IDE e2e on release
 on:
-  release:
-    types: [released]
-
-jobs:
-  trigger-ide-e2e:    
+  push:
+    branches:
+      - "releases/**"
+      - "*.*.*"
+  pull_request:
+    types:
+      - opened
+    branches:
+      - 'releases/**'
+      - '*.*.*'
+jobs:  
+  intellij-e2e:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        ide: [ vscode, intellij ]
-    steps:
-      - name: Trigger IDE e2e              
-        uses: peter-evans/repository-dispatch@v2
+    env:
+      CI_BUILD_PLUGIN: "true"
+    steps:                
+      - name: Public IP
+        id: ip
+        uses: haythem/public-ip@v1.3
+      - name: Print Public IP
+        run: |
+          echo ${{ steps.ip.outputs.ipv4 }}
+          echo ${{ steps.ip.outputs.ipv6 }}
+      - name: Remove unnecessary files
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+      - uses: actions/checkout@v3
         with:
-          token: ${{ secrets.GITHUB_PAT }}
-          repository: metalbear-co/mirrord-${{ matrix.ide }}
-          event-type: e2e
+          repository: "metalbear-co/mirrord-intellij"     
+      - name: checkout into the last released tag
+        run: git checkout tags/$(grep 'pluginVersion =' gradle.properties | cut -d '=' -f 2 | xargs)
+      - uses: actions/checkout@v3
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: zulu
+          java-version: 17
+      - uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+      - uses: abatilo/actions-poetry@v2
+      - run: poetry --version
+      - name: get mirrord latest
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash
+      - name: Start minikube
+        uses: medyagh/setup-minikube@master
+        with:
+          container-runtime: docker
+      - run: |
+          minikube image load /tmp/test.tar
+          kubectl apply -f sample/kubernetes/app.yaml
+          echo "POD_TO_SELECT=$(kubectl get pods -o=name | head -n 1)" >> "$GITHUB_ENV"
+          kubectl wait --for=condition=ready --timeout=30s $(kubectl get pods -o=name | head -n 1)
+          KUBE_SERVICE=$(minikube service list --output=json | jq -r '.[] | select(.Name == "py-serv") | .URLs[0]')
+          echo "$KUBE_SERVICE"
+          echo "KUBE_SERVICE=$KUBE_SERVICE" >> "$GITHUB_ENV"
+      - name: Setup FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download build folder
+        uses: actions/download-artifact@v3
+        with:
+          name: mirrord-build
+          path: build/
+      - name: Run intellij e2e in headless state
+        uses: coactions/setup-xvfb@v1
+        env:
+          POD_TO_SELECT: ${{ env.POD_TO_SELECT }}
+          KUBE_SERVICE: ${{ env.KUBE_SERVICE }}
+        with:
+          run: ./gradlew test
+      - name: Move video
+        if: ${{ failure() }}
+        run: |
+          mv video build/reports
+      - name: Save fails report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: mirrord-plugin-fail-report
+          path: |
+            build/reports        
+
+
+  vscode-e2e:
+    runs-on: ubuntu-latest
+    env:
+      CI_BUILD_PLUGIN: "true"      
+    steps:
+      - name: Public IP
+        id: ip
+        uses: haythem/public-ip@v1.3
+      - name: Print Public IP
+        run: |
+          echo ${{ steps.ip.outputs.ipv4 }}
+          echo ${{ steps.ip.outputs.ipv6 }}
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - name: Install dependencies
+        run: |
+          npm install
+      # this is to avoid timeout on download
+      - name: get mirrord latest
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash
+      - name: Start minikube
+        uses: medyagh/setup-minikube@master
+        with:
+          container-runtime: docker
+      - run: |
+          minikube image load /tmp/test.tar                    
+          kubectl apply -f sample/kubernetes/app.yaml          
+          echo "POD_TO_SELECT=$(kubectl get pods -o=name | head -n 1)" >> "$GITHUB_ENV"
+          kubectl wait --for=condition=ready --timeout=30s $(kubectl get pods -o=name | head -n 1)          
+          KUBE_SERVICE=$(minikube service list --output=json | jq -r '.[] | select(.Name == "py-serv") | .URLs[0]')
+          echo "$KUBE_SERVICE"
+          echo "KUBE_SERVICE=$KUBE_SERVICE" >> "$GITHUB_ENV"
+      # we can't run chrome like apps in the CI, we use a virtual frame buffer:
+      # refer: http://elementalselenium.com/tips/38-headless
+      - name: Run vscode e2e in headless state
+        uses: coactions/setup-xvfb@v1
+        env:
+          POD_TO_SELECT: ${{ env.POD_TO_SELECT }}
+          KUBE_SERVICE: ${{ env.KUBE_SERVICE }}
+        with:
+          run: npm run test
+
+    
