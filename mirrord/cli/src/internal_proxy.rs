@@ -213,10 +213,10 @@ fn create_listen_socket() -> Result<TcpListener, InternalProxyError> {
 
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
-pub(crate) async fn proxy() -> Result<()> {
+pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
     let config = LayerConfig::from_env()?;
 
-    let mut analytics = AnalyticsReporter::new(config.telemetry);
+    let mut analytics = AnalyticsReporter::new(config.telemetry, watch);
     (&config).collect_analytics(analytics.get_mut());
 
     // Let it assign port for us then print it for the user.
