@@ -439,7 +439,7 @@ fn main() -> miette::Result<()> {
             Commands::ExtensionExec(args) => {
                 extension_exec(*args, watch).await?;
             }
-            Commands::InternalProxy => internal_proxy::proxy().await?,
+            Commands::InternalProxy => internal_proxy::proxy(watch).await?,
             Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
         };
         Ok(())
