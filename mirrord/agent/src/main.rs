@@ -771,10 +771,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()
-                .with_thread_ids(false)
-                .without_time()
-                .pretty()
-                .json()
+                .with_thread_ids(true)
                 .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
                 .compact(),
         )
