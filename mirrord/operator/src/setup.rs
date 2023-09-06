@@ -84,8 +84,7 @@ pub enum LicenseType {
 pub struct SetupOptions {
     pub license: LicenseType,
     pub namespace: OperatorNamespace,
-    pub operator_version: String,
-    pub agent_version: String
+    pub image: String,
 }
 
 #[derive(Debug)]
@@ -104,7 +103,11 @@ pub struct Operator {
 
 impl Operator {
     pub fn new(options: SetupOptions) -> Self {
-        let SetupOptions { license, namespace, operator_version: image, .. } = options;
+        let SetupOptions {
+            license,
+            namespace,
+            image,
+        } = options;
 
         let (license_secret, license_key) = match license {
             LicenseType::Online(license_key) => (None, Some(license_key)),
@@ -127,7 +130,7 @@ impl Operator {
             license_secret.as_ref(),
             license_key,
             &tls_secret,
-            image
+            image,
         );
 
         let service = OperatorService::new(&namespace);
@@ -221,7 +224,7 @@ impl OperatorDeployment {
         license_secret: Option<&OperatorLicenseSecret>,
         license_key: Option<String>,
         tls_secret: &OperatorTlsSecret,
-        image: String
+        image: String,
     ) -> Self {
         let mut envs = vec![
             EnvVar {
