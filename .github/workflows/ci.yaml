@@ -292,6 +292,10 @@ jobs:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
           toolchain: nightly-2023-04-19
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v2
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: clippy x64
         run: cargo clippy --target=x86_64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
       - name: clippy aarch64
