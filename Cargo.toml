@@ -16,6 +16,7 @@ members = [
     "tests/rust-e2e-fileops",
     "tests/rust-unix-socket-client",
     "tests/rust-bypassed-unix-socket",
+    "tests/issue1317",
 ]
 resolver = "2"
 

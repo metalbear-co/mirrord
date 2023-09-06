@@ -16,13 +16,16 @@ serde_json.workspace = true
 mirrord = { artifact = "bin", path = "../mirrord/cli" }
 serde = "1"
 futures.workspace = true
-rstest = "*"
+rstest = "0.18"
 tokio-util = "0.7"
-rand = "*"
-futures-util = "*"
+rand = "0.8"
+futures-util = "0.3"
 wsl = "0.1"
 chrono = "0.4"
 tempfile = "3"
 bytes = "1"
 tokio-tungstenite = { version = "0.19" }
 fancy-regex.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true

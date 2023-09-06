@@ -2,10 +2,8 @@ use std::{
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    sync::LazyLock,
 };
 
-use fancy_regex::Regex;
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ConnectionId, Port,
@@ -324,15 +322,6 @@ pub struct TcpConnectionSniffer {
 
 impl TcpConnectionSniffer {
     pub const TASK_NAME: &'static str = "Sniffer";
-
-    /// Used to detect if an existing connection packet contains HTTP traffic that we should be
-    /// mirroring, but we're currently NOT.
-    ///
-    /// **Attention**: Whitespace at the end of this regex is significant!
-    const HTTP_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new("(?i)(get|head|post|put|delete|connect|options|trace|patch) ")
-            .expect("Failed initializing HTTP detection regex for sniffer!")
-    });
 
     /// Runs the sniffer loop, capturing packets.
     #[tracing::instrument(level = "trace", skip(self))]
