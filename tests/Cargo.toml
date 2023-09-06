@@ -26,3 +26,8 @@ tempfile = "3"
 bytes = "1"
 tokio-tungstenite = { version = "0.19" }
 fancy-regex.workspace = true
+
+[features]
+default = ["ephemeral", "job"]
+ephemeral = []
+job = []
