@@ -192,7 +192,7 @@ impl OperatorApi {
         session_information: &OperatorSessionInformation,
         analytics: Option<&mut AnalyticsReporter>,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        if let Some(analytics) = analytics {
+        analytics.and_then(|analytics| {
             analytics.set_operator_properties(AnalyticsOperatorProperties {
                 client_hash: session_information
                     .client_certificate
@@ -204,7 +204,8 @@ impl OperatorApi {
                     .as_deref()
                     .map(AnalyticsHash::from_base64),
             });
-        }
+            Some(analytics)
+        });
 
         OperatorApi::new(config)
             .await?

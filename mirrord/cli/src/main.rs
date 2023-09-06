@@ -446,9 +446,12 @@ fn main() -> miette::Result<()> {
     });
 
     rt.block_on(async move {
-        if let Err(_) = tokio::time::timeout(Duration::from_secs(10), signal.drain()).await {
-            warn!("Failed to drain in a timely manner, ongoing tasks dropped.");
-        }
+        tokio::time::timeout(Duration::from_secs(10), signal.drain())
+            .await
+            .is_err()
+            .then(|| {
+                warn!("Failed to drain in a timely manner, ongoing tasks dropped.");
+            });
     });
 
     res?;
