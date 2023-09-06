@@ -1,1 +1,0 @@
-CLI: Change operator setup to fetch from API version of operator to install
