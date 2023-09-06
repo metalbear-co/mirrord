@@ -2732,7 +2732,7 @@ dependencies = [
 
 [[package]]
 name = "issue1899"
-version = "3.64.1"
+version = "3.64.2"
 dependencies = [
  "libc",
 ]

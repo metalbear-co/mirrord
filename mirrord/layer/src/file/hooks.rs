@@ -1072,6 +1072,7 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FnReaddir_r,
             FN_READDIR_R
         );
+        #[cfg(target_os = "linux")]
         replace!(
             hook_manager,
             "readdir64_r",
