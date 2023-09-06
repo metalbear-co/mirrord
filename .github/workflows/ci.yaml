@@ -293,9 +293,9 @@ jobs:
           target: aarch64-apple-darwin
           toolchain: nightly-2023-04-19
       - name: clippy x64
-        run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
+        run: cargo clippy --target=x86_64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
       - name: clippy aarch64
-        run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
+        run: cargo clippy --target=aarch64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
       - name: mirrord SIP UT
         run: cargo test --target=x86_64-apple-darwin -p mirrord-sip
       # prepare stuff needed for integration tests
