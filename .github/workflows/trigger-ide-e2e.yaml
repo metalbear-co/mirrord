@@ -10,7 +10,6 @@ on:
     branches:
       - "releases/**"
       - "*.*.*"
-      - "ide-workflow-trigger"
 jobs:
   intellij-e2e:
     runs-on: ubuntu-latest
@@ -103,7 +102,7 @@ jobs:
         with:
           repository: "metalbear-co/mirrord-vscode"
       - name: checkout into the last released tag
-        run: git checkout tags/$(grep 'pluginVersion =' gradle.properties | cut -d '=' -f 2 | xargs)
+        run: git checkout tags/$(jq -r .version package.json)
       - uses: actions/setup-node@v3
         with:
           node-version: 18
