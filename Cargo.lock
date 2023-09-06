@@ -2962,7 +2962,7 @@ dependencies = [
 
 [[package]]
 name = "issue1317"
-version = "3.64.2"
+version = "3.65.0"
 dependencies = [
  "actix-web",
  "env_logger",

@@ -13,9 +13,7 @@ mod issue1317 {
     use rstest::*;
     use tokio::{net::TcpStream, time::timeout};
 
-    use crate::utils::{
-        get_service_host_and_port, kube_client, service, Agent, Application, KubeService,
-    };
+    use crate::utils::{get_service_host_and_port, kube_client, service, Application, KubeService};
 
     #[rstest]
     #[trace]
@@ -35,7 +33,6 @@ mod issue1317 {
         #[notrace]
         kube_client: Client,
         #[values(Application::RustIssue1317)] application: Application,
-        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
@@ -68,18 +65,16 @@ mod issue1317 {
         let body = response.into_body().collect().await.unwrap();
         assert!(String::from_utf8_lossy(&body.to_bytes()[..]).contains("Echo [remote]"));
 
+        // Started mirrord.
         let mut process = application
-            .run(
-                &service.target,
-                Some(&service.namespace),
-                agent.flag(),
-                None,
-            )
+            .run(&service.target, Some(&service.namespace), None, None)
             .await;
         process
             .wait_for_line(Duration::from_secs(120), "daemon subscribed")
             .await;
 
+        // Now this request should be mirrored back to us, even though mirrord started sniffing
+        // mid-session.
         let request = Request::builder()
             .body(Full::new(Bytes::from(format!("GET 2"))))
             .unwrap();
