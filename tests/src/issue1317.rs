@@ -1,3 +1,4 @@
+/// Tests for mirroring existing connections.
 #[cfg(test)]
 mod issue1317 {
     use std::time::Duration;
@@ -15,6 +16,10 @@ mod issue1317 {
 
     use crate::utils::{get_service_host_and_port, kube_client, service, Application, KubeService};
 
+    /// Creates a [`TcpStream`] that sends a request to `service` before mirrord is started (no
+    /// agent up yet), and keeps this stream alive. Then it starts mirrord in _mirror_ mode, and
+    /// sends another request that should start the sniffing/subscribe/mirror flow, even though this
+    /// is not the first packet (not TCP handshake) of this connection.
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
