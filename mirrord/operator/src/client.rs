@@ -190,19 +190,21 @@ impl OperatorApi {
     pub async fn connect(
         config: &LayerConfig,
         session_information: &OperatorSessionInformation,
-        analytics: &mut AnalyticsReporter,
+        analytics: Option<&mut AnalyticsReporter>,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        analytics.set_operator_properties(AnalyticsOperatorProperties {
-            client_hash: session_information
-                .client_certificate
-                .as_ref()
-                .and_then(|certificate| certificate.sha256_fingerprint().ok())
-                .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
-            license_hash: session_information
-                .fingerprint
-                .as_deref()
-                .map(AnalyticsHash::from_base64),
-        });
+        if let Some(analytics) = analytics {
+            analytics.set_operator_properties(AnalyticsOperatorProperties {
+                client_hash: session_information
+                    .client_certificate
+                    .as_ref()
+                    .and_then(|certificate| certificate.sha256_fingerprint().ok())
+                    .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
+                license_hash: session_information
+                    .fingerprint
+                    .as_deref()
+                    .map(AnalyticsHash::from_base64),
+            });
+        }
 
         OperatorApi::new(config)
             .await?

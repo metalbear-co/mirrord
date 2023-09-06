@@ -80,9 +80,7 @@ fn print_port(listener: &TcpListener) -> Result<()> {
 /// breakpoint hit and someone is holding it) It will keep the agent alive and send pings on its
 /// behalf.
 async fn connection_task(config: LayerConfig, stream: TcpStream) {
-    let mut inactive_analytics = AnalyticsReporter::new(false);
-
-    let Ok(agent_connection) = connect_and_ping(&config, &mut inactive_analytics)
+    let Ok(agent_connection) = connect_and_ping(&config, None)
         .await
         .inspect_err(|err| error!("connection to agent failed {err:#?}")) else { return; };
 
@@ -225,7 +223,7 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
     // Create a main connection, that will be held until proxy is closed.
     // This will guarantee agent staying alive and will enable us to
     // make the agent close on last connection close immediately (will help in tests)
-    let mut main_connection = connect_and_ping(&config, &mut analytics)
+    let mut main_connection = connect_and_ping(&config, Some(&mut analytics))
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
@@ -314,7 +312,7 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
 /// sending the first message
 async fn connect_and_ping(
     config: &LayerConfig,
-    analytics: &mut AnalyticsReporter,
+    analytics: Option<&mut AnalyticsReporter>,
 ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
     let ((mut sender, mut receiver), _) = connect(config, analytics).await?;
     ping(&mut sender, &mut receiver).await?;
@@ -382,7 +380,7 @@ fn create_ping_loop(
 /// Returns the tx/rx and whether the operator is used.
 async fn connect(
     config: &LayerConfig,
-    analytics: &mut AnalyticsReporter,
+    analytics: Option<&mut AnalyticsReporter>,
 ) -> Result<(
     (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
     Option<OperatorSessionInformation>,
