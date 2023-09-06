@@ -98,12 +98,6 @@ pub enum Application {
 }
 
 #[derive(Debug)]
-pub enum Agent {
-    Ephemeral,
-    Job,
-}
-
-#[derive(Debug)]
 pub enum FileOps {
     #[cfg(target_os = "linux")]
     Python,
@@ -363,15 +357,6 @@ impl Application {
     }
 }
 
-impl Agent {
-    pub fn flag(&self) -> Option<Vec<&str>> {
-        match self {
-            Agent::Ephemeral => Some(vec!["--ephemeral-container"]),
-            Agent::Job => None,
-        }
-    }
-}
-
 impl FileOps {
     pub fn command(&self) -> Vec<&str> {
         match self {
@@ -484,6 +469,7 @@ pub async fn run_exec(
     if let Some(namespace) = namespace {
         mirrord_args.extend(["--target-namespace", namespace].into_iter());
     }
+
     if let Some(args) = args {
         mirrord_args.extend(args.into_iter());
     }

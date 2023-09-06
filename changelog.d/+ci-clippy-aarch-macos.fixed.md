@@ -1,0 +1,1 @@
+CI: run macOS clippy on all of the codebase

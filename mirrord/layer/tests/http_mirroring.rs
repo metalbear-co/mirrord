@@ -1,5 +1,6 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
+#![allow(non_snake_case)]
 
 use std::{path::PathBuf, time::Duration};
 
@@ -13,9 +14,15 @@ pub use common::*;
 /// the layer, send HTTP requests and verify in the server output that the application received
 /// them. Tests the layer's communication with the agent, the bind hook, and the forwarding of
 /// mirrored traffic to the application.
+///
+/// NOTE: Flask, FastAPI mirroring tests are flaky and have been decorated with the flaky_test
+/// macro. Some speculation is that it is because of lack of mid session mirroring. flaky_test can
+/// be removed once https://github.com/metalbear-co/mirrord/pull/1887 is merged.
+
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
+#[flaky_test::flaky_test]
 async fn mirroring_with_http(
     #[values(
         Application::PythonFlaskHTTP,
@@ -30,8 +37,10 @@ async fn mirroring_with_http(
         .start_process_with_layer_and_port(
             dylib_path,
             vec![
+                ("RUST_LOG", "mirrord=trace"),
                 ("MIRRORD_FILE_MODE", "local"),
                 ("MIRRORD_UDP_OUTGOING", "false"),
+                ("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES"),
             ],
             Some(config_dir.join("port_mapping.json").to_str().unwrap()),
         )

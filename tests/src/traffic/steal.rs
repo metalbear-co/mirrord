@@ -1,3 +1,4 @@
+#![allow(dead_code, unused)]
 #[cfg(test)]
 mod steal {
     use std::{
@@ -14,10 +15,11 @@ mod steal {
 
     use crate::utils::{
         config_dir, get_service_host_and_port, get_service_url, http2_service, kube_client,
-        send_request, send_requests, service, tcp_echo_service, websocket_service, Agent,
-        Application, KubeService,
+        send_request, send_requests, service, tcp_echo_service, websocket_service, Application,
+        KubeService,
     };
 
+    #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -31,15 +33,16 @@ mod steal {
             Application::NodeHTTP
         )]
         application: Application,
-        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut flags = vec!["--steal"];
-        if let Some(flag) = agent.flag() {
-            flags.extend(flag)
+
+        if cfg!(feature = "ephemeral") {
+            flags.extend(["-e"].into_iter());
         }
+
         let mut process = application
             .run(&service.target, Some(&service.namespace), Some(flags), None)
             .await;
@@ -55,6 +58,7 @@ mod steal {
         application.assert(&process).await;
     }
 
+    #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -68,15 +72,16 @@ mod steal {
             Application::NodeHTTP
         )]
         application: Application,
-        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut flags = vec!["--steal"];
-        if let Some(flag) = agent.flag() {
-            flags.extend(flag)
+
+        if cfg!(feature = "ephemeral") {
+            flags.extend(["-e"].into_iter());
         }
+
         let mut process = application
             .run(
                 &service.target,
@@ -99,22 +104,21 @@ mod steal {
 
     /// Test the app continues running with mirrord and traffic is no longer stolen after the app
     /// closes a socket.
+    #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    async fn close_socket(
-        #[future] service: KubeService,
-        #[future] kube_client: Client,
-        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
-    ) {
+    async fn close_socket(#[future] service: KubeService, #[future] kube_client: Client) {
         let application = Application::PythonCloseSocket;
         // Start the test app with mirrord
         let service = service.await;
         let kube_client = kube_client.await;
         let mut flags = vec!["--steal"];
-        if let Some(flag) = agent.flag() {
-            flags.extend(flag)
+
+        if cfg!(feature = "ephemeral") {
+            flags.extend(["-e"].into_iter());
         }
+
         let mut process = application
             .run(&service.target, Some(&service.namespace), Some(flags), None)
             .await;
@@ -186,16 +190,17 @@ mod steal {
     async fn close_socket_keep_connection(
         #[future] service: KubeService,
         #[future] kube_client: Client,
-        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let application = Application::PythonCloseSocketKeepConnection;
         // Start the test app with mirrord
         let service = service.await;
         let kube_client = kube_client.await;
         let mut flags = vec!["--steal"];
-        if let Some(flag) = agent.flag() {
-            flags.extend(flag)
+
+        if cfg!(feature = "ephemeral") {
+            flags.extend(["-e"].into_iter());
         }
+
         let mut process = application
             .run(
                 &service.target,
@@ -257,6 +262,7 @@ mod steal {
 
     /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
@@ -269,15 +275,11 @@ mod steal {
             Application::NodeHTTP
         )]
         application: Application,
-        #[values(Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
-        let mut flags = vec!["--steal"];
-        if let Some(flag) = agent.flag() {
-            flags.extend(flag)
-        }
+        let flags = vec!["--steal"];
 
         let mut client = application
             .run(
@@ -303,6 +305,7 @@ mod steal {
         application.assert(&client).await;
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
@@ -311,7 +314,6 @@ mod steal {
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(Application::NodeHTTP)] application: Application,
-        #[values(Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
@@ -324,7 +326,7 @@ mod steal {
             .run(
                 &service.target,
                 Some(&service.namespace),
-                agent.flag(),
+                None,
                 Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
             )
             .await;
@@ -344,6 +346,7 @@ mod steal {
         application.assert(&client).await;
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
@@ -352,7 +355,6 @@ mod steal {
         #[future] service: KubeService,
         #[future] kube_client: Client,
         #[values(Application::NodeHTTP)] application: Application,
-        #[values(Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
@@ -365,7 +367,7 @@ mod steal {
             .run(
                 &service.target,
                 Some(&service.namespace),
-                agent.flag(),
+                None,
                 Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
             )
             .await;
@@ -400,6 +402,7 @@ mod steal {
         application.assert(&client).await;
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
@@ -407,15 +410,11 @@ mod steal {
         #[future] http2_service: KubeService,
         #[future] kube_client: Client,
         #[values(Application::NodeHTTP2)] application: Application,
-        #[values(Agent::Job)] agent: Agent,
     ) {
         let service = http2_service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
-        let mut flags = vec!["--steal", "--fs-mode=local"];
-        if let Some(flag) = agent.flag() {
-            flags.extend(flag)
-        }
+        let flags = vec!["--steal", "--fs-mode=local"];
 
         let mut mirrored_process = application
             .run(
@@ -468,6 +467,7 @@ mod steal {
 
     /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`
     /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
@@ -480,16 +480,13 @@ mod steal {
             Application::NodeHTTP
         )]
         application: Application,
-        #[values(Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
 
-        let mut flags = vec!["--steal"];
-        if let Some(flag) = agent.flag() {
-            flags.extend(flag)
-        }
+        let flags = vec!["--steal"];
+
         let mut mirrorded_process = application
             .run(
                 &service.target,
@@ -539,13 +536,13 @@ mod steal {
     /// connection of an unsupported protocol.
     /// We verify that the traffic is forwarded to- and handled by the deployed app, and the local
     /// app does not see the traffic.
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
     async fn complete_passthrough(
         #[future] tcp_echo_service: KubeService,
         #[future] kube_client: Client,
-        #[values(Agent::Job)] agent: Agent,
         #[values(Application::PythonFastApiHTTP, Application::NodeHTTP)] application: Application,
         #[values("THIS IS NOT HTTP!\n", "short.\n")] tcp_data: &str,
     ) {
@@ -553,10 +550,8 @@ mod steal {
         let kube_client = kube_client.await;
         let (host, port) = get_service_host_and_port(kube_client.clone(), &service).await;
 
-        let mut flags = vec!["--steal"];
-        if let Some(flag) = agent.flag() {
-            flags.extend(flag)
-        }
+        let flags = vec!["--steal"];
+
         let mut mirrorded_process = application
             .run(
                 &service.target,
@@ -577,8 +572,10 @@ mod steal {
         let mut buf = String::new();
         reader.read_line(&mut buf).unwrap();
         println!("Got response: {buf}");
-        assert_eq!(&buf[..8], "remote: "); // The data was passed through to remote app.
-        assert_eq!(&buf[8..], tcp_data); // The correct data was sent there and back.
+        // replace "remote: " with empty string, since the response can be split into frames
+        // and we just need assert the final response
+        buf = buf.replace("remote: ", "");
+        assert_eq!(&buf, tcp_data); // The correct data was sent there and back.
 
         // Verify the data was passed through and nothing was sent to the local app.
         let stdout_after = mirrorded_process.get_stdout().await;
@@ -604,13 +601,13 @@ mod steal {
     ///
     /// We verify that the traffic is forwarded to- and handled by the deployed app, and the local
     /// app does not see the traffic.
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
     async fn websocket_upgrade(
         #[future] websocket_service: KubeService,
         #[future] kube_client: Client,
-        #[values(Agent::Job)] agent: Agent,
         #[values(Application::PythonFastApiHTTP, Application::NodeHTTP)] application: Application,
         #[values(
             "Hello, websocket!\n".to_string(),
@@ -624,10 +621,8 @@ mod steal {
         let kube_client = kube_client.await;
         let (host, port) = get_service_host_and_port(kube_client.clone(), &service).await;
 
-        let mut flags = vec!["--steal"];
-        if let Some(flag) = agent.flag() {
-            flags.extend(flag)
-        }
+        let flags = vec!["--steal"];
+
         let mut mirrorded_process = application
             .run(
                 &service.target,

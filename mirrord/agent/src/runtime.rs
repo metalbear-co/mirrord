@@ -70,7 +70,7 @@ pub(crate) trait ContainerRuntime {
 }
 
 #[enum_dispatch(ContainerRuntime)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Container {
     Docker(DockerContainer),
     Containerd(ContainerdContainer),
@@ -79,30 +79,22 @@ pub(crate) enum Container {
 
 /// get a container object according to args.
 pub(crate) async fn get_container(
-    container_id_opt: Option<&String>,
-    container_runtime_opt: Option<&String>,
-) -> Result<Option<Container>> {
-    if let (Some(container_id), Some(container_runtime)) = (container_id_opt, container_runtime_opt)
-    {
-        let container_id = container_id.to_string();
-        match container_runtime.as_str() {
-            "docker" => Ok(Some(Container::Docker(
-                DockerContainer::from_id(container_id).await?,
-            ))),
-            "containerd" => Ok(Some(Container::Containerd(ContainerdContainer {
-                container_id,
-            }))),
-            "cri-o" => Ok(Some(Container::CriO(CriOContainer::from_id(container_id)))),
-            _ => Err(AgentError::NotFound(format!(
-                "Unknown runtime {container_runtime:?}"
-            ))),
-        }
-    } else {
-        Ok(None)
+    container_id: String,
+    container_runtime: Option<&str>,
+) -> Result<Container> {
+    match container_runtime {
+        Some("docker") => Ok(Container::Docker(
+            DockerContainer::from_id(container_id).await?,
+        )),
+        Some("containerd") => Ok(Container::Containerd(ContainerdContainer { container_id })),
+        Some("cri-o") => Ok(Container::CriO(CriOContainer::from_id(container_id))),
+        _ => Err(AgentError::NotFound(format!(
+            "Unknown runtime {container_runtime:?}"
+        ))),
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct DockerContainer {
     container_id: String,
     client: Docker,
@@ -168,7 +160,7 @@ impl ContainerRuntime for DockerContainer {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ContainerdContainer {
     container_id: String,
 }

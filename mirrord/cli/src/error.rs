@@ -224,4 +224,9 @@ pub(crate) enum CliError {
         r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
     ))]
     ConnectInfoLoadFailed(String, serde_json::Error),
+    #[error("Runtime build failed please report it. err: `{0}`")]
+    #[diagnostic(help(
+        r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
+    ))]
+    RuntimeError(std::io::Error),
 }

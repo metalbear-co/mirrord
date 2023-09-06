@@ -26,8 +26,7 @@ use mirrord_config::{
 use mirrord_kube::{
     api::{
         container::SKIP_NAMES,
-        get_k8s_resource_api,
-        kubernetes::{create_kube_api, rollout::Rollout},
+        kubernetes::{create_kube_api, get_k8s_resource_api, rollout::Rollout},
     },
     error::KubeApiError,
 };
@@ -106,7 +105,7 @@ where
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
 }
 
-async fn exec(args: &ExecArgs) -> Result<()> {
+async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord exec");
     if !args.disable_version_check {
         prompt_outdated_version(&progress).await;
@@ -219,7 +218,7 @@ async fn exec(args: &ExecArgs) -> Result<()> {
 
     let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
-    let mut analytics = AnalyticsReporter::only_error(config.telemetry);
+    let mut analytics = AnalyticsReporter::only_error(config.telemetry, watch);
     (&config).collect_analytics(analytics.get_mut());
 
     config.verify(&mut context)?;
@@ -407,8 +406,7 @@ async fn register_to_waitlist(email: EmailAddress) -> Result<()> {
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[tokio::main]
-async fn main() -> miette::Result<()> {
+fn main() -> miette::Result<()> {
     let cli = Cli::parse();
 
     if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
@@ -420,22 +418,43 @@ async fn main() -> miette::Result<()> {
             .init();
     }
 
-    match cli.commands {
-        Commands::Exec(args) => exec(&args).await?,
-        Commands::Extract { path } => {
-            extract_library(
-                Some(path),
-                &ProgressTracker::from_env("mirrord extract library..."),
-                false,
-            )?;
-        }
-        Commands::ListTargets(args) => print_pod_targets(&args).await?,
-        Commands::Operator(args) => operator_command(*args).await?,
-        Commands::ExtensionExec(args) => extension_exec(*args).await?,
-        Commands::InternalProxy => internal_proxy::proxy().await?,
-        Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
-    }
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(CliError::RuntimeError)?;
+    let (signal, watch) = drain::channel();
 
+    let res: Result<(), CliError> = rt.block_on(async move {
+        match cli.commands {
+            Commands::Exec(args) => exec(&args, watch).await?,
+            Commands::Extract { path } => {
+                extract_library(
+                    Some(path),
+                    &ProgressTracker::from_env("mirrord extract library..."),
+                    false,
+                )?;
+            }
+            Commands::ListTargets(args) => print_pod_targets(&args).await?,
+            Commands::Operator(args) => operator_command(*args).await?,
+            Commands::ExtensionExec(args) => {
+                extension_exec(*args, watch).await?;
+            }
+            Commands::InternalProxy => internal_proxy::proxy(watch).await?,
+            Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
+        };
+        Ok(())
+    });
+
+    rt.block_on(async move {
+        tokio::time::timeout(Duration::from_secs(10), signal.drain())
+            .await
+            .is_err()
+            .then(|| {
+                warn!("Failed to drain in a timely manner, ongoing tasks dropped.");
+            });
+    });
+
+    res?;
     Ok(())
 }
 

@@ -265,6 +265,9 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/issue1776portnot53
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue1899
+          cargo build
       - run: ./scripts/build_c_apps.sh
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
       - name: mirrord protocol UT
@@ -289,10 +292,14 @@ jobs:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
           toolchain: nightly-2023-04-19
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v2
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: clippy x64
-        run: cargo clippy -p mirrord -p mirrord-sip --target=x86_64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
+        run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=x86_64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
       - name: clippy aarch64
-        run: cargo clippy -p mirrord -p mirrord-sip --target=aarch64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
+        run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=aarch64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
       - name: mirrord SIP UT
         run: cargo test --target=x86_64-apple-darwin -p mirrord-sip
       # prepare stuff needed for integration tests
@@ -351,6 +358,9 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/issue1776portnot53
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue1899
+          cargo build
       - run: ./scripts/build_c_apps.sh
       # For the `java_temurin_sip` test.
       - uses: sdkman/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
@@ -395,7 +405,7 @@ jobs:
       - run: minikube image load /tmp/test.tar
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run targetless E2E test.
-        run: cargo test --target=x86_64-unknown-linux-gnu -p tests targetless
+        run: cargo test --target=x86_64-unknown-linux-gnu -p tests targetless --no-default-features --features job
       - name: Run all E2E test
         run: cargo test --target=x86_64-unknown-linux-gnu -p tests -- --test-threads=6
       - name: Collect logs

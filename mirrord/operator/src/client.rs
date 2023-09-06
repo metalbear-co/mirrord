@@ -10,7 +10,7 @@ use mirrord_config::{
     feature::network::incoming::ConcurrentSteal, target::TargetConfig, LayerConfig,
 };
 use mirrord_kube::{
-    api::{get_k8s_resource_api, kubernetes::create_kube_api},
+    api::kubernetes::{create_kube_api, get_k8s_resource_api},
     error::KubeApiError,
 };
 use mirrord_progress::Progress;
@@ -109,7 +109,13 @@ impl OperatorApi {
     {
         let operator_api = OperatorApi::new(config).await?;
 
-        let status = operator_api.get_status().await?;
+        let status = match operator_api.get_status().await.transpose()? {
+            Some(status) => status,
+            None => {
+                // No operator found
+                return Ok(None);
+            }
+        };
 
         let client_certificate =
             if let Some(credential_name) = status.spec.license.fingerprint.as_ref() {
@@ -184,18 +190,21 @@ impl OperatorApi {
     pub async fn connect(
         config: &LayerConfig,
         session_information: &OperatorSessionInformation,
-        analytics: &mut AnalyticsReporter,
+        analytics: Option<&mut AnalyticsReporter>,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        analytics.set_operator_properties(AnalyticsOperatorProperties {
-            client_hash: session_information
-                .client_certificate
-                .as_ref()
-                .and_then(|certificate| certificate.sha256_fingerprint().ok())
-                .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
-            license_hash: session_information
-                .fingerprint
-                .as_deref()
-                .map(AnalyticsHash::from_base64),
+        analytics.map(|analytics| {
+            analytics.set_operator_properties(AnalyticsOperatorProperties {
+                client_hash: session_information
+                    .client_certificate
+                    .as_ref()
+                    .and_then(|certificate| certificate.sha256_fingerprint().ok())
+                    .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
+                license_hash: session_information
+                    .fingerprint
+                    .as_deref()
+                    .map(AnalyticsHash::from_base64),
+            });
+            analytics
         });
 
         OperatorApi::new(config)
@@ -237,12 +246,12 @@ impl OperatorApi {
         })
     }
 
-    async fn get_status(&self) -> Result<MirrordOperatorCrd> {
-        self.version_api
-            .get(OPERATOR_STATUS_NAME)
-            .await
-            .map_err(KubeApiError::KubeError)
-            .map_err(OperatorApiError::KubeApiError)
+    async fn get_status(&self) -> Option<Result<MirrordOperatorCrd>> {
+        match self.version_api.get(OPERATOR_STATUS_NAME).await {
+            Ok(status) => Some(Ok(status)),
+            Err(kube::Error::Api(ErrorResponse { code: 404, .. })) => None,
+            Err(err) => Some(Err(OperatorApiError::from(KubeApiError::from(err)))),
+        }
     }
 
     async fn fetch_target(&self) -> Result<Option<TargetCrd>> {

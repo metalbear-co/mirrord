@@ -1736,6 +1736,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 
 [[package]]
+name = "drain"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f1a0abf3fcefad9b4dd0e414207a7408e12b68414a01e6bb19b897d5bd7632d"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "dyn-clone"
 version = "1.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1941,7 +1950,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "libc",
 ]
@@ -1963,6 +1972,17 @@ name = "fixedbitset"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
+
+[[package]]
+name = "flaky_test"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "479cde5eb168cf5a056dd98f311cbfab7494c216394e4fb9eba0336827a8db93"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
 
 [[package]]
 name = "flate2"
@@ -2443,8 +2463,7 @@ dependencies = [
 [[package]]
 name = "hyper"
 version = "1.0.0-rc.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d280a71f348bcc670fc55b02b63c53a04ac0bf2daff2980795aeaf53edae10e6"
+source = "git+https://github.com/meowjesty/hyper?branch=master#d4a61e3da87a08a25772cd3aa2f503cb4346c81f"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -2508,7 +2527,7 @@ dependencies = [
 [[package]]
 name = "hyper-util"
 version = "0.0.0"
-source = "git+https://github.com/hyperium/hyper-util#f898015fc9eca9f459ddac521db278d904099e89"
+source = "git+https://github.com/meowjesty/hyper-util?branch=issue/1869/update-runtime#fc9d572f0e8ce4a9f1c01f3420bf26ad4f2ab65e"
 dependencies = [
  "futures-channel",
  "futures-util",
@@ -2705,7 +2724,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "errno 0.3.2",
  "libc",
@@ -2714,10 +2733,17 @@ dependencies = [
 
 [[package]]
 name = "issue1776portnot53"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "libc",
  "socket2 0.5.3",
+]
+
+[[package]]
+name = "issue1899"
+version = "3.64.2"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
@@ -2994,7 +3020,7 @@ checksum = "57bcfdad1b858c2db7c38303a6d2ad4dfaf5eb53dfeb0910128b2c26d6158503"
 
 [[package]]
 name = "listen_ports"
-version = "3.63.0"
+version = "3.64.2"
 
 [[package]]
 name = "lock_api"
@@ -3204,12 +3230,13 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "actix-codec",
  "anyhow",
  "clap",
  "const-random",
+ "drain",
  "email_address",
  "exec",
  "futures",
@@ -3246,7 +3273,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -3298,10 +3325,11 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "assert-json-diff",
  "base64 0.21.2",
+ "drain",
  "reqwest",
  "serde",
  "serde_json",
@@ -3311,7 +3339,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "chrono",
  "fs4",
@@ -3331,7 +3359,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "bimap",
  "bitflags 2.4.0",
@@ -3352,7 +3380,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -3362,7 +3390,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "axum",
  "futures",
@@ -3380,7 +3408,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "actix-codec",
  "base64 0.21.2",
@@ -3394,7 +3422,7 @@ dependencies = [
  "mirrord-protocol",
  "rand",
  "regex",
- "rstest 0.17.0",
+ "rstest 0.18.2",
  "serde",
  "serde_json",
  "shellexpand",
@@ -3406,7 +3434,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -3420,6 +3448,7 @@ dependencies = [
  "errno 0.3.2",
  "exec",
  "fancy-regex",
+ "flaky_test",
  "frida-gum",
  "futures",
  "hashbrown 0.14.0",
@@ -3441,7 +3470,7 @@ dependencies = [
  "os_info",
  "rand",
  "regex",
- "rstest 0.17.0",
+ "rstest 0.18.2",
  "serde",
  "serde_json",
  "socket2 0.5.3",
@@ -3461,7 +3490,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3470,7 +3499,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -3480,7 +3509,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -3514,7 +3543,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "atty",
  "enum_dispatch",
@@ -3547,7 +3576,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "apple-codesign",
  "memchr",
@@ -3874,7 +3903,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.63.0"
+version = "3.64.2"
 
 [[package]]
 name = "outref"
@@ -4724,21 +4753,21 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.63.0"
+version = "3.64.2"
 dependencies = [
  "tokio",
 ]
