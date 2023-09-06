@@ -24,6 +24,12 @@ mod issue1317 {
     async fn issue1317(
         #[future]
         #[notrace]
+        #[with(
+            "default",
+            "NodePort",
+            "ghcr.io/metalbear-co/mirrord-http-keep-alive:latest",
+            "http-keep-alive"
+        )]
         service: KubeService,
         #[future]
         #[notrace]

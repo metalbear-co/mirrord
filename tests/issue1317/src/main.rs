@@ -1,3 +1,4 @@
+//! Local counterpart of the [http-keep-alive]() server.
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     env_logger::Builder::from_default_env()
