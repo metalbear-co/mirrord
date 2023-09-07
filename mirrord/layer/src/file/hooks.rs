@@ -142,6 +142,7 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
 ///
 /// Opens the directory with `read` permission using the [`open_logic`] flow, then calls
 /// [`fdopendir`] to convert the [`RawFd`] into a `*DIR` stream (which we treat as `usize`).
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> usize {
     open_logic(raw_filename, O_RDONLY, O_DIRECTORY)
