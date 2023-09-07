@@ -1080,6 +1080,12 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FnReaddir64_r,
             FN_READDIR64_R
         );
+        // aarch + macOS hooks fail
+        // because macOs internally calls this with pointer authentication
+        // and we don't compile to arm64e yet, so it breaks.
+        // but it seems we'll be able to compile to arm64e soon.
+        // https://github.com/rust-lang/rust/pull/115526
+        #[cfg(target_os = "linux")]
         replace!(
             hook_manager,
             "opendir",
