@@ -12,6 +12,7 @@ use exec::execvp;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
+use futures::TryFutureExt;
 use k8s_openapi::{
     api::{apps::v1::Deployment, core::v1::Pod},
     Metadata, NamespaceResourceScope,
@@ -20,7 +21,7 @@ use kube::api::ListParams;
 use miette::JSONReportHandler;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics};
 use mirrord_config::{
-    config::{ConfigContext, MirrordConfig},
+    config::{ConfigContext, ConfigError, MirrordConfig},
     LayerConfig, LayerFileConfig,
 };
 use mirrord_kube::{
@@ -33,7 +34,7 @@ use mirrord_kube::{
 use mirrord_progress::{Progress, ProgressTracker};
 use operator::operator_command;
 use semver::Version;
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
@@ -404,6 +405,43 @@ async fn register_to_waitlist(email: EmailAddress) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct VerifiedConfig {
+    config: Option<String>,
+    errors: Option<String>,
+}
+
+/// Verifies a config file specified by `path`.
+///
+/// ## Usage
+///
+/// ```sh
+/// mirrord verify-config ./config.json
+/// ```
+async fn verify_config(VerifyConfigArgs { path }: VerifyConfigArgs) -> Result<()> {
+    let mut config_context = ConfigContext::default();
+
+    let read_path = path.clone();
+    let verified = match async move { LayerFileConfig::from_path(path) }
+        .and_then(|config| async move { config.generate_config(&mut config_context) })
+        .and_then(|_| tokio::fs::read_to_string(read_path).map_err(ConfigError::from))
+        .await
+    {
+        Ok(config) => VerifiedConfig {
+            config: Some(config),
+            ..Default::default()
+        },
+        Err(fail) => VerifiedConfig {
+            errors: Some(fail.to_string()),
+            ..Default::default()
+        },
+    };
+
+    println!("{}", serde_json::to_string_pretty(&verified)?);
+
+    Ok(())
+}
+
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> miette::Result<()> {
@@ -441,6 +479,7 @@ fn main() -> miette::Result<()> {
             }
             Commands::InternalProxy => internal_proxy::proxy(watch).await?,
             Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
+            Commands::VerifyConfig(config_path) => verify_config(config_path).await?,
         };
         Ok(())
     });
