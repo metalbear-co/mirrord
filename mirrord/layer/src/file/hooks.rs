@@ -15,6 +15,8 @@ use libc::{
 };
 #[cfg(target_os = "linux")]
 use libc::{dirent64, stat64, EBADF, EINVAL, ENOENT, ENOTDIR};
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+use libc::{O_DIRECTORY, O_RDONLY};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
     DirEntryInternal, FsMetadataInternal, MetadataInternal, ReadFileResponse, WriteFileResponse,
@@ -27,12 +29,13 @@ use tracing::trace;
 use tracing::{error, info, warn};
 
 use super::{ops::*, OpenOptionsInternalExt};
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+use crate::close_layer_fd;
 #[cfg(target_os = "macos")]
 use crate::detour::Bypass;
 #[cfg(target_os = "linux")]
 use crate::error::HookError::ResponseError;
 use crate::{
-    close_layer_fd,
     common::CheckedInto,
     detour::{Detour, DetourGuard},
     error::HookError,
