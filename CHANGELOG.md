@@ -8,6 +8,21 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.65.1](https://github.com/metalbear-co/mirrord/tree/3.65.1) - 2023-09-07
+
+
+### Added
+
+- Add some Ruby env to excluded: GEM_HOME, GEM_PATH
+  [#1892](https://github.com/metalbear-co/mirrord/issues/1892)
+
+
+### Fixed
+
+- Disable opendir hook on aarch macOS since it crashes due to arm64e issues
+  [#1920](https://github.com/metalbear-co/mirrord/issues/1920)
+
+
 ## [3.65.0](https://github.com/metalbear-co/mirrord/tree/3.65.0) - 2023-09-06
 
 
