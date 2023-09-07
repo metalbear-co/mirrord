@@ -79,6 +79,7 @@ jobs:
         run: |
           mv video build/reports
       - name: Send failure to discord
+        if: ${{ failure() }}
         run: |
           curl -i -H "Accept: application/json" -H "Content-Type: application/json" -X POST --data '{"content": "IntelliJ e2e has failed!"}' ${{ secrets.webhook_url }}
       - name: Save fails report
@@ -138,5 +139,6 @@ jobs:
         with:
           run: npm run test
       - name: Send failure to discord
+        if: ${{ failure() }}
         run: |
           curl -i -H "Accept: application/json" -H "Content-Type: application/json" -X POST --data '{"content": "VsCode e2e has failed!"}' ${{ secrets.webhook_url }}
