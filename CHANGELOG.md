@@ -11,7 +11,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 ## [3.65.1](https://github.com/metalbear-co/mirrord/tree/3.65.1) - 2023-09-07
 
 
-### Added
+### Changed
 
 - Add some Ruby env to excluded: GEM_HOME, GEM_PATH
   [#1892](https://github.com/metalbear-co/mirrord/issues/1892)
