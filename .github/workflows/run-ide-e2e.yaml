@@ -10,6 +10,8 @@ on:
     branches:
       - "releases/**"
       - "*.*.*"
+
+# this worflow copies the exact IDE e2e and runs it on the release branches
 jobs:
   intellij-e2e:
     runs-on: ubuntu-latest
@@ -78,10 +80,6 @@ jobs:
         if: ${{ failure() }}
         run: |
           mv video build/reports
-      - name: Send failure to discord
-        if: ${{ failure() }}
-        run: |
-          curl -i -H "Accept: application/json" -H "Content-Type: application/json" -X POST --data '{"content": "IntelliJ e2e has failed!"}' ${{ secrets.webhook_url }}
       - name: Save fails report
         if: ${{ failure() }}
         uses: actions/upload-artifact@v3
@@ -138,7 +136,3 @@ jobs:
           KUBE_SERVICE: ${{ env.KUBE_SERVICE }}
         with:
           run: npm run test
-      - name: Send failure to discord
-        if: ${{ failure() }}
-        run: |
-          curl -i -H "Accept: application/json" -H "Content-Type: application/json" -X POST --data '{"content": "VsCode e2e has failed!"}' ${{ secrets.webhook_url }}
