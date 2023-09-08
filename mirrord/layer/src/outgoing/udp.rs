@@ -130,7 +130,7 @@ impl UdpOutgoingHandler {
 
                             break;
                         }
-                        Ok((read_amount, _)) if read_amount == 0 => {
+                        Ok((0, _)) => {
                             trace!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
                             close_remote_stream(layer_tx.clone()).await;
 

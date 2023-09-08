@@ -283,7 +283,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
             if listen_result != 0 {
                 error!("listen -> Failed `listen` sockfd {:#?}", sockfd);
 
-                return Err(io::Error::last_os_error())?;
+                Err(io::Error::last_os_error())?
             }
 
             blocking_send_hook_message(HookMessage::Tcp(TcpIncoming::Listen(Listen {
@@ -360,7 +360,7 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
                 "connect -> Failed call to libc::connect with {:#?}",
                 connect_result,
             );
-            return Err(io::Error::last_os_error())?;
+            Err(io::Error::last_os_error())?
         }
 
         let connected = Connected {
@@ -836,7 +836,7 @@ pub(super) fn getaddrinfo(
             MANAGED_ADDRINFO.insert(raw as usize);
             raw
         })
-        .reduce(|current, mut previous| {
+        .reduce(|current, previous| {
             // Safety: These pointers were just allocated using `Box::new`, so they should be
             // fine regarding memory layout, and are not dangling.
             unsafe { (*previous).ai_next = current };
