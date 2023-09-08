@@ -42,11 +42,12 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: mirrord-artifacts
+          path: target/debug/
       - run: |
           echo "$GITHUB_WORKSPACE"      
           echo "$HOME"      
           ls -la
-      - run: echo "$GITHUB_WORKSPACE/mirrord" >> $GITHUB_PATH
+      - run: echo "$HOME/target/debug/mirrord" >> $GITHUB_PATH
       - run: |
           echo "$GITHUB_WORKSPACE"      
           echo "$PATH"
