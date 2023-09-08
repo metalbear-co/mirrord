@@ -26,8 +26,7 @@ jobs:
       - name: checkout into the last released tag
         run: |
           git fetch --all --tags
-          git checkout tags/$(grep 'pluginVersion =' gradle.properties | cut -d '=' -f 2 | xargs)
-      - uses: actions/checkout@v3
+          git checkout tags/$(grep 'pluginVersion =' gradle.properties | cut -d '=' -f 2 | xargs)      
       - name: Setup Java
         uses: actions/setup-java@v3
         with:
