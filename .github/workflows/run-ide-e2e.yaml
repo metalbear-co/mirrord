@@ -22,9 +22,11 @@ jobs:
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
       - uses: actions/checkout@v3
         with:
-          repository: "metalbear-co/mirrord-intellij"
+          repository: "metalbear-co/mirrord-intellij"      
       - name: checkout into the last released tag
-        run: git checkout tags/$(grep 'pluginVersion =' gradle.properties | cut -d '=' -f 2 | xargs)
+        run: |
+          git fetch --all --tags
+          git checkout tags/$(grep 'pluginVersion =' gradle.properties | cut -d '=' -f 2 | xargs)
       - uses: actions/checkout@v3
       - name: Setup Java
         uses: actions/setup-java@v3
@@ -57,7 +59,7 @@ jobs:
       - name: Setup FFmpeg
         uses: FedericoCarboni/setup-ffmpeg@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}      
+          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run intellij e2e in headless state
         uses: coactions/setup-xvfb@v1
         env:
@@ -93,7 +95,9 @@ jobs:
         with:
           repository: "metalbear-co/mirrord-vscode"
       - name: checkout into the last released tag
-        run: git checkout tags/$(jq -r .version package.json)
+        run: |
+          git fetch --all --tags
+          git checkout tags/$(jq -r .version package.json)
       - uses: actions/setup-node@v3
         with:
           node-version: 18
