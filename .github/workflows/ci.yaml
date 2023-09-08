@@ -131,14 +131,15 @@ jobs:
       # Check that compiles for the supported linux targets (aarch64)
       - run: cargo-zigbuild clippy --lib --bins --all-features --target aarch64-unknown-linux-gnu -- -Wclippy::indexing_slicing -D warnings
 
+  # echo "branch=$([[ ${{ github.head_ref }} =~ "^[0-9]+\.[0-9]+\.[0-9]+$" ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
   check_if_release_branch:
     runs-on: ubuntu-latest
     outputs:
       release_branch: ${{ steps.release-branch.outputs.branch }}
     steps:
       - id: release-branch
-        run: |
-          echo "branch=$([[ ${{ github.head_ref }} =~ "^[0-9]+\.[0-9]+\.[0-9]+$" ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
+        run: |          
+          echo "branch=true" >> "$GITHUB_OUTPUT"
       - name: output test
         run: |
           echo ${{ steps.release-branch.outputs.branch }}
@@ -466,7 +467,7 @@ jobs:
         with:
           name: mirrord-artifacts
           path: target/debug/
-      - run: echo "target/debug/mirrord" >> $GITHUB_PATH
+      - run: echo "$GITHUB_WORKSPACE/target/debug/mirrord" >> $GITHUB_PATH
       - uses: ./.github/workflows/run-ide-e2e.yaml
 
   # We need some "accummulation" job here because bors fails (timeouts) to
