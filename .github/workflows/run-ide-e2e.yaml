@@ -26,7 +26,7 @@ jobs:
       - name: checkout into the last released tag
         run: |
           git fetch --all --tags
-          git checkout tags/$(grep 'pluginVersion =' gradle.properties | cut -d '=' -f 2 | xargs)      
+          git checkout tags/$(grep 'pluginVersion =' gradle.properties | cut -d '=' -f 2 | xargs)
       - name: Setup Java
         uses: actions/setup-java@v3
         with:
@@ -45,9 +45,11 @@ jobs:
       - run: |
           echo "$GITHUB_WORKSPACE"      
           echo "$HOME"      
-          ls -la
-      - run: echo "$HOME/target/debug/mirrord" >> $GITHUB_PATH
+          ls -la          
+      - run: echo "$GITHUB_WORKSPACE/target/debug/mirrord" >> $GITHUB_PATH
       - run: |
+          which mirrord
+          mirrord -V
           echo "$GITHUB_WORKSPACE"      
           echo "$PATH"
           ls -la
