@@ -149,7 +149,7 @@ async fn connection_task(config: LayerConfig, stream: TcpStream) {
 
 /// Request target container pause from the connected agent.
 async fn request_pause(
-    sender: &mut mpsc::Sender<ClientMessage>,
+    sender: &mpsc::Sender<ClientMessage>,
     receiver: &mut mpsc::Receiver<DaemonMessage>,
 ) -> Result<(), InternalProxyError> {
     info!("Requesting target container pause from the agent");
@@ -230,7 +230,7 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
     if config.pause {
         tokio::time::timeout(
             Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into()),
-            request_pause(&mut main_connection.0, &mut main_connection.1),
+            request_pause(&main_connection.0, &mut main_connection.1),
         )
         .await
         .map_err(|_| {
@@ -314,14 +314,14 @@ async fn connect_and_ping(
     config: &LayerConfig,
     analytics: Option<&mut AnalyticsReporter>,
 ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-    let ((mut sender, mut receiver), _) = connect(config, analytics).await?;
-    ping(&mut sender, &mut receiver).await?;
+    let ((sender, mut receiver), _) = connect(config, analytics).await?;
+    ping(&sender, &mut receiver).await?;
     Ok((sender, receiver))
 }
 
 /// Sends a ping the connection and expects a pong.
 async fn ping(
-    sender: &mut mpsc::Sender<ClientMessage>,
+    sender: &mpsc::Sender<ClientMessage>,
     receiver: &mut mpsc::Receiver<DaemonMessage>,
 ) -> Result<(), InternalProxyError> {
     sender.send(ClientMessage::Ping).await?;
@@ -349,7 +349,7 @@ fn create_ping_loop(
             loop {
                 tokio::select! {
                     _ = main_keep_interval.tick() => {
-                        if let Err(err) = ping(&mut connection.0, &mut connection.1).await {
+                        if let Err(err) = ping(&connection.0, &mut connection.1).await {
                             cancellation_token.cancel();
 
                             return Err(err);

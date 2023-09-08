@@ -175,13 +175,13 @@ impl Eq for PartialType {}
 impl Eq for PartialField {}
 
 impl Hash for PartialType {
-    fn hash<H: ~const std::hash::Hasher>(&self, state: &mut H) {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.ident.hash(state)
     }
 }
 
 impl Hash for PartialField {
-    fn hash<H: ~const std::hash::Hasher>(&self, state: &mut H) {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.ident.hash(state)
     }
 }

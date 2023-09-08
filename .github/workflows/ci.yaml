@@ -121,7 +121,7 @@ jobs:
       - run: rm rust-toolchain.toml
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: nightly-2023-04-19
+          toolchain: nightly-2023-09-07
           components: rustfmt, clippy
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
       - run: python3 -m pip install cargo-zigbuild
@@ -146,7 +146,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           # TODO(alex): update this when https://github.com/rust-lang/rust/issues/109631 is fixed
-          toolchain: nightly-2023-04-19
+          toolchain: nightly-2023-09-07
       - run: cargo doc --document-private-items
 
   test_agent:
@@ -291,7 +291,7 @@ jobs:
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
-          toolchain: nightly-2023-04-19
+          toolchain: nightly-2023-09-07
       - name: Install Protoc
         uses: arduino/setup-protoc@v2
         with:

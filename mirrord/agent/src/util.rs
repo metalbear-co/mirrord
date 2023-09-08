@@ -32,7 +32,7 @@ where
     pub fn subscribe(&mut self, client: C, topic: T) {
         self._inner
             .entry(topic)
-            .or_insert_with(HashSet::new)
+            .or_default()
             .insert(client);
     }
 

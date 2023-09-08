@@ -97,16 +97,16 @@ impl<T> Deref for HookFn<T> {
     }
 }
 
-impl<T> const Default for HookFn<T> {
-    fn default() -> Self {
-        Self(OnceLock::new())
-    }
-}
 
 impl<T> HookFn<T> {
     /// Helper function to set the inner [`OnceLock`](std::sync::OnceLock) `T` of `self`.
     pub(crate) fn set(&self, value: T) -> Result<(), T> {
         self.0.set(value)
+    }
+
+    /// Until we can impl Default as const.
+    pub(crate) const fn default_const() -> Self {
+        Self(OnceLock::new())
     }
 }
 

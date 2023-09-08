@@ -326,7 +326,7 @@ impl TcpConnectionStealer {
         self.connection_clients.insert(connection_id, client_id);
         self.client_connections
             .entry(client_id)
-            .or_insert_with(HashSet::new)
+            .or_default()
             .insert(connection_id);
 
         let new_connection = DaemonTcp::NewConnection(NewTcpConnection {
