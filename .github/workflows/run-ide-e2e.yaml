@@ -46,7 +46,7 @@ jobs:
           echo "$GITHUB_WORKSPACE"      
           echo "$HOME"      
           ls -la          
-      - run: echo "$GITHUB_WORKSPACE/target/debug/mirrord" >> $GITHUB_PATH
+      - run: echo "$(pwd)/target/debug/mirrord" >> $GITHUB_PATH
       - run: |
           which mirrord
           mirrord -V
