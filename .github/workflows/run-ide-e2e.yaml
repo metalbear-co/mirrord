@@ -22,7 +22,7 @@ jobs:
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
       - uses: actions/checkout@v3
         with:
-          repository: "metalbear-co/mirrord-intellij"      
+          repository: "metalbear-co/mirrord-intellij"
       - name: checkout into the last released tag
         run: |
           git fetch --all --tags
@@ -42,8 +42,15 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: mirrord-artifacts
-          path: target/debug/
-      - run: echo "$GITHUB_WORKSPACE/target/debug/mirrord" >> $GITHUB_PATH
+      - run: |
+          echo "$GITHUB_WORKSPACE"      
+          echo "$HOME"      
+          ls -la
+      - run: echo "$GITHUB_WORKSPACE/mirrord" >> $GITHUB_PATH
+      - run: |
+          echo "$GITHUB_WORKSPACE"      
+          echo "$PATH"
+          ls -la
       - name: Start minikube
         uses: medyagh/setup-minikube@master
         with:
