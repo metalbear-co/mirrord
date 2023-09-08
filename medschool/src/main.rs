@@ -192,8 +192,11 @@ impl Display for PartialType {
         let docs = self.docs.last().cloned().unwrap_or_default();
         f.write_str(&docs)?;
 
-        let fields: String = self.fields.iter().map(|field| format!("{field}")).collect();
-        f.write_str(&fields)
+        self.fields.iter().fold(f, |accum, s| {
+            accum.write_str(&s.to_string()).expect("writing failed");
+            accum
+        });
+        Ok(())
     }
 }
 
