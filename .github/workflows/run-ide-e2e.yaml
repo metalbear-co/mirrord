@@ -42,8 +42,7 @@ jobs:
         with:
           name: mirrord-artifacts
       - run: |
-          echo "${GITHUB_WORKSPACE}/mirrord" >> "$GITHUB_PATH"
-          echo "${PATH}"
+          echo "${GITHUB_WORKSPACE}" >> "$GITHUB_PATH"          
       - run: |
           mirrord -V
           which mirrord
@@ -113,6 +112,7 @@ jobs:
           name: mirrord-artifacts
       - run: |
           sudo mv mirrord /usr/local/bin
+          chmod u+x /usr/local/bin/mirrord
           mirrord -V
       - name: Start minikube
         uses: medyagh/setup-minikube@master
