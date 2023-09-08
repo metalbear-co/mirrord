@@ -265,7 +265,8 @@ async fn get_kube_pods(
                 .as_ref()?
                 .containers
                 .iter()
-                .filter(|&container| (!SKIP_NAMES.contains(container.name.as_str()))).map(|container| container.name.clone())
+                .filter(|&container| (!SKIP_NAMES.contains(container.name.as_str())))
+                .map(|container| container.name.clone())
                 .collect();
             Some((name, containers))
         })

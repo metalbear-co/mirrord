@@ -30,10 +30,7 @@ where
 {
     /// Add a new subscription to a topic for a given client.
     pub fn subscribe(&mut self, client: C, topic: T) {
-        self._inner
-            .entry(topic)
-            .or_default()
-            .insert(client);
+        self._inner.entry(topic).or_default().insert(client);
     }
 
     /// Remove a subscription of given client from the topic.

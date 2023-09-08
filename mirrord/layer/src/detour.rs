@@ -97,7 +97,6 @@ impl<T> Deref for HookFn<T> {
     }
 }
 
-
 impl<T> HookFn<T> {
     /// Helper function to set the inner [`OnceLock`](std::sync::OnceLock) `T` of `self`.
     pub(crate) fn set(&self, value: T) -> Result<(), T> {

@@ -82,7 +82,10 @@ fn print_port(listener: &TcpListener) -> Result<()> {
 async fn connection_task(config: LayerConfig, stream: TcpStream) {
     let Ok(agent_connection) = connect_and_ping(&config, None)
         .await
-        .inspect_err(|err| error!("connection to agent failed {err:#?}")) else { return; };
+        .inspect_err(|err| error!("connection to agent failed {err:#?}"))
+    else {
+        return;
+    };
 
     let mut layer_connection = actix_codec::Framed::new(stream, DaemonCodec::new());
     let (agent_sender, mut agent_receiver) = agent_connection;

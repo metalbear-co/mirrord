@@ -40,7 +40,7 @@ impl Credentials {
     /// Checks if certificate exists in credentials and the validitiy in terms of expiration
     pub fn is_ready(&self) -> bool {
         let Some(certificate) = self.certificate.as_ref() else {
-            return false
+            return false;
         };
 
         certificate
