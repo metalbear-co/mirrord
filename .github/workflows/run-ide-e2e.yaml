@@ -47,7 +47,7 @@ jobs:
           echo "$HOME"      
           ls -la          
       - run: |
-          mv target/debug/mirrord /bin
+          sudo mv target/debug/mirrord /bin
           ls -la target/debug/
           ls -la /bin
       - run: |          
