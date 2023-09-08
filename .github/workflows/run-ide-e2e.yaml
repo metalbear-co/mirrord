@@ -47,9 +47,9 @@ jobs:
           echo "$HOME"      
           ls -la          
       - run: |
-          sudo mv target/debug/mirrord /bin
+          sudo mv target/debug/mirrord /usr/local/bin
           ls -la target/debug/
-          ls -la /bin
+          ls -la /usr/local/bin
       - run: |          
           echo "$GITHUB_WORKSPACE"      
           echo "$PATH"
