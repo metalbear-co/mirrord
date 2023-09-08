@@ -289,6 +289,13 @@ jobs:
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-config
       - name: mirrord kube UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features
+      - name: upload mirrord
+        uses: actions/upload-artifact@v3
+        with:
+          name: mirrord-artifacts
+          path: |
+            target/debug/mirrord
+          if-no-files-found: error        
 
   macos_tests:
     runs-on: macos-13
@@ -438,28 +445,9 @@ jobs:
           config: "markdownlint-config.json"
           args: "README.md"
 
-  build_mirrord_on_release_branch:
-    runs-on: ubuntu-latest
-    name: build mirrord
-    needs: check_if_release_branch
-    if: ${{ needs.check_if_release_branch.outputs.release_branch == 'true' }}
-    steps:
-      - uses: actions/checkout@v3
-      - uses: arduino/setup-protoc@v1
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - run: cargo build --manifest-path=./Cargo.toml
-      - name: upload layer
-        uses: actions/upload-artifact@v3
-        with:
-          name: mirrord-artifacts
-          path: |
-            target/debug/mirrord
-          if-no-files-found: error
-
+        
   ide_e2e_on_release_branch:
-    needs: build_mirrord_on_release_branch
+    needs: [check_if_release_branch, integration_tests]
     uses: ./.github/workflows/run-ide-e2e.yaml
 
   # We need some "accummulation" job here because bors fails (timeouts) to

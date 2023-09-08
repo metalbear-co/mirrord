@@ -41,21 +41,12 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: mirrord-artifacts
-          path: target/debug/
       - run: |
-          echo "$GITHUB_WORKSPACE"      
-          echo "$HOME"      
-          ls -la          
+          pwd
+          echo "$(pwd)/mirrord" >> "$GITHUB_PATH"          
       - run: |
-          sudo mv target/debug/mirrord /usr/local/bin
-          ls -la target/debug/
-          ls -la /usr/local/bin
-      - run: |          
-          echo "$GITHUB_WORKSPACE"      
-          echo "$PATH"
-          ls -la    
-          which mirrord      
-          mirrord -V       
+          mirrord -V
+          which mirrord               
       - name: Start minikube
         uses: medyagh/setup-minikube@master
         with:
