@@ -1,15 +1,6 @@
 name: Run IDE e2e on release
 on:
-  push:
-    branches:
-      - "releases/**"
-      - "*.*.*"
-  pull_request:
-    types:
-      - opened
-    branches:
-      - "releases/**"
-      - "*.*.*"
+  workflow_call:
 
 # this worflow copies the exact IDE e2e and runs it on the release branches
 jobs:
@@ -44,10 +35,7 @@ jobs:
         with:
           python-version: 3.11
       - uses: abatilo/actions-poetry@v2
-      - run: poetry --version
-      - name: get mirrord latest
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash
+      - run: poetry --version      
       - name: Start minikube
         uses: medyagh/setup-minikube@master
         with:
@@ -110,11 +98,7 @@ jobs:
           node-version: 18
       - name: Install dependencies
         run: |
-          npm install
-      # this is to avoid timeout on download
-      - name: get mirrord latest
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash
+          npm install    
       - name: Start minikube
         uses: medyagh/setup-minikube@master
         with:
