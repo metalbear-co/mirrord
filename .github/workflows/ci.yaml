@@ -138,7 +138,7 @@ jobs:
     steps:
       - id: release-branch
         run: |
-          echo "branch=$([[ ${{ github.head_ref }} ~= "^[0-9]+\.[0-9]+\.[0-9]+$" ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
+          echo "branch=$([[ ${{ github.head_ref }} =~ "^[0-9]+\.[0-9]+\.[0-9]+$" ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
 
   check-rust-docs:
     runs-on: ubuntu-latest
