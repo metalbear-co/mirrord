@@ -35,7 +35,13 @@ jobs:
         with:
           python-version: 3.11
       - uses: abatilo/actions-poetry@v2
-      - run: poetry --version      
+      - run: poetry --version
+      - name: download mirrord binary
+        uses: actions/download-artifact@v3
+        with:
+          name: mirrord-artifacts
+          path: target/debug/
+      - run: echo "$GITHUB_WORKSPACE/target/debug/mirrord" >> $GITHUB_PATH
       - name: Start minikube
         uses: medyagh/setup-minikube@master
         with:
@@ -51,12 +57,7 @@ jobs:
       - name: Setup FFmpeg
         uses: FedericoCarboni/setup-ffmpeg@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Download build folder
-        uses: actions/download-artifact@v3
-        with:
-          name: mirrord-build
-          path: build/
+          token: ${{ secrets.GITHUB_TOKEN }}      
       - name: Run intellij e2e in headless state
         uses: coactions/setup-xvfb@v1
         env:
@@ -98,7 +99,13 @@ jobs:
           node-version: 18
       - name: Install dependencies
         run: |
-          npm install    
+          npm install
+      - name: download mirrord binary
+        uses: actions/download-artifact@v3
+        with:
+          name: mirrord-artifacts
+          path: target/debug/
+      - run: echo "$GITHUB_WORKSPACE/target/debug/mirrord" >> $GITHUB_PATH
       - name: Start minikube
         uses: medyagh/setup-minikube@master
         with:
