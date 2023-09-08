@@ -289,6 +289,8 @@ jobs:
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-config
       - name: mirrord kube UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features
+      - name: build mirrord
+        run: cargo build --target x86_64-unknown-linux-gnu -p mirrord        
       - name: upload mirrord
         uses: actions/upload-artifact@v3
         with:
