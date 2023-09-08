@@ -70,9 +70,6 @@ pub enum KubeApiError {
     #[error("Kube incluster error `{0}`!")]
     KubeInclusterError(#[from] kube::config::InClusterError),
 
-    #[error("mirrord-layer: Failed to wait for agent startup")]
-    AgentReadyMessageMissing,
-
     #[error("Unable to fetch node limits for {0:?}")]
     NodeBadAllocatable(String),
 

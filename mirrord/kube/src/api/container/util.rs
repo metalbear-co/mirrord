@@ -5,11 +5,9 @@ use k8s_openapi::api::core::v1::{Pod, Toleration};
 use kube::{api::LogParams, Api};
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
 use regex::Regex;
+use tracing::warn;
 
-use crate::{
-    api::container::ContainerParams,
-    error::{KubeApiError, Result},
-};
+use crate::{api::container::ContainerParams, error::Result};
 
 static AGENT_READY_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new("agent ready( - version (\\S+))?").expect("failed to create regex")
@@ -90,7 +88,8 @@ pub(super) async fn wait_for_agent_startup(
         return Ok(version);
     }
 
-    Err(KubeApiError::AgentReadyMessageMissing)
+    warn!("Agent did not print 'agent ready' message");
+    Ok(None)
 }
 
 #[cfg(test)]
