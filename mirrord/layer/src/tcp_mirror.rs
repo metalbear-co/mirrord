@@ -43,7 +43,7 @@ async fn tcp_tunnel(mut local_stream: TcpStream, remote_stream: Receiver<Vec<u8>
                         info!("Failed reading local_stream with {:#?}", fail);
                         break;
                     }
-                    Ok(read_amount) if read_amount == 0 => {
+                    Ok(0) => {
                         trace!("tcp_tunnel -> exiting due to local stream closed!");
                         break;
                     },

@@ -200,13 +200,12 @@ unsafe fn patch_sip_for_new_process(
 ///
 /// We change 2 arguments and then call the original functions:
 /// 1. The executable path - we check it for SIP, create a patched binary and use the path to the
-///     new path instead of the original path. If there is no SIP, we use a new string with the
-///     same path.
-/// 2. argv - we strip mirrord's temporary directory from the start of arguments.
-///     So if argv[1] is "/var/folders/1337/mirrord-bin/opt/homebrew/bin/npx"
-///     Switch it to "/opt/homebrew/bin/npx"
-///     Also here we create a new array with pointers to new strings, even if there are no changes
-///     needed (except for the case of an error).
+///    new path instead of the original path. If there is no SIP, we use a new string with the same
+///    path.
+/// 2. argv - we strip mirrord's temporary directory from the start of arguments. So if argv[1] is
+///    "/var/folders/1337/mirrord-bin/opt/homebrew/bin/npx" Switch it to "/opt/homebrew/bin/npx"
+///    Also here we create a new array with pointers to new strings, even if there are no changes
+///    needed (except for the case of an error).
 ///
 /// If there is an error in the detour, we don't exit or anything, we just call the original libc
 /// function with the original passed arguments.

@@ -1,5 +1,5 @@
 #![feature(result_option_inspect)]
-#![feature(hash_drain_filter)]
+#![feature(hash_extract_if)]
 #![feature(let_chains)]
 #![feature(type_alias_impl_trait)]
 #![feature(tcp_quickack)]
@@ -87,7 +87,7 @@ struct State {
 
 impl State {
     /// Return [`Err`] if container runtime operations failed.
-    pub async fn new(args: &Args) -> Result<State> {
+    pub async fn new(args: &Args, watch: drain::Watch) -> Result<State> {
         let mut env: HashMap<String, String> = HashMap::new();
 
         let (ephemeral, container, pid) = match &args.mode {
@@ -98,7 +98,7 @@ impl State {
                 let container =
                     get_container(container_id.clone(), Some(container_runtime)).await?;
 
-                let container_handle = ContainerHandle::new(container).await?;
+                let container_handle = ContainerHandle::new(container, watch).await?;
                 let pid = container_handle.pid().to_string();
 
                 env.extend(container_handle.raw_env().clone());
@@ -538,7 +538,7 @@ impl ClientConnectionHandler {
 
 /// Initializes the agent's [`State`], channels, threads, and runs [`ClientConnectionHandler`]s.
 #[tracing::instrument(level = "trace")]
-async fn start_agent(args: Args) -> Result<()> {
+async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
     trace!("Starting agent with args: {args:?}");
 
     let listener = TcpListener::bind(SocketAddrV4::new(
@@ -547,7 +547,7 @@ async fn start_agent(args: Args) -> Result<()> {
     ))
     .await?;
 
-    let mut state = State::new(&args).await?;
+    let mut state = State::new(&args, watch).await?;
 
     let cancellation_token = CancellationToken::new();
     // Cancel all other tasks on exit
@@ -742,10 +742,10 @@ fn spawn_child_agent() -> Result<()> {
     Ok(())
 }
 
-async fn start_iptable_guard(args: Args) -> Result<()> {
+async fn start_iptable_guard(args: Args, watch: drain::Watch) -> Result<()> {
     debug!("start_iptable_guard -> Initializing iptable-guard.");
 
-    let state = State::new(&args).await?;
+    let state = State::new(&args, watch).await?;
     let pid = state.container_pid();
 
     std::env::set_var(IPTABLE_PREROUTING_ENV, IPTABLE_PREROUTING.as_str());
@@ -785,17 +785,24 @@ async fn main() -> Result<()> {
 
     let args = cli::parse_args();
 
+    let (signal, watch) = drain::channel();
+
     let agent_result = if args.mode.is_targetless()
         || (std::env::var(IPTABLE_PREROUTING_ENV).is_ok()
             && std::env::var(IPTABLE_MESH_ENV).is_ok())
     {
-        start_agent(args).await
+        start_agent(args, watch).await
     } else {
-        start_iptable_guard(args).await
+        start_iptable_guard(args, watch).await
     };
 
-    // wait for background tasks to finish
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    // wait for background tasks/drop impl
+    tokio::time::timeout(std::time::Duration::from_secs(10), signal.drain())
+        .await
+        .is_err()
+        .then(|| {
+            warn!("main -> mirrord-agent waiting for drain timed out");
+        });
 
     match agent_result {
         Ok(_) => {

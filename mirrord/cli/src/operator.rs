@@ -13,6 +13,7 @@ use mirrord_operator::{
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{row, Table};
+use serde::Deserialize;
 use tokio::fs;
 use tracing::warn;
 
@@ -21,6 +22,24 @@ use crate::{
     error::CliError,
     Result,
 };
+
+#[derive(Deserialize)]
+struct OperatorVersionResponse {
+    operator: String,
+}
+
+/// Fetches latest version of mirrord operator from our API
+async fn get_last_version() -> Result<String, reqwest::Error> {
+    let client = reqwest::Client::builder().build()?;
+    let response: OperatorVersionResponse = client
+        .get("https://version.mirrord.dev/v1/operator/version")
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    Ok(response.operator)
+}
 
 /// Setup the operator into a file or to stdout, with explanation.
 async fn operator_setup(
@@ -51,13 +70,29 @@ async fn operator_setup(
         (None, None) => None,
     };
 
+    // if env var std::env::var("MIRRORD_OPERATOR_IMAGE") exists, use it, otherwise call async
+    // function to get it
+    let image = match std::env::var("MIRRORD_OPERATOR_IMAGE") {
+        Ok(image) => image,
+        Err(_) => {
+            let version = get_last_version()
+                .await
+                .map_err(CliError::OperatorVersionCheckError)?;
+            format!("ghcr.io/metalbear-co/operator:{version}")
+        }
+    };
+
     if let Some(license) = license {
         eprintln!(
             "Installing mirrord operator with namespace: {}",
             namespace.name()
         );
 
-        let operator = Operator::new(SetupOptions { license, namespace });
+        let operator = Operator::new(SetupOptions {
+            license,
+            namespace,
+            image,
+        });
 
         match file {
             Some(path) => {

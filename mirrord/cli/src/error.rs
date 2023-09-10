@@ -229,4 +229,7 @@ pub(crate) enum CliError {
         r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
     ))]
     RuntimeError(std::io::Error),
+    #[error("Failed to get last operator version err: `{0}`")]
+    #[diagnostic(help("Please check internet connection.{GENERAL_HELP}"))]
+    OperatorVersionCheckError(reqwest::Error),
 }

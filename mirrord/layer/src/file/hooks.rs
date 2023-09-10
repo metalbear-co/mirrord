@@ -11,10 +11,12 @@ use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
 use errno::{set_errno, Errno};
 use libc::{
     self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
-    AT_FDCWD, DIR, O_DIRECTORY, O_RDONLY,
+    AT_FDCWD, DIR,
 };
 #[cfg(target_os = "linux")]
 use libc::{dirent64, stat64, EBADF, EINVAL, ENOENT, ENOTDIR};
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+use libc::{O_DIRECTORY, O_RDONLY};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
     DirEntryInternal, FsMetadataInternal, MetadataInternal, ReadFileResponse, WriteFileResponse,
@@ -27,12 +29,13 @@ use tracing::trace;
 use tracing::{error, info, warn};
 
 use super::{ops::*, OpenOptionsInternalExt};
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+use crate::close_layer_fd;
 #[cfg(target_os = "macos")]
 use crate::detour::Bypass;
 #[cfg(target_os = "linux")]
 use crate::error::HookError::ResponseError;
 use crate::{
-    close_layer_fd,
     common::CheckedInto,
     detour::{Detour, DetourGuard},
     error::HookError,
@@ -142,6 +145,7 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
 ///
 /// Opens the directory with `read` permission using the [`open_logic`] flow, then calls
 /// [`fdopendir`] to convert the [`RawFd`] into a `*DIR` stream (which we treat as `usize`).
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> usize {
     open_logic(raw_filename, O_RDONLY, O_DIRECTORY)
@@ -873,34 +877,20 @@ unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs) -> c_int {
 //     raw_path: *const c_char,
 //     flag: c_int,
 //     out_stat: *mut statx,
-// ) -> c_int {
-//     let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
-//     let path = if flags & libc::AT_EMPTYPATH != 0 {
-//         None
-//     } else {
-//         Some((!raw_path.is_null()).then(|| CStr::from_ptr(raw_path)))
-//     };
-//     let (Ok(result) | Err(result)) = xstat(path, Some(fd), follow_symlink)
-//         .map(|res| {
-//             let res = res.metadata;
-//             out_stat.write_bytes(0, 1);
-//             let out = &mut *out_stat;
-//             // Set mask for available fields
-//             out.stx_mask = libc::STATX_BASIC_STATS;
-//             out.stx_mode = best_effort_cast(metadata.mode);
-//             out.stx_size = best_effort_cast(metadata.size);
-//             out.stx_atime.tv_nsec = metadata.access_time;
-//             out.stx_mtime.tv_nsec = metadata.modification_time;
-//             out.stx_ctime.tv_nsec = metadata.creation_time;
-//             out.stx_atime.tv_sec = nano_to_secs(metadata.access_time);
-//             out.stx_mtime.tv_sec = nano_to_secs(metadata.modification_time);
-//             out.stx_ctime.tv_sec = nano_to_secs(metadata.creation_time);
-//             out.stx_nlink = best_effort_cast(metadata.hard_links);
-//             out.stx_uid = metadata.user_id;
-//             out.stx_gid = metadata.group_id;
-//             out.stx_ino = best_effort_cast(metadata.inode);
-//             out.stx_blksize = best_effort_cast(metadata.block_size);
-//             out.stx_blocks = best_effort_cast(metadata.blocks);
+// ) -> c_int { let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0; let path = if flags &
+//   libc::AT_EMPTYPATH != 0 { None } else { Some((!raw_path.is_null()).then(||
+//   CStr::from_ptr(raw_path))) }; let (Ok(result) | Err(result)) = xstat(path, Some(fd),
+//   follow_symlink) .map(|res| { let res = res.metadata; out_stat.write_bytes(0, 1); let out = &mut
+//   *out_stat; // Set mask for available fields out.stx_mask = libc::STATX_BASIC_STATS;
+//   out.stx_mode = best_effort_cast(metadata.mode); out.stx_size = best_effort_cast(metadata.size);
+//   out.stx_atime.tv_nsec = metadata.access_time; out.stx_mtime.tv_nsec =
+//   metadata.modification_time; out.stx_ctime.tv_nsec = metadata.creation_time;
+//   out.stx_atime.tv_sec = nano_to_secs(metadata.access_time); out.stx_mtime.tv_sec =
+//   nano_to_secs(metadata.modification_time); out.stx_ctime.tv_sec =
+//   nano_to_secs(metadata.creation_time); out.stx_nlink = best_effort_cast(metadata.hard_links);
+//   out.stx_uid = metadata.user_id; out.stx_gid = metadata.group_id; out.stx_ino =
+//   best_effort_cast(metadata.inode); out.stx_blksize = best_effort_cast(metadata.block_size);
+//   out.stx_blocks = best_effort_cast(metadata.blocks);
 
 //             out.stx_dev_major = libc::major(metadata.device_id);
 //             out.stx_dev_minor = libc::minor(metadata.device_id);
@@ -1080,6 +1070,12 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FnReaddir64_r,
             FN_READDIR64_R
         );
+        // aarch + macOS hooks fail
+        // because macOs internally calls this with pointer authentication
+        // and we don't compile to arm64e yet, so it breaks.
+        // but it seems we'll be able to compile to arm64e soon.
+        // https://github.com/rust-lang/rust/pull/115526
+        #[cfg(target_os = "linux")]
         replace!(
             hook_manager,
             "opendir",
