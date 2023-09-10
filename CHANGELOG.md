@@ -8,6 +8,27 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.65.2](https://github.com/metalbear-co/mirrord/tree/3.65.2) - 2023-09-10
+
+
+### Changed
+
+- Add ruby related ENV to the default exclude list
+
+
+### Fixed
+
+- Fixed connecting to unspecified ip i.e 0.0.0.0
+  [#1928](https://github.com/metalbear-co/mirrord/issues/1928)
+
+
+### Internal
+
+- Refactor code to match newest Rust nightly - 2023-09-07
+  [#1457](https://github.com/metalbear-co/mirrord/issues/1457)
+- Update tj-actions to v39 to check for fixes for similar hashes
+
+
 ## [3.65.1](https://github.com/metalbear-co/mirrord/tree/3.65.1) - 2023-09-07
 
 
