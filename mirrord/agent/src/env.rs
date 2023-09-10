@@ -38,6 +38,13 @@ impl EnvFilter {
                 WildMatch::new("_JAVA_OPTIONS"),
                 WildMatch::new("GEM_HOME"),
                 WildMatch::new("GEM_PATH"),
+                WildMatch::new("BUNDLE_PATH"),
+                WildMatch::new("BUNDLE_BIN_PATH"),
+                WildMatch::new("BUNDLE_GEM_PATH"),
+                WildMatch::new("PWD"),
+                WildMatch::new("BUNDLER_ORIG_GEM_HOME"),
+                WildMatch::new("BUNDLE_GEMFILE"),
+                WildMatch::new("RUBYLIB"),
             ];
 
             for selector in &filter_env_vars {
