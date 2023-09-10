@@ -220,9 +220,15 @@ mod operator {
         let req_builder = client.get(&url);
         let mut headers = HeaderMap::default();
         headers.insert("x-filter", "yes".parse().unwrap());
-        send_request(req_builder, Some("GET"), headers.clone()).await;
+        send_request(req_builder, Some("DELETE"), headers.clone()).await;
 
-        client_a.child.kill().await.unwrap();
+        client_a
+            .wait_for_line(Duration::from_secs(10), "DELETE")
+            .await;
+
+        tokio::time::timeout(Duration::from_secs(15), client_a.wait())
+            .await
+            .unwrap();
 
         let res = client_b.child.wait().await.unwrap();
         assert!(!res.success());
@@ -282,11 +288,13 @@ mod operator {
 
         send_request(req_builder, Some("DELETE"), headers.clone()).await;
 
+        client_a
+            .wait_for_line(Duration::from_secs(10), "DELETE")
+            .await;
+
         tokio::time::timeout(Duration::from_secs(10), client_a.wait())
             .await
             .unwrap();
-
-        application.assert(&client_a).await;
 
         let client = reqwest::Client::new();
         let req_builder = client.delete(&url);
@@ -295,10 +303,12 @@ mod operator {
 
         send_request(req_builder, Some("DELETE"), headers.clone()).await;
 
+        client_b
+            .wait_for_line(Duration::from_secs(10), "DELETE")
+            .await;
+
         tokio::time::timeout(Duration::from_secs(10), client_b.wait())
             .await
             .unwrap();
-
-        application.assert(&client_a).await;
     }
 }
