@@ -137,7 +137,7 @@ mod operator {
     ) {
         let service = service.await;
 
-        let flags = vec!["--steal"];
+        let flags = vec!["--steal", "--fs-mode=local"];
 
         let mut client_a = application
             .run(
@@ -181,7 +181,7 @@ mod operator {
         let service = service.await;
         let client = kube_client.await;
 
-        let flags = vec!["--steal"];
+        let flags = vec!["--steal", "--fs-mode=local"];
 
         let mut client_a = application
             .run(
@@ -217,18 +217,18 @@ mod operator {
         // check if client_a is stealing
         let url = get_service_url(client, &service).await;
         let client = reqwest::Client::new();
-        let req_builder = client.get(&url);
+        let req_builder = client.delete(&url);
         let mut headers = HeaderMap::default();
         headers.insert("x-filter", "yes".parse().unwrap());
         send_request(req_builder, Some("DELETE"), headers.clone()).await;
 
-        client_a
-            .wait_for_line(Duration::from_secs(10), "DELETE")
-            .await;
-
         tokio::time::timeout(Duration::from_secs(15), client_a.wait())
             .await
             .unwrap();
+
+        client_a
+            .assert_stdout_contains("DELETE: Request completed")
+            .await;
 
         let res = client_b.child.wait().await.unwrap();
         assert!(!res.success());
@@ -250,7 +250,7 @@ mod operator {
         let mut config_path = config_dir.clone();
         config_path.push("http_filter_header.json");
 
-        let flags = vec!["--steal"];
+        let flags = vec!["--steal", "--fs-mode=local"];
 
         let mut client_a = application
             .run(
@@ -288,13 +288,13 @@ mod operator {
 
         send_request(req_builder, Some("DELETE"), headers.clone()).await;
 
-        client_a
-            .wait_for_line(Duration::from_secs(10), "DELETE")
-            .await;
-
         tokio::time::timeout(Duration::from_secs(10), client_a.wait())
             .await
             .unwrap();
+
+        client_a
+            .assert_stdout_contains("DELETE: Request completed")
+            .await;
 
         let client = reqwest::Client::new();
         let req_builder = client.delete(&url);
@@ -303,12 +303,12 @@ mod operator {
 
         send_request(req_builder, Some("DELETE"), headers.clone()).await;
 
-        client_b
-            .wait_for_line(Duration::from_secs(10), "DELETE")
-            .await;
-
         tokio::time::timeout(Duration::from_secs(10), client_b.wait())
             .await
             .unwrap();
+
+        client_b
+            .assert_stdout_contains("DELETE: Request completed")
+            .await;
     }
 }
