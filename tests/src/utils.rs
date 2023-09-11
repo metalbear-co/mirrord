@@ -12,6 +12,7 @@ use std::{
 };
 
 use chrono::{Timelike, Utc};
+use const_format::formatcp;
 use fancy_regex::Regex;
 use futures::FutureExt;
 use futures_util::{future::BoxFuture, stream::TryStreamExt};
@@ -326,7 +327,13 @@ impl Application {
             Application::CurlToKubeApi => {
                 vec!["curl", "https://kubernetes/api", "--insecure"]
             }
-            Application::RustIssue1317 => vec!["rust-e2e/issue1317"],
+            Application::RustIssue1317 => {
+                println!("foo");
+                vec![formatcp!(
+                    "{}/../target/debug/issue1317",
+                    env!("CARGO_MANIFEST_DIR")
+                )]
+            }
         }
     }
 

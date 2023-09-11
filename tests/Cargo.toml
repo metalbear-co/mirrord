@@ -29,6 +29,7 @@ fancy-regex.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 http-body-util.workspace = true
+const_format = "0.2"
 
 [features]
 default = ["ephemeral", "job"]
