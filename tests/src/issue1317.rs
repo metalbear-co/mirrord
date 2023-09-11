@@ -97,12 +97,11 @@ mod issue1317 {
 
         let body = response.into_body().collect().await.unwrap();
         assert!(String::from_utf8_lossy(&body.to_bytes()[..]).contains("Echo [remote]"));
+        drop(request_sender);
 
         process
             .wait_for_line(Duration::from_secs(60), "Echo [local]: GET 2")
             .await;
-
-        drop(request_sender);
 
         timeout(Duration::from_secs(40), process.wait())
             .await
