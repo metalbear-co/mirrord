@@ -55,9 +55,9 @@ type GetDEnts64Stream = Peekable<
 #[derive(Debug, Default)]
 pub(crate) struct FileManager {
     root_path: PathBuf,
-    pub open_files: HashMap<u64, RemoteFile>,
-    pub dir_streams: HashMap<u64, Enumerate<ReadDir>>,
-    pub getdents_streams: HashMap<u64, GetDEnts64Stream>,
+    open_files: HashMap<u64, RemoteFile>,
+    dir_streams: HashMap<u64, Enumerate<ReadDir>>,
+    getdents_streams: HashMap<u64, GetDEnts64Stream>,
     index_allocator: IndexAllocator<u64, 100>,
 }
 

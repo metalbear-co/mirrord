@@ -1,5 +1,5 @@
 #![feature(result_option_inspect)]
-#![feature(hash_drain_filter)]
+#![feature(hash_extract_if)]
 #![feature(let_chains)]
 #![feature(type_alias_impl_trait)]
 #![feature(tcp_quickack)]
@@ -15,10 +15,6 @@ use std::{
 };
 
 use actix_codec::Framed;
-use cli::parse_args;
-use dns::DnsApi;
-use error::{AgentError, Result};
-use file::FileManager;
 use futures::{
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
@@ -27,9 +23,6 @@ use mirrord_protocol::{
     pause::DaemonPauseTarget, ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
     LogMessage,
 };
-use outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi};
-use sniffer::{SnifferCommand, TcpConnectionSniffer, TcpSnifferApi};
-use steal::api::TcpStealerApi;
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -44,8 +37,14 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 use crate::{
     cli::Args,
     container_handle::ContainerHandle,
+    dns::DnsApi,
+    error::{AgentError, Result},
+    file::FileManager,
+    outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi},
     runtime::get_container,
+    sniffer::{SnifferCommand, TcpConnectionSniffer, TcpSnifferApi},
     steal::{
+        api::TcpStealerApi,
         connection::TcpConnectionStealer,
         ip_tables::{
             IPTablesWrapper, SafeIpTables, IPTABLE_MESH, IPTABLE_MESH_ENV, IPTABLE_PREROUTING,
@@ -89,7 +88,7 @@ struct State {
 
 impl State {
     /// Return [`Err`] if container runtime operations failed.
-    pub async fn new(args: &Args) -> Result<State> {
+    pub async fn new(args: &Args, watch: drain::Watch) -> Result<State> {
         let container = get_container(
             args.container_id.as_ref(),
             args.container_runtime.as_ref(),
@@ -98,7 +97,7 @@ impl State {
         .await?;
 
         let container = match container {
-            Some(container) => Some(ContainerHandle::new(container).await?),
+            Some(container) => Some(ContainerHandle::new(container, watch).await?),
             None => None,
         };
 
@@ -111,11 +110,33 @@ impl State {
 
         let mut env: HashMap<String, String> = HashMap::new();
 
-        let environ_path = PathBuf::from("/proc").join(pid).join("environ");
+        let (ephemeral, container, pid) = match &args.mode {
+            cli::Mode::Targeted {
+                container_id,
+                container_runtime,
+            } => {
+                let container =
+                    get_container(container_id.clone(), Some(container_runtime)).await?;
 
-        if let Some(container) = container.as_ref() {
-            env.extend(container.raw_env().clone());
-        }
+                let container_handle = ContainerHandle::new(container, watch).await?;
+                let pid = container_handle.pid().to_string();
+
+                env.extend(container_handle.raw_env().clone());
+
+                (false, Some(container_handle), pid)
+            }
+            cli::Mode::Ephemeral => {
+                // in ephemeral container, we get same env as the target container, so copy our env.
+                env.extend(std::env::vars());
+
+                // If we are in an ephemeral container, we use pid 1.
+                (true, None, "1".to_string())
+            }
+            // if not, we use the pid of the target container or fallback to self
+            cli::Mode::Targetless | cli::Mode::BlackboxTest => (false, None, "self".to_string()),
+        };
+
+        let environ_path = PathBuf::from("/proc").join(pid).join("environ");
 
         match env::get_proc_environ(environ_path).await {
             Ok(environ) => env.extend(environ.into_iter()),
@@ -129,7 +150,7 @@ impl State {
             index_allocator: Default::default(),
             container,
             env,
-            ephemeral: args.ephemeral_container,
+            ephemeral,
         })
     }
 
@@ -219,13 +240,27 @@ impl State {
     }
 }
 
+enum BackgroundTask<Command> {
+    Running(TaskStatus, Sender<Command>),
+    Disabled,
+}
+
+impl<Command> Clone for BackgroundTask<Command> {
+    fn clone(&self) -> Self {
+        match self {
+            BackgroundTask::Disabled => BackgroundTask::Disabled,
+            BackgroundTask::Running(status, sender) => {
+                BackgroundTask::Running(status.clone(), sender.clone())
+            }
+        }
+    }
+}
+
 /// Handles to background tasks used by [`ClientConnectionHandler`].
 #[derive(Clone)]
 struct BackgroundTasks {
-    sniffer_status: TaskStatus,
-    sniffer_sender: Sender<SnifferCommand>,
-    stealer_status: TaskStatus,
-    stealer_sender: Sender<StealerCommand>,
+    sniffer: BackgroundTask<SnifferCommand>,
+    stealer: BackgroundTask<StealerCommand>,
     dns_api: DnsApi,
 }
 
@@ -235,7 +270,7 @@ struct ClientConnectionHandler {
     file_manager: FileManager,
     stream: Framed<TcpStream, DaemonCodec>,
     tcp_sniffer_api: Option<TcpSnifferApi>,
-    tcp_stealer_api: TcpStealerApi,
+    tcp_stealer_api: Option<TcpStealerApi>,
     tcp_outgoing_api: TcpOutgoingApi,
     udp_outgoing_api: UdpOutgoingApi,
     dns_api: DnsApi,
@@ -260,48 +295,9 @@ impl ClientConnectionHandler {
 
         let file_manager = FileManager::new(pid.or_else(|| ephemeral.then_some(1)));
 
-        let tcp_sniffer_api = match TcpSnifferApi::new(
-            id,
-            bg_tasks.sniffer_sender,
-            bg_tasks.sniffer_status,
-            CHANNEL_SIZE,
-        )
-        .await
-        {
-            Ok(api) => Some(api),
-            Err(e) => {
-                let message = format!(
-                    "Failed to create TcpSnifferApi: {e}, this could be due to kernel version."
-                );
-                warn!(message);
-                let _ = stream
-                    .send(DaemonMessage::LogMessage(LogMessage::warn(message)))
-                    .await; // Ignore message send error.
-
-                None
-            }
-        };
-
-        let tcp_stealer_api = match TcpStealerApi::new(
-            id,
-            bg_tasks.stealer_sender,
-            bg_tasks.stealer_status,
-            CHANNEL_SIZE,
-            protocol_version,
-        )
-        .await
-        {
-            Ok(api) => api,
-            Err(e) => {
-                let _ = stream
-                    .send(DaemonMessage::Close(format!(
-                        "Failed to create TcpStealerApi: {e}."
-                    )))
-                    .await; // Ignore message send error.
-
-                Err(e)?
-            }
-        };
+        let tcp_sniffer_api = Self::ceate_sniffer_api(id, bg_tasks.sniffer, &mut stream).await;
+        let tcp_stealer_api =
+            Self::ceate_stealer_api(id, bg_tasks.stealer, protocol_version, &mut stream).await?;
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
         let udp_outgoing_api = UdpOutgoingApi::new(pid);
@@ -320,6 +316,66 @@ impl ClientConnectionHandler {
         };
 
         Ok(client_handler)
+    }
+
+    async fn ceate_sniffer_api(
+        id: ClientId,
+        task: BackgroundTask<SnifferCommand>,
+        stream: &mut Framed<TcpStream, DaemonCodec>,
+    ) -> Option<TcpSnifferApi> {
+        if let BackgroundTask::Running(sniffer_status, sniffer_sender) = task {
+            match TcpSnifferApi::new(id, sniffer_sender, sniffer_status, CHANNEL_SIZE).await {
+                Ok(api) => Some(api),
+                Err(e) => {
+                    let message = format!(
+                        "Failed to create TcpSnifferApi: {e}, this could be due to kernel version."
+                    );
+
+                    warn!(message);
+
+                    // Ignore message send error.
+                    let _ = stream
+                        .send(DaemonMessage::LogMessage(LogMessage::warn(message)))
+                        .await;
+
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    }
+
+    async fn ceate_stealer_api(
+        id: ClientId,
+        task: BackgroundTask<StealerCommand>,
+        protocol_version: semver::Version,
+        stream: &mut Framed<TcpStream, DaemonCodec>,
+    ) -> Result<Option<TcpStealerApi>> {
+        if let BackgroundTask::Running(stealer_status, stealer_sender) = task {
+            match TcpStealerApi::new(
+                id,
+                stealer_sender,
+                stealer_status,
+                CHANNEL_SIZE,
+                protocol_version,
+            )
+            .await
+            {
+                Ok(api) => Ok(Some(api)),
+                Err(e) => {
+                    let _ = stream
+                        .send(DaemonMessage::Close(format!(
+                            "Failed to create TcpStealerApi: {e}."
+                        )))
+                        .await; // Ignore message send error.
+
+                    Err(e)?
+                }
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     /// Starts a loop that handles client connection and state.
@@ -357,7 +413,13 @@ impl ClientConnectionHandler {
                     Ok(message) => self.respond(DaemonMessage::Tcp(message)).await?,
                     Err(e) => break e,
                 },
-                message = self.tcp_stealer_api.recv() => match message {
+                message = async {
+                    if let Some(ref mut stealer_api) = self.tcp_stealer_api {
+                        stealer_api.recv().await
+                    } else {
+                        unreachable!()
+                    }
+                }, if self.tcp_stealer_api.is_some() => match message {
                     Ok(message) => self.respond(DaemonMessage::TcpSteal(message)).await?,
                     Err(e) => break e,
                 },
@@ -442,7 +504,12 @@ impl ClientConnectionHandler {
                 }
             }
             ClientMessage::TcpSteal(message) => {
-                self.tcp_stealer_api.handle_client_message(message).await?
+                if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
+                    tcp_stealer_api.handle_client_message(message).await?
+                } else {
+                    warn!("received tcp steal request while not available");
+                    Err(AgentError::SnifferApiError)?
+                }
             }
             ClientMessage::Close => {
                 return Ok(false);
@@ -473,9 +540,11 @@ impl ClientConnectionHandler {
                 }
             }
             ClientMessage::SwitchProtocolVersion(version) => {
-                self.tcp_stealer_api
-                    .switch_protocol_version(version.clone())
-                    .await?;
+                if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
+                    tcp_stealer_api
+                        .switch_protocol_version(version.clone())
+                        .await?;
+                }
 
                 self.respond(DaemonMessage::SwitchProtocolVersionResponse(version))
                     .await?;
@@ -489,8 +558,7 @@ impl ClientConnectionHandler {
 
 /// Initializes the agent's [`State`], channels, threads, and runs [`ClientConnectionHandler`]s.
 #[tracing::instrument(level = "trace")]
-async fn start_agent() -> Result<()> {
-    let args = parse_args();
+async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
     trace!("Starting agent with args: {args:?}");
 
     let listener = TcpListener::bind(SocketAddrV4::new(
@@ -499,7 +567,7 @@ async fn start_agent() -> Result<()> {
     ))
     .await?;
 
-    let mut state = State::new(&args).await?;
+    let mut state = State::new(&args, watch).await?;
 
     let cancellation_token = CancellationToken::new();
     // Cancel all other tasks on exit
@@ -510,7 +578,9 @@ async fn start_agent() -> Result<()> {
 
     let dns_api = DnsApi::new(state.container_pid(), 1000);
 
-    let (sniffer_task, sniffer_status) = {
+    let (sniffer_task, sniffer_status) = if args.mode.is_targetless() {
+        (None, None)
+    } else {
         let cancellation_token = cancellation_token.clone();
         let watched_task = WatchedTask::new(
             TcpConnectionSniffer::TASK_NAME,
@@ -532,10 +602,12 @@ async fn start_agent() -> Result<()> {
             "net",
         );
 
-        (task, status)
+        (Some(task), Some(status))
     };
 
-    let (stealer_task, stealer_status) = {
+    let (stealer_task, stealer_status) = if args.mode.is_targetless() {
+        (None, None)
+    } else {
         let cancellation_token = cancellation_token.clone();
         let watched_task = WatchedTask::new(
             TcpConnectionStealer::TASK_NAME,
@@ -555,14 +627,16 @@ async fn start_agent() -> Result<()> {
             "net",
         );
 
-        (task, status)
+        (Some(task), Some(status))
     };
 
-    let mut bg_tasks = BackgroundTasks {
-        sniffer_status,
-        sniffer_sender: sniffer_command_tx,
-        stealer_status,
-        stealer_sender: stealer_command_tx,
+    let bg_tasks = BackgroundTasks {
+        sniffer: sniffer_status
+            .map(|status| BackgroundTask::Running(status, sniffer_command_tx))
+            .unwrap_or(BackgroundTask::Disabled),
+        stealer: stealer_status
+            .map(|status| BackgroundTask::Running(status, stealer_command_tx))
+            .unwrap_or(BackgroundTask::Disabled),
         dns_api,
     };
 
@@ -638,14 +712,26 @@ async fn start_agent() -> Result<()> {
     trace!("Agent shutting down.");
     drop(cancel_guard);
 
-    sniffer_task.join().map_err(|_| AgentError::JoinTask)?;
-    if let Some(err) = bg_tasks.sniffer_status.err().await {
-        error!("start_agent -> sniffer task failed with error: {}", err);
+    let BackgroundTasks {
+        sniffer, stealer, ..
+    } = bg_tasks;
+
+    if let (Some(sniffer_task), BackgroundTask::Running(mut sniffer_status, _)) =
+        (sniffer_task, sniffer)
+    {
+        sniffer_task.join().map_err(|_| AgentError::JoinTask)?;
+        if let Some(err) = sniffer_status.err().await {
+            error!("start_agent -> sniffer task failed with error: {}", err);
+        }
     }
 
-    stealer_task.join().map_err(|_| AgentError::JoinTask)?;
-    if let Some(err) = bg_tasks.stealer_status.err().await {
-        error!("start_agent -> stealer task failed with error: {}", err);
+    if let (Some(stealer_task), BackgroundTask::Running(mut stealer_status, _)) =
+        (stealer_task, stealer)
+    {
+        stealer_task.join().map_err(|_| AgentError::JoinTask)?;
+        if let Some(err) = stealer_status.err().await {
+            error!("start_agent -> stealer task failed with error: {}", err);
+        }
     }
 
     trace!("Agent shutdown.");
@@ -676,11 +762,10 @@ fn spawn_child_agent() -> Result<()> {
     Ok(())
 }
 
-async fn start_iptable_guard() -> Result<()> {
+async fn start_iptable_guard(args: Args, watch: drain::Watch) -> Result<()> {
     debug!("start_iptable_guard -> Initializing iptable-guard.");
 
-    let args = parse_args();
-    let state = State::new(&args).await?;
+    let state = State::new(&args, watch).await?;
     let pid = state.container_pid();
 
     std::env::set_var(IPTABLE_PREROUTING_ENV, IPTABLE_PREROUTING.as_str());
@@ -718,16 +803,26 @@ async fn main() -> Result<()> {
         env!("CARGO_PKG_VERSION")
     );
 
-    let agent_result = if std::env::var(IPTABLE_PREROUTING_ENV).is_ok()
-        && std::env::var(IPTABLE_MESH_ENV).is_ok()
+    let args = cli::parse_args();
+
+    let (signal, watch) = drain::channel();
+
+    let agent_result = if args.mode.is_targetless()
+        || (std::env::var(IPTABLE_PREROUTING_ENV).is_ok()
+            && std::env::var(IPTABLE_MESH_ENV).is_ok())
     {
-        start_agent().await
+        start_agent(args, watch).await
     } else {
-        start_iptable_guard().await
+        start_iptable_guard(args, watch).await
     };
 
-    // wait for background tasks to finish
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    // wait for background tasks/drop impl
+    tokio::time::timeout(std::time::Duration::from_secs(10), signal.drain())
+        .await
+        .is_err()
+        .then(|| {
+            warn!("main -> mirrord-agent waiting for drain timed out");
+        });
 
     match agent_result {
         Ok(_) => {

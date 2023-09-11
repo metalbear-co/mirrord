@@ -80,11 +80,12 @@ fn print_port(listener: &TcpListener) -> Result<()> {
 /// breakpoint hit and someone is holding it) It will keep the agent alive and send pings on its
 /// behalf.
 async fn connection_task(config: LayerConfig, stream: TcpStream) {
-    let mut inactive_analytics = AnalyticsReporter::new(false);
-
-    let Ok(agent_connection) = connect_and_ping(&config, &mut inactive_analytics)
+    let Ok(agent_connection) = connect_and_ping(&config, None)
         .await
-        .inspect_err(|err| error!("connection to agent failed {err:#?}")) else { return; };
+        .inspect_err(|err| error!("connection to agent failed {err:#?}"))
+    else {
+        return;
+    };
 
     let mut layer_connection = actix_codec::Framed::new(stream, DaemonCodec::new());
     let (agent_sender, mut agent_receiver) = agent_connection;
@@ -151,7 +152,7 @@ async fn connection_task(config: LayerConfig, stream: TcpStream) {
 
 /// Request target container pause from the connected agent.
 async fn request_pause(
-    sender: &mut mpsc::Sender<ClientMessage>,
+    sender: &mpsc::Sender<ClientMessage>,
     receiver: &mut mpsc::Receiver<DaemonMessage>,
 ) -> Result<(), InternalProxyError> {
     info!("Requesting target container pause from the agent");
@@ -213,10 +214,10 @@ fn create_listen_socket() -> Result<TcpListener, InternalProxyError> {
 
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
-pub(crate) async fn proxy() -> Result<()> {
+pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
     let config = LayerConfig::from_env()?;
 
-    let mut analytics = AnalyticsReporter::new(config.telemetry);
+    let mut analytics = AnalyticsReporter::new(config.telemetry, watch);
     (&config).collect_analytics(analytics.get_mut());
 
     // Let it assign port for us then print it for the user.
@@ -225,14 +226,14 @@ pub(crate) async fn proxy() -> Result<()> {
     // Create a main connection, that will be held until proxy is closed.
     // This will guarantee agent staying alive and will enable us to
     // make the agent close on last connection close immediately (will help in tests)
-    let mut main_connection = connect_and_ping(&config, &mut analytics)
+    let mut main_connection = connect_and_ping(&config, Some(&mut analytics))
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
     if config.pause {
         tokio::time::timeout(
             Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into()),
-            request_pause(&mut main_connection.0, &mut main_connection.1),
+            request_pause(&main_connection.0, &mut main_connection.1),
         )
         .await
         .map_err(|_| {
@@ -314,16 +315,16 @@ pub(crate) async fn proxy() -> Result<()> {
 /// sending the first message
 async fn connect_and_ping(
     config: &LayerConfig,
-    analytics: &mut AnalyticsReporter,
+    analytics: Option<&mut AnalyticsReporter>,
 ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-    let ((mut sender, mut receiver), _) = connect(config, analytics).await?;
-    ping(&mut sender, &mut receiver).await?;
+    let ((sender, mut receiver), _) = connect(config, analytics).await?;
+    ping(&sender, &mut receiver).await?;
     Ok((sender, receiver))
 }
 
 /// Sends a ping the connection and expects a pong.
 async fn ping(
-    sender: &mut mpsc::Sender<ClientMessage>,
+    sender: &mpsc::Sender<ClientMessage>,
     receiver: &mut mpsc::Receiver<DaemonMessage>,
 ) -> Result<(), InternalProxyError> {
     sender.send(ClientMessage::Ping).await?;
@@ -351,7 +352,7 @@ fn create_ping_loop(
             loop {
                 tokio::select! {
                     _ = main_keep_interval.tick() => {
-                        if let Err(err) = ping(&mut connection.0, &mut connection.1).await {
+                        if let Err(err) = ping(&connection.0, &mut connection.1).await {
                             cancellation_token.cancel();
 
                             return Err(err);
@@ -382,7 +383,7 @@ fn create_ping_loop(
 /// Returns the tx/rx and whether the operator is used.
 async fn connect(
     config: &LayerConfig,
-    analytics: &mut AnalyticsReporter,
+    analytics: Option<&mut AnalyticsReporter>,
 ) -> Result<(
     (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
     Option<OperatorSessionInformation>,

@@ -7,6 +7,7 @@ mod env {
 
     use crate::utils::{run_exec_with_target, service, EnvApp, KubeService};
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
@@ -17,6 +18,7 @@ mod env {
         remote_env_vars_works(service, application).await;
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]

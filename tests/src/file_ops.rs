@@ -1,3 +1,4 @@
+#![allow(dead_code, unused)]
 #[cfg(test)]
 mod file_ops {
 
@@ -5,8 +6,9 @@ mod file_ops {
 
     use rstest::*;
 
-    use crate::utils::{run_exec_with_target, service, Agent, FileOps, KubeService};
+    use crate::utils::{run_exec_with_target, service, FileOps, KubeService};
 
+    #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[cfg(target_os = "linux")]
     #[rstest]
     #[trace]
@@ -16,7 +18,6 @@ mod file_ops {
         #[future]
         #[notrace]
         service: KubeService,
-        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
         #[values(FileOps::Python, FileOps::Rust)] ops: FileOps,
     ) {
         let service = service.await;
@@ -25,8 +26,8 @@ mod file_ops {
 
         let mut args = vec!["--fs-mode", "write"];
 
-        if let Some(ephemeral_flag) = agent.flag() {
-            args.extend(ephemeral_flag);
+        if cfg!(feature = "ephemeral") {
+            args.extend(["-e"].into_iter());
         }
 
         let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/**")];
@@ -43,6 +44,7 @@ mod file_ops {
         ops.assert(process).await;
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[cfg(target_os = "macos")]
     #[rstest]
     #[trace]
@@ -72,6 +74,7 @@ mod file_ops {
         process.assert_python_fileops_stderr().await;
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -105,6 +108,7 @@ mod file_ops {
         process.assert_python_fileops_stderr().await;
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -191,6 +195,7 @@ mod file_ops {
     /// On Linux: Test our getdents64 Go syscall hook, for `os.ReadDir` on go.
     /// This is an E2E test and not an integration test in order to test the agent side of the
     /// detour.
+    #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -199,7 +204,6 @@ mod file_ops {
         #[future]
         #[notrace]
         service: KubeService,
-        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
         #[values(FileOps::GoDir18, FileOps::GoDir19, FileOps::GoDir20)] ops: FileOps,
     ) {
         let service = service.await;
@@ -207,8 +211,8 @@ mod file_ops {
 
         let mut args = vec!["--fs-mode", "read"];
 
-        if let Some(ephemeral_flag) = agent.flag() {
-            args.extend(ephemeral_flag);
+        if cfg!(feature = "ephemeral") {
+            args.extend(["-e"].into_iter());
         }
 
         let mut process = run_exec_with_target(

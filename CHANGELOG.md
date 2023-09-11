@@ -8,6 +8,104 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.65.2](https://github.com/metalbear-co/mirrord/tree/3.65.2) - 2023-09-10
+
+
+### Changed
+
+- Add ruby related ENV to the default exclude list
+
+
+### Fixed
+
+- Fixed connecting to unspecified ip i.e 0.0.0.0
+  [#1928](https://github.com/metalbear-co/mirrord/issues/1928)
+
+
+### Internal
+
+- Refactor code to match newest Rust nightly - 2023-09-07
+  [#1457](https://github.com/metalbear-co/mirrord/issues/1457)
+- Update tj-actions to v39 to check for fixes for similar hashes
+
+
+## [3.65.1](https://github.com/metalbear-co/mirrord/tree/3.65.1) - 2023-09-07
+
+
+### Changed
+
+- Add some Ruby env to excluded: GEM_HOME, GEM_PATH
+  [#1892](https://github.com/metalbear-co/mirrord/issues/1892)
+
+
+### Fixed
+
+- Disable opendir hook on aarch macOS since it crashes due to arm64e issues
+  [#1920](https://github.com/metalbear-co/mirrord/issues/1920)
+
+
+## [3.65.0](https://github.com/metalbear-co/mirrord/tree/3.65.0) - 2023-09-06
+
+
+### Added
+
+- Add hooks for `opendir`, `readdir64_r`, `__lxstat`, `__lxstat64`,
+  `__xstat64`. Also contains a refactor of the `*stat` family of hooks (they
+  now call a shared function), and `openat64` as its own function.
+  [#1899](https://github.com/metalbear-co/mirrord/issues/1899)
+
+
+### Changed
+
+- CLI: Change operator setup to fetch from API version of operator to install
+- Don't error on agent ready missing absent, add retry in connection to
+  upstream agent
+
+
+### Fixed
+
+- Fixed agent crashing on flush connections not enabled
+  [#1904](https://github.com/metalbear-co/mirrord/issues/1904)
+- CI: run macOS clippy on all of the codebase
+- Fixed pause flakiness by improving our cleanup process [using watch]
+
+
+### Internal
+
+- CLI: Change to use drain instead of hoping sleep would help
+- Enable ephemeral containers for tests on operator
+
+
+## [3.64.2](https://github.com/metalbear-co/mirrord/tree/3.64.2) - 2023-09-05
+
+
+### Changed
+
+- Changed the targeted and non targeted flows for creating agent.
+  [#1844](https://github.com/metalbear-co/mirrord/issues/1844)
+- Add info about errors to TELEMETRY.md
+
+
+### Fixed
+
+- Change agent to use current thread runtime, multi thread is enabled by
+  mistake.
+  * Added a sleep before exiting both in layer and agent to allow
+  `tokio::spawn` tasks spawned from `Drop` finish.
+  * Changed implementation of pause guard to use `tokio::spawn` - fixes pause
+  in combination with above change.
+- Fix analytics not being sent on drop
+
+
+### Internal
+
+- Refactor [if Some / else None] pattern to use [bool.then()] in medschool.
+  [#1890](https://github.com/metalbear-co/mirrord/issues/1890)
+- Add a "Try to reduce the use of non-optional `Option`s" rule to the mirrord
+  style guide.
+- Label mirroring integration tests as flaky
+
+
 ## [3.64.1](https://github.com/metalbear-co/mirrord/tree/3.64.1) - 2023-09-03
 
 

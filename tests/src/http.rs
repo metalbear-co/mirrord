@@ -8,7 +8,7 @@ mod http {
     use tokio::time::timeout;
 
     use crate::utils::{
-        get_service_url, kube_client, send_requests, service, Agent, Application, KubeService,
+        get_service_url, kube_client, send_requests, service, Application, KubeService,
     };
 
     /// ## Warning
@@ -36,18 +36,12 @@ mod http {
             Application::PythonFastApiHTTP
         )]
         application: Application,
-        #[values(Agent::Ephemeral, Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut process = application
-            .run(
-                &service.target,
-                Some(&service.namespace),
-                agent.flag(),
-                None,
-            )
+            .run(&service.target, Some(&service.namespace), None, None)
             .await;
         process
             .wait_for_line(Duration::from_secs(120), "daemon subscribed")
@@ -81,18 +75,12 @@ mod http {
         kube_client: Client,
         #[values(Application::PythonFlaskHTTP, Application::PythonFastApiHTTP)]
         application: Application,
-        #[values(Agent::Job)] agent: Agent,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut process = application
-            .run(
-                &service.target,
-                Some(&service.namespace),
-                agent.flag(),
-                None,
-            )
+            .run(&service.target, Some(&service.namespace), None, None)
             .await;
         process
             .wait_for_line(Duration::from_secs(300), "daemon subscribed")

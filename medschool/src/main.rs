@@ -175,13 +175,13 @@ impl Eq for PartialType {}
 impl Eq for PartialField {}
 
 impl Hash for PartialType {
-    fn hash<H: ~const std::hash::Hasher>(&self, state: &mut H) {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.ident.hash(state)
     }
 }
 
 impl Hash for PartialField {
-    fn hash<H: ~const std::hash::Hasher>(&self, state: &mut H) {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.ident.hash(state)
     }
 }
@@ -192,8 +192,11 @@ impl Display for PartialType {
         let docs = self.docs.last().cloned().unwrap_or_default();
         f.write_str(&docs)?;
 
-        let fields: String = self.fields.iter().map(|field| format!("{field}")).collect();
-        f.write_str(&fields)
+        self.fields.iter().fold(f, |accum, s| {
+            accum.write_str(&s.to_string()).expect("writing failed");
+            accum
+        });
+        Ok(())
     }
 }
 
@@ -364,15 +367,11 @@ fn parse_docs_into_tree(files: Vec<syn::File>) -> Result<BTreeSet<PartialType>, 
                             .any(|doc| doc.contains(r"<!--${internal}-->"));
 
                         // We only care about types that have docs.
-                        if !thing_docs_untreated.is_empty() && !is_internal {
-                            Some(PartialType {
-                                ident: item.ident.to_string(),
-                                docs: thing_docs_untreated,
-                                fields: Default::default(),
-                            })
-                        } else {
-                            None
-                        }
+                        (!thing_docs_untreated.is_empty() && !is_internal).then(|| PartialType {
+                            ident: item.ident.to_string(),
+                            docs: thing_docs_untreated,
+                            fields: Default::default(),
+                        })
                     }
                     syn::Item::Struct(item) => {
                         let fields = item
@@ -396,18 +395,14 @@ fn parse_docs_into_tree(files: Vec<syn::File>) -> Result<BTreeSet<PartialType>, 
                         public_fields.sort();
 
                         // We only care about types that have docs.
-                        if !thing_docs_untreated.is_empty()
+                        (!thing_docs_untreated.is_empty()
                             && !public_fields.is_empty()
-                            && !is_internal
-                        {
-                            Some(PartialType {
+                            && !is_internal)
+                            .then(|| PartialType {
                                 ident: item.ident.to_string(),
                                 docs: thing_docs_untreated,
                                 fields: public_fields,
                             })
-                        } else {
-                            None
-                        }
                     }
                     _ => None,
                 })
