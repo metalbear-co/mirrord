@@ -85,7 +85,7 @@ where
         .await
         .map_err(KubeApiError::KubeError)?;
 
-    let mut spec = ephemeral_containers_subresource
+    let spec = ephemeral_containers_subresource
         .spec
         .as_mut()
         .ok_or(KubeApiError::PodSpecNotFound)?;

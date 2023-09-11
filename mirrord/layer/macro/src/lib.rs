@@ -73,7 +73,7 @@ pub fn hook_fn(
         // `pub(crate) static FN_CLOSE: HookFn<FnClose> = HookFn::default()`
         let original_fn = quote! {
             #visibility static #static_name: crate::detour::HookFn<#type_name> =
-                crate::detour::HookFn::default()
+                crate::detour::HookFn::default_const()
         };
 
         let output = quote! {
@@ -154,7 +154,7 @@ pub fn hook_guard_fn(
         // `pub(crate) static FN_CLOSE: HookFn<FnClose> = HookFn::default()`
         let original_fn = quote! {
             #visibility static #static_name: crate::detour::HookFn<#type_name> =
-                crate::detour::HookFn::default()
+                crate::detour::HookFn::default_const()
         };
 
         let statements = proper_function.block.stmts.to_vec();

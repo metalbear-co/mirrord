@@ -86,7 +86,10 @@ fn test_udp(socket: SocketAddr, peer: SocketAddr) {
 
 fn main() {
     let Some((use_tcp, socket, peers)) = parse_args() else {
-        panic!("USAGE: {} --tcp/--udp <local socket> <peer sockets>", env::args().next().unwrap());
+        panic!(
+            "USAGE: {} --tcp/--udp <local socket> <peer sockets>",
+            env::args().next().unwrap()
+        );
     };
 
     peers.into_iter().for_each(|peer| {
