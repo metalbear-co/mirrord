@@ -11,6 +11,17 @@
 #     If you're adding something, please make sure it doesn't impact too much, and if you're reviewing please have it in mind.
 # 4. Make sure to specify target for cargo invocations, to re-use cache (cargo build --target X while host is X then cargo build will not use cache
 #    since it's different targets from it's perspective - https://doc.rust-lang.org/cargo/guide/build-cache.html
+#
+# - Adding a compiled app to e2e:
+#
+# If you want to add a rust/go/[other compiled language] to the list of e2e apps, then you have to check 2 other
+# places.
+#
+# 1. The `test-images` repo, if your e2e wants to use a custom image, that's not already there, and;
+# 2. The `mirrord-ci` repo, where you should add the compilation call to `e2e-setup-action/action.yaml`.
+#
+# Forgetting (2) will probably net you a message saying that `mirrord exec` could not find the path of the app,
+# while forgetting (1) nets you a message saying that the service could not be reached/found.
 name: CI
 
 on:
