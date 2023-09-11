@@ -463,7 +463,7 @@ jobs:
       matrix:
         ide: ["intellij", "vscode"]
     needs: build_mirrord_on_release_branch
-    uses: metalbear-co/mirrord-{{ matrix.ide }}/.github/workflows/reusable_e2e.yaml@main
+    uses: metalbear-co/mirrord-${{ matrix.ide }}/.github/workflows/reusable_e2e.yaml@main
 
   # We need some "accummulation" job here because bors fails (timeouts) to
   # listen on matrix builds.
