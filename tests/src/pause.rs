@@ -185,6 +185,8 @@ mod pause {
         assert!(reqwest::get(url).await.unwrap().status().is_success());
     }
 
+    /// pause ephemeral doesn't work on docker + systemd which is what we have in CI
+    #[cfg(not(feature="docker"))]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
@@ -278,6 +280,8 @@ mod pause {
     /// 2. Wait for the local child process to exit.
     /// 3. Wait for the agent jobs to complete.
     /// 4. Verify the target pod is unpaused.
+    /// pause ephemeral doesn't work on docker + systemd which is what we have in CI
+    #[cfg(not(feature="docker"))]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]

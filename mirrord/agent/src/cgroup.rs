@@ -52,8 +52,8 @@ pub(crate) enum CgroupV2Error {
     ReadingCgroupProcs(std::io::Error),
     #[error("Malformed cgroup.procs file: {0}")]
     MalformedCgroupProcs(<u64 as FromStr>::Err, String),
-    #[error("Failed to write process to cgroup.procs file: {0:?}, e: {1} existing files {2:?}")]
-    WritingCgroupProcs(PathBuf, std::io::Error, Vec<PathBuf>),
+    #[error("Failed to write process to cgroup.procs file: {0} - this can happen on Docker + systemd + ephemeral")]
+    WritingCgroupProcs(std::io::Error),
     #[error("Failed entering cgroup namespace {0}")]
     EnteringCgroupNamespace(#[from] NamespaceError),
     #[error("Failed to check existence of cgroup subdir: {0}")]
@@ -218,12 +218,12 @@ async fn move_pids_to_cgroupv2(cgroup_path: &Path, pids: Vec<u64>) -> Result<(),
         .write(true)
         .open(proc_file.clone())
         .await
-        .map_err(|e| CgroupV2Error::WritingCgroupProcs(proc_file.clone(), e, files.clone()))?;
+        .map_err(CgroupV2Error::WritingCgroupProcs)?;
 
     for pid in pids {
         file.write_all(pid.to_string().as_bytes())
             .await
-            .map_err(|e| CgroupV2Error::WritingCgroupProcs(proc_file.clone(), e, files.clone()))?;
+            .map_err(CgroupV2Error::WritingCgroupProcs)?;
     }
     Ok(())
 }
