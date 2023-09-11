@@ -44,6 +44,7 @@ mod issue1317 {
         let (host, port) = get_service_host_and_port(kube_client.clone(), &service).await;
 
         // Create a connection with the service before mirrord is started.
+        let host = host.trim_end();
         let connection = TcpStream::connect(format!("{host}:{port}"))
             .await
             .expect(&format!("Failed connecting to {host:?}:{port:?}!"));
