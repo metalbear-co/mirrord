@@ -46,7 +46,7 @@ mod issue1317 {
         // Create a connection with the service before mirrord is started.
         let connection = TcpStream::connect(format!("{host}:{port}"))
             .await
-            .expect("Failed connecting to {:?}:{:?}!", host, port);
+            .expect(&format!("Failed connecting to {host:?}:{port:?}!"));
 
         let (mut request_sender, connection) =
             http1::handshake(TokioIo::new(connection)).await.unwrap();
