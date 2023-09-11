@@ -45,6 +45,19 @@ impl EnvFilter {
                 WildMatch::new("BUNDLER_ORIG_GEM_HOME"),
                 WildMatch::new("BUNDLE_GEMFILE"),
                 WildMatch::new("RUBYLIB"),
+                WildMatch::new("BUNDLER_VERSION"),
+                WildMatch::new("RUBYOPT"),
+                WildMatch::new("BUNDLER_ORIG_BUNDLER_VERSION"),
+                WildMatch::new("BUNDLER_ORIG_BUNDLER_ORIG_MANPATH"),
+                WildMatch::new("BUNDLER_ORIG_PATH"),
+                WildMatch::new("BUNDLE_APP_CONFIG"),
+                WildMatch::new("BUNDLER_ORIG_RUBYOPT"),
+                WildMatch::new("BUNDLER_ORIG_MANPATH"),
+                WildMatch::new("BUNDLER_ORIG_BUNDLE_GEMFILE"),
+                WildMatch::new("BUNDLER_ORIG_RUBYLIB"),
+                WildMatch::new("BUNDLER_ORIG_RB_USER_INSTALL"),
+                WildMatch::new("BUNDLE_FORCE_RUBY_PLATFORM"),
+                WildMatch::new("BUNDLER_ORIG_BUNDLE_BIN_PATH"),
             ];
 
             for selector in &filter_env_vars {
