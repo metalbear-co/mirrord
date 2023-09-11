@@ -187,6 +187,7 @@ pub struct LayerConfig {
     ///
     /// Note: It requires agent configuration to be set to privileged when running with the
     /// ephemeral agent option. Defaults to `false`.
+    /// Note2: Pause + ephemeral might not work on Docker runtimes.
     #[config(env = "MIRRORD_PAUSE", default = false, unstable)]
     pub pause: bool,
 

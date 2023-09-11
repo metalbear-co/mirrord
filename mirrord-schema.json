@@ -79,7 +79,7 @@
     },
     "pause": {
       "title": "pause {#root-pause}",
-      "description": "Controls target pause feature. Unstable.\n\nWith this feature enabled, the remote container is paused while this layer is connected to the agent.\n\nNote: It requires agent configuration to be set to privileged when running with the ephemeral agent option. Defaults to `false`.",
+      "description": "Controls target pause feature. Unstable.\n\nWith this feature enabled, the remote container is paused while this layer is connected to the agent.\n\nNote: It requires agent configuration to be set to privileged when running with the ephemeral agent option. Defaults to `false`. Note2: Pause + ephemeral might not work on Docker runtimes.",
       "type": [
         "boolean",
         "null"
