@@ -12,7 +12,6 @@ use exec::execvp;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
-use futures::TryFutureExt;
 use k8s_openapi::{
     api::{apps::v1::Deployment, core::v1::Pod},
     Metadata, NamespaceResourceScope,
@@ -21,7 +20,8 @@ use kube::api::ListParams;
 use miette::JSONReportHandler;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics};
 use mirrord_config::{
-    config::{ConfigContext, ConfigError, MirrordConfig},
+    config::{ConfigContext, MirrordConfig},
+    target::TargetConfig,
     LayerConfig, LayerFileConfig,
 };
 use mirrord_kube::{
@@ -403,10 +403,13 @@ async fn register_to_waitlist(email: EmailAddress) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct VerifiedConfig {
-    config: Option<String>,
-    errors: Option<String>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum VerifiedConfig {
+    Success {
+        config: TargetConfig,
+        warnings: Vec<String>,
+    },
+    Failed(Vec<String>),
 }
 
 /// Verifies a config file specified by `path`.
@@ -414,25 +417,41 @@ struct VerifiedConfig {
 /// ## Usage
 ///
 /// ```sh
+/// mirrord verify-config [path]
+/// ```
+///
+/// - Example:
+///
+/// ```sh
 /// mirrord verify-config ./config.json
+///
+/// # {
+/// #   "Success": {
+/// #     "config": {
+/// #       "path": {
+/// #         "deployment": "sample-python-deployment",
+/// #         "container": null
+/// #       },
+/// #       "namespace": null
+/// #     },
+/// #     "warnings": []
+/// #   }
+/// # }
 /// ```
 async fn verify_config(VerifyConfigArgs { path }: VerifyConfigArgs) -> Result<()> {
     let mut config_context = ConfigContext::default();
 
-    let read_path = path.clone();
-    let verified = match async move { LayerFileConfig::from_path(path) }
-        .and_then(|config| async move { config.generate_config(&mut config_context) })
-        .and_then(|_| tokio::fs::read_to_string(read_path).map_err(ConfigError::from))
-        .await
-    {
-        Ok(config) => VerifiedConfig {
-            config: Some(config),
-            ..Default::default()
+    let verified = match LayerFileConfig::from_path(path)
+        .and_then(|config| config.generate_config(&mut config_context))
+        .and_then(|config| {
+            config.verify(&mut config_context)?;
+            Ok(config)
+        }) {
+        Ok(config) => VerifiedConfig::Success {
+            config: config.target,
+            warnings: config_context.get_warnings().to_owned(),
         },
-        Err(fail) => VerifiedConfig {
-            errors: Some(fail.to_string()),
-            ..Default::default()
-        },
+        Err(fail) => VerifiedConfig::Failed(vec![fail.to_string()]),
     };
 
     println!("{}", serde_json::to_string_pretty(&verified)?);
