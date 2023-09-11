@@ -21,7 +21,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct DnsRequest {
+pub(crate) struct DnsRequest {
     request: GetAddrInfoRequest,
     tx: oneshot::Sender<GetAddrInfoResponse>,
 }
@@ -59,7 +59,7 @@ async fn dns_lookup(root_path: &Path, host: String) -> RemoteResult<DnsLookup> {
 ///
 /// Reads a `DnsRequest` from `rx` and returns the resolved addresses (or `Error`) through
 /// `DnsRequest::tx`.
-pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Result<()> {
+pub(crate) async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Result<()> {
     let root_path = pid
         .map(|pid| PathBuf::from("/proc").join(pid.to_string()).join("root"))
         .unwrap_or_else(|| PathBuf::from("/"));
@@ -87,7 +87,7 @@ pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Resul
 }
 
 #[derive(Clone)]
-pub struct DnsApi {
+pub(crate) struct DnsApi {
     task_status: TaskStatus,
     sender: Sender<DnsRequest>,
 }
