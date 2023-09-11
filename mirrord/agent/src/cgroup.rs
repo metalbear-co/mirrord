@@ -52,8 +52,8 @@ pub(crate) enum CgroupV2Error {
     ReadingCgroupProcs(std::io::Error),
     #[error("Malformed cgroup.procs file: {0}")]
     MalformedCgroupProcs(<u64 as FromStr>::Err, String),
-    #[error("Failed to write process to cgroup.procs file: {0}")]
-    WritingCgroupProcs(std::io::Error),
+    #[error("Failed to write process to cgroup.procs file: {0}, existing files {1:?}")]
+    WritingCgroupProcs(std::io::Error, Vec<PathBuf>),
     #[error("Failed entering cgroup namespace {0}")]
     EnteringCgroupNamespace(#[from] NamespaceError),
     #[error("Failed to check existence of cgroup subdir: {0}")]
@@ -207,16 +207,21 @@ async fn read_pids_cgroupv2(cgroup_path: &Path) -> Result<Vec<u64>, CgroupV2Erro
 #[tracing::instrument(level = "trace", ret)]
 async fn move_pids_to_cgroupv2(cgroup_path: &Path, pids: Vec<u64>) -> Result<(), CgroupV2Error> {
     let mut open_options = OpenOptions::new();
+    let mut read_dir = tokio::fs::read_dir(cgroup_path).await.unwrap();
+    let mut files = vec![];
+    while let Some(entry) = read_dir.next_entry().await.unwrap() {
+        files.push(entry.path());
+    }
     let mut file = open_options
         .write(true)
         .open(cgroup_path.join(CgroupV2::PROCS_FILE))
         .await
-        .map_err(CgroupV2Error::WritingCgroupProcs)?;
+        .map_err(| e| CgroupV2Error::WritingCgroupProcs(e, files.clone()))?;
 
     for pid in pids {
         file.write_all(pid.to_string().as_bytes())
             .await
-            .map_err(CgroupV2Error::WritingCgroupProcs)?;
+            .map_err( | e | CgroupV2Error::WritingCgroupProcs(e, files.clone()))?;
     }
     Ok(())
 }
