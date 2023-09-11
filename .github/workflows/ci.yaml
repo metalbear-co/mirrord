@@ -22,6 +22,12 @@
 #
 # Forgetting (2) will probably net you a message saying that `mirrord exec` could not find the path of the app,
 # while forgetting (1) nets you a message saying that the service could not be reached/found.
+#
+# Caveats:
+#
+# You cannot use `workspace` dependencies in the test app, it fails to build, must fully specify the dependency.
+#
+# Related to (2): If you modify `mirrord-ci/actions.yaml`, you'll be affecting every PR!
 name: CI
 
 on:

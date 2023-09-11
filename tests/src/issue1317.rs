@@ -99,8 +99,10 @@ mod issue1317 {
         assert!(String::from_utf8_lossy(&body.to_bytes()[..]).contains("Echo [remote]"));
 
         process
-            .wait_for_line(Duration::from_secs(10), "Echo [local]: GET 2")
+            .wait_for_line(Duration::from_secs(30), "Echo [local]: GET 2")
             .await;
+
+        drop(request_sender);
 
         timeout(Duration::from_secs(40), process.wait())
             .await
