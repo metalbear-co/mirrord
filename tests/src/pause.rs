@@ -186,7 +186,7 @@ mod pause {
     }
 
     /// pause ephemeral doesn't work on docker + systemd which is what we have in CI
-    #[cfg(not(feature="docker"))]
+    #[cfg(not(feature = "docker"))]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
@@ -281,7 +281,7 @@ mod pause {
     /// 3. Wait for the agent jobs to complete.
     /// 4. Verify the target pod is unpaused.
     /// pause ephemeral doesn't work on docker + systemd which is what we have in CI
-    #[cfg(not(feature="docker"))]
+    #[cfg(not(feature = "docker"))]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
