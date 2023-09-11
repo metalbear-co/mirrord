@@ -86,7 +86,7 @@ pub(crate) struct CgroupV1 {
 /// We mkdir, mount the cgroup, which mounts the root for some reason
 /// then find the cgroup path, join it and write freeze to it.
 impl CgroupV1 {
-    const FREEZE_PATH: &str = "freezer.state";
+    const FREEZE_PATH: &'static str = "freezer.state";
 
     #[tracing::instrument(level = "trace", ret)]
     pub(crate) async fn new() -> Result<Self, CgroupV1Error> {
@@ -241,7 +241,7 @@ async fn freeze_cgroupv2(cgroup_path: &Path, on: bool) -> Result<(), CgroupV2Err
 }
 
 impl CgroupV2 {
-    const PROCS_FILE: &str = "cgroup.procs";
+    const PROCS_FILE: &'static str = "cgroup.procs";
 
     #[tracing::instrument(level = "trace", ret, skip(self))]
     async fn pause(&self) -> Result<(), CgroupV2Error> {

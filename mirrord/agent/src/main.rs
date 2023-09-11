@@ -89,25 +89,6 @@ struct State {
 impl State {
     /// Return [`Err`] if container runtime operations failed.
     pub async fn new(args: &Args, watch: drain::Watch) -> Result<State> {
-        let container = get_container(
-            args.container_id.as_ref(),
-            args.container_runtime.as_ref(),
-            args.ephemeral_container,
-        )
-        .await?;
-
-        let container = match container {
-            Some(container) => Some(ContainerHandle::new(container, watch).await?),
-            None => None,
-        };
-
-        // If we are in an ephemeral container, we use pid 1.
-        // if not, we use the pid of the target container or fallback to self
-        let pid = container
-            .as_ref()
-            .map(|h| h.pid().to_string())
-            .unwrap_or_else(|| "self".to_string());
-
         let mut env: HashMap<String, String> = HashMap::new();
 
         let (ephemeral, container, pid) = match &args.mode {
@@ -126,11 +107,17 @@ impl State {
                 (false, Some(container_handle), pid)
             }
             cli::Mode::Ephemeral => {
-                // in ephemeral container, we get same env as the target container, so copy our env.
-                env.extend(std::env::vars());
+                let container_handle = ContainerHandle::new(
+                    runtime::Container::Ephemeral(runtime::EphemeralContainer {}),
+                    watch,
+                )
+                .await?;
+
+                let pid = container_handle.pid().to_string();
+                env.extend(container_handle.raw_env().clone());
 
                 // If we are in an ephemeral container, we use pid 1.
-                (true, None, "1".to_string())
+                (true, Some(container_handle), pid)
             }
             // if not, we use the pid of the target container or fallback to self
             cli::Mode::Targetless | cli::Mode::BlackboxTest => (false, None, "self".to_string()),
