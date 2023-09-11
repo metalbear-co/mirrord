@@ -266,10 +266,8 @@ async fn get_kube_pods(
                 .as_ref()?
                 .containers
                 .iter()
-                .filter_map(|container| {
-                    // filter out mesh side cars
-                    (!SKIP_NAMES.contains(container.name.as_str())).then(|| container.name.clone())
-                })
+                .filter(|&container| (!SKIP_NAMES.contains(container.name.as_str())))
+                .map(|container| container.name.clone())
                 .collect();
             Some((name, containers))
         })

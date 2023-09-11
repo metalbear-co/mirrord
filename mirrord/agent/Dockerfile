@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:6968c72ab7f403f31e3c1edc68c6d3c4c29b6e27 as chef
+FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:3d0d6988d3a9c2584d09b4eb05a52d97dae464c8 as chef
 ARG TARGETARCH
 WORKDIR /app
 
@@ -24,12 +24,12 @@ COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /a
 # so we remove from the workspace
 RUN sed -i '/members = \[/,/\]/c\members = [\n    "mirrord/*",\n]' /app/Cargo.toml
 
-RUN cargo +nightly-2023-04-19 chef prepare --recipe-path recipe.json
+RUN cargo +nightly-2023-09-07 chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 
 COPY --from=planner /app/recipe.json recipe.json
-RUN cargo +nightly-2023-04-19 chef cook --release --zigbuild --target $(cat /.platform) --recipe-path recipe.json
+RUN cargo +nightly-2023-09-07 chef cook --release --zigbuild --target $(cat /.platform) --recipe-path recipe.json
 
 # Copy order is important here, since we want the cache to be invalidated as less as possible
 # so we start with the most static files, then the most dynamic ones
@@ -43,7 +43,7 @@ COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /a
 # so we remove from the workspace
 RUN sed -i '/members = \[/,/\]/c\members = [\n    "mirrord/*",\n]' /app/Cargo.toml
 
-RUN cargo +nightly-2023-04-19 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release
+RUN cargo +nightly-2023-09-07 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release
 RUN cp /app/target/$(cat /.platform)/release/mirrord-agent /mirrord-agent
 
 FROM ghcr.io/metalbear-co/ci-agent-runtime:latest
