@@ -329,7 +329,7 @@ impl Application {
             }
             Application::RustIssue1317 => {
                 vec![formatcp!(
-                    "{}/../target/debug/issue1317",
+                    "{}/../../target/debug/issue1317",
                     env!("CARGO_MANIFEST_DIR")
                 )]
             }
