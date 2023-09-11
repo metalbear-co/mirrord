@@ -328,7 +328,6 @@ impl Application {
                 vec!["curl", "https://kubernetes/api", "--insecure"]
             }
             Application::RustIssue1317 => {
-                println!("foo");
                 vec![formatcp!(
                     "{}/../target/debug/issue1317",
                     env!("CARGO_MANIFEST_DIR")
