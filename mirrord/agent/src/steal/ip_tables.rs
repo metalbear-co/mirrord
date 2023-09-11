@@ -64,8 +64,8 @@ pub static IPTABLE_PREROUTING: LazyLock<String> = LazyLock::new(|| {
     })
 });
 
-pub static IPTABLE_MESH_ENV: &str = "MIRRORD_IPTABLE_MESH_NAME";
-pub static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
+pub(crate) static IPTABLE_MESH_ENV: &str = "MIRRORD_IPTABLE_MESH_NAME";
+pub(crate) static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_MESH_ENV).unwrap_or_else(|_| {
         format!(
             "MIRRORD_OUTPUT_{}",
@@ -74,8 +74,8 @@ pub static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
     })
 });
 
-pub static IPTABLE_STANDARD_ENV: &str = "MIRRORD_IPTABLE_STANDARD_NAME";
-pub static IPTABLE_STANDARD: LazyLock<String> = LazyLock::new(|| {
+pub(crate) static IPTABLE_STANDARD_ENV: &str = "MIRRORD_IPTABLE_STANDARD_NAME";
+pub(crate) static IPTABLE_STANDARD: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_STANDARD_ENV).unwrap_or_else(|_| {
         format!(
             "MIRRORD_STANDARD_{}",
@@ -97,7 +97,7 @@ pub static IPTABLE_INPUT: LazyLock<String> = LazyLock::new(|| {
 const IPTABLES_TABLE_NAME: &str = "nat";
 
 #[cfg_attr(test, mockall::automock)]
-pub trait IPTables {
+pub(crate) trait IPTables {
     fn with_table(&self, table_name: &'static str) -> Self
     where
         Self: Sized;
@@ -200,7 +200,7 @@ impl IPTables for IPTablesWrapper {
 }
 
 #[enum_dispatch(Redirect)]
-pub enum Redirects<IPT: IPTables + Send + Sync> {
+pub(crate) enum Redirects<IPT: IPTables + Send + Sync> {
     Standard(StandardRedirect<IPT>),
     Mesh(MeshRedirect<IPT>),
     FlushConnections(FlushConnections<IPT, Redirects<IPT>>),

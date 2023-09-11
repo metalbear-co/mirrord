@@ -33,7 +33,7 @@ use crate::{
 };
 
 #[derive(Debug, Eq, Copy, Clone)]
-pub struct TcpSessionIdentifier {
+pub(crate) struct TcpSessionIdentifier {
     /// The remote address that is sending a packet to the impersonated pod.
     ///
     /// ## Details
@@ -221,14 +221,14 @@ impl From<LayerTcp> for SnifferCommands {
 }
 
 #[derive(Debug)]
-pub struct SnifferCommand {
+pub(crate) struct SnifferCommand {
     client_id: ClientId,
     command: SnifferCommands,
 }
 
 /// Interface used by clients to interact with the [`TcpConnectionSniffer`].
 /// Multiple instances of this struct operate on a single sniffer instance.
-pub struct TcpSnifferApi {
+pub(crate) struct TcpSnifferApi {
     /// Id of the client using this struct.
     client_id: ClientId,
     /// Channel used to send commands to the [`TcpConnectionSniffer`].
@@ -309,7 +309,7 @@ impl Drop for TcpSnifferApi {
     }
 }
 
-pub struct TcpConnectionSniffer {
+pub(crate) struct TcpConnectionSniffer {
     port_subscriptions: Subscriptions<Port, ClientId>,
     receiver: Receiver<SnifferCommand>,
     client_senders: HashMap<ClientId, Sender<DaemonTcp>>,
