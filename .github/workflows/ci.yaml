@@ -466,7 +466,7 @@ jobs:
 
   vscode_e2e_on_release_branch:
     needs: build_mirrord_on_release_branch
-    uses: metalbear-co/mirrord-vscode/.github/workflows/reusable_e2e.yaml@main
+    uses: metalbear-co/mirrord-vscode/.github/workflows/reusable_e2e.yaml
     with:
       mirrord_release_branch: true
 
