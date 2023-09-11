@@ -458,13 +458,13 @@ jobs:
             target/debug/mirrord
           if-no-files-found: error
 
-  intellij_e2e_on_release_branch:    
+  intellij_e2e_on_release_branch:
     needs: build_mirrord_on_release_branch
     uses: metalbear-co/mirrord-intellij/.github/workflows/reusable_e2e.yaml@main
 
-  vscode_e2e_on_release_branch:    
+  vscode_e2e_on_release_branch:
     needs: build_mirrord_on_release_branch
-    uses: metalbear-co/mirrord-vscode/.github/workflows/reusable_e2e.yaml@main    
+    uses: metalbear-co/mirrord-vscode/.github/workflows/reusable_e2e.yaml@main
 
   # We need some "accummulation" job here because bors fails (timeouts) to
   # listen on matrix builds.
@@ -477,7 +477,8 @@ jobs:
       [
         towncrier_check,
         changed_files,
-        ide_e2e_on_release_branch,
+        intellij_e2e_on_release_branch,
+        vscode_e2e_on_release_branch,
         test_agent_image,
         macos_tests,
         integration_tests,
