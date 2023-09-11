@@ -96,7 +96,6 @@ pub enum Application {
     CurlToKubeApi,
     PythonCloseSocket,
     PythonCloseSocketKeepConnection,
-    RustIssue1317,
 }
 
 #[derive(Debug)]
@@ -326,13 +325,6 @@ impl Application {
             Application::Go20HTTP => vec!["go-e2e/20.go_test_app"],
             Application::CurlToKubeApi => {
                 vec!["curl", "https://kubernetes/api", "--insecure"]
-            }
-            Application::RustIssue1317 => {
-                // vec![formatcp!(
-                //     "{}/../../target/debug/issue1317",
-                //     env!("CARGO_MANIFEST_DIR")
-                // )]
-                vec!["/home/runner/work/mirrord/target/debug/issue1317"]
             }
         }
     }

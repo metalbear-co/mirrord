@@ -1,7 +1,7 @@
 /// Tests for mirroring existing connections.
 #[cfg(test)]
 mod issue1317 {
-    use std::time::Duration;
+    use std::{path::PathBuf, time::Duration};
 
     use bytes::Bytes;
     use http_body_util::{BodyExt, Full};
@@ -14,7 +14,9 @@ mod issue1317 {
     use rstest::*;
     use tokio::{net::TcpStream, time::timeout};
 
-    use crate::utils::{get_service_host_and_port, kube_client, service, Application, KubeService};
+    use crate::utils::{
+        get_service_host_and_port, kube_client, run_exec_with_target, service, KubeService,
+    };
 
     /// Creates a [`TcpStream`] that sends a request to `service` before mirrord is started (no
     /// agent up yet), and keeps this stream alive. Then it starts mirrord in _mirror_ mode, and
@@ -37,7 +39,6 @@ mod issue1317 {
         #[future]
         #[notrace]
         kube_client: Client,
-        #[values(Application::RustIssue1317)] application: Application,
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
@@ -72,9 +73,13 @@ mod issue1317 {
         assert!(String::from_utf8_lossy(&body.to_bytes()[..]).contains("Echo [remote]"));
 
         // Started mirrord.
-        let mut process = application
-            .run(&service.target, Some(&service.namespace), None, None)
-            .await;
+        let app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../target/debug/issue1317")
+            .to_string_lossy()
+            .to_string();
+        let executable = vec![app_path.as_str()];
+        let mut process = run_exec_with_target(executable, &service.target, None, None, None).await;
+
         process
             .wait_for_line(Duration::from_secs(120), "daemon subscribed")
             .await;
@@ -101,6 +106,6 @@ mod issue1317 {
             .await
             .unwrap();
 
-        application.assert(&process).await;
+        process.wait_assert_success().await;
     }
 }
