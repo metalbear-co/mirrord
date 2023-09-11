@@ -74,7 +74,7 @@ mod issue1317 {
 
         // Started mirrord.
         let app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/debug/issue1317")
+            .join("../target/debug/issue1317")
             .to_string_lossy()
             .to_string();
         let executable = vec![app_path.as_str()];
