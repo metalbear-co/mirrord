@@ -12,7 +12,7 @@ mod issue1317 {
     use hyper_util::rt::TokioIo;
     use kube::Client;
     use rstest::*;
-    use tokio::{net::TcpStream, time::timeout};
+    use tokio::net::TcpStream;
 
     use crate::utils::{
         get_service_host_and_port, kube_client, run_exec_with_target, service, KubeService,
