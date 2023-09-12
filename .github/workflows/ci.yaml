@@ -56,13 +56,13 @@ jobs:
           fetch-depth: 0
       - name: get CI changes
         id: changed-ci
-        uses: tj-actions/changed-files@v39
+        uses: tj-actions/changed-files@v36
         with:
           files: |
             .github/workflows/ci.yaml
       - name: get changed rs files
         id: changed-rs
-        uses: tj-actions/changed-files@v39
+        uses: tj-actions/changed-files@v36
         with:
           files: |
             **/*.rs
@@ -76,19 +76,19 @@ jobs:
             .cargo/**
       - name: get markdown changes
         id: changed-markdown
-        uses: tj-actions/changed-files@v39
+        uses: tj-actions/changed-files@v36
         with:
           files: |
             README.md
       - name: get protocol changes
         id: changed-protocol
-        uses: tj-actions/changed-files@v39
+        uses: tj-actions/changed-files@v36
         with:
           files: |
             mirrord/protocol/**
       - name: get protocol toml changes
         id: changed-protocol-toml
-        uses: tj-actions/changed-files@v39
+        uses: tj-actions/changed-files@v36
         with:
           files: |
             mirrord/protocol/Cargo.toml
@@ -121,7 +121,7 @@ jobs:
       - run: rm rust-toolchain.toml
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: nightly-2023-09-07
+          toolchain: nightly-2023-04-19
           components: rustfmt, clippy
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
       - run: python3 -m pip install cargo-zigbuild
@@ -130,7 +130,10 @@ jobs:
       - run: cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-gnu -- -Wclippy::indexing_slicing -D warnings
       # Check that compiles for the supported linux targets (aarch64)
       - run: cargo-zigbuild clippy --lib --bins --all-features --target aarch64-unknown-linux-gnu -- -Wclippy::indexing_slicing -D warnings
-  
+
+  # if the branch is named is `x.x.x`, x ∈ [0, 9], then it's a release branch
+  # the output of this test is a boolean indicating if it's a release branch
+  # which is then used by `build_mirrord_on_release_branch`
   check_if_release_branch:
     runs-on: ubuntu-latest
     outputs:
@@ -158,7 +161,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           # TODO(alex): update this when https://github.com/rust-lang/rust/issues/109631 is fixed
-          toolchain: nightly-2023-09-07
+          toolchain: nightly-2023-04-19
       - run: cargo doc --document-private-items
 
   test_agent:
@@ -303,7 +306,7 @@ jobs:
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
-          toolchain: nightly-2023-09-07
+          toolchain: nightly-2023-04-19
       - name: Install Protoc
         uses: arduino/setup-protoc@v2
         with:
@@ -418,11 +421,7 @@ jobs:
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run targetless E2E test.
         run: cargo test --target=x86_64-unknown-linux-gnu -p tests targetless --no-default-features --features job
-      - name: Run all E2E test - docker
-        if: ${{ matrix.container-runtime == 'docker' }}
-        run: cargo test --target=x86_64-unknown-linux-gnu -p tests --features docker -- --test-threads=6
-      - name: Run all E2E test - containerd
-        if: ${{ matrix.container-runtime == 'containerd' }}
+      - name: Run all E2E test
         run: cargo test --target=x86_64-unknown-linux-gnu -p tests -- --test-threads=6
       - name: Collect logs
         if: ${{ failure() }}
@@ -441,6 +440,8 @@ jobs:
           config: "markdownlint-config.json"
           args: "README.md"
 
+  # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
+  # building concurrently can run faster the release ide tests
   build_mirrord_on_release_branch:
     runs-on: ubuntu-latest
     name: build mirrord
@@ -461,6 +462,9 @@ jobs:
             target/debug/mirrord
           if-no-files-found: error
 
+ # depends on `build_mirrord_on_release_branch` which provides the binary on the current tag
+ # `build_mirrord_on_release_branch` depends on `check_if_release_branch` 
+ # which checks if the branch is a release branch
   intellij_e2e_on_release_branch:
     needs: build_mirrord_on_release_branch
     uses: metalbear-co/mirrord-intellij/.github/workflows/reusable_e2e.yaml@main
