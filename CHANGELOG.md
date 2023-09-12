@@ -8,6 +8,26 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.66.0](https://github.com/metalbear-co/mirrord/tree/3.66.0) - 2023-09-12
+
+
+### Added
+
+- Added support for pausing ephemeral containers. This feature requires the
+  agent to have privileged access.
+  [#1358](https://github.com/metalbear-co/mirrord/issues/1358)
+
+
+### Changed
+
+- Add ruby related ENV to the default exclude list
+
+
+### Internal
+
+- Add concurrent steal tests - operator
+
+
 ## [3.65.2](https://github.com/metalbear-co/mirrord/tree/3.65.2) - 2023-09-10
 
 
