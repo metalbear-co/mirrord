@@ -102,6 +102,8 @@ mod issue1317 {
             .wait_for_line(Duration::from_secs(60), "Echo [local]: GET 2")
             .await;
 
+        // The last request sends `"EXIT"` in the body, and this triggers a `process::exit(0)` on
+        // the local process.
         let request = Request::builder()
             .body(Full::new(Bytes::from(format!("EXIT"))))
             .unwrap();

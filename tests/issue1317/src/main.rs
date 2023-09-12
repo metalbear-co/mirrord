@@ -1,4 +1,5 @@
-//! Local counterpart of the [http-keep-alive]() server.
+//! Local counterpart of the
+//! [http-keep-alive](https://github.com/metalbear-co/test-images/tree/main/http-keep-alive) server.
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     env_logger::Builder::from_default_env()
@@ -20,6 +21,7 @@ async fn main() -> std::io::Result<()> {
 #[get("/")]
 #[tracing::instrument(level = "info", ret)]
 async fn index(incoming: String) -> String {
+    // If the body contains `EXIT`, then we quit this process.
     if incoming.contains("EXIT") {
         eprintln!("Exiting process!");
         std::process::exit(0);
@@ -29,14 +31,7 @@ async fn index(incoming: String) -> String {
     }
 }
 
-#[post("/")]
-#[tracing::instrument(level = "info", ret)]
-async fn quit(incoming: String) -> String {
-    eprintln!("Exiting process!");
-    std::process::exit(0);
-}
-
 use std::time::Duration;
 
-use actix_web::{get, middleware::Logger, post, App, HttpServer};
+use actix_web::{get, middleware::Logger, App, HttpServer};
 use tracing::info;
