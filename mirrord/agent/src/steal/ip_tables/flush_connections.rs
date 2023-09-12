@@ -20,7 +20,7 @@ use crate::{
 const MARK: &str = "0x1";
 
 #[derive(Debug)]
-pub struct FlushConnections<IPT: IPTables, T> {
+pub(crate) struct FlushConnections<IPT: IPTables, T> {
     managed: IPTableChain<IPT>,
     inner: Box<T>,
 }

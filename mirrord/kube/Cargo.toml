@@ -34,6 +34,7 @@ shellexpand = "3"
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+tokio-retry = "0.3"
 
 [dev-dependencies]
 base64 = "0.21"

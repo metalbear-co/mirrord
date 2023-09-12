@@ -31,3 +31,5 @@ fancy-regex.workspace = true
 default = ["ephemeral", "job"]
 ephemeral = []
 job = []
+operator = []
+docker = []

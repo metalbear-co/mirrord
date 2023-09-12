@@ -31,7 +31,10 @@ async fn recv_from(
     let mut conn = layer_connection.codec;
     let msg = conn.try_next().await.unwrap().unwrap();
 
-    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect { remote_address: SocketAddress::Ip(addr) })) = msg else {
+    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
+        remote_address: SocketAddress::Ip(addr),
+    })) = msg
+    else {
         panic!("Invalid message received from layer: {msg:?}");
     };
     conn.send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Ok(
@@ -46,7 +49,11 @@ async fn recv_from(
 
     let msg = conn.try_next().await.unwrap().unwrap();
 
-    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite { connection_id: 0, bytes })) = msg else {
+    let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
+        connection_id: 0,
+        bytes,
+    })) = msg
+    else {
         panic!("Invalid message received from layer: {msg:?}");
     };
 

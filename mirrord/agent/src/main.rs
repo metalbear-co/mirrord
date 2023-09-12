@@ -1,5 +1,5 @@
 #![feature(result_option_inspect)]
-#![feature(hash_drain_filter)]
+#![feature(hash_extract_if)]
 #![feature(let_chains)]
 #![feature(type_alias_impl_trait)]
 #![feature(tcp_quickack)]
@@ -56,12 +56,14 @@ use crate::{
     watched_task::{TaskStatus, WatchedTask},
 };
 
+mod cgroup;
 mod cli;
 mod container_handle;
 mod dns;
 mod env;
 mod error;
 mod file;
+mod namespace;
 mod outgoing;
 mod runtime;
 mod sniffer;
@@ -81,7 +83,6 @@ struct State {
     /// pausing. When those args are not passed, container is [`None`].
     container: Option<ContainerHandle>,
     env: HashMap<String, String>,
-    /// Whether this agent is run in an ephemeral container.
     ephemeral: bool,
 }
 
@@ -106,11 +107,17 @@ impl State {
                 (false, Some(container_handle), pid)
             }
             cli::Mode::Ephemeral => {
-                // in ephemeral container, we get same env as the target container, so copy our env.
-                env.extend(std::env::vars());
+                let container_handle = ContainerHandle::new(
+                    runtime::Container::Ephemeral(runtime::EphemeralContainer {}),
+                    watch,
+                )
+                .await?;
+
+                let pid = container_handle.pid().to_string();
+                env.extend(container_handle.raw_env().clone());
 
                 // If we are in an ephemeral container, we use pid 1.
-                (true, None, "1".to_string())
+                (true, Some(container_handle), pid)
             }
             // if not, we use the pid of the target container or fallback to self
             cli::Mode::Targetless | cli::Mode::BlackboxTest => (false, None, "self".to_string()),
@@ -258,10 +265,6 @@ struct ClientConnectionHandler {
     /// Handle to the target container if there is one.
     /// Used for pausing the container.
     container_handle: Option<ContainerHandle>,
-    /// Whether this agent is run in an ephemeral container.
-    /// TODO this is used only to prevent pausing from an ephemeral container and should be removed
-    /// once this feature is supported
-    ephemeral: bool,
 }
 
 impl ClientConnectionHandler {
@@ -297,7 +300,6 @@ impl ClientConnectionHandler {
             dns_api: bg_tasks.dns_api,
             env,
             container_handle,
-            ephemeral,
         };
 
         Ok(client_handler)
@@ -500,24 +502,29 @@ impl ClientConnectionHandler {
                 return Ok(false);
             }
             ClientMessage::PauseTargetRequest(pause) => {
-                if self.ephemeral {
-                    Err(AgentError::PauseEphemeralAgent)?;
-                }
-
-                let changed = self
+                match self
                     .container_handle
                     .as_ref()
                     .ok_or(AgentError::PauseAbsentTarget)?
                     .set_paused(pause)
-                    .await?;
-
-                self.respond(DaemonMessage::PauseTarget(
-                    DaemonPauseTarget::PauseResponse {
-                        changed,
-                        container_paused: pause,
-                    },
-                ))
-                .await?;
+                    .await
+                {
+                    Ok(changed) => {
+                        self.respond(DaemonMessage::PauseTarget(
+                            DaemonPauseTarget::PauseResponse {
+                                changed,
+                                container_paused: pause,
+                            },
+                        ))
+                        .await?;
+                    }
+                    Err(e) => {
+                        self.respond(DaemonMessage::LogMessage(LogMessage::error(format!(
+                            "Failed to pause target container: {e:?}"
+                        ))))
+                        .await?;
+                    }
+                }
             }
             ClientMessage::SwitchProtocolVersion(version) => {
                 if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {

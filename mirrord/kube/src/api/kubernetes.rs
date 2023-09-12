@@ -20,6 +20,11 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "incluster")]
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+#[cfg(not(feature = "incluster"))]
+use tokio_retry::{
+    strategy::{jitter, ExponentialBackoff},
+    Retry,
+};
 use tracing::{info, trace};
 
 use crate::{
@@ -171,10 +176,13 @@ impl AgentManagment for KubernetesAPI {
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
         let pod_api: Api<Pod> =
             get_k8s_resource_api(&self.client, connect_info.namespace.as_deref());
-        trace!("port-forward to pod {:?}", &connect_info);
-        let mut port_forwarder = pod_api
-            .portforward(&connect_info.pod_name, &[connect_info.agent_port])
-            .await?;
+        let retry_strategy = ExponentialBackoff::from_millis(10).map(jitter).take(3);
+        let ports = &[connect_info.agent_port];
+        let mut port_forwarder = Retry::spawn(retry_strategy, || {
+            trace!("port-forward to pod {:?}", &connect_info);
+            pod_api.portforward(&connect_info.pod_name, ports)
+        })
+        .await?;
 
         Ok(wrap_raw_connection(
             port_forwarder
