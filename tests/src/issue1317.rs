@@ -106,14 +106,11 @@ mod issue1317 {
             .method("POST")
             .body(Full::new(Bytes::from(format!("POST 3"))))
             .unwrap();
-        let _ = request_sender
+        let response = request_sender
             .send_request(request)
             .await
-            .expect_err("3rd request ends the program, and isn't handled by remote!");
-
-        timeout(Duration::from_secs(40), process.wait())
-            .await
-            .unwrap();
+            .expect("3rd request ends the program, and it's a 404!");
+        assert!(response.status().is_client_error());
 
         process.wait_assert_success().await;
     }
