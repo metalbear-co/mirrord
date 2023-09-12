@@ -20,7 +20,7 @@ async fn main() -> std::io::Result<()> {
 #[get("/")]
 #[tracing::instrument(level = "info", ret)]
 async fn index(incoming: String) -> String {
-    println!("Echo [local]: {incoming}");
+    eprintln!("Echo [local]: {incoming}");
     format!("Echo [local]: {incoming}")
 }
 
