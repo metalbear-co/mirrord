@@ -404,6 +404,7 @@ async fn register_to_waitlist(email: EmailAddress) -> Result<()> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
 enum VerifiedConfig {
     Success {
         config: TargetConfig,
@@ -425,18 +426,17 @@ enum VerifiedConfig {
 /// ```sh
 /// mirrord verify-config ./config.json
 ///
-/// # {
-/// #   "Success": {
-/// #     "config": {
-/// #       "path": {
-/// #         "deployment": "sample-python-deployment",
-/// #         "container": null
-/// #       },
-/// #       "namespace": null
-/// #     },
-/// #     "warnings": []
-/// #   }
-/// # }
+///
+/// {
+///   "type": "Success",
+///   "config": {
+///     "path": {
+///       "deployment": "sample-deployment",
+///     },
+///     "namespace": null
+///   },
+///   "warnings": []
+/// }
 /// ```
 async fn verify_config(VerifyConfigArgs { path }: VerifyConfigArgs) -> Result<()> {
     let mut config_context = ConfigContext::default();
