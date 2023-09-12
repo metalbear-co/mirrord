@@ -141,7 +141,7 @@ jobs:
     steps:
       - id: release-branch
         run: |
-          echo "branch=$([[ ${{ github.head_ref }} =~ "^[0-9]+\.[0-9]+\.[0-9]+$" ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
+          echo "branch=$([[ ${{ github.head_ref || github.ref_name }} =~ "^[0-9]+\.[0-9]+\.[0-9]+$" ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
       - name: output test
         run: |
           echo ${{ steps.release-branch.outputs.branch }}
