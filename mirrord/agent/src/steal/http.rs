@@ -22,7 +22,9 @@ use tokio::{
 };
 
 use self::{
-    error::HttpTrafficError, filter::MINIMAL_HEADER_SIZE, hyper_handler::RawHyperConnection,
+    error::HttpTrafficError,
+    filter::{H2_PREFACE, MINIMAL_HEADER_SIZE},
+    hyper_handler::RawHyperConnection,
     reversible_stream::ReversibleStream,
 };
 use crate::{
@@ -103,7 +105,7 @@ trait HttpV {
 
 /// Identifies a message as being HTTP or not.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum HttpVersion {
+pub(crate) enum HttpVersion {
     /// HTTP/1
     #[default]
     V1,
@@ -120,12 +122,12 @@ impl HttpVersion {
     /// Checks if `buffer` contains a valid HTTP/1.x request, or if it could be an HTTP/2 request by
     /// comparing it with a slice of [`H2_PREFACE`].
     #[tracing::instrument(level = "trace")]
-    fn new(buffer: &[u8], h2_preface: &[u8]) -> Self {
+    pub(crate) fn new(buffer: &[u8]) -> Self {
         let mut empty_headers = [httparse::EMPTY_HEADER; 0];
 
         if buffer.len() < MINIMAL_HEADER_SIZE {
             Self::NotHttp
-        } else if buffer == h2_preface {
+        } else if buffer == &H2_PREFACE[..MINIMAL_HEADER_SIZE] {
             Self::V2
         } else if matches!(
             httparse::Request::new(&mut empty_headers).parse(buffer),
