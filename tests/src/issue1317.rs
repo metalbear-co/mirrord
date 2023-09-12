@@ -44,6 +44,8 @@ mod issue1317 {
         let kube_client = kube_client.await;
         let (host, port) = get_service_host_and_port(kube_client.clone(), &service).await;
 
+        tokio::time::sleep(Duration::from_secs(10)).await;
+
         // Create a connection with the service before mirrord is started.
         let host = host.trim_end();
         let connection = TcpStream::connect(format!("{host}:{port}"))
