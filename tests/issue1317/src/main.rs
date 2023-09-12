@@ -20,8 +20,13 @@ async fn main() -> std::io::Result<()> {
 #[get("/")]
 #[tracing::instrument(level = "info", ret)]
 async fn index(incoming: String) -> String {
-    eprintln!("Echo [local]: {incoming}");
-    format!("Echo [local]: {incoming}")
+    if incoming.contains("EXIT") {
+        eprintln!("Exiting process!");
+        std::process::exit(0);
+    } else {
+        eprintln!("Echo [local]: {incoming}");
+        format!("Echo [local]: {incoming}")
+    }
 }
 
 #[post("/")]

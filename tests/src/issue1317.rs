@@ -103,15 +103,15 @@ mod issue1317 {
             .await;
 
         let request = Request::builder()
-            .method("POST")
-            .body(Full::new(Bytes::from(format!("POST 3"))))
+            .body(Full::new(Bytes::from(format!("EXIT"))))
             .unwrap();
         let response = request_sender
             .send_request(request)
             .await
-            .expect("3rd request ends the program, and it's a 404!");
+            .expect("3rd request ends the program!");
         assert!(response.status().is_client_error());
 
+        drop(request_sender);
         process.wait_assert_success().await;
     }
 }
