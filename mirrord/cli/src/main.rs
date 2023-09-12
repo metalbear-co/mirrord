@@ -403,13 +403,24 @@ async fn register_to_waitlist(email: EmailAddress) -> Result<()> {
     Ok(())
 }
 
+/// Produced by calling `verify_config`.
+///
+/// It's consumed by the IDEs to check if a config is valid, or missing something, without starting
+/// mirrord fully.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 enum VerifiedConfig {
+    /// mirrord is able to run with this config, but it might have some issues or weird behavior
+    /// depending on the `warnings`.
     Success {
+        /// A valid, verified config for the `target` part of mirrord.
         config: TargetConfig,
+        /// Improper combination of features was requested, but mirrord can still run.
         warnings: Vec<String>,
     },
+    /// Invalid config was detected, mirrord cannot run.
+    ///
+    /// May be triggered by extra/lacking `,`, or invalid fields, etc.
     Failed(Vec<String>),
 }
 
