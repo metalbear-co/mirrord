@@ -25,7 +25,7 @@ static LINKERD_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
 static ISTIO_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"-p tcp -m tcp --dport ([\d:,]+)").unwrap());
 
-pub struct MeshRedirect<IPT: IPTables> {
+pub(crate) struct MeshRedirect<IPT: IPTables> {
     preroute: PreroutingRedirect<IPT>,
     managed: IPTableChain<IPT>,
     own_packet_filter: String,
@@ -166,7 +166,7 @@ where
     }
 }
 
-pub enum MeshVendor {
+pub(crate) enum MeshVendor {
     Linkerd,
     Istio,
 }

@@ -11,7 +11,7 @@ use crate::{
 
 #[async_trait]
 #[enum_dispatch]
-pub trait Redirect {
+pub(crate) trait Redirect {
     async fn mount_entrypoint(&self) -> Result<()>;
 
     async fn unmount_entrypoint(&self) -> Result<()>;
@@ -22,7 +22,7 @@ pub trait Redirect {
     async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()>;
 }
 
-pub struct PreroutingRedirect<IPT: IPTables> {
+pub(crate) struct PreroutingRedirect<IPT: IPTables> {
     managed: IPTableChain<IPT>,
 }
 

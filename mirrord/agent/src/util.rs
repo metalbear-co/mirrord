@@ -3,14 +3,16 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     future::Future,
     hash::Hash,
-    path::PathBuf,
     thread::JoinHandle,
 };
 
 use num_traits::{CheckedAdd, Num};
 use tracing::error;
 
-use crate::{error::AgentError, runtime::set_namespace};
+use crate::{
+    error::AgentError,
+    namespace::{set_namespace, NamespaceType},
+};
 
 /// Struct that helps you manage topic -> subscribers
 ///
@@ -191,9 +193,7 @@ where
 #[tracing::instrument(level = "trace")]
 pub(crate) fn enter_namespace(pid: Option<u64>, namespace: &str) -> Result<(), AgentError> {
     if let Some(pid) = pid {
-        let path = PathBuf::from("/proc").join(pid.to_string()).join("ns");
-
-        Ok(set_namespace(path.join(namespace)).inspect_err(|fail| {
+        Ok(set_namespace(pid, NamespaceType::Net).inspect_err(|fail| {
             error!("Failed setting pid {pid:#?} namespace {namespace:#?} with {fail:#?}")
         })?)
     } else {

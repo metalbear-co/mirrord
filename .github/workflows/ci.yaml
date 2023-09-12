@@ -131,6 +131,21 @@ jobs:
       # Check that compiles for the supported linux targets (aarch64)
       - run: cargo-zigbuild clippy --lib --bins --all-features --target aarch64-unknown-linux-gnu -- -Wclippy::indexing_slicing -D warnings
 
+  # if the branch is named is `x.x.x`, x ∈ [0, 9], then it's a release branch
+  # the output of this test is a boolean indicating if it's a release branch
+  # which is then used by `build_mirrord_on_release_branch`
+  check_if_release_branch:
+    runs-on: ubuntu-latest
+    outputs:
+      release_branch: ${{ steps.release-branch.outputs.branch }}
+    steps:
+      - id: release-branch
+        run: |
+          echo "branch=$([[ ${{ github.head_ref || github.ref_name }} =~ "^[0-9]+\.[0-9]+\.[0-9]+$" ]]  && echo "true" || echo "false" )" >> "$GITHUB_OUTPUT"
+      - name: output test
+        run: |
+          echo ${{ steps.release-branch.outputs.branch }}
+
   check-rust-docs:
     runs-on: ubuntu-latest
     needs: changed_files
@@ -406,7 +421,11 @@ jobs:
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run targetless E2E test.
         run: cargo test --target=x86_64-unknown-linux-gnu -p tests targetless --no-default-features --features job
-      - name: Run all E2E test
+      - name: Run all E2E test - docker
+        if: ${{ matrix.container-runtime == 'docker' }}
+        run: cargo test --target=x86_64-unknown-linux-gnu -p tests --features docker -- --test-threads=6
+      - name: Run all E2E test - containerd
+        if: ${{ matrix.container-runtime == 'containerd' }}
         run: cargo test --target=x86_64-unknown-linux-gnu -p tests -- --test-threads=6
       - name: Collect logs
         if: ${{ failure() }}
@@ -425,6 +444,43 @@ jobs:
           config: "markdownlint-config.json"
           args: "README.md"
 
+  # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
+  # building concurrently can run faster the release ide tests
+  build_mirrord_on_release_branch:
+    runs-on: ubuntu-latest
+    name: build mirrord
+    needs: check_if_release_branch
+    if: ${{ needs.check_if_release_branch.outputs.release_branch == 'true' }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: arduino/setup-protoc@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - run: cargo build --manifest-path=./Cargo.toml
+      - name: upload layer
+        uses: actions/upload-artifact@v3
+        with:
+          name: mirrord-artifacts
+          path: |
+            target/debug/mirrord
+          if-no-files-found: error
+
+  # depends on `build_mirrord_on_release_branch` which provides the binary on the current tag
+  # `build_mirrord_on_release_branch` depends on `check_if_release_branch`
+  # which checks if the branch is a release branch
+  intellij_e2e_on_release_branch:
+    needs: build_mirrord_on_release_branch
+    uses: metalbear-co/mirrord-intellij/.github/workflows/reusable_e2e.yaml@main
+    with:
+      mirrord_release_branch: true
+
+  vscode_e2e_on_release_branch:
+    needs: build_mirrord_on_release_branch
+    uses: metalbear-co/mirrord-vscode/.github/workflows/reusable_e2e.yaml@main
+    with:
+      mirrord_release_branch: true
+
   # We need some "accummulation" job here because bors fails (timeouts) to
   # listen on matrix builds.
   # Hence, we have some kind of dummy here that bors can listen on
@@ -436,6 +492,8 @@ jobs:
       [
         towncrier_check,
         changed_files,
+        intellij_e2e_on_release_branch,
+        vscode_e2e_on_release_branch,
         test_agent_image,
         macos_tests,
         integration_tests,
