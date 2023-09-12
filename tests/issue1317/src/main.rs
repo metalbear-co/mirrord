@@ -24,7 +24,14 @@ async fn index(incoming: String) -> String {
     format!("Echo [local]: {incoming}")
 }
 
+#[post("/")]
+#[tracing::instrument(level = "info", ret)]
+async fn quit(incoming: String) -> String {
+    eprintln!("Exiting process!");
+    std::process::exit(0);
+}
+
 use std::time::Duration;
 
-use actix_web::{get, middleware::Logger, App, HttpServer};
+use actix_web::{get, middleware::Logger, post, App, HttpServer};
 use tracing::info;

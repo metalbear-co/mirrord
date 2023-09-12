@@ -97,11 +97,19 @@ mod issue1317 {
 
         let body = response.into_body().collect().await.unwrap();
         assert!(String::from_utf8_lossy(&body.to_bytes()[..]).contains("Echo [remote]"));
-        drop(request_sender);
 
         process
             .wait_for_line(Duration::from_secs(60), "Echo [local]: GET 2")
             .await;
+
+        let request = Request::builder()
+            .method("POST")
+            .body(Full::new(Bytes::from(format!("POST 3"))))
+            .unwrap();
+        let _ = request_sender
+            .send_request(request)
+            .await
+            .expect_err("3rd request ends the program, and isn't handled by remote!");
 
         timeout(Duration::from_secs(40), process.wait())
             .await
