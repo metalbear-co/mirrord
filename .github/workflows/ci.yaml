@@ -56,13 +56,13 @@ jobs:
           fetch-depth: 0
       - name: get CI changes
         id: changed-ci
-        uses: tj-actions/changed-files@v36
+        uses: tj-actions/changed-files@v39
         with:
           files: |
             .github/workflows/ci.yaml
       - name: get changed rs files
         id: changed-rs
-        uses: tj-actions/changed-files@v36
+        uses: tj-actions/changed-files@v39
         with:
           files: |
             **/*.rs
@@ -76,19 +76,19 @@ jobs:
             .cargo/**
       - name: get markdown changes
         id: changed-markdown
-        uses: tj-actions/changed-files@v36
+        uses: tj-actions/changed-files@v39
         with:
           files: |
             README.md
       - name: get protocol changes
         id: changed-protocol
-        uses: tj-actions/changed-files@v36
+        uses: tj-actions/changed-files@v39
         with:
           files: |
             mirrord/protocol/**
       - name: get protocol toml changes
         id: changed-protocol-toml
-        uses: tj-actions/changed-files@v36
+        uses: tj-actions/changed-files@v39
         with:
           files: |
             mirrord/protocol/Cargo.toml
@@ -462,9 +462,9 @@ jobs:
             target/debug/mirrord
           if-no-files-found: error
 
- # depends on `build_mirrord_on_release_branch` which provides the binary on the current tag
- # `build_mirrord_on_release_branch` depends on `check_if_release_branch` 
- # which checks if the branch is a release branch
+  # depends on `build_mirrord_on_release_branch` which provides the binary on the current tag
+  # `build_mirrord_on_release_branch` depends on `check_if_release_branch`
+  # which checks if the branch is a release branch
   intellij_e2e_on_release_branch:
     needs: build_mirrord_on_release_branch
     uses: metalbear-co/mirrord-intellij/.github/workflows/reusable_e2e.yaml@main
