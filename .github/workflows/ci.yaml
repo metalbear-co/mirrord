@@ -161,7 +161,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           # TODO(alex): update this when https://github.com/rust-lang/rust/issues/109631 is fixed
-          toolchain: nightly-2023-04-19
+          toolchain: nightly-2023-09-07
       - run: cargo doc --document-private-items
 
   test_agent:
@@ -306,7 +306,7 @@ jobs:
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
-          toolchain: nightly-2023-04-19
+          toolchain: nightly-2023-09-07
       - name: Install Protoc
         uses: arduino/setup-protoc@v2
         with:
@@ -421,7 +421,11 @@ jobs:
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run targetless E2E test.
         run: cargo test --target=x86_64-unknown-linux-gnu -p tests targetless --no-default-features --features job
-      - name: Run all E2E test
+      - name: Run all E2E test - docker
+        if: ${{ matrix.container-runtime == 'docker' }}
+        run: cargo test --target=x86_64-unknown-linux-gnu -p tests --features docker -- --test-threads=6
+      - name: Run all E2E test - containerd
+        if: ${{ matrix.container-runtime == 'containerd' }}
         run: cargo test --target=x86_64-unknown-linux-gnu -p tests -- --test-threads=6
       - name: Collect logs
         if: ${{ failure() }}
