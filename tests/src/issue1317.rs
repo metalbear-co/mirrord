@@ -109,7 +109,7 @@ mod issue1317 {
             .send_request(request)
             .await
             .expect("3rd request ends the program!");
-        assert!(response.status().is_client_error());
+        assert!(response.status().is_success());
 
         drop(request_sender);
         process.wait_assert_success().await;
