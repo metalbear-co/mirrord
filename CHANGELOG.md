@@ -8,29 +8,6 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
-## [3.67.0](https://github.com/metalbear-co/mirrord/tree/3.67.0) - 2023-09-13
-
-
-### Added
-
-- Add new command `mirrord verify-config [path]` to the mirrord-cli. It
-  verifies a mirrord config file producing a tool friendly output.
-  [#1840](https://github.com/metalbear-co/mirrord/issues/1840)
-
-
-### Fixed
-
-- Support mirroring existing sessions by introducing an HTTP check when the
-  sniffer receives a tcp packet.
-  [#1317](https://github.com/metalbear-co/mirrord/issues/1317)
-
-
-### Internal
-
-- Run IDE e2e tests on release.
-  [#1893](https://github.com/metalbear-co/mirrord/issues/1893)
-
-
 ## [3.66.0](https://github.com/metalbear-co/mirrord/tree/3.66.0) - 2023-09-12
 
 
