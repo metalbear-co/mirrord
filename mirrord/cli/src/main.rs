@@ -21,6 +21,7 @@ use miette::JSONReportHandler;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics};
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
+    target::TargetConfig,
     LayerConfig, LayerFileConfig,
 };
 use mirrord_kube::{
@@ -33,7 +34,7 @@ use mirrord_kube::{
 use mirrord_progress::{Progress, ProgressTracker};
 use operator::operator_command;
 use semver::Version;
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
@@ -402,6 +403,73 @@ async fn register_to_waitlist(email: EmailAddress) -> Result<()> {
     Ok(())
 }
 
+/// Produced by calling `verify_config`.
+///
+/// It's consumed by the IDEs to check if a config is valid, or missing something, without starting
+/// mirrord fully.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+enum VerifiedConfig {
+    /// mirrord is able to run with this config, but it might have some issues or weird behavior
+    /// depending on the `warnings`.
+    Success {
+        /// A valid, verified config for the `target` part of mirrord.
+        config: TargetConfig,
+        /// Improper combination of features was requested, but mirrord can still run.
+        warnings: Vec<String>,
+    },
+    /// Invalid config was detected, mirrord cannot run.
+    ///
+    /// May be triggered by extra/lacking `,`, or invalid fields, etc.
+    Failed(Vec<String>),
+}
+
+/// Verifies a config file specified by `path`.
+///
+/// ## Usage
+///
+/// ```sh
+/// mirrord verify-config [path]
+/// ```
+///
+/// - Example:
+///
+/// ```sh
+/// mirrord verify-config ./config.json
+///
+///
+/// {
+///   "type": "Success",
+///   "config": {
+///     "path": {
+///       "deployment": "sample-deployment",
+///     },
+///     "namespace": null
+///   },
+///   "warnings": []
+/// }
+/// ```
+async fn verify_config(VerifyConfigArgs { path }: VerifyConfigArgs) -> Result<()> {
+    let mut config_context = ConfigContext::default();
+
+    let verified = match LayerFileConfig::from_path(path)
+        .and_then(|config| config.generate_config(&mut config_context))
+        .and_then(|config| {
+            config.verify(&mut config_context)?;
+            Ok(config)
+        }) {
+        Ok(config) => VerifiedConfig::Success {
+            config: config.target,
+            warnings: config_context.get_warnings().to_owned(),
+        },
+        Err(fail) => VerifiedConfig::Failed(vec![fail.to_string()]),
+    };
+
+    println!("{}", serde_json::to_string_pretty(&verified)?);
+
+    Ok(())
+}
+
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> miette::Result<()> {
@@ -439,6 +507,7 @@ fn main() -> miette::Result<()> {
             }
             Commands::InternalProxy => internal_proxy::proxy(watch).await?,
             Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
+            Commands::VerifyConfig(config_path) => verify_config(config_path).await?,
         };
         Ok(())
     });

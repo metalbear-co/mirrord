@@ -55,6 +55,10 @@ pub(super) enum Commands {
     /// Internal proxy - used to aggregate connections from multiple layers
     #[command(hide = true, name = "intproxy")]
     InternalProxy,
+
+    /// Verify config file without starting mirrord.
+    #[command(hide = true)]
+    VerifyConfig(VerifyConfigArgs),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -277,4 +281,11 @@ fn email_parse(email: &str) -> Result<EmailAddress, String> {
     email
         .parse()
         .map_err(|e: email_address::Error| format!("invalid email address provided: {e:?}"))
+}
+
+/// Args for the [`super::verify_config`] mirrord-cli command.
+#[derive(Args, Debug)]
+pub(super) struct VerifyConfigArgs {
+    /// Config file path.
+    pub(super) path: PathBuf,
 }
