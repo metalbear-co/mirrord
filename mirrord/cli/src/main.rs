@@ -421,7 +421,7 @@ enum VerifiedConfig {
     /// Invalid config was detected, mirrord cannot run.
     ///
     /// May be triggered by extra/lacking `,`, or invalid fields, etc.
-    Failed(Vec<String>),
+    Fail { errors: Vec<String> },
 }
 
 /// Verifies a config file specified by `path`.
@@ -435,7 +435,7 @@ enum VerifiedConfig {
 /// - Example:
 ///
 /// ```sh
-/// mirrord verify-config ./config.json
+/// mirrord verify-config ./valid-config.json
 ///
 ///
 /// {
@@ -447,6 +447,16 @@ enum VerifiedConfig {
 ///     "namespace": null
 ///   },
 ///   "warnings": []
+/// }
+/// ```
+///
+/// ```sh
+/// mirrord verify-config ./broken-config.json
+///
+///
+/// {
+///   "type": "Fail",
+///   "errors": ["mirrord-config: IO operation failed with `No such file or directory (os error 2)`"]
 /// }
 /// ```
 async fn verify_config(VerifyConfigArgs { path }: VerifyConfigArgs) -> Result<()> {
@@ -462,7 +472,9 @@ async fn verify_config(VerifyConfigArgs { path }: VerifyConfigArgs) -> Result<()
             config: config.target,
             warnings: config_context.get_warnings().to_owned(),
         },
-        Err(fail) => VerifiedConfig::Failed(vec![fail.to_string()]),
+        Err(fail) => VerifiedConfig::Fail {
+            errors: vec![fail.to_string()],
+        },
     };
 
     println!("{}", serde_json::to_string_pretty(&verified)?);
