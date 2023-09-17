@@ -255,7 +255,7 @@ impl UserSocket {
 
     /// Inform TCP handler about closing a bound/listening port.
     #[tracing::instrument(level = "trace", ret)]
-    pub(crate) fn close(&self) {
+    pub(crate) async fn close(&self) {
         if let Some(port) = self.get_bound_port() {
             match self.kind {
                 SocketKind::Tcp(_) => {
@@ -265,7 +265,8 @@ impl UserSocket {
                     // connections/data.
                     let _ = blocking_send_hook_message(HookMessage::Tcp(
                         super::tcp::TcpIncoming::Close(port),
-                    ));
+                    ))
+                    .await;
                 }
                 // We don't do incoming UDP, so no need to notify anyone about this.
                 SocketKind::Udp(_) => {}

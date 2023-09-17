@@ -51,6 +51,14 @@ pub(super) fn detour_bypass_off() {
     });
 }
 
+pub(super) fn detour_bypass_on() {
+    DETOUR_BYPASS.with(|enabled| {
+        if let Ok(mut bypass) = enabled.try_borrow_mut() {
+            *bypass = true
+        }
+    });
+}
+
 /// Handler for the layer's [`DETOUR_BYPASS`].
 ///
 /// Sets [`DETOUR_BYPASS`] on creation, and turns it off on [`Drop`].

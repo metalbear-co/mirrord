@@ -78,11 +78,12 @@ use std::{collections::VecDeque, ffi::OsString, net::SocketAddr, panic, sync::On
 use bimap::BiMap;
 use common::ResponseChannel;
 use ctor::ctor;
+use detour::{detour_bypass_off, detour_bypass_on};
 use dns::GetAddrInfo;
 use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
 use hooks::HookManager;
-use libc::{c_int, pid_t};
+use libc::c_int;
 use load::ExecutableName;
 use mirrord_config::{
     feature::{
@@ -112,7 +113,7 @@ use tokio::{
     select,
     sync::mpsc::{channel, Receiver, Sender},
 };
-use tracing::{debug, error, info, trace, warn};
+use tracing::{error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -159,6 +160,8 @@ const TRACE_ONLY_ENV: &str = "MIRRORD_LAYER_TRACE_ONLY";
 fn build_runtime() -> Runtime {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
+        .on_thread_park(detour_bypass_off)
+        .on_thread_unpark(detour_bypass_on)
         .build()
         .unwrap()
 }
@@ -181,9 +184,10 @@ fn build_runtime() -> Runtime {
 ///
 /// You probably don't want to use this directly, instead prefer calling
 /// [`blocking_send_hook_message`](common::blocking_send_hook_message) to send internal messages.
-pub(crate) static mut HOOK_SENDER: OnceLock<Sender<HookMessage>> = OnceLock::new();
+pub(crate) static HOOK_SENDER: OnceLock<Sender<HookMessage>> = OnceLock::new();
 
-pub(crate) static LAYER_INITIALIZED: OnceLock<()> = OnceLock::new();
+/// Shared runtime for hooks and our main loop.
+pub(crate) static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
 /// Holds the file operations configuration, as specified by [`FsConfig`].
 ///
@@ -467,21 +471,18 @@ fn layer_start(mut config: LayerConfig) {
 
     // does not need to be atomic because on the first call there are never other threads.
     // Will be false when manually called from fork hook.
-    if LAYER_INITIALIZED.get().is_none() {
-        // If we're here it's not a fork, we're in the ctor.
-        let _ = LAYER_INITIALIZED.set(());
-        init_tracing();
-        set_globals(&config);
-        enable_hooks(
-            config.feature.fs.is_active(),
-            config.feature.network.dns,
-            config
-                .sip_binaries
-                .clone()
-                .map(|x| x.to_vec())
-                .unwrap_or_default(),
-        );
-    }
+
+    init_tracing();
+    set_globals(&config);
+    enable_hooks(
+        config.feature.fs.is_active(),
+        config.feature.network.dns,
+        config
+            .sip_binaries
+            .clone()
+            .map(|x| x.to_vec())
+            .unwrap_or_default(),
+    );
 
     let _detour_guard = DetourGuard::new();
     info!("Initializing mirrord-layer!");
@@ -511,23 +512,9 @@ fn layer_start(mut config: LayerConfig) {
     let (tx, rx) = runtime.block_on(connection::connect_to_proxy(address));
     let (sender, receiver) = channel::<HookMessage>(1000);
 
-    // SAFETY: mutation of `HOOK_SENDER` happens only in the ctor, or in the fork hook, and in all
-    // of those cases there's only one thread so we can do this safely.
-    unsafe {
-        if let Some(old_sender) = HOOK_SENDER.take() {
-            // HOOK_SENDER is already set, we're currently on a fork detour.
+    HOOK_SENDER.set(sender).expect("HOOK_SENDER set failed");
 
-            // we can't call drop since it might trigger the traceback that can be seen here
-            // https://github.com/metalbear-co/mirrord/issues/1792
-            // so we leak it.
-            std::mem::forget(old_sender);
-        }
-        HOOK_SENDER
-            .set(sender)
-            .expect("Setting HOOK_SENDER singleton");
-    };
-
-    start_layer_thread(tx, rx, receiver, config, runtime);
+    start_layer_task(tx, rx, receiver, config, runtime);
 }
 
 /// We need to hook execve syscall to allow mirrord-layer to be loaded with sip patch when loading
@@ -784,7 +771,7 @@ impl Layer {
 ///
 /// ## Details
 ///
-/// We have our big loop here that is initialized in a separate task by [`start_layer_thread`].
+/// We have our big loop here that is initialized in a separate task by [`start_layer_task`].
 ///
 /// In this loop we:
 ///
@@ -879,21 +866,17 @@ async fn thread_loop(
 
 /// Initializes mirrord-layer's [`thread_loop`] in a separate [`tokio::task`].
 #[tracing::instrument(level = "trace", skip(tx, rx, receiver))]
-fn start_layer_thread(
+fn start_layer_task(
     tx: Sender<ClientMessage>,
     rx: Receiver<DaemonMessage>,
     receiver: Receiver<HookMessage>,
     config: LayerConfig,
     runtime: Runtime,
 ) {
-    std::thread::spawn(move || {
-        let _guard = DetourGuard::new();
-        runtime.block_on(thread_loop(receiver, tx, rx, config));
-        runtime.block_on(async move {
-            // wait for background tasks to finish
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        });
-    });
+    // this will make the thread_loop get some execution time on each
+    // call to the runtime from the hooks.
+    runtime.spawn(thread_loop(receiver, tx, rx, config));
+    RUNTIME.set(runtime).expect("RUNTIME set failed");
 }
 
 /// Prepares the [`HookManager`] and [`replace!`]s [`libc`] calls with our hooks, according to what
@@ -948,8 +931,6 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
                 FN_UV_FS_CLOSE
             );
         };
-
-        replace!(&mut hook_manager, "fork", fork_detour, FnFork, FN_FORK);
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut hook_manager, enabled_remote_dns) };
@@ -980,7 +961,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
 ///
 /// Removes the `fd` key from either [`SOCKETS`] or [`OPEN_FILES`].
 /// **DON'T ADD LOGS HERE SINCE CALLER MIGHT CLOSE STDOUT/STDERR CAUSING THIS TO CRASH**
-pub(crate) fn close_layer_fd(fd: c_int) {
+pub(crate) async fn close_layer_fd(fd: c_int) {
     let file_mode_active = FILE_MODE
         .get()
         .expect("Should be set during initialization!")
@@ -992,7 +973,7 @@ pub(crate) fn close_layer_fd(fd: c_int) {
 
         // Closed file is a socket, so if it's already bound to a port - notify agent to stop
         // mirroring/stealing that port.
-        socket.close();
+        socket.close().await;
     } else if file_mode_active {
         OPEN_FILES.remove(&fd);
     }
@@ -1011,23 +992,7 @@ pub(crate) fn close_layer_fd(fd: c_int) {
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     let res = FN_CLOSE(fd);
-    close_layer_fd(fd);
-    res
-}
-
-/// Hook for `libc::fork`.
-///
-/// on macOS, be wary what we do in this path as we might trigger https://github.com/metalbear-co/mirrord/issues/1745
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
-    debug!("Process {} forking!.", std::process::id());
-    let res = FN_FORK();
-    if res == 0 {
-        debug!("Child process initializing layer.");
-        mirrord_layer_entry_point()
-    } else {
-        debug!("Child process id is {res}.");
-    }
+    get_runtime().block_on(close_layer_fd(fd));
     res
 }
 
@@ -1065,6 +1030,11 @@ pub(crate) unsafe extern "C" fn uv_fs_close_detour(
 ) -> c_int {
     // In this case we call `close_layer_fd` before the original close function, because execution
     // does not return to here after calling `FN_UV_FS_CLOSE`.
-    close_layer_fd(fd);
+    get_runtime().block_on(close_layer_fd(fd));
     FN_UV_FS_CLOSE(a, b, fd, c)
+}
+
+#[inline]
+pub(crate) fn get_runtime() -> &'static Runtime {
+    RUNTIME.get().expect("RUNTIME should be set!")
 }

@@ -12,7 +12,7 @@ use std::{
 use libc::{c_int, c_void, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::IncomingMode;
 use mirrord_protocol::{
-    dns::LookupRecord,
+    dns::{DnsLookup, LookupRecord},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
 use socket2::SockAddr;
@@ -26,7 +26,7 @@ use crate::{
     dns::GetAddrInfo,
     error::HookError,
     file::{self, OPEN_FILES},
-    is_debugger_port,
+    get_runtime, is_debugger_port,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
     tcp::{Listen, TcpIncoming},
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_CONFIG, LISTEN_PORTS,
@@ -288,12 +288,15 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
                 Err(io::Error::last_os_error())?
             }
 
-            blocking_send_hook_message(HookMessage::Tcp(TcpIncoming::Listen(Listen {
-                mirror_port: address.port(),
-                requested_port: requested_address.port(),
-                ipv6: address.is_ipv6(),
-                id: socket.id,
-            })))?;
+            get_runtime().block_on(async {
+                blocking_send_hook_message(HookMessage::Tcp(TcpIncoming::Listen(Listen {
+                    mirror_port: address.port(),
+                    requested_port: requested_address.port(),
+                    ipv6: address.is_ipv6(),
+                    id: socket.id,
+                })))
+                .await
+            })?;
 
             Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(Bound {
                 requested_address,
@@ -341,11 +344,15 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
             }
         };
 
-        blocking_send_hook_message(hook_message)?;
+        let res: HookResult<RemoteConnection> = get_runtime().block_on(async {
+            blocking_send_hook_message(hook_message).await?;
+            Ok(mirror_rx.await??)
+        });
+
         let RemoteConnection {
             layer_address,
             user_app_address,
-        } = mirror_rx.blocking_recv()??;
+        } = res?;
 
         // Connect to the interceptor socket that is listening.
         let connect_result: ConnectResult = if CALL_CONNECT {
@@ -736,11 +743,12 @@ pub(super) fn remote_getaddrinfo(
         hook_channel_tx,
     };
 
-    blocking_send_hook_message(HookMessage::GetAddrinfo(hook))?;
+    let addr_info_list: HookResult<DnsLookup> = get_runtime().block_on(async {
+        blocking_send_hook_message(HookMessage::GetAddrinfo(hook)).await?;
+        Ok(hook_channel_rx.await??)
+    });
 
-    let addr_info_list = hook_channel_rx.blocking_recv()??;
-
-    Ok(addr_info_list
+    Ok(addr_info_list?
         .into_iter()
         .map(|LookupRecord { name, ip }| (name, SocketAddr::from((ip, service))))
         .collect())
@@ -856,19 +864,26 @@ pub(super) fn getaddrinfo(
 fn remote_hostname_string() -> Detour<CString> {
     let hostname_path = PathBuf::from("/etc/hostname");
 
-    let OpenFileResponse { fd } = file::ops::RemoteFile::remote_open(
-        hostname_path,
-        OpenOptionsInternal {
-            read: true,
-            ..Default::default()
-        },
-    )?;
+    let (bytes, read_amount) = get_runtime().block_on(async {
+        let OpenFileResponse { fd } = file::ops::RemoteFile::remote_open(
+            hostname_path,
+            OpenOptionsInternal {
+                read: true,
+                ..Default::default()
+            },
+        )
+        .await?;
 
-    let ReadFileResponse { bytes, read_amount } = file::ops::RemoteFile::remote_read(fd, 256)?;
+        let ReadFileResponse { bytes, read_amount } =
+            file::ops::RemoteFile::remote_read(fd, 256).await?;
 
-    let _ = file::ops::RemoteFile::remote_close(fd).inspect_err(|fail| {
-        trace!("Leaking remote file fd (should be harmless) due to {fail:#?}!")
-    });
+        let _ = file::ops::RemoteFile::remote_close(fd)
+            .await
+            .inspect_err(|fail| {
+                trace!("Leaking remote file fd (should be harmless) due to {fail:#?}!")
+            });
+        Detour::Success((bytes, read_amount))
+    })?;
 
     CString::new(
         bytes

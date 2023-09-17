@@ -40,6 +40,7 @@ use crate::{
     detour::{Detour, DetourGuard},
     error::HookError,
     file::ops::{access, lseek, open, read, write},
+    get_runtime,
     hooks::HookManager,
     replace,
 };
@@ -65,14 +66,17 @@ fn update_ptr_from_bypass(ptr: *const c_char, bypass: Bypass) -> *const c_char {
 
 /// Implementation of open_detour, used in open_detour and openat_detour
 /// We ignore mode in case we don't bypass the call.
-#[tracing::instrument(level = "trace", ret)]
-unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, mode: c_int) -> Detour<RawFd> {
+async unsafe fn open_logic(
+    raw_path: *const c_char,
+    open_flags: c_int,
+    _mode: c_int,
+) -> Detour<RawFd> {
     let path = raw_path.checked_into();
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
     trace!("path {:#?} | open_options {:#?}", path, open_options);
 
-    open(path, open_options)
+    open(path, open_options).await
 }
 
 /// Hook for `libc::open`.
@@ -90,7 +94,7 @@ pub(super) unsafe extern "C" fn open_detour(
     if guard.is_none() {
         FN_OPEN(raw_path, open_flags, mode)
     } else {
-        open_logic(raw_path, open_flags, mode).unwrap_or_bypass_with(|_bypass| {
+        get_runtime().block_on(open_logic(raw_path, open_flags, mode)).unwrap_or_bypass_with(|_bypass| {
             #[cfg(target_os = "macos")]
             let raw_path = update_ptr_from_bypass(raw_path, _bypass);
             FN_OPEN(raw_path, open_flags, mode)
@@ -113,7 +117,7 @@ pub(super) unsafe extern "C" fn open64_detour(
     if guard.is_none() {
         FN_OPEN64(raw_path, open_flags, mode)
     } else {
-        open_logic(raw_path, open_flags, mode).unwrap_or_bypass_with(|_bypass| {
+        get_runtime().block_on(open_logic(raw_path, open_flags, mode)).unwrap_or_bypass_with(|_bypass| {
             #[cfg(target_os = "macos")]
             let raw_path = update_ptr_from_bypass(raw_path, _bypass);
             FN_OPEN64(raw_path, open_flags, mode)
@@ -133,7 +137,7 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
     if guard.is_none() {
         FN_OPEN_NOCANCEL(raw_path, open_flags, mode)
     } else {
-        open_logic(raw_path, open_flags, mode).unwrap_or_bypass_with(|_bypass| {
+        get_runtime().block_on(open_logic(raw_path, open_flags, mode)).unwrap_or_bypass_with(|_bypass| {
             #[cfg(target_os = "macos")]
             let raw_path = update_ptr_from_bypass(raw_path, _bypass);
             FN_OPEN_NOCANCEL(raw_path, open_flags, mode)
@@ -148,13 +152,19 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> usize {
-    open_logic(raw_filename, O_RDONLY, O_DIRECTORY)
-        .and_then(|fd| match fdopendir(fd) {
-            Detour::Success(success) => Detour::Success(success),
-            Detour::Bypass(bypass) => Detour::Bypass(bypass),
-            Detour::Error(fail) => {
-                close_layer_fd(fd);
-                Detour::Error(fail)
+    get_runtime()
+        .block_on(async {
+            match open_logic(raw_filename, O_RDONLY, O_DIRECTORY).await {
+                Detour::Success(fd) => match fdopendir(fd).await {
+                    Detour::Success(success) => Detour::Success(success),
+                    Detour::Bypass(bypass) => Detour::Bypass(bypass),
+                    Detour::Error(fail) => {
+                        close_layer_fd(fd).await;
+                        Detour::Error(fail)
+                    }
+                },
+                Detour::Bypass(bypass) => Detour::Bypass(bypass),
+                Detour::Error(fail) => Detour::Error(fail),
             }
         })
         .unwrap_or_bypass_with(|_| FN_OPENDIR(raw_filename))
@@ -162,7 +172,9 @@ pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> u
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fdopendir_detour(fd: RawFd) -> usize {
-    fdopendir(fd).unwrap_or_bypass_with(|_| FN_FDOPENDIR(fd))
+    get_runtime()
+        .block_on(fdopendir(fd))
+        .unwrap_or_bypass_with(|_| FN_FDOPENDIR(fd))
 }
 
 /// Assign DirEntryInternal to dirent
@@ -236,7 +248,8 @@ pub(crate) unsafe extern "C" fn readdir_r_detour(
     entry: *mut dirent,
     result: *mut *mut dirent,
 ) -> c_int {
-    readdir_r(dirp as usize)
+    get_runtime()
+        .block_on(readdir_r(dirp as usize))
         .map(|resp| {
             if let Some(direntry) = resp {
                 match assign_direntry(direntry, entry, false) {
@@ -283,7 +296,9 @@ pub(crate) unsafe extern "C" fn readdir64_r_detour(
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn closedir_detour(dirp: *mut DIR) -> c_int {
-    closedir(dirp as usize).unwrap_or_bypass_with(|_| FN_CLOSEDIR(dirp))
+    get_runtime()
+        .block_on(closedir(dirp as usize))
+        .unwrap_or_bypass_with(|_| FN_CLOSEDIR(dirp))
 }
 
 /// Equivalent to `open_detour`, **except** when `raw_path` specifies a relative path.
@@ -299,11 +314,13 @@ pub(crate) unsafe extern "C" fn openat_detour(
 ) -> RawFd {
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
-    openat(fd, raw_path.checked_into(), open_options).unwrap_or_bypass_with(|_bypass| {
-        #[cfg(target_os = "macos")]
-        let raw_path = update_ptr_from_bypass(raw_path, _bypass);
-        FN_OPENAT(fd, raw_path, open_flags)
-    })
+    get_runtime()
+        .block_on(openat(fd, raw_path.checked_into(), open_options))
+        .unwrap_or_bypass_with(|_bypass| {
+            #[cfg(target_os = "macos")]
+            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+            FN_OPENAT(fd, raw_path, open_flags)
+        })
 }
 
 /// Equivalent to `open_detour`, **except** when `raw_path` specifies a relative path.
@@ -319,11 +336,13 @@ pub(crate) unsafe extern "C" fn openat64_detour(
 ) -> RawFd {
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
-    openat(fd, raw_path.checked_into(), open_options).unwrap_or_bypass_with(|_bypass| {
-        #[cfg(target_os = "macos")]
-        let raw_path = update_ptr_from_bypass(raw_path, _bypass);
-        FN_OPENAT64(fd, raw_path, open_flags)
-    })
+    get_runtime()
+        .block_on(openat(fd, raw_path.checked_into(), open_options))
+        .unwrap_or_bypass_with(|_bypass| {
+            #[cfg(target_os = "macos")]
+            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+            FN_OPENAT64(fd, raw_path, open_flags)
+        })
 }
 
 #[hook_guard_fn]
@@ -334,11 +353,13 @@ pub(crate) unsafe extern "C" fn _openat_nocancel_detour(
 ) -> RawFd {
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
-    openat(fd, raw_path.checked_into(), open_options).unwrap_or_bypass_with(|_bypass| {
-        #[cfg(target_os = "macos")]
-        let raw_path = update_ptr_from_bypass(raw_path, _bypass);
-        FN__OPENAT_NOCANCEL(fd, raw_path, open_flags)
-    })
+    get_runtime()
+        .block_on(openat(fd, raw_path.checked_into(), open_options))
+        .unwrap_or_bypass_with(|_bypass| {
+            #[cfg(target_os = "macos")]
+            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+            FN__OPENAT_NOCANCEL(fd, raw_path, open_flags)
+        })
 }
 
 /// Hook for getdents64, for Go's `os.ReadDir` on Linux.
@@ -492,7 +513,8 @@ pub(crate) unsafe extern "C" fn pread_detour(
     amount_to_read: size_t,
     offset: off_t,
 ) -> ssize_t {
-    pread(fd, amount_to_read as u64, offset as u64)
+    get_runtime()
+        .block_on(pread(fd, amount_to_read as u64, offset as u64))
         .map(|read_file| {
             let ReadFileResponse { bytes, read_amount } = read_file;
             let fixed_read = (amount_to_read as u64).min(read_amount);
@@ -520,7 +542,8 @@ pub(crate) unsafe extern "C" fn _pread_nocancel_detour(
     amount_to_read: size_t,
     offset: off_t,
 ) -> ssize_t {
-    pread(fd, amount_to_read as u64, offset as u64)
+    get_runtime()
+        .block_on(pread(fd, amount_to_read as u64, offset as u64))
         .map(|read_file| {
             let ReadFileResponse { bytes, read_amount } = read_file;
             let fixed_read = (amount_to_read as u64).min(read_amount);
@@ -551,7 +574,8 @@ pub(crate) unsafe extern "C" fn pwrite_detour(
     // Convert the given buffer into a u8 slice, upto the amount to write.
     let casted_in_buffer: &[u8] = slice::from_raw_parts(in_buffer.cast(), amount_to_write);
 
-    pwrite(fd, casted_in_buffer, offset as u64)
+    get_runtime()
+        .block_on(pwrite(fd, casted_in_buffer, offset as u64))
         .map(|write_response| {
             let WriteFileResponse { written_amount } = write_response;
             written_amount as ssize_t
@@ -569,7 +593,8 @@ pub(crate) unsafe extern "C" fn _pwrite_nocancel_detour(
     // Convert the given buffer into a u8 slice, upto the amount to write.
     let casted_in_buffer: &[u8] = slice::from_raw_parts(in_buffer.cast(), amount_to_write);
 
-    pwrite(fd, casted_in_buffer, offset as u64)
+    get_runtime()
+        .block_on(pwrite(fd, casted_in_buffer, offset as u64))
         .map(|write_response| {
             let WriteFileResponse { written_amount } = write_response;
             written_amount as ssize_t
@@ -582,7 +607,8 @@ pub(crate) unsafe extern "C" fn _pwrite_nocancel_detour(
 /// **Bypassed** by `fd`s that are not managed by us (not found in `OPEN_FILES`).
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn lseek_detour(fd: RawFd, offset: off_t, whence: c_int) -> off_t {
-    lseek(fd, offset, whence)
+    get_runtime()
+        .block_on(lseek(fd, offset, whence))
         .map(|offset| i64::try_from(offset).unwrap())
         .unwrap_or_bypass_with(|_| FN_LSEEK(fd, offset, whence))
 }
@@ -598,7 +624,9 @@ pub(crate) unsafe extern "C" fn write_logic(
     let write_bytes =
         (!buffer.is_null()).then(|| slice::from_raw_parts(buffer as *const u8, count).to_vec());
 
-    write(fd, write_bytes).unwrap_or_bypass_with(|_| FN_WRITE(fd, buffer, count))
+    get_runtime()
+        .block_on(write(fd, write_bytes))
+        .unwrap_or_bypass_with(|_| FN_WRITE(fd, buffer, count))
 }
 
 /// Hook for `libc::write`.
@@ -624,16 +652,20 @@ pub(crate) unsafe extern "C" fn _write_nocancel_detour(
     let write_bytes =
         (!buffer.is_null()).then(|| slice::from_raw_parts(buffer as *const u8, count).to_vec());
 
-    write(fd, write_bytes).unwrap_or_bypass_with(|_| FN__WRITE_NOCANCEL(fd, buffer, count))
+    get_runtime()
+        .block_on(write(fd, write_bytes))
+        .unwrap_or_bypass_with(|_| FN__WRITE_NOCANCEL(fd, buffer, count))
 }
 
 /// Implementation of access_detour, used in access_detour and faccessat_detour
 unsafe fn access_logic(raw_path: *const c_char, mode: c_int) -> c_int {
-    access(raw_path.checked_into(), mode as u8).unwrap_or_bypass_with(|_bypass| {
-        #[cfg(target_os = "macos")]
-        let raw_path = update_ptr_from_bypass(raw_path, _bypass);
-        FN_ACCESS(raw_path, mode)
-    })
+    get_runtime()
+        .block_on(access(raw_path.checked_into(), mode as u8))
+        .unwrap_or_bypass_with(|_bypass| {
+            #[cfg(target_os = "macos")]
+            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+            FN_ACCESS(raw_path, mode)
+        })
 }
 
 /// Hook for `libc::access`.
@@ -719,11 +751,13 @@ fn stat_logic<const FOLLOW_SYMLINK: bool>(
     } else {
         let path = raw_path.map(CheckedInto::checked_into);
 
-        xstat(path, fd, FOLLOW_SYMLINK).map(|res| {
-            let res = res.metadata;
-            unsafe { fill_stat(out_stat, &res) };
-            0
-        })
+        get_runtime()
+            .block_on(xstat(path, fd, FOLLOW_SYMLINK))
+            .map(|res| {
+                let res = res.metadata;
+                unsafe { fill_stat(out_stat, &res) };
+                0
+            })
     }
 }
 
@@ -830,11 +864,17 @@ pub(crate) unsafe fn fstatat_logic(
     }
 
     let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
-    xstat(Some(raw_path.checked_into()), Some(fd), follow_symlink).map(|res| {
-        let res = res.metadata;
-        fill_stat(out_stat as *mut _, &res);
-        0
-    })
+    get_runtime()
+        .block_on(xstat(
+            Some(raw_path.checked_into()),
+            Some(fd),
+            follow_symlink,
+        ))
+        .map(|res| {
+            let res = res.metadata;
+            fill_stat(out_stat as *mut _, &res);
+            0
+        })
 }
 
 /// Hook for `libc::fstatat`.
@@ -858,7 +898,8 @@ unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs) -> c_int {
         return HookError::BadPointer.into();
     }
 
-    xstatfs(fd)
+    get_runtime()
+        .block_on(xstatfs(fd))
         .map(|res| {
             let res = res.metadata;
             fill_statfs(out_stat, &res);

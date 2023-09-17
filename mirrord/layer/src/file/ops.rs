@@ -15,7 +15,7 @@ use crate::{
     common::blocking_send_hook_message,
     detour::{Bypass, Detour},
     error::{HookError, HookResult as Result},
-    HookMessage,
+    get_runtime, HookMessage,
 };
 
 /// 1 Megabyte. Large read requests can lead to timeouts.
@@ -34,7 +34,7 @@ impl RemoteFile {
 
     /// Sends a [`FileOperation::Open`] message, opening the file in the agent.
     #[tracing::instrument(level = "trace")]
-    pub(crate) fn remote_open(
+    pub(crate) async fn remote_open(
         path: PathBuf,
         open_options: OpenOptionsInternal,
     ) -> Detour<OpenFileResponse> {
@@ -45,16 +45,16 @@ impl RemoteFile {
             file_channel_tx,
         };
 
-        blocking_send_file_message(FileOperation::Open(requesting_file))?;
+        blocking_send_file_message(FileOperation::Open(requesting_file)).await?;
 
-        Detour::Success(file_channel_rx.blocking_recv()??)
+        Detour::Success(file_channel_rx.await??)
     }
 
     /// Sends a [`FileOperation::Read`] message, reading the file in the agent.
     ///
     /// Blocking request and wait on already found remote_fd
     #[tracing::instrument(level = "trace")]
-    pub(crate) fn remote_read(remote_fd: u64, read_amount: u64) -> Detour<ReadFileResponse> {
+    pub(crate) async fn remote_read(remote_fd: u64, read_amount: u64) -> Detour<ReadFileResponse> {
         let (file_channel_tx, file_channel_rx) = oneshot::channel();
 
         // Limit read size because if we read too much it can lead to a timeout
@@ -67,15 +67,15 @@ impl RemoteFile {
             file_channel_tx,
         };
 
-        blocking_send_file_message(FileOperation::Read(reading_file))?;
+        blocking_send_file_message(FileOperation::Read(reading_file)).await?;
 
-        Detour::Success(file_channel_rx.blocking_recv()??)
+        Detour::Success(file_channel_rx.await??)
     }
 
     /// Sends a [`FileOperation::Close`] message, closing the file in the agent.
     #[tracing::instrument(level = "trace")]
-    pub(crate) fn remote_close(fd: u64) -> Result<()> {
-        blocking_send_file_message(FileOperation::Close(Close { fd }))
+    pub(crate) async fn remote_close(fd: u64) -> Result<()> {
+        blocking_send_file_message(FileOperation::Close(Close { fd })).await
     }
 }
 
@@ -87,9 +87,14 @@ impl Drop for RemoteFile {
         // operation to complete. The write operation is hooked and at some point tries to lock
         // `OPEN_FILES`, which means the thread deadlocks with itself (we call
         // `OPEN_FILES.lock()?.remove()` and then while still locked, `OPEN_FILES.lock()` again)
-        Self::remote_close(self.fd).expect(
-            "mirrord failed to send close file message to main layer thread. Error: {err:?}",
-        );
+        let rt = get_runtime();
+        let _guard = rt.enter();
+        let fd = self.fd;
+        rt.spawn(async move {
+            Self::remote_close(fd).await.expect(
+                "mirrord failed to send close file message to main layer thread. Error: {err:?}",
+            );
+        });
     }
 }
 
@@ -120,7 +125,7 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<u64> {
 
 /// Create temporary local file to get a valid local fd.
 #[tracing::instrument(level = "trace")]
-fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
+async fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
     let random_string = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
     let file_name = format!("{remote_fd}-{random_string}");
     let file_path = env::temp_dir().join(file_name);
@@ -129,7 +134,7 @@ fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
     let local_file_fd: RawFd = unsafe { FN_OPEN(file_path_ptr, O_RDONLY | O_CREAT) };
     if local_file_fd == -1 {
         // Close the remote file if creating a tmp local file failed and we have an invalid local fd
-        close_remote_file_on_failure(remote_fd)?;
+        close_remote_file_on_failure(remote_fd).await?;
         Detour::Error(HookError::LocalFileCreation(remote_fd))
     } else {
         unsafe { unlink(file_path_ptr) };
@@ -139,13 +144,13 @@ fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
 
 /// Close the remote file if the call to [`libc::shm_open`] failed and we have an invalid local fd.
 #[tracing::instrument(level = "trace")]
-fn close_remote_file_on_failure(fd: u64) -> Result<()> {
+async fn close_remote_file_on_failure(fd: u64) -> Result<()> {
     error!("Creating a temporary local file resulted in an error, closing the file remotely!");
-    RemoteFile::remote_close(fd)
+    RemoteFile::remote_close(fd).await
 }
 
-fn blocking_send_file_message(message: FileOperation) -> Result<()> {
-    blocking_send_hook_message(HookMessage::File(message))
+async fn blocking_send_file_message(message: FileOperation) -> Result<()> {
+    blocking_send_hook_message(HookMessage::File(message)).await
 }
 
 /// Blocking wrapper around `libc::open` call.
@@ -160,7 +165,10 @@ fn blocking_send_file_message(message: FileOperation) -> Result<()> {
 /// _local_ and _remote_ file association, plus **inserting** it into the storage for
 /// [`OPEN_FILES`].
 #[tracing::instrument(level = "trace")]
-pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
+pub(crate) async fn open(
+    path: Detour<PathBuf>,
+    open_options: OpenOptionsInternal,
+) -> Detour<RawFd> {
     let path = path?;
 
     if path.is_relative() {
@@ -170,12 +178,12 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
 
     should_ignore!(path, open_options.is_write());
 
-    let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)?;
-
+    let OpenFileResponse { fd: remote_fd } =
+        RemoteFile::remote_open(path.clone(), open_options).await?;
     // TODO: Need a way to say "open a directory", right now `is_dir` always returns false.
-    // This requires having a fake directory name (`/fake`, for example), instead of just converting
-    // the fd to a string.
-    let local_file_fd = create_local_fake_file(remote_fd)?;
+    // This requires having a fake directory name (`/fake`, for example), instead of just
+    // converting the fd to a string.
+    let local_file_fd = create_local_fake_file(remote_fd).await?;
 
     OPEN_FILES.insert(
         local_file_fd,
@@ -216,7 +224,7 @@ pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE>
 
 /// creates a directory stream for the `remote_fd` in the agent
 #[tracing::instrument(level = "trace")]
-pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
+pub(crate) async fn fdopendir(fd: RawFd) -> Detour<usize> {
     // usize == ptr size
     // we don't return a pointer to an address that contains DIR
 
@@ -229,11 +237,11 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
         dir_channel_tx,
     };
 
-    blocking_send_file_message(FileOperation::FdOpenDir(open_dir_request))?;
+    blocking_send_file_message(FileOperation::FdOpenDir(open_dir_request)).await?;
 
-    let OpenDirResponse { fd: remote_dir_fd } = dir_channel_rx.blocking_recv()??;
+    let OpenDirResponse { fd: remote_dir_fd } = dir_channel_rx.await??;
 
-    let local_dir_fd = create_local_fake_file(remote_dir_fd)?;
+    let local_dir_fd = create_local_fake_file(remote_dir_fd).await?;
     OPEN_DIRS.insert(local_dir_fd as usize, remote_dir_fd);
 
     // According to docs, when using fdopendir, the fd is now managed by OS - i.e closed
@@ -244,7 +252,7 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
 
 // fetches the current entry in the directory stream created by `fdopendir`
 #[tracing::instrument(level = "trace")]
-pub(crate) fn readdir_r(dir_stream: usize) -> Detour<Option<DirEntryInternal>> {
+pub(crate) async fn readdir_r(dir_stream: usize) -> Detour<Option<DirEntryInternal>> {
     let remote_fd = *OPEN_DIRS
         .get(&dir_stream)
         .ok_or(Bypass::LocalDirStreamNotFound(dir_stream))?;
@@ -256,27 +264,27 @@ pub(crate) fn readdir_r(dir_stream: usize) -> Detour<Option<DirEntryInternal>> {
         dir_channel_tx,
     };
 
-    blocking_send_file_message(FileOperation::ReadDir(requesting_dir))?;
+    blocking_send_file_message(FileOperation::ReadDir(requesting_dir)).await?;
 
-    let ReadDirResponse { direntry } = dir_channel_rx.blocking_recv()??;
+    let ReadDirResponse { direntry } = dir_channel_rx.await??;
     Detour::Success(direntry)
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn closedir(dir_stream: usize) -> Detour<c_int> {
+pub(crate) async fn closedir(dir_stream: usize) -> Detour<c_int> {
     let remote_fd = *OPEN_DIRS
         .get(&dir_stream)
         .ok_or(Bypass::LocalDirStreamNotFound(dir_stream))?;
 
     let requesting_dir = CloseDir { fd: remote_fd };
 
-    blocking_send_file_message(FileOperation::CloseDir(requesting_dir))?;
+    blocking_send_file_message(FileOperation::CloseDir(requesting_dir)).await?;
 
     Detour::Success(0)
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn openat(
+pub(crate) async fn openat(
     fd: RawFd,
     path: Detour<PathBuf>,
     open_options: OpenOptionsInternal,
@@ -286,7 +294,7 @@ pub(crate) fn openat(
     // `openat` behaves the same as `open` when the path is absolute. When called with AT_FDCWD, the
     // call is propagated to `open`.
     if path.is_absolute() || fd == AT_FDCWD {
-        open(Detour::Success(path), open_options)
+        open(Detour::Success(path), open_options).await
     } else {
         // Relative path requires special handling, we must identify the relative part (relative to
         // what).
@@ -301,10 +309,10 @@ pub(crate) fn openat(
             file_channel_tx,
         };
 
-        blocking_send_file_message(FileOperation::OpenRelative(requesting_file))?;
+        blocking_send_file_message(FileOperation::OpenRelative(requesting_file)).await?;
 
-        let OpenFileResponse { fd: remote_fd } = file_channel_rx.blocking_recv()??;
-        let local_file_fd = create_local_fake_file(remote_fd)?;
+        let OpenFileResponse { fd: remote_fd } = file_channel_rx.await??;
+        let local_file_fd = create_local_fake_file(remote_fd).await?;
 
         OPEN_FILES.insert(
             local_file_fd,
@@ -320,11 +328,17 @@ pub(crate) fn openat(
 /// **Bypassed** when trying to load system files, and files from the current working directory, see
 /// `open`.
 pub(crate) fn read(local_fd: RawFd, read_amount: u64) -> Detour<ReadFileResponse> {
-    get_remote_fd(local_fd).and_then(|remote_fd| RemoteFile::remote_read(remote_fd, read_amount))
+    get_remote_fd(local_fd).and_then(|remote_fd| {
+        get_runtime().block_on(RemoteFile::remote_read(remote_fd, read_amount))
+    })
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<ReadFileResponse> {
+pub(crate) async fn pread(
+    local_fd: RawFd,
+    buffer_size: u64,
+    offset: u64,
+) -> Detour<ReadFileResponse> {
     // We're only interested in files that are paired with mirrord-agent.
     let remote_fd = get_remote_fd(local_fd)?;
 
@@ -337,12 +351,16 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<Re
         file_channel_tx,
     };
 
-    blocking_send_file_message(FileOperation::ReadLimited(reading_file))?;
+    blocking_send_file_message(FileOperation::ReadLimited(reading_file)).await?;
 
-    Detour::Success(file_channel_rx.blocking_recv()??)
+    Detour::Success(file_channel_rx.await??)
 }
 
-pub(crate) fn pwrite(local_fd: RawFd, buffer: &[u8], offset: u64) -> Detour<WriteFileResponse> {
+pub(crate) async fn pwrite(
+    local_fd: RawFd,
+    buffer: &[u8],
+    offset: u64,
+) -> Detour<WriteFileResponse> {
     let remote_fd = get_remote_fd(local_fd)?;
 
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
@@ -354,13 +372,13 @@ pub(crate) fn pwrite(local_fd: RawFd, buffer: &[u8], offset: u64) -> Detour<Writ
         file_channel_tx,
     };
 
-    blocking_send_file_message(FileOperation::WriteLimited(writing_file))?;
+    blocking_send_file_message(FileOperation::WriteLimited(writing_file)).await?;
 
-    Detour::Success(file_channel_rx.blocking_recv()??)
+    Detour::Success(file_channel_rx.await??)
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn lseek(local_fd: RawFd, offset: i64, whence: i32) -> Detour<u64> {
+pub(crate) async fn lseek(local_fd: RawFd, offset: i64, whence: i32) -> Detour<u64> {
     let remote_fd = get_remote_fd(local_fd)?;
 
     let seek_from = match whence {
@@ -384,13 +402,13 @@ pub(crate) fn lseek(local_fd: RawFd, offset: i64, whence: i32) -> Detour<u64> {
         file_channel_tx,
     };
 
-    blocking_send_file_message(FileOperation::Seek(seeking_file))?;
+    blocking_send_file_message(FileOperation::Seek(seeking_file)).await?;
 
-    let SeekFileResponse { result_offset } = file_channel_rx.blocking_recv()??;
+    let SeekFileResponse { result_offset } = file_channel_rx.await??;
     Detour::Success(result_offset)
 }
 
-pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isize> {
+pub(crate) async fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isize> {
     let remote_fd = get_remote_fd(local_fd)?;
 
     let (file_channel_tx, file_channel_rx) = oneshot::channel();
@@ -402,14 +420,14 @@ pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isi
         file_channel_tx,
     };
 
-    blocking_send_file_message(FileOperation::Write(writing_file))?;
+    blocking_send_file_message(FileOperation::Write(writing_file)).await?;
 
-    let WriteFileResponse { written_amount } = file_channel_rx.blocking_recv()??;
+    let WriteFileResponse { written_amount } = file_channel_rx.await??;
     Detour::Success(written_amount.try_into()?)
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn access(path: Detour<PathBuf>, mode: u8) -> Detour<c_int> {
+pub(crate) async fn access(path: Detour<PathBuf>, mode: u8) -> Detour<c_int> {
     let path = path?;
 
     should_ignore!(path, false);
@@ -427,9 +445,9 @@ pub(crate) fn access(path: Detour<PathBuf>, mode: u8) -> Detour<c_int> {
         file_channel_tx,
     };
 
-    blocking_send_file_message(FileOperation::Access(access))?;
+    blocking_send_file_message(FileOperation::Access(access)).await?;
 
-    file_channel_rx.blocking_recv()??;
+    file_channel_rx.await??;
 
     Detour::Success(0)
 }
@@ -440,7 +458,7 @@ pub(crate) fn access(path: Detour<PathBuf>, mode: u8) -> Detour<c_int> {
 /// rawish_path is Option<Option<&CStr>> because we need to differentiate between null pointer
 /// and non existing argument (For error handling)
 #[tracing::instrument(level = "trace")]
-pub(crate) fn xstat(
+pub(crate) async fn xstat(
     rawish_path: Option<Detour<PathBuf>>,
     fd: Option<RawFd>,
     follow_symlink: bool,
@@ -490,22 +508,22 @@ pub(crate) fn xstat(
         file_channel_tx,
     };
 
-    blocking_send_file_message(FileOperation::Xstat(lstat))?;
+    blocking_send_file_message(FileOperation::Xstat(lstat)).await?;
 
-    Detour::Success(file_channel_rx.blocking_recv()??)
+    Detour::Success(file_channel_rx.await??)
 }
 
 #[tracing::instrument(level = "trace")]
-pub(crate) fn xstatfs(fd: RawFd) -> Detour<XstatFsResponse> {
+pub(crate) async fn xstatfs(fd: RawFd) -> Detour<XstatFsResponse> {
     let fd = get_remote_fd(fd)?;
 
     let (fs_channel_tx, fs_channel_rx) = oneshot::channel();
 
     let lstatfs = XstatFs { fd, fs_channel_tx };
 
-    blocking_send_file_message(FileOperation::XstatFs(lstatfs))?;
+    blocking_send_file_message(FileOperation::XstatFs(lstatfs)).await?;
 
-    Detour::Success(fs_channel_rx.blocking_recv()??)
+    Detour::Success(fs_channel_rx.await??)
 }
 
 #[cfg(target_os = "linux")]
