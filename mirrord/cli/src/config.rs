@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
+use clap_complete::Shell;
 use email_address::EmailAddress;
 use mirrord_operator::setup::OperatorNamespace;
 
@@ -38,6 +39,10 @@ pub(super) enum Commands {
     ///
     /// 3. No privileged permissions required for end users.
     Waitlist(WaitlistArgs),
+
+    /// Generates shell completions for the provided shell.
+    /// Supported shells: bash, elvish, fish, powershell, zsh
+    Completions(CompletionsArgs),
 
     #[command(hide = true)]
     Extract { path: String },
@@ -288,4 +293,9 @@ fn email_parse(email: &str) -> Result<EmailAddress, String> {
 pub(super) struct VerifyConfigArgs {
     /// Config file path.
     pub(super) path: PathBuf,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct CompletionsArgs {
+    pub(super) shell: Shell,
 }
