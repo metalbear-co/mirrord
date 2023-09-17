@@ -83,7 +83,7 @@ use dns::GetAddrInfo;
 use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
 use hooks::HookManager;
-use libc::c_int;
+use libc::{c_int, pid_t};
 use load::ExecutableName;
 use mirrord_config::{
     feature::{
@@ -184,10 +184,10 @@ fn build_runtime() -> Runtime {
 ///
 /// You probably don't want to use this directly, instead prefer calling
 /// [`blocking_send_hook_message`](common::blocking_send_hook_message) to send internal messages.
-pub(crate) static HOOK_SENDER: OnceLock<Sender<HookMessage>> = OnceLock::new();
+pub(crate) static mut HOOK_SENDER: OnceLock<Sender<HookMessage>> = OnceLock::new();
 
 /// Shared runtime for hooks and our main loop.
-pub(crate) static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+pub(crate) static mut RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
 /// Holds the file operations configuration, as specified by [`FsConfig`].
 ///
@@ -271,6 +271,7 @@ pub(crate) fn is_debugger_port(addr: &SocketAddr) -> bool {
 
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
 fn layer_pre_initialization() -> Result<(), LayerError> {
+    eprintln!("loading");
     let given_process = EXECUTABLE_NAME.get_or_try_init(ExecutableName::from_env)?;
 
     EXECUTABLE_PATH.get_or_try_init(|| {
@@ -469,20 +470,28 @@ fn layer_start(mut config: LayerConfig) {
         config.feature.network.outgoing.udp = false;
     }
 
+    let (sender, receiver) = channel::<HookMessage>(1000);
+
     // does not need to be atomic because on the first call there are never other threads.
     // Will be false when manually called from fork hook.
-
-    init_tracing();
-    set_globals(&config);
-    enable_hooks(
-        config.feature.fs.is_active(),
-        config.feature.network.dns,
-        config
-            .sip_binaries
-            .clone()
-            .map(|x| x.to_vec())
-            .unwrap_or_default(),
-    );
+    if let Some(runtime) = unsafe { RUNTIME.take() } {
+        std::mem::forget(runtime);
+        let sender = unsafe { HOOK_SENDER.take().expect("HOOK_SENDER should be set!") };
+        std::mem::forget(sender);
+    } else {
+        init_tracing();
+        set_globals(&config);
+        enable_hooks(
+            config.feature.fs.is_active(),
+            config.feature.network.dns,
+            config
+                .sip_binaries
+                .clone()
+                .map(|x| x.to_vec())
+                .unwrap_or_default(),
+        );
+    }
+    unsafe { HOOK_SENDER.set(sender).expect("HOOK_SENDER set failed"); }
 
     let _detour_guard = DetourGuard::new();
     info!("Initializing mirrord-layer!");
@@ -510,9 +519,6 @@ fn layer_start(mut config: LayerConfig) {
 
     let runtime = build_runtime();
     let (tx, rx) = runtime.block_on(connection::connect_to_proxy(address));
-    let (sender, receiver) = channel::<HookMessage>(1000);
-
-    HOOK_SENDER.set(sender).expect("HOOK_SENDER set failed");
 
     start_layer_task(tx, rx, receiver, config, runtime);
 }
@@ -876,7 +882,7 @@ fn start_layer_task(
     // this will make the thread_loop get some execution time on each
     // call to the runtime from the hooks.
     runtime.spawn(thread_loop(receiver, tx, rx, config));
-    RUNTIME.set(runtime).expect("RUNTIME set failed");
+    unsafe { RUNTIME.set(runtime).expect("RUNTIME set failed"); }
 }
 
 /// Prepares the [`HookManager`] and [`replace!`]s [`libc`] calls with our hooks, according to what
@@ -931,6 +937,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
                 FN_UV_FS_CLOSE
             );
         };
+        replace!(&mut hook_manager, "fork", fork_detour, FnFork, FN_FORK);
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut hook_manager, enabled_remote_dns) };
@@ -1036,5 +1043,21 @@ pub(crate) unsafe extern "C" fn uv_fs_close_detour(
 
 #[inline]
 pub(crate) fn get_runtime() -> &'static Runtime {
-    RUNTIME.get().expect("RUNTIME should be set!")
+    unsafe { RUNTIME.get().expect("RUNTIME should be set!") }
+}
+
+/// Hook for `libc::fork`.
+///
+/// on macOS, be wary what we do in this path as we might trigger https://github.com/metalbear-co/mirrord/issues/1745
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
+    eprintln!("Process {} forking!.", std::process::id());
+    let res = FN_FORK();
+    if res == 0 {
+        eprintln!("Child process initializing layer. {} ", std::process::id());
+        mirrord_layer_entry_point()
+    } else {
+        eprintln!("Child process id is {res}. my pid: {}", std::process::id());
+    }
+    res
 }

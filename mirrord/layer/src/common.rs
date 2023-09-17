@@ -56,12 +56,12 @@ pub(crate) type ResponseChannel<T> = oneshot::Sender<RemoteResult<T>>;
 ///
 /// [`ClientMessage`]: mirrord_protocol::codec::ClientMessage
 pub(crate) async fn blocking_send_hook_message(message: HookMessage) -> HookResult<()> {
-    HOOK_SENDER
+    unsafe { HOOK_SENDER
         .get()
         .ok_or(HookError::CannotGetHookSender)?
         .send(message)
         .await
-        .map_err(Into::into)
+        .map_err(Into::into) }
 }
 
 /// These messages are handled internally by the layer, and become `ClientMessage`s sent to

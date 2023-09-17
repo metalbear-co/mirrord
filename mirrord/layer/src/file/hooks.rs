@@ -94,11 +94,13 @@ pub(super) unsafe extern "C" fn open_detour(
     if guard.is_none() {
         FN_OPEN(raw_path, open_flags, mode)
     } else {
-        get_runtime().block_on(open_logic(raw_path, open_flags, mode)).unwrap_or_bypass_with(|_bypass| {
-            #[cfg(target_os = "macos")]
-            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
-            FN_OPEN(raw_path, open_flags, mode)
-        })
+        get_runtime()
+            .block_on(open_logic(raw_path, open_flags, mode))
+            .unwrap_or_bypass_with(|_bypass| {
+                #[cfg(target_os = "macos")]
+                let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+                FN_OPEN(raw_path, open_flags, mode)
+            })
     }
 }
 
@@ -117,11 +119,13 @@ pub(super) unsafe extern "C" fn open64_detour(
     if guard.is_none() {
         FN_OPEN64(raw_path, open_flags, mode)
     } else {
-        get_runtime().block_on(open_logic(raw_path, open_flags, mode)).unwrap_or_bypass_with(|_bypass| {
-            #[cfg(target_os = "macos")]
-            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
-            FN_OPEN64(raw_path, open_flags, mode)
-        })
+        get_runtime()
+            .block_on(open_logic(raw_path, open_flags, mode))
+            .unwrap_or_bypass_with(|_bypass| {
+                #[cfg(target_os = "macos")]
+                let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+                FN_OPEN64(raw_path, open_flags, mode)
+            })
     }
 }
 
@@ -137,11 +141,13 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
     if guard.is_none() {
         FN_OPEN_NOCANCEL(raw_path, open_flags, mode)
     } else {
-        get_runtime().block_on(open_logic(raw_path, open_flags, mode)).unwrap_or_bypass_with(|_bypass| {
-            #[cfg(target_os = "macos")]
-            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
-            FN_OPEN_NOCANCEL(raw_path, open_flags, mode)
-        })
+        get_runtime()
+            .block_on(open_logic(raw_path, open_flags, mode))
+            .unwrap_or_bypass_with(|_bypass| {
+                #[cfg(target_os = "macos")]
+                let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+                FN_OPEN_NOCANCEL(raw_path, open_flags, mode)
+            })
     }
 }
 
