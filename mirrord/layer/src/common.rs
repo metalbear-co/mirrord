@@ -6,7 +6,7 @@ use mirrord_protocol::{file::OpenOptionsInternal, RemoteResult};
 #[cfg(target_os = "macos")]
 use mirrord_sip::{MIRRORD_TEMP_BIN_DIR_CANONIC_STRING, MIRRORD_TEMP_BIN_DIR_STRING};
 use tokio::sync::oneshot;
-use tracing::warn;
+use tracing::{warn, info};
 
 use crate::{
     detour::{Bypass, Detour},
@@ -56,6 +56,7 @@ pub(crate) type ResponseChannel<T> = oneshot::Sender<RemoteResult<T>>;
 ///
 /// [`ClientMessage`]: mirrord_protocol::codec::ClientMessage
 pub(crate) fn blocking_send_hook_message(message: HookMessage) -> HookResult<()> {
+    info!("Sending hook message: {:#?}", message);
     // SAFETY: mutation happens only on initialization.
     unsafe {
         HOOK_SENDER

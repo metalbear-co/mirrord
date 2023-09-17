@@ -521,10 +521,11 @@ fn layer_start(mut config: LayerConfig) {
             // https://github.com/metalbear-co/mirrord/issues/1792
             // so we leak it.
             std::mem::forget(old_sender);
+        } else {
+            HOOK_SENDER
+                .set(sender)
+                .expect("Setting HOOK_SENDER singleton");
         }
-        HOOK_SENDER
-            .set(sender)
-            .expect("Setting HOOK_SENDER singleton");
     };
 
     start_layer_thread(tx, rx, receiver, config, runtime);
@@ -821,6 +822,7 @@ async fn thread_loop(
     loop {
         select! {
             hook_message = receiver.recv() => {
+                info!("Received hook message: {:#?}", hook_message);
                 layer.handle_hook_message(hook_message.unwrap()).await;
             }
             Some(tcp_outgoing_message) = layer.tcp_outgoing_handler.recv() => {
