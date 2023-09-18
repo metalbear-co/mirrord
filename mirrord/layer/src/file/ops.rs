@@ -528,7 +528,7 @@ pub(crate) async fn xstatfs(fd: RawFd) -> Detour<XstatFsResponse> {
 
 #[cfg(target_os = "linux")]
 #[tracing::instrument(level = "trace")]
-pub(crate) fn getdents64(fd: RawFd, buffer_size: u64) -> Detour<GetDEnts64Response> {
+pub(crate) async fn getdents64(fd: RawFd, buffer_size: u64) -> Detour<GetDEnts64Response> {
     // We're only interested in files that are paired with mirrord-agent.
     let remote_fd = get_remote_fd(fd)?;
 
@@ -540,7 +540,7 @@ pub(crate) fn getdents64(fd: RawFd, buffer_size: u64) -> Detour<GetDEnts64Respon
         dents_tx,
     };
 
-    blocking_send_file_message(FileOperation::GetDEnts64(getdents64_message))?;
+    blocking_send_file_message(FileOperation::GetDEnts64(getdents64_message)).await?;
 
     Detour::Success(dents_rx.blocking_recv()??)
 }

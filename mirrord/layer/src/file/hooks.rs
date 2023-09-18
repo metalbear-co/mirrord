@@ -281,7 +281,8 @@ pub(crate) unsafe extern "C" fn readdir64_r_detour(
     entry: *mut dirent64,
     result: *mut *mut dirent64,
 ) -> c_int {
-    readdir_r(dirp as usize)
+    get_runtime()
+        .block_on(readdir_r(dirp as usize))
         .map(|resp| {
             if let Some(direntry) = resp {
                 match assign_direntry64(direntry, entry, false) {
@@ -376,7 +377,7 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
     dirent_buf: *mut c_void,
     buf_size: c_size_t,
 ) -> c_ssize_t {
-    match getdents64(fd, buf_size as u64) {
+    match get_runtime().block_on(getdents64(fd, buf_size as u64)) {
         Detour::Success(res) => {
             let mut next = dirent_buf as *mut dirent;
             let end = next.byte_add(buf_size);
