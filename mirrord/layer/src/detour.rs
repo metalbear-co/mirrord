@@ -9,7 +9,13 @@ use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
-use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf, sync::{OnceLock, atomic::AtomicBool}};
+use std::{
+    cell::RefCell,
+    ops::Deref,
+    os::unix::prelude::*,
+    path::PathBuf,
+    sync::{atomic::AtomicBool, OnceLock},
+};
 
 #[cfg(target_os = "macos")]
 use libc::c_char;
@@ -90,7 +96,7 @@ impl DetourGuard {
                 } else {
                     *bypass = true;
                     Some(Self)
-                }                
+                }
              } else {
                 None
             }

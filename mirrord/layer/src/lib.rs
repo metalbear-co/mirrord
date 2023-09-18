@@ -113,13 +113,13 @@ use tokio::{
     select,
     sync::mpsc::{channel, Receiver, Sender},
 };
-use tracing::{error, info, trace, warn, debug};
+use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
-    common::{HookMessage, blocking_send_hook_message},
+    common::{blocking_send_hook_message, HookMessage},
     debugger_ports::DebuggerPorts,
-    detour::{DetourGuard, global_detour_bypass_set},
+    detour::{global_detour_bypass_set, DetourGuard},
     file::{filter::FILE_FILTER, FileHandler},
     load::LoadType,
     socket::CONNECTION_QUEUE,
@@ -491,7 +491,9 @@ fn layer_start(mut config: LayerConfig) {
                 .unwrap_or_default(),
         );
     }
-    unsafe { HOOK_SENDER.set(sender).expect("HOOK_SENDER set failed"); }
+    unsafe {
+        HOOK_SENDER.set(sender).expect("HOOK_SENDER set failed");
+    }
 
     let _detour_guard = DetourGuard::new();
     info!("Initializing mirrord-layer!");
@@ -603,7 +605,7 @@ struct Layer {
     steal: bool,
 
     /// Controls if layer should keep running
-    run: bool
+    run: bool,
 }
 
 impl Layer {
@@ -637,7 +639,7 @@ impl Layer {
             ),
             http_response_receiver,
             steal,
-            run: true
+            run: true,
         }
     }
 
@@ -890,7 +892,9 @@ fn start_layer_task(
     // this will make the thread_loop get some execution time on each
     // call to the runtime from the hooks.
     runtime.spawn(thread_loop(receiver, tx, rx, config));
-    unsafe { RUNTIME.set(runtime).expect("RUNTIME set failed"); }
+    unsafe {
+        RUNTIME.set(runtime).expect("RUNTIME set failed");
+    }
 }
 
 /// Prepares the [`HookManager`] and [`replace!`]s [`libc`] calls with our hooks, according to what
@@ -1019,7 +1023,9 @@ pub(crate) unsafe extern "C" fn exit_detour(status: c_int) {
     // Bypass all
     global_detour_bypass_set(true);
     // Let mainloop know and exit
-    get_runtime().block_on(blocking_send_hook_message(HookMessage::Exit)).expect("Failed to send exit message");
+    get_runtime()
+        .block_on(blocking_send_hook_message(HookMessage::Exit))
+        .expect("Failed to send exit message");
 
     FN_EXIT(status);
 }
