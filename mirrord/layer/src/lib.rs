@@ -271,7 +271,6 @@ pub(crate) fn is_debugger_port(addr: &SocketAddr) -> bool {
 
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
 fn layer_pre_initialization() -> Result<(), LayerError> {
-    eprintln!("loading");
     let given_process = EXECUTABLE_NAME.get_or_try_init(ExecutableName::from_env)?;
 
     EXECUTABLE_PATH.get_or_try_init(|| {
