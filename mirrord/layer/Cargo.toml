@@ -29,7 +29,7 @@ tracing-subscriber.workspace = true
 frida-gum = { git = "https://github.com/metalbear-co/frida-rust", version = "0.13", features = ["auto-download"], branch="capstone_remove" }
 futures.workspace = true
 
-tokio = { workspace = true, features = ["fs", "rt", "rt-multi-thread", "macros", "process"] }
+tokio = { workspace = true, features = ["fs", "rt", "rt-multi-thread", "macros"] }
 serde.workspace = true
 serde_json.workspace = true
 
