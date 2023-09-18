@@ -5,7 +5,8 @@
 
 use std::{collections::HashMap, time::Duration};
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::generate;
 use config::*;
 use email_address::EmailAddress;
 use exec::execvp;
@@ -520,6 +521,10 @@ fn main() -> miette::Result<()> {
             Commands::InternalProxy => internal_proxy::proxy(watch).await?,
             Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
             Commands::VerifyConfig(config_path) => verify_config(config_path).await?,
+            Commands::Completions(args) => {
+                let mut cmd: clap::Command = Cli::command();
+                generate(args.shell, &mut cmd, "mirrord", &mut std::io::stdout());
+            }
         };
         Ok(())
     });
