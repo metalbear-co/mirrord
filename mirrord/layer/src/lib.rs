@@ -117,9 +117,9 @@ use tracing::{error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
-    common::HookMessage,
+    common::{HookMessage, blocking_send_hook_message},
     debugger_ports::DebuggerPorts,
-    detour::DetourGuard,
+    detour::{DetourGuard, global_detour_bypass_set},
     file::{filter::FILE_FILTER, FileHandler},
     load::LoadType,
     socket::CONNECTION_QUEUE,
@@ -601,6 +601,9 @@ struct Layer {
     /// - `true`: uses `tcp_steal_handler`;
     /// - `false`: uses `tcp_mirror_handler`.
     steal: bool,
+
+    /// Controls if layer should keep running
+    run: bool
 }
 
 impl Layer {
@@ -634,6 +637,7 @@ impl Layer {
             ),
             http_response_receiver,
             steal,
+            run: true
         }
     }
 
@@ -691,6 +695,10 @@ impl Layer {
                 .handle_hook_message(message, &self.tx)
                 .await
                 .unwrap(),
+            HookMessage::Exit => {
+                debug!("main loop exiting");
+                self.run = false;
+            }
         }
     }
 
@@ -811,7 +819,7 @@ async fn thread_loop(
         warn!("Unable to switch protocol: {err}");
     }
 
-    loop {
+    while layer.run {
         select! {
             hook_message = receiver.recv() => {
                 layer.handle_hook_message(hook_message.unwrap()).await;
@@ -938,6 +946,8 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
             );
         };
         replace!(&mut hook_manager, "fork", fork_detour, FnFork, FN_FORK);
+        // we hook exit instead of using `atexit` because we want to be the first one to get called.
+        replace!(&mut hook_manager, "exit", exit_detour, FnExit, FN_EXIT);
     };
 
     unsafe { socket::hooks::enable_socket_hooks(&mut hook_manager, enabled_remote_dns) };
@@ -1001,6 +1011,17 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     let res = FN_CLOSE(fd);
     get_runtime().block_on(close_layer_fd(fd));
     res
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn exit_detour(status: c_int) {
+    trace!("Exiting pid: {:?}", std::process::id());
+    // Bypass all
+    global_detour_bypass_set(true);
+    // Let mainloop know and exit
+    blocking_send_hook_message(HookMessage::Exit).expect("Failed to send exit message");
+
+    FN_EXIT(status);
 }
 
 /// No need to guard because we call another detour which will do the guard for us.

@@ -87,6 +87,9 @@ pub(crate) enum HookMessage {
 
     /// Message originating from `getaddrinfo`, see [`GetAddrInfo`].
     GetAddrinfo(GetAddrInfo),
+
+    /// Process is closing, cleanup
+    Exit
 }
 
 /// Converts raw pointer values `P` to some other type.

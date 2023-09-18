@@ -9,7 +9,7 @@ use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
-use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf, sync::OnceLock};
+use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf, sync::{OnceLock, atomic::AtomicBool}};
 
 #[cfg(target_os = "macos")]
 use libc::c_char;
@@ -40,6 +40,9 @@ thread_local!(
     static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false)
 );
 
+/// Controls globally if hooks are bypassed or not.
+static GLOBAL_DETOUR_BYPASS: AtomicBool = AtomicBool::new(false);
+
 /// Sets [`DETOUR_BYPASS`] to `false`.
 ///
 /// Prefer relying on the [`Drop`] implementation of [`DetourGuard`] instead.
@@ -59,6 +62,11 @@ pub(super) fn detour_bypass_on() {
     });
 }
 
+/// Sets [`GLOBAL_DETOUR_BYPASS`]
+/// Controlling if we bypass all hooks on all threads.
+pub(super) fn global_detour_bypass_set(active: bool) {
+    GLOBAL_DETOUR_BYPASS.store(active, std::sync::atomic::Ordering::Relaxed);
+}
 /// Handler for the layer's [`DETOUR_BYPASS`].
 ///
 /// Sets [`DETOUR_BYPASS`] on creation, and turns it off on [`Drop`].
@@ -76,8 +84,13 @@ impl DetourGuard {
             if let Ok(bypass) = enabled.try_borrow() && *bypass {
                 None
             } else if let Ok(mut bypass) = enabled.try_borrow_mut(){
-                *bypass = true;
-                Some(Self)
+                // don't add overhead so do it only when bypass isn't true
+                if GLOBAL_DETOUR_BYPASS.load(std::sync::atomic::Ordering::Relaxed) {
+                    return None
+                } else {
+                    *bypass = true;
+                    Some(Self)
+                }                
              } else {
                 None
             }
