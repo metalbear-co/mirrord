@@ -113,7 +113,7 @@ use tokio::{
     select,
     sync::mpsc::{channel, Receiver, Sender},
 };
-use tracing::{error, info, trace, warn};
+use tracing::{error, info, trace, warn, debug};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -1019,7 +1019,7 @@ pub(crate) unsafe extern "C" fn exit_detour(status: c_int) {
     // Bypass all
     global_detour_bypass_set(true);
     // Let mainloop know and exit
-    blocking_send_hook_message(HookMessage::Exit).expect("Failed to send exit message");
+    get_runtime().block_on(blocking_send_hook_message(HookMessage::Exit)).expect("Failed to send exit message");
 
     FN_EXIT(status);
 }
