@@ -128,9 +128,10 @@ where
         let k8s_api = KubernetesAPI::create(config)
             .await
             .map_err(CliError::KubernetesApiFailed)?;
-        if (k8s_api.detect_openshift(progress).await).is_err() {
-            debug!("couldn't determine OpenShift");
-        };
+
+        let _ = k8s_api.detect_openshift(progress).await.map_err(|err| {
+            debug!("couldn't determine OpenShift: {err}");
+        });
 
         let agent_connect_info = tokio::time::timeout(
             Duration::from_secs(config.agent.startup_timeout),
