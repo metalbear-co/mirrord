@@ -11,7 +11,7 @@ use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
-use tracing::trace;
+use tracing::{debug, trace};
 
 use crate::{CliError, Result};
 
@@ -128,9 +128,8 @@ where
         let k8s_api = KubernetesAPI::create(config)
             .await
             .map_err(CliError::KubernetesApiFailed)?;
-
         if (k8s_api.detect_openshift(progress).await).is_err() {
-            progress.warning("couldn't determine OpenShift");
+            debug!("couldn't determine OpenShift");
         };
 
         let agent_connect_info = tokio::time::timeout(
