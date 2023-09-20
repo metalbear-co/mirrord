@@ -5,7 +5,8 @@
 
 use std::{collections::HashMap, time::Duration};
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::generate;
 use config::*;
 use email_address::EmailAddress;
 use exec::execvp;
@@ -18,19 +19,23 @@ use k8s_openapi::{
 };
 use kube::api::ListParams;
 use miette::JSONReportHandler;
-use mirrord_config::{config::MirrordConfig, LayerConfig, LayerFileConfig};
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics};
+use mirrord_config::{
+    config::{ConfigContext, MirrordConfig},
+    target::TargetConfig,
+    LayerConfig, LayerFileConfig,
+};
 use mirrord_kube::{
     api::{
         container::SKIP_NAMES,
-        get_k8s_resource_api,
-        kubernetes::{create_kube_api, rollout::Rollout},
+        kubernetes::{create_kube_api, get_k8s_resource_api, rollout::Rollout},
     },
     error::KubeApiError,
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use operator::operator_command;
 use semver::Version;
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
@@ -47,7 +52,62 @@ mod operator;
 
 pub(crate) use error::{CliError, Result};
 
-async fn exec(args: &ExecArgs) -> Result<()> {
+async fn exec_process<P>(
+    config: LayerConfig,
+    args: &ExecArgs,
+    progress: &P,
+    analytics: &mut AnalyticsReporter,
+) -> Result<()>
+where
+    P: Progress + Send + Sync,
+{
+    let mut sub_progress = progress.subtask("preparing to launch process");
+
+    #[cfg(target_os = "macos")]
+    let execution_info =
+        MirrordExecution::start(&config, Some(&args.binary), &mut sub_progress, analytics).await?;
+    #[cfg(not(target_os = "macos"))]
+    let execution_info = MirrordExecution::start(&config, &mut sub_progress, analytics).await?;
+
+    #[cfg(target_os = "macos")]
+    let (_did_sip_patch, binary) = match execution_info.patched_path {
+        None => (false, args.binary.clone()),
+        Some(sip_result) => (true, sip_result),
+    };
+
+    #[cfg(not(target_os = "macos"))]
+    let binary = args.binary.clone();
+
+    // Stop confusion with layer
+    std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
+
+    // Set environment variables from agent + layer settings.
+    for (key, value) in &execution_info.environment {
+        std::env::set_var(key, value);
+    }
+
+    let mut binary_args = args.binary_args.clone();
+    // Put original executable in argv[0] even if actually running patched version.
+    binary_args.insert(0, args.binary.clone());
+
+    sub_progress.success(Some("ready to launch process"));
+    // The execve hook is not yet active and does not hijack this call.
+    let err = execvp(binary.clone(), binary_args.clone());
+    error!("Couldn't execute {:?}", err);
+    analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    if let exec::Error::Errno(errno) = err {
+        if Into::<i32>::into(errno) == 86 {
+            // "Bad CPU type in executable"
+            if _did_sip_patch {
+                return Err(CliError::RosettaMissing(binary));
+            }
+        }
+    }
+    Err(CliError::BinaryExecuteFailed(binary, binary_args))
+}
+
+async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord exec");
     if !args.disable_version_check {
         prompt_outdated_version(&progress).await;
@@ -158,51 +218,23 @@ async fn exec(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_CONFIG_FILE", full_path);
     }
 
-    let mut sub_progress = progress.subtask("preparing to launch process");
+    let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
-    let config = LayerConfig::from_env()?;
+    let mut analytics = AnalyticsReporter::only_error(config.telemetry, watch);
+    (&config).collect_analytics(analytics.get_mut());
 
-    #[cfg(target_os = "macos")]
-    let execution_info =
-        MirrordExecution::start(&config, Some(&args.binary), &sub_progress).await?;
-    #[cfg(not(target_os = "macos"))]
-    let execution_info = MirrordExecution::start(&config, &sub_progress).await?;
-
-    #[cfg(target_os = "macos")]
-    let (_did_sip_patch, binary) = match execution_info.patched_path {
-        None => (false, args.binary.clone()),
-        Some(sip_result) => (true, sip_result),
-    };
-
-    #[cfg(not(target_os = "macos"))]
-    let binary = args.binary.clone();
-
-    // Stop confusion with layer
-    std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
-
-    // Set environment variables from agent + layer settings.
-    for (key, value) in &execution_info.environment {
-        std::env::set_var(key, value);
+    config.verify(&mut context)?;
+    for warning in context.get_warnings() {
+        progress.warning(warning);
     }
 
-    let mut binary_args = args.binary_args.clone();
-    // Put original executable in argv[0] even if actually running patched version.
-    binary_args.insert(0, args.binary.clone());
+    let execution_result = exec_process(config, args, &progress, &mut analytics).await;
 
-    sub_progress.success(Some("ready to launch process"));
-    // The execve hook is not yet active and does not hijack this call.
-    let err = execvp(binary.clone(), binary_args.clone());
-    error!("Couldn't execute {:?}", err);
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    if let exec::Error::Errno(errno) = err {
-        if Into::<i32>::into(errno) == 86 {
-            // "Bad CPU type in executable"
-            if _did_sip_patch {
-                return Err(CliError::RosettaMissing(binary));
-            }
-        }
+    if execution_result.is_err() && !analytics.has_error() {
+        analytics.set_error(AnalyticsError::Unknown);
     }
-    Err(CliError::BinaryExecuteFailed(binary, binary_args))
+
+    execution_result
 }
 
 /// Returns a list of (pod name, [container names]) pairs, filtering out mesh side cars
@@ -235,10 +267,8 @@ async fn get_kube_pods(
                 .as_ref()?
                 .containers
                 .iter()
-                .filter_map(|container| {
-                    // filter out mesh side cars
-                    (!SKIP_NAMES.contains(container.name.as_str())).then(|| container.name.clone())
-                })
+                .filter(|&container| (!SKIP_NAMES.contains(container.name.as_str())))
+                .map(|container| container.name.clone())
                 .collect();
             Some((name, containers))
         })
@@ -304,18 +334,20 @@ where
 ///  "pod/py-serv-deployment-5c57fbdc98-pdbn4/container/py-serv",
 /// ]```
 async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
-    let (accept_invalid_certificates, kubeconfig, namespace, kube_context) =
-        if let Some(config) = &args.config_file {
-            let layer_config = LayerFileConfig::from_path(config)?.generate_config()?;
-            (
-                layer_config.accept_invalid_certificates,
-                layer_config.kubeconfig,
-                layer_config.target.namespace,
-                layer_config.kube_context,
-            )
-        } else {
-            (false, None, None, None)
-        };
+    let (accept_invalid_certificates, kubeconfig, namespace, kube_context) = if let Some(config) =
+        &args.config_file
+    {
+        let mut cfg_context = ConfigContext::default();
+        let layer_config = LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?;
+        (
+            layer_config.accept_invalid_certificates,
+            layer_config.kubeconfig,
+            layer_config.target.namespace,
+            layer_config.kube_context,
+        )
+    } else {
+        (false, None, None, None)
+    };
 
     let client = create_kube_api(accept_invalid_certificates, kubeconfig, kube_context)
         .await
@@ -372,10 +404,88 @@ async fn register_to_waitlist(email: EmailAddress) -> Result<()> {
     Ok(())
 }
 
+/// Produced by calling `verify_config`.
+///
+/// It's consumed by the IDEs to check if a config is valid, or missing something, without starting
+/// mirrord fully.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+enum VerifiedConfig {
+    /// mirrord is able to run with this config, but it might have some issues or weird behavior
+    /// depending on the `warnings`.
+    Success {
+        /// A valid, verified config for the `target` part of mirrord.
+        config: TargetConfig,
+        /// Improper combination of features was requested, but mirrord can still run.
+        warnings: Vec<String>,
+    },
+    /// Invalid config was detected, mirrord cannot run.
+    ///
+    /// May be triggered by extra/lacking `,`, or invalid fields, etc.
+    Fail { errors: Vec<String> },
+}
+
+/// Verifies a config file specified by `path`.
+///
+/// ## Usage
+///
+/// ```sh
+/// mirrord verify-config [path]
+/// ```
+///
+/// - Example:
+///
+/// ```sh
+/// mirrord verify-config ./valid-config.json
+///
+///
+/// {
+///   "type": "Success",
+///   "config": {
+///     "path": {
+///       "deployment": "sample-deployment",
+///     },
+///     "namespace": null
+///   },
+///   "warnings": []
+/// }
+/// ```
+///
+/// ```sh
+/// mirrord verify-config ./broken-config.json
+///
+///
+/// {
+///   "type": "Fail",
+///   "errors": ["mirrord-config: IO operation failed with `No such file or directory (os error 2)`"]
+/// }
+/// ```
+async fn verify_config(VerifyConfigArgs { path }: VerifyConfigArgs) -> Result<()> {
+    let mut config_context = ConfigContext::default();
+
+    let verified = match LayerFileConfig::from_path(path)
+        .and_then(|config| config.generate_config(&mut config_context))
+        .and_then(|config| {
+            config.verify(&mut config_context)?;
+            Ok(config)
+        }) {
+        Ok(config) => VerifiedConfig::Success {
+            config: config.target,
+            warnings: config_context.get_warnings().to_owned(),
+        },
+        Err(fail) => VerifiedConfig::Fail {
+            errors: vec![fail.to_string()],
+        },
+    };
+
+    println!("{}", serde_json::to_string_pretty(&verified)?);
+
+    Ok(())
+}
+
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[tokio::main]
-async fn main() -> miette::Result<()> {
+fn main() -> miette::Result<()> {
     let cli = Cli::parse();
 
     if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
@@ -387,22 +497,48 @@ async fn main() -> miette::Result<()> {
             .init();
     }
 
-    match cli.commands {
-        Commands::Exec(args) => exec(&args).await?,
-        Commands::Extract { path } => {
-            extract_library(
-                Some(path),
-                &ProgressTracker::from_env("mirrord extract library..."),
-                false,
-            )?;
-        }
-        Commands::ListTargets(args) => print_pod_targets(&args).await?,
-        Commands::Operator(args) => operator_command(*args).await?,
-        Commands::ExtensionExec(args) => extension_exec(*args).await?,
-        Commands::InternalProxy => internal_proxy::proxy().await?,
-        Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
-    }
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(CliError::RuntimeError)?;
+    let (signal, watch) = drain::channel();
 
+    let res: Result<(), CliError> = rt.block_on(async move {
+        match cli.commands {
+            Commands::Exec(args) => exec(&args, watch).await?,
+            Commands::Extract { path } => {
+                extract_library(
+                    Some(path),
+                    &ProgressTracker::from_env("mirrord extract library..."),
+                    false,
+                )?;
+            }
+            Commands::ListTargets(args) => print_pod_targets(&args).await?,
+            Commands::Operator(args) => operator_command(*args).await?,
+            Commands::ExtensionExec(args) => {
+                extension_exec(*args, watch).await?;
+            }
+            Commands::InternalProxy => internal_proxy::proxy(watch).await?,
+            Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
+            Commands::VerifyConfig(config_path) => verify_config(config_path).await?,
+            Commands::Completions(args) => {
+                let mut cmd: clap::Command = Cli::command();
+                generate(args.shell, &mut cmd, "mirrord", &mut std::io::stdout());
+            }
+        };
+        Ok(())
+    });
+
+    rt.block_on(async move {
+        tokio::time::timeout(Duration::from_secs(10), signal.drain())
+            .await
+            .is_err()
+            .then(|| {
+                warn!("Failed to drain in a timely manner, ongoing tasks dropped.");
+            });
+    });
+
+    res?;
     Ok(())
 }
 

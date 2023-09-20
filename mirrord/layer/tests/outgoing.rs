@@ -48,7 +48,10 @@ async fn outgoing_udp(dylib_path: &PathBuf) {
 
     for peer in peers {
         let msg = conn.try_next().await.unwrap().unwrap();
-        let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect { remote_address: SocketAddress::Ip(addr) })) = msg else {
+        let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
+            remote_address: SocketAddress::Ip(addr),
+        })) = msg
+        else {
             panic!("Invalid message received from layer: {msg:?}");
         };
         assert_eq!(addr, peer);
@@ -63,7 +66,11 @@ async fn outgoing_udp(dylib_path: &PathBuf) {
         .unwrap();
 
         let msg = conn.try_next().await.unwrap().unwrap();
-        let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite { connection_id: 0, bytes })) = msg else {
+        let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
+            connection_id: 0,
+            bytes,
+        })) = msg
+        else {
             panic!("Invalid message received from layer: {msg:?}");
         };
         conn.send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
@@ -108,7 +115,10 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &PathBuf, con
 
     for peer in peers {
         let msg = conn.try_next().await.unwrap().unwrap();
-        let ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect { remote_address: SocketAddress::Ip(addr) })) = msg else {
+        let ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
+            remote_address: SocketAddress::Ip(addr),
+        })) = msg
+        else {
             panic!("Invalid message received from layer: {msg:?}");
         };
         assert_eq!(addr, peer);
@@ -123,7 +133,11 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &PathBuf, con
         .unwrap();
 
         let msg = conn.try_next().await.unwrap().unwrap();
-        let ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite { connection_id: 0, bytes })) = msg else {
+        let ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
+            connection_id: 0,
+            bytes,
+        })) = msg
+        else {
             panic!("Invalid message received from layer: {msg:?}");
         };
         conn.send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(

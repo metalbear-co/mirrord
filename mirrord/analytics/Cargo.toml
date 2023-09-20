@@ -15,10 +15,12 @@ edition.workspace = true
 
 
 [dependencies]
-
+base64 = "0.21"
 serde.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true}
 tracing.workspace = true
+tokio.workspace = true
+drain.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

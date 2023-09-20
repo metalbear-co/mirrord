@@ -9,12 +9,14 @@ mod traffic {
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::LogParams, Api, Client};
     use rstest::*;
+    use tokio::{fs::File, io::AsyncWriteExt};
 
     use crate::utils::{
-        hostname_service, kube_client, run_exec_with_target, service, udp_logger_service,
-        KubeService, CONTAINER_NAME,
+        config_dir, hostname_service, kube_client, run_exec_with_target, service,
+        udp_logger_service, KubeService, CONTAINER_NAME,
     };
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
@@ -31,6 +33,7 @@ mod traffic {
         assert!(res.success());
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
@@ -50,6 +53,7 @@ mod traffic {
     // TODO: change outgoing TCP tests to use the same setup as in the outgoing UDP test so that
     //       they actually verify that the traffic is intercepted and forwarded (and isn't just
     //       directly sent out from the local application).
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
@@ -65,6 +69,7 @@ mod traffic {
         assert!(res.success());
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[should_panic]
@@ -81,6 +86,7 @@ mod traffic {
         assert!(res.success());
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn outgoing_traffic_single_request_disabled(#[future] service: KubeService) {
@@ -103,6 +109,7 @@ mod traffic {
         assert!(res.success());
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn outgoing_traffic_make_request_after_listen(#[future] service: KubeService) {
@@ -117,6 +124,7 @@ mod traffic {
         assert!(res.success());
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn outgoing_traffic_make_request_localhost(#[future] service: KubeService) {
@@ -134,6 +142,7 @@ mod traffic {
     /// Currently, mirrord only intercepts and forwards outgoing udp traffic if the application
     /// binds a non-0 port and calls `connect`. This test runs with mirrord a node app that does
     /// that and verifies that mirrord intercepts and forwards the outgoing udp message.
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
@@ -215,8 +224,126 @@ mod traffic {
         assert!(found, "Did not find expected log line.");
     }
 
+    /// Very similar to [`outgoing_traffic_udp_with_connect`], but it uses the outgoing traffic
+    /// filter to resolve the remote host names.
+    #[cfg_attr(not(feature = "job"), ignore)]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    pub async fn outgoing_traffic_filter_udp_with_connect(
+        config_dir: &std::path::PathBuf,
+        #[future] udp_logger_service: KubeService,
+        #[future] service: KubeService,
+        #[future] kube_client: Client,
+    ) {
+        let internal_service = udp_logger_service.await; // Only reachable from withing the cluster.
+        let target_service = service.await; // Impersonate a pod of this service, to reach internal.
+        let kube_client = kube_client.await;
+        let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &internal_service.namespace);
+        let mut lp = LogParams {
+            container: Some(String::from(CONTAINER_NAME)),
+            follow: false,
+            limit_bytes: None,
+            pretty: false,
+            previous: false,
+            since_seconds: None,
+            tail_lines: None,
+            timestamps: false,
+        };
+
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_udp_client_with_connect.mjs",
+            "31415",
+            // Reaching service by only service name is only possible from within the cluster.
+            &internal_service.name,
+        ];
+
+        // Make connections on port `31415` go through local.
+        let mut config_path = config_dir.clone();
+        config_path.push("outgoing_filter_local.json");
+
+        // Meta-test: verify that the application cannot reach the internal service without
+        // mirrord forwarding outgoing UDP traffic via the target pod.
+        // If this verification fails, the test itself is invalid.
+        let mut process = run_exec_with_target(
+            node_command.clone(),
+            &target_service.target,
+            Some(&target_service.namespace),
+            None,
+            Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
+        )
+        .await;
+        let res = process.wait().await;
+        assert!(!res.success()); // Should fail because local process cannot reach service.
+        let stripped_target = internal_service.target.split('/').collect::<Vec<&str>>()[1];
+        let logs = pod_api.logs(stripped_target, &lp).await;
+        assert_eq!(logs.unwrap(), "");
+
+        // Create remote filter file with service name so we can test DNS outgoing filter.
+        let service_name = internal_service.name.clone();
+        let mut filter_config_path = config_dir.clone();
+        let remote_config_filter = format!("outgoing_filter_remote_{service_name}.json");
+        filter_config_path.push(remote_config_filter);
+        let config_path = filter_config_path.clone();
+
+        let mut remote_config_file = File::create(filter_config_path).await.unwrap();
+
+        let remote_filter = format!(
+            r#"
+{{
+    "feature": {{
+        "network": {{
+            "outgoing": {{
+                "filter": {{
+                    "remote": ["{service_name}"]
+                }}
+            }}
+        }}
+    }}
+}}       "#
+        );
+
+        remote_config_file
+            .write_all(remote_filter.as_bytes())
+            .await
+            .unwrap();
+
+        // Run mirrord with outgoing enabled.
+        let mut process = run_exec_with_target(
+            node_command,
+            &target_service.target,
+            Some(&target_service.namespace),
+            None,
+            Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
+        )
+        .await;
+        let res = process.wait().await;
+        assert!(res.success());
+
+        // Verify that the UDP message sent by the application reached the internal service.
+        lp.follow = true; // Follow log stream.
+
+        let mut log_lines = pod_api
+            .log_stream(stripped_target, &lp)
+            .await
+            .unwrap()
+            .lines();
+
+        let mut found = false;
+        while let Some(log) = log_lines.try_next().await.unwrap() {
+            println!("logged - {log}");
+            if log.contains("Can I pass the test please?") {
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "Did not find expected log line.");
+    }
+
     /// Test that the process does not crash and messages are sent out normally when the
     /// application calls `connect` on a UDP socket with outgoing traffic disabled on mirrord.
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(30))]
@@ -259,6 +386,7 @@ mod traffic {
         assert!(res.success());
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn go18_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
@@ -266,6 +394,7 @@ mod traffic {
         test_go(service, command).await;
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn go19_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
@@ -273,6 +402,7 @@ mod traffic {
         test_go(service, command).await;
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
@@ -281,6 +411,7 @@ mod traffic {
         test_go(service, command).await;
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
@@ -289,6 +420,7 @@ mod traffic {
         test_go(service, command).await;
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
@@ -297,6 +429,7 @@ mod traffic {
         test_go(service, command).await;
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
@@ -305,6 +438,7 @@ mod traffic {
         test_go(service, command).await;
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn listen_localhost(#[future] service: KubeService) {
@@ -316,6 +450,7 @@ mod traffic {
         assert!(res.success());
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
@@ -336,6 +471,7 @@ mod traffic {
     /// 2. Run with mirrord a client application that connects to that socket, sends data, verifies
     /// its echo and panics if anything went wrong
     /// 3. Verify the client app did not panic.
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
@@ -372,6 +508,7 @@ mod traffic {
     /// Verify that mirrord does not interfere with ignored unix sockets and connecting to a unix
     /// socket that is NOT configured to happen remotely works fine locally (testing the Bypass
     /// case of connections to unix sockets).
+    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]

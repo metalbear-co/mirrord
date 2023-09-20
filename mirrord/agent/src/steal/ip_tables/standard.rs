@@ -12,7 +12,7 @@ use crate::{
     },
 };
 
-pub struct StandardRedirect<IPT: IPTables> {
+pub(crate) struct StandardRedirect<IPT: IPTables> {
     preroute: PreroutingRedirect<IPT>,
     managed: IPTableChain<IPT>,
     own_packet_filter: String,

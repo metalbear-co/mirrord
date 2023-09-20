@@ -76,7 +76,7 @@ pub struct AgentConfig {
     /// ### agent.namespace {#agent-namespace}
     ///
     /// Namespace where the agent shall live.
-    ///
+    /// Note: Doesn't work with ephemeral containers.
     /// Defaults to the current kubernetes namespace.
     #[config(env = "MIRRORD_AGENT_NAMESPACE")]
     pub namespace: Option<String>,
@@ -253,7 +253,10 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{config::MirrordConfig, util::testing::with_env_vars};
+    use crate::{
+        config::{ConfigContext, MirrordConfig},
+        util::testing::with_env_vars,
+    };
 
     #[rstest]
     fn default(
@@ -287,7 +290,10 @@ mod tests {
                 ("MIRRORD_AGENT_STARTUP_TIMEOUT", startup_timeout.0),
             ],
             || {
-                let agent = AgentFileConfig::default().generate_config().unwrap();
+                let mut cfg_context = ConfigContext::default();
+                let agent = AgentFileConfig::default()
+                    .generate_config(&mut cfg_context)
+                    .unwrap();
 
                 assert_eq!(agent.log_level, log_level.1);
                 assert_eq!(agent.namespace.as_deref(), namespace.1);

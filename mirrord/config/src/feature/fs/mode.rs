@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     config::{
-        from_env::FromEnv, source::MirrordConfigSource, ConfigError, FromMirrordConfig,
-        MirrordConfig, Result,
+        from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError,
+        FromMirrordConfig, MirrordConfig, Result,
     },
     util::MirrordToggleableConfig,
 };
@@ -46,6 +46,10 @@ pub enum FsModeConfig {
 }
 
 impl FsModeConfig {
+    pub fn is_local(self) -> bool {
+        matches!(self, FsModeConfig::Local)
+    }
+
     pub fn is_read(self) -> bool {
         matches!(self, FsModeConfig::Read | FsModeConfig::LocalWithOverrides)
     }
@@ -85,15 +89,15 @@ impl FsModeConfig {
 impl MirrordConfig for FsModeConfig {
     type Generated = FsModeConfig;
 
-    fn generate_config(self) -> Result<Self::Generated> {
+    fn generate_config(self, context: &mut ConfigContext) -> Result<Self::Generated> {
         let fs = FromEnv::new("MIRRORD_FILE_OPS")
-            .source_value()
+            .source_value(context)
             .transpose()?;
         let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS")
-            .source_value()
+            .source_value(context)
             .transpose()?;
         let mode = FromEnv::new("MIRRORD_FILE_MODE")
-            .source_value()
+            .source_value(context)
             .transpose()?;
 
         if let Some(mode) = mode {
@@ -105,15 +109,15 @@ impl MirrordConfig for FsModeConfig {
 }
 
 impl MirrordToggleableConfig for FsModeConfig {
-    fn disabled_config() -> Result<Self::Generated> {
+    fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated> {
         let fs = FromEnv::new("MIRRORD_FILE_OPS")
-            .source_value()
+            .source_value(context)
             .transpose()?;
         let ro_fs = FromEnv::new("MIRRORD_FILE_RO_OPS")
-            .source_value()
+            .source_value(context)
             .transpose()?;
         let mode = FromEnv::new("MIRRORD_FILE_MODE")
-            .source_value()
+            .source_value(context)
             .transpose()?;
         if let Some(mode) = mode {
             Ok(mode)
@@ -146,7 +150,10 @@ mod tests {
         with_env_vars(
             vec![("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)],
             || {
-                let fs = FsModeConfig::default().generate_config().unwrap();
+                let mut cfg_context = ConfigContext::default();
+                let fs = FsModeConfig::default()
+                    .generate_config(&mut cfg_context)
+                    .unwrap();
 
                 assert_eq!(fs, expect);
             },
@@ -162,8 +169,9 @@ mod tests {
         with_env_vars(
             vec![("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)],
             || {
+                let mut cfg_context = ConfigContext::default();
                 let fs = ToggleableConfig::<FsModeConfig>::Enabled(false)
-                    .generate_config()
+                    .generate_config(&mut cfg_context)
                     .unwrap();
 
                 assert_eq!(fs, expect);

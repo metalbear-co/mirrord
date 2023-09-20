@@ -48,14 +48,14 @@ jobs:
             target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so
           if-no-files-found: error
   build_binaries_macos:
-    runs-on: macos-12
+    runs-on: macos-13
     steps:
       - uses: actions/checkout@v3
       - run: rm rust-toolchain.toml
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: x86_64-apple-darwin,aarch64-apple-darwin
-          toolchain: nightly-2023-04-19
+          toolchain: nightly-2023-09-07
       - name: Import Code-Signing Certificates
         uses: Apple-Actions/import-codesign-certs@8f3fb608891dd2244cdab3d69cd68c0d37a7fe93
         with:
@@ -68,7 +68,7 @@ jobs:
           brew tap mitchellh/gon
           brew install mitchellh/gon/gon
       - name: build mirrord-layer x86-64
-        run: cargo +nightly-2023-04-19 build --release -p mirrord-layer --target=x86_64-apple-darwin
+        run: cargo +nightly-2023-09-07 build --release -p mirrord-layer --target=x86_64-apple-darwin
       - name: build mirrord-layer macOS arm/arm64e
         # Editing the arm64 binary, since arm64e can be loaded into both arm64 & arm64e
         # >> target/debug/libmirrord_layer.dylib: Mach-O 64-bit dynamically linked shared library arm64
@@ -77,7 +77,7 @@ jobs:
         # >> magic bits: 0000000 facf feed 000c 0100 0002 0000 0006 0000
         # >> target/debug/libmirrord_layer.dylib: Mach-O 64-bit dynamically linked shared library arm64e
         run: |
-          cargo +nightly-2023-04-19 build --release -p mirrord-layer --target=aarch64-apple-darwin
+          cargo +nightly-2023-09-07 build --release -p mirrord-layer --target=aarch64-apple-darwin
           cp target/aarch64-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/libmirrord_layer_arm64e.dylib
           printf '\x02' | dd of=target/aarch64-apple-darwin/release/libmirrord_layer_arm64e.dylib bs=1 seek=8 count=1 conv=notrunc
       - name: Sign layer binaries
@@ -97,11 +97,11 @@ jobs:
       - name: build macOS arm cli with universal dylib
         env:
           MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
-        run: cargo +nightly-2023-04-19 build --release -p mirrord --target=aarch64-apple-darwin
+        run: cargo +nightly-2023-09-07 build --release -p mirrord --target=aarch64-apple-darwin
       - name: build macOS x86-64 cli with universal dylib
         env:
           MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
-        run: cargo +nightly-2023-04-19 build --release -p mirrord --target=x86_64-apple-darwin
+        run: cargo +nightly-2023-09-07 build --release -p mirrord --target=x86_64-apple-darwin
       - name: Sign cli binaries
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}

@@ -9,7 +9,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct IPTableChain<IPT: IPTables> {
+pub(crate) struct IPTableChain<IPT: IPTables> {
     inner: Arc<IPT>,
     chain_name: String,
     chain_size: AtomicI32,

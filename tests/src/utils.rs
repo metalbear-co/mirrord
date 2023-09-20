@@ -12,6 +12,7 @@ use std::{
 };
 
 use chrono::{Timelike, Utc};
+// use const_format::formatcp;
 use fancy_regex::Regex;
 use futures::FutureExt;
 use futures_util::{future::BoxFuture, stream::TryStreamExt};
@@ -95,12 +96,6 @@ pub enum Application {
     CurlToKubeApi,
     PythonCloseSocket,
     PythonCloseSocketKeepConnection,
-}
-
-#[derive(Debug)]
-pub enum Agent {
-    Ephemeral,
-    Job,
 }
 
 #[derive(Debug)]
@@ -363,15 +358,6 @@ impl Application {
     }
 }
 
-impl Agent {
-    pub fn flag(&self) -> Option<Vec<&str>> {
-        match self {
-            Agent::Ephemeral => Some(vec!["--ephemeral-container"]),
-            Agent::Job => None,
-        }
-    }
-}
-
 impl FileOps {
     pub fn command(&self) -> Vec<&str> {
         match self {
@@ -484,6 +470,7 @@ pub async fn run_exec(
     if let Some(namespace) = namespace {
         mirrord_args.extend(["--target-namespace", namespace].into_iter());
     }
+
     if let Some(args) = args {
         mirrord_args.extend(args.into_iter());
     }
@@ -809,10 +796,12 @@ pub async fn service(
     .unwrap();
     watch_resource_exists(&service_api, "default").await;
 
-    let target = get_pod_instance(kube_client.clone(), &name, namespace)
+    let target = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
         .await
         .unwrap();
+
     let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
+
     await_condition(pod_api, &target, is_pod_running())
         .await
         .unwrap();
@@ -1005,15 +994,22 @@ pub async fn get_service_url(kube_client: Client, service: &KubeService) -> Stri
     format!("http://{host_ip}:{port}")
 }
 
-/// Returns a name of any pod belonging to the given app.
-pub async fn get_pod_instance(client: Client, app_name: &str, namespace: &str) -> Option<String> {
-    let pod_api: Api<Pod> = Api::namespaced(client, namespace);
-    pod_api
-        .list(&ListParams::default().labels(&format!("app={app_name}")))
+/// Returns a name of any pod/deployment belonging to the given app.
+pub async fn get_instance_name<T>(client: Client, app_name: &str, namespace: &str) -> Option<String>
+where
+    T: kube::Resource<Scope = k8s_openapi::NamespaceResourceScope>
+        + k8s_openapi::Metadata
+        + Clone
+        + DeserializeOwned
+        + Debug,
+    <T as kube::Resource>::DynamicType: Default,
+{
+    let api: Api<T> = Api::namespaced(client, namespace);
+    api.list(&ListParams::default().labels(&format!("app={}", app_name)))
         .await
         .unwrap()
         .into_iter()
-        .find_map(|pod| pod.metadata.name)
+        .find_map(|item| item.meta().name.clone())
 }
 
 /// Take a request builder of any method, add headers, send the request, verify success, and

@@ -8,6 +8,330 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.68.0](https://github.com/metalbear-co/mirrord/tree/3.68.0) - 2023-09-19
+
+
+### Added
+
+- New subcommand for generating shell completions for
+  bash/fish/zsh/powershell/elvish
+  [#1947](https://github.com/metalbear-co/mirrord/issues/1947)
+
+
+### Fixed
+
+- Fix mirrord-cli verify-config command not serializing failures correctly due
+  to serde not being able to serialize newtype pattern in tagged unions.
+  [#1840](https://github.com/metalbear-co/mirrord/issues/1840)
+
+
+### Internal
+
+- CI: Add quotes to branch name in check_if_release_branch
+  [#add-quotes-ci](https://github.com/metalbear-co/mirrord/issues/add-quotes-ci)
+- Bump and clean depenedencies in our code and in tests
+- Remove process feature from Tokio in layer package
+
+
+## [3.67.0](https://github.com/metalbear-co/mirrord/tree/3.67.0) - 2023-09-13
+
+
+### Added
+
+- Add new command `mirrord verify-config [path]` to the mirrord-cli. It
+  verifies a mirrord config file producing a tool friendly output.
+  [#1840](https://github.com/metalbear-co/mirrord/issues/1840)
+
+
+### Fixed
+
+- Support mirroring existing sessions by introducing an HTTP check when the
+  sniffer receives a tcp packet.
+  [#1317](https://github.com/metalbear-co/mirrord/issues/1317)
+
+
+### Internal
+
+- Run IDE e2e tests on release.
+  [#1893](https://github.com/metalbear-co/mirrord/issues/1893)
+- Add `document` method on `KeyPair` to access pem encoded key.
+
+
+## [3.66.0](https://github.com/metalbear-co/mirrord/tree/3.66.0) - 2023-09-12
+
+
+### Added
+
+- Added support for pausing ephemeral containers. This feature requires the
+  agent to have privileged access.
+  [#1358](https://github.com/metalbear-co/mirrord/issues/1358)
+
+
+### Changed
+
+- Add ruby related ENV to the default exclude list
+
+
+### Internal
+
+- Add concurrent steal tests - operator
+
+
+## [3.65.2](https://github.com/metalbear-co/mirrord/tree/3.65.2) - 2023-09-10
+
+
+### Changed
+
+- Add ruby related ENV to the default exclude list
+
+
+### Fixed
+
+- Fixed connecting to unspecified ip i.e 0.0.0.0
+  [#1928](https://github.com/metalbear-co/mirrord/issues/1928)
+
+
+### Internal
+
+- Refactor code to match newest Rust nightly - 2023-09-07
+  [#1457](https://github.com/metalbear-co/mirrord/issues/1457)
+- Update tj-actions to v39 to check for fixes for similar hashes
+
+
+## [3.65.1](https://github.com/metalbear-co/mirrord/tree/3.65.1) - 2023-09-07
+
+
+### Changed
+
+- Add some Ruby env to excluded: GEM_HOME, GEM_PATH
+  [#1892](https://github.com/metalbear-co/mirrord/issues/1892)
+
+
+### Fixed
+
+- Disable opendir hook on aarch macOS since it crashes due to arm64e issues
+  [#1920](https://github.com/metalbear-co/mirrord/issues/1920)
+
+
+## [3.65.0](https://github.com/metalbear-co/mirrord/tree/3.65.0) - 2023-09-06
+
+
+### Added
+
+- Add hooks for `opendir`, `readdir64_r`, `__lxstat`, `__lxstat64`,
+  `__xstat64`. Also contains a refactor of the `*stat` family of hooks (they
+  now call a shared function), and `openat64` as its own function.
+  [#1899](https://github.com/metalbear-co/mirrord/issues/1899)
+
+
+### Changed
+
+- CLI: Change operator setup to fetch from API version of operator to install
+- Don't error on agent ready missing absent, add retry in connection to
+  upstream agent
+
+
+### Fixed
+
+- Fixed agent crashing on flush connections not enabled
+  [#1904](https://github.com/metalbear-co/mirrord/issues/1904)
+- CI: run macOS clippy on all of the codebase
+- Fixed pause flakiness by improving our cleanup process [using watch]
+
+
+### Internal
+
+- CLI: Change to use drain instead of hoping sleep would help
+- Enable ephemeral containers for tests on operator
+
+
+## [3.64.2](https://github.com/metalbear-co/mirrord/tree/3.64.2) - 2023-09-05
+
+
+### Changed
+
+- Changed the targeted and non targeted flows for creating agent.
+  [#1844](https://github.com/metalbear-co/mirrord/issues/1844)
+- Add info about errors to TELEMETRY.md
+
+
+### Fixed
+
+- Change agent to use current thread runtime, multi thread is enabled by
+  mistake.
+  * Added a sleep before exiting both in layer and agent to allow
+  `tokio::spawn` tasks spawned from `Drop` finish.
+  * Changed implementation of pause guard to use `tokio::spawn` - fixes pause
+  in combination with above change.
+- Fix analytics not being sent on drop
+
+
+### Internal
+
+- Refactor [if Some / else None] pattern to use [bool.then()] in medschool.
+  [#1890](https://github.com/metalbear-co/mirrord/issues/1890)
+- Add a "Try to reduce the use of non-optional `Option`s" rule to the mirrord
+  style guide.
+- Label mirroring integration tests as flaky
+
+
+## [3.64.1](https://github.com/metalbear-co/mirrord/tree/3.64.1) - 2023-09-03
+
+
+### Fixed
+
+- Remove extra message of `{"type":"FinishedTask","name":"mirrord preparing to
+  launch","success":true,"message":null}` that causes breakage in extensions.
+
+
+## [3.64.0](https://github.com/metalbear-co/mirrord/tree/3.64.0) - 2023-09-02
+
+
+### Added
+
+- Warn when running in a mesh service with mirror mode.
+  [#1768](https://github.com/metalbear-co/mirrord/issues/1768)
+
+
+### Fixed
+
+- Fixed detecting operator not found as an error
+  [#1868](https://github.com/metalbear-co/mirrord/issues/1868)
+- Update hyper and hyper-util to fix double select call (and properly handle
+  large http traffic).
+  [#1869](https://github.com/metalbear-co/mirrord/issues/1869)
+- Fixed ongoing connections not being stolen by changing our flush mechanism -
+  add a rule to drop marked connections and then mark existing connections when
+  starting to steal.
+  [#1870](https://github.com/metalbear-co/mirrord/issues/1870)
+- Fixed panic on crash analytics
+  [#1872](https://github.com/metalbear-co/mirrord/issues/1872)
+- Fixed showing error on each file not found triggered by the file not found
+  configuration
+- Regex meta characters are now escaped in `$HOME` (`not-found` file filter).
+
+
+### Internal
+
+- Set fork env in integration tests using uvicorn
+  [#1627](https://github.com/metalbear-co/mirrord/issues/1627)
+- Fix complete_passthrough response flake
+  [#1811](https://github.com/metalbear-co/mirrord/issues/1811)
+- Fix typo in flush connections conntrack command
+
+
+## [3.63.0](https://github.com/metalbear-co/mirrord/tree/3.63.0) - 2023-08-28
+
+
+### Added
+
+- Add the ability to send analytics on errors and not only on successful runs.
+  [#1785](https://github.com/metalbear-co/mirrord/issues/1785)
+- Report back internal proxy error stream to cli
+  [#1855](https://github.com/metalbear-co/mirrord/issues/1855)
+
+
+### Changed
+
+- Changed config unstable/deprecations to be aggregated with other config
+  warnings [#1860](https://github.com/metalbear-co/mirrord/issues/1860)
+
+
+### Fixed
+
+- `not-found` file filter fixed to only match files inside the `$HOME`
+  directory. [#1863](https://github.com/metalbear-co/mirrord/issues/1863)
+- Fix openshift detection taking too long by querying a subset instead of all
+  APIs
+
+
+### Internal
+
+- CI Improvements:
+  - Unify lint and integration for macOS to save cache and runner.
+  - Remove trace logging from integration tests on macos
+  - use node 18 for testing since installing 19 in CI takes hours.
+  - remove `build_mirrord` job - quite useless as it's used only in other
+  workflow, so have it there and re-use cache
+    also save some cache,
+  - specify target for all cargo invocations to re-use cache efficiently.
+  - fix flake with node server closing before time
+- Fix regression in kube api blocking operator from compiling
+- Reorganize the CI with the following objective of unifying as much as we can
+  CI that can run on the same host, this is to have less caches and have better
+  compilation time (as there's overlap). Things done:
+
+  - Remove the build layer CI, since we now have an integration tests that
+  check it + clippy for aarch darwin / Linux
+  - Make clippy run for all of the project for aarch64 linux instead of agent
+  only
+  - Revert removal of Rust cache from e2e (was by mistake)
+  - Don't use "cache" for other Gos since it will try to overwrite and have bad
+  results.
+
+
+## [3.62.0](https://github.com/metalbear-co/mirrord/tree/3.62.0) - 2023-08-26
+
+
+### Added
+
+- Add analytics collection to operator session information.
+  [#1805](https://github.com/metalbear-co/mirrord/issues/1805)
+- Added an extra `not-found` file filter to improve experience when using cloud
+  services under mirrord.
+  [#1694](https://github.com/metalbear-co/mirrord/issues/1694)
+
+
+### Changed
+
+- Update telemetry.md with new info about mirrord for Teams
+  [#1837](https://github.com/metalbear-co/mirrord/issues/1837)
+- Changed keep alive to happen from internal proxy to support cases where layer
+  process is stuck [breakpoint/etc]
+  [#1839](https://github.com/metalbear-co/mirrord/issues/1839)
+- Changed CLI progress to print warnings and not only set it as the last
+  message of progress
+- Changed config verify to return aggregated warnings list for user to print
+  instead of warn in current progress - can fix issues with extension where we
+  printed to stderr.
+
+
+### Fixed
+
+- Fix ephemeral agent creation api using agent namespace instead of target.
+  Add note about agent namespace being irrelevant in ephemeral.
+- Fix macOS SIP potential issues from exec having mirrord loaded into the code
+  sign binary.
+- Fix operator setup so `MIRRORD_OPERATOR_IMAGE` will function properly.
+- Fixed issue connecting to ephemeral container when target is in different
+  namespace
+
+
+### Internal
+
+- Changed e2e to use a shared setup e2e action to leverage all GitHub caches,
+  reduce e2e time by half.
+- Changes to the CI to make it fater:
+  - Use go cache for integration test
+  - use mac-13 runner for tests
+
+
+## [3.61.0](https://github.com/metalbear-co/mirrord/tree/3.61.0) - 2023-08-22
+
+
+### Added
+
+- Support DNS resolution for the outgoing filter config.
+  [#702](https://github.com/metalbear-co/mirrord/issues/702)
+
+
+### Fixed
+
+- Fixed wrong errno being set by mirrord, fixing various flows that rely on
+  errno even when return code is ok
+  [#1828](https://github.com/metalbear-co/mirrord/issues/1828)
+
+
 ## [3.60.0](https://github.com/metalbear-co/mirrord/tree/3.60.0) - 2023-08-21
 
 

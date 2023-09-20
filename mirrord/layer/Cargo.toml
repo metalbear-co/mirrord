@@ -29,7 +29,7 @@ tracing-subscriber.workspace = true
 frida-gum = { git = "https://github.com/metalbear-co/frida-rust", version = "0.13", features = ["auto-download"], branch="capstone_remove" }
 futures.workspace = true
 
-tokio = { workspace = true, features = ["fs", "rt", "rt-multi-thread", "macros", "process"] }
+tokio = { workspace = true, features = ["fs", "rt", "rt-multi-thread", "macros"] }
 serde.workspace = true
 serde_json.workspace = true
 
@@ -57,6 +57,7 @@ hyper-util.workspace = true
 http-body-util  = { workspace = true }
 bimap.workspace = true
 dashmap = "5.4"
+hashbrown = "0.14"
 exec.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -74,6 +75,7 @@ test-cdylib = "*"
 tower = "0.4"
 tokio = { version = "1", features = ["rt", "net", "macros"] }
 tests = { path = "../../tests" }
+flaky_test = "0.1.0"
 
 [lib]
 crate_type = ["cdylib"]

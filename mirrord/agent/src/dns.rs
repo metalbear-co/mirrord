@@ -21,7 +21,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct DnsRequest {
+pub(crate) struct DnsRequest {
     request: GetAddrInfoRequest,
     tx: oneshot::Sender<GetAddrInfoResponse>,
 }
@@ -32,7 +32,7 @@ pub struct DnsRequest {
 /// Uses `AsyncResolver:::lookup_ip` to resolve `host`.
 ///
 /// `root_path` is used to read `/proc/{pid}/root` configuration files when creating a resolver.
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "trace", ret)]
 async fn dns_lookup(root_path: &Path, host: String) -> RemoteResult<DnsLookup> {
     let resolv_conf_path = root_path.join("etc").join("resolv.conf");
     let hosts_path = root_path.join("etc").join("hosts");
@@ -59,7 +59,7 @@ async fn dns_lookup(root_path: &Path, host: String) -> RemoteResult<DnsLookup> {
 ///
 /// Reads a `DnsRequest` from `rx` and returns the resolved addresses (or `Error`) through
 /// `DnsRequest::tx`.
-pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Result<()> {
+pub(crate) async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Result<()> {
     let root_path = pid
         .map(|pid| PathBuf::from("/proc").join(pid.to_string()).join("root"))
         .unwrap_or_else(|| PathBuf::from("/"));
@@ -87,7 +87,7 @@ pub async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Resul
 }
 
 #[derive(Clone)]
-pub struct DnsApi {
+pub(crate) struct DnsApi {
     task_status: TaskStatus,
     sender: Sender<DnsRequest>,
 }
@@ -113,6 +113,7 @@ impl DnsApi {
         }
     }
 
+    #[tracing::instrument(level = "trace", ret, skip(self))]
     async fn try_make_request(&self, request: GetAddrInfoRequest) -> Result<GetAddrInfoResponse> {
         let (tx, rx) = oneshot::channel();
         let request = DnsRequest { request, tx };
@@ -120,6 +121,7 @@ impl DnsApi {
         rx.await.map_err(Into::into)
     }
 
+    #[tracing::instrument(level = "trace", ret, skip(self))]
     pub async fn make_request(
         &mut self,
         request: GetAddrInfoRequest,

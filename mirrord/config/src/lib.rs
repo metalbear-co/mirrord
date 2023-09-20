@@ -17,7 +17,7 @@ pub mod util;
 
 use std::path::Path;
 
-use config::{ConfigError, MirrordConfig};
+use config::{ConfigContext, ConfigError, MirrordConfig};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -203,7 +203,9 @@ pub struct LayerConfig {
     /// With this feature enabled, the remote container is paused while this layer is connected to
     /// the agent.
     ///
-    /// Defaults to `false`.
+    /// Note: It requires agent configuration to be set to privileged when running with the
+    /// ephemeral agent option. Defaults to `false`.
+    /// Note2: Pause + ephemeral might not work on Docker runtimes.
     #[config(env = "MIRRORD_PAUSE", default = false, unstable)]
     pub pause: bool,
 
@@ -218,39 +220,6 @@ pub struct LayerConfig {
     /// ```
     #[config(env = "MIRRORD_CONNECT_TCP")]
     pub connect_tcp: Option<String>,
-
-    /// <!--${internal}-->
-    ///
-    /// ## connect_agent_name {#root-connect_agent_name}
-    ///
-    /// Agent name that already exists that we can connect to.
-    ///
-    /// Keep in mind that the intention here is to allow reusing a long living mirrord-agent pod,
-    /// and **not** to connect multiple (simultaneos) mirrord instances to a single
-    /// mirrord-agent, as the later is not properly supported without the use of
-    /// [mirrord-operator](https://metalbear.co/#waitlist-form).
-    ///
-    /// ```json
-    /// {
-    ///   "connect_agent_name": "mirrord-agent-still-alive"
-    /// }
-    /// ```
-    #[config(env = "MIRRORD_CONNECT_AGENT")]
-    pub connect_agent_name: Option<String>,
-
-    /// <!--${internal}-->
-    ///
-    /// ## connect_agent_port {#root-connect_agent_port}
-    ///
-    /// Agent listen port that already exists that we can connect to.
-    ///
-    /// ```json
-    /// {
-    ///   "connect_agent_port": "8888"
-    /// }
-    /// ```
-    #[config(env = "MIRRORD_CONNECT_PORT")]
-    pub connect_agent_port: Option<u16>,
 
     /// ## operator {#root-operator}
     ///
@@ -329,26 +298,46 @@ pub struct LayerConfig {
 }
 
 impl LayerConfig {
-    pub fn from_env() -> Result<Self, ConfigError> {
+    /// Generate a config from the environment variables and/or a config file.
+    /// On success, returns the config and a vec of warnings.
+    /// To be used from CLI to verify config and print warnings
+    pub fn from_env_with_warnings() -> Result<(Self, ConfigContext), ConfigError> {
+        let mut cfg_context = ConfigContext::default();
         if let Ok(path) = std::env::var("MIRRORD_CONFIG_FILE") {
-            LayerFileConfig::from_path(path)?.generate_config()
+            LayerFileConfig::from_path(path)?.generate_config(&mut cfg_context)
         } else {
-            LayerFileConfig::default().generate_config()
+            LayerFileConfig::default().generate_config(&mut cfg_context)
         }
+        .map(|config| (config, cfg_context))
+    }
+
+    /// Generate a config from the environment variables and/or a config file.
+    /// On success, returns the config.
+    /// To be used from parts that load configuration but aren't the first one to do so
+    pub fn from_env() -> Result<Self, ConfigError> {
+        Self::from_env_with_warnings().map(|(config, _)| config)
     }
 
     /// Verify that there are no conflicting settings.
     /// We don't call it from `from_env` since we want to verify it only once (from cli)
-    pub fn verify(&self) -> Result<(), ConfigError> {
+    /// Returns vec of warnings
+    pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
         if self.pause {
-            if self.agent.ephemeral {
-                Err(ConfigError::Conflict("Pausing is not yet supported together with an ephemeral agent container.
-                Mutually exclusive arguments `--pause` and `--ephemeral-container` passed together.".to_string()))?;
+            if self.agent.ephemeral && !self.agent.privileged {
+                context.add_warning("The target pause feature with ephemeral requires to enable the privileged flag on the agent.".to_string());
             }
             if !self.feature.network.incoming.is_steal() {
-                warn!("{PAUSE_WITHOUT_STEAL_WARNING}");
+                context.add_warning(PAUSE_WITHOUT_STEAL_WARNING.to_string());
             }
         }
+
+        if self.agent.ephemeral && self.agent.namespace.is_some() {
+            context.add_warning(
+                "Agent namespace is ignored when using an ephemeral container for the agent."
+                    .to_string(),
+            );
+        }
+
         if self
             .feature
             .network
@@ -633,8 +622,6 @@ mod tests {
             pause: Some(false),
             kubeconfig: None,
             telemetry: None,
-            connect_agent_name: None,
-            connect_agent_port: None,
             target: Some(TargetFileConfig::Advanced {
                 path: Some(Target::Pod(PodTarget {
                     pod: "test-service-abcdefg-abcd".to_owned(),

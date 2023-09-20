@@ -194,6 +194,11 @@ pub(crate) enum CliError {
         r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
     ))]
     InternalProxyStdoutError,
+    #[error("Couldn't get stdderr of internal proxy")]
+    #[diagnostic(help(
+        r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
+    ))]
+    InternalProxyStderrError,
     #[error("Couldn't get port of internal proxy")]
     #[diagnostic(help(
         r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
@@ -214,4 +219,17 @@ pub(crate) enum CliError {
     #[error("Waitlist registration failed.")]
     #[diagnostic(help("Please check the email provided and internet connection.{GENERAL_HELP}"))]
     WaitlistError(reqwest::Error),
+    #[error("Connection info deserialization failed: please report it. value: `{0}` err: `{1}`")]
+    #[diagnostic(help(
+        r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
+    ))]
+    ConnectInfoLoadFailed(String, serde_json::Error),
+    #[error("Runtime build failed please report it. err: `{0}`")]
+    #[diagnostic(help(
+        r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
+    ))]
+    RuntimeError(std::io::Error),
+    #[error("Failed to get last operator version err: `{0}`")]
+    #[diagnostic(help("Please check internet connection.{GENERAL_HELP}"))]
+    OperatorVersionCheckError(reqwest::Error),
 }

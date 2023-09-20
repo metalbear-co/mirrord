@@ -24,7 +24,7 @@ where
 }
 
 /// Serializable `X509Certificate`
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Certificate(
     #[serde(
         deserialize_with = "x509_deserialize",

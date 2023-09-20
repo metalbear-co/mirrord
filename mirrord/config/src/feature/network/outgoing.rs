@@ -8,7 +8,7 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigError},
+    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError},
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
@@ -137,16 +137,16 @@ pub struct OutgoingConfig {
 }
 
 impl MirrordToggleableConfig for OutgoingFileConfig {
-    fn disabled_config() -> Result<Self::Generated, ConfigError> {
+    fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
         Ok(OutgoingConfig {
             tcp: FromEnv::new("MIRRORD_TCP_OUTGOING")
-                .source_value()
+                .source_value(context)
                 .unwrap_or(Ok(false))?,
             udp: FromEnv::new("MIRRORD_UDP_OUTGOING")
-                .source_value()
+                .source_value(context)
                 .unwrap_or(Ok(false))?,
             unix_streams: FromEnv::new("MIRRORD_OUTGOING_REMOTE_UNIX_STREAMS")
-                .source_value()
+                .source_value(context)
                 .transpose()?,
             ..Default::default()
         })
@@ -154,7 +154,7 @@ impl MirrordToggleableConfig for OutgoingFileConfig {
 }
 
 /// <!--${internal}-->
-/// Errors related to parsing an [`OutgoingFilter`].  
+/// Errors related to parsing an [`OutgoingFilter`].
 #[derive(Debug, Error)]
 pub enum OutgoingFilterError {
     #[error("Nom: failed parsing with {0}!")]
@@ -393,7 +393,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        config::MirrordConfig,
+        config::{ConfigContext, MirrordConfig},
         util::{testing::with_env_vars, ToggleableConfig},
     };
 
@@ -414,7 +414,10 @@ mod tests {
                 ("MIRRORD_UDP_OUTGOING", udp.0),
             ],
             || {
-                let outgoing = OutgoingFileConfig::default().generate_config().unwrap();
+                let mut cfg_context = ConfigContext::default();
+                let outgoing = OutgoingFileConfig::default()
+                    .generate_config(&mut cfg_context)
+                    .unwrap();
 
                 assert_eq!(outgoing.tcp, tcp.1);
                 assert_eq!(outgoing.udp, udp.1);
@@ -439,8 +442,9 @@ mod tests {
                 ("MIRRORD_UDP_OUTGOING", udp.0),
             ],
             || {
+                let mut cfg_context = ConfigContext::default();
                 let outgoing = ToggleableConfig::<OutgoingFileConfig>::Enabled(false)
-                    .generate_config()
+                    .generate_config(&mut cfg_context)
                     .unwrap();
 
                 assert_eq!(outgoing.tcp, tcp.1);

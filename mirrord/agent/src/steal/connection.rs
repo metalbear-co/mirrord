@@ -6,7 +6,6 @@ use std::{
 
 use bytes::Bytes;
 use fancy_regex::Regex;
-use iptables::IPTables;
 use mirrord_protocol::{
     tcp::{HttpResponseFallback, NewTcpConnection, TcpClose, HTTP_FRAMED_VERSION},
     RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
@@ -27,7 +26,8 @@ use crate::{
     error::Result,
     steal::{
         connection::StealSubscription::{HttpFiltered, Unfiltered},
-        http::{HttpFilter, HttpFilterManager, Response},
+        http::{HttpFilter, HttpFilterManager},
+        ip_tables::IPTablesWrapper,
     },
     AgentError::{AgentInvariantViolated, HttpRequestReceiverClosed},
 };
@@ -68,7 +68,7 @@ pub(crate) struct TcpConnectionStealer {
     /// Set of rules the agent uses to steal traffic from through the
     /// [`TcpConnectionStealer::stealer`] listener.
     /// None when there are no subscribers.
-    iptables: Option<SafeIpTables<IPTables>>,
+    iptables: Option<SafeIpTables<IPTablesWrapper>>,
 
     /// Used to send data back to the original remote connection.
     write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
@@ -142,7 +142,7 @@ impl TcpConnectionStealer {
 
     /// Get a result with a reference to the iptables.
     /// Should only be called while there are subscribers (otherwise self.iptables is None).
-    fn iptables(&self) -> Result<&SafeIpTables<IPTables>> {
+    fn iptables(&self) -> Result<&SafeIpTables<IPTablesWrapper>> {
         debug_assert!(self.iptables.is_some()); // is_some as long as there are subs
         self.iptables.as_ref().ok_or(AgentInvariantViolated)
     }
@@ -326,7 +326,7 @@ impl TcpConnectionStealer {
         self.connection_clients.insert(connection_id, client_id);
         self.client_connections
             .entry(client_id)
-            .or_insert_with(HashSet::new)
+            .or_default()
             .insert(connection_id);
 
         let new_connection = DaemonTcp::NewConnection(NewTcpConnection {
@@ -416,7 +416,7 @@ impl TcpConnectionStealer {
             .unwrap_or_default();
         let iptables = iptables::new(false).unwrap();
 
-        self.iptables = Some(SafeIpTables::create(iptables, flush_connections).await?);
+        self.iptables = Some(SafeIpTables::create(iptables.into(), flush_connections).await?);
         Ok(())
     }
 

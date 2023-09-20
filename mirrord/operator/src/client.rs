@@ -2,12 +2,15 @@ use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
 use kube::{error::ErrorResponse, Api, Client, Resource};
-use mirrord_auth::{credential_store::CredentialStoreSync, error::AuthenticationError};
+use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, AnalyticsReporter};
+use mirrord_auth::{
+    certificate::Certificate, credential_store::CredentialStoreSync, error::AuthenticationError,
+};
 use mirrord_config::{
     feature::network::incoming::ConcurrentSteal, target::TargetConfig, LayerConfig,
 };
 use mirrord_kube::{
-    api::{get_k8s_resource_api, kubernetes::create_kube_api},
+    api::kubernetes::{create_kube_api, get_k8s_resource_api},
     error::KubeApiError,
 };
 use mirrord_progress::Progress;
@@ -17,12 +20,11 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
-use tracing::error;
+use tracing::{debug, error};
 
 use crate::crd::{MirrordOperatorCrd, OperatorFeatures, TargetCrd, OPERATOR_STATUS_NAME};
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
-const MIRRORD_OPERATOR_SESSION: &str = "MIRRORD_OPERATOR_SESSION";
 
 #[derive(Debug, Error)]
 pub enum OperatorApiError {
@@ -46,11 +48,39 @@ pub enum OperatorApiError {
     Authentication(#[from] AuthenticationError),
     #[error("Can't start proccess because other locks exist on target")]
     ConcurrentStealAbort,
-    #[error("Invalid operator session - this is a bug, please report it. value: `{0}` err: `{1}`")]
-    InvalidOperatorSession(String, serde_json::Error),
 }
 
 type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
+
+/// Data we store into environment variables for the child processes to use.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct OperatorSessionInformation {
+    pub client_certificate: Option<Certificate>,
+    pub session_id: u64,
+    pub target: TargetCrd,
+    pub fingerprint: Option<String>,
+    pub operator_features: Vec<OperatorFeatures>,
+    pub protocol_version: Option<semver::Version>,
+}
+
+impl OperatorSessionInformation {
+    pub fn new(
+        client_certificate: Option<Certificate>,
+        target: TargetCrd,
+        fingerprint: Option<String>,
+        operator_features: Vec<OperatorFeatures>,
+        protocol_version: Option<semver::Version>,
+    ) -> Self {
+        Self {
+            client_certificate,
+            session_id: rand::random(),
+            target,
+            fingerprint,
+            operator_features,
+            protocol_version,
+        }
+    }
+}
 
 pub struct OperatorApi {
     client: Client,
@@ -61,54 +91,12 @@ pub struct OperatorApi {
     on_concurrent_steal: ConcurrentSteal,
 }
 
-/// Data we store into environment variables for the child processes to use.
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct OperatorSessionInformation {
-    pub session_id: String,
-    pub target: TargetCrd,
-    pub fingerprint: Option<String>,
-    pub operator_features: Vec<OperatorFeatures>,
-    pub protocol_version: Option<semver::Version>,
-}
-
-impl OperatorSessionInformation {
-    pub fn new(
-        target: TargetCrd,
-        fingerprint: Option<String>,
-        operator_features: Vec<OperatorFeatures>,
-        protocol_version: Option<semver::Version>,
-    ) -> Self {
-        Self {
-            session_id: rand::random::<u64>().to_string(),
-            target,
-            fingerprint,
-            operator_features,
-            protocol_version,
-        }
-    }
-
-    /// Returns environment variable holding the information
-    pub const fn env_key() -> &'static str {
-        MIRRORD_OPERATOR_SESSION
-    }
-
-    /// Loads the information from environment variables
-    pub fn from_env() -> Result<Option<Self>> {
-        std::env::var(Self::env_key())
-            .ok()
-            .map(|val| {
-                serde_json::from_str(&val)
-                    .map_err(|e| OperatorApiError::InvalidOperatorSession(val, e))
-            })
-            .transpose()
-    }
-}
-
 impl OperatorApi {
     /// Creates a new operator session, setting the session information in environment variables.
     pub async fn create_session<P>(
         config: &LayerConfig,
         progress: &P,
+        analytics: &mut AnalyticsReporter,
     ) -> Result<
         Option<(
             mpsc::Sender<ClientMessage>,
@@ -121,31 +109,64 @@ impl OperatorApi {
     {
         let operator_api = OperatorApi::new(config).await?;
 
-        if let Some(target) = operator_api.fetch_target().await? {
-            let status = operator_api.get_status().await?;
+        let status = match operator_api.get_status().await.transpose()? {
+            Some(status) => status,
+            None => {
+                // No operator found
+                return Ok(None);
+            }
+        };
 
-            let mut version_progress = progress.subtask("comparing versions");
-            let operator_version = Version::parse(&status.spec.operator_version).unwrap(); // TODO: Remove unwrap
+        let client_certificate =
+            if let Some(credential_name) = status.spec.license.fingerprint.as_ref() {
+                CredentialStoreSync::get_client_certificate::<MirrordOperatorCrd>(
+                    &operator_api.client,
+                    credential_name.to_string(),
+                )
+                .await
+                .map_err(|err| debug!("CredentialStore error: {err}"))
+                .ok()
+            } else {
+                None
+            };
 
-            // This is printed multiple times when the local process forks. Can be solved by e.g.
-            // propagating an env var, don't think it's worth the extra complexity though
-            let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
-            if operator_version > mirrord_version {
-                // we make two sub tasks since it looks best this way
-                version_progress.warning(
+        analytics.set_operator_properties(AnalyticsOperatorProperties {
+            client_hash: client_certificate
+                .as_ref()
+                .and_then(|certificate| certificate.sha256_fingerprint().ok())
+                .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
+            license_hash: status
+                .spec
+                .license
+                .fingerprint
+                .as_deref()
+                .map(AnalyticsHash::from_base64),
+        });
+
+        let mut version_progress = progress.subtask("comparing versions");
+        let operator_version = Version::parse(&status.spec.operator_version).unwrap(); // TODO: Remove unwrap
+
+        // This is printed multiple times when the local process forks. Can be solved by e.g.
+        // propagating an env var, don't think it's worth the extra complexity though
+        let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+        if operator_version > mirrord_version {
+            // we make two sub tasks since it looks best this way
+            version_progress.warning(
                     &format!(
                         "Your mirrord plugin/CLI version {} does not match the operator version {}. This can lead to unforeseen issues.",
                         mirrord_version,
                         operator_version));
-                version_progress.success(None);
-                version_progress = progress.subtask("comparing versions");
-                version_progress.warning(
-                    "Consider updating your mirrord plugin/CLI to match the operator version.",
-                );
-            }
             version_progress.success(None);
+            version_progress = progress.subtask("comparing versions");
+            version_progress.warning(
+                "Consider updating your mirrord plugin/CLI to match the operator version.",
+            );
+        }
+        version_progress.success(None);
 
+        if let Some(target) = operator_api.fetch_target().await? {
             let operator_session_information = OperatorSessionInformation::new(
+                client_certificate,
                 target,
                 status.spec.license.fingerprint,
                 status.spec.features.unwrap_or_default(),
@@ -169,7 +190,23 @@ impl OperatorApi {
     pub async fn connect(
         config: &LayerConfig,
         session_information: &OperatorSessionInformation,
+        analytics: Option<&mut AnalyticsReporter>,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+        analytics.map(|analytics| {
+            analytics.set_operator_properties(AnalyticsOperatorProperties {
+                client_hash: session_information
+                    .client_certificate
+                    .as_ref()
+                    .and_then(|certificate| certificate.sha256_fingerprint().ok())
+                    .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
+                license_hash: session_information
+                    .fingerprint
+                    .as_deref()
+                    .map(AnalyticsHash::from_base64),
+            });
+            analytics
+        });
+
         OperatorApi::new(config)
             .await?
             .connect_target(session_information)
@@ -209,12 +246,12 @@ impl OperatorApi {
         })
     }
 
-    async fn get_status(&self) -> Result<MirrordOperatorCrd> {
-        self.version_api
-            .get(OPERATOR_STATUS_NAME)
-            .await
-            .map_err(KubeApiError::KubeError)
-            .map_err(OperatorApiError::KubeApiError)
+    async fn get_status(&self) -> Option<Result<MirrordOperatorCrd>> {
+        match self.version_api.get(OPERATOR_STATUS_NAME).await {
+            Ok(status) => Some(Ok(status)),
+            Err(kube::Error::Api(ErrorResponse { code: 404, .. })) => None,
+            Err(err) => Some(Err(OperatorApiError::from(KubeApiError::from(err)))),
+        }
     }
 
     async fn fetch_target(&self) -> Result<Option<TargetCrd>> {
@@ -258,6 +295,7 @@ impl OperatorApi {
     }
 
     /// Create websocket connection to operator
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn connect_target(
         &self,
         session_information: &OperatorSessionInformation,
@@ -276,16 +314,21 @@ impl OperatorApi {
 
         let mut builder = Request::builder()
             .uri(self.connect_url(session_information))
-            .header("x-session-id", session_information.session_id.clone());
+            .header("x-session-id", session_information.session_id.to_string());
 
-        if let Some(credential_name) = &session_information.fingerprint {
-            let client_credentials = CredentialStoreSync::get_client_certificate::<
-                MirrordOperatorCrd,
-            >(&self.client, credential_name.to_string())
-            .await
-            .map(|certificate_der| general_purpose::STANDARD.encode(certificate_der))?;
-
-            builder = builder.header("x-client-der", client_credentials);
+        if let Some(certificate) = &session_information.client_certificate {
+            match certificate
+                .encode_der()
+                .map(|certificate_der| general_purpose::STANDARD.encode(certificate_der))
+                .map_err(AuthenticationError::Pem)
+            {
+                Ok(client_credentials) => {
+                    builder = builder.header("x-client-der", client_credentials);
+                }
+                Err(err) => {
+                    debug!("CredentialStore error: {err}");
+                }
+            }
         }
 
         let connection = self

@@ -9,10 +9,12 @@ use mirrord_protocol::{
 };
 use thiserror::Error;
 
-use crate::{sniffer::SnifferCommand, steal::StealerCommand};
+use crate::{
+    cgroup::CgroupError, namespace::NamespaceError, sniffer::SnifferCommand, steal::StealerCommand,
+};
 
 #[derive(Debug, Error)]
-pub enum AgentError {
+pub(crate) enum AgentError {
     #[error("Agent failed with `{0:?}`")]
     IO(#[from] std::io::Error),
 
@@ -145,8 +147,11 @@ pub enum AgentError {
     #[error("Requested pause, but there is no target container.")]
     PauseAbsentTarget,
 
-    #[error("Pause feature is not supported with ephemeral agent.")]
-    PauseEphemeralAgent,
+    #[error("Pause failed with cgroup error: {0} - make sure agent is set to privileged.")]
+    PauseFailedCgroup(#[from] CgroupError),
+
+    #[error(transparent)]
+    FailedNamespaceEnter(#[from] NamespaceError),
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;

@@ -1,21 +1,45 @@
 use std::time::Duration;
 
-use mirrord_config::LayerConfig;
-use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
+use mirrord_analytics::AnalyticsReporter;
+use mirrord_config::{feature::network::outgoing::OutgoingFilterConfig, LayerConfig};
+use mirrord_kube::api::{
+    kubernetes::{AgentKubernetesConnectInfo, KubernetesAPI},
+    AgentManagment,
+};
 use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorSessionInformation};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
-use tracing::trace;
+use tracing::{debug, trace};
 
 use crate::{CliError, Result};
 
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum AgentConnectInfo {
     Operator(OperatorSessionInformation),
     /// Connect directly to an agent by name and port using k8s port forward.
-    DirectKubernetes(String, u16),
+    DirectKubernetes(AgentKubernetesConnectInfo),
 }
 
+const AGENT_CONNECT_INFO_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
+
+impl AgentConnectInfo {
+    /// Returns environment variable holding the information
+    pub const fn env_key() -> &'static str {
+        AGENT_CONNECT_INFO_KEY
+    }
+
+    /// Loads the information from environment variables
+    pub fn from_env() -> Result<Option<Self>> {
+        std::env::var(Self::env_key())
+            .ok()
+            .map(|val| {
+                serde_json::from_str(&val).map_err(|e| CliError::ConnectInfoLoadFailed(val, e))
+            })
+            .transpose()
+    }
+}
 pub(crate) struct AgentConnection {
     pub sender: mpsc::Sender<ClientMessage>,
     pub receiver: mpsc::Receiver<DaemonMessage>,
@@ -24,6 +48,7 @@ pub(crate) struct AgentConnection {
 pub(crate) async fn create_operator_session<P>(
     config: &LayerConfig,
     progress: &P,
+    analytics: &mut AnalyticsReporter,
 ) -> Result<
     Option<(
         mpsc::Sender<ClientMessage>,
@@ -37,7 +62,7 @@ where
 {
     let mut sub_progress = progress.subtask("checking operator");
 
-    match OperatorApi::create_session(config, progress).await {
+    match OperatorApi::create_session(config, progress, analytics).await {
         Ok(Some(connection)) => {
             sub_progress.success(Some("connected to operator"));
             Ok(Some(connection))
@@ -70,12 +95,25 @@ where
 /// Creates an agent if needed then connects to it.
 pub(crate) async fn create_and_connect<P>(
     config: &LayerConfig,
-    progress: &P,
+    progress: &mut P,
+    analytics: &mut AnalyticsReporter,
 ) -> Result<(AgentConnectInfo, AgentConnection)>
 where
     P: Progress + Send + Sync,
 {
-    if config.operator && let Some((sender, receiver, operator_information)) = create_operator_session(config, progress).await? {
+    if let Some(outgoing_filter) = &config.feature.network.outgoing.filter {
+        if matches!(outgoing_filter, OutgoingFilterConfig::Remote(_)) && !config.feature.network.dns
+        {
+            progress.warning(
+                    "The mirrord outgoing traffic filter includes host names to be connected remotely,\
+                     but the remote DNS feature is disabled, so the addresses of these hosts will be\
+                     resolved locally!\n\
+                     > Consider enabling the remote DNS resolution feature.",
+            );
+        }
+    }
+
+    if config.operator && let Some((sender, receiver, operator_information)) = create_operator_session(config, progress, analytics).await? {
         Ok((
             AgentConnectInfo::Operator(operator_information),
             AgentConnection { sender, receiver },
@@ -91,26 +129,25 @@ where
             .await
             .map_err(CliError::KubernetesApiFailed)?;
 
-        let mut detect_openshift_task = progress.subtask("detecting OpenShift...");
-        if (k8s_api.detect_openshift(&mut detect_openshift_task).await).is_err() {
-            detect_openshift_task.warning("couldn't determine OpenShift");
-        };
+        let _ = k8s_api.detect_openshift(progress).await.map_err(|err| {
+            debug!("couldn't determine OpenShift: {err}");
+        });
 
-        let (pod_agent_name, agent_port) = tokio::time::timeout(
+        let agent_connect_info = tokio::time::timeout(
             Duration::from_secs(config.agent.startup_timeout),
-            k8s_api.create_agent(progress),
+            k8s_api.create_agent(progress, Some(config)),
         )
         .await
         .map_err(|_| CliError::AgentReadyTimeout)?
         .map_err(CliError::CreateAgentFailed)?;
 
         let (sender, receiver) = k8s_api
-            .create_connection((pod_agent_name.clone(), agent_port))
+            .create_connection(agent_connect_info.clone())
             .await
             .map_err(CliError::AgentConnectionFailed)?;
 
         Ok((
-            AgentConnectInfo::DirectKubernetes(pod_agent_name, agent_port),
+            AgentConnectInfo::DirectKubernetes(agent_connect_info),
             AgentConnection { sender, receiver },
         ))
     }

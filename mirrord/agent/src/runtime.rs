@@ -1,9 +1,4 @@
-use std::{
-    collections::HashMap,
-    fs::File,
-    os::unix::io::{IntoRawFd, RawFd},
-    path::PathBuf,
-};
+use std::collections::HashMap;
 
 use bollard::{container::InspectContainerOptions, Docker, API_DEFAULT_VERSION};
 use containerd_client::{
@@ -15,14 +10,13 @@ use containerd_client::{
     with_namespace,
 };
 use enum_dispatch::enum_dispatch;
-use nix::sched::setns;
 use oci_spec::runtime::Spec;
 use tokio::net::UnixStream;
 use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
-use tracing::{trace, warn};
 
 use crate::{
+    cgroup::Cgroup,
     env::parse_raw_env,
     error::{AgentError, Result},
     runtime::crio::CriOContainer,
@@ -70,39 +64,32 @@ pub(crate) trait ContainerRuntime {
 }
 
 #[enum_dispatch(ContainerRuntime)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Container {
     Docker(DockerContainer),
     Containerd(ContainerdContainer),
     CriO(CriOContainer),
+    Ephemeral(EphemeralContainer),
 }
 
 /// get a container object according to args.
 pub(crate) async fn get_container(
-    container_id_opt: Option<&String>,
-    container_runtime_opt: Option<&String>,
-) -> Result<Option<Container>> {
-    if let (Some(container_id), Some(container_runtime)) = (container_id_opt, container_runtime_opt)
-    {
-        let container_id = container_id.to_string();
-        match container_runtime.as_str() {
-            "docker" => Ok(Some(Container::Docker(
-                DockerContainer::from_id(container_id).await?,
-            ))),
-            "containerd" => Ok(Some(Container::Containerd(ContainerdContainer {
-                container_id,
-            }))),
-            "cri-o" => Ok(Some(Container::CriO(CriOContainer::from_id(container_id)))),
-            _ => Err(AgentError::NotFound(format!(
-                "Unknown runtime {container_runtime:?}"
-            ))),
-        }
-    } else {
-        Ok(None)
+    container_id: String,
+    container_runtime: Option<&str>,
+) -> Result<Container> {
+    match container_runtime {
+        Some("docker") => Ok(Container::Docker(
+            DockerContainer::from_id(container_id).await?,
+        )),
+        Some("containerd") => Ok(Container::Containerd(ContainerdContainer { container_id })),
+        Some("cri-o") => Ok(Container::CriO(CriOContainer::from_id(container_id))),
+        _ => Err(AgentError::NotFound(format!(
+            "Unknown runtime {container_runtime:?}"
+        ))),
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct DockerContainer {
     container_id: String,
     client: Docker,
@@ -168,7 +155,7 @@ impl ContainerRuntime for DockerContainer {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ContainerdContainer {
     container_id: String,
 }
@@ -288,11 +275,24 @@ impl ContainerRuntime for ContainerdContainer {
     }
 }
 
-#[tracing::instrument(level = "trace")]
-pub fn set_namespace(ns_path: PathBuf) -> Result<()> {
-    let fd: RawFd = File::open(ns_path)?.into_raw_fd();
-    trace!("set_namespace -> fd {:#?}", fd);
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct EphemeralContainer;
 
-    setns(fd, nix::sched::CloneFlags::CLONE_NEWNET)?;
-    Ok(())
+impl ContainerRuntime for EphemeralContainer {
+    /// When running on ephemeral, root pid is always 1 and env is the current process' env. (we
+    /// copy it from the k8s spec)
+    async fn get_info(&self) -> Result<ContainerInfo> {
+        Ok(ContainerInfo::new(1, std::env::vars().collect()))
+    }
+
+    /// Pause requires root privileges, so if it fails on permission we send a message.
+    async fn pause(&self) -> Result<()> {
+        let cgroup = Cgroup::new().await?;
+        cgroup.pause().await.map_err(From::from)
+    }
+
+    async fn unpause(&self) -> Result<()> {
+        let cgroup = Cgroup::new().await?;
+        cgroup.unpause().await.map_err(From::from)
+    }
 }

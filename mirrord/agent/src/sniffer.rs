@@ -27,12 +27,13 @@ use tracing::{debug, error, trace, warn};
 
 use crate::{
     error::AgentError,
+    steal::http::HttpVersion,
     util::{ClientId, IndexAllocator, Subscriptions},
     watched_task::TaskStatus,
 };
 
 #[derive(Debug, Eq, Copy, Clone)]
-pub struct TcpSessionIdentifier {
+pub(crate) struct TcpSessionIdentifier {
     /// The remote address that is sending a packet to the impersonated pod.
     ///
     /// ## Details
@@ -98,7 +99,7 @@ struct TCPSession {
 
 type TCPSessionMap = HashMap<TcpSessionIdentifier, TCPSession>;
 
-fn is_new_connection(flags: u16) -> bool {
+const fn is_new_connection(flags: u16) -> bool {
     0 != (flags & TcpFlags::SYN) && 0 == (flags & (TcpFlags::ACK | TcpFlags::RST | TcpFlags::FIN))
 }
 
@@ -220,14 +221,14 @@ impl From<LayerTcp> for SnifferCommands {
 }
 
 #[derive(Debug)]
-pub struct SnifferCommand {
+pub(crate) struct SnifferCommand {
     client_id: ClientId,
     command: SnifferCommands,
 }
 
 /// Interface used by clients to interact with the [`TcpConnectionSniffer`].
 /// Multiple instances of this struct operate on a single sniffer instance.
-pub struct TcpSnifferApi {
+pub(crate) struct TcpSnifferApi {
     /// Id of the client using this struct.
     client_id: ClientId,
     /// Channel used to send commands to the [`TcpConnectionSniffer`].
@@ -308,7 +309,7 @@ impl Drop for TcpSnifferApi {
     }
 }
 
-pub struct TcpConnectionSniffer {
+pub(crate) struct TcpConnectionSniffer {
     port_subscriptions: Subscriptions<Port, ClientId>,
     receiver: Receiver<SnifferCommand>,
     client_senders: HashMap<ClientId, Sender<DaemonTcp>>,
@@ -369,11 +370,14 @@ impl TcpConnectionSniffer {
         })
     }
 
-    #[tracing::instrument(level = "trace", skip(self, sender))]
+    /// New layer is connecting to this agent sniffer.
+    #[tracing::instrument(level = "trace", ret, skip(self, sender))]
     fn handle_new_client(&mut self, client_id: ClientId, sender: Sender<DaemonTcp>) {
         self.client_senders.insert(client_id, sender);
     }
 
+    /// layer with `client_id` wants to sniff on `port`.
+    #[tracing::instrument(level = "trace", ret, skip(self))]
     async fn handle_subscribe(
         &mut self,
         client_id: ClientId,
@@ -393,7 +397,10 @@ impl TcpConnectionSniffer {
         self.update_sniffer()
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    /// Updates the sniffer's internal state.
+    ///
+    /// Called when the sniffer receives a new command.
+    #[tracing::instrument(level = "trace", ret, skip(self))]
     fn update_sniffer(&mut self) -> Result<(), AgentError> {
         let ports = self.port_subscriptions.get_subscribed_topics();
 
@@ -414,6 +421,7 @@ impl TcpConnectionSniffer {
             .contains(&port)
     }
 
+    #[tracing::instrument(level = "trace", ret, skip(self))]
     async fn handle_command(&mut self, command: SnifferCommand) -> Result<(), AgentError> {
         match command {
             SnifferCommand {
@@ -472,7 +480,7 @@ impl TcpConnectionSniffer {
     }
 
     /// Sends a [`DaemonTcp`] message back to the client with `client_id`.
-    #[tracing::instrument(level = "trace", skip(self, message))]
+    #[tracing::instrument(level = "trace", ret, skip(self, message))]
     async fn send_message_to_client(
         &mut self,
         client_id: &ClientId,
@@ -491,7 +499,19 @@ impl TcpConnectionSniffer {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self, eth_packet), fields(bytes = %eth_packet.len()))]
+    /// First it checks the `tcp_flags` with [`is_new_connection`], if that's not the case, meaning
+    /// we have traffic from some existing connection from before mirrord started, then it tries to
+    /// see if `bytes` contains an HTTP request (HTTP/1) of some sort. When an HTTP request is
+    /// detected, then the agent should start mirroring as if it was a new connection.
+    ///
+    /// tl;dr: checks packet flags, or if it's an HTTP packet, then begins a new sniffing session.
+    #[tracing::instrument(level = "trace", ret, skip(bytes))]
+    fn treat_as_new_session(tcp_flags: u16, bytes: &[u8]) -> bool {
+        is_new_connection(tcp_flags)
+            || matches!(HttpVersion::new(bytes), HttpVersion::V1 | HttpVersion::V2)
+    }
+
+    #[tracing::instrument(level = "trace", ret, skip(self, eth_packet), fields(bytes = %eth_packet.len()))]
     async fn handle_packet(&mut self, eth_packet: Vec<u8>) -> Result<(), AgentError> {
         let (identifier, tcp_packet) = match get_tcp_packet(eth_packet) {
             Some(res) => res,
@@ -513,8 +533,11 @@ impl TcpConnectionSniffer {
         let session = match self.sessions.remove(&identifier) {
             Some(session) => session,
             None => {
-                if !is_new_connection(tcp_flags) {
-                    debug!("not new connection {tcp_flags:?}");
+                // Performs a check on the `tcp_flags` and on the packet contents to see if this
+                // should be treated as a new connection.
+                if !Self::treat_as_new_session(tcp_flags, &tcp_packet.bytes) {
+                    // Either it's an existing session, or some sort of existing traffic we don't
+                    // care to start mirroring.
                     return Ok(());
                 }
 
@@ -582,7 +605,6 @@ impl TcpConnectionSniffer {
             self.sessions.insert(identifier, session);
         }
 
-        trace!("TcpConnectionSniffer::handle_packet -> finished");
         Ok(())
     }
 }

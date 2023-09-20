@@ -16,7 +16,10 @@ use kube::{api::ListParams, Api, Client};
 use mirrord_config::target::{DeploymentTarget, PodTarget, RolloutTarget, Target};
 
 use crate::{
-    api::{container::choose_container, get_k8s_resource_api, kubernetes::rollout::Rollout},
+    api::{
+        container::choose_container,
+        kubernetes::{get_k8s_resource_api, rollout::Rollout},
+    },
     error::{KubeApiError, Result},
 };
 
@@ -40,10 +43,14 @@ impl Display for ContainerRuntime {
 #[derive(Debug)]
 pub struct RuntimeData {
     pub pod_name: String,
+    pub pod_namespace: Option<String>,
     pub node_name: String,
     pub container_id: String,
     pub container_runtime: ContainerRuntime,
     pub container_name: String,
+
+    /// Used to check if we're running with a mesh/sidecar in `detect_mesh_mirror_mode`.
+    pub is_mesh: bool,
 }
 
 impl RuntimeData {
@@ -67,14 +74,16 @@ impl RuntimeData {
             .as_ref()
             .ok_or(KubeApiError::PodStatusNotFound)?
             .container_statuses
-            .as_ref()
+            .clone()
             .ok_or(KubeApiError::ContainerStatusNotFound)?;
-        let chosen_status =
-            choose_container(container_name, container_statuses).ok_or_else(|| {
-                KubeApiError::ContainerNotFound(
-                    container_name.clone().unwrap_or_else(|| "None".to_string()),
-                )
-            })?;
+        let (chosen_container, is_mesh) =
+            choose_container(container_name, container_statuses.as_ref());
+
+        let chosen_status = chosen_container.ok_or_else(|| {
+            KubeApiError::ContainerNotFound(
+                container_name.clone().unwrap_or_else(|| "None".to_string()),
+            )
+        })?;
 
         let container_name = chosen_status.name.clone();
         let container_id_full = chosen_status
@@ -103,10 +112,12 @@ impl RuntimeData {
 
         Ok(RuntimeData {
             pod_name,
+            pod_namespace: pod.metadata.namespace.clone(),
             node_name,
             container_id,
             container_runtime,
             container_name,
+            is_mesh,
         })
     }
 

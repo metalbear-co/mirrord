@@ -1,20 +1,14 @@
 #![deny(missing_docs)]
 
-use clap::{
-    error::{Error, ErrorKind},
-    Parser,
-};
+use clap::{Parser, Subcommand};
+
+const DEFAULT_RUNTIME: &str = "containerd";
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
-    /// Container id to get traffic from
-    #[arg(short, long)]
-    pub container_id: Option<String>,
-
-    /// Container runtime to use
-    #[arg(short = 'r', long)]
-    pub container_runtime: Option<String>,
+    #[clap(subcommand)]
+    pub mode: Mode,
 
     /// Port to use for communication
     #[arg(short = 'l', long, default_value_t = 61337)]
@@ -27,10 +21,6 @@ pub struct Args {
     /// Interface to use
     #[arg(short = 'i', long)]
     pub network_interface: Option<String>,
-
-    /// Inform the agent to use `proc/1/root` as the root directory.
-    #[arg(short = 'e', long, default_value_t = false)]
-    pub ephemeral_container: bool,
 
     /// Pause the target container while clients are connected.
     #[arg(short = 'p', long, default_value_t = false)]
@@ -49,28 +39,31 @@ pub struct Args {
     pub base_protocol_version: semver::Version,
 }
 
-const DEFAULT_RUNTIME: &str = "containerd";
+#[derive(Clone, Debug, Default, Subcommand)]
+pub enum Mode {
+    Targeted {
+        /// Container id to get traffic from
+        #[arg(short, long)]
+        container_id: String,
+
+        /// Container runtime to use
+        #[arg(short = 'r', long, default_value = DEFAULT_RUNTIME)]
+        container_runtime: String,
+    },
+    /// Inform the agent to use `proc/1/root` as the root directory.
+    Ephemeral,
+    #[default]
+    Targetless,
+    #[clap(hide = true)]
+    BlackboxTest,
+}
+
+impl Mode {
+    pub fn is_targetless(&self) -> bool {
+        matches!(self, Mode::Targetless)
+    }
+}
 
 pub fn parse_args() -> Args {
-    let args = Args::try_parse()
-        .and_then(|args| {
-            if args.container_runtime.is_some() && args.container_id.is_none() {
-                Err(Error::raw(
-                    ErrorKind::InvalidValue,
-                    "container_id is required when container_runtime is specified",
-                ))
-            } else {
-                Ok(args)
-            }
-        })
-        .map(|mut args| {
-            if args.container_runtime.is_none() {
-                args.container_runtime = Some(DEFAULT_RUNTIME.to_string());
-            }
-            args
-        });
-    match args {
-        Ok(args) => args,
-        Err(e) => e.exit(),
-    }
+    Args::try_parse().unwrap_or_else(|err| err.exit())
 }
