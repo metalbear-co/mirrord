@@ -70,7 +70,7 @@ pub trait ContainerApi<V>
 where
     V: ContainerVariant,
 {
-    async fn create_agent<P>(&self, progress: &P) -> Result<AgentKubernetesConnectInfo>
+    async fn create_agent<P>(&self, progress: &mut P) -> Result<AgentKubernetesConnectInfo>
     where
         P: Progress + Send + Sync;
 }

@@ -32,7 +32,7 @@ impl<'c, V> Targeted<'c, V> {
 }
 
 impl<'c> ContainerApi<JobTargetedVariant<'c>> for Targeted<'c, JobTargetedVariant<'c>> {
-    async fn create_agent<P>(&self, progress: &P) -> Result<AgentKubernetesConnectInfo>
+    async fn create_agent<P>(&self, progress: &mut P) -> Result<AgentKubernetesConnectInfo>
     where
         P: Progress + Send + Sync,
     {
@@ -43,15 +43,13 @@ impl<'c> ContainerApi<JobTargetedVariant<'c>> for Targeted<'c, JobTargetedVarian
         } = self;
 
         if variant.agent_config().check_out_of_pods {
-            let mut check_node = progress.subtask("checking if node is allocatable...");
             match runtime_data.check_node(client).await {
-                NodeCheck::Success => check_node.success(Some("node is allocatable")),
+                NodeCheck::Success => debug!("node is allocatable"),
                 NodeCheck::Error(err) => {
-                    debug!("{err}");
-                    check_node.warning("unable to check if node is allocatable");
+                    debug!("unable to check if node is allocatable, {err}");
                 }
                 NodeCheck::Failed(node_name, pods) => {
-                    check_node.failure(Some("node is not allocatable"));
+                    progress.failure(Some("node is not allocatable"));
 
                     return Err(KubeApiError::NodePodLimitExceeded(node_name, pods));
                 }
@@ -63,7 +61,7 @@ impl<'c> ContainerApi<JobTargetedVariant<'c>> for Targeted<'c, JobTargetedVarian
 }
 
 impl<'c> ContainerApi<EphemeralTargetedVariant<'c>> for Targeted<'c, EphemeralTargetedVariant<'c>> {
-    async fn create_agent<P>(&self, progress: &P) -> Result<AgentKubernetesConnectInfo>
+    async fn create_agent<P>(&self, progress: &mut P) -> Result<AgentKubernetesConnectInfo>
     where
         P: Progress + Send + Sync,
     {

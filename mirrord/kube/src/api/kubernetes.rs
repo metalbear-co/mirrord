@@ -25,7 +25,7 @@ use tokio_retry::{
     strategy::{jitter, ExponentialBackoff},
     Retry,
 };
-use tracing::{info, trace};
+use tracing::{debug, info, trace};
 
 use crate::{
     api::{
@@ -74,7 +74,7 @@ impl KubernetesAPI {
         }
     }
 
-    pub async fn detect_openshift<P>(&self, progress: &mut P) -> Result<()>
+    pub async fn detect_openshift<P>(&self, progress: &P) -> Result<()>
     where
         P: Progress + Send + Sync,
     {
@@ -87,7 +87,7 @@ impl KubernetesAPI {
         {
             progress.warning("mirrord has detected it's running on OpenShift. Due to the default PSP of OpenShift, mirrord may not be able to create the agent. Please refer to the documentation at https://mirrord.dev/docs/overview/faq/#can-i-use-mirrord-with-openshift");
         } else {
-            progress.success(Some("OpenShift was not detected."))
+            debug!("OpenShift was not detected.");
         }
         Ok(())
     }
