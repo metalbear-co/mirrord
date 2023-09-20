@@ -8,6 +8,55 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.68.0](https://github.com/metalbear-co/mirrord/tree/3.68.0) - 2023-09-19
+
+
+### Added
+
+- New subcommand for generating shell completions for
+  bash/fish/zsh/powershell/elvish
+  [#1947](https://github.com/metalbear-co/mirrord/issues/1947)
+
+
+### Fixed
+
+- Fix mirrord-cli verify-config command not serializing failures correctly due
+  to serde not being able to serialize newtype pattern in tagged unions.
+  [#1840](https://github.com/metalbear-co/mirrord/issues/1840)
+
+
+### Internal
+
+- CI: Add quotes to branch name in check_if_release_branch
+  [#add-quotes-ci](https://github.com/metalbear-co/mirrord/issues/add-quotes-ci)
+- Bump and clean depenedencies in our code and in tests
+- Remove process feature from Tokio in layer package
+
+
+## [3.67.0](https://github.com/metalbear-co/mirrord/tree/3.67.0) - 2023-09-13
+
+
+### Added
+
+- Add new command `mirrord verify-config [path]` to the mirrord-cli. It
+  verifies a mirrord config file producing a tool friendly output.
+  [#1840](https://github.com/metalbear-co/mirrord/issues/1840)
+
+
+### Fixed
+
+- Support mirroring existing sessions by introducing an HTTP check when the
+  sniffer receives a tcp packet.
+  [#1317](https://github.com/metalbear-co/mirrord/issues/1317)
+
+
+### Internal
+
+- Run IDE e2e tests on release.
+  [#1893](https://github.com/metalbear-co/mirrord/issues/1893)
+- Add `document` method on `KeyPair` to access pem encoded key.
+
+
 ## [3.66.0](https://github.com/metalbear-co/mirrord/tree/3.66.0) - 2023-09-12
 
 

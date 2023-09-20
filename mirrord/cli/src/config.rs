@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
+use clap_complete::Shell;
 use email_address::EmailAddress;
 use mirrord_operator::setup::OperatorNamespace;
 
@@ -39,6 +40,10 @@ pub(super) enum Commands {
     /// 3. No privileged permissions required for end users.
     Waitlist(WaitlistArgs),
 
+    /// Generates shell completions for the provided shell.
+    /// Supported shells: bash, elvish, fish, powershell, zsh
+    Completions(CompletionsArgs),
+
     #[command(hide = true)]
     Extract { path: String },
     /// Operator commands eg. setup
@@ -55,6 +60,10 @@ pub(super) enum Commands {
     /// Internal proxy - used to aggregate connections from multiple layers
     #[command(hide = true, name = "intproxy")]
     InternalProxy,
+
+    /// Verify config file without starting mirrord.
+    #[command(hide = true)]
+    VerifyConfig(VerifyConfigArgs),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -277,4 +286,16 @@ fn email_parse(email: &str) -> Result<EmailAddress, String> {
     email
         .parse()
         .map_err(|e: email_address::Error| format!("invalid email address provided: {e:?}"))
+}
+
+/// Args for the [`super::verify_config`] mirrord-cli command.
+#[derive(Args, Debug)]
+pub(super) struct VerifyConfigArgs {
+    /// Config file path.
+    pub(super) path: PathBuf,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct CompletionsArgs {
+    pub(super) shell: Shell,
 }
