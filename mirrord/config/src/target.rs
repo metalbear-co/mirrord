@@ -204,6 +204,16 @@ impl FromStr for Target {
     }
 }
 
+impl Target {
+    /// Get the target name - pod name, deployment name, rollout name..
+    pub fn get_target_name(&self) -> String {
+        match self {
+            Target::Deployment(deployment) => deployment.deployment.clone(),
+            Target::Pod(pod) => pod.pod.clone(),
+            Target::Rollout(rollout) => rollout.rollout.clone(),
+        }
+    }
+}
 /// <!--${internal}-->
 /// Mirror the pod specified by [`PodTarget::pod`].
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
