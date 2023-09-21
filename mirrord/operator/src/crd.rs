@@ -21,14 +21,18 @@ pub struct TargetSpec {
 }
 
 impl TargetCrd {
+    /// Creates target name in format of target_type.target_name.[container.container_name]
+    /// for example:
+    /// deploy.nginx
+    /// deploy.nginx.container.nginx
     pub fn target_name(target: &Target) -> String {
         let (type_name, target, container) = match target {
             Target::Deployment(target) => ("deploy", &target.deployment, &target.container),
-            Target::Pod(target) => ("pod.{}", &target.pod, &target.container),
-            Target::Rollout(target) => ("rollout.{}", &target.rollout, &target.container),
+            Target::Pod(target) => ("pod", &target.pod, &target.container),
+            Target::Rollout(target) => ("rollout", &target.rollout, &target.container),
         };
         if let Some(container) = container {
-            format!("{}.{}.{}", type_name, target, container)
+            format!("{}.{}.container.{}", type_name, target, container)
         } else {
             format!("{}.{}", type_name, target)
         }
