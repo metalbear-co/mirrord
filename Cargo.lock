@@ -3698,6 +3698,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-internal-proxy-protocol"
+version = "3.68.0"
+dependencies = [
+ "actix-codec",
+ "bincode",
+ "bytes",
+ "mirrord-protocol",
+ "serde",
+]
+
+[[package]]
 name = "mirrord-kube"
 version = "3.68.0"
 dependencies = [

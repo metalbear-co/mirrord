@@ -1,0 +1,1 @@
+Fixes selecting container to use when using operator

@@ -22,10 +22,15 @@ pub struct TargetSpec {
 
 impl TargetCrd {
     pub fn target_name(target: &Target) -> String {
-        match target {
-            Target::Deployment(target) => format!("deploy.{}", target.deployment),
-            Target::Pod(target) => format!("pod.{}", target.pod),
-            Target::Rollout(target) => format!("rollout.{}", target.rollout),
+        let (type_name, target, container) = match target {
+            Target::Deployment(target) => ("deploy", &target.deployment, &target.container),
+            Target::Pod(target) => ("pod.{}", &target.pod, &target.container),
+            Target::Rollout(target) => ("rollout.{}", &target.rollout, &target.container),
+        };
+        if let Some(container) = container {
+            format!("{}.{}.{}", type_name, target, container)
+        } else {
+            format!("{}.{}", type_name, target)
         }
     }
 
