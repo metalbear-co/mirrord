@@ -3785,6 +3785,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-intproxy"
+version = "3.68.0"
+dependencies = [
+ "bincode",
+ "futures",
+ "mirrord-config",
+ "mirrord-kube",
+ "mirrord-operator",
+ "mirrord-protocol",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "mirrord-kube"
 version = "3.71.2"
 dependencies = [

@@ -248,6 +248,10 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
 
     print_port(&listener)?;
 
+    unsafe {
+        detach_io()?;
+    }
+
     let (stream, _) = timeout(
         Duration::from_secs(config.internal_proxy.start_idle_timeout),
         listener.accept(),
@@ -263,10 +267,6 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
     let mut active_connections = JoinSet::new();
 
     active_connections.spawn(connection_task(config.clone(), stream));
-
-    unsafe {
-        detach_io()?;
-    }
 
     loop {
         tokio::select! {
@@ -302,7 +302,7 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
     match main_connection_task_join.await {
         Ok(Err(err)) => Err(err.into()),
         Err(err) => {
-            error!("internal_proxy connection paniced {err}");
+            error!("internal_proxy connection panicked {err}");
 
             Err(InternalProxyError::AgentClosedConnection.into())
         }

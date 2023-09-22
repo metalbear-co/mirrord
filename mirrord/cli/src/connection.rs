@@ -40,6 +40,7 @@ impl AgentConnectInfo {
             .transpose()
     }
 }
+
 pub(crate) struct AgentConnection {
     pub sender: mpsc::Sender<ClientMessage>,
     pub receiver: mpsc::Receiver<DaemonMessage>,

@@ -19,7 +19,7 @@ bytes.workspace = true
 thiserror.workspace = true
 trust-dns-resolver.workspace = true
 serde.workspace = true
-bincode =  { version = "2.0.0-rc.2", features = ["serde"] }
+bincode.workspace = true
 tracing.workspace = true
 hyper = { workspace = true, features = ["client"]}
 http-serde = "1.1.2"
