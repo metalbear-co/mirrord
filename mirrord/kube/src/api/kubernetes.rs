@@ -199,20 +199,13 @@ impl AgentManagment for KubernetesAPI {
     where
         P: Progress + Send + Sync,
     {
-        let runtime_data = if let Some(ref path) = self.target.path {
+        let runtime_data = if let Some(ref path) = self.target.path && !matches!(path, mirrord_config::target::Target::Targetless) {
             let runtime_data = path
                 .runtime_data(&self.client, self.target.namespace.as_deref())
                 .await?;
 
             Some(runtime_data)
         } else {
-            // Most users won't see this, since the default log level is error, and also progress
-            // reporting overrides logs in this stage of the run.
-            info!(
-                "No target specified. Spawning a targetless agent - not specifying a node, not \
-                impersonating any existing resource. \
-                To spawn a targeted agent, please specify a target in the configuration.",
-            );
             None
         };
 

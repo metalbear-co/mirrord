@@ -184,12 +184,19 @@ pub enum Target {
     /// <!--${internal}-->
     /// Mirror a rollout.
     Rollout(RolloutTarget),
+
+    /// <!--${internal}-->
+    /// Spawn a new pod.
+    Targetless,
 }
 
 impl FromStr for Target {
     type Err = ConfigError;
 
     fn from_str(target: &str) -> Result<Target> {
+        if target == "targetless" {
+            return Ok(Target::Targetless);
+        }
         let mut split = target.split('/');
         match split.next() {
             Some("deployment") | Some("deploy") => {
@@ -334,6 +341,9 @@ impl CollectAnalytics for &TargetConfig {
                     if rollout.container.is_some() {
                         flags |= TargetAnalyticFlags::CONTAINER;
                     }
+                }
+                Target::Targetless => {
+                    // Targetless is essentially 0, so no need to set any flags.
                 }
             }
         }
