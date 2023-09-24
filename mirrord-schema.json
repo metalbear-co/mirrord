@@ -1000,6 +1000,10 @@
               "$ref": "#/definitions/RolloutTarget"
             }
           ]
+        },
+        {
+          "description": "<!--${internal}--> Spawn a new pod.",
+          "type": "null"
         }
       ]
     },
