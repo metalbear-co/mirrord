@@ -26,6 +26,7 @@ impl TargetCrd {
             Target::Deployment(target) => format!("deploy.{}", target.deployment),
             Target::Pod(target) => format!("pod.{}", target.pod),
             Target::Rollout(target) => format!("rollout.{}", target.rollout),
+            Target::Targetless => TARGETLESS_TARGET_NAME.to_string(),
         }
     }
 
