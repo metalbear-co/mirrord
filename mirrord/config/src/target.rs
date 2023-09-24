@@ -184,12 +184,19 @@ pub enum Target {
     /// <!--${internal}-->
     /// Mirror a rollout.
     Rollout(RolloutTarget),
+
+    /// <!--${internal}-->
+    /// Spawn a new pod.
+    Targetless,
 }
 
 impl FromStr for Target {
     type Err = ConfigError;
 
     fn from_str(target: &str) -> Result<Target> {
+        if target == "targetless" {
+            return Ok(Target::Targetless);
+        }
         let mut split = target.split('/');
         match split.next() {
             Some("deployment") | Some("deploy") => {
@@ -211,6 +218,9 @@ impl Target {
             Target::Deployment(deployment) => deployment.deployment.clone(),
             Target::Pod(pod) => pod.pod.clone(),
             Target::Rollout(rollout) => rollout.rollout.clone(),
+            Target::Targetless => {
+                unreachable!("this shouldn't happen - called from operator on a flow where it's not targetless.")
+            }
         }
     }
 }
@@ -344,6 +354,9 @@ impl CollectAnalytics for &TargetConfig {
                     if rollout.container.is_some() {
                         flags |= TargetAnalyticFlags::CONTAINER;
                     }
+                }
+                Target::Targetless => {
+                    // Targetless is essentially 0, so no need to set any flags.
                 }
             }
         }

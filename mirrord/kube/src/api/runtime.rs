@@ -244,6 +244,9 @@ impl RuntimeDataProvider for Target {
             Target::Deployment(deployment) => deployment.runtime_data(client, namespace).await,
             Target::Pod(pod) => pod.runtime_data(client, namespace).await,
             Target::Rollout(rollout) => rollout.runtime_data(client, namespace).await,
+            Target::Targetless => {
+                unreachable!("runtime_data can't be called on Targetless")
+            }
         }
     }
 }
