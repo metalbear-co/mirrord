@@ -223,7 +223,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, watch);
     (&config).collect_analytics(analytics.get_mut());
 
-    config.verify(&mut context)?;
+    config.verify::<false>(&mut context)?;
     for warning in context.get_warnings() {
         progress.warning(warning);
     }
@@ -466,7 +466,7 @@ async fn verify_config(VerifyConfigArgs { path }: VerifyConfigArgs) -> Result<()
     let verified = match LayerFileConfig::from_path(path)
         .and_then(|config| config.generate_config(&mut config_context))
         .and_then(|config| {
-            config.verify(&mut config_context)?;
+            config.verify::<true>(&mut config_context)?;
             Ok(config)
         }) {
         Ok(config) => VerifiedConfig::Success {

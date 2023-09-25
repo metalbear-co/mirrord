@@ -301,9 +301,18 @@ impl LayerConfig {
     }
 
     /// Verify that there are no conflicting settings.
+    ///
     /// We don't call it from `from_env` since we want to verify it only once (from cli)
-    /// Returns vec of warnings
-    pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
+    ///
+    /// Fills `context` with the warnings.
+    ///
+    /// `WARN_TARGETLESS` changes the config conflict (targetless + steal mode) to a warning,
+    /// instead of a hard error, as the IDEs can still recover from this by showing a target pick
+    /// dialog.
+    pub fn verify<const WARN_TARGETLESS: bool>(
+        &self,
+        context: &mut ConfigContext,
+    ) -> Result<(), ConfigError> {
         if self.pause {
             if self.agent.ephemeral && !self.agent.privileged {
                 context.add_warning("The target pause feature with ephemeral requires to enable the privileged flag on the agent.".to_string());
@@ -367,9 +376,15 @@ impl LayerConfig {
             if self.target.namespace.is_some() {
                 Err(ConfigError::TargetNamespaceWithoutTarget)?;
             }
+
             if self.feature.network.incoming.is_steal() {
-                Err(ConfigError::Conflict("Steal mode is not compatible with a targetless agent, please either disable this option or specify a target.".into()))?;
+                if WARN_TARGETLESS {
+                    context.add_warning("Steal mode is not compatible with a targetless agent, please either disable this option or specify a target.".into());
+                } else {
+                    Err(ConfigError::Conflict("Steal mode is not compatible with a targetless agent, please either disable this option or specify a target.".into()))?;
+                }
             }
+
             if self.agent.ephemeral {
                 Err(ConfigError::Conflict(
                     "Using an ephemeral container for the agent is not compatible with a targetless agent, please either disable this option or specify a target.".into(),
