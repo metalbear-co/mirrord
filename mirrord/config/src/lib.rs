@@ -301,8 +301,10 @@ impl LayerConfig {
     }
 
     /// Verify that there are no conflicting settings.
+    ///
     /// We don't call it from `from_env` since we want to verify it only once (from cli)
-    /// Returns vec of warnings
+    ///
+    /// Fills `context` with the warnings.
     pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
         if self.pause {
             if self.agent.ephemeral && !self.agent.privileged {
@@ -368,7 +370,7 @@ impl LayerConfig {
                 Err(ConfigError::TargetNamespaceWithoutTarget)?;
             }
             if self.feature.network.incoming.is_steal() {
-                Err(ConfigError::Conflict("Steal mode is not compatible with a targetless agent, please either disable this option or specify a target.".into()))?;
+                context.add_warning("Steal mode is not compatible with a targetless agent, please either disable this option or specify a target.".into());
             }
             if self.agent.ephemeral {
                 Err(ConfigError::Conflict(
