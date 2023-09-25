@@ -1,4 +1,4 @@
-use std::{env::VarError, net::SocketAddr, ptr, str::ParseBoolError};
+use std::{env::VarError, io, net::SocketAddr, ptr, str::ParseBoolError};
 
 use errno::set_errno;
 use ignore_codes::*;
@@ -209,6 +209,9 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Something went wrong with the outgoing filter `{0}`.")]
     OutgoingFilterError(#[from] OutgoingFilterError),
+
+    #[error("mirrord-layer: Failed to connect to internal proxy at {0}: {1}")]
+    InternalProxyConnectionFailed(SocketAddr, io::Error),
 }
 
 impl From<SerializationError> for LayerError {

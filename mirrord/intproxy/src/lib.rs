@@ -18,7 +18,7 @@ use tokio::{
 use crate::{
     agent_info::AgentConnectInfo,
     error::{IntProxyError, Result},
-    protocol::{LayerToProxyMessage, ProxyToLayerMessage},
+    protocol::{LayerToProxyMessage, LocalMessage, ProxyToLayerMessage},
 };
 
 pub mod agent_info;
@@ -171,8 +171,8 @@ impl IntProxy {
 
 struct ProxySession {
     agent_conn: AgentConnection,
-    layer_sender: AsyncSender<ProxyToLayerMessage, OwnedWriteHalf>,
-    layer_receiver: AsyncReceiver<LayerToProxyMessage, OwnedReadHalf>,
+    layer_sender: AsyncSender<LocalMessage<ProxyToLayerMessage>, OwnedWriteHalf>,
+    layer_receiver: AsyncReceiver<LocalMessage<LayerToProxyMessage>, OwnedReadHalf>,
     ping: bool,
 }
 
@@ -183,8 +183,7 @@ impl ProxySession {
         let mut agent_conn = intproxy.connect_to_agent().await?;
         agent_conn.ping().await?;
 
-        let (layer_sender, layer_receiver) =
-            codec::make_async_framed::<ProxyToLayerMessage, LayerToProxyMessage>(conn);
+        let (layer_sender, layer_receiver) = codec::make_async_framed(conn);
 
         Ok(Self {
             agent_conn,
@@ -239,19 +238,16 @@ impl ProxySession {
             DaemonMessage::Pong => {
                 self.ping = false;
             }
-            agent_message => {
-                self.layer_sender
-                    .send(&ProxyToLayerMessage::DaemonMessage(agent_message))
-                    .await?
-            }
+            _ => todo!(),
         }
 
         Ok(())
     }
 
-    async fn handle_layer_message(&mut self, message: LayerToProxyMessage) -> Result<()> {
-        match message {
-            LayerToProxyMessage::ClientMessage(message) => self.agent_conn.send(message).await,
-        }
+    async fn handle_layer_message(
+        &mut self,
+        _message: LocalMessage<LayerToProxyMessage>,
+    ) -> Result<()> {
+        todo!()
     }
 }

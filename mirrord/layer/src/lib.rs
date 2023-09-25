@@ -137,6 +137,7 @@ mod hooks;
 mod load;
 mod macros;
 mod outgoing;
+mod proxy_connection;
 mod socket;
 mod tcp;
 mod tcp_mirror;
