@@ -23,53 +23,6 @@ use crate::{
     LayerError::{PortAlreadyStolen, UnexpectedResponseError},
 };
 
-#[derive(Debug)]
-pub(crate) enum TcpIncoming {
-    Listen(Listen),
-    Close(Port),
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct Listen {
-    pub mirror_port: Port,
-    pub requested_port: Port,
-    pub ipv6: bool,
-    pub id: SocketId,
-}
-
-impl PartialEq for Listen {
-    fn eq(&self, other: &Self) -> bool {
-        self.requested_port == other.requested_port
-    }
-}
-
-impl Eq for Listen {}
-
-impl Hash for Listen {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.requested_port.hash(state);
-    }
-}
-
-impl Borrow<Port> for Listen {
-    fn borrow(&self) -> &Port {
-        &self.requested_port
-    }
-}
-
-impl From<&Listen> for SocketAddr {
-    fn from(listen: &Listen) -> Self {
-        let address = if listen.ipv6 {
-            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen.mirror_port)
-        } else {
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen.mirror_port)
-        };
-
-        debug_assert_eq!(address.port(), listen.mirror_port);
-        address
-    }
-}
-
 pub(crate) trait TcpHandler<const IS_STEAL: bool> {
     fn ports(&self) -> &HashSet<Listen>;
     fn ports_mut(&mut self) -> &mut HashSet<Listen>;

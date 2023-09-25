@@ -30,6 +30,7 @@ pub type Result<T> = core::result::Result<T, CodecError>;
 const BUFFER_SIZE: usize = 1024;
 const PREFIX_BYTES: usize = u32::BITS as usize / 8;
 
+#[derive(Debug)]
 pub struct SyncSender<T, W> {
     buffer: Vec<u8>,
     writer: W,
@@ -64,6 +65,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct SyncReceiver<T, R> {
     buffer: Vec<u8>,
     reader: R,
@@ -117,6 +119,7 @@ pub fn make_sync_framed<T1: Encode, T2: Decode>(
     Ok((sender, receiver))
 }
 
+#[derive(Debug)]
 pub struct AsyncSender<T, W> {
     buffer: Vec<u8>,
     writer: W,
@@ -151,6 +154,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct AsyncReceiver<T, R> {
     buffer: Vec<u8>,
     reader: R,

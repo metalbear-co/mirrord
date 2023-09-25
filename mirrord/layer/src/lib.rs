@@ -73,7 +73,9 @@
 extern crate alloc;
 extern crate core;
 
-use std::{collections::VecDeque, ffi::OsString, net::SocketAddr, panic, sync::OnceLock};
+use std::{
+    collections::VecDeque, ffi::OsString, net::SocketAddr, panic, sync::OnceLock, time::Duration,
+};
 
 use bimap::BiMap;
 use common::ResponseChannel;
@@ -95,6 +97,7 @@ use mirrord_config::{
     },
     LayerConfig,
 };
+use mirrord_intproxy::protocol::InitSession;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
@@ -102,6 +105,7 @@ use mirrord_protocol::{
     ClientMessage, DaemonMessage, CLIENT_READY_FOR_LOGS,
 };
 use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
+use proxy_connection::ProxyConnection;
 use regex::RegexSet;
 use socket::{OutgoingSelector, SOCKETS};
 use tcp::TcpHandler;
@@ -116,7 +120,6 @@ use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
-    common::HookMessage,
     debugger_ports::DebuggerPorts,
     detour::DetourGuard,
     file::{filter::FILE_FILTER, FileHandler},
@@ -182,7 +185,7 @@ fn build_runtime() -> Runtime {
 ///
 /// You probably don't want to use this directly, instead prefer calling
 /// [`blocking_send_hook_message`](common::blocking_send_hook_message) to send internal messages.
-pub(crate) static mut HOOK_SENDER: OnceLock<Sender<HookMessage>> = OnceLock::new();
+pub(crate) static mut PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
 
 pub(crate) static LAYER_INITIALIZED: OnceLock<()> = OnceLock::new();
 
@@ -508,27 +511,18 @@ fn layer_start(mut config: LayerConfig) {
         .parse()
         .expect("couldn't parse proxy address");
 
-    let runtime = build_runtime();
-    let (tx, rx) = runtime.block_on(connection::connect_to_proxy(address));
-    let (sender, receiver) = channel::<HookMessage>(1000);
-
-    // SAFETY: mutation of `HOOK_SENDER` happens only in the ctor, or in the fork hook, and in all
-    // of those cases there's only one thread so we can do this safely.
     unsafe {
-        if let Some(old_sender) = HOOK_SENDER.take() {
-            // HOOK_SENDER is already set, we're currently on a fork detour.
+        PROXY_CONNECTION.take();
+        let proxy_connection =
+            ProxyConnection::new(address, InitSession::New, Duration::from_secs(5))
+                .expect("failed to initialize proxy connection");
 
-            // we can't call drop since it might trigger the traceback that can be seen here
-            // https://github.com/metalbear-co/mirrord/issues/1792
-            // so we leak it.
-            std::mem::forget(old_sender);
-        }
-        HOOK_SENDER
-            .set(sender)
+        PROXY_CONNECTION
+            .set(proxy_connection)
             .expect("Setting HOOK_SENDER singleton");
-    };
+    }
 
-    start_layer_thread(tx, rx, receiver, config, runtime);
+    // start_layer_thread(config);
 }
 
 /// We need to hook execve syscall to allow mirrord-layer to be loaded with sip patch when loading
@@ -651,56 +645,56 @@ impl Layer {
         self.tx.send(msg).await.map_err(|err| err.0)
     }
 
-    /// Passes most of the [`HookMessage`]s to their appropriate handlers, together with the
-    /// `Layer::tx` channel.
-    ///
-    /// ## Special case
-    ///
-    /// The [`HookMessage::GetAddrInfo`] message is dealt with here, we convert it to a
-    /// [`ClientMessage::GetAddrInfoRequest`], and send it with [`Self::send`].
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn handle_hook_message(&mut self, hook_message: HookMessage) {
-        match hook_message {
-            HookMessage::Tcp(message) => {
-                if self.steal {
-                    self.tcp_steal_handler
-                        .handle_hook_message(message, &self.tx)
-                        .await
-                        .unwrap();
-                } else {
-                    self.tcp_mirror_handler
-                        .handle_hook_message(message, &self.tx)
-                        .await
-                        .unwrap();
-                }
-            }
-            HookMessage::File(message) => {
-                self.file_handler
-                    .handle_hook_message(message, &self.tx)
-                    .await
-                    .unwrap();
-            }
-            HookMessage::GetAddrinfo(GetAddrInfo {
-                node,
-                hook_channel_tx,
-            }) => {
-                self.getaddrinfo_handler_queue.push_back(hook_channel_tx);
-                let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node });
+    // / Passes most of the [`HookMessage`]s to their appropriate handlers, together with the
+    // / `Layer::tx` channel.
+    // /
+    // / ## Special case
+    // /
+    // / The [`HookMessage::GetAddrInfo`] message is dealt with here, we convert it to a
+    // / [`ClientMessage::GetAddrInfoRequest`], and send it with [`Self::send`].
+    // #[tracing::instrument(level = "trace", skip(self))]
+    // async fn handle_hook_message(&mut self, hook_message: HookMessage) {
+    //     match hook_message {
+    //         HookMessage::Tcp(message) => {
+    //             if self.steal {
+    //                 self.tcp_steal_handler
+    //                     .handle_hook_message(message, &self.tx)
+    //                     .await
+    //                     .unwrap();
+    //             } else {
+    //                 self.tcp_mirror_handler
+    //                     .handle_hook_message(message, &self.tx)
+    //                     .await
+    //                     .unwrap();
+    //             }
+    //         }
+    //         HookMessage::File(message) => {
+    //             self.file_handler
+    //                 .handle_hook_message(message, &self.tx)
+    //                 .await
+    //                 .unwrap();
+    //         }
+    //         HookMessage::GetAddrinfo(GetAddrInfo {
+    //             node,
+    //             hook_channel_tx,
+    //         }) => {
+    //             self.getaddrinfo_handler_queue.push_back(hook_channel_tx);
+    //             let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node });
 
-                self.send(request).await.unwrap();
-            }
-            HookMessage::TcpOutgoing(message) => self
-                .tcp_outgoing_handler
-                .handle_hook_message(message, &self.tx)
-                .await
-                .unwrap(),
-            HookMessage::UdpOutgoing(message) => self
-                .udp_outgoing_handler
-                .handle_hook_message(message, &self.tx)
-                .await
-                .unwrap(),
-        }
-    }
+    //             self.send(request).await.unwrap();
+    //         }
+    //         HookMessage::TcpOutgoing(message) => self
+    //             .tcp_outgoing_handler
+    //             .handle_hook_message(message, &self.tx)
+    //             .await
+    //             .unwrap(),
+    //         HookMessage::UdpOutgoing(message) => self
+    //             .udp_outgoing_handler
+    //             .handle_hook_message(message, &self.tx)
+    //             .await
+    //             .unwrap(),
+    //     }
+    // }
 
     /// Passes most of the [`DaemonMessage`]s to their appropriate handlers.
     ///
@@ -878,24 +872,19 @@ async fn thread_loop(
     graceful_exit!("mirrord has encountered an error and is now exiting.");
 }
 
-/// Initializes mirrord-layer's [`thread_loop`] in a separate [`tokio::task`].
-#[tracing::instrument(level = "trace", skip(tx, rx, receiver))]
-fn start_layer_thread(
-    tx: Sender<ClientMessage>,
-    rx: Receiver<DaemonMessage>,
-    receiver: Receiver<HookMessage>,
-    config: LayerConfig,
-    runtime: Runtime,
-) {
-    std::thread::spawn(move || {
-        let _guard = DetourGuard::new();
-        runtime.block_on(thread_loop(receiver, tx, rx, config));
-        runtime.block_on(async move {
-            // wait for background tasks to finish
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        });
-    });
-}
+// /// Initializes mirrord-layer's [`thread_loop`] in a separate [`tokio::task`].
+// #[tracing::instrument(level = "trace", skip(tx, rx, receiver))]
+// fn start_layer_thread(
+//     tx: Sender<ClientMessage>,
+//     rx: Receiver<DaemonMessage>,
+//     receiver: Receiver<HookMessage>,
+//     config: LayerConfig,
+//     runtime: Runtime,
+// ) { std::thread::spawn(move || { let _guard = DetourGuard::new();
+//   runtime.block_on(thread_loop(receiver, tx, rx, config)); runtime.block_on(async move { // wait
+//   for background tasks to finish tokio::time::sleep(std::time::Duration::from_secs(1)).await; });
+//   });
+// }
 
 /// Prepares the [`HookManager`] and [`replace!`]s [`libc`] calls with our hooks, according to what
 /// the user configured.

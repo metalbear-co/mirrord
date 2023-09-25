@@ -1,30 +1,31 @@
 use std::{sync::Arc, time::Duration};
 
-use codec::{AsyncReceiver, AsyncSender};
+use error::LayerCommunicationFailed;
+use file_handler::FileHandler;
 use mirrord_config::LayerConfig;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
 use mirrord_operator::client::OperatorApi;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
+use protocol::hook::HookMessage;
 use tokio::{
-    net::{
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpListener, TcpStream,
-    },
-    sync::mpsc::{Receiver, Sender},
-    task::JoinSet,
+    net::{TcpListener, TcpStream},
+    sync::mpsc::{self, Receiver, Sender},
+    task::{self, JoinSet},
     time,
 };
 
 use crate::{
     agent_info::AgentConnectInfo,
-    error::{IntProxyError, Result},
+    error::{AgentCommunicationFailed, IntProxyError, Result},
     protocol::{LayerToProxyMessage, LocalMessage, ProxyToLayerMessage},
 };
 
 pub mod agent_info;
 pub mod codec;
 pub mod error;
+mod file_handler;
 pub mod protocol;
+mod request_queue;
 
 pub struct IntProxy {
     config: LayerConfig,
@@ -38,25 +39,38 @@ struct AgentConnection {
 }
 
 impl AgentConnection {
-    async fn send(&self, message: ClientMessage) -> Result<()> {
+    async fn send(
+        &self,
+        message: ClientMessage,
+    ) -> core::result::Result<(), AgentCommunicationFailed> {
         self.sender
             .send(message)
             .await
-            .map_err(|_| IntProxyError::AgentCommunicationFailed)
+            .map_err(|_| AgentCommunicationFailed::ChannelClosed)
     }
 
     async fn receive(&mut self) -> Option<DaemonMessage> {
         self.receiver.recv().await
     }
 
-    async fn ping(&mut self) -> Result<()> {
+    async fn ping(&mut self) -> core::result::Result<(), AgentCommunicationFailed> {
         self.send(ClientMessage::Ping).await?;
-        self.receive()
-            .await
-            .ok_or(IntProxyError::AgentCommunicationFailed)?;
 
-        Ok(())
+        let response = self
+            .receive()
+            .await
+            .ok_or(AgentCommunicationFailed::ChannelClosed)?;
+
+        match response {
+            DaemonMessage::Pong => Ok(()),
+            other => Err(AgentCommunicationFailed::UnexpectedMessage(other)),
+        }
     }
+}
+
+struct LayerConnection {
+    sender: Sender<LocalMessage<ProxyToLayerMessage>>,
+    receiver: Receiver<LocalMessage<LayerToProxyMessage>>,
 }
 
 impl IntProxy {
@@ -171,25 +185,80 @@ impl IntProxy {
 
 struct ProxySession {
     agent_conn: AgentConnection,
-    layer_sender: AsyncSender<LocalMessage<ProxyToLayerMessage>, OwnedWriteHalf>,
-    layer_receiver: AsyncReceiver<LocalMessage<LayerToProxyMessage>, OwnedReadHalf>,
+    layer_conn: LayerConnection,
     ping: bool,
+
+    file_handler: FileHandler,
 }
 
 impl ProxySession {
     const PING_INTERVAL: Duration = Duration::from_secs(30);
+    const CHANNEL_SIZE: usize = 512;
+
+    fn spawn_layer_connection_task(conn: TcpStream) -> LayerConnection {
+        let (mut layer_sender, mut layer_receiver) = codec::make_async_framed::<
+            LocalMessage<ProxyToLayerMessage>,
+            LocalMessage<LayerToProxyMessage>,
+        >(conn);
+
+        let (layer_tx, layer_rx) = mpsc::channel(Self::CHANNEL_SIZE);
+        let (proxy_tx, mut proxy_rx) = mpsc::channel(Self::CHANNEL_SIZE);
+
+        task::spawn(async move {
+            loop {
+                tokio::select! {
+                    res = layer_receiver.receive() => {
+                        match res {
+                            Ok(None) => {
+                                tracing::trace!("no more messages from layer to proxy");
+                                break;
+                            }
+                            Ok(Some(message)) => {
+                                if let Err(_) = layer_tx.send(message).await {
+                                    tracing::trace!("layer channel closed");
+                                    break;
+                                }
+                            }
+                            Err(err) => {
+                                tracing::error!("failed to receive message from layer: {err:?}");
+                                break;
+                            }
+                        }
+                    }
+                    res = proxy_rx.recv() => {
+                        let Some(message) = res else {
+                            tracing::trace!("no more messages from proxy to layer");
+                            break;
+                        };
+
+                        if let Err(err) = layer_sender.send(&message).await {
+                            tracing::error!("failed to send message to layer: {err:?}");
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        LayerConnection {
+            sender: proxy_tx,
+            receiver: layer_rx,
+        }
+    }
 
     async fn new(intproxy: &IntProxy, conn: TcpStream) -> Result<Self> {
         let mut agent_conn = intproxy.connect_to_agent().await?;
         agent_conn.ping().await?;
 
-        let (layer_sender, layer_receiver) = codec::make_async_framed(conn);
+        let layer_conn = Self::spawn_layer_connection_task(conn);
+
+        let file_handler = FileHandler::new(agent_conn.sender.clone(), layer_conn.sender.clone());
 
         Ok(Self {
             agent_conn,
-            layer_sender,
-            layer_receiver,
+            layer_conn,
             ping: false,
+            file_handler,
         })
     }
 
@@ -199,10 +268,10 @@ impl ProxySession {
 
         loop {
             tokio::select! {
-                layer_message = self.layer_receiver.receive() => {
+                layer_message = self.layer_conn.receiver.recv() => {
                     ping_interval.reset();
 
-                    let Some(message) = layer_message? else {
+                    let Some(message) = layer_message else {
                         tracing::trace!("layer connection closed");
                         break Ok(());
                     };
@@ -226,7 +295,7 @@ impl ProxySession {
                         self.ping = true;
                     } else {
                         tracing::warn!("Unmatched ping, timeout!");
-                        break Err(IntProxyError::AgentCommunicationFailed);
+                        break Err(IntProxyError::AgentCommunicationFailed(AgentCommunicationFailed::UnmatchedPing));
                     }
                 }
             }
@@ -246,8 +315,18 @@ impl ProxySession {
 
     async fn handle_layer_message(
         &mut self,
-        _message: LocalMessage<LayerToProxyMessage>,
+        message: LocalMessage<LayerToProxyMessage>,
     ) -> Result<()> {
-        todo!()
+        match message.inner {
+            LayerToProxyMessage::HookMessage(HookMessage::File(file)) => {
+                self.file_handler
+                    .handle_hook_message(message.message_id, file)
+                    .await
+            }
+            LayerToProxyMessage::HookMessage(HookMessage::Tcp(_)) => todo!(),
+            other => Err(IntProxyError::LayerCommunicationFailed(
+                LayerCommunicationFailed::UnexpectedMessage(other),
+            )),
+        }
     }
 }

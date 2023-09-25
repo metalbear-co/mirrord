@@ -2,20 +2,25 @@ use core::ffi::CStr;
 use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 use libc::{c_int, unlink, AT_FDCWD, FILE};
+use mirrord_intproxy::protocol::{
+    hook::{
+        Access, Close, CloseDir, FdOpenDir, FileOperation, GetDEnts64, HookMessage, Open,
+        OpenRelative, Read, ReadDir, ReadLimited, Seek, Write, WriteLimited, Xstat, XstatFs,
+    },
+    LayerToProxyMessage,
+};
 use mirrord_protocol::file::{
     OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse, WriteFileResponse,
     XstatFsResponse, XstatResponse,
 };
 use rand::distributions::{Alphanumeric, DistString};
-use tokio::sync::oneshot;
 use tracing::{error, trace};
 
 use super::{filter::FILE_FILTER, hooks::FN_OPEN, open_dirs::OPEN_DIRS, *};
 use crate::{
-    common::blocking_send_hook_message,
+    common,
     detour::{Bypass, Detour},
     error::{HookError, HookResult as Result},
-    HookMessage,
 };
 
 /// 1 Megabyte. Large read requests can lead to timeouts.
@@ -38,16 +43,11 @@ impl RemoteFile {
         path: PathBuf,
         open_options: OpenOptionsInternal,
     ) -> Detour<OpenFileResponse> {
-        let (file_channel_tx, file_channel_rx) = oneshot::channel();
-        let requesting_file = Open {
-            path,
-            open_options,
-            file_channel_tx,
-        };
+        let requesting_file = Open { path, open_options };
 
-        blocking_send_file_message(FileOperation::Open(requesting_file))?;
+        let response = common::make_proxy_request(requesting_file)??;
 
-        Detour::Success(file_channel_rx.blocking_recv()??)
+        Detour::Success(response)
     }
 
     /// Sends a [`FileOperation::Read`] message, reading the file in the agent.
@@ -55,27 +55,25 @@ impl RemoteFile {
     /// Blocking request and wait on already found remote_fd
     #[tracing::instrument(level = "trace")]
     pub(crate) fn remote_read(remote_fd: u64, read_amount: u64) -> Detour<ReadFileResponse> {
-        let (file_channel_tx, file_channel_rx) = oneshot::channel();
-
         // Limit read size because if we read too much it can lead to a timeout
         // Seems also that bincode doesn't do well with large buffers
         let read_amount = std::cmp::min(read_amount, MAX_READ_SIZE);
         let reading_file = Read {
             remote_fd,
             buffer_size: read_amount,
-            start_from: 0,
-            file_channel_tx,
         };
 
-        blocking_send_file_message(FileOperation::Read(reading_file))?;
+        let response = common::make_proxy_request(reading_file)??;
 
-        Detour::Success(file_channel_rx.blocking_recv()??)
+        Detour::Success(response)
     }
 
     /// Sends a [`FileOperation::Close`] message, closing the file in the agent.
     #[tracing::instrument(level = "trace")]
     pub(crate) fn remote_close(fd: u64) -> Result<()> {
-        blocking_send_file_message(FileOperation::Close(Close { fd }))
+        common::send_proxy_message(LayerToProxyMessage::HookMessage(HookMessage::File(
+            FileOperation::Close(Close { fd }),
+        )))
     }
 }
 
@@ -142,10 +140,6 @@ fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
 fn close_remote_file_on_failure(fd: u64) -> Result<()> {
     error!("Creating a temporary local file resulted in an error, closing the file remotely!");
     RemoteFile::remote_close(fd)
-}
-
-fn blocking_send_file_message(message: FileOperation) -> Result<()> {
-    blocking_send_hook_message(HookMessage::File(message))
 }
 
 /// Blocking wrapper around `libc::open` call.
@@ -222,16 +216,11 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
 
     let remote_file_fd = OPEN_FILES.get(&fd).ok_or(Bypass::LocalFdNotFound(fd))?.fd;
 
-    let (dir_channel_tx, dir_channel_rx) = oneshot::channel();
-
     let open_dir_request = FdOpenDir {
         remote_fd: remote_file_fd,
-        dir_channel_tx,
     };
 
-    blocking_send_file_message(FileOperation::FdOpenDir(open_dir_request))?;
-
-    let OpenDirResponse { fd: remote_dir_fd } = dir_channel_rx.blocking_recv()??;
+    let OpenDirResponse { fd: remote_dir_fd } = common::make_proxy_request(open_dir_request)??;
 
     let local_dir_fd = create_local_fake_file(remote_dir_fd)?;
     OPEN_DIRS.insert(local_dir_fd as usize, remote_dir_fd);
@@ -259,18 +248,14 @@ pub(crate) fn openat(
         // what).
         let remote_fd = get_remote_fd(fd)?;
 
-        let (file_channel_tx, file_channel_rx) = oneshot::channel();
-
         let requesting_file = OpenRelative {
             relative_fd: remote_fd,
             path: path.clone(),
             open_options,
-            file_channel_tx,
         };
 
-        blocking_send_file_message(FileOperation::OpenRelative(requesting_file))?;
+        let OpenFileResponse { fd: remote_fd } = common::make_proxy_request(requesting_file)??;
 
-        let OpenFileResponse { fd: remote_fd } = file_channel_rx.blocking_recv()??;
         let local_file_fd = create_local_fake_file(remote_fd)?;
 
         OPEN_FILES.insert(
@@ -295,35 +280,29 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<Re
     // We're only interested in files that are paired with mirrord-agent.
     let remote_fd = get_remote_fd(local_fd)?;
 
-    let (file_channel_tx, file_channel_rx) = oneshot::channel();
-
-    let reading_file = Read {
+    let reading_file = ReadLimited {
         remote_fd,
-        buffer_size: buffer_size as _,
+        buffer_size,
         start_from: offset,
-        file_channel_tx,
     };
 
-    blocking_send_file_message(FileOperation::ReadLimited(reading_file))?;
+    let response = common::make_proxy_request(reading_file)??;
 
-    Detour::Success(file_channel_rx.blocking_recv()??)
+    Detour::Success(response)
 }
 
 pub(crate) fn pwrite(local_fd: RawFd, buffer: &[u8], offset: u64) -> Detour<WriteFileResponse> {
     let remote_fd = get_remote_fd(local_fd)?;
 
-    let (file_channel_tx, file_channel_rx) = oneshot::channel();
-
-    let writing_file = Write {
+    let writing_file = WriteLimited {
         remote_fd,
         write_bytes: buffer.to_vec(),
         start_from: offset,
-        file_channel_tx,
     };
 
-    blocking_send_file_message(FileOperation::WriteLimited(writing_file))?;
+    let response = common::make_proxy_request(writing_file)??;
 
-    Detour::Success(file_channel_rx.blocking_recv()??)
+    Detour::Success(response)
 }
 
 #[tracing::instrument(level = "trace")]
@@ -343,35 +322,25 @@ pub(crate) fn lseek(local_fd: RawFd, offset: i64, whence: i32) -> Detour<u64> {
         }
     };
 
-    let (file_channel_tx, file_channel_rx) = oneshot::channel();
-
     let seeking_file = Seek {
         remote_fd,
-        seek_from,
-        file_channel_tx,
+        seek_from: seek_from.into(),
     };
 
-    blocking_send_file_message(FileOperation::Seek(seeking_file))?;
+    let SeekFileResponse { result_offset } = common::make_proxy_request(seeking_file)??;
 
-    let SeekFileResponse { result_offset } = file_channel_rx.blocking_recv()??;
     Detour::Success(result_offset)
 }
 
 pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isize> {
     let remote_fd = get_remote_fd(local_fd)?;
 
-    let (file_channel_tx, file_channel_rx) = oneshot::channel();
-
     let writing_file = Write {
         remote_fd,
         write_bytes: write_bytes.ok_or(Bypass::EmptyBuffer)?,
-        start_from: 0,
-        file_channel_tx,
     };
 
-    blocking_send_file_message(FileOperation::Write(writing_file))?;
-
-    let WriteFileResponse { written_amount } = file_channel_rx.blocking_recv()??;
+    let WriteFileResponse { written_amount } = common::make_proxy_request(writing_file)??;
     Detour::Success(written_amount.try_into()?)
 }
 
@@ -386,17 +355,9 @@ pub(crate) fn access(path: Detour<PathBuf>, mode: u8) -> Detour<c_int> {
         Detour::Bypass(Bypass::RelativePath(path.clone()))?
     };
 
-    let (file_channel_tx, file_channel_rx) = oneshot::channel();
+    let access = Access { path, mode };
 
-    let access = Access {
-        path,
-        mode,
-        file_channel_tx,
-    };
-
-    blocking_send_file_message(FileOperation::Access(access))?;
-
-    file_channel_rx.blocking_recv()??;
+    let _ = common::make_proxy_request(access)??;
 
     Detour::Success(0)
 }
@@ -448,31 +409,26 @@ pub(crate) fn xstat(
         (None, None) => return Detour::Error(HookError::NullPointer),
     };
 
-    let (file_channel_tx, file_channel_rx) = oneshot::channel();
-
     let lstat = Xstat {
         fd,
         path,
         follow_symlink,
-        file_channel_tx,
     };
 
-    blocking_send_file_message(FileOperation::Xstat(lstat))?;
+    let response = common::make_proxy_request(lstat)??;
 
-    Detour::Success(file_channel_rx.blocking_recv()??)
+    Detour::Success(response)
 }
 
 #[tracing::instrument(level = "trace")]
 pub(crate) fn xstatfs(fd: RawFd) -> Detour<XstatFsResponse> {
     let fd = get_remote_fd(fd)?;
 
-    let (fs_channel_tx, fs_channel_rx) = oneshot::channel();
+    let lstatfs = XstatFs { fd };
 
-    let lstatfs = XstatFs { fd, fs_channel_tx };
+    let response = common::make_proxy_request(lstatfs)??;
 
-    blocking_send_file_message(FileOperation::XstatFs(lstatfs))?;
-
-    Detour::Success(fs_channel_rx.blocking_recv()??)
+    Detour::Success(response)
 }
 
 #[cfg(target_os = "linux")]
@@ -481,15 +437,12 @@ pub(crate) fn getdents64(fd: RawFd, buffer_size: u64) -> Detour<GetDEnts64Respon
     // We're only interested in files that are paired with mirrord-agent.
     let remote_fd = get_remote_fd(fd)?;
 
-    let (dents_tx, dents_rx) = oneshot::channel();
-
-    let getdents64_message = GetDEnts64 {
+    let getdents64 = GetDEnts64 {
         remote_fd,
         buffer_size,
-        dents_tx,
     };
 
-    blocking_send_file_message(FileOperation::GetDEnts64(getdents64_message))?;
+    let response = common::make_proxy_request(getdents64)??;
 
-    Detour::Success(dents_rx.blocking_recv()??)
+    Detour::Success(response)
 }

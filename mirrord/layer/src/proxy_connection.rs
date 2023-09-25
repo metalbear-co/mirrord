@@ -11,7 +11,20 @@ use std::{
 
 use mirrord_intproxy::{
     codec::{self, CodecError, SyncReceiver, SyncSender},
-    protocol::{InitSession, LayerToProxyMessage, LocalMessage, ProxyToLayerMessage},
+    protocol::{
+        hook::{
+            Access, FdOpenDir, FileOperation, GetDEnts64, HookMessage, Open, OpenRelative, Read,
+            ReadDir, ReadLimited, Seek, Write, WriteLimited, Xstat, XstatFs,
+        },
+        HasResponse, InitSession, LayerToProxyMessage, LocalMessage, ProxyToLayerMessage,
+    },
+};
+use mirrord_protocol::{
+    file::{
+        AccessFileResponse, GetDEnts64Response, OpenDirResponse, OpenFileResponse, ReadDirResponse,
+        ReadFileResponse, SeekFileResponse, WriteFileResponse, XstatFsResponse, XstatResponse,
+    },
+    FileResponse, RemoteResult,
 };
 use thiserror::Error;
 
@@ -37,6 +50,7 @@ impl<T> From<PoisonError<T>> for ProxyError {
 
 pub type Result<T> = core::result::Result<T, ProxyError>;
 
+#[derive(Debug)]
 pub struct ProxyConnection {
     sender: Mutex<SyncSender<LocalMessage<LayerToProxyMessage>, TcpStream>>,
     responses: Mutex<ResponseManager>,
@@ -56,7 +70,7 @@ impl ProxyConnection {
         >(connection)?;
 
         sender.send(&LocalMessage {
-            message_id: Some(0),
+            message_id: 0,
             inner: LayerToProxyMessage::InitSession(session),
         })?;
 
@@ -81,7 +95,7 @@ impl ProxyConnection {
     pub fn send(&self, message: LayerToProxyMessage) -> Result<u64> {
         let message_id = self.next_message_id();
         let message = LocalMessage {
-            message_id: Some(message_id),
+            message_id,
             inner: message,
         };
 
@@ -93,8 +107,15 @@ impl ProxyConnection {
     pub fn receive(&self, response_id: u64) -> Result<ProxyToLayerMessage> {
         self.responses.lock()?.receive(response_id)
     }
+
+    pub fn make_request<T: HasResponse>(&self, request: T) -> Result<T::Response> {
+        let response_id = self.send(request.into_message())?;
+        let response = self.receive(response_id)?;
+        T::extract_response(response).map_err(ProxyError::UnexpectedResponse)
+    }
 }
 
+#[derive(Debug)]
 struct ResponseManager {
     receiver: SyncReceiver<LocalMessage<ProxyToLayerMessage>, TcpStream>,
     outstanding_responses: HashMap<u64, ProxyToLayerMessage>,
@@ -118,18 +139,13 @@ impl ResponseManager {
                 .receiver
                 .receive()?
                 .ok_or(ProxyError::ConnectionClosed)?;
-            match response.message_id {
-                Some(id) if id == response_id => break Ok(response.inner),
-                Some(id) => {
-                    self.outstanding_responses.insert(id, response.inner);
-                }
-                None => self.handle_no_id_message(response.inner)?,
-            }
-        }
-    }
 
-    fn handle_no_id_message(&self, _message: ProxyToLayerMessage) -> Result<()> {
-        // TODO
-        Ok(())
+            if response.message_id == response_id {
+                break Ok(response.inner);
+            }
+
+            self.outstanding_responses
+                .insert(response.message_id, response.inner);
+        }
     }
 }

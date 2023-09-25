@@ -15,7 +15,7 @@ static SOCKET_ID_ALLOCATOR: AtomicU64 = AtomicU64::new(0);
 ///
 /// This is mostly to help the [`ConnectionQueue`] tracking the correct socket for [`ops::accept`].
 #[derive(Debug, PartialOrd, PartialEq, Ord, Eq, Clone, Copy, Hash)]
-pub(crate) struct SocketId(u64);
+pub struct SocketId(u64);
 
 impl Default for SocketId {
     /// Increments [`SOCKET_ID_ALLOCATOR`] and uses the latest value as an id for `Self`.
