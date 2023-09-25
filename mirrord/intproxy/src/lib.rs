@@ -2,14 +2,9 @@ use std::{sync::Arc, time::Duration};
 
 use codec::{AsyncReceiver, AsyncSender};
 use mirrord_config::LayerConfig;
-use mirrord_kube::api::{
-    kubernetes::{AgentKubernetesConnectInfo, KubernetesAPI},
-    wrap_raw_connection, AgentManagment,
-};
-use mirrord_operator::client::{OperatorApi, OperatorSessionInformation};
+use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
+use mirrord_operator::client::OperatorApi;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
-use protocol::{LayerToProxyMessage, ProxyToLayerMessage};
-use serde::{Deserialize, Serialize};
 use tokio::{
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
@@ -20,19 +15,16 @@ use tokio::{
     time,
 };
 
-use crate::error::{IntProxyError, Result};
+use crate::{
+    agent_info::AgentConnectInfo,
+    error::{IntProxyError, Result},
+    protocol::{LayerToProxyMessage, ProxyToLayerMessage},
+};
 
+pub mod agent_info;
 pub mod codec;
 pub mod error;
 pub mod protocol;
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum AgentConnectInfo {
-    /// Connect to the agent through the operator.
-    Operator(OperatorSessionInformation),
-    /// Connect directly to the agent by name and port using k8s port forward.
-    DirectKubernetes(AgentKubernetesConnectInfo),
-}
 
 pub struct IntProxy {
     config: LayerConfig,

@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use miette::Diagnostic;
 use mirrord_console::error::ConsoleError;
+use mirrord_intproxy::error::IntProxyError;
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::OperatorApiError;
 use thiserror::Error;
@@ -21,15 +22,11 @@ const GENERAL_HELP: &str = r#"
 "#;
 
 #[derive(Debug, Error, Diagnostic)]
-pub(crate) enum InternalProxyError {
+pub(crate) enum InternalProxySetupError {
     #[error("Couldn't listen for connections {0:#?}")]
     ListenError(std::io::Error),
-    #[error("Couldn't get local port{0:#?}")]
+    #[error("Couldn't get local port {0:#?}")]
     LocalPortError(std::io::Error),
-    #[error("Couldn't accept connection before timeout")]
-    FirstConnectionTimeout,
-    #[error("Couldn't accept connection {0:#?}")]
-    AcceptError(std::io::Error),
     #[error("Couldn't connect to agent via TCP {0:#?}")]
     TcpConnectError(std::io::Error),
     #[error("Agent closed connection on ping/pong, image version/arch mismatch?")]
@@ -206,8 +203,8 @@ pub(crate) enum CliError {
     InternalProxyPortReadError,
     #[error("Internal proxy read error: {0:#?}")]
     InternalProxyReadError(std::io::Error),
-    #[error("Internal proxy error: {0:#?}")]
-    InternalProxyError(#[from] InternalProxyError),
+    #[error("Internal proxy setup error: {0:#?}")]
+    InternalProxySetupError(#[from] InternalProxySetupError),
     #[error("Getting cli path failed {0:#?}")]
     CliPathError(std::io::Error),
     #[error("Executing internal proxy failed {0:#?}")]
@@ -232,4 +229,6 @@ pub(crate) enum CliError {
     #[error("Failed to get last operator version err: `{0}`")]
     #[diagnostic(help("Please check internet connection.{GENERAL_HELP}"))]
     OperatorVersionCheckError(reqwest::Error),
+    #[error("Internal proxy failed: {0:#?}")]
+    InternalProxyError(#[from] IntProxyError),
 }

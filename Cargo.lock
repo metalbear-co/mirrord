@@ -3624,6 +3624,7 @@ dependencies = [
  "mirrord-auth",
  "mirrord-config",
  "mirrord-console",
+ "mirrord-intproxy",
  "mirrord-kube",
  "mirrord-layer",
  "mirrord-operator",
