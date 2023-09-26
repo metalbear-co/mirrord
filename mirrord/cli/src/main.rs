@@ -579,7 +579,7 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
                         progress.print("To disable version checks, set env variable MIRRORD_CHECK_VERSION to 'false'.");
                         progress.success(Some(&format!("Update to {latest_version} available")));
                     } else {
-                        progress.success(Some(&format!("Running on latest ({latest_version})!")));
+                        progress.success(Some(&format!("Running on latest ({CURRENT_VERSION})!")));
                     }
                 }
             }
