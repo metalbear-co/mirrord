@@ -50,11 +50,17 @@ pub enum AgentResponse {
 pub trait IsLayerRequest: Sized {
     fn wrap(self) -> ClientMessage;
 
+    fn check(message: &ClientMessage) -> bool;
+
     fn try_unwrap(message: ClientMessage) -> Result<Self, ClientMessage>;
 }
 
-pub trait HasResponse: IsLayerRequest {
+pub trait IsLayerRequestWithResponse: IsLayerRequest {
     type Response: Sized;
+
+    fn wrap_response(response: Self::Response) -> AgentResponse;
+
+    fn check_response(response: &AgentResponse) -> bool;
 
     fn try_unwrap_response(response: AgentResponse) -> Result<Self::Response, AgentResponse>;
 }
@@ -79,8 +85,19 @@ macro_rules! impl_request {
             req_path = $($req_variants) => +,
         );
 
-        impl HasResponse for $req_type {
+        impl IsLayerRequestWithResponse for $req_type {
             type Response = $res_type;
+
+            fn wrap_response(response: Self::Response) -> AgentResponse {
+                combine_paths!(response, $($res_variants),+)
+            }
+
+            fn check_response(response: &AgentResponse) -> bool {
+                match response {
+                    combine_paths!(_inner, $($res_variants),+) => true,
+                    _ => false,
+                }
+            }
 
             fn try_unwrap_response(response: AgentResponse) -> Result<Self::Response, AgentResponse> {
                 match response {
@@ -98,6 +115,13 @@ macro_rules! impl_request {
         impl IsLayerRequest for $req_type {
             fn wrap(self) -> ClientMessage {
                 combine_paths!(self, $($req_variants),+)
+            }
+
+            fn check(message: &ClientMessage) -> bool {
+                match message {
+                    combine_paths!(_inner, $($req_variants),+) => true,
+                    _ => false,
+                }
             }
 
             fn try_unwrap(message: ClientMessage) -> Result<Self, ClientMessage> {

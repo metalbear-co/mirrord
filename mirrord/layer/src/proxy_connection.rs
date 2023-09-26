@@ -12,8 +12,8 @@ use std::{
 use mirrord_intproxy::{
     codec::{self, CodecError, SyncReceiver, SyncSender},
     protocol::{
-        HasResponse, InitSession, IsLayerRequest, LayerToProxyMessage, LocalMessage, MessageId,
-        ProxyToLayerMessage,
+        InitSession, IsLayerRequest, IsLayerRequestWithResponse, LayerToProxyMessage, LocalMessage,
+        MessageId, ProxyToLayerMessage,
     },
 };
 use thiserror::Error;
@@ -98,7 +98,10 @@ impl ProxyConnection {
         self.responses.lock()?.receive(response_id)
     }
 
-    pub fn make_request_with_response<T: HasResponse>(&self, request: T) -> Result<T::Response> {
+    pub fn make_request_with_response<T: IsLayerRequestWithResponse>(
+        &self,
+        request: T,
+    ) -> Result<T::Response> {
         let response_id = self.send(LayerToProxyMessage::LayerRequest(request.wrap()))?;
         let response = self.receive(response_id)?;
         match response {

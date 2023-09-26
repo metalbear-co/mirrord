@@ -1,10 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
-// use file_handler::FileHandler;
 use layer_conn::LayerConnection;
 use mirrord_config::LayerConfig;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
-// use protocol::hook::HookMessage;
+use protocol::AgentResponse;
+use request_proxy::RequestProxy;
 use tokio::{
     net::{TcpListener, TcpStream},
     task::JoinSet,
@@ -20,10 +20,9 @@ use crate::{
 pub mod agent_conn;
 pub mod codec;
 pub mod error;
-mod file_handler;
 mod layer_conn;
 pub mod protocol;
-mod request_queue;
+mod request_proxy;
 
 pub struct IntProxy {
     config: LayerConfig,
@@ -113,7 +112,7 @@ struct ProxySession {
     agent_conn: AgentConnection,
     layer_conn: LayerConnection,
     ping: bool,
-    // file_handler: FileHandler,
+    request_proxy: RequestProxy,
 }
 
 impl ProxySession {
@@ -126,14 +125,14 @@ impl ProxySession {
 
         let layer_conn = LayerConnection::new(conn);
 
-        // let file_handler =
-        //     FileHandler::new(agent_conn.sender().clone(), layer_conn.sender().clone());
+        let request_proxy =
+            RequestProxy::new(agent_conn.sender().clone(), layer_conn.sender().clone());
 
         Ok(Self {
             agent_conn,
             layer_conn,
             ping: false,
-            // file_handler,
+            request_proxy,
         })
     }
 
@@ -182,7 +181,13 @@ impl ProxySession {
             DaemonMessage::Pong => {
                 self.ping = false;
             }
-            // DaemonMessage::File(file) => self.file_handler.handle_daemon_message(file).await?,
+            DaemonMessage::Close(reason) => {
+                return Err(IntProxyError::AgentClosedConnection(reason))
+            }
+            DaemonMessage::File(file_response) => {
+                let response = AgentResponse::File(file_response);
+                self.request_proxy.handle_agent_response(response).await?;
+            }
             _ => todo!(),
         }
 
@@ -194,13 +199,12 @@ impl ProxySession {
         message: LocalMessage<LayerToProxyMessage>,
     ) -> Result<()> {
         match message.inner {
-            // LayerToProxyMessage::HookMessage(HookMessage::File(file)) => {
-            //     self.file_handler
-            //         .handle_hook_message(message.message_id, file)
-            //         .await
-            // }
-            // LayerToProxyMessage::HookMessage(HookMessage::Tcp(_)) => todo!(),
-            other => Err(IntProxyError::UnexpectedLayerMessage(other)),
+            LayerToProxyMessage::LayerRequest(request) => {
+                self.request_proxy
+                    .handle_layer_request(message.message_id, request)
+                    .await
+            }
+            LayerToProxyMessage::InitSession(_) => todo!(),
         }
     }
 }

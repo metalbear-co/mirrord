@@ -2,7 +2,7 @@
 use std::{collections::VecDeque, ffi::CStr, path::PathBuf};
 
 use libc::c_char;
-use mirrord_intproxy::protocol::{HasResponse, IsLayerRequest, MessageId};
+use mirrord_intproxy::protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};
 use mirrord_protocol::{file::OpenOptionsInternal, RemoteResult};
 #[cfg(target_os = "macos")]
 use mirrord_sip::{MIRRORD_TEMP_BIN_DIR_CANONIC_STRING, MIRRORD_TEMP_BIN_DIR_STRING};
@@ -39,7 +39,9 @@ pub(crate) type ResponseDeque<T> = VecDeque<ResponseChannel<T>>;
 /// See [`ResponseDeque`] for usage details.
 pub(crate) type ResponseChannel<T> = oneshot::Sender<RemoteResult<T>>;
 
-pub fn make_proxy_request_with_response<T: HasResponse>(request: T) -> HookResult<T::Response> {
+pub fn make_proxy_request_with_response<T: IsLayerRequestWithResponse>(
+    request: T,
+) -> HookResult<T::Response> {
     // SAFETY: mutation happens only on initialization.
     unsafe {
         PROXY_CONNECTION
