@@ -320,7 +320,6 @@ impl OperatorDeployment {
             security_context: Some(SecurityContext {
                 allow_privilege_escalation: Some(false),
                 privileged: Some(false),
-                run_as_user: Some(1001),
                 ..Default::default()
             }),
             resources: Some(ResourceRequirements {
