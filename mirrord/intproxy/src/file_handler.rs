@@ -10,6 +10,7 @@ use mirrord_protocol::{
 use tokio::sync::mpsc::Sender;
 
 use crate::{
+    agent_conn::AgentSender,
     error::Result,
     protocol::{
         hook::{
@@ -22,7 +23,7 @@ use crate::{
 };
 
 pub struct FileHandler {
-    agent_sender: Sender<ClientMessage>,
+    agent_sender: AgentSender,
 
     open_queue: RequestQueue<Open>,
     read_queue: RequestQueue<Read>,
@@ -41,7 +42,7 @@ pub struct FileHandler {
 
 impl FileHandler {
     pub fn new(
-        agent_sender: Sender<ClientMessage>,
+        agent_sender: AgentSender,
         layer_sender: Sender<LocalMessage<ProxyToLayerMessage>>,
     ) -> Self {
         Self {

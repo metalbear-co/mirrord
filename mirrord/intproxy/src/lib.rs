@@ -3,8 +3,6 @@ use std::{sync::Arc, time::Duration};
 use error::LayerCommunicationFailed;
 use file_handler::FileHandler;
 use mirrord_config::LayerConfig;
-use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
-use mirrord_operator::client::OperatorApi;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use protocol::hook::HookMessage;
 use tokio::{
@@ -15,15 +13,16 @@ use tokio::{
 };
 
 use crate::{
-    agent_info::AgentConnectInfo,
-    error::{AgentCommunicationFailed, IntProxyError, Result},
+    agent_conn::{AgentCommunicationFailed, AgentConnectInfo, AgentConnection},
+    error::{IntProxyError, Result},
     protocol::{LayerToProxyMessage, LocalMessage, ProxyToLayerMessage},
 };
 
-pub mod agent_info;
+pub mod agent_conn;
 pub mod codec;
 pub mod error;
 mod file_handler;
+mod layer_conn;
 pub mod protocol;
 mod request_queue;
 
@@ -31,41 +30,6 @@ pub struct IntProxy {
     config: LayerConfig,
     agent_connect_info: Option<AgentConnectInfo>,
     listener: TcpListener,
-}
-
-struct AgentConnection {
-    sender: Sender<ClientMessage>,
-    receiver: Receiver<DaemonMessage>,
-}
-
-impl AgentConnection {
-    async fn send(
-        &self,
-        message: ClientMessage,
-    ) -> core::result::Result<(), AgentCommunicationFailed> {
-        self.sender
-            .send(message)
-            .await
-            .map_err(|_| AgentCommunicationFailed::ChannelClosed)
-    }
-
-    async fn receive(&mut self) -> Option<DaemonMessage> {
-        self.receiver.recv().await
-    }
-
-    async fn ping(&mut self) -> core::result::Result<(), AgentCommunicationFailed> {
-        self.send(ClientMessage::Ping).await?;
-
-        let response = self
-            .receive()
-            .await
-            .ok_or(AgentCommunicationFailed::ChannelClosed)?;
-
-        match response {
-            DaemonMessage::Pong => Ok(()),
-            other => Err(AgentCommunicationFailed::UnexpectedMessage(other)),
-        }
-    }
 }
 
 struct LayerConnection {
@@ -84,38 +48,6 @@ impl IntProxy {
             agent_connect_info,
             listener,
         }
-    }
-
-    async fn connect_to_agent(&self) -> Result<AgentConnection> {
-        let (sender, receiver) = match self.agent_connect_info.as_ref() {
-            Some(AgentConnectInfo::Operator(operator_session_information)) => {
-                OperatorApi::connect(&self.config, operator_session_information, None)
-                    .await
-                    .map_err(IntProxyError::OperatorAgentConnectionFailed)?
-            }
-            Some(AgentConnectInfo::DirectKubernetes(connect_info)) => {
-                let k8s_api = KubernetesAPI::create(&self.config)
-                    .await
-                    .map_err(IntProxyError::KubeApiAgentConnectionFailed)?;
-                k8s_api
-                    .create_connection(connect_info.clone())
-                    .await
-                    .map_err(IntProxyError::KubeApiAgentConnectionFailed)?
-            }
-            None => {
-                if let Some(address) = &self.config.connect_tcp {
-                    let stream = TcpStream::connect(address)
-                        .await
-                        .map_err(IntProxyError::RawAgentConnectionFailed)?;
-
-                    wrap_raw_connection(stream)
-                } else {
-                    return Err(IntProxyError::NoConnectionMethod);
-                }
-            }
-        };
-
-        Ok(AgentConnection { sender, receiver })
     }
 
     pub async fn run(self: Arc<Self>) -> Result<()> {
@@ -156,7 +88,7 @@ impl IntProxy {
                     }
                     Err(err) => {
                         tracing::error!("failed to accept first connection: {err:#?}");
-                        return Err(IntProxyError::FirstAcceptFailed(err));
+                        return Err(IntProxyError::AcceptFailed(err));
                     }
                 },
 
@@ -247,12 +179,13 @@ impl ProxySession {
     }
 
     async fn new(intproxy: &IntProxy, conn: TcpStream) -> Result<Self> {
-        let mut agent_conn = intproxy.connect_to_agent().await?;
-        agent_conn.ping().await?;
+        let mut agent_conn =
+            AgentConnection::new(&intproxy.config, intproxy.agent_connect_info.as_ref()).await?;
+        agent_conn.ping_pong().await?;
 
         let layer_conn = Self::spawn_layer_connection_task(conn);
 
-        let file_handler = FileHandler::new(agent_conn.sender.clone(), layer_conn.sender.clone());
+        let file_handler = FileHandler::new(agent_conn.sender().clone(), layer_conn.sender.clone());
 
         Ok(Self {
             agent_conn,
@@ -295,7 +228,7 @@ impl ProxySession {
                         self.ping = true;
                     } else {
                         tracing::warn!("Unmatched ping, timeout!");
-                        break Err(IntProxyError::AgentCommunicationFailed(AgentCommunicationFailed::UnmatchedPing));
+                        break Err(AgentCommunicationFailed::UnmatchedPing.into());
                     }
                 }
             }
@@ -307,6 +240,7 @@ impl ProxySession {
             DaemonMessage::Pong => {
                 self.ping = false;
             }
+            DaemonMessage::File(file) => self.file_handler.handle_daemon_message(file).await?,
             _ => todo!(),
         }
 

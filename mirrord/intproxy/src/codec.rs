@@ -15,13 +15,13 @@ use tokio::{
 
 #[derive(Error, Debug)]
 pub enum CodecError {
-    #[error("encoding failed: {0:?}")]
+    #[error("encoding failed: {0}")]
     EncodingFailed(#[from] EncodeError),
-    #[error("decoding failed: {0:?}")]
+    #[error("decoding failed: {0}")]
     DecodingFailed(#[from] DecodeError),
-    #[error("message too long: {0:?}")]
+    #[error("message too long: {0}")]
     MessageTooLong(#[from] TryFromIntError),
-    #[error("io failed: {0:?}")]
+    #[error("io failed: {0}")]
     Io(#[from] io::Error),
 }
 
