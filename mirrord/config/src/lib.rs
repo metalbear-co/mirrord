@@ -21,6 +21,7 @@ use config::{ConfigContext, ConfigError, MirrordConfig};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
+use tera::Tera;
 use tracing::warn;
 
 use crate::{
@@ -47,6 +48,10 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 /// All of the configuration fields have a default value, so a minimal configuration would be no
 /// configuration at all.
 ///
+/// The configuration supports templating using the [Tera](https://keats.github.io/tera/docs/) template engine.
+/// Currently we don't provide additional values to the context, if you have anything you want us to
+/// provide please let us know.
+///
 /// To help you get started, here are examples of a basic configuration file, and a complete
 /// configuration file containing all fields.
 ///
@@ -63,10 +68,23 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 /// }
 /// ```
 ///
+/// ### Basic `config.json` with templating {#root-basic-templating}
+///
+/// ```json
+/// {
+///   "target": "{{ get_env(name="TARGET", default="pod/fallback") }}",
+///   "feature": {
+///     "env": true,
+///     "fs": "read",
+///     "network": true
+///   }
+/// }
+/// ```
+///
 /// ### Complete `config.json` {#root-complete}
 ///
 ///  Don't use this example as a starting point, it's just here to show you all the available
-/// options.
+///  options.
 /// ```json
 /// {
 ///   "accept_invalid_certificates": false,
@@ -406,13 +424,14 @@ impl LayerFileConfig {
     where
         P: AsRef<Path>,
     {
-        let path = path.as_ref();
-        let file = std::fs::read(path)?;
+        let mut template_engine = Tera::default();
+        template_engine.add_template_file(path.as_ref(), Some("main"))?;
+        let rendered = template_engine.render("main", &tera::Context::new())?;
 
-        match path.extension().and_then(|os_val| os_val.to_str()) {
-            Some("json") => Ok(serde_json::from_slice::<Self>(&file[..])?),
-            Some("toml") => Ok(toml::from_str::<Self>(&String::from_utf8_lossy(&file))?),
-            Some("yaml") => Ok(serde_yaml::from_slice::<Self>(&file[..])?),
+        match path.as_ref().extension().and_then(|os_val| os_val.to_str()) {
+            Some("json") => Ok(serde_json::from_str::<Self>(&rendered)?),
+            Some("toml") => Ok(toml::from_str::<Self>(&rendered)?),
+            Some("yaml") => Ok(serde_yaml::from_str::<Self>(&rendered)?),
             _ => Err(ConfigError::UnsupportedFormat),
         }
     }
