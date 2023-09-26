@@ -28,4 +28,3 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [] }
 tracing.workspace = true
-typemap = "0.3.0"

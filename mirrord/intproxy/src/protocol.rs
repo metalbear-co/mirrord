@@ -50,19 +50,8 @@ pub mod hook {
 
     #[derive(Encode, Decode, Debug)]
     pub enum HookMessage {
-        /// TCP incoming messages originating from a hook, see [`TcpIncoming`].
         Tcp(TcpIncoming),
-
-        /// TCP outgoing messages originating from a hook, see [`TcpOutgoing`].
-        // TcpOutgoing(TcpOutgoing),
-
-        // /// UDP outgoing messages originating from a hook, see [`UdpOutgoing`].
-        // UdpOutgoing(UdpOutgoing),
-
-        /// File messages originating from a hook, see [`FileOperation`].
         File(FileOperation),
-        // / Message originating from `getaddrinfo`, see [`GetAddrInfo`].
-        // GetAddrinfo(GetAddrInfo),
     }
 
     #[derive(Encode, Decode, Debug)]
@@ -144,7 +133,6 @@ pub mod hook {
     pub struct Seek {
         pub remote_fd: u64,
         pub seek_from: SeekFromInternal,
-        // pub(crate) file_channel_tx: ResponseChannel<SeekFileResponse>,
     }
 
     #[derive(Encode, Decode, Debug)]

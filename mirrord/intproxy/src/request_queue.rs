@@ -1,20 +1,19 @@
 use std::{collections::VecDeque, marker::PhantomData};
 
-use tokio::sync::mpsc::Sender;
-
 use crate::{
-    error::LayerCommunicationFailed,
-    protocol::{HasResponse, LocalMessage, ProxyToLayerMessage},
+    error::{IntProxyError, Result},
+    layer_conn::LayerSender,
+    protocol::{HasResponse, LocalMessage},
 };
 
 pub struct RequestQueue<T> {
-    response_sender: Sender<LocalMessage<ProxyToLayerMessage>>,
+    response_sender: LayerSender,
     queued_ids: VecDeque<u64>,
     _response_type: PhantomData<T>,
 }
 
 impl<T: HasResponse> RequestQueue<T> {
-    pub fn new(response_sender: Sender<LocalMessage<ProxyToLayerMessage>>) -> Self {
+    pub fn new(response_sender: LayerSender) -> Self {
         Self {
             response_sender,
             queued_ids: Default::default(),
@@ -26,21 +25,19 @@ impl<T: HasResponse> RequestQueue<T> {
         self.queued_ids.push_back(request_id)
     }
 
-    pub async fn resolve_one(
-        &mut self,
-        response: T::Response,
-    ) -> Result<(), LayerCommunicationFailed> {
+    pub async fn resolve_one(&mut self, response: T::Response) -> Result<()> {
         let message_id = self
             .queued_ids
             .pop_front()
-            .ok_or(LayerCommunicationFailed::RequestQueueEmpty)?;
+            .ok_or(IntProxyError::RequestQueueEmpty)?;
 
         self.response_sender
             .send(LocalMessage {
                 message_id,
                 inner: T::wrap_response(response),
             })
-            .await
-            .map_err(Into::into)
+            .await?;
+
+        Ok(())
     }
 }

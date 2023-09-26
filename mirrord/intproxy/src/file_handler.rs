@@ -7,17 +7,14 @@ use mirrord_protocol::{
     },
     ClientMessage, FileRequest, FileResponse,
 };
-use tokio::sync::mpsc::Sender;
 
 use crate::{
     agent_conn::AgentSender,
     error::Result,
-    protocol::{
-        hook::{
-            Access, Close, CloseDir, FdOpenDir, FileOperation, GetDEnts64, Open, OpenRelative,
-            Read, ReadDir, ReadLimited, Seek, Write, WriteLimited, Xstat, XstatFs,
-        },
-        LocalMessage, ProxyToLayerMessage,
+    layer_conn::LayerSender,
+    protocol::hook::{
+        Access, Close, CloseDir, FdOpenDir, FileOperation, GetDEnts64, Open, OpenRelative, Read,
+        ReadDir, ReadLimited, Seek, Write, WriteLimited, Xstat, XstatFs,
     },
     request_queue::RequestQueue,
 };
@@ -41,10 +38,7 @@ pub struct FileHandler {
 }
 
 impl FileHandler {
-    pub fn new(
-        agent_sender: AgentSender,
-        layer_sender: Sender<LocalMessage<ProxyToLayerMessage>>,
-    ) -> Self {
+    pub fn new(agent_sender: AgentSender, layer_sender: LayerSender) -> Self {
         Self {
             agent_sender,
             open_queue: RequestQueue::new(layer_sender.clone()),

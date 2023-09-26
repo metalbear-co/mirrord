@@ -120,11 +120,6 @@ impl AgentConnection {
         &self.sender
     }
 
-    pub async fn send(&self, message: ClientMessage) -> Result<()> {
-        self.sender.send(message).await?;
-        Ok(())
-    }
-
     pub async fn receive(&mut self) -> Option<DaemonMessage> {
         self.receiver.recv().await
     }
