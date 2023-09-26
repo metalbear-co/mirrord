@@ -37,6 +37,7 @@ fn generate_local_set() -> RegexSet {
         r"^.+\.d$",
         r"^.+\.pyc$",
         r"^.+\.py$",
+        r"^.+\.jar$",
         r"^.+\.js$",
         r"^.+\.pth$",
         r"^.+\.plist$",
