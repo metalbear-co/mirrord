@@ -20,7 +20,7 @@ use std::{
 
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics};
 use mirrord_config::LayerConfig;
-use mirrord_intproxy::{agent_info::AgentConnectInfo, IntProxy};
+use mirrord_intproxy::{agent_conn::AgentConnectInfo, IntProxy};
 use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
 use mirrord_operator::client::{OperatorApi, OperatorSessionInformation};
 use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonMessage};

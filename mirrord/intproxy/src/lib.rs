@@ -1,10 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
-use file_handler::FileHandler;
-use layer_conn::{LayerCommunicationFailed, LayerConnection};
+// use file_handler::FileHandler;
+use layer_conn::LayerConnection;
 use mirrord_config::LayerConfig;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
-use protocol::hook::HookMessage;
+// use protocol::hook::HookMessage;
 use tokio::{
     net::{TcpListener, TcpStream},
     task::JoinSet,
@@ -113,8 +113,7 @@ struct ProxySession {
     agent_conn: AgentConnection,
     layer_conn: LayerConnection,
     ping: bool,
-
-    file_handler: FileHandler,
+    // file_handler: FileHandler,
 }
 
 impl ProxySession {
@@ -127,14 +126,14 @@ impl ProxySession {
 
         let layer_conn = LayerConnection::new(conn);
 
-        let file_handler =
-            FileHandler::new(agent_conn.sender().clone(), layer_conn.sender().clone());
+        // let file_handler =
+        //     FileHandler::new(agent_conn.sender().clone(), layer_conn.sender().clone());
 
         Ok(Self {
             agent_conn,
             layer_conn,
             ping: false,
-            file_handler,
+            // file_handler,
         })
     }
 
@@ -183,7 +182,7 @@ impl ProxySession {
             DaemonMessage::Pong => {
                 self.ping = false;
             }
-            DaemonMessage::File(file) => self.file_handler.handle_daemon_message(file).await?,
+            // DaemonMessage::File(file) => self.file_handler.handle_daemon_message(file).await?,
             _ => todo!(),
         }
 
@@ -195,15 +194,13 @@ impl ProxySession {
         message: LocalMessage<LayerToProxyMessage>,
     ) -> Result<()> {
         match message.inner {
-            LayerToProxyMessage::HookMessage(HookMessage::File(file)) => {
-                self.file_handler
-                    .handle_hook_message(message.message_id, file)
-                    .await
-            }
-            LayerToProxyMessage::HookMessage(HookMessage::Tcp(_)) => todo!(),
-            other => Err(IntProxyError::LayerCommunicationFailed(
-                LayerCommunicationFailed::UnexpectedMessage(other),
-            )),
+            // LayerToProxyMessage::HookMessage(HookMessage::File(file)) => {
+            //     self.file_handler
+            //         .handle_hook_message(message.message_id, file)
+            //         .await
+            // }
+            // LayerToProxyMessage::HookMessage(HookMessage::Tcp(_)) => todo!(),
+            other => Err(IntProxyError::UnexpectedLayerMessage(other)),
         }
     }
 }

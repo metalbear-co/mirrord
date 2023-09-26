@@ -16,8 +16,6 @@ pub enum LayerCommunicationFailed {
     ChannelClosed,
     #[error("binary protocol failed: {0}")]
     CodecFailed(#[from] CodecError),
-    #[error("received unexpected message")]
-    UnexpectedMessage(LayerToProxyMessage),
 }
 
 impl From<SendError<LocalMessage<ProxyToLayerMessage>>> for LayerCommunicationFailed {

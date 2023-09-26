@@ -12,19 +12,9 @@ use std::{
 use mirrord_intproxy::{
     codec::{self, CodecError, SyncReceiver, SyncSender},
     protocol::{
-        hook::{
-            Access, FdOpenDir, FileOperation, GetDEnts64, HookMessage, Open, OpenRelative, Read,
-            ReadDir, ReadLimited, Seek, Write, WriteLimited, Xstat, XstatFs,
-        },
-        HasResponse, InitSession, LayerToProxyMessage, LocalMessage, ProxyToLayerMessage,
+        HasResponse, InitSession, IsLayerRequest, LayerToProxyMessage, LocalMessage, MessageId,
+        ProxyToLayerMessage,
     },
-};
-use mirrord_protocol::{
-    file::{
-        AccessFileResponse, GetDEnts64Response, OpenDirResponse, OpenFileResponse, ReadDirResponse,
-        ReadFileResponse, SeekFileResponse, WriteFileResponse, XstatFsResponse, XstatResponse,
-    },
-    FileResponse, RemoteResult,
 };
 use thiserror::Error;
 
@@ -88,11 +78,11 @@ impl ProxyConnection {
         })
     }
 
-    fn next_message_id(&self) -> u64 {
+    fn next_message_id(&self) -> MessageId {
         self.next_message_id.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub fn send(&self, message: LayerToProxyMessage) -> Result<u64> {
+    pub fn send(&self, message: LayerToProxyMessage) -> Result<MessageId> {
         let message_id = self.next_message_id();
         let message = LocalMessage {
             message_id,
@@ -108,10 +98,18 @@ impl ProxyConnection {
         self.responses.lock()?.receive(response_id)
     }
 
-    pub fn make_request<T: HasResponse>(&self, request: T) -> Result<T::Response> {
-        let response_id = self.send(request.into_message())?;
+    pub fn make_request_with_response<T: HasResponse>(&self, request: T) -> Result<T::Response> {
+        let response_id = self.send(LayerToProxyMessage::LayerRequest(request.wrap()))?;
         let response = self.receive(response_id)?;
-        T::extract_response(response).map_err(ProxyError::UnexpectedResponse)
+        match response {
+            ProxyToLayerMessage::AgentResponse(response) => T::try_unwrap_response(response)
+                .map_err(|e| ProxyError::UnexpectedResponse(ProxyToLayerMessage::AgentResponse(e))),
+            other => Err(ProxyError::UnexpectedResponse(other)),
+        }
+    }
+
+    pub fn make_request_no_response<T: IsLayerRequest>(&self, request: T) -> Result<MessageId> {
+        self.send(LayerToProxyMessage::LayerRequest(request.wrap()))
     }
 }
 

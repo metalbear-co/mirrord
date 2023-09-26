@@ -1,9 +1,21 @@
 use bincode::{Decode, Encode};
-use mirrord_protocol::FileResponse;
+use mirrord_protocol::{
+    file::{
+        AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, FdOpenDirRequest,
+        GetDEnts64Request, GetDEnts64Response, OpenDirResponse, OpenFileRequest, OpenFileResponse,
+        OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
+        ReadFileResponse, ReadLimitedFileRequest, SeekFileRequest, SeekFileResponse,
+        WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest, XstatFsRequest,
+        XstatFsResponse, XstatRequest, XstatResponse,
+    },
+    ClientMessage, FileRequest, FileResponse, RemoteResult,
+};
+
+pub type MessageId = u64;
 
 #[derive(Encode, Decode, Debug)]
 pub struct LocalMessage<T> {
-    pub message_id: u64,
+    pub message_id: MessageId,
     pub inner: T,
 }
 
@@ -19,490 +31,182 @@ pub enum InitSession {
 #[derive(Encode, Decode, Debug)]
 pub enum LayerToProxyMessage {
     InitSession(InitSession),
-    HookMessage(hook::HookMessage),
+    /// Raw requests from the layer
+    LayerRequest(ClientMessage),
 }
 
 #[derive(Encode, Decode, Debug)]
 pub enum ProxyToLayerMessage {
     SessionInfo(SessionId),
-    FileResponse(FileResponse),
+    /// Raw responses from the agent
+    AgentResponse(AgentResponse),
 }
 
-pub mod hook {
-    use std::{
-        borrow::Borrow,
-        hash::{Hash, Hasher},
-        net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-        path::PathBuf,
-    };
-
-    use bincode::{Decode, Encode};
-    use mirrord_protocol::{
-        file::{
-            AccessFileResponse, GetDEnts64Response, OpenDirResponse, OpenFileResponse,
-            OpenOptionsInternal, ReadDirResponse, ReadFileResponse, SeekFileResponse,
-            SeekFromInternal, WriteFileResponse, XstatFsResponse, XstatResponse,
-        },
-        FileResponse, Port, RemoteResult,
-    };
-
-    use super::{HasResponse, LayerToProxyMessage, ProxyToLayerMessage};
-
-    #[derive(Encode, Decode, Debug)]
-    pub enum HookMessage {
-        Tcp(TcpIncoming),
-        File(FileOperation),
-    }
-
-    #[derive(Encode, Decode, Debug)]
-    pub enum TcpIncoming {
-        Listen(Listen),
-        Close(Port),
-    }
-
-    #[derive(Encode, Decode, Debug, Clone)]
-    pub struct Listen {
-        pub mirror_port: Port,
-        pub requested_port: Port,
-        pub ipv6: bool,
-        pub id: u64,
-    }
-
-    impl PartialEq for Listen {
-        fn eq(&self, other: &Self) -> bool {
-            self.requested_port == other.requested_port
-        }
-    }
-
-    impl Eq for Listen {}
-
-    impl Hash for Listen {
-        fn hash<H: Hasher>(&self, state: &mut H) {
-            self.requested_port.hash(state);
-        }
-    }
-
-    impl Borrow<Port> for Listen {
-        fn borrow(&self) -> &Port {
-            &self.requested_port
-        }
-    }
-
-    impl From<&Listen> for SocketAddr {
-        fn from(listen: &Listen) -> Self {
-            let address = if listen.ipv6 {
-                SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), listen.mirror_port)
-            } else {
-                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen.mirror_port)
-            };
-
-            debug_assert_eq!(address.port(), listen.mirror_port);
-            address
-        }
-    }
-
-    #[derive(Encode, Decode, Debug)]
-    pub struct Open {
-        pub path: PathBuf,
-        // pub(crate) file_channel_tx: ResponseChannel<OpenFileResponse>,
-        pub open_options: OpenOptionsInternal,
-    }
-
-    #[derive(Encode, Decode, Debug)]
-    pub struct OpenRelative {
-        pub relative_fd: u64,
-        pub path: PathBuf,
-        // pub(crate) file_channel_tx: ResponseChannel<OpenFileResponse>,
-        pub open_options: OpenOptionsInternal,
-    }
-
-    #[derive(Encode, Decode, Debug)]
-    pub struct Read {
-        pub remote_fd: u64,
-        pub buffer_size: u64,
-    }
-
-    #[derive(Encode, Decode, Debug)]
-    pub struct ReadLimited {
-        pub remote_fd: u64,
-        pub buffer_size: u64,
-        pub start_from: u64,
-    }
-
-    #[derive(Encode, Decode, Debug)]
-    pub struct Seek {
-        pub remote_fd: u64,
-        pub seek_from: SeekFromInternal,
-    }
-
-    #[derive(Encode, Decode, Debug)]
-    pub struct Write {
-        pub remote_fd: u64,
-        pub write_bytes: Vec<u8>,
-    }
-
-    #[derive(Encode, Decode, Debug)]
-    pub struct WriteLimited {
-        pub remote_fd: u64,
-        pub write_bytes: Vec<u8>,
-        pub start_from: u64,
-    }
-
-    #[derive(Encode, Decode, Debug)]
-    pub struct Close {
-        pub fd: u64,
-    }
-
-    #[derive(Encode, Decode, Debug)]
-    pub struct Access {
-        pub path: PathBuf,
-        pub mode: u8,
-    }
-
-    pub type RemoteFd = u64;
-
-    #[derive(Encode, Decode, Debug)]
-    pub struct Xstat {
-        pub path: Option<PathBuf>,
-        pub fd: Option<RemoteFd>,
-        pub follow_symlink: bool,
-    }
-
-    #[derive(Encode, Decode, Debug)]
-    pub struct XstatFs {
-        pub fd: RemoteFd,
-    }
-
-    #[derive(Encode, Decode, Debug)]
-    pub struct ReadDir {
-        pub remote_fd: u64,
-    }
-
-    #[derive(Encode, Decode, Debug)]
-    pub struct FdOpenDir {
-        pub remote_fd: u64,
-    }
-
-    #[derive(Encode, Decode, Debug)]
-    pub struct CloseDir {
-        pub fd: u64,
-    }
-
-    #[cfg(target_os = "linux")]
-    #[derive(Encode, Decode, Debug)]
-    pub struct GetDEnts64 {
-        pub remote_fd: u64,
-        pub buffer_size: u64,
-    }
-
-    #[derive(Encode, Decode, Debug)]
-    pub enum FileOperation {
-        Open(Open),
-        OpenRelative(OpenRelative),
-        Read(Read),
-        ReadLimited(ReadLimited),
-        Write(Write),
-        WriteLimited(WriteLimited),
-        Seek(Seek),
-        Close(Close),
-        Access(Access),
-        Xstat(Xstat),
-        XstatFs(XstatFs),
-        ReadDir(ReadDir),
-        FdOpenDir(FdOpenDir),
-        CloseDir(CloseDir),
-        #[cfg(target_os = "linux")]
-        GetDEnts64(GetDEnts64),
-    }
-
-    impl HasResponse for Open {
-        type Response = RemoteResult<OpenFileResponse>;
-
-        fn into_message(self) -> LayerToProxyMessage {
-            LayerToProxyMessage::HookMessage(HookMessage::File(FileOperation::Open(self)))
-        }
-
-        fn wrap_response(response: Self::Response) -> ProxyToLayerMessage {
-            ProxyToLayerMessage::FileResponse(FileResponse::Open(response))
-        }
-
-        fn unwrap_response(
-            message: ProxyToLayerMessage,
-        ) -> core::result::Result<Self::Response, ProxyToLayerMessage> {
-            match message {
-                ProxyToLayerMessage::FileResponse(FileResponse::Open(response)) => Ok(response),
-                other => Err(other),
-            }
-        }
-    }
-
-    impl HasResponse for Read {
-        type Response = RemoteResult<ReadFileResponse>;
-
-        fn into_message(self) -> LayerToProxyMessage {
-            LayerToProxyMessage::HookMessage(HookMessage::File(FileOperation::Read(self)))
-        }
-
-        fn wrap_response(response: Self::Response) -> ProxyToLayerMessage {
-            ProxyToLayerMessage::FileResponse(FileResponse::Read(response))
-        }
-
-        fn unwrap_response(
-            message: ProxyToLayerMessage,
-        ) -> core::result::Result<Self::Response, ProxyToLayerMessage> {
-            match message {
-                ProxyToLayerMessage::FileResponse(FileResponse::Read(response)) => Ok(response),
-                other => Err(other),
-            }
-        }
-    }
-
-    impl HasResponse for ReadLimited {
-        type Response = RemoteResult<ReadFileResponse>;
-
-        fn into_message(self) -> LayerToProxyMessage {
-            LayerToProxyMessage::HookMessage(HookMessage::File(FileOperation::ReadLimited(self)))
-        }
-
-        fn wrap_response(response: Self::Response) -> ProxyToLayerMessage {
-            ProxyToLayerMessage::FileResponse(FileResponse::ReadLimited(response))
-        }
-
-        fn unwrap_response(
-            message: ProxyToLayerMessage,
-        ) -> core::result::Result<Self::Response, ProxyToLayerMessage> {
-            match message {
-                ProxyToLayerMessage::FileResponse(FileResponse::ReadLimited(response)) => {
-                    Ok(response)
-                }
-                other => Err(other),
-            }
-        }
-    }
-
-    impl HasResponse for FdOpenDir {
-        type Response = RemoteResult<OpenDirResponse>;
-
-        fn into_message(self) -> LayerToProxyMessage {
-            LayerToProxyMessage::HookMessage(HookMessage::File(FileOperation::FdOpenDir(self)))
-        }
-
-        fn wrap_response(response: Self::Response) -> ProxyToLayerMessage {
-            ProxyToLayerMessage::FileResponse(FileResponse::OpenDir(response))
-        }
-
-        fn unwrap_response(
-            message: ProxyToLayerMessage,
-        ) -> core::result::Result<Self::Response, ProxyToLayerMessage> {
-            match message {
-                ProxyToLayerMessage::FileResponse(FileResponse::OpenDir(response)) => Ok(response),
-                other => Err(other),
-            }
-        }
-    }
-
-    impl HasResponse for ReadDir {
-        type Response = RemoteResult<ReadDirResponse>;
-
-        fn into_message(self) -> LayerToProxyMessage {
-            LayerToProxyMessage::HookMessage(HookMessage::File(FileOperation::ReadDir(self)))
-        }
-
-        fn wrap_response(response: Self::Response) -> ProxyToLayerMessage {
-            ProxyToLayerMessage::FileResponse(FileResponse::ReadDir(response))
-        }
-
-        fn unwrap_response(
-            message: ProxyToLayerMessage,
-        ) -> core::result::Result<Self::Response, ProxyToLayerMessage> {
-            match message {
-                ProxyToLayerMessage::FileResponse(FileResponse::ReadDir(response)) => Ok(response),
-                other => Err(other),
-            }
-        }
-    }
-
-    impl HasResponse for OpenRelative {
-        type Response = RemoteResult<OpenFileResponse>;
-
-        fn into_message(self) -> LayerToProxyMessage {
-            LayerToProxyMessage::HookMessage(HookMessage::File(FileOperation::OpenRelative(self)))
-        }
-
-        fn wrap_response(response: Self::Response) -> ProxyToLayerMessage {
-            ProxyToLayerMessage::FileResponse(FileResponse::Open(response))
-        }
-
-        fn unwrap_response(
-            message: ProxyToLayerMessage,
-        ) -> core::result::Result<Self::Response, ProxyToLayerMessage> {
-            match message {
-                ProxyToLayerMessage::FileResponse(FileResponse::Open(response)) => Ok(response),
-                other => Err(other),
-            }
-        }
-    }
-
-    impl HasResponse for Write {
-        type Response = RemoteResult<WriteFileResponse>;
-
-        fn into_message(self) -> LayerToProxyMessage {
-            LayerToProxyMessage::HookMessage(HookMessage::File(FileOperation::Write(self)))
-        }
-
-        fn wrap_response(response: Self::Response) -> ProxyToLayerMessage {
-            ProxyToLayerMessage::FileResponse(FileResponse::Write(response))
-        }
-
-        fn unwrap_response(
-            message: ProxyToLayerMessage,
-        ) -> core::result::Result<Self::Response, ProxyToLayerMessage> {
-            match message {
-                ProxyToLayerMessage::FileResponse(FileResponse::Write(response)) => Ok(response),
-                other => Err(other),
-            }
-        }
-    }
-
-    impl HasResponse for WriteLimited {
-        type Response = RemoteResult<WriteFileResponse>;
-
-        fn into_message(self) -> LayerToProxyMessage {
-            LayerToProxyMessage::HookMessage(HookMessage::File(FileOperation::WriteLimited(self)))
-        }
-
-        fn wrap_response(response: Self::Response) -> ProxyToLayerMessage {
-            ProxyToLayerMessage::FileResponse(FileResponse::WriteLimited(response))
-        }
-
-        fn unwrap_response(
-            message: ProxyToLayerMessage,
-        ) -> core::result::Result<Self::Response, ProxyToLayerMessage> {
-            match message {
-                ProxyToLayerMessage::FileResponse(FileResponse::WriteLimited(response)) => {
-                    Ok(response)
-                }
-                other => Err(other),
-            }
-        }
-    }
-
-    impl HasResponse for Seek {
-        type Response = RemoteResult<SeekFileResponse>;
-
-        fn into_message(self) -> LayerToProxyMessage {
-            LayerToProxyMessage::HookMessage(HookMessage::File(FileOperation::Seek(self)))
-        }
-
-        fn wrap_response(response: Self::Response) -> ProxyToLayerMessage {
-            ProxyToLayerMessage::FileResponse(FileResponse::Seek(response))
-        }
-
-        fn unwrap_response(
-            message: ProxyToLayerMessage,
-        ) -> core::result::Result<Self::Response, ProxyToLayerMessage> {
-            match message {
-                ProxyToLayerMessage::FileResponse(FileResponse::Seek(response)) => Ok(response),
-                other => Err(other),
-            }
-        }
-    }
-
-    impl HasResponse for Access {
-        type Response = RemoteResult<AccessFileResponse>;
-
-        fn into_message(self) -> LayerToProxyMessage {
-            LayerToProxyMessage::HookMessage(HookMessage::File(FileOperation::Access(self)))
-        }
-
-        fn wrap_response(response: Self::Response) -> ProxyToLayerMessage {
-            ProxyToLayerMessage::FileResponse(FileResponse::Access(response))
-        }
-
-        fn unwrap_response(
-            message: ProxyToLayerMessage,
-        ) -> core::result::Result<Self::Response, ProxyToLayerMessage> {
-            match message {
-                ProxyToLayerMessage::FileResponse(FileResponse::Access(response)) => Ok(response),
-                other => Err(other),
-            }
-        }
-    }
-
-    impl HasResponse for Xstat {
-        type Response = RemoteResult<XstatResponse>;
-
-        fn into_message(self) -> LayerToProxyMessage {
-            LayerToProxyMessage::HookMessage(HookMessage::File(FileOperation::Xstat(self)))
-        }
-
-        fn wrap_response(response: Self::Response) -> ProxyToLayerMessage {
-            ProxyToLayerMessage::FileResponse(FileResponse::Xstat(response))
-        }
-
-        fn unwrap_response(
-            message: ProxyToLayerMessage,
-        ) -> core::result::Result<Self::Response, ProxyToLayerMessage> {
-            match message {
-                ProxyToLayerMessage::FileResponse(FileResponse::Xstat(response)) => Ok(response),
-                other => Err(other),
-            }
-        }
-    }
-
-    impl HasResponse for XstatFs {
-        type Response = RemoteResult<XstatFsResponse>;
-
-        fn into_message(self) -> LayerToProxyMessage {
-            LayerToProxyMessage::HookMessage(HookMessage::File(FileOperation::XstatFs(self)))
-        }
-
-        fn wrap_response(response: Self::Response) -> ProxyToLayerMessage {
-            ProxyToLayerMessage::FileResponse(FileResponse::XstatFs(response))
-        }
-
-        fn unwrap_response(
-            message: ProxyToLayerMessage,
-        ) -> core::result::Result<Self::Response, ProxyToLayerMessage> {
-            match message {
-                ProxyToLayerMessage::FileResponse(FileResponse::XstatFs(response)) => Ok(response),
-                other => Err(other),
-            }
-        }
-    }
-
-    impl HasResponse for GetDEnts64 {
-        type Response = RemoteResult<GetDEnts64Response>;
-
-        fn into_message(self) -> LayerToProxyMessage {
-            LayerToProxyMessage::HookMessage(HookMessage::File(FileOperation::GetDEnts64(self)))
-        }
-
-        fn wrap_response(response: Self::Response) -> ProxyToLayerMessage {
-            ProxyToLayerMessage::FileResponse(FileResponse::GetDEnts64(response))
-        }
-
-        fn unwrap_response(
-            message: ProxyToLayerMessage,
-        ) -> core::result::Result<Self::Response, ProxyToLayerMessage> {
-            match message {
-                ProxyToLayerMessage::FileResponse(FileResponse::GetDEnts64(response)) => {
-                    Ok(response)
-                }
-                other => Err(other),
-            }
-        }
-    }
+#[derive(Encode, Decode, Debug)]
+pub enum AgentResponse {
+    File(FileResponse),
 }
 
-pub trait HasResponse: Sized {
+pub trait IsLayerRequest: Sized {
+    fn wrap(self) -> ClientMessage;
+
+    fn try_unwrap(message: ClientMessage) -> Result<Self, ClientMessage>;
+}
+
+pub trait HasResponse: IsLayerRequest {
     type Response: Sized;
 
-    fn into_message(self) -> LayerToProxyMessage;
-
-    fn wrap_response(response: Self::Response) -> ProxyToLayerMessage;
-
-    fn unwrap_response(
-        message: ProxyToLayerMessage,
-    ) -> core::result::Result<Self::Response, ProxyToLayerMessage>;
+    fn try_unwrap_response(response: AgentResponse) -> Result<Self::Response, AgentResponse>;
 }
+
+macro_rules! combine_paths {
+    ($value: ident, $variant: path, $($rest: path),+) => {
+        $variant(combine_paths!($value, $($rest),+))
+    };
+
+    ($value: ident, $variant: path) => { $variant($value) };
+}
+
+macro_rules! impl_request {
+    (
+        req = $req_type: path,
+        res = $res_type: path,
+        req_path = $($req_variants: path) => +,
+        res_path = $($res_variants: path) => +,
+    ) => {
+        impl_request!(
+            req = $req_type,
+            req_path = $($req_variants) => +,
+        );
+
+        impl HasResponse for $req_type {
+            type Response = $res_type;
+
+            fn try_unwrap_response(response: AgentResponse) -> Result<Self::Response, AgentResponse> {
+                match response {
+                    combine_paths!(inner, $($res_variants),+) => Ok(inner),
+                    other => Err(other),
+                }
+            }
+        }
+    };
+
+    (
+        req = $req_type: path,
+        req_path = $($req_variants: path) => +,
+    ) => {
+        impl IsLayerRequest for $req_type {
+            fn wrap(self) -> ClientMessage {
+                combine_paths!(self, $($req_variants),+)
+            }
+
+            fn try_unwrap(message: ClientMessage) -> Result<Self, ClientMessage> {
+                match message {
+                    combine_paths!(inner, $($req_variants),+) => Ok(inner),
+                    other => Err(other),
+                }
+            }
+        }
+    };
+}
+
+impl_request!(
+    req = OpenFileRequest,
+    res = RemoteResult<OpenFileResponse>,
+    req_path = ClientMessage::FileRequest => FileRequest::Open,
+    res_path = AgentResponse::File => FileResponse::Open,
+);
+
+impl_request!(
+    req = OpenRelativeFileRequest,
+    res = RemoteResult<OpenFileResponse>,
+    req_path = ClientMessage::FileRequest => FileRequest::OpenRelative,
+    res_path = AgentResponse::File => FileResponse::Open,
+);
+
+impl_request!(
+    req = ReadFileRequest,
+    res = RemoteResult<ReadFileResponse>,
+    req_path = ClientMessage::FileRequest => FileRequest::Read,
+    res_path = AgentResponse::File => FileResponse::Read,
+);
+
+impl_request!(
+    req = ReadLimitedFileRequest,
+    res = RemoteResult<ReadFileResponse>,
+    req_path = ClientMessage::FileRequest => FileRequest::ReadLimited,
+    res_path = AgentResponse::File => FileResponse::ReadLimited,
+);
+
+impl_request!(
+    req = SeekFileRequest,
+    res = RemoteResult<SeekFileResponse>,
+    req_path = ClientMessage::FileRequest => FileRequest::Seek,
+    res_path = AgentResponse::File => FileResponse::Seek,
+);
+
+impl_request!(
+    req = WriteFileRequest,
+    res = RemoteResult<WriteFileResponse>,
+    req_path = ClientMessage::FileRequest => FileRequest::Write,
+    res_path = AgentResponse::File => FileResponse::Write,
+);
+
+impl_request!(
+    req = WriteLimitedFileRequest,
+    res = RemoteResult<WriteFileResponse>,
+    req_path = ClientMessage::FileRequest => FileRequest::WriteLimited,
+    res_path = AgentResponse::File => FileResponse::WriteLimited,
+);
+
+impl_request!(
+    req = AccessFileRequest,
+    res = RemoteResult<AccessFileResponse>,
+    req_path = ClientMessage::FileRequest => FileRequest::Access,
+    res_path = AgentResponse::File => FileResponse::Access,
+);
+
+impl_request!(
+    req = XstatRequest,
+    res = RemoteResult<XstatResponse>,
+    req_path = ClientMessage::FileRequest => FileRequest::Xstat,
+    res_path = AgentResponse::File => FileResponse::Xstat,
+);
+
+impl_request!(
+    req = XstatFsRequest,
+    res = RemoteResult<XstatFsResponse>,
+    req_path = ClientMessage::FileRequest => FileRequest::XstatFs,
+    res_path = AgentResponse::File => FileResponse::XstatFs,
+);
+
+impl_request!(
+    req = FdOpenDirRequest,
+    res = RemoteResult<OpenDirResponse>,
+    req_path = ClientMessage::FileRequest => FileRequest::FdOpenDir,
+    res_path = AgentResponse::File => FileResponse::OpenDir,
+);
+
+impl_request!(
+    req = ReadDirRequest,
+    res = RemoteResult<ReadDirResponse>,
+    req_path = ClientMessage::FileRequest => FileRequest::ReadDir,
+    res_path = AgentResponse::File => FileResponse::ReadDir,
+);
+
+impl_request!(
+    req = GetDEnts64Request,
+    res = RemoteResult<GetDEnts64Response>,
+    req_path = ClientMessage::FileRequest => FileRequest::GetDEnts64,
+    res_path = AgentResponse::File => FileResponse::GetDEnts64,
+);
+
+impl_request!(
+    req = CloseFileRequest,
+    req_path = ClientMessage::FileRequest => FileRequest::Close,
+);
+
+impl_request!(
+    req = CloseDirRequest,
+    req_path = ClientMessage::FileRequest => FileRequest::CloseDir,
+);

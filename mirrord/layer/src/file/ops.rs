@@ -2,16 +2,9 @@ use core::ffi::CStr;
 use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 use libc::{c_int, unlink, AT_FDCWD, FILE};
-use mirrord_intproxy::protocol::{
-    hook::{
-        Access, Close, CloseDir, FdOpenDir, FileOperation, GetDEnts64, HookMessage, Open,
-        OpenRelative, Read, ReadDir, ReadLimited, Seek, Write, WriteLimited, Xstat, XstatFs,
-    },
-    LayerToProxyMessage,
-};
 use mirrord_protocol::file::{
-    OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse, WriteFileResponse,
-    XstatFsResponse, XstatResponse,
+    OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
+    WriteFileResponse, XstatFsResponse, XstatResponse,
 };
 use rand::distributions::{Alphanumeric, DistString};
 use tracing::{error, trace};
@@ -43,9 +36,9 @@ impl RemoteFile {
         path: PathBuf,
         open_options: OpenOptionsInternal,
     ) -> Detour<OpenFileResponse> {
-        let requesting_file = Open { path, open_options };
+        let requesting_file = OpenFileRequest { path, open_options };
 
-        let response = common::make_proxy_request(requesting_file)??;
+        let response = common::make_proxy_request_with_response(requesting_file)??;
 
         Detour::Success(response)
     }
@@ -58,12 +51,12 @@ impl RemoteFile {
         // Limit read size because if we read too much it can lead to a timeout
         // Seems also that bincode doesn't do well with large buffers
         let read_amount = std::cmp::min(read_amount, MAX_READ_SIZE);
-        let reading_file = Read {
+        let reading_file = ReadFileRequest {
             remote_fd,
             buffer_size: read_amount,
         };
 
-        let response = common::make_proxy_request(reading_file)??;
+        let response = common::make_proxy_request_with_response(reading_file)??;
 
         Detour::Success(response)
     }
@@ -71,9 +64,8 @@ impl RemoteFile {
     /// Sends a [`FileOperation::Close`] message, closing the file in the agent.
     #[tracing::instrument(level = "trace")]
     pub(crate) fn remote_close(fd: u64) -> Result<()> {
-        common::send_proxy_message(LayerToProxyMessage::HookMessage(HookMessage::File(
-            FileOperation::Close(Close { fd }),
-        )))
+        common::make_proxy_request_no_response(CloseFileRequest { fd })?;
+        Ok(())
     }
 }
 
@@ -216,11 +208,12 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
 
     let remote_file_fd = OPEN_FILES.get(&fd).ok_or(Bypass::LocalFdNotFound(fd))?.fd;
 
-    let open_dir_request = FdOpenDir {
+    let open_dir_request = FdOpenDirRequest {
         remote_fd: remote_file_fd,
     };
 
-    let OpenDirResponse { fd: remote_dir_fd } = common::make_proxy_request(open_dir_request)??;
+    let OpenDirResponse { fd: remote_dir_fd } =
+        common::make_proxy_request_with_response(open_dir_request)??;
 
     let local_dir_fd = create_local_fake_file(remote_dir_fd)?;
     OPEN_DIRS.insert(local_dir_fd as usize, remote_dir_fd);
@@ -248,13 +241,14 @@ pub(crate) fn openat(
         // what).
         let remote_fd = get_remote_fd(fd)?;
 
-        let requesting_file = OpenRelative {
+        let requesting_file = OpenRelativeFileRequest {
             relative_fd: remote_fd,
             path: path.clone(),
             open_options,
         };
 
-        let OpenFileResponse { fd: remote_fd } = common::make_proxy_request(requesting_file)??;
+        let OpenFileResponse { fd: remote_fd } =
+            common::make_proxy_request_with_response(requesting_file)??;
 
         let local_file_fd = create_local_fake_file(remote_fd)?;
 
@@ -280,13 +274,13 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<Re
     // We're only interested in files that are paired with mirrord-agent.
     let remote_fd = get_remote_fd(local_fd)?;
 
-    let reading_file = ReadLimited {
+    let reading_file = ReadLimitedFileRequest {
         remote_fd,
         buffer_size,
         start_from: offset,
     };
 
-    let response = common::make_proxy_request(reading_file)??;
+    let response = common::make_proxy_request_with_response(reading_file)??;
 
     Detour::Success(response)
 }
@@ -294,13 +288,13 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<Re
 pub(crate) fn pwrite(local_fd: RawFd, buffer: &[u8], offset: u64) -> Detour<WriteFileResponse> {
     let remote_fd = get_remote_fd(local_fd)?;
 
-    let writing_file = WriteLimited {
+    let writing_file = WriteLimitedFileRequest {
         remote_fd,
         write_bytes: buffer.to_vec(),
         start_from: offset,
     };
 
-    let response = common::make_proxy_request(writing_file)??;
+    let response = common::make_proxy_request_with_response(writing_file)??;
 
     Detour::Success(response)
 }
@@ -322,12 +316,13 @@ pub(crate) fn lseek(local_fd: RawFd, offset: i64, whence: i32) -> Detour<u64> {
         }
     };
 
-    let seeking_file = Seek {
-        remote_fd,
+    let seeking_file = SeekFileRequest {
+        fd: remote_fd,
         seek_from: seek_from.into(),
     };
 
-    let SeekFileResponse { result_offset } = common::make_proxy_request(seeking_file)??;
+    let SeekFileResponse { result_offset } =
+        common::make_proxy_request_with_response(seeking_file)??;
 
     Detour::Success(result_offset)
 }
@@ -335,12 +330,13 @@ pub(crate) fn lseek(local_fd: RawFd, offset: i64, whence: i32) -> Detour<u64> {
 pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isize> {
     let remote_fd = get_remote_fd(local_fd)?;
 
-    let writing_file = Write {
-        remote_fd,
+    let writing_file = WriteFileRequest {
+        fd: remote_fd,
         write_bytes: write_bytes.ok_or(Bypass::EmptyBuffer)?,
     };
 
-    let WriteFileResponse { written_amount } = common::make_proxy_request(writing_file)??;
+    let WriteFileResponse { written_amount } =
+        common::make_proxy_request_with_response(writing_file)??;
     Detour::Success(written_amount.try_into()?)
 }
 
@@ -355,9 +351,12 @@ pub(crate) fn access(path: Detour<PathBuf>, mode: u8) -> Detour<c_int> {
         Detour::Bypass(Bypass::RelativePath(path.clone()))?
     };
 
-    let access = Access { path, mode };
+    let access = AccessFileRequest {
+        pathname: path,
+        mode,
+    };
 
-    let _ = common::make_proxy_request(access)??;
+    let _ = common::make_proxy_request_with_response(access)??;
 
     Detour::Success(0)
 }
@@ -409,13 +408,13 @@ pub(crate) fn xstat(
         (None, None) => return Detour::Error(HookError::NullPointer),
     };
 
-    let lstat = Xstat {
+    let lstat = XstatRequest {
         fd,
         path,
         follow_symlink,
     };
 
-    let response = common::make_proxy_request(lstat)??;
+    let response = common::make_proxy_request_with_response(lstat)??;
 
     Detour::Success(response)
 }
@@ -424,9 +423,9 @@ pub(crate) fn xstat(
 pub(crate) fn xstatfs(fd: RawFd) -> Detour<XstatFsResponse> {
     let fd = get_remote_fd(fd)?;
 
-    let lstatfs = XstatFs { fd };
+    let lstatfs = XstatFsRequest { fd };
 
-    let response = common::make_proxy_request(lstatfs)??;
+    let response = common::make_proxy_request_with_response(lstatfs)??;
 
     Detour::Success(response)
 }
@@ -437,12 +436,12 @@ pub(crate) fn getdents64(fd: RawFd, buffer_size: u64) -> Detour<GetDEnts64Respon
     // We're only interested in files that are paired with mirrord-agent.
     let remote_fd = get_remote_fd(fd)?;
 
-    let getdents64 = GetDEnts64 {
+    let getdents64 = GetDEnts64Request {
         remote_fd,
         buffer_size,
     };
 
-    let response = common::make_proxy_request(getdents64)??;
+    let response = common::make_proxy_request_with_response(getdents64)??;
 
     Detour::Success(response)
 }
