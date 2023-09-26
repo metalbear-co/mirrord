@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use bincode::{Decode, Encode};
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
@@ -9,7 +11,8 @@ use mirrord_protocol::{
         WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest, XstatFsRequest,
         XstatFsResponse, XstatRequest, XstatResponse,
     },
-    FileRequest, FileResponse, RemoteResult, outgoing::SocketAddress,
+    outgoing::{tcp::LayerTcpOutgoing, udp::LayerUdpOutgoing, LayerConnect, SocketAddress},
+    ClientMessage, FileRequest, FileResponse, RemoteResult,
 };
 
 pub type MessageId = u64;
@@ -32,7 +35,6 @@ pub enum InitSession {
 #[derive(Encode, Decode, Debug)]
 pub enum LayerToProxyMessage {
     InitSession(InitSession),
-    /// Raw requests from the layer
     LayerRequest(LayerRequest),
 }
 
@@ -44,20 +46,39 @@ pub enum LayerRequest {
     ConnectUdpOutgoing(ConnectUdpOutgoing),
 }
 
+impl From<LayerRequest> for ClientMessage {
+    fn from(value: LayerRequest) -> Self {
+        match value {
+            LayerRequest::File(req) => ClientMessage::FileRequest(req),
+            LayerRequest::GetAddrInfo(req) => ClientMessage::GetAddrInfoRequest(req),
+            LayerRequest::ConnectTcpOutgoing(req) => {
+                ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
+                    remote_address: req.remote_address,
+                }))
+            }
+            LayerRequest::ConnectUdpOutgoing(req) => {
+                ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
+                    remote_address: req.remote_address,
+                }))
+            }
+        }
+    }
+}
+
 #[derive(Encode, Decode, Debug)]
-pub struct ConnectTcpOutgoing {
-    pub remote_address: SocketAddress
+pub struct ConnectTcpOutgoing<P> {
+    pub remote_address: SocketAddress,
+    _phantom: PhantomData<fn() -> P>,
 }
 
 #[derive(Encode, Decode, Debug)]
 pub struct ConnectUdpOutgoing {
-    pub remote_address: SocketAddress
+    pub remote_address: SocketAddress,
 }
 
 #[derive(Encode, Decode, Debug)]
 pub enum ProxyToLayerMessage {
     SessionInfo(SessionId),
-    /// Raw responses from the agent
     AgentResponse(AgentResponse),
 }
 

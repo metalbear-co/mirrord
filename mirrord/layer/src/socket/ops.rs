@@ -1,5 +1,4 @@
 use alloc::ffi::CString;
-use mirrord_intproxy::protocol::{ConnectTcpOutgoing, ConnectUdpOutgoing, OutgoingConnectResponse};
 use core::{ffi::CStr, mem};
 use std::{
     io,
@@ -12,6 +11,7 @@ use std::{
 
 use libc::{c_int, c_void, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::IncomingMode;
+use mirrord_intproxy::protocol::{ConnectTcpOutgoing, ConnectUdpOutgoing, OutgoingConnectResponse};
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, LookupRecord},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
@@ -29,8 +29,14 @@ use crate::{
     is_debugger_port,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
     // tcp::{Listen, TcpIncoming},
-    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_CONFIG, LISTEN_PORTS,
-    OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR, REMOTE_UNIX_STREAMS, TARGETLESS,
+    ENABLED_TCP_OUTGOING,
+    ENABLED_UDP_OUTGOING,
+    INCOMING_CONFIG,
+    LISTEN_PORTS,
+    OUTGOING_IGNORE_LOCALHOST,
+    OUTGOING_SELECTOR,
+    REMOTE_UNIX_STREAMS,
+    TARGETLESS,
 };
 
 /// Holds the pair of [`SocketAddr`] with their hostnames, resolved remotely through

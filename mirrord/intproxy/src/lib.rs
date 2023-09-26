@@ -21,8 +21,10 @@ pub mod agent_conn;
 pub mod codec;
 pub mod error;
 mod layer_conn;
+mod outgoing;
 pub mod protocol;
 mod request_proxy;
+mod request_queue;
 
 pub struct IntProxy {
     config: LayerConfig,
