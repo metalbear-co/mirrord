@@ -188,6 +188,10 @@ impl ProxySession {
                 let response = AgentResponse::File(file_response);
                 self.request_proxy.handle_agent_response(response).await?;
             }
+            DaemonMessage::GetAddrInfoResponse(response) => {
+                let response = AgentResponse::GetAddrInfo(response);
+                self.request_proxy.handle_agent_response(response).await?;
+            }
             _ => todo!(),
         }
 

@@ -177,7 +177,7 @@ pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE>
         .map(CStr::to_str)
         .transpose()
         .map_err(|fail| {
-            warn!(
+            tracing::warn!(
                 "Failed converting `rawish_mode` from `CStr` with {:#?}",
                 fail
             );
@@ -308,9 +308,10 @@ pub(crate) fn lseek(local_fd: RawFd, offset: i64, whence: i32) -> Detour<u64> {
         libc::SEEK_CUR => SeekFrom::Current(offset),
         libc::SEEK_END => SeekFrom::End(offset),
         invalid => {
-            warn!(
+            tracing::warn!(
                 "lseek -> potential invalid value {:#?} for whence {:#?}",
-                invalid, whence
+                invalid,
+                whence
             );
             return Detour::Bypass(Bypass::CStrConversion);
         }

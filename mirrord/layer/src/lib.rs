@@ -120,10 +120,7 @@ use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
-    debugger_ports::DebuggerPorts,
-    detour::DetourGuard,
-    file::{filter::FILE_FILTER, FileHandler},
-    load::LoadType,
+    debugger_ports::DebuggerPorts, detour::DetourGuard, file::filter::FILE_FILTER, load::LoadType,
     socket::CONNECTION_QUEUE,
 };
 
@@ -667,21 +664,6 @@ impl Layer {
     //                     .await
     //                     .unwrap();
     //             }
-    //         }
-    //         HookMessage::File(message) => {
-    //             self.file_handler
-    //                 .handle_hook_message(message, &self.tx)
-    //                 .await
-    //                 .unwrap();
-    //         }
-    //         HookMessage::GetAddrinfo(GetAddrInfo {
-    //             node,
-    //             hook_channel_tx,
-    //         }) => {
-    //             self.getaddrinfo_handler_queue.push_back(hook_channel_tx);
-    //             let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node });
-
-    //             self.send(request).await.unwrap();
     //         }
     //         HookMessage::TcpOutgoing(message) => self
     //             .tcp_outgoing_handler

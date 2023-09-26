@@ -1,5 +1,6 @@
 use bincode::{Decode, Encode};
 use mirrord_protocol::{
+    dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     file::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, FdOpenDirRequest,
         GetDEnts64Request, GetDEnts64Response, OpenDirResponse, OpenFileRequest, OpenFileResponse,
@@ -8,7 +9,7 @@ use mirrord_protocol::{
         WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest, XstatFsRequest,
         XstatFsResponse, XstatRequest, XstatResponse,
     },
-    ClientMessage, FileRequest, FileResponse, RemoteResult,
+    FileRequest, FileResponse, RemoteResult, outgoing::SocketAddress,
 };
 
 pub type MessageId = u64;
@@ -32,7 +33,25 @@ pub enum InitSession {
 pub enum LayerToProxyMessage {
     InitSession(InitSession),
     /// Raw requests from the layer
-    LayerRequest(ClientMessage),
+    LayerRequest(LayerRequest),
+}
+
+#[derive(Encode, Decode, Debug)]
+pub enum LayerRequest {
+    File(FileRequest),
+    GetAddrInfo(GetAddrInfoRequest),
+    ConnectTcpOutgoing(ConnectTcpOutgoing),
+    ConnectUdpOutgoing(ConnectUdpOutgoing),
+}
+
+#[derive(Encode, Decode, Debug)]
+pub struct ConnectTcpOutgoing {
+    pub remote_address: SocketAddress
+}
+
+#[derive(Encode, Decode, Debug)]
+pub struct ConnectUdpOutgoing {
+    pub remote_address: SocketAddress
 }
 
 #[derive(Encode, Decode, Debug)]
@@ -45,14 +64,23 @@ pub enum ProxyToLayerMessage {
 #[derive(Encode, Decode, Debug)]
 pub enum AgentResponse {
     File(FileResponse),
+    GetAddrInfo(GetAddrInfoResponse),
+    ConnectTcpOutgoing(RemoteResult<OutgoingConnectResponse>),
+    ConnectUdpOutgoing(RemoteResult<OutgoingConnectResponse>),
+}
+
+#[derive(Encode, Decode, Debug)]
+pub struct OutgoingConnectResponse {
+    pub layer_address: SocketAddress,
+    pub user_app_address: SocketAddress,
 }
 
 pub trait IsLayerRequest: Sized {
-    fn wrap(self) -> ClientMessage;
+    fn wrap(self) -> LayerRequest;
 
-    fn check(message: &ClientMessage) -> bool;
+    fn check(message: &LayerRequest) -> bool;
 
-    fn try_unwrap(message: ClientMessage) -> Result<Self, ClientMessage>;
+    fn try_unwrap(message: LayerRequest) -> Result<Self, LayerRequest>;
 }
 
 pub trait IsLayerRequestWithResponse: IsLayerRequest {
@@ -113,18 +141,18 @@ macro_rules! impl_request {
         req_path = $($req_variants: path) => +,
     ) => {
         impl IsLayerRequest for $req_type {
-            fn wrap(self) -> ClientMessage {
+            fn wrap(self) -> LayerRequest {
                 combine_paths!(self, $($req_variants),+)
             }
 
-            fn check(message: &ClientMessage) -> bool {
+            fn check(message: &LayerRequest) -> bool {
                 match message {
                     combine_paths!(_inner, $($req_variants),+) => true,
                     _ => false,
                 }
             }
 
-            fn try_unwrap(message: ClientMessage) -> Result<Self, ClientMessage> {
+            fn try_unwrap(message: LayerRequest) -> Result<Self, LayerRequest> {
                 match message {
                     combine_paths!(inner, $($req_variants),+) => Ok(inner),
                     other => Err(other),
@@ -137,100 +165,121 @@ macro_rules! impl_request {
 impl_request!(
     req = OpenFileRequest,
     res = RemoteResult<OpenFileResponse>,
-    req_path = ClientMessage::FileRequest => FileRequest::Open,
+    req_path = LayerRequest::File => FileRequest::Open,
     res_path = AgentResponse::File => FileResponse::Open,
 );
 
 impl_request!(
     req = OpenRelativeFileRequest,
     res = RemoteResult<OpenFileResponse>,
-    req_path = ClientMessage::FileRequest => FileRequest::OpenRelative,
+    req_path = LayerRequest::File => FileRequest::OpenRelative,
     res_path = AgentResponse::File => FileResponse::Open,
 );
 
 impl_request!(
     req = ReadFileRequest,
     res = RemoteResult<ReadFileResponse>,
-    req_path = ClientMessage::FileRequest => FileRequest::Read,
+    req_path = LayerRequest::File => FileRequest::Read,
     res_path = AgentResponse::File => FileResponse::Read,
 );
 
 impl_request!(
     req = ReadLimitedFileRequest,
     res = RemoteResult<ReadFileResponse>,
-    req_path = ClientMessage::FileRequest => FileRequest::ReadLimited,
+    req_path = LayerRequest::File => FileRequest::ReadLimited,
     res_path = AgentResponse::File => FileResponse::ReadLimited,
 );
 
 impl_request!(
     req = SeekFileRequest,
     res = RemoteResult<SeekFileResponse>,
-    req_path = ClientMessage::FileRequest => FileRequest::Seek,
+    req_path = LayerRequest::File => FileRequest::Seek,
     res_path = AgentResponse::File => FileResponse::Seek,
 );
 
 impl_request!(
     req = WriteFileRequest,
     res = RemoteResult<WriteFileResponse>,
-    req_path = ClientMessage::FileRequest => FileRequest::Write,
+    req_path = LayerRequest::File => FileRequest::Write,
     res_path = AgentResponse::File => FileResponse::Write,
 );
 
 impl_request!(
     req = WriteLimitedFileRequest,
     res = RemoteResult<WriteFileResponse>,
-    req_path = ClientMessage::FileRequest => FileRequest::WriteLimited,
+    req_path = LayerRequest::File => FileRequest::WriteLimited,
     res_path = AgentResponse::File => FileResponse::WriteLimited,
 );
 
 impl_request!(
     req = AccessFileRequest,
     res = RemoteResult<AccessFileResponse>,
-    req_path = ClientMessage::FileRequest => FileRequest::Access,
+    req_path = LayerRequest::File => FileRequest::Access,
     res_path = AgentResponse::File => FileResponse::Access,
 );
 
 impl_request!(
     req = XstatRequest,
     res = RemoteResult<XstatResponse>,
-    req_path = ClientMessage::FileRequest => FileRequest::Xstat,
+    req_path = LayerRequest::File => FileRequest::Xstat,
     res_path = AgentResponse::File => FileResponse::Xstat,
 );
 
 impl_request!(
     req = XstatFsRequest,
     res = RemoteResult<XstatFsResponse>,
-    req_path = ClientMessage::FileRequest => FileRequest::XstatFs,
+    req_path = LayerRequest::File => FileRequest::XstatFs,
     res_path = AgentResponse::File => FileResponse::XstatFs,
 );
 
 impl_request!(
     req = FdOpenDirRequest,
     res = RemoteResult<OpenDirResponse>,
-    req_path = ClientMessage::FileRequest => FileRequest::FdOpenDir,
+    req_path = LayerRequest::File => FileRequest::FdOpenDir,
     res_path = AgentResponse::File => FileResponse::OpenDir,
 );
 
 impl_request!(
     req = ReadDirRequest,
     res = RemoteResult<ReadDirResponse>,
-    req_path = ClientMessage::FileRequest => FileRequest::ReadDir,
+    req_path = LayerRequest::File => FileRequest::ReadDir,
     res_path = AgentResponse::File => FileResponse::ReadDir,
 );
 
 impl_request!(
     req = GetDEnts64Request,
     res = RemoteResult<GetDEnts64Response>,
-    req_path = ClientMessage::FileRequest => FileRequest::GetDEnts64,
+    req_path = LayerRequest::File => FileRequest::GetDEnts64,
     res_path = AgentResponse::File => FileResponse::GetDEnts64,
 );
 
 impl_request!(
     req = CloseFileRequest,
-    req_path = ClientMessage::FileRequest => FileRequest::Close,
+    req_path = LayerRequest::File => FileRequest::Close,
 );
 
 impl_request!(
     req = CloseDirRequest,
-    req_path = ClientMessage::FileRequest => FileRequest::CloseDir,
+    req_path = LayerRequest::File => FileRequest::CloseDir,
+);
+
+impl_request!(
+    req = GetAddrInfoRequest,
+    res = GetAddrInfoResponse,
+    req_path = LayerRequest::GetAddrInfo,
+    res_path = AgentResponse::GetAddrInfo,
+);
+
+impl_request!(
+    req = ConnectTcpOutgoing,
+    res = RemoteResult<OutgoingConnectResponse>,
+    req_path = LayerRequest::ConnectTcpOutgoing,
+    res_path = AgentResponse::ConnectTcpOutgoing,
+);
+
+impl_request!(
+    req = ConnectUdpOutgoing,
+    res = RemoteResult<OutgoingConnectResponse>,
+    req_path = LayerRequest::ConnectUdpOutgoing,
+    res_path = AgentResponse::ConnectUdpOutgoing,
 );

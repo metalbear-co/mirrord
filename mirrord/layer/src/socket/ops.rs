@@ -1,4 +1,5 @@
 use alloc::ffi::CString;
+use mirrord_intproxy::protocol::{ConnectTcpOutgoing, ConnectUdpOutgoing, OutgoingConnectResponse};
 use core::{ffi::CStr, mem};
 use std::{
     io,
@@ -12,7 +13,7 @@ use std::{
 use libc::{c_int, c_void, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::IncomingMode;
 use mirrord_protocol::{
-    dns::LookupRecord,
+    dns::{GetAddrInfoRequest, LookupRecord},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
 use socket2::SockAddr;
@@ -21,14 +22,13 @@ use tracing::{error, info, trace};
 
 use super::{hooks::*, *};
 use crate::{
-    common::{blocking_send_hook_message, HookMessage},
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     dns::GetAddrInfo,
     error::HookError,
     file::{self, OPEN_FILES},
     is_debugger_port,
     outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
-    tcp::{Listen, TcpIncoming},
+    // tcp::{Listen, TcpIncoming},
     ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_CONFIG, LISTEN_PORTS,
     OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR, REMOTE_UNIX_STREAMS, TARGETLESS,
 };
@@ -323,29 +323,24 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
     // Closure that performs the connection with mirrord messaging.
     let remote_connection = |remote_address: SockAddr| {
         // Prepare this socket to be intercepted.
-        let (mirror_tx, mirror_rx) = oneshot::channel();
+        let remote_address = SocketAddress::try_from(remote_address).unwrap();
 
-        let connect = Connect {
-            remote_address: remote_address.clone(),
-            channel_tx: mirror_tx,
-        };
-
-        let hook_message = match PROTOCOL {
+        let response = match PROTOCOL {
             TCP => {
-                let connect_hook = TcpOutgoing::Connect(connect);
-                HookMessage::TcpOutgoing(connect_hook)
+                let request = ConnectTcpOutgoing { remote_address };
+                common::make_proxy_request_with_response(request)??
             }
             UDP => {
-                let connect_hook = UdpOutgoing::Connect(connect);
-                HookMessage::UdpOutgoing(connect_hook)
+                let request = ConnectUdpOutgoing { remote_address };
+                common::make_proxy_request_with_response(request)??
             }
         };
 
-        blocking_send_hook_message(hook_message)?;
-        let RemoteConnection {
+        // blocking_send_hook_message(hook_message)?;
+        let OutgoingConnectResponse {
             layer_address,
             user_app_address,
-        } = mirror_rx.blocking_recv()??;
+        } = response;
 
         // Connect to the interceptor socket that is listening.
         let connect_result: ConnectResult = if CALL_CONNECT {
@@ -730,15 +725,7 @@ pub(super) fn remote_getaddrinfo(
     node: String,
     service: u16,
 ) -> HookResult<Vec<(String, SocketAddr)>> {
-    let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
-    let hook = GetAddrInfo {
-        node,
-        hook_channel_tx,
-    };
-
-    blocking_send_hook_message(HookMessage::GetAddrinfo(hook))?;
-
-    let addr_info_list = hook_channel_rx.blocking_recv()??;
+    let addr_info_list = common::make_proxy_request_with_response(GetAddrInfoRequest { node })?.0?;
 
     Ok(addr_info_list
         .into_iter()

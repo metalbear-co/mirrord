@@ -24,7 +24,7 @@ use trust_dns_resolver::config::Protocol;
 
 use self::id::SocketId;
 use crate::{
-    common::{blocking_send_hook_message, HookMessage},
+    common,
     detour::{Bypass, Detour, DetourGuard, OptionExt},
     error::{HookError, HookResult, LayerError},
     socket::ops::{remote_getaddrinfo, REMOTE_DNS_REVERSE_MAPPING},

@@ -1,14 +1,16 @@
-use core::fmt;
 use std::{
-    io::SeekFrom,
     os::unix::io::RawFd,
-    path::PathBuf,
     sync::{Arc, LazyLock},
 };
 
 use dashmap::DashMap;
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
-use mirrord_intproxy::protocol::hook::RemoteFd;
+use mirrord_protocol::file::{
+    AccessFileRequest, CloseDirRequest, CloseFileRequest, DirEntryInternal, FdOpenDirRequest,
+    OpenDirResponse, OpenOptionsInternal, OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse,
+    ReadFileRequest, ReadLimitedFileRequest, SeekFileRequest, WriteFileRequest,
+    WriteLimitedFileRequest, XstatFsRequest, XstatRequest,
+};
 /// File operations on remote pod.
 ///
 /// Read-only file operations are enabled by default, you can turn it off by setting
@@ -20,30 +22,13 @@ use mirrord_intproxy::protocol::hook::RemoteFd;
 /// `[FsConfig]`.
 #[cfg(target_os = "linux")]
 use mirrord_protocol::file::{GetDEnts64Request, GetDEnts64Response};
-use mirrord_protocol::{
-    file::{
-        AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, DirEntryInternal,
-        FdOpenDirRequest, OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
-        OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
-        ReadFileResponse, ReadLimitedFileRequest, SeekFileRequest, SeekFileResponse,
-        WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest, XstatFsRequest,
-        XstatFsResponse, XstatRequest, XstatResponse,
-    },
-    ClientMessage, FileRequest, FileResponse, RemoteResult,
-};
-use tokio::sync::mpsc::Sender;
-use tracing::{error, trace, warn};
-
-use crate::{
-    common::{ResponseChannel, ResponseDeque},
-    error::{LayerError, Result},
-};
 
 pub(crate) mod filter;
 pub(crate) mod hooks;
 pub(crate) mod open_dirs;
 pub(crate) mod ops;
 
+type RemoteFd = u64;
 type LocalFd = RawFd;
 type DirStreamFd = usize;
 
@@ -104,7 +89,7 @@ impl OpenOptionsInternalExt for OpenOptionsInternal {
                     // Only has meaning for `fmemopen`.
                     'b' => {}
                     invalid => {
-                        warn!("Invalid mode for fopen {:#?}", invalid);
+                        tracing::warn!("Invalid mode for fopen {:#?}", invalid);
                     }
                 }
 

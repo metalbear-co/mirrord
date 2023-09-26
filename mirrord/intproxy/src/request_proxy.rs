@@ -1,12 +1,13 @@
 use std::{collections::VecDeque, marker::PhantomData};
 
 use mirrord_protocol::{
+    dns::GetAddrInfoRequest,
     file::{
         AccessFileRequest, FdOpenDirRequest, GetDEnts64Request, OpenFileRequest,
         OpenRelativeFileRequest, ReadDirRequest, ReadFileRequest, ReadLimitedFileRequest,
         SeekFileRequest, WriteFileRequest, WriteLimitedFileRequest, XstatFsRequest, XstatRequest,
     },
-    ClientMessage,
+    ClientMessage, outgoing::{udp::LayerUdpOutgoing, LayerConnect, tcp::LayerTcpOutgoing},
 };
 
 use crate::{
@@ -14,12 +15,12 @@ use crate::{
     error::{IntProxyError, Result},
     layer_conn::LayerSender,
     protocol::{
-        AgentResponse, IsLayerRequestWithResponse, LocalMessage, MessageId, ProxyToLayerMessage,
+        AgentResponse, IsLayerRequestWithResponse, LocalMessage, MessageId, ProxyToLayerMessage, LayerRequest,
     },
 };
 
 trait RequestQueue: Send + Sync {
-    fn save_request_id(&mut self, id: MessageId, request: &ClientMessage) -> bool;
+    fn save_request_id(&mut self, id: MessageId, request: &LayerRequest) -> bool;
 
     fn get_request_id(&mut self, response: &AgentResponse) -> Option<MessageId>;
 }
@@ -39,7 +40,7 @@ impl<T> Default for TypedRequestQueue<T> {
 }
 
 impl<T: IsLayerRequestWithResponse> RequestQueue for TypedRequestQueue<T> {
-    fn save_request_id(&mut self, id: MessageId, request: &ClientMessage) -> bool {
+    fn save_request_id(&mut self, id: MessageId, request: &LayerRequest) -> bool {
         if T::check(request) {
             self.request_ids.push_back(id);
             true
@@ -60,7 +61,7 @@ impl<T: IsLayerRequestWithResponse> RequestQueue for TypedRequestQueue<T> {
 pub struct RequestProxy {
     agent_sender: AgentSender,
     layer_sender: LayerSender,
-    queues: [Box<dyn RequestQueue>; 13],
+    queues: [Box<dyn RequestQueue>; 14],
 }
 
 impl RequestProxy {
@@ -69,7 +70,7 @@ impl RequestProxy {
     }
 
     pub fn new(agent_sender: AgentSender, layer_sender: LayerSender) -> Self {
-        let queues: [Box<dyn RequestQueue>; 13] = [
+        let queues: [Box<dyn RequestQueue>; 14] = [
             Self::make_queue::<OpenFileRequest>(),
             Self::make_queue::<OpenRelativeFileRequest>(),
             Self::make_queue::<ReadFileRequest>(),
@@ -83,6 +84,7 @@ impl RequestProxy {
             Self::make_queue::<FdOpenDirRequest>(),
             Self::make_queue::<ReadDirRequest>(),
             Self::make_queue::<GetDEnts64Request>(),
+            Self::make_queue::<GetAddrInfoRequest>(),
         ];
 
         Self {
@@ -96,11 +98,12 @@ impl RequestProxy {
     pub async fn handle_layer_request(
         &mut self,
         request_id: MessageId,
-        request: ClientMessage,
+        request: LayerRequest,
     ) -> Result<()> {
         for queue in &mut self.queues {
             if queue.save_request_id(request_id, &request) {
-                return self.agent_sender.send(request).await.map_err(Into::into);
+                let message = Self::make_client_message(request);
+                return self.agent_sender.send(message).await.map_err(Into::into);
             }
         }
 
@@ -127,5 +130,14 @@ impl RequestProxy {
         }
 
         Err(IntProxyError::RequestQueueNotFound(response))
+    }
+
+    fn make_client_message(request: LayerRequest) -> ClientMessage {
+        match request {
+            LayerRequest::File(req) => ClientMessage::FileRequest(req),
+            LayerRequest::GetAddrInfo(req) => ClientMessage::GetAddrInfoRequest(req),
+            LayerRequest::ConnectUdpOutgoing(req) => ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect { remote_address: req.remote_address })),
+            LayerRequest::ConnectTcpOutgoing(req) => ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect { remote_address: req.remote_address })),
+        }
     }
 }
