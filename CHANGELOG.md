@@ -8,6 +8,28 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.70.0](https://github.com/metalbear-co/mirrord/tree/3.70.0) - 2023-09-27
+
+
+### Added
+
+- Added templating for mirrord config using Tera engine.
+  [#1817](https://github.com/metalbear-co/mirrord/issues/1817)
+
+
+### Fixed
+
+- Running `mix` works now (bug was calling `lstat` in `stat` bypass).
+  [#1967](https://github.com/metalbear-co/mirrord/issues/1967)
+- Fix progress message shows wrong latest version
+  [#1972](https://github.com/metalbear-co/mirrord/issues/1972)
+
+
+### Internal
+
+- Remove `run_as_user` from operator deployment's `security_context`.
+
+
 ## [3.69.0](https://github.com/metalbear-co/mirrord/tree/3.69.0) - 2023-09-26
 
 
