@@ -8,6 +8,81 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.70.0](https://github.com/metalbear-co/mirrord/tree/3.70.0) - 2023-09-27
+
+
+### Added
+
+- Added templating for mirrord config using Tera engine.
+  [#1817](https://github.com/metalbear-co/mirrord/issues/1817)
+
+
+### Fixed
+
+- Running `mix` works now (bug was calling `lstat` in `stat` bypass).
+  [#1967](https://github.com/metalbear-co/mirrord/issues/1967)
+- Fix progress message shows wrong latest version
+  [#1972](https://github.com/metalbear-co/mirrord/issues/1972)
+
+
+### Internal
+
+- Remove `run_as_user` from operator deployment's `security_context`.
+
+
+## [3.69.0](https://github.com/metalbear-co/mirrord/tree/3.69.0) - 2023-09-26
+
+
+### Removed
+
+- Remove spammy messages from progress
+  [#1934](https://github.com/metalbear-co/mirrord/issues/1934)
+
+
+### Added
+
+- Added the ability to specify targetless in config file, to allow
+  non-interactive targetless in IDEs
+  [#1962](https://github.com/metalbear-co/mirrord/issues/1962)
+
+
+### Changed
+
+- Change targetless + steal mode to warning instead of error.
+- Changed file filter to exclude jar files from being read remote by default
+  [#1968](https://github.com/metalbear-co/mirrord/issues/1968)
+
+
+### Fixed
+
+- Fixes selecting container to use when using operator
+
+
+## [3.68.0](https://github.com/metalbear-co/mirrord/tree/3.68.0) - 2023-09-19
+
+
+### Added
+
+- New subcommand for generating shell completions for
+  bash/fish/zsh/powershell/elvish
+  [#1947](https://github.com/metalbear-co/mirrord/issues/1947)
+
+
+### Fixed
+
+- Fix mirrord-cli verify-config command not serializing failures correctly due
+  to serde not being able to serialize newtype pattern in tagged unions.
+  [#1840](https://github.com/metalbear-co/mirrord/issues/1840)
+
+
+### Internal
+
+- CI: Add quotes to branch name in check_if_release_branch
+  [#add-quotes-ci](https://github.com/metalbear-co/mirrord/issues/add-quotes-ci)
+- Bump and clean depenedencies in our code and in tests
+- Remove process feature from Tokio in layer package
+
+
 ## [3.67.0](https://github.com/metalbear-co/mirrord/tree/3.67.0) - 2023-09-13
 
 

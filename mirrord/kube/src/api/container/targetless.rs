@@ -28,7 +28,7 @@ where
 }
 
 impl<'c> ContainerApi<JobVariant<'c>> for Targetless<'c, JobVariant<'c>> {
-    async fn create_agent<P>(&self, progress: &P) -> Result<AgentKubernetesConnectInfo>
+    async fn create_agent<P>(&self, progress: &mut P) -> Result<AgentKubernetesConnectInfo>
     where
         P: Progress + Send + Sync,
     {

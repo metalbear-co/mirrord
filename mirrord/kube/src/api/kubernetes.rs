@@ -25,7 +25,7 @@ use tokio_retry::{
     strategy::{jitter, ExponentialBackoff},
     Retry,
 };
-use tracing::{info, trace};
+use tracing::{debug, info, trace};
 
 use crate::{
     api::{
@@ -74,7 +74,7 @@ impl KubernetesAPI {
         }
     }
 
-    pub async fn detect_openshift<P>(&self, progress: &mut P) -> Result<()>
+    pub async fn detect_openshift<P>(&self, progress: &P) -> Result<()>
     where
         P: Progress + Send + Sync,
     {
@@ -87,7 +87,7 @@ impl KubernetesAPI {
         {
             progress.warning("mirrord has detected it's running on OpenShift. Due to the default PSP of OpenShift, mirrord may not be able to create the agent. Please refer to the documentation at https://mirrord.dev/docs/overview/faq/#can-i-use-mirrord-with-openshift");
         } else {
-            progress.success(Some("OpenShift was not detected."))
+            debug!("OpenShift was not detected.");
         }
         Ok(())
     }
@@ -199,20 +199,13 @@ impl AgentManagment for KubernetesAPI {
     where
         P: Progress + Send + Sync,
     {
-        let runtime_data = if let Some(ref path) = self.target.path {
+        let runtime_data = if let Some(ref path) = self.target.path && !matches!(path, mirrord_config::target::Target::Targetless) {
             let runtime_data = path
                 .runtime_data(&self.client, self.target.namespace.as_deref())
                 .await?;
 
             Some(runtime_data)
         } else {
-            // Most users won't see this, since the default log level is error, and also progress
-            // reporting overrides logs in this stage of the run.
-            info!(
-                "No target specified. Spawning a targetless agent - not specifying a node, not \
-                impersonating any existing resource. \
-                To spawn a targeted agent, please specify a target in the configuration.",
-            );
             None
         };
 
