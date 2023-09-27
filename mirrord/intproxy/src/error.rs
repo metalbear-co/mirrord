@@ -1,11 +1,11 @@
 use std::io;
 
+use mirrord_protocol::ResponseError;
 use thiserror::Error;
 
 use crate::{
-    agent_conn::AgentCommunicationFailed,
-    layer_conn::LayerCommunicationFailed,
-    protocol::{AgentResponse, LayerToProxyMessage},
+    agent_conn::AgentCommunicationFailed, layer_conn::LayerCommunicationFailed,
+    protocol::LayerToProxyMessage,
 };
 
 #[derive(Error, Debug)]
@@ -20,12 +20,21 @@ pub enum IntProxyError {
     LayerCommunicationFailed(#[from] LayerCommunicationFailed),
     #[error("request queue is empty")]
     RequestQueueEmpty,
-    #[error("request queue not found")]
-    RequestQueueNotFound(AgentResponse),
     #[error("received unexpected message from layer")]
     UnexpectedLayerMessage(LayerToProxyMessage),
     #[error("agent closed connection: {0}")]
     AgentClosedConnection(String),
+    #[error("component {name} failed: {inner_error}")]
+    ComponentFailed {
+        name: &'static str,
+        inner_error: Box<Self>,
+    },
+    #[error("component panicked")]
+    ComponentPanicked,
+    #[error("agent error: {0}")]
+    AgentError(#[from] ResponseError),
+    #[error("connection id {0} not found")]
+    NoConnectionId(u64),
 }
 
 pub type Result<T> = core::result::Result<T, IntProxyError>;

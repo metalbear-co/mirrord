@@ -1,29 +1,30 @@
 use std::{sync::Arc, time::Duration};
 
+use components::{outgoing_proxy::OutgoingProxy, simple_proxy::SimpleProxy};
 use layer_conn::LayerConnection;
 use mirrord_config::LayerConfig;
-use mirrord_protocol::{ClientMessage, DaemonMessage};
-use protocol::AgentResponse;
-use request_proxy::RequestProxy;
+use mirrord_protocol::{
+    dns::GetAddrInfoRequest, ClientMessage, DaemonMessage, FileRequest, FileResponse,
+};
+use protocol::{LayerToProxyMessage, LocalMessage, Tcp, Udp};
 use tokio::{
     net::{TcpListener, TcpStream},
     task::JoinSet,
     time,
 };
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     agent_conn::{AgentCommunicationFailed, AgentConnectInfo, AgentConnection},
     error::{IntProxyError, Result},
-    protocol::{LayerToProxyMessage, LocalMessage},
 };
 
 pub mod agent_conn;
 pub mod codec;
+mod components;
 pub mod error;
 mod layer_conn;
-mod outgoing;
 pub mod protocol;
-mod request_proxy;
 mod request_queue;
 
 pub struct IntProxy {
@@ -45,7 +46,7 @@ impl IntProxy {
         }
     }
 
-    pub async fn run(self: Arc<Self>) -> Result<()> {
+    pub async fn run(self: Arc<Self>, cancellation_token: CancellationToken) -> Result<()> {
         let first_timeout = Duration::from_secs(self.config.internal_proxy.start_idle_timeout);
         let consecutive_timeout = Duration::from_secs(self.config.internal_proxy.idle_timeout);
 
@@ -63,8 +64,10 @@ impl IntProxy {
 
 
                         let proxy_clone = self.clone();
+                        let token_clone = cancellation_token.clone();
+
                         active_connections.spawn(async move {
-                            let session = match ProxySession::new(&proxy_clone, stream).await {
+                            let session = match ProxySession::new(&proxy_clone, stream, token_clone).await {
                                 Ok(session) => session,
                                 Err(err) => {
                                     tracing::error!("failed to create a new session for {peer}: {err:?}");
@@ -114,27 +117,41 @@ struct ProxySession {
     agent_conn: AgentConnection,
     layer_conn: LayerConnection,
     ping: bool,
-    request_proxy: RequestProxy,
+    cancellation_token: CancellationToken,
+    simple_proxy: SimpleProxy,
+    outgoing_udp_proxy: OutgoingProxy<Udp>,
+    outgoing_tcp_proxy: OutgoingProxy<Tcp>,
 }
 
 impl ProxySession {
     const PING_INTERVAL: Duration = Duration::from_secs(30);
 
-    async fn new(intproxy: &IntProxy, conn: TcpStream) -> Result<Self> {
+    async fn new(
+        intproxy: &IntProxy,
+        conn: TcpStream,
+        cancellation_token: CancellationToken,
+    ) -> Result<Self> {
         let mut agent_conn =
             AgentConnection::new(&intproxy.config, intproxy.agent_connect_info.as_ref()).await?;
         agent_conn.ping_pong().await?;
 
         let layer_conn = LayerConnection::new(conn);
 
-        let request_proxy =
-            RequestProxy::new(agent_conn.sender().clone(), layer_conn.sender().clone());
+        let simple_proxy =
+            SimpleProxy::new(layer_conn.sender().clone(), agent_conn.sender().clone());
+        let outgoing_tcp_proxy =
+            OutgoingProxy::new(layer_conn.sender().clone(), agent_conn.sender().clone());
+        let outgoing_udp_proxy =
+            OutgoingProxy::new(layer_conn.sender().clone(), agent_conn.sender().clone());
 
         Ok(Self {
             agent_conn,
             layer_conn,
             ping: false,
-            request_proxy,
+            cancellation_token,
+            simple_proxy,
+            outgoing_tcp_proxy,
+            outgoing_udp_proxy,
         })
     }
 
@@ -156,13 +173,12 @@ impl ProxySession {
                 },
 
                 agent_message = self.agent_conn.receive() => {
-                    match agent_message {
-                        Some(agent_message) => self.handle_agent_message(agent_message).await?,
-                        None => {
-                            tracing::trace!("agent connection closed");
-                            break Ok(());
-                        }
-                    }
+                    let Some(message) = agent_message else {
+                        tracing::trace!("agent connection closed");
+                        break Ok(());
+                    };
+
+                    self.handle_agent_message(message).await?;
                 },
 
                 _ = ping_interval.tick() => {
@@ -170,7 +186,7 @@ impl ProxySession {
                         self.agent_conn.sender().send(ClientMessage::Ping).await?;
                         self.ping = true;
                     } else {
-                        tracing::warn!("Unmatched ping, timeout!");
+                        tracing::warn!("unmatched ping, timeout!");
                         break Err(AgentCommunicationFailed::UnmatchedPing.into());
                     }
                 }
@@ -180,21 +196,20 @@ impl ProxySession {
 
     async fn handle_agent_message(&mut self, message: DaemonMessage) -> Result<()> {
         match message {
-            DaemonMessage::Pong => {
-                self.ping = false;
+            DaemonMessage::Close(msg) => todo!(),
+            DaemonMessage::Tcp(msg) => todo!(),
+            DaemonMessage::TcpSteal(msg) => todo!(),
+            DaemonMessage::TcpOutgoing(msg) => todo!(),
+            DaemonMessage::UdpOutgoing(msg) => todo!(),
+            DaemonMessage::LogMessage(msg) => todo!(),
+            DaemonMessage::File(msg) => self.simple_proxy.handle_response(msg).await?,
+            DaemonMessage::Pong => todo!(),
+            DaemonMessage::GetEnvVarsResponse(msg) => todo!(),
+            DaemonMessage::GetAddrInfoResponse(msg) => {
+                self.simple_proxy.handle_response(msg).await?
             }
-            DaemonMessage::Close(reason) => {
-                return Err(IntProxyError::AgentClosedConnection(reason))
-            }
-            DaemonMessage::File(file_response) => {
-                let response = AgentResponse::File(file_response);
-                self.request_proxy.handle_agent_response(response).await?;
-            }
-            DaemonMessage::GetAddrInfoResponse(response) => {
-                let response = AgentResponse::GetAddrInfo(response);
-                self.request_proxy.handle_agent_response(response).await?;
-            }
-            _ => todo!(),
+            DaemonMessage::PauseTarget(msg) => todo!(),
+            DaemonMessage::SwitchProtocolVersionResponse(msg) => todo!(),
         }
 
         Ok(())
@@ -205,12 +220,35 @@ impl ProxySession {
         message: LocalMessage<LayerToProxyMessage>,
     ) -> Result<()> {
         match message.inner {
-            LayerToProxyMessage::LayerRequest(request) => {
-                self.request_proxy
-                    .handle_layer_request(message.message_id, request)
+            LayerToProxyMessage::InitSession(_) => todo!(),
+            LayerToProxyMessage::File(req) => match req {
+                req @ (FileRequest::CloseDir(..) | FileRequest::Close(..)) => self
+                    .agent_conn
+                    .sender()
+                    .send(ClientMessage::FileRequest(req))
+                    .await
+                    .map_err(Into::into),
+                req => {
+                    self.simple_proxy
+                        .handle_request(req, message.message_id)
+                        .await
+                }
+            },
+            LayerToProxyMessage::GetAddrInfo(req) => {
+                self.simple_proxy
+                    .handle_request(req, message.message_id)
                     .await
             }
-            LayerToProxyMessage::InitSession(_) => todo!(),
+            LayerToProxyMessage::ConnectTcpOutgoing(req) => {
+                self.outgoing_tcp_proxy
+                    .handle_request(req, message.message_id)
+                    .await
+            }
+            LayerToProxyMessage::ConnectUdpOutgoing(req) => {
+                self.outgoing_udp_proxy
+                    .handle_request(req, message.message_id)
+                    .await
+            }
         }
     }
 }
