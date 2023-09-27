@@ -2,8 +2,9 @@ use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
-use self::{env::EnvConfig, fs::FsConfig, network::NetworkConfig};
+use self::{copy_target::CopyTargetConfig, env::EnvConfig, fs::FsConfig, network::NetworkConfig};
 
+pub mod copy_target;
 pub mod env;
 pub mod fs;
 pub mod network;
@@ -76,6 +77,9 @@ pub struct FeatureConfig {
     /// ## feature.network {#feature-network}
     #[config(nested, toggleable)]
     pub network: NetworkConfig,
+
+    #[config(nested, toggleable)]
+    pub copy_target: CopyTargetConfig,
 }
 
 impl CollectAnalytics for &FeatureConfig {

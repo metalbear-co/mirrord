@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
-use kube::{error::ErrorResponse, Api, Client, Resource};
+use kube::{api::PostParams, error::ErrorResponse, Api, Client, Resource};
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, AnalyticsReporter};
 use mirrord_auth::{
     certificate::Certificate, credential_store::CredentialStoreSync, error::AuthenticationError,
@@ -22,7 +22,10 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 use tracing::{debug, error};
 
-use crate::crd::{MirrordOperatorCrd, OperatorFeatures, TargetCrd, OPERATOR_STATUS_NAME};
+use crate::crd::{
+    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, TargetCrd,
+    OPERATOR_STATUS_NAME,
+};
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
 
@@ -85,6 +88,7 @@ impl OperatorSessionInformation {
 pub struct OperatorApi {
     client: Client,
     target_api: Api<TargetCrd>,
+    copy_target_api: Api<CopyTargetCrd>,
     target_namespace: Option<String>,
     version_api: Api<MirrordOperatorCrd>,
     target_config: TargetConfig,
@@ -109,12 +113,9 @@ impl OperatorApi {
     {
         let operator_api = OperatorApi::new(config).await?;
 
-        let status = match operator_api.get_status().await.transpose()? {
-            Some(status) => status,
-            None => {
-                // No operator found
-                return Ok(None);
-            }
+        let Some(status) = operator_api.get_status().await.transpose()? else {
+            // No operator found
+            return Ok(None);
         };
 
         let client_certificate =
@@ -164,28 +165,105 @@ impl OperatorApi {
         }
         version_progress.success(None);
 
-        if let Some(target) = operator_api.fetch_target().await? {
-            let operator_session_information = OperatorSessionInformation::new(
-                client_certificate,
-                target,
-                status.spec.license.fingerprint,
-                status.spec.features.unwrap_or_default(),
-                status
-                    .spec
-                    .protocol_version
-                    .and_then(|str_version| str_version.parse().ok()),
-            );
+        let Some(target) = operator_api.fetch_target().await? else {
+            return Err(OperatorApiError::InvalidTarget);
+        };
 
-            let (sender, receiver) = operator_api
-                .connect_target(&operator_session_information)
-                .await?;
-            Ok(Some((sender, receiver, operator_session_information)))
+        let operator_session_information = OperatorSessionInformation::new(
+            client_certificate,
+            target,
+            status.spec.license.fingerprint,
+            status.spec.features.unwrap_or_default(),
+            status
+                .spec
+                .protocol_version
+                .and_then(|str_version| str_version.parse().ok()),
+        );
+
+        let (sender, receiver) = if config.feature.copy_target.enabled {
+            operator_api
+                .copy_target(&operator_session_information)
+                .await?
         } else {
-            // No operator found
-            Ok(None)
-        }
+            operator_api
+                .connect_target(&operator_session_information)
+                .await?
+        };
+
+        Ok(Some((sender, receiver, operator_session_information)))
     }
 
+    pub async fn copy_target(
+        self,
+        session_information: &OperatorSessionInformation,
+    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+        let target = self.target_config.path.clone().expect("Must have config");
+
+        let requested = CopyTargetCrd::new(
+            &format!(
+                "{}-copy-{:x}",
+                target.get_target_name(),
+                rand::random::<u32>()
+            ),
+            CopyTargetSpec {
+                target,
+                patch: None,
+            },
+        );
+
+        println!("{requested:?}");
+
+        let created = self
+            .copy_target_api
+            .create(&PostParams::default(), &requested)
+            .await
+            .map_err(KubeApiError::from)?;
+
+        let url = {
+            let dt = &();
+            let ns = self
+                .target_namespace
+                .as_deref()
+                .unwrap_or_else(|| self.client.default_namespace());
+            let api_version = CopyTargetCrd::api_version(dt);
+            let plural = CopyTargetCrd::plural(dt);
+
+            format!(
+                "/apis/{api_version}/proxy/namespaces/{ns}/{plural}/{}",
+                created.spec.target.get_target_name()
+            )
+        };
+
+        let mut builder = Request::builder()
+            .uri(url)
+            .header("x-session-id", session_information.session_id.to_string());
+
+        if let Some(certificate) = &session_information.client_certificate {
+            match certificate
+                .encode_der()
+                .map(|certificate_der| general_purpose::STANDARD.encode(certificate_der))
+                .map_err(AuthenticationError::Pem)
+            {
+                Ok(client_credentials) => {
+                    builder = builder.header("x-client-der", client_credentials);
+                }
+                Err(err) => {
+                    debug!("CredentialStore error: {err}");
+                }
+            }
+        }
+
+        let connection = self
+            .client
+            .connect(builder.body(vec![])?)
+            .await
+            .map_err(KubeApiError::from)?;
+
+        Ok(ConnectionWrapper::wrap(
+            connection,
+            session_information.protocol_version.clone(),
+        ))
+    }
     /// Connect to session using operator and session information
     pub async fn connect(
         config: &LayerConfig,
@@ -233,12 +311,15 @@ impl OperatorApi {
         };
 
         let target_api: Api<TargetCrd> = get_k8s_resource_api(&client, target_namespace.as_deref());
+        let copy_target_api: Api<CopyTargetCrd> =
+            get_k8s_resource_api(&client, target_namespace.as_deref());
 
         let version_api: Api<MirrordOperatorCrd> = Api::all(client.clone());
 
         Ok(OperatorApi {
             client,
             target_api,
+            copy_target_api,
             target_namespace,
             version_api,
             target_config,

@@ -1,4 +1,5 @@
 use chrono::NaiveDate;
+use k8s_openapi::api::{apps::v1::Deployment, core::v1::Pod};
 use kube::CustomResource;
 use mirrord_config::target::{Target, TargetConfig};
 use schemars::JsonSchema;
@@ -121,4 +122,27 @@ pub struct LicenseInfoOwned {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub enum OperatorFeatures {
     ProxyApi,
+    #[serde(other)]
+    Other,
+}
+
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+    group = "operator.metalbear.co",
+    version = "v1",
+    kind = "CopyTarget",
+    struct = "CopyTargetCrd",
+    namespaced
+)]
+pub struct CopyTargetSpec {
+    pub target: Target,
+    pub patch: Option<CopyTargetPatch>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase", tag = "kind", content = "value")]
+pub enum CopyTargetPatch {
+    Deployment(Deployment),
+    Pod(Pod),
+    Rollout(serde_json::Value),
 }
