@@ -753,7 +753,7 @@ unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -
         |_bypass| {
             #[cfg(target_os = "macos")]
             let raw_path = update_ptr_from_bypass(raw_path, _bypass);
-            FN_LSTAT(raw_path, out_stat)
+            FN_STAT(raw_path, out_stat)
         },
     )
 }
