@@ -32,7 +32,9 @@ impl SimpleProxy {
         request: R,
         id: MessageId,
     ) -> Result<()> {
-        self.queue.save_request_id(id);
+        if request.expects_response() {
+            self.queue.save_request_id(id);
+        }
 
         self.agent_sender
             .send(request.into_message())
@@ -58,19 +60,27 @@ impl SimpleProxy {
 
 pub trait SimpleRequest {
     fn into_message(self) -> ClientMessage;
+
+    fn expects_response(&self) -> bool;
 }
 
 impl SimpleRequest for FileRequest {
     fn into_message(self) -> ClientMessage {
-        debug_assert!(!matches!(self, Self::Close(..) | Self::CloseDir(..)));
-
         ClientMessage::FileRequest(self)
+    }
+
+    fn expects_response(&self) -> bool {
+        !matches!(self, Self::Close(..) | Self::CloseDir(..))
     }
 }
 
 impl SimpleRequest for GetAddrInfoRequest {
     fn into_message(self) -> ClientMessage {
         ClientMessage::GetAddrInfoRequest(self)
+    }
+
+    fn expects_response(&self) -> bool {
+        true
     }
 }
 

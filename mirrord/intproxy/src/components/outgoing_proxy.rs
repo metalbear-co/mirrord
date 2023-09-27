@@ -1,64 +1,3 @@
-// use std::marker::PhantomData;
-
-// use mirrord_protocol::{
-//     outgoing::{tcp::LayerTcpOutgoing, udp::LayerUdpOutgoing, LayerConnect},
-//     ClientMessage,
-// };
-
-// use crate::{
-//     agent_conn::AgentSender,
-//     error::Result,
-//     layer_conn::LayerSender,
-//     protocol::{ConnectOutgoing, MessageId, NetProtocol, Tcp, Udp},
-//     request_queue::RequestQueue,
-// };
-
-// pub struct OutgoingProxy<P> {
-//     layer_sender: LayerSender,
-//     agent_sender: AgentSender,
-//     connect_queue: RequestQueue,
-//     _phantom: PhantomData<fn() -> P>,
-// }
-
-// impl<P: NetProtocolExt> OutgoingProxy<P> {
-//     pub fn new(layer_sender: LayerSender, agent_sender: AgentSender) -> Self {
-//         Self {
-//             layer_sender,
-//             agent_sender,
-//             connect_queue: Default::default(),
-//             _phantom: Default::default(),
-//         }
-//     }
-
-//     pub async fn handle_request(
-//         &mut self,
-//         connect: ConnectOutgoing<P>,
-//         message_id: MessageId,
-//     ) -> Result<()> { self.connect_queue.save_request_id(message_id);
-
-//         let message = P::wrap_layer_connect(LayerConnect {
-//             remote_address: connect.remote_address,
-//         });
-//         self.agent_sender.send(message).await.map_err(Into::into)
-//     }
-// }
-
-// pub trait NetProtocolExt: NetProtocol {
-//     fn wrap_layer_connect(message: LayerConnect) -> ClientMessage;
-// }
-
-// impl NetProtocolExt for Udp {
-//     fn wrap_layer_connect(message: LayerConnect) -> ClientMessage {
-//         ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(message))
-//     }
-// }
-
-// impl NetProtocolExt for Tcp {
-//     fn wrap_layer_connect(message: LayerConnect) -> ClientMessage {
-//         ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(message))
-//     }
-// }
-
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -67,16 +6,13 @@ use std::{
 use mirrord_protocol::{
     outgoing::{
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
-        DaemonConnect, DaemonRead, LayerConnect, SocketAddress, LayerClose, LayerWrite,
+        DaemonConnect, DaemonRead, LayerConnect, SocketAddress,
     },
     ClientMessage, ConnectionId, RemoteResult,
     ResponseError::NotImplemented,
 };
-use tokio::{
-    net::UdpSocket,
-    sync::mpsc::{channel, Receiver, Sender},
-    task,
-};
+use tokio::{net::UdpSocket, task};
+
 use crate::{
     agent_conn::AgentSender,
     error::{IntProxyError, Result},
@@ -87,119 +23,22 @@ use crate::{
     request_queue::RequestQueue,
 };
 
-#[derive(Clone)]
-struct InterceptorSocketSender(Sender<Vec<u8>>);
-
-impl InterceptorSocketSender {
-    async fn send(&self, data: Vec<u8>) -> Result<()> {
-        self.0.send(data).await.map_err(|_| todo!())
-    }
-}
-
 /// Responsible for handling hook and daemon messages for the outgoing traffic feature.
 pub struct UdpOutgoingHandler {
     agent_sender: AgentSender,
     layer_sender: LayerSender,
-
-    mirrors: HashMap<ConnectionId, InterceptorSocketSender>,
-
+    mirrors: HashMap<ConnectionId, interceptor::InterceptorTaskHandle>,
     connect_queue: RequestQueue,
-    // /// Channel used to pass messages (currently only `Write`) from an intercepted socket to the
-    // /// main `layer` loop.
-    // ///
-    // /// This is sent from `interceptor_task`.
-    // layer_tx: Sender<LayerUdpOutgoing>,
-    // layer_rx: Receiver<LayerUdpOutgoing>,
 }
 
 impl UdpOutgoingHandler {
-    async fn interceptor_task(
-        agent_sender: AgentSender,
-        connection_id: ConnectionId,
-        mirror_socket: UdpSocket,
-        mut remote_rx: Receiver<Vec<u8>>,
-    ) {
-        let close_remote_stream = |agent_sender: AgentSender| async move {
-            let close = LayerClose { connection_id };
-            let outgoing_close = LayerUdpOutgoing::Close(close);
-
-            if let Err(e) = agent_sender.send(ClientMessage::UdpOutgoing(outgoing_close)).await {
-                tracing::error!("Failed sending close message with {:#?}!", e);
-            }
-        };
-
-        let mut recv_from_buffer = vec![0; 1500];
-        let mut user_address: Option<SocketAddr> = None;
-
-        loop {
-            tokio::select! {
-                biased; // To allow local socket to be read before being closed
-
-                read = mirror_socket.recv_from(&mut recv_from_buffer) => {
-                    match read {
-                        Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
-                            continue;
-                        },
-                        Err(fail) => {
-                            tracing::info!("failed reading mirror_stream with {:#?}", fail);
-                            close_remote_stream(agent_sender).await;
-                            break;
-                        }
-                        Ok((0, _)) => {
-                            tracing::trace!("interceptor_task -> Stream {:#?} has no more data, closing!", connection_id);
-                            close_remote_stream(agent_sender).await;
-                            break;
-                        },
-                        Ok((read_amount, from)) => {
-                            tracing::trace!("interceptor_task -> Received data from user socket {:#?}", from);
-                            user_address = Some(from);
-                            let write = LayerWrite {
-                                connection_id,
-                                bytes: recv_from_buffer
-                                    .get(..read_amount)
-                                    .expect("recv_from returned more bytes than the buffer can hold")
-                                    .to_vec(),
-                            };
-                            let outgoing_write = LayerUdpOutgoing::Write(write);
-
-                            if let Err(err) = agent_sender.send(ClientMessage::UdpOutgoing(outgoing_write)).await {
-                                tracing::error!("Failed sending write message with {err:#?}!");
-                                break;
-                            }
-                        }
-                    }
-                },
-                bytes = remote_rx.recv() => {
-                    match bytes {
-                        Some(bytes) => {
-                            tracing::trace!("interceptor_task -> Received data from remote socket");
-                            // Writes the data sent by `agent` (that came from the actual remote
-                            // stream) to our interceptor socket. When the user tries to read the
-                            // remote data, this'll be what they receive.
-                            if let Err(fail) = mirror_socket
-                                .send_to(
-                                    &bytes,
-                                    user_address.expect("User socket should be set by now!"),
-                                )
-                                .await
-                            {
-                                tracing::trace!("Failed writing to mirror_stream with {:#?}!", fail);
-                                break;
-                            }
-                        },
-                        None => {
-                            tracing::warn!("interceptor_task -> exiting due to remote stream closed!");
-                            break;
-                        }
-                    }
-                },
-            }
+    pub fn new(layer_sender: LayerSender, agent_sender: AgentSender) -> Self {
+        Self {
+            agent_sender,
+            layer_sender,
+            mirrors: Default::default(),
+            connect_queue: Default::default(),
         }
-
-        tracing::trace!(
-            "interceptor_task done -> connection_id {:#?}",
-            connection_id
-        );
     }
 
     pub async fn handle_layer_request(
@@ -274,20 +113,21 @@ impl UdpOutgoingHandler {
         }
         .await?;
 
-        let (remote_tx, remote_rx) = channel::<Vec<u8>>(1000);
-
         let layer_address = mirror_socket.local_addr()?;
 
-        // user and interceptor sockets are connected to each other, so now we spawn
-        // a new task to pair their reads/writes.
-        task::spawn(UdpOutgoingHandler::interceptor_task(
+        let interceptor_task = interceptor::InterceptorTask::new(
             self.agent_sender.clone(),
             connection_id,
             mirror_socket,
-            remote_rx,
-        ));
+            512,
+        );
+        let interceptor_handle = interceptor_task.handle();
 
-        self.mirrors.insert(connection_id, InterceptorSocketSender(remote_tx));
+        // user and interceptor sockets are connected to each other, so now we spawn
+        // a new task to pair their reads/writes.
+        task::spawn(interceptor_task.run());
+
+        self.mirrors.insert(connection_id, interceptor_handle);
 
         let response = Ok(OutgoingConnectResponse {
             user_app_address: local_address,
@@ -319,5 +159,166 @@ impl UdpOutgoingHandler {
 
     fn handle_agent_close(&mut self, connection_id: u64) {
         self.mirrors.remove(&connection_id);
+    }
+}
+
+mod interceptor {
+    use std::net::SocketAddr;
+
+    use mirrord_protocol::{
+        outgoing::{udp::LayerUdpOutgoing, LayerClose, LayerWrite},
+        ClientMessage, ConnectionId,
+    };
+    use tokio::{
+        net::UdpSocket,
+        sync::mpsc::{self, Receiver, Sender},
+    };
+
+    use crate::{
+        agent_conn::AgentSender,
+        error::{IntProxyError, Result},
+    };
+
+    pub struct InterceptorTaskHandle(Sender<Vec<u8>>);
+
+    impl InterceptorTaskHandle {
+        pub async fn send(&self, data: Vec<u8>) -> Result<()> {
+            self.0
+                .send(data)
+                .await
+                .map_err(|_| IntProxyError::OutgoingUdpInterceptorFailed)
+        }
+    }
+
+    pub struct InterceptorTask {
+        agent_sender: AgentSender,
+        connection_id: ConnectionId,
+        local_socket: UdpSocket,
+        task_rx: Receiver<Vec<u8>>,
+        task_tx: Option<Sender<Vec<u8>>>,
+    }
+
+    impl InterceptorTask {
+        pub fn new(
+            agent_sender: AgentSender,
+            connection_id: ConnectionId,
+            local_socket: UdpSocket,
+            channel_size: usize,
+        ) -> Self {
+            let (task_tx, task_rx) = mpsc::channel(channel_size);
+
+            Self {
+                agent_sender,
+                connection_id,
+                local_socket,
+                task_rx,
+                task_tx: task_tx.into(),
+            }
+        }
+
+        pub fn handle(&self) -> InterceptorTaskHandle {
+            let tx = self
+                .task_tx
+                .as_ref()
+                .expect("interceptor sender should not be dropped before the task is run")
+                .clone();
+            InterceptorTaskHandle(tx)
+        }
+
+        async fn close_remote_stream(&self) {
+            let close = LayerClose {
+                connection_id: self.connection_id,
+            };
+            let outgoing_close = LayerUdpOutgoing::Close(close);
+
+            if let Err(e) = self
+                .agent_sender
+                .send(ClientMessage::UdpOutgoing(outgoing_close))
+                .await
+            {
+                tracing::error!("failed sending close message: {e:?}");
+            }
+        }
+
+        pub async fn run(mut self) {
+            self.task_tx = None;
+
+            let mut recv_from_buffer = vec![0; 1500];
+            let mut user_address: Option<SocketAddr> = None;
+
+            loop {
+                tokio::select! {
+                    biased; // To allow local socket to be read before being closed
+
+                    read = self.local_socket.recv_from(&mut recv_from_buffer) => {
+                        match read {
+                            Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
+                                continue;
+                            },
+                            Err(fail) => {
+                                tracing::info!("failed reading mirror_stream with {fail:#?}");
+                                self.close_remote_stream().await;
+                                break;
+                            }
+                            Ok((0, _)) => {
+                                tracing::trace!("interceptor_task -> stream {} has no more data, closing", self.connection_id);
+                                self.close_remote_stream().await;
+                                break;
+                            },
+                            Ok((read_amount, from)) => {
+                                tracing::trace!("interceptor_task -> received data from user socket {from}");
+
+                                user_address.replace(from);
+
+                                let write = LayerWrite {
+                                    connection_id: self.connection_id,
+                                    bytes: recv_from_buffer
+                                        .get(..read_amount)
+                                        .expect("recv_from returned more bytes than the buffer can hold")
+                                        .to_vec(),
+                                };
+                                let outgoing_write = LayerUdpOutgoing::Write(write);
+
+                                if let Err(err) = self.agent_sender.send(ClientMessage::UdpOutgoing(outgoing_write)).await {
+                                    tracing::error!("failed sending write message with {err:#?}");
+                                    break;
+                                }
+                            }
+                        }
+                    },
+
+                    bytes = self.task_rx.recv() => {
+                        match bytes {
+                            Some(bytes) => {
+                                tracing::trace!("interceptor_task -> Received data from remote socket");
+                                // Writes the data sent by `agent` (that came from the actual remote
+                                // stream) to our interceptor socket. When the user tries to read the
+                                // remote data, this'll be what they receive.
+                                if let Err(fail) = self
+                                    .local_socket
+                                    .send_to(
+                                        &bytes,
+                                        user_address.expect("User socket should be set by now!"),
+                                    )
+                                    .await
+                                {
+                                    tracing::trace!("Failed writing to mirror_stream with {:#?}!", fail);
+                                    break;
+                                }
+                            },
+                            None => {
+                                tracing::warn!("interceptor_task -> exiting due to remote stream closed!");
+                                break;
+                            }
+                        }
+                    },
+                }
+            }
+
+            tracing::trace!(
+                "interceptor_task done -> connection_id {}",
+                self.connection_id
+            );
+        }
     }
 }

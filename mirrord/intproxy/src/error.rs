@@ -35,6 +35,10 @@ pub enum IntProxyError {
     AgentError(#[from] ResponseError),
     #[error("connection id {0} not found")]
     NoConnectionId(u64),
+    #[error("udp interceptor task failed")]
+    OutgoingUdpInterceptorFailed,
+    #[error("io error: {0}")]
+    Io(#[from] io::Error),
 }
 
 pub type Result<T> = core::result::Result<T, IntProxyError>;

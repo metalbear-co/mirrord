@@ -1,12 +1,12 @@
+#![feature(async_fn_in_trait)]
+
 use std::{sync::Arc, time::Duration};
 
-use components::{outgoing_proxy::OutgoingProxy, simple_proxy::SimpleProxy};
+use components::{outgoing_proxy::UdpOutgoingHandler, simple_proxy::SimpleProxy};
 use layer_conn::LayerConnection;
 use mirrord_config::LayerConfig;
-use mirrord_protocol::{
-    dns::GetAddrInfoRequest, ClientMessage, DaemonMessage, FileRequest, FileResponse,
-};
-use protocol::{LayerToProxyMessage, LocalMessage, Tcp, Udp};
+use mirrord_protocol::{ClientMessage, DaemonMessage, FileRequest};
+use protocol::{LayerToProxyMessage, LocalMessage};
 use tokio::{
     net::{TcpListener, TcpStream},
     task::JoinSet,
@@ -119,8 +119,7 @@ struct ProxySession {
     ping: bool,
     cancellation_token: CancellationToken,
     simple_proxy: SimpleProxy,
-    outgoing_udp_proxy: OutgoingProxy<Udp>,
-    outgoing_tcp_proxy: OutgoingProxy<Tcp>,
+    outgoing_udp_proxy: UdpOutgoingHandler,
 }
 
 impl ProxySession {
@@ -139,10 +138,8 @@ impl ProxySession {
 
         let simple_proxy =
             SimpleProxy::new(layer_conn.sender().clone(), agent_conn.sender().clone());
-        let outgoing_tcp_proxy =
-            OutgoingProxy::new(layer_conn.sender().clone(), agent_conn.sender().clone());
         let outgoing_udp_proxy =
-            OutgoingProxy::new(layer_conn.sender().clone(), agent_conn.sender().clone());
+            UdpOutgoingHandler::new(layer_conn.sender().clone(), agent_conn.sender().clone());
 
         Ok(Self {
             agent_conn,
@@ -150,7 +147,6 @@ impl ProxySession {
             ping: false,
             cancellation_token,
             simple_proxy,
-            outgoing_tcp_proxy,
             outgoing_udp_proxy,
         })
     }
@@ -200,7 +196,9 @@ impl ProxySession {
             DaemonMessage::Tcp(msg) => todo!(),
             DaemonMessage::TcpSteal(msg) => todo!(),
             DaemonMessage::TcpOutgoing(msg) => todo!(),
-            DaemonMessage::UdpOutgoing(msg) => todo!(),
+            DaemonMessage::UdpOutgoing(msg) => {
+                self.outgoing_udp_proxy.handle_agent_message(msg).await?
+            }
             DaemonMessage::LogMessage(msg) => todo!(),
             DaemonMessage::File(msg) => self.simple_proxy.handle_response(msg).await?,
             DaemonMessage::Pong => todo!(),
@@ -239,16 +237,12 @@ impl ProxySession {
                     .handle_request(req, message.message_id)
                     .await
             }
-            LayerToProxyMessage::ConnectTcpOutgoing(req) => {
-                self.outgoing_tcp_proxy
-                    .handle_request(req, message.message_id)
-                    .await
-            }
             LayerToProxyMessage::ConnectUdpOutgoing(req) => {
                 self.outgoing_udp_proxy
-                    .handle_request(req, message.message_id)
+                    .handle_layer_request(req, message.message_id)
                     .await
             }
+            _ => todo!(),
         }
     }
 }
