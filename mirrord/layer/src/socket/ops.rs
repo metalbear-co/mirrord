@@ -11,24 +11,21 @@ use std::{
 
 use libc::{c_int, c_void, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::IncomingMode;
-use mirrord_intproxy::protocol::{ConnectOutgoing, OutgoingConnectResponse, Tcp, Udp};
+use mirrord_intproxy::protocol::{OutgoingConnectResponse, ConnectTcpOutgoing, ConnectUdpOutgoing};
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, LookupRecord},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
 use socket2::SockAddr;
-use tokio::sync::oneshot;
 use tracing::{error, info, trace};
 
 use super::{hooks::*, *};
 use crate::{
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
-    dns::GetAddrInfo,
     error::HookError,
     file::{self, OPEN_FILES},
     is_debugger_port,
-    outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
-    // tcp::{Listen, TcpIncoming},
+    outgoing::{Connect, RemoteConnection},
     ENABLED_TCP_OUTGOING,
     ENABLED_UDP_OUTGOING,
     INCOMING_CONFIG,
@@ -333,18 +330,18 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
 
         let response = match PROTOCOL {
             TCP => {
-                let request = ConnectOutgoing::<Tcp>::new(remote_address);
+                let request = ConnectTcpOutgoing { remote_address };
                 common::make_proxy_request_with_response(request)??
             }
             UDP => {
-                let request = ConnectOutgoing::<Udp>::new(remote_address);
+                let request = ConnectUdpOutgoing { remote_address };
                 common::make_proxy_request_with_response(request)??
             }
         };
 
         let OutgoingConnectResponse {
             layer_address,
-            user_app_address,
+            user_address,
         } = response;
 
         // Connect to the interceptor socket that is listening.
@@ -366,9 +363,9 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
         }
 
         let connected = Connected {
-            remote_address: remote_address.try_into()?,
-            local_address: user_app_address.try_into()?,
-            layer_address: Some(layer_address.try_into()?),
+            remote_address,
+            local_address: user_address,
+            layer_address: Some(layer_address),
         };
 
         trace!("we are connected {connected:#?}");

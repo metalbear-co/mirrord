@@ -29,3 +29,5 @@ thiserror.workspace = true
 tokio = { workspace = true, features = [] }
 tracing.workspace = true
 tokio-util.workspace = true
+rand = "0.8"
+async-trait = "0.1.73"

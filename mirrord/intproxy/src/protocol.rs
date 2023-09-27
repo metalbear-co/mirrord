@@ -1,5 +1,3 @@
-use std::{fmt, marker::PhantomData};
-
 use bincode::{Decode, Encode};
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
@@ -32,18 +30,6 @@ pub enum InitSession {
     ExecFrom(SessionId),
 }
 
-pub trait NetProtocol: fmt::Debug + Encode + Decode {}
-
-#[derive(Debug, Encode, Decode)]
-pub struct Tcp;
-
-impl NetProtocol for Tcp {}
-
-#[derive(Debug, Encode, Decode)]
-pub struct Udp;
-
-impl NetProtocol for Udp {}
-
 #[derive(Encode, Decode, Debug)]
 pub enum LayerToProxyMessage {
     InitSession(InitSession),
@@ -52,23 +38,18 @@ pub enum LayerToProxyMessage {
 
     GetAddrInfo(GetAddrInfoRequest),
 
-    ConnectTcpOutgoing(ConnectOutgoing<Tcp>),
-    ConnectUdpOutgoing(ConnectOutgoing<Udp>),
+    ConnectTcpOutgoing(ConnectTcpOutgoing),
+    ConnectUdpOutgoing(ConnectUdpOutgoing),
 }
 
 #[derive(Encode, Decode, Debug)]
-pub struct ConnectOutgoing<P> {
+pub struct ConnectTcpOutgoing {
     pub remote_address: SocketAddress,
-    _phantom: PhantomData<fn() -> P>,
 }
 
-impl<P> ConnectOutgoing<P> {
-    pub fn new(remote_address: SocketAddress) -> Self {
-        Self {
-            remote_address,
-            _phantom: Default::default(),
-        }
-    }
+#[derive(Encode, Decode, Debug)]
+pub struct ConnectUdpOutgoing {
+    pub remote_address: SocketAddress,
 }
 
 #[derive(Encode, Decode, Debug)]
@@ -86,7 +67,7 @@ pub enum ProxyToLayerMessage {
 #[derive(Encode, Decode, Debug)]
 pub struct OutgoingConnectResponse {
     pub layer_address: SocketAddress,
-    pub user_app_address: SocketAddress,
+    pub user_address: SocketAddress,
 }
 
 pub trait IsLayerRequest: Sized {
@@ -287,14 +268,14 @@ impl_request!(
 );
 
 impl_request!(
-    req = ConnectOutgoing<Tcp>,
+    req = ConnectTcpOutgoing,
     res = RemoteResult<OutgoingConnectResponse>,
     req_path = LayerToProxyMessage::ConnectTcpOutgoing,
     res_path = ProxyToLayerMessage::ConnectTcpOutgoing,
 );
 
 impl_request!(
-    req = ConnectOutgoing<Udp>,
+    req = ConnectUdpOutgoing,
     res = RemoteResult<OutgoingConnectResponse>,
     req_path = LayerToProxyMessage::ConnectUdpOutgoing,
     res_path = ProxyToLayerMessage::ConnectUdpOutgoing,

@@ -1,6 +1,6 @@
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
-    ClientMessage, FileRequest, FileResponse,
+    ClientMessage, FileRequest, FileResponse, GetEnvVarsRequest,
 };
 
 use crate::{

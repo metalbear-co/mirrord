@@ -2,11 +2,8 @@
 
 use std::{sync::Arc, time::Duration};
 
-use components::{outgoing_proxy::UdpOutgoingHandler, simple_proxy::SimpleProxy};
-use layer_conn::LayerConnection;
 use mirrord_config::LayerConfig;
 use mirrord_protocol::{ClientMessage, DaemonMessage, FileRequest};
-use protocol::{LayerToProxyMessage, LocalMessage};
 use tokio::{
     net::{TcpListener, TcpStream},
     task::JoinSet,
@@ -17,14 +14,20 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     agent_conn::{AgentCommunicationFailed, AgentConnectInfo, AgentConnection},
     error::{IntProxyError, Result},
+    layer_conn::LayerConnection,
+    protocol::{LayerToProxyMessage, LocalMessage},
+    proxies::{
+        outgoing::{proxy::OutgoingProxy, DatagramHandler, StreamHandler},
+        simple::SimpleProxy,
+    },
 };
 
 pub mod agent_conn;
 pub mod codec;
-mod components;
 pub mod error;
 mod layer_conn;
 pub mod protocol;
+mod proxies;
 mod request_queue;
 
 pub struct IntProxy {
@@ -119,7 +122,8 @@ struct ProxySession {
     ping: bool,
     cancellation_token: CancellationToken,
     simple_proxy: SimpleProxy,
-    outgoing_udp_proxy: UdpOutgoingHandler,
+    datagram_outgoing_proxy: OutgoingProxy<DatagramHandler>,
+    stream_outgoing_proxy: OutgoingProxy<StreamHandler>,
 }
 
 impl ProxySession {
@@ -138,8 +142,10 @@ impl ProxySession {
 
         let simple_proxy =
             SimpleProxy::new(layer_conn.sender().clone(), agent_conn.sender().clone());
-        let outgoing_udp_proxy =
-            UdpOutgoingHandler::new(layer_conn.sender().clone(), agent_conn.sender().clone());
+        let datagram_outgoing_proxy =
+            OutgoingProxy::new(agent_conn.sender().clone(), layer_conn.sender().clone());
+        let stream_outgoing_proxy =
+            OutgoingProxy::new(agent_conn.sender().clone(), layer_conn.sender().clone());
 
         Ok(Self {
             agent_conn,
@@ -147,7 +153,8 @@ impl ProxySession {
             ping: false,
             cancellation_token,
             simple_proxy,
-            outgoing_udp_proxy,
+            datagram_outgoing_proxy,
+            stream_outgoing_proxy,
         })
     }
 
@@ -195,22 +202,20 @@ impl ProxySession {
             DaemonMessage::Close(msg) => todo!(),
             DaemonMessage::Tcp(msg) => todo!(),
             DaemonMessage::TcpSteal(msg) => todo!(),
-            DaemonMessage::TcpOutgoing(msg) => todo!(),
+            DaemonMessage::TcpOutgoing(msg) => {
+                self.stream_outgoing_proxy.handle_agent_message(msg).await
+            }
             DaemonMessage::UdpOutgoing(msg) => {
-                self.outgoing_udp_proxy.handle_agent_message(msg).await?
+                self.datagram_outgoing_proxy.handle_agent_message(msg).await
             }
             DaemonMessage::LogMessage(msg) => todo!(),
-            DaemonMessage::File(msg) => self.simple_proxy.handle_response(msg).await?,
+            DaemonMessage::File(msg) => self.simple_proxy.handle_response(msg).await,
             DaemonMessage::Pong => todo!(),
             DaemonMessage::GetEnvVarsResponse(msg) => todo!(),
-            DaemonMessage::GetAddrInfoResponse(msg) => {
-                self.simple_proxy.handle_response(msg).await?
-            }
+            DaemonMessage::GetAddrInfoResponse(msg) => self.simple_proxy.handle_response(msg).await,
             DaemonMessage::PauseTarget(msg) => todo!(),
             DaemonMessage::SwitchProtocolVersionResponse(msg) => todo!(),
         }
-
-        Ok(())
     }
 
     async fn handle_layer_message(
@@ -238,11 +243,15 @@ impl ProxySession {
                     .await
             }
             LayerToProxyMessage::ConnectUdpOutgoing(req) => {
-                self.outgoing_udp_proxy
-                    .handle_layer_request(req, message.message_id)
+                self.datagram_outgoing_proxy
+                    .handle_layer_connect_request(req, message.message_id)
                     .await
             }
-            _ => todo!(),
+            LayerToProxyMessage::ConnectTcpOutgoing(req) => {
+                self.stream_outgoing_proxy
+                    .handle_layer_connect_request(req, message.message_id)
+                    .await
+            }
         }
     }
 }

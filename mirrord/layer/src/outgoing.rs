@@ -2,15 +2,11 @@ use core::fmt;
 use std::ops::{Deref, DerefMut};
 
 use mirrord_protocol::{
-    outgoing::{DaemonConnect, DaemonRead, LayerClose, LayerConnect, LayerWrite},
     ConnectionId,
 };
 use socket2::SockAddr;
 
 use crate::common::ResponseChannel;
-
-pub(crate) mod tcp;
-pub(crate) mod udp;
 
 /// Wrapper type for the (layer) socket address that intercepts the user's socket messages.
 ///

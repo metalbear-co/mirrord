@@ -102,17 +102,13 @@ impl ProxyConnection {
         &self,
         request: T,
     ) -> Result<T::Response> {
-        let response_id = self.send(LayerToProxyMessage::LayerRequest(request.wrap()))?;
+        let response_id = self.send(request.wrap())?;
         let response = self.receive(response_id)?;
-        match response {
-            ProxyToLayerMessage::AgentResponse(response) => T::try_unwrap_response(response)
-                .map_err(|e| ProxyError::UnexpectedResponse(ProxyToLayerMessage::AgentResponse(e))),
-            other => Err(ProxyError::UnexpectedResponse(other)),
-        }
+        T::try_unwrap_response(response).map_err(ProxyError::UnexpectedResponse)
     }
 
     pub fn make_request_no_response<T: IsLayerRequest>(&self, request: T) -> Result<MessageId> {
-        self.send(LayerToProxyMessage::LayerRequest(request.wrap()))
+        self.send(request.wrap())
     }
 }
 

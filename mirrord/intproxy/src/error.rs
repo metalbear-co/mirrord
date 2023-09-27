@@ -37,8 +37,14 @@ pub enum IntProxyError {
     NoConnectionId(u64),
     #[error("udp interceptor task failed")]
     OutgoingUdpInterceptorFailed,
+    #[error("tcp interceptor task failed")]
+    OutgoingTcpInterceptorFailed,
     #[error("io error: {0}")]
     Io(#[from] io::Error),
+    #[error("outgoing interceptor task failed")]
+    OutgoingInterceptorFailed,
+    #[error("sending datagrams over unix sockets is not supported")]
+    DatagramOverUnix,
 }
 
 pub type Result<T> = core::result::Result<T, IntProxyError>;
