@@ -12,7 +12,7 @@ use std::{
 use mirrord_intproxy::{
     codec::{self, CodecError, SyncReceiver, SyncSender},
     protocol::{
-        InitSession, IsLayerRequest, IsLayerRequestWithResponse, LayerToProxyMessage, LocalMessage,
+        NewSession, IsLayerRequest, IsLayerRequestWithResponse, LayerToProxyMessage, LocalMessage,
         MessageId, ProxyToLayerMessage,
     },
 };
@@ -49,7 +49,7 @@ pub struct ProxyConnection {
 }
 
 impl ProxyConnection {
-    pub fn new(proxy_addr: SocketAddr, session: InitSession, timeout: Duration) -> Result<Self> {
+    pub fn new(proxy_addr: SocketAddr, session: NewSession, timeout: Duration) -> Result<Self> {
         let connection = TcpStream::connect(proxy_addr)?;
         connection.set_read_timeout(Some(timeout))?;
         connection.set_write_timeout(Some(timeout))?;
@@ -61,12 +61,12 @@ impl ProxyConnection {
 
         sender.send(&LocalMessage {
             message_id: 0,
-            inner: LayerToProxyMessage::InitSession(session),
+            inner: LayerToProxyMessage::NewSession(session),
         })?;
 
         let mut responses = ResponseManager::new(receiver);
         let response = responses.receive(0)?;
-        let ProxyToLayerMessage::SessionInfo(session_id) = &response else {
+        let ProxyToLayerMessage::NewSession(session_id) = &response else {
             return Err(ProxyError::UnexpectedResponse(response));
         };
 

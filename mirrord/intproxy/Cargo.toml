@@ -18,7 +18,7 @@ edition.workspace = true
 [dependencies]
 mirrord-config = { path = "../config" }
 mirrord-kube = { path = "../kube" }
-mirrord-operator = { path = "../operator" }
+mirrord-operator = { path = "../operator", features = ["client"] }
 mirrord-protocol = { path = "../protocol" }
 
 bincode.workspace = true
@@ -26,8 +26,7 @@ futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = [] }
+tokio.workspace = true
 tracing.workspace = true
 tokio-util.workspace = true
 rand = "0.8"
-async-trait = "0.1.73"

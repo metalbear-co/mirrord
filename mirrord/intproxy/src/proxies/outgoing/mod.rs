@@ -6,11 +6,10 @@ use std::{
 
 use mirrord_protocol::{
     outgoing::{
-        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
-        udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
-        DaemonConnect, DaemonRead, LayerClose, LayerConnect, SocketAddress, UnixAddr,
+        tcp::LayerTcpOutgoing, udp::LayerUdpOutgoing, LayerClose, LayerConnect, SocketAddress,
+        UnixAddr,
     },
-    ClientMessage, ConnectionId, RemoteResult,
+    ClientMessage, ConnectionId,
 };
 use rand::{distributions::Alphanumeric, Rng};
 use tokio::{
@@ -21,172 +20,75 @@ use tokio::{
 
 use crate::{
     error::{IntProxyError, Result},
-    protocol::{
-        ConnectTcpOutgoing, ConnectUdpOutgoing, OutgoingConnectResponse, ProxyToLayerMessage,
-    },
+    protocol::NetProtocol,
 };
 
 mod interceptor;
 pub mod proxy;
 
-pub enum AgentOutgoingMessage {
-    Connect(RemoteResult<DaemonConnect>),
-    Read(RemoteResult<DaemonRead>),
-    Close(ConnectionId),
-}
-
-#[async_trait::async_trait]
-pub trait NetProtocolHandler: 'static + Send + Sync {
-    type Listener: Listener<Socket = Self::Socket>;
-    type Socket: Socket;
-    type LayerConnectRequest;
-    type AgentMessage;
-
-    fn make_close_message(connection_id: ConnectionId) -> ClientMessage;
-
-    fn make_connect_message(remote_address: SocketAddress) -> ClientMessage;
-
-    fn unwrap_layer_connect_request(request: Self::LayerConnectRequest) -> SocketAddress;
-
-    fn wrap_layer_connect_response(
-        response: RemoteResult<OutgoingConnectResponse>,
-    ) -> ProxyToLayerMessage;
-
-    fn unwrap_agent_message(message: Self::AgentMessage) -> AgentOutgoingMessage;
-}
-
-#[async_trait::async_trait]
-pub trait Listener: 'static + Send + Sync + Sized {
-    type Socket: Socket;
-
-    async fn create(for_remote_address: SocketAddress) -> Result<Self>;
-
-    fn local_address(&self) -> Result<SocketAddress>;
-
-    async fn accept(self) -> Result<Self::Socket>;
-}
-
-#[async_trait::async_trait]
-pub trait Socket: 'static + Send + Sync {
-    async fn send(&mut self, bytes: &[u8]) -> Result<()>;
-
-    async fn receive(&mut self) -> Result<Vec<u8>>;
-}
-
-pub struct DatagramHandler;
-
-pub struct DatagramSocket {
-    socket: UdpSocket,
-    peer: Option<SocketAddr>,
-    buffer: Vec<u8>,
-}
-
-impl NetProtocolHandler for DatagramHandler {
-    type Listener = DatagramSocket;
-    type Socket = DatagramSocket;
-    type LayerConnectRequest = ConnectUdpOutgoing;
-    type AgentMessage = DaemonUdpOutgoing;
-
-    fn make_close_message(connection_id: ConnectionId) -> ClientMessage {
-        ClientMessage::UdpOutgoing(LayerUdpOutgoing::Close(LayerClose { connection_id }))
-    }
-
-    fn make_connect_message(remote_address: SocketAddress) -> ClientMessage {
-        ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect { remote_address }))
-    }
-
-    fn unwrap_layer_connect_request(request: Self::LayerConnectRequest) -> SocketAddress {
-        request.remote_address
-    }
-
-    fn wrap_layer_connect_response(
-        response: RemoteResult<OutgoingConnectResponse>,
-    ) -> ProxyToLayerMessage {
-        ProxyToLayerMessage::ConnectUdpOutgoing(response)
-    }
-
-    fn unwrap_agent_message(message: Self::AgentMessage) -> AgentOutgoingMessage {
-        match message {
-            DaemonUdpOutgoing::Close(close) => AgentOutgoingMessage::Close(close),
-            DaemonUdpOutgoing::Connect(connect) => AgentOutgoingMessage::Connect(connect),
-            DaemonUdpOutgoing::Read(read) => AgentOutgoingMessage::Read(read),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl Listener for DatagramSocket {
-    type Socket = Self;
-
-    fn local_address(&self) -> Result<SocketAddress> {
-        let addr = self.socket.local_addr()?;
-
-        Ok(addr.into())
-    }
-
-    async fn create(for_remote_address: SocketAddress) -> Result<Self> {
-        let bind_address = match for_remote_address {
-            SocketAddress::Ip(inner) => match inner.ip() {
-                IpAddr::V4(..) => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
-                IpAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 0),
-            },
-            SocketAddress::Unix(_) => {
-                tracing::error!("attempted to send datagrams over unix socket");
-                return Err(IntProxyError::DatagramOverUnix);
+impl NetProtocol {
+    fn wrap_agent_close(&self, connection_id: ConnectionId) -> ClientMessage {
+        match self {
+            Self::Datagrams => {
+                ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(LayerClose { connection_id }))
             }
-        };
-
-        let socket = UdpSocket::bind(bind_address).await?;
-
-        Ok(Self {
-            peer: None,
-            socket,
-            buffer: vec![0; 1500],
-        })
+            Self::Stream => {
+                ClientMessage::UdpOutgoing(LayerUdpOutgoing::Close(LayerClose { connection_id }))
+            }
+        }
     }
 
-    async fn accept(self) -> Result<Self::Socket> {
-        Ok(self)
+    fn wrap_agent_connect(&self, remote_address: SocketAddress) -> ClientMessage {
+        match self {
+            Self::Datagrams => {
+                ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
+                    remote_address,
+                }))
+            }
+            Self::Stream => ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
+                remote_address,
+            })),
+        }
+    }
+
+    async fn prepare_socket(self, for_remote_address: SocketAddress) -> Result<PreparedSocket> {
+        let socket = match for_remote_address {
+            SocketAddress::Ip(addr) => {
+                let ip_addr = match addr.ip() {
+                    IpAddr::V4(..) => IpAddr::V4(Ipv4Addr::LOCALHOST),
+                    IpAddr::V6(..) => IpAddr::V6(Ipv6Addr::LOCALHOST),
+                };
+                let bind_at = SocketAddr::new(ip_addr, 0);
+
+                match self {
+                    Self::Datagrams => PreparedSocket::UdpSocket(UdpSocket::bind(bind_at).await?),
+                    Self::Stream => PreparedSocket::TcpListener(TcpListener::bind(bind_at).await?),
+                }
+            }
+            SocketAddress::Unix(..) => match self {
+                Self::Stream => {
+                    let path = PreparedSocket::generate_uds_path().await?;
+                    PreparedSocket::UnixListener(UnixListener::bind(path)?)
+                }
+                Self::Datagrams => {
+                    tracing::error!("layer requested intercepting outgoing datagrams over unix socket, this is not supported");
+                    return Err(IntProxyError::DatagramOverUnix);
+                }
+            },
+        };
+
+        Ok(socket)
     }
 }
 
-#[async_trait::async_trait]
-impl Socket for DatagramSocket {
-    async fn send(&mut self, bytes: &[u8]) -> Result<()> {
-        let Some(peer) = self.peer else {
-            panic!("cannot send data until peer is known");
-        };
-
-        let bytes_sent = self.socket.send_to(bytes, peer).await?;
-
-        if bytes_sent != bytes.len() {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "failed to send all bytes",
-            ))?;
-        }
-
-        Ok(())
-    }
-
-    async fn receive(&mut self) -> Result<Vec<u8>> {
-        let (received, peer) = self.socket.recv_from(&mut self.buffer).await?;
-
-        if self.peer.is_none() {
-            self.peer.replace(peer);
-            self.socket.connect(peer).await?;
-        }
-
-        let bytes = self.buffer.get(..received).unwrap().to_vec();
-
-        Ok(bytes)
-    }
+enum PreparedSocket {
+    UdpSocket(UdpSocket),
+    TcpListener(TcpListener),
+    UnixListener(UnixListener),
 }
 
-pub struct StreamHandler;
-
-impl StreamHandler {
-    /// For unix socket addresses, relative to the temp dir.
+impl PreparedSocket {
+    /// For unix listeners, relative to the temp dir.
     const UNIX_STREAMS_DIRNAME: &'static str = "mirrord-unix-sockets";
 
     async fn generate_uds_path() -> Result<PathBuf> {
@@ -203,135 +105,99 @@ impl StreamHandler {
 
         Ok(tmp_dir.join(random_string))
     }
-}
-
-pub enum StreamListener {
-    Tcp(TcpListener),
-    Unix(UnixListener),
-}
-
-pub enum StreamSocket {
-    Tcp { stream: TcpStream, buffer: Vec<u8> },
-    Unix { stream: UnixStream, buffer: Vec<u8> },
-}
-
-#[async_trait::async_trait]
-impl Listener for StreamListener {
-    type Socket = StreamSocket;
 
     fn local_address(&self) -> Result<SocketAddress> {
-        match self {
-            Self::Tcp(tcp) => tcp.local_addr().map(Into::into).map_err(Into::into),
-            Self::Unix(unix) => {
-                let path = unix
-                    .local_addr()?
-                    .as_pathname()
-                    .ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::Other, "no pathname found for unix listener")
-                    })?
-                    .to_path_buf();
-                Ok(SocketAddress::Unix(UnixAddr::Pathname(path)))
+        let address = match self {
+            Self::TcpListener(listener) => listener.local_addr()?.into(),
+            Self::UdpSocket(socket) => socket.local_addr()?.into(),
+            Self::UnixListener(listener) => {
+                let addr = listener.local_addr()?;
+                let pathname = addr.as_pathname().unwrap().to_path_buf();
+                SocketAddress::Unix(UnixAddr::Pathname(pathname))
             }
-        }
+        };
+
+        Ok(address)
     }
 
-    async fn create(for_remote_address: SocketAddress) -> Result<Self> {
-        match for_remote_address {
-            SocketAddress::Ip(inner) => {
-                let addr = match inner.ip() {
-                    IpAddr::V4(..) => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
-                    IpAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 0),
-                };
-
-                let listener = TcpListener::bind(addr).await?;
-
-                Ok(Self::Tcp(listener))
+    async fn accept(self) -> Result<ConnectedSocket> {
+        let (inner, is_really_connected, buf_size) = match self {
+            Self::TcpListener(listener) => {
+                let (stream, _) = listener.accept().await?;
+                (InnerConnectedSocket::TcpStream(stream), true, 1024)
             }
-            SocketAddress::Unix(_) => {
-                let path = StreamHandler::generate_uds_path().await?;
-
-                let listener = UnixListener::bind(path)?;
-
-                Ok(Self::Unix(listener))
+            Self::UdpSocket(socket) => (InnerConnectedSocket::UdpSocket(socket), false, 1500),
+            Self::UnixListener(listener) => {
+                let (stream, _) = listener.accept().await?;
+                (InnerConnectedSocket::UnixStream(stream), true, 1024)
             }
-        }
-    }
+        };
 
-    async fn accept(self) -> Result<Self::Socket> {
-        match self {
-            Self::Tcp(tcp) => {
-                let (stream, _) = tcp.accept().await?;
-                Ok(StreamSocket::Tcp {
-                    stream,
-                    buffer: vec![0; 1024],
-                })
-            }
-            Self::Unix(unix) => {
-                let (stream, _) = unix.accept().await?;
-                Ok(StreamSocket::Unix {
-                    stream,
-                    buffer: vec![0; 1024],
-                })
-            }
-        }
+        Ok(ConnectedSocket {
+            inner,
+            is_really_connected,
+            buffer: vec![0; buf_size],
+        })
     }
 }
 
-#[async_trait::async_trait]
-impl Socket for StreamSocket {
-    async fn send(&mut self, bytes: &[u8]) -> Result<()> {
-        match self {
-            Self::Tcp { stream, .. } => stream.write_all(bytes).await?,
-            Self::Unix { stream, .. } => stream.write_all(bytes).await?,
-        }
+enum InnerConnectedSocket {
+    UdpSocket(UdpSocket),
+    TcpStream(TcpStream),
+    UnixStream(UnixStream),
+}
 
-        Ok(())
+pub struct ConnectedSocket {
+    inner: InnerConnectedSocket,
+    is_really_connected: bool,
+    buffer: Vec<u8>,
+}
+
+impl ConnectedSocket {
+    async fn send(&mut self, bytes: &[u8]) -> Result<()> {
+        match &mut self.inner {
+            InnerConnectedSocket::UdpSocket(socket) => {
+                let bytes_sent = socket.send(bytes).await?;
+
+                if bytes_sent != bytes.len() {
+                    Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "failed to send all bytes",
+                    ))?;
+                }
+
+                Ok(())
+            }
+            InnerConnectedSocket::TcpStream(stream) => {
+                stream.write_all(bytes).await.map_err(Into::into)
+            }
+            InnerConnectedSocket::UnixStream(stream) => {
+                stream.write_all(bytes).await.map_err(Into::into)
+            }
+        }
     }
 
     async fn receive(&mut self) -> Result<Vec<u8>> {
-        match self {
-            Self::Tcp { stream, buffer } => {
-                let received = stream.read(buffer).await?;
-                Ok(buffer.get(..received).unwrap().to_vec())
+        match &mut self.inner {
+            InnerConnectedSocket::UdpSocket(socket) => {
+                let (received, peer) = socket.recv_from(&mut self.buffer).await?;
+
+                if !self.is_really_connected {
+                    socket.connect(peer).await?;
+                }
+
+                let bytes = self.buffer.get(..received).unwrap().to_vec();
+
+                Ok(bytes)
             }
-            Self::Unix { stream, buffer } => {
-                let received = stream.read(buffer).await?;
-                Ok(buffer.get(..received).unwrap().to_vec())
+            InnerConnectedSocket::TcpStream(stream) => {
+                let received = stream.read(&mut self.buffer).await?;
+                Ok(self.buffer.get(..received).unwrap().to_vec())
             }
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl NetProtocolHandler for StreamHandler {
-    type Listener = StreamListener;
-    type Socket = StreamSocket;
-    type LayerConnectRequest = ConnectTcpOutgoing;
-    type AgentMessage = DaemonTcpOutgoing;
-
-    fn make_close_message(connection_id: ConnectionId) -> ClientMessage {
-        ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(LayerClose { connection_id }))
-    }
-
-    fn make_connect_message(remote_address: SocketAddress) -> ClientMessage {
-        ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect { remote_address }))
-    }
-
-    fn unwrap_layer_connect_request(request: Self::LayerConnectRequest) -> SocketAddress {
-        request.remote_address
-    }
-
-    fn wrap_layer_connect_response(
-        response: RemoteResult<OutgoingConnectResponse>,
-    ) -> ProxyToLayerMessage {
-        ProxyToLayerMessage::ConnectTcpOutgoing(response)
-    }
-
-    fn unwrap_agent_message(message: Self::AgentMessage) -> AgentOutgoingMessage {
-        match message {
-            DaemonTcpOutgoing::Close(close) => AgentOutgoingMessage::Close(close),
-            DaemonTcpOutgoing::Connect(connect) => AgentOutgoingMessage::Connect(connect),
-            DaemonTcpOutgoing::Read(read) => AgentOutgoingMessage::Read(read),
+            InnerConnectedSocket::UnixStream(stream) => {
+                let received = stream.read(&mut self.buffer).await?;
+                Ok(self.buffer.get(..received).unwrap().to_vec())
+            }
         }
     }
 }

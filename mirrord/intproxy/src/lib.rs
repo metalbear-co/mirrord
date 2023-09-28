@@ -7,7 +7,7 @@ use mirrord_protocol::{ClientMessage, DaemonMessage, FileRequest};
 use tokio::{
     net::{TcpListener, TcpStream},
     task::JoinSet,
-    time,
+    time::{self, Interval, MissedTickBehavior},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -16,10 +16,7 @@ use crate::{
     error::{IntProxyError, Result},
     layer_conn::LayerConnection,
     protocol::{LayerToProxyMessage, LocalMessage},
-    proxies::{
-        outgoing::{proxy::OutgoingProxy, DatagramHandler, StreamHandler},
-        simple::SimpleProxy,
-    },
+    proxies::{outgoing::proxy::OutgoingProxy, simple::SimpleProxy},
 };
 
 pub mod agent_conn;
@@ -119,11 +116,10 @@ impl IntProxy {
 struct ProxySession {
     agent_conn: AgentConnection,
     layer_conn: LayerConnection,
-    ping: bool,
-    cancellation_token: CancellationToken,
+    _cancellation_token: CancellationToken,
     simple_proxy: SimpleProxy,
-    datagram_outgoing_proxy: OutgoingProxy<DatagramHandler>,
-    stream_outgoing_proxy: OutgoingProxy<StreamHandler>,
+    outgoing_proxy: OutgoingProxy,
+    ping_pong: PingPong,
 }
 
 impl ProxySession {
@@ -142,31 +138,25 @@ impl ProxySession {
 
         let simple_proxy =
             SimpleProxy::new(layer_conn.sender().clone(), agent_conn.sender().clone());
-        let datagram_outgoing_proxy =
+        let outgoing_proxy =
             OutgoingProxy::new(agent_conn.sender().clone(), layer_conn.sender().clone());
-        let stream_outgoing_proxy =
-            OutgoingProxy::new(agent_conn.sender().clone(), layer_conn.sender().clone());
+
+        let ping_pong = PingPong::new(Self::PING_INTERVAL).await;
 
         Ok(Self {
             agent_conn,
             layer_conn,
-            ping: false,
-            cancellation_token,
+            _cancellation_token: cancellation_token,
             simple_proxy,
-            datagram_outgoing_proxy,
-            stream_outgoing_proxy,
+            outgoing_proxy,
+            ping_pong,
         })
     }
 
     async fn serve_connection(mut self) -> Result<()> {
-        let mut ping_interval = time::interval(Self::PING_INTERVAL);
-        ping_interval.tick().await;
-
         loop {
             tokio::select! {
                 layer_message = self.layer_conn.receive() => {
-                    ping_interval.reset();
-
                     let Some(message) = layer_message else {
                         tracing::trace!("layer connection closed");
                         break Ok(());
@@ -184,37 +174,36 @@ impl ProxySession {
                     self.handle_agent_message(message).await?;
                 },
 
-                _ = ping_interval.tick() => {
-                    if !self.ping {
-                        self.agent_conn.sender().send(ClientMessage::Ping).await?;
-                        self.ping = true;
-                    } else {
-                        tracing::warn!("unmatched ping, timeout!");
-                        break Err(AgentCommunicationFailed::UnmatchedPing.into());
-                    }
+                res = self.ping_pong.timeout() => {
+                    res?;
+                    self.agent_conn.sender().send(ClientMessage::Ping).await?;
+                    self.ping_pong.ping_sent();
                 }
             }
         }
     }
 
     async fn handle_agent_message(&mut self, message: DaemonMessage) -> Result<()> {
+        self.ping_pong
+            .agent_sent_message(matches!(message, DaemonMessage::Pong))?;
+
         match message {
-            DaemonMessage::Close(msg) => todo!(),
-            DaemonMessage::Tcp(msg) => todo!(),
-            DaemonMessage::TcpSteal(msg) => todo!(),
+            DaemonMessage::Close(..) => todo!(),
+            DaemonMessage::Tcp(..) => todo!(),
+            DaemonMessage::TcpSteal(..) => todo!(),
             DaemonMessage::TcpOutgoing(msg) => {
-                self.stream_outgoing_proxy.handle_agent_message(msg).await
+                self.outgoing_proxy.handle_agent_tcp_message(msg).await
             }
             DaemonMessage::UdpOutgoing(msg) => {
-                self.datagram_outgoing_proxy.handle_agent_message(msg).await
+                self.outgoing_proxy.handle_agent_udp_message(msg).await
             }
-            DaemonMessage::LogMessage(msg) => todo!(),
+            DaemonMessage::LogMessage(..) => todo!(),
             DaemonMessage::File(msg) => self.simple_proxy.handle_response(msg).await,
-            DaemonMessage::Pong => todo!(),
-            DaemonMessage::GetEnvVarsResponse(msg) => todo!(),
+            DaemonMessage::Pong => Ok(()),
+            DaemonMessage::GetEnvVarsResponse(..) => todo!(),
             DaemonMessage::GetAddrInfoResponse(msg) => self.simple_proxy.handle_response(msg).await,
-            DaemonMessage::PauseTarget(msg) => todo!(),
-            DaemonMessage::SwitchProtocolVersionResponse(msg) => todo!(),
+            DaemonMessage::PauseTarget(..) => todo!(),
+            DaemonMessage::SwitchProtocolVersionResponse(..) => todo!(),
         }
     }
 
@@ -223,7 +212,7 @@ impl ProxySession {
         message: LocalMessage<LayerToProxyMessage>,
     ) -> Result<()> {
         match message.inner {
-            LayerToProxyMessage::InitSession(_) => todo!(),
+            LayerToProxyMessage::NewSession(..) => todo!(),
             LayerToProxyMessage::File(req) => match req {
                 req @ (FileRequest::CloseDir(..) | FileRequest::Close(..)) => self
                     .agent_conn
@@ -242,16 +231,62 @@ impl ProxySession {
                     .handle_request(req, message.message_id)
                     .await
             }
-            LayerToProxyMessage::ConnectUdpOutgoing(req) => {
-                self.datagram_outgoing_proxy
+            LayerToProxyMessage::OutgoingConnect(req) => {
+                self.outgoing_proxy
                     .handle_layer_connect_request(req, message.message_id)
                     .await
             }
-            LayerToProxyMessage::ConnectTcpOutgoing(req) => {
-                self.stream_outgoing_proxy
-                    .handle_layer_connect_request(req, message.message_id)
-                    .await
+        }
+    }
+}
+
+/// Handles ping pong logic on the proxy side.
+struct PingPong {
+    interval: Interval,
+    awaiting_pong: bool,
+}
+
+impl PingPong {
+    async fn new(frequency: Duration) -> Self {
+        let mut interval = time::interval(frequency);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        interval.tick().await;
+
+        Self {
+            interval,
+            awaiting_pong: false,
+        }
+    }
+
+    /// Returns an error if the agent did not respond to ping in time.
+    /// Returns [`Ok`] if its time to send a ping to the agent.
+    async fn timeout(&mut self) -> Result<()> {
+        self.interval.tick().await;
+
+        if self.awaiting_pong {
+            Err(AgentCommunicationFailed::PingTimeout.into())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn ping_sent(&mut self) {
+        self.interval.reset();
+        self.awaiting_pong = true;
+    }
+
+    fn agent_sent_message(&mut self, is_pong: bool) -> Result<()> {
+        match (self.awaiting_pong, is_pong) {
+            (false, true) => Err(AgentCommunicationFailed::UnmatchedPong.into()),
+            (true, true) => {
+                self.interval.reset();
+                Ok(())
             }
+            (false, false) => {
+                self.interval.reset();
+                Ok(())
+            }
+            (true, false) => Ok(()),
         }
     }
 }

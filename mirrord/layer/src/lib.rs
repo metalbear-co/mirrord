@@ -78,9 +78,7 @@ use std::{
 };
 
 use bimap::BiMap;
-use common::ResponseChannel;
 use ctor::ctor;
-use dns::GetAddrInfo;
 use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
 use hooks::HookManager;
@@ -97,14 +95,13 @@ use mirrord_config::{
     },
     LayerConfig,
 };
-use mirrord_intproxy::protocol::InitSession;
+use mirrord_intproxy::protocol::NewSession;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest},
     tcp::{HttpResponseFallback, LayerTcpSteal},
     ClientMessage, DaemonMessage, CLIENT_READY_FOR_LOGS,
 };
-use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
 use proxy_connection::ProxyConnection;
 use regex::RegexSet;
 use socket::{OutgoingSelector, SOCKETS};
@@ -125,10 +122,8 @@ use crate::{
 };
 
 mod common;
-mod connection;
 mod debugger_ports;
 mod detour;
-mod dns;
 mod error;
 #[cfg(target_os = "macos")]
 mod exec_utils;
@@ -136,7 +131,6 @@ mod file;
 mod hooks;
 mod load;
 mod macros;
-mod outgoing;
 mod proxy_connection;
 mod socket;
 mod tcp;
@@ -511,7 +505,7 @@ fn layer_start(mut config: LayerConfig) {
     unsafe {
         PROXY_CONNECTION.take();
         let proxy_connection =
-            ProxyConnection::new(address, InitSession::New, Duration::from_secs(5))
+            ProxyConnection::new(address, NewSession::New, Duration::from_secs(5))
                 .expect("failed to initialize proxy connection");
 
         PROXY_CONNECTION
@@ -563,30 +557,6 @@ struct Layer {
     /// Handler to the TCP mirror operations, see [`TcpMirrorHandler`].
     tcp_mirror_handler: TcpMirrorHandler,
 
-    /// Handler to the TCP outgoing operations, see [`TcpOutgoingHandler`].
-    tcp_outgoing_handler: TcpOutgoingHandler,
-
-    /// Handler to the UDP outgoing operations, see [`UdpOutgoingHandler`].
-    udp_outgoing_handler: UdpOutgoingHandler,
-    // TODO: Starting to think about a better abstraction over this whole mess. File operations are
-    // pretty much just `std::fs::File` things, so I think the best approach would be to create
-    // a `FakeFile`, and implement `std::io` traits on it.
-    //
-    // Maybe every `FakeFile` could hold it's own `oneshot` channel, read more about this on the
-    // `common` module above `XHook` structs.
-    file_handler: FileHandler,
-
-    /// Handles the DNS lookup response we get from the agent, see
-    /// `getaddrinfo`.
-    ///
-    /// Unlike most of the other [`DaemonMessage`] handlers, this message is handled directly in
-    /// `handle_daemon_message`.
-    ///
-    /// These are a list of [`oneshot::Sender`](tokio::sync::oneshot::Sender) channels containing
-    /// the [`RemoteResult`](mirrord_protocol::codec::RemoteResult)s of the [`DnsLookup`] operation
-    /// from the agent.
-    getaddrinfo_handler_queue: VecDeque<ResponseChannel<DnsLookup>>,
-
     /// Handler to the TCP stealer operations, see [`UdpOutgoingHandler`].
     pub tcp_steal_handler: TcpStealHandler,
 
@@ -608,7 +578,6 @@ impl Layer {
         rx: Receiver<DaemonMessage>,
         incoming: IncomingConfig,
     ) -> Layer {
-        // TODO: buffer size?
         let (http_response_sender, http_response_receiver) = channel(1024);
         let steal = incoming.is_steal();
         let IncomingConfig {
@@ -622,10 +591,6 @@ impl Layer {
             tx,
             rx,
             tcp_mirror_handler: TcpMirrorHandler::new(port_mapping.clone()),
-            tcp_outgoing_handler: TcpOutgoingHandler::default(),
-            udp_outgoing_handler: Default::default(),
-            file_handler: FileHandler::default(),
-            getaddrinfo_handler_queue: VecDeque::new(),
             tcp_steal_handler: TcpStealHandler::new(
                 http_response_sender,
                 port_mapping,
@@ -642,41 +607,41 @@ impl Layer {
         self.tx.send(msg).await.map_err(|err| err.0)
     }
 
-    // / Passes most of the [`HookMessage`]s to their appropriate handlers, together with the
-    // / `Layer::tx` channel.
-    // /
-    // / ## Special case
-    // /
-    // / The [`HookMessage::GetAddrInfo`] message is dealt with here, we convert it to a
-    // / [`ClientMessage::GetAddrInfoRequest`], and send it with [`Self::send`].
-    // #[tracing::instrument(level = "trace", skip(self))]
-    // async fn handle_hook_message(&mut self, hook_message: HookMessage) {
-    //     match hook_message {
-    //         HookMessage::Tcp(message) => {
-    //             if self.steal {
-    //                 self.tcp_steal_handler
-    //                     .handle_hook_message(message, &self.tx)
-    //                     .await
-    //                     .unwrap();
-    //             } else {
-    //                 self.tcp_mirror_handler
-    //                     .handle_hook_message(message, &self.tx)
-    //                     .await
-    //                     .unwrap();
-    //             }
-    //         }
-    //         HookMessage::TcpOutgoing(message) => self
-    //             .tcp_outgoing_handler
-    //             .handle_hook_message(message, &self.tx)
-    //             .await
-    //             .unwrap(),
-    //         HookMessage::UdpOutgoing(message) => self
-    //             .udp_outgoing_handler
-    //             .handle_hook_message(message, &self.tx)
-    //             .await
-    //             .unwrap(),
-    //     }
-    // }
+    /// Passes most of the [`HookMessage`]s to their appropriate handlers, together with the
+    /// `Layer::tx` channel.
+    ///
+    /// ## Special case
+    ///
+    /// The [`HookMessage::GetAddrInfo`] message is dealt with here, we convert it to a
+    /// [`ClientMessage::GetAddrInfoRequest`], and send it with [`Self::send`].
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn handle_hook_message(&mut self, hook_message: HookMessage) {
+        match hook_message {
+            HookMessage::Tcp(message) => {
+                if self.steal {
+                    self.tcp_steal_handler
+                        .handle_hook_message(message, &self.tx)
+                        .await
+                        .unwrap();
+                } else {
+                    self.tcp_mirror_handler
+                        .handle_hook_message(message, &self.tx)
+                        .await
+                        .unwrap();
+                }
+            }
+            HookMessage::TcpOutgoing(message) => self
+                .tcp_outgoing_handler
+                .handle_hook_message(message, &self.tx)
+                .await
+                .unwrap(),
+            HookMessage::UdpOutgoing(message) => self
+                .udp_outgoing_handler
+                .handle_hook_message(message, &self.tx)
+                .await
+                .unwrap(),
+        }
+    }
 
     /// Passes most of the [`DaemonMessage`]s to their appropriate handlers.
     ///
@@ -853,20 +818,6 @@ async fn thread_loop(
     }
     graceful_exit!("mirrord has encountered an error and is now exiting.");
 }
-
-// /// Initializes mirrord-layer's [`thread_loop`] in a separate [`tokio::task`].
-// #[tracing::instrument(level = "trace", skip(tx, rx, receiver))]
-// fn start_layer_thread(
-//     tx: Sender<ClientMessage>,
-//     rx: Receiver<DaemonMessage>,
-//     receiver: Receiver<HookMessage>,
-//     config: LayerConfig,
-//     runtime: Runtime,
-// ) { std::thread::spawn(move || { let _guard = DetourGuard::new();
-//   runtime.block_on(thread_loop(receiver, tx, rx, config)); runtime.block_on(async move { // wait
-//   for background tasks to finish tokio::time::sleep(std::time::Duration::from_secs(1)).await; });
-//   });
-// }
 
 /// Prepares the [`HookManager`] and [`replace!`]s [`libc`] calls with our hooks, according to what
 /// the user configured.

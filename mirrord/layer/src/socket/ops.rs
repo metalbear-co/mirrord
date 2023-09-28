@@ -11,7 +11,7 @@ use std::{
 
 use libc::{c_int, c_void, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::IncomingMode;
-use mirrord_intproxy::protocol::{OutgoingConnectResponse, ConnectTcpOutgoing, ConnectUdpOutgoing};
+use mirrord_intproxy::protocol::{ConnectTcpOutgoing, ConnectUdpOutgoing, OutgoingConnectResponse};
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, LookupRecord},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
@@ -25,15 +25,8 @@ use crate::{
     error::HookError,
     file::{self, OPEN_FILES},
     is_debugger_port,
-    outgoing::{Connect, RemoteConnection},
-    ENABLED_TCP_OUTGOING,
-    ENABLED_UDP_OUTGOING,
-    INCOMING_CONFIG,
-    LISTEN_PORTS,
-    OUTGOING_IGNORE_LOCALHOST,
-    OUTGOING_SELECTOR,
-    REMOTE_UNIX_STREAMS,
-    TARGETLESS,
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_CONFIG, LISTEN_PORTS,
+    OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR, REMOTE_UNIX_STREAMS, TARGETLESS,
 };
 
 /// Holds the pair of [`SocketAddr`] with their hostnames, resolved remotely through
@@ -341,11 +334,14 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
 
         let OutgoingConnectResponse {
             layer_address,
-            user_address,
+            in_cluster_address,
         } = response;
 
         // Connect to the interceptor socket that is listening.
         let connect_result: ConnectResult = if CALL_CONNECT {
+            let layer_address = SockAddr::try_from(layer_address)?;
+            let user_address = SockAddr::try_from(in_cluster_address)?;
+
             unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
         } else {
             ConnectResult {
@@ -364,7 +360,7 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
 
         let connected = Connected {
             remote_address,
-            local_address: user_address,
+            local_address: in_cluster_address,
             layer_address: Some(layer_address),
         };
 

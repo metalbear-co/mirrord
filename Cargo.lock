@@ -3789,7 +3789,6 @@ dependencies = [
 name = "mirrord-intproxy"
 version = "3.71.2"
 dependencies = [
- "async-trait",
  "bincode",
  "futures",
  "mirrord-config",

@@ -1,12 +1,11 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{collections::VecDeque, ffi::CStr, path::PathBuf};
+use std::{ffi::CStr, path::PathBuf};
 
 use libc::c_char;
 use mirrord_intproxy::protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};
-use mirrord_protocol::{file::OpenOptionsInternal, RemoteResult};
+use mirrord_protocol::file::OpenOptionsInternal;
 #[cfg(target_os = "macos")]
 use mirrord_sip::{MIRRORD_TEMP_BIN_DIR_CANONIC_STRING, MIRRORD_TEMP_BIN_DIR_STRING};
-use tokio::sync::oneshot;
 use tracing::warn;
 
 use crate::{
@@ -16,29 +15,8 @@ use crate::{
     PROXY_CONNECTION,
 };
 
-/// Type alias for a queue of responses from the agent, where these responses are [`RemoteResult`]s.
-///
-/// ## Usage
-///
-/// We have no identifiers for the hook requests, so if hook responses were sent asynchronously we
-/// would have no way to match them back to their requests. However, requests are sent out
-/// synchronously, and responses are sent back synchronously, so keeping them in order is how we
-/// maintain our way to match them.
-///
-/// - The usual flow is:
-///
-/// 1. `push_back` the [`oneshot::Sender`] that will be used to produce the [`RemoteResult`];
-///
-/// 2. When the operation gets a response from the agent:
-///     1. `pop_front` to get the [`oneshot::Sender`], then;
-///     2. `Sender::send` the result back to the operation that initiated the request.
-pub(crate) type ResponseDeque<T> = VecDeque<ResponseChannel<T>>;
-
-/// Type alias for the channel that sends a response from the agent.
-///
-/// See [`ResponseDeque`] for usage details.
-pub(crate) type ResponseChannel<T> = oneshot::Sender<RemoteResult<T>>;
-
+/// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
+/// Blocks until the proxy responds.
 pub fn make_proxy_request_with_response<T: IsLayerRequestWithResponse>(
     request: T,
 ) -> HookResult<T::Response> {
@@ -52,6 +30,8 @@ pub fn make_proxy_request_with_response<T: IsLayerRequestWithResponse>(
     }
 }
 
+/// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
+/// Blocks until the request is sent.
 pub fn make_proxy_request_no_response<T: IsLayerRequest>(request: T) -> HookResult<MessageId> {
     // SAFETY: mutation happens only on initialization.
     unsafe {
