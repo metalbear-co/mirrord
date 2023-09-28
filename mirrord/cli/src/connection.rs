@@ -126,19 +126,3 @@ where
 }
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
-
-// impl AgentConnectInfo {
-//     pub const ENV_KEY: &'static str = "MIRRORD_AGENT_CONNECT_INFO";
-
-//     pub fn as_env(&self) -> Result<String, serde_json::Error> {
-//         serde_json::to_string(self)
-//     }
-
-//     pub fn from_env() -> Result<Option<Self>, serde_json::Error> {
-//         env::var(Self::ENV_KEY)
-//             .ok()
-//             .as_deref()
-//             .map(serde_json::from_str)
-//             .transpose()
-//     }
-// }
