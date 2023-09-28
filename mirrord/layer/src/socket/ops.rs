@@ -11,7 +11,7 @@ use std::{
 
 use libc::{c_int, c_void, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::IncomingMode;
-use mirrord_intproxy::protocol::{ConnectTcpOutgoing, ConnectUdpOutgoing, OutgoingConnectResponse};
+use mirrord_intproxy::protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, LookupRecord},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
@@ -322,11 +322,17 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
 
         let response = match PROTOCOL {
             TCP => {
-                let request = ConnectTcpOutgoing { remote_address };
+                let request = OutgoingConnectRequest {
+                    remote_address,
+                    protocol: NetProtocol::Stream,
+                };
                 common::make_proxy_request_with_response(request)??
             }
             UDP => {
-                let request = ConnectUdpOutgoing { remote_address };
+                let request = OutgoingConnectRequest {
+                    remote_address,
+                    protocol: NetProtocol::Datagrams,
+                };
                 common::make_proxy_request_with_response(request)??
             }
         };

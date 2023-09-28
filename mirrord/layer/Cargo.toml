@@ -28,16 +28,11 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 # change to upstream once https://github.com/frida/frida-rust/pull/99 is merged
 frida-gum = { git = "https://github.com/metalbear-co/frida-rust", version = "0.13", features = ["auto-download"], branch="capstone_remove" }
-futures.workspace = true
 
-tokio = { workspace = true, features = ["fs", "rt", "rt-multi-thread", "macros"] }
 serde.workspace = true
 serde_json.workspace = true
 
-actix-codec.workspace = true
 bytes.workspace = true
-tokio-stream.workspace = true
-tokio-util.workspace = true
 thiserror.workspace = true
 trust-dns-resolver.workspace = true
 num-traits.workspace = true

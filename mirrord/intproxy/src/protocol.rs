@@ -88,6 +88,7 @@ pub struct OutgoingConnectRequest {
     pub protocol: NetProtocol,
 }
 
+/// Requests related to incoming tcp.
 #[derive(Encode, Decode, Debug)]
 pub enum TcpIncomingRequest {}
 

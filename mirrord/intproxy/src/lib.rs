@@ -1,7 +1,13 @@
-use std::{sync::Arc, time::Duration};
+#![feature(lazy_cell)]
+
+use std::{
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
 
 use mirrord_config::LayerConfig;
 use mirrord_protocol::{ClientMessage, DaemonMessage, FileRequest};
+use semver::VersionReq;
 use tokio::{
     net::{TcpListener, TcpStream},
     task::JoinSet,
@@ -23,6 +29,10 @@ mod layer_conn;
 pub mod protocol;
 mod proxies;
 mod request_queue;
+
+/// Minimal [`mirrord_protocol`] version that allows [`ClientMessage::ReadyForLogs`] message.
+pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.3.1".parse().expect("Bad Identifier"));
 
 pub struct IntProxy {
     config: LayerConfig,
@@ -61,7 +71,6 @@ impl IntProxy {
 
 
                         let proxy_clone = self.clone();
-
                         active_connections.spawn(async move {
                             let session = match ProxySession::new(&proxy_clone, stream).await {
                                 Ok(session) => session,
@@ -76,10 +85,6 @@ impl IntProxy {
                             }
                         });
                     },
-                    Err(err) if any_connection_accepted => {
-                        tracing::error!("failed to accept connection: {err:#?}");
-                        return Err(IntProxyError::AcceptFailed(err));
-                    }
                     Err(err) => {
                         tracing::error!("failed to accept first connection: {err:#?}");
                         return Err(IntProxyError::AcceptFailed(err));
@@ -189,22 +194,40 @@ impl ProxySession {
             .agent_sent_message(matches!(message, DaemonMessage::Pong))?;
 
         match message {
-            DaemonMessage::Close(..) => todo!(),
-            DaemonMessage::Tcp(..) => todo!(),
-            DaemonMessage::TcpSteal(..) => todo!(),
+            DaemonMessage::Pong => Ok(()),
+            DaemonMessage::Close(reason) => Err(IntProxyError::AgentClosedConnection(reason)),
             DaemonMessage::TcpOutgoing(msg) => {
                 self.outgoing_proxy.handle_agent_tcp_message(msg).await
             }
             DaemonMessage::UdpOutgoing(msg) => {
                 self.outgoing_proxy.handle_agent_udp_message(msg).await
             }
-            DaemonMessage::LogMessage(..) => todo!(),
             DaemonMessage::File(msg) => self.simple_proxy.handle_response(msg).await,
-            DaemonMessage::Pong => Ok(()),
-            DaemonMessage::GetEnvVarsResponse(..) => todo!(),
             DaemonMessage::GetAddrInfoResponse(msg) => self.simple_proxy.handle_response(msg).await,
-            DaemonMessage::PauseTarget(..) => todo!(),
-            DaemonMessage::SwitchProtocolVersionResponse(..) => todo!(),
+
+            DaemonMessage::Tcp(..) => todo!(),
+            DaemonMessage::TcpSteal(..) => todo!(),
+
+            DaemonMessage::SwitchProtocolVersionResponse(protocol_version) => {
+                if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
+                    if let Err(e) = self
+                        .agent_conn
+                        .sender()
+                        .send(ClientMessage::ReadyForLogs)
+                        .await
+                    {
+                        tracing::error!("unable to enable logs from the agent: {e}");
+                    }
+                }
+
+                Ok(())
+            }
+
+            DaemonMessage::LogMessage(..) => todo!(), /* we don't have any thread in the layer */
+            // to handle this ;/
+            other => Err(IntProxyError::AgentCommunicationFailed(
+                AgentCommunicationFailed::UnexpectedMessage(other),
+            )),
         }
     }
 

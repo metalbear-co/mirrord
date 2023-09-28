@@ -30,3 +30,4 @@ tokio.workspace = true
 tracing.workspace = true
 tokio-util.workspace = true
 rand = "0.8"
+semver = { workspace = true, features = ["serde"] }
