@@ -10,7 +10,7 @@ use mirrord_sip::SipError;
 use thiserror::Error;
 use tracing::{error, info};
 
-use crate::{proxy_connection::ProxyError, tcp_steal::http_forwarding::HttpForwarderError};
+use crate::proxy_connection::ProxyError;
 
 /// Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
 mod ignore_codes {
@@ -99,8 +99,8 @@ pub(crate) enum HookError {
 /// Errors internal to mirrord-layer.
 ///
 /// You'll encounter these when the layer is performing some of its internal operations (mostly when
-/// handling messsages, like [`HookMessage`], or
-/// [`DaemonMessage`](mirrord_protocol::codec::DaemonMessage)).
+/// handling messsages, like
+/// [`ProxyToLayerMessage`](mirrord_intproxy::protocol::ProxyToLayerMessage).
 #[derive(Error, Debug)]
 pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed while getting a response!")]
@@ -163,9 +163,8 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Got unexpected response error from agent: {0}")]
     UnexpectedResponseError(ResponseError),
 
-    #[error("mirrord-layer: Stolen HTTP request forwarding failed with `{0}`.")]
-    HttpForwardingError(#[from] HttpForwarderError),
-
+    // #[error("mirrord-layer: Stolen HTTP request forwarding failed with `{0}`.")]
+    // HttpForwardingError(#[from] HttpForwarderError),
     #[error("mirrord-layer: Regex creation failed with `{0}`.")]
     Regex(#[from] fancy_regex::Error),
 

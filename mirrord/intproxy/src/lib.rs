@@ -1,5 +1,3 @@
-#![feature(async_fn_in_trait)]
-
 use std::{sync::Arc, time::Duration};
 
 use mirrord_config::LayerConfig;
@@ -9,7 +7,6 @@ use tokio::{
     task::JoinSet,
     time::{self, Interval, MissedTickBehavior},
 };
-use tokio_util::sync::CancellationToken;
 
 use crate::{
     agent_conn::{AgentCommunicationFailed, AgentConnectInfo, AgentConnection},
@@ -46,7 +43,7 @@ impl IntProxy {
         }
     }
 
-    pub async fn run(self: Arc<Self>, cancellation_token: CancellationToken) -> Result<()> {
+    pub async fn run(self: Arc<Self>) -> Result<()> {
         let first_timeout = Duration::from_secs(self.config.internal_proxy.start_idle_timeout);
         let consecutive_timeout = Duration::from_secs(self.config.internal_proxy.idle_timeout);
 
@@ -64,10 +61,9 @@ impl IntProxy {
 
 
                         let proxy_clone = self.clone();
-                        let token_clone = cancellation_token.clone();
 
                         active_connections.spawn(async move {
-                            let session = match ProxySession::new(&proxy_clone, stream, token_clone).await {
+                            let session = match ProxySession::new(&proxy_clone, stream).await {
                                 Ok(session) => session,
                                 Err(err) => {
                                     tracing::error!("failed to create a new session for {peer}: {err:?}");
@@ -116,7 +112,6 @@ impl IntProxy {
 struct ProxySession {
     agent_conn: AgentConnection,
     layer_conn: LayerConnection,
-    _cancellation_token: CancellationToken,
     simple_proxy: SimpleProxy,
     outgoing_proxy: OutgoingProxy,
     ping_pong: PingPong,
@@ -125,11 +120,7 @@ struct ProxySession {
 impl ProxySession {
     const PING_INTERVAL: Duration = Duration::from_secs(30);
 
-    async fn new(
-        intproxy: &IntProxy,
-        conn: TcpStream,
-        cancellation_token: CancellationToken,
-    ) -> Result<Self> {
+    async fn new(intproxy: &IntProxy, conn: TcpStream) -> Result<Self> {
         let mut agent_conn =
             AgentConnection::new(&intproxy.config, intproxy.agent_connect_info.as_ref()).await?;
         agent_conn.ping_pong().await?;
@@ -146,7 +137,6 @@ impl ProxySession {
         Ok(Self {
             agent_conn,
             layer_conn,
-            _cancellation_token: cancellation_token,
             simple_proxy,
             outgoing_proxy,
             ping_pong,
@@ -154,6 +144,17 @@ impl ProxySession {
     }
 
     async fn serve_connection(mut self) -> Result<()> {
+        if let Err(err) = self
+            .agent_conn
+            .sender()
+            .send(ClientMessage::SwitchProtocolVersion(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await
+        {
+            tracing::error!("failed to switch protocol version: {err:?}");
+        }
+
         loop {
             tokio::select! {
                 layer_message = self.layer_conn.receive() => {
@@ -236,6 +237,7 @@ impl ProxySession {
                     .handle_layer_connect_request(req, message.message_id)
                     .await
             }
+            LayerToProxyMessage::TcpIncoming(..) => todo!(),
         }
     }
 }

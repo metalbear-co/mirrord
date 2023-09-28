@@ -24,8 +24,7 @@ use crate::{
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     error::HookError,
     file::{self, OPEN_FILES},
-    is_debugger_port,
-    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_CONFIG, LISTEN_PORTS,
+    is_debugger_port, ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_CONFIG, LISTEN_PORTS,
     OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR, REMOTE_UNIX_STREAMS, TARGETLESS,
 };
 

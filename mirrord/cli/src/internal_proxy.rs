@@ -187,9 +187,7 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
     }
 
     let proxy = Arc::new(IntProxy::new(config, agent_connect_info, listener));
-    proxy
-        .run(main_connection_cancellation_token.clone())
-        .await?;
+    proxy.run().await?;
 
     main_connection_cancellation_token.cancel();
 

@@ -38,6 +38,8 @@ pub enum LayerToProxyMessage {
     GetAddrInfo(GetAddrInfoRequest),
     /// A request to initiate a new outgoing connection.
     OutgoingConnect(OutgoingConnectRequest),
+    /// Requests related to incoming tcp.
+    TcpIncoming(TcpIncomingRequest),
 }
 
 /// Unique `layer <-> proxy` session identifier.
@@ -72,7 +74,7 @@ pub enum NetProtocol {
     ///
     /// In reality, this is a connectionless protocol.
     /// However, one can call [`connect`](https://man7.org/linux/man-pages/man2/connect.2.html) on a datagram socket,
-    /// which alters socket's behavior. Currently, we require this call to happen before we
+    /// which alters this socket's behavior. Currently, we require this call to happen before we
     /// intercept outgoing UDP.
     Datagrams,
 }
@@ -85,6 +87,9 @@ pub struct OutgoingConnectRequest {
     /// The protocol stack the user application wants to use.
     pub protocol: NetProtocol,
 }
+
+#[derive(Encode, Decode, Debug)]
+pub enum TcpIncomingRequest {}
 
 /// Messages sent by the internal proxy and handled by the layer.
 #[derive(Encode, Decode, Debug)]

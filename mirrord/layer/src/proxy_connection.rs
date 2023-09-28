@@ -12,8 +12,8 @@ use std::{
 use mirrord_intproxy::{
     codec::{self, CodecError, SyncReceiver, SyncSender},
     protocol::{
-        NewSession, IsLayerRequest, IsLayerRequestWithResponse, LayerToProxyMessage, LocalMessage,
-        MessageId, ProxyToLayerMessage,
+        IsLayerRequest, IsLayerRequestWithResponse, LayerToProxyMessage, LocalMessage, MessageId,
+        NewSessionRequest, ProxyToLayerMessage, SessionId,
     },
 };
 use thiserror::Error;
@@ -45,11 +45,15 @@ pub struct ProxyConnection {
     sender: Mutex<SyncSender<LocalMessage<LayerToProxyMessage>, TcpStream>>,
     responses: Mutex<ResponseManager>,
     next_message_id: AtomicU64,
-    session_id: u64,
+    session_id: SessionId,
 }
 
 impl ProxyConnection {
-    pub fn new(proxy_addr: SocketAddr, session: NewSession, timeout: Duration) -> Result<Self> {
+    pub fn new(
+        proxy_addr: SocketAddr,
+        session: NewSessionRequest,
+        timeout: Duration,
+    ) -> Result<Self> {
         let connection = TcpStream::connect(proxy_addr)?;
         connection.set_read_timeout(Some(timeout))?;
         connection.set_write_timeout(Some(timeout))?;
@@ -109,6 +113,10 @@ impl ProxyConnection {
 
     pub fn make_request_no_response<T: IsLayerRequest>(&self, request: T) -> Result<MessageId> {
         self.send(request.wrap())
+    }
+
+    pub fn session_id(&self) -> SessionId {
+        self.session_id
     }
 }
 
