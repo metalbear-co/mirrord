@@ -25,7 +25,7 @@ use crate::{
     error::HookError,
     file::{self, OPEN_FILES},
     is_debugger_port, ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_CONFIG, LISTEN_PORTS,
-    OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR, REMOTE_UNIX_STREAMS, TARGETLESS,
+    OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR, REMOTE_UNIX_STREAMS, TARGETLESS, INCOMING_HANDLER, incoming::Listen,
 };
 
 /// Holds the pair of [`SocketAddr`] with their hostnames, resolved remotely through
@@ -278,17 +278,20 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
         }) => {
             let listen_result = unsafe { FN_LISTEN(sockfd, backlog) };
             if listen_result != 0 {
+                let error = io::Error::last_os_error();
+
                 error!("listen -> Failed `listen` sockfd {:#?}", sockfd);
 
-                Err(io::Error::last_os_error())?
+                Err(error)?
             }
 
-            blocking_send_hook_message(HookMessage::Tcp(TcpIncoming::Listen(Listen {
+            let listen = Listen {
                 mirror_port: address.port(),
                 requested_port: requested_address.port(),
                 ipv6: address.is_ipv6(),
                 id: socket.id,
-            })))?;
+            };
+            INCOMING_HANDLER.get().expect("Should be set during initialization").handle_listen(listen)?;
 
             Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(Bound {
                 requested_address,
@@ -310,32 +313,22 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
 /// This returns errno so we can restore the correct errno in case result is -1 (until we get
 /// back to the hook we might call functions that will corrupt errno)
 #[tracing::instrument(level = "trace", ret)]
-fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
+fn connect_outgoing<const CALL_CONNECT: bool>(
     sockfd: RawFd,
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
+    protocol: NetProtocol,
 ) -> Detour<ConnectResult> {
     // Closure that performs the connection with mirrord messaging.
     let remote_connection = |remote_address: SockAddr| {
         // Prepare this socket to be intercepted.
         let remote_address = SocketAddress::try_from(remote_address).unwrap();
 
-        let response = match PROTOCOL {
-            TCP => {
-                let request = OutgoingConnectRequest {
-                    remote_address,
-                    protocol: NetProtocol::Stream,
-                };
-                common::make_proxy_request_with_response(request)??
-            }
-            UDP => {
-                let request = OutgoingConnectRequest {
-                    remote_address,
-                    protocol: NetProtocol::Datagrams,
-                };
-                common::make_proxy_request_with_response(request)??
-            }
+        let request = OutgoingConnectRequest {
+            remote_address: remote_address.clone(),
+            protocol,
         };
+        let response = common::make_proxy_request_with_response(request)??;
 
         let OutgoingConnectResponse {
             layer_address,
@@ -344,8 +337,7 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
 
         // Connect to the interceptor socket that is listening.
         let connect_result: ConnectResult = if CALL_CONNECT {
-            let layer_address = SockAddr::try_from(layer_address)?;
-            let user_address = SockAddr::try_from(in_cluster_address)?;
+            let layer_address = SockAddr::try_from(layer_address.clone())?;
 
             unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
         } else {
@@ -386,7 +378,7 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
         // handle this address trickery.
         match OUTGOING_SELECTOR
             .get()?
-            .get_connection_through::<PROTOCOL>(remote_address.as_socket()?)?
+            .get_connection_through(remote_address.as_socket()?, protocol)?
         {
             ConnectionThrough::Remote(addr) => {
                 let connect_result = remote_connection(SockAddr::from(addr))?;
@@ -528,11 +520,11 @@ pub(super) fn connect(
         .copied()
         .expect("Should be set during initialization!");
 
-    match user_socket_info.kind {
-        SocketKind::Udp(_) if enabled_udp_outgoing => {
-            connect_outgoing::<UDP, true>(sockfd, remote_address, user_socket_info)
+    match NetProtocol::from(user_socket_info.kind) {
+        NetProtocol::Datagrams if enabled_udp_outgoing => {
+            connect_outgoing::<true>(sockfd, remote_address, user_socket_info, NetProtocol::Datagrams)
         }
-        SocketKind::Tcp(_) => match user_socket_info.state {
+        NetProtocol::Stream => match user_socket_info.state {
             SocketState::Initialized
                 if (optional_ip_address.is_some() && enabled_tcp_outgoing)
                     || (remote_address.is_unix()
@@ -540,7 +532,7 @@ pub(super) fn connect(
                             .as_ref()
                             .is_some_and(|streams| !streams.is_empty())) =>
             {
-                connect_outgoing::<TCP, true>(sockfd, remote_address, user_socket_info)
+                connect_outgoing::<true>(sockfd, remote_address, user_socket_info, NetProtocol::Stream)
             }
             SocketState::Bound(Bound { address, .. }) => {
                 trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
@@ -1039,7 +1031,7 @@ pub(super) fn send_to(
             )
         }
     } else {
-        connect_outgoing::<UDP, false>(sockfd, destination, user_socket_info)?;
+        connect_outgoing::<false>(sockfd, destination, user_socket_info, NetProtocol::Datagrams)?;
 
         let layer_address: SockAddr = SOCKETS
             .get(&sockfd)
@@ -1114,7 +1106,7 @@ pub(super) fn sendmsg(
 
         unsafe { FN_SENDMSG(sockfd, true_message_header.as_ref(), flags) }
     } else {
-        connect_outgoing::<UDP, false>(sockfd, destination, user_socket_info)?;
+        connect_outgoing::<false>(sockfd, destination, user_socket_info, NetProtocol::Datagrams)?;
 
         let layer_address: SockAddr = SOCKETS
             .get(&sockfd)

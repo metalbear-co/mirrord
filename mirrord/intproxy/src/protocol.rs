@@ -10,7 +10,7 @@ use mirrord_protocol::{
         XstatFsResponse, XstatRequest, XstatResponse,
     },
     outgoing::SocketAddress,
-    FileRequest, FileResponse, RemoteResult,
+    FileRequest, FileResponse, RemoteResult, Port,
 };
 
 /// An identifier for a message sent from the layer to the internal proxy.
@@ -90,7 +90,20 @@ pub struct OutgoingConnectRequest {
 
 /// Requests related to incoming tcp.
 #[derive(Encode, Decode, Debug)]
-pub enum TcpIncomingRequest {}
+pub enum TcpIncomingRequest {
+    PortSubscribe(PortSubscribe),
+    PortUnsubscribe(PortUnsubscribe),
+}
+
+#[derive(Encode, Decode, Debug)]
+pub struct PortSubscribe {
+    pub port: Port,
+}
+
+#[derive(Encode, Decode, Debug)]
+pub struct PortUnsubscribe {
+    pub port: Port,
+}
 
 /// Messages sent by the internal proxy and handled by the layer.
 #[derive(Encode, Decode, Debug)]
@@ -363,6 +376,11 @@ impl_request!(
     res = RemoteResult<OutgoingConnectResponse>,
     req_path = LayerToProxyMessage::OutgoingConnect,
     res_path = ProxyToLayerMessage::OutgoingConnect,
+);
+
+impl_request!(
+    req = PortUnsubscribe,
+    req_path = LayerToProxyMessage::TcpIncoming => TcpIncomingRequest::PortUnsubscribe,
 );
 
 #[test]

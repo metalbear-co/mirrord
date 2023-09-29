@@ -17,6 +17,7 @@ use mirrord_config::{
     },
     util::VecOrSingle,
 };
+use mirrord_intproxy::protocol::{NetProtocol, PortUnsubscribe};
 use mirrord_protocol::outgoing::SocketAddress;
 use socket2::SockAddr;
 use tracing::warn;
@@ -34,12 +35,6 @@ use crate::{
 pub(super) mod hooks;
 pub(crate) mod id;
 pub(crate) mod ops;
-
-// TODO(alex): Should be an enum, but to do so requires the `adt_const_params` feature, which also
-// requires enabling `incomplete_features`.
-type ConnectProtocol = bool;
-const TCP: ConnectProtocol = false;
-const UDP: ConnectProtocol = !TCP;
 
 pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock::new(DashMap::new);
 
@@ -179,10 +174,16 @@ pub(crate) enum SocketKind {
 }
 
 impl SocketKind {
-    pub(crate) const fn is_udp(&self) -> bool {
-        match self {
-            SocketKind::Tcp(_) => false,
-            SocketKind::Udp(_) => true,
+    pub(crate) const fn is_udp(self) -> bool {
+        matches!(self, Self::Udp(..))
+    }
+}
+
+impl From<SocketKind> for NetProtocol {
+    fn from(kind: SocketKind) -> Self {
+        match kind {
+            SocketKind::Tcp(..) => Self::Stream,
+            SocketKind::Udp(..) => Self::Datagrams,
         }
     }
 }
@@ -263,9 +264,7 @@ impl UserSocket {
                     // informing the layer's and agent's TCP handlers about the socket
                     // close. The agent might try to continue sending incoming
                     // connections/data.
-                    let _ = blocking_send_hook_message(HookMessage::Tcp(
-                        super::tcp::TcpIncoming::Close(port),
-                    ));
+                    let _ = common::make_proxy_request_no_response(PortUnsubscribe { port });
                 }
                 // We don't do incoming UDP, so no need to notify anyone about this.
                 SocketKind::Udp(_) => {}
@@ -373,15 +372,16 @@ impl OutgoingSelector {
     /// So if the user specified a selector with `0.0.0.0:0`, we're going to be always matching on
     /// it.
     #[tracing::instrument(level = "trace", ret)]
-    fn get_connection_through<const PROTOCOL: ConnectProtocol>(
+    fn get_connection_through(
         &self,
         address: SocketAddr,
+        protocol: NetProtocol,
     ) -> Detour<ConnectionThrough> {
         // Closure that checks if the current filter matches the enabled protocols.
-        let filter_protocol = |outgoing: &&OutgoingFilter| match outgoing.protocol {
-            ProtocolFilter::Any => true,
-            ProtocolFilter::Tcp if PROTOCOL == TCP => true,
-            ProtocolFilter::Udp if PROTOCOL == UDP => true,
+        let filter_protocol = move |outgoing: &&OutgoingFilter| match (outgoing.protocol, protocol) {
+            (ProtocolFilter::Any, _) => true,
+            (ProtocolFilter::Tcp, NetProtocol::Stream) => true,
+            (ProtocolFilter::Udp, NetProtocol::Datagrams) => true,
             _ => false,
         };
 

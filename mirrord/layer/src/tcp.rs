@@ -1,6 +1,5 @@
-// use std::io::ErrorKind::ConnectionRefused;
-// /// Tcp Traffic management, common code for stealing & mirroring
 // use std::{
+//     io::ErrorKind::ConnectionRefused,
 //     borrow::Borrow,
 //     collections::HashSet,
 //     hash::{Hash, Hasher},
@@ -23,7 +22,7 @@
 //     LayerError::{PortAlreadyStolen, UnexpectedResponseError},
 // };
 
-// pub(crate) trait TcpHandler<const IS_STEAL: bool> {
+// pub trait TcpHandler<const IS_STEAL: bool> {
 //     fn ports(&self) -> &HashSet<Listen>;
 //     fn ports_mut(&mut self) -> &mut HashSet<Listen>;
 //     fn port_mapping_ref(&self) -> &BiMap<u16, u16>;

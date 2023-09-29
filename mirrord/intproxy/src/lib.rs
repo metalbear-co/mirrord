@@ -6,7 +6,7 @@ use std::{
 };
 
 use mirrord_config::LayerConfig;
-use mirrord_protocol::{ClientMessage, DaemonMessage, FileRequest};
+use mirrord_protocol::{ClientMessage, DaemonMessage, FileRequest, LogLevel};
 use semver::VersionReq;
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -205,10 +205,8 @@ impl ProxySession {
             }
             DaemonMessage::File(msg) => self.simple_proxy.handle_response(msg).await,
             DaemonMessage::GetAddrInfoResponse(msg) => self.simple_proxy.handle_response(msg).await,
-
             DaemonMessage::Tcp(..) => todo!(),
             DaemonMessage::TcpSteal(..) => todo!(),
-
             DaemonMessage::SwitchProtocolVersionResponse(protocol_version) => {
                 if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
                     if let Err(e) = self
@@ -223,9 +221,15 @@ impl ProxySession {
 
                 Ok(())
             }
+            DaemonMessage::LogMessage(log) => {
+                // TODO: we don't have any thread in the layer to handle this
+                match log.level {
+                    LogLevel::Error => tracing::error!("agent error: {}", log.message),
+                    LogLevel::Warn => tracing::warn!("agent warning: {}", log.message),
+                }
 
-            DaemonMessage::LogMessage(..) => todo!(), /* we don't have any thread in the layer */
-            // to handle this ;/
+                Ok(())
+            }
             other => Err(IntProxyError::AgentCommunicationFailed(
                 AgentCommunicationFailed::UnexpectedMessage(other),
             )),
