@@ -56,6 +56,7 @@ pub enum Mode {
         #[arg(short = 'r', long, default_value = DEFAULT_RUNTIME)]
         container_runtime: String,
 
+        /// Which kind of mesh the remote pod is in, see [`MeshVendor`].
         #[arg(long)]
         mesh: Option<String>,
     },
@@ -83,6 +84,5 @@ impl Mode {
 }
 
 pub fn parse_args() -> Args {
-    tracing::debug!("args: {:?}", std::env::args_os());
     Args::try_parse().unwrap_or_else(|err| err.exit())
 }
