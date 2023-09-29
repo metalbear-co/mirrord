@@ -56,7 +56,7 @@ impl Deref for EnvVars {
 ///   when we're mirroring with `istio`;
 /// - Used in the stealer iptables handling to add/detect special rules for meshes;
 ///
-/// Can be converted to and from `String`, but the [`from_str`] just `panics` if you pass an invalid
+/// Can be converted to and from `String`, but the `from_str` just `panics` if you pass an invalid
 /// value (this use-case is hand-written, so it can't fail unless you add a new value and forget to
 /// handle it in the [`FromStr`] implementation).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
