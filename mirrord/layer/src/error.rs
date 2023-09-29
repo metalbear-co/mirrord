@@ -4,7 +4,7 @@ use errno::set_errno;
 use ignore_codes::*;
 use libc::{c_char, DIR, FILE};
 use mirrord_config::{config::ConfigError, feature::network::outgoing::OutgoingFilterError};
-use mirrord_protocol::{ClientMessage, ConnectionId, ResponseError, SerializationError};
+use mirrord_protocol::{ResponseError, SerializationError};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
 use thiserror::Error;
@@ -98,9 +98,8 @@ pub(crate) enum HookError {
 
 /// Errors internal to mirrord-layer.
 ///
-/// You'll encounter these when the layer is performing some of its internal operations (mostly when
-/// handling messsages, like
-/// [`ProxyToLayerMessage`](mirrord_intproxy::protocol::ProxyToLayerMessage).
+/// You'll encounter these when the layer is performing some of its internal operations, mostly when
+/// handling [`ProxyToLayerMessage`](mirrord_intproxy::protocol::ProxyToLayerMessage).
 #[derive(Error, Debug)]
 pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed while getting a response!")]
@@ -122,28 +121,8 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Parsing `bool` value failed with `{0}`!")]
     ParseBoolError(#[from] ParseBoolError),
 
-    #[error("mirrord-layer: Failed to get `Sender` for sending tcp response!")]
-    SendErrorTcpResponse,
-
-    #[error("mirrord-layer: Failed to get `Sender` for sending udp response!")]
-    SendErrorUdpResponse,
-
-    #[error("mirrord-layer: Failed to get `Sender` for sending file response!")]
-    SendErrorFileResponse,
-
-    #[error("mirrord-layer: Failed to get `Sender` for sending getaddrinfo response!")]
-    SendErrorGetAddrInfoResponse,
-
     #[error("mirrord-layer: IO failed with `{0}`!")]
     IO(#[from] std::io::Error),
-
-    #[error("mirrord-layer: No connection found for id `{0}`!")]
-    NoConnectionId(ConnectionId),
-
-    #[error(
-        "mirrord-layer: Got new connection from daemon after layer already closed that socket."
-    )]
-    NewConnectionAfterSocketClose(ConnectionId),
 
     #[error("mirrord-layer: JSON convert error")]
     JSONConvertError(#[from] serde_json::Error),
@@ -164,12 +143,6 @@ pub(crate) enum LayerError {
     // HttpForwardingError(#[from] HttpForwarderError),
     #[error("mirrord-layer: Regex creation failed with `{0}`.")]
     Regex(#[from] fancy_regex::Error),
-
-    #[error("mirrord-layer: Agent closed connection with error: {0}")]
-    AgentErrorClosed(String),
-
-    #[error("mirrord-layer: local app closed the connection with mirrord.")]
-    AppClosedConnection(ClientMessage),
 
     // `From` implemented below, not with `#[from]` so that when new variants of
     // `SerializationError` are added, they are mapped into different variants of

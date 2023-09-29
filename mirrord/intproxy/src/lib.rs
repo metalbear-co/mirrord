@@ -20,7 +20,7 @@ use crate::{
     layer_conn::LayerConnection,
     ping_pong::PingPong,
     protocol::{LayerToProxyMessage, LocalMessage},
-    proxies::{outgoing::proxy::OutgoingProxy, simple::SimpleProxy},
+    proxies::{incoming::IncomingProxy, outgoing::proxy::OutgoingProxy, simple::SimpleProxy},
 };
 
 pub mod agent_conn;
@@ -121,6 +121,7 @@ struct ProxySession {
     layer_conn: LayerConnection,
     simple_proxy: SimpleProxy,
     outgoing_proxy: OutgoingProxy,
+    incoming_proxy: IncomingProxy,
     ping_pong: PingPong,
 }
 
@@ -146,6 +147,7 @@ impl ProxySession {
             layer_conn,
             simple_proxy,
             outgoing_proxy,
+            incoming_proxy: Default::default(),
             ping_pong,
         })
     }
@@ -205,8 +207,8 @@ impl ProxySession {
             }
             DaemonMessage::File(msg) => self.simple_proxy.handle_response(msg).await,
             DaemonMessage::GetAddrInfoResponse(msg) => self.simple_proxy.handle_response(msg).await,
-            DaemonMessage::Tcp(..) => todo!(),
-            DaemonMessage::TcpSteal(..) => todo!(),
+            DaemonMessage::Tcp(msg) => self.incoming_proxy.handle_agent_message(msg).await,
+            DaemonMessage::TcpSteal(msg) => self.incoming_proxy.handle_agent_message(msg).await,
             DaemonMessage::SwitchProtocolVersionResponse(protocol_version) => {
                 if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
                     if let Err(e) = self
@@ -265,7 +267,9 @@ impl ProxySession {
                     .handle_layer_connect_request(req, message.message_id)
                     .await
             }
-            LayerToProxyMessage::TcpIncoming(..) => todo!(),
+            LayerToProxyMessage::Incoming(req) => {
+                self.incoming_proxy.handle_layer_request(req).await
+            }
         }
     }
 }

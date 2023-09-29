@@ -10,7 +10,7 @@ use mirrord_protocol::{
         XstatFsResponse, XstatRequest, XstatResponse,
     },
     outgoing::SocketAddress,
-    FileRequest, FileResponse, RemoteResult, Port,
+    FileRequest, FileResponse, Port, RemoteResult,
 };
 
 /// An identifier for a message sent from the layer to the internal proxy.
@@ -38,8 +38,8 @@ pub enum LayerToProxyMessage {
     GetAddrInfo(GetAddrInfoRequest),
     /// A request to initiate a new outgoing connection.
     OutgoingConnect(OutgoingConnectRequest),
-    /// Requests related to incoming tcp.
-    TcpIncoming(TcpIncomingRequest),
+    /// Requests related to incoming.
+    Incoming(IncomingRequest),
 }
 
 /// Unique `layer <-> proxy` session identifier.
@@ -88,9 +88,9 @@ pub struct OutgoingConnectRequest {
     pub protocol: NetProtocol,
 }
 
-/// Requests related to incoming tcp.
+/// Requests related to `incoming` features.
 #[derive(Encode, Decode, Debug)]
-pub enum TcpIncomingRequest {
+pub enum IncomingRequest {
     PortSubscribe(PortSubscribe),
     PortUnsubscribe(PortUnsubscribe),
 }
@@ -108,7 +108,7 @@ pub struct PortUnsubscribe {
 /// Messages sent by the internal proxy and handled by the layer.
 #[derive(Encode, Decode, Debug)]
 pub enum ProxyToLayerMessage {
-    /// A response to [`NewSession`] request. Contains the identifier of the new `layer <-> proxy`
+    /// A response to [`NewSessionRequest`]. Contains the identifier of the new `layer <-> proxy`
     /// session.
     NewSession(SessionId),
     /// A response to layer's [`FileRequest`].
@@ -117,6 +117,13 @@ pub enum ProxyToLayerMessage {
     GetAddrInfo(GetAddrInfoResponse),
     /// A response to layer's [`OutgoingConnectRequest`]
     OutgoingConnect(RemoteResult<OutgoingConnectResponse>),
+    /// A response to layer's [`PortSubscribe`]
+    Incoming(PortSubscribeResult),
+}
+
+#[derive(Encode, Decode, Debug)]
+pub struct PortSubscribeResult {
+    result: RemoteResult<()>,
 }
 
 /// A response to layer's [`OutgoingConnectRequest`].
@@ -379,8 +386,15 @@ impl_request!(
 );
 
 impl_request!(
+    req = PortSubscribe,
+    res = PortSubscribeResult,
+    req_path = LayerToProxyMessage::Incoming => IncomingRequest::PortSubscribe,
+    res_path = ProxyToLayerMessage::Incoming,
+);
+
+impl_request!(
     req = PortUnsubscribe,
-    req_path = LayerToProxyMessage::TcpIncoming => TcpIncomingRequest::PortUnsubscribe,
+    req_path = LayerToProxyMessage::Incoming => IncomingRequest::PortUnsubscribe,
 );
 
 #[test]

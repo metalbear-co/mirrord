@@ -24,8 +24,10 @@ use crate::{
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     error::HookError,
     file::{self, OPEN_FILES},
-    is_debugger_port, ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_CONFIG, LISTEN_PORTS,
-    OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR, REMOTE_UNIX_STREAMS, TARGETLESS, INCOMING_HANDLER, incoming::Listen,
+    incoming::Listen,
+    is_debugger_port, ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_CONFIG,
+    INCOMING_HANDLER, LISTEN_PORTS, OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR,
+    REMOTE_UNIX_STREAMS, TARGETLESS,
 };
 
 /// Holds the pair of [`SocketAddr`] with their hostnames, resolved remotely through
@@ -291,7 +293,10 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
                 ipv6: address.is_ipv6(),
                 id: socket.id,
             };
-            INCOMING_HANDLER.get().expect("Should be set during initialization").handle_listen(listen)?;
+            INCOMING_HANDLER
+                .get()
+                .expect("Should be set during initialization")
+                .handle_listen(listen)?;
 
             Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(Bound {
                 requested_address,
@@ -521,9 +526,12 @@ pub(super) fn connect(
         .expect("Should be set during initialization!");
 
     match NetProtocol::from(user_socket_info.kind) {
-        NetProtocol::Datagrams if enabled_udp_outgoing => {
-            connect_outgoing::<true>(sockfd, remote_address, user_socket_info, NetProtocol::Datagrams)
-        }
+        NetProtocol::Datagrams if enabled_udp_outgoing => connect_outgoing::<true>(
+            sockfd,
+            remote_address,
+            user_socket_info,
+            NetProtocol::Datagrams,
+        ),
         NetProtocol::Stream => match user_socket_info.state {
             SocketState::Initialized
                 if (optional_ip_address.is_some() && enabled_tcp_outgoing)
@@ -532,7 +540,12 @@ pub(super) fn connect(
                             .as_ref()
                             .is_some_and(|streams| !streams.is_empty())) =>
             {
-                connect_outgoing::<true>(sockfd, remote_address, user_socket_info, NetProtocol::Stream)
+                connect_outgoing::<true>(
+                    sockfd,
+                    remote_address,
+                    user_socket_info,
+                    NetProtocol::Stream,
+                )
             }
             SocketState::Bound(Bound { address, .. }) => {
                 trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
@@ -1031,7 +1044,12 @@ pub(super) fn send_to(
             )
         }
     } else {
-        connect_outgoing::<false>(sockfd, destination, user_socket_info, NetProtocol::Datagrams)?;
+        connect_outgoing::<false>(
+            sockfd,
+            destination,
+            user_socket_info,
+            NetProtocol::Datagrams,
+        )?;
 
         let layer_address: SockAddr = SOCKETS
             .get(&sockfd)
@@ -1106,7 +1124,12 @@ pub(super) fn sendmsg(
 
         unsafe { FN_SENDMSG(sockfd, true_message_header.as_ref(), flags) }
     } else {
-        connect_outgoing::<false>(sockfd, destination, user_socket_info, NetProtocol::Datagrams)?;
+        connect_outgoing::<false>(
+            sockfd,
+            destination,
+            user_socket_info,
+            NetProtocol::Datagrams,
+        )?;
 
         let layer_address: SockAddr = SOCKETS
             .get(&sockfd)
