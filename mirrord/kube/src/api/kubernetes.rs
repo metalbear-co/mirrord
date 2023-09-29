@@ -215,7 +215,7 @@ impl AgentManagment for KubernetesAPI {
 
         let is_mesh = runtime_data
             .as_ref()
-            .map(|runtime| runtime.is_mesh)
+            .map(|runtime| runtime.mesh.is_some())
             .unwrap_or_default();
 
         if self

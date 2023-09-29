@@ -4,7 +4,7 @@ use std::{
 };
 
 use enum_dispatch::enum_dispatch;
-use mirrord_protocol::Port;
+use mirrord_protocol::{MeshVendor, Port};
 use rand::distributions::{Alphanumeric, DistString};
 use tracing::warn;
 
@@ -12,7 +12,7 @@ use crate::{
     error::{AgentError, Result},
     steal::ip_tables::{
         flush_connections::FlushConnections,
-        mesh::{MeshRedirect, MeshVendor},
+        mesh::{MeshRedirect, MeshVendorExt},
         redirect::{PreroutingRedirect, Redirect},
         standard::StandardRedirect,
     },

@@ -95,6 +95,7 @@ impl State {
             cli::Mode::Targeted {
                 container_id,
                 container_runtime,
+                ..
             } => {
                 let container =
                     get_container(container_id.clone(), Some(container_runtime)).await?;
@@ -544,7 +545,7 @@ impl ClientConnectionHandler {
 }
 
 /// Initializes the agent's [`State`], channels, threads, and runs [`ClientConnectionHandler`]s.
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "info", ret)]
 async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
     trace!("Starting agent with args: {args:?}");
 
@@ -569,9 +570,11 @@ async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
         (None, None)
     } else {
         let cancellation_token = cancellation_token.clone();
+        let mesh = args.mode.mesh();
+
         let watched_task = WatchedTask::new(
             TcpConnectionSniffer::TASK_NAME,
-            TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface).and_then(
+            TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface, mesh).and_then(
                 |sniffer| async move {
                     let res = sniffer.start(cancellation_token).await;
                     if let Err(err) = res.as_ref() {
