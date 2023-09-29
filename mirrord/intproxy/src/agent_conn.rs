@@ -21,10 +21,6 @@ use tokio::{
 pub enum AgentCommunicationFailed {
     #[error("failed to connect: {0}")]
     ConnectionFailed(#[from] AgentConnectionFailed),
-    #[error("received unexpected pong from the agent")]
-    UnmatchedPong,
-    #[error("agent did not respond to ping message in time")]
-    PingTimeout,
     #[error("channel is closed")]
     ChannelClosed,
     #[error("received unexpected message: {0:?}")]

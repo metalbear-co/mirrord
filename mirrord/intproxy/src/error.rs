@@ -3,7 +3,10 @@ use std::io;
 use mirrord_protocol::ResponseError;
 use thiserror::Error;
 
-use crate::{agent_conn::AgentCommunicationFailed, layer_conn::LayerCommunicationFailed};
+use crate::{
+    agent_conn::AgentCommunicationFailed, layer_conn::LayerCommunicationFailed,
+    ping_pong::PingPongError,
+};
 
 #[derive(Error, Debug)]
 pub enum IntProxyError {
@@ -29,6 +32,8 @@ pub enum IntProxyError {
     OutgoingInterceptorFailed,
     #[error("sending datagrams over unix sockets is not supported")]
     DatagramOverUnix,
+    #[error("ping pong error: {0}")]
+    PingPong(#[from] PingPongError),
 }
 
 pub type Result<T> = core::result::Result<T, IntProxyError>;

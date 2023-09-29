@@ -11,13 +11,14 @@ use semver::VersionReq;
 use tokio::{
     net::{TcpListener, TcpStream},
     task::JoinSet,
-    time::{self, Interval, MissedTickBehavior},
+    time,
 };
 
 use crate::{
     agent_conn::{AgentCommunicationFailed, AgentConnectInfo, AgentConnection},
     error::{IntProxyError, Result},
     layer_conn::LayerConnection,
+    ping_pong::PingPong,
     protocol::{LayerToProxyMessage, LocalMessage},
     proxies::{outgoing::proxy::OutgoingProxy, simple::SimpleProxy},
 };
@@ -26,6 +27,7 @@ pub mod agent_conn;
 pub mod codec;
 pub mod error;
 mod layer_conn;
+mod ping_pong;
 pub mod protocol;
 mod proxies;
 mod request_queue;
@@ -180,7 +182,7 @@ impl ProxySession {
                     self.handle_agent_message(message).await?;
                 },
 
-                res = self.ping_pong.timeout() => {
+                res = self.ping_pong.ready() => {
                     res?;
                     self.agent_conn.sender().send(ClientMessage::Ping).await?;
                     self.ping_pong.ping_sent();
@@ -190,8 +192,7 @@ impl ProxySession {
     }
 
     async fn handle_agent_message(&mut self, message: DaemonMessage) -> Result<()> {
-        self.ping_pong
-            .agent_sent_message(matches!(message, DaemonMessage::Pong))?;
+        self.ping_pong.inspect_agent_message(&message)?;
 
         match message {
             DaemonMessage::Pong => Ok(()),
@@ -261,57 +262,6 @@ impl ProxySession {
                     .await
             }
             LayerToProxyMessage::TcpIncoming(..) => todo!(),
-        }
-    }
-}
-
-/// Handles ping pong logic on the proxy side.
-struct PingPong {
-    interval: Interval,
-    awaiting_pong: bool,
-}
-
-impl PingPong {
-    async fn new(frequency: Duration) -> Self {
-        let mut interval = time::interval(frequency);
-        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-        interval.tick().await;
-
-        Self {
-            interval,
-            awaiting_pong: false,
-        }
-    }
-
-    /// Returns an error if the agent did not respond to ping in time.
-    /// Returns [`Ok`] if its time to send a ping to the agent.
-    async fn timeout(&mut self) -> Result<()> {
-        self.interval.tick().await;
-
-        if self.awaiting_pong {
-            Err(AgentCommunicationFailed::PingTimeout.into())
-        } else {
-            Ok(())
-        }
-    }
-
-    fn ping_sent(&mut self) {
-        self.interval.reset();
-        self.awaiting_pong = true;
-    }
-
-    fn agent_sent_message(&mut self, is_pong: bool) -> Result<()> {
-        match (self.awaiting_pong, is_pong) {
-            (false, true) => Err(AgentCommunicationFailed::UnmatchedPong.into()),
-            (true, true) => {
-                self.interval.reset();
-                Ok(())
-            }
-            (false, false) => {
-                self.interval.reset();
-                Ok(())
-            }
-            (true, false) => Ok(()),
         }
     }
 }
