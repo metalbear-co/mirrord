@@ -545,7 +545,7 @@ impl ClientConnectionHandler {
 }
 
 /// Initializes the agent's [`State`], channels, threads, and runs [`ClientConnectionHandler`]s.
-#[tracing::instrument(level = "info", ret)]
+#[tracing::instrument(level = "trace", ret)]
 async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
     trace!("Starting agent with args: {args:?}");
 
