@@ -73,6 +73,10 @@ impl Mode {
         matches!(self, Mode::Targetless)
     }
 
+    /// Converts a mesh `Option<String>` to an `Option<MeshVendor>`.
+    ///
+    /// Keep in mind that the [`FromStr`] implementation for [`MeshVendor`] `panic`s if we feed it
+    /// anything other than `"Istio"` or `"Linkerd"`.
     pub(super) fn mesh(&self) -> Option<MeshVendor> {
         match self {
             Mode::Targeted { mesh, .. } => mesh
