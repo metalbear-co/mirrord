@@ -513,7 +513,7 @@ impl TcpConnectionSniffer {
     /// detected, then the agent should start mirroring as if it was a new connection.
     ///
     /// tl;dr: checks packet flags, or if it's an HTTP packet, then begins a new sniffing session.
-    #[tracing::instrument(level = "debug", ret, skip(bytes))]
+    #[tracing::instrument(level = "trace", ret, skip(bytes))]
     fn treat_as_new_session(tcp_flags: u16, bytes: &[u8]) -> bool {
         is_new_connection(tcp_flags)
             || matches!(HttpVersion::new(bytes), HttpVersion::V1 | HttpVersion::V2)
