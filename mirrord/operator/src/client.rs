@@ -211,31 +211,14 @@ impl OperatorApi {
             },
         );
 
-        println!("{requested:?}");
-
         let created = self
             .copy_target_api
             .create(&PostParams::default(), &requested)
             .await
             .map_err(KubeApiError::from)?;
 
-        let url = {
-            let dt = &();
-            let ns = self
-                .target_namespace
-                .as_deref()
-                .unwrap_or_else(|| self.client.default_namespace());
-            let api_version = CopyTargetCrd::api_version(dt);
-            let plural = CopyTargetCrd::plural(dt);
-
-            format!(
-                "/apis/{api_version}/proxy/namespaces/{ns}/{plural}/{}",
-                created.spec.target.get_target_name()
-            )
-        };
-
         let mut builder = Request::builder()
-            .uri(url)
+            .uri(self.copy_url(&created.spec.target.get_target_name()))
             .header("x-session-id", session_information.session_id.to_string());
 
         if let Some(certificate) = &session_information.client_certificate {
@@ -343,6 +326,19 @@ impl OperatorApi {
             Err(kube::Error::Api(ErrorResponse { code: 404, .. })) => Ok(None),
             Err(err) => Err(OperatorApiError::from(KubeApiError::from(err))),
         }
+    }
+
+    #[tracing::instrument(level = "debug", skip(self), ret)]
+    fn copy_url(&self, name: &str) -> String {
+        let dt = &();
+        let ns = self
+            .target_namespace
+            .as_deref()
+            .unwrap_or_else(|| self.client.default_namespace());
+        let api_version = CopyTargetCrd::api_version(dt);
+        let plural = CopyTargetCrd::plural(dt);
+
+        format!("/apis/{api_version}/proxy/namespaces/{ns}/{plural}/{name}")
     }
 
     #[tracing::instrument(level = "debug", skip(self), ret)]
