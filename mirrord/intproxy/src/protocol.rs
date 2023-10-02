@@ -98,12 +98,12 @@ pub enum IncomingRequest {
 }
 
 /// A request to start proxying incoming connections.
-/// 
+///
 /// For each connection incoming to the remote port,
 /// the internal proxy will initiate a new connection to the local port specified in `listening_on`.
 /// Through this connection, the proxy will first send the [`SocketAddress`] of the original peer,
 /// serialized with [`crate::codec`]. After that, the proxy will send raw data.
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct PortSubscribe {
     /// Port on the remote pod that layer wants want to mirror.
     pub port: Port,
@@ -114,8 +114,8 @@ pub struct PortSubscribe {
 /// A request to stop proxying incoming connections.
 #[derive(Encode, Decode, Debug)]
 pub struct PortUnsubscribe {
-    /// Local address on which the layer was listening.
-    pub listening_on: SocketAddress,
+    /// Port on the remote pod that layer mirrored.
+    pub port: Port,
 }
 
 /// Messages sent by the internal proxy and handled by the layer.

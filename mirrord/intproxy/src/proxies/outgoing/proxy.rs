@@ -21,7 +21,7 @@ pub struct OutgoingProxy {
     agent_sender: AgentSender,
     layer_sender: LayerSender,
     interceptors: HashMap<(ConnectionId, NetProtocol), InterceptorTaskHandle>,
-    connect_queues: HashMap<NetProtocol, RequestQueue>,
+    connect_queues: HashMap<NetProtocol, RequestQueue<()>>,
 }
 
 impl OutgoingProxy {
@@ -47,7 +47,7 @@ impl OutgoingProxy {
         self.connect_queues
             .entry(protocol)
             .or_default()
-            .save_request_id(message_id);
+            .insert((), message_id);
 
         self.agent_sender
             .send(protocol.wrap_agent_connect(remote_address))
@@ -119,8 +119,9 @@ impl OutgoingProxy {
         let message_id = self
             .connect_queues
             .get_mut(&protocol)
-            .and_then(RequestQueue::get_request_id)
-            .ok_or(IntProxyError::RequestQueueEmpty)?;
+            .ok_or(IntProxyError::RequestQueueEmpty)?
+            .get()?
+            .id;
 
         let connect = match connect {
             Ok(connect) => connect,

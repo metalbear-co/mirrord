@@ -34,6 +34,8 @@ pub enum IntProxyError {
     DatagramOverUnix,
     #[error("ping pong error: {0}")]
     PingPong(#[from] PingPongError),
+    #[error("incoming interceptor task failed")]
+    IncomingInterceptorFailed,
 }
 
 pub type Result<T> = core::result::Result<T, IntProxyError>;

@@ -178,7 +178,7 @@ impl UserSocket {
                 ..
             } => {
                 let _ = common::make_proxy_request_no_response(PortUnsubscribe {
-                    listening_on: bound.address.into(),
+                    port: bound.requested_address.port(),
                 });
             }
             _ => {}

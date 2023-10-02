@@ -5,7 +5,7 @@ use mirrord_protocol::{
 
 use crate::{
     agent_conn::AgentSender,
-    error::{IntProxyError, Result},
+    error::Result,
     layer_conn::LayerSender,
     protocol::{LocalMessage, MessageId, ProxyToLayerMessage},
     request_queue::RequestQueue,
@@ -13,9 +13,9 @@ use crate::{
 
 #[derive(Default)]
 pub struct Queues {
-    file_ops: RequestQueue,
-    get_addr_info: RequestQueue,
-    get_env_vars: RequestQueue,
+    file_ops: RequestQueue<()>,
+    get_addr_info: RequestQueue<()>,
+    get_env_vars: RequestQueue<()>,
 }
 
 /// For passing messages between the layer and the agent without custom internal logic.
@@ -40,7 +40,7 @@ impl SimpleProxy {
         id: MessageId,
     ) -> Result<()> {
         if let Some(queue) = request.get_queue(&mut self.queues) {
-            queue.save_request_id(id);
+            queue.insert((), id);
         }
 
         self.agent_sender
@@ -50,10 +50,7 @@ impl SimpleProxy {
     }
 
     pub async fn handle_response<R: SimpleResponse>(&mut self, response: R) -> Result<()> {
-        let message_id = response
-            .get_queue(&mut self.queues)
-            .get_request_id()
-            .ok_or(IntProxyError::RequestQueueEmpty)?;
+        let message_id = response.get_queue(&mut self.queues).get()?.id;
 
         self.layer_sender
             .send(LocalMessage {
@@ -68,7 +65,7 @@ impl SimpleProxy {
 pub trait SimpleRequest {
     fn into_message(self) -> ClientMessage;
 
-    fn get_queue<'a>(&self, queues: &'a mut Queues) -> Option<&'a mut RequestQueue>;
+    fn get_queue<'a>(&self, queues: &'a mut Queues) -> Option<&'a mut RequestQueue<()>>;
 }
 
 impl SimpleRequest for FileRequest {
@@ -76,7 +73,7 @@ impl SimpleRequest for FileRequest {
         ClientMessage::FileRequest(self)
     }
 
-    fn get_queue<'a>(&self, queues: &'a mut Queues) -> Option<&'a mut RequestQueue> {
+    fn get_queue<'a>(&self, queues: &'a mut Queues) -> Option<&'a mut RequestQueue<()>> {
         match self {
             Self::Close(..) | Self::CloseDir(..) => None,
             _ => Some(&mut queues.file_ops),
@@ -89,7 +86,7 @@ impl SimpleRequest for GetAddrInfoRequest {
         ClientMessage::GetAddrInfoRequest(self)
     }
 
-    fn get_queue<'a>(&self, queues: &'a mut Queues) -> Option<&'a mut RequestQueue> {
+    fn get_queue<'a>(&self, queues: &'a mut Queues) -> Option<&'a mut RequestQueue<()>> {
         Some(&mut queues.get_addr_info)
     }
 }
@@ -99,7 +96,7 @@ impl SimpleRequest for GetEnvVarsRequest {
         ClientMessage::GetEnvVarsRequest(self)
     }
 
-    fn get_queue<'a>(&self, queues: &'a mut Queues) -> Option<&'a mut RequestQueue> {
+    fn get_queue<'a>(&self, queues: &'a mut Queues) -> Option<&'a mut RequestQueue<()>> {
         Some(&mut queues.get_env_vars)
     }
 }
@@ -107,7 +104,7 @@ impl SimpleRequest for GetEnvVarsRequest {
 pub trait SimpleResponse {
     fn into_message(self) -> ProxyToLayerMessage;
 
-    fn get_queue<'a>(&self, queues: &'a mut Queues) -> &'a mut RequestQueue;
+    fn get_queue<'a>(&self, queues: &'a mut Queues) -> &'a mut RequestQueue<()>;
 }
 
 impl SimpleResponse for FileResponse {
@@ -115,7 +112,7 @@ impl SimpleResponse for FileResponse {
         ProxyToLayerMessage::File(self)
     }
 
-    fn get_queue<'a>(&self, queues: &'a mut Queues) -> &'a mut RequestQueue {
+    fn get_queue<'a>(&self, queues: &'a mut Queues) -> &'a mut RequestQueue<()> {
         &mut queues.file_ops
     }
 }
@@ -125,7 +122,7 @@ impl SimpleResponse for GetAddrInfoResponse {
         ProxyToLayerMessage::GetAddrInfo(self)
     }
 
-    fn get_queue<'a>(&self, queues: &'a mut Queues) -> &'a mut RequestQueue {
+    fn get_queue<'a>(&self, queues: &'a mut Queues) -> &'a mut RequestQueue<()> {
         &mut queues.get_addr_info
     }
 }

@@ -250,6 +250,7 @@ pub(super) fn bind(
 /// later be routed to the fake local port.
 #[tracing::instrument(level = "trace", ret)]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
+    // TODO msmolarek: port mapping?
     let mut socket = {
         SOCKETS
             .remove(&sockfd)

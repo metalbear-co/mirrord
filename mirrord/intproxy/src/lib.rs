@@ -139,6 +139,8 @@ impl ProxySession {
             SimpleProxy::new(layer_conn.sender().clone(), agent_conn.sender().clone());
         let outgoing_proxy =
             OutgoingProxy::new(agent_conn.sender().clone(), layer_conn.sender().clone());
+        let incoming_proxy =
+            IncomingProxy::new(&intproxy.config.feature.network.incoming, agent_conn.sender().clone(), layer_conn.sender().clone());
 
         let ping_pong = PingPong::new(Self::PING_INTERVAL).await;
 
@@ -147,7 +149,7 @@ impl ProxySession {
             layer_conn,
             simple_proxy,
             outgoing_proxy,
-            incoming_proxy: Default::default(),
+            incoming_proxy,
             ping_pong,
         })
     }
@@ -268,7 +270,9 @@ impl ProxySession {
                     .await
             }
             LayerToProxyMessage::Incoming(req) => {
-                self.incoming_proxy.handle_layer_request(req).await
+                self.incoming_proxy
+                    .handle_layer_request(req, message.message_id)
+                    .await
             }
         }
     }
