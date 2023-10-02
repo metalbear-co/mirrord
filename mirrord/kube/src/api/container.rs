@@ -3,6 +3,7 @@ use std::{collections::HashSet, sync::LazyLock};
 use k8s_openapi::api::core::v1::ContainerStatus;
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
+use mirrord_protocol::MeshVendor;
 use rand::{
     distributions::{Alphanumeric, DistString},
     Rng,
@@ -86,11 +87,19 @@ where
 pub fn choose_container<'a>(
     container_name: &Option<String>,
     container_statuses: &'a [ContainerStatus],
-) -> (Option<&'a ContainerStatus>, bool) {
-    const MESH_LIST: [&str; 4] = ["istio-proxy", "istio-init", "linkerd-proxy", "linkerd-init"];
-    let is_mesh = container_statuses
-        .iter()
-        .any(|status| MESH_LIST.contains(&status.name.as_str()));
+) -> (Option<&'a ContainerStatus>, Option<MeshVendor>) {
+    const ISTIO: [&str; 2] = ["istio-proxy", "istio-init"];
+    const LINKERD: [&str; 2] = ["linkerd-proxy", "linkerd-init"];
+
+    let mesh = container_statuses.iter().find_map(|status| {
+        if ISTIO.contains(&status.name.as_str()) {
+            Some(MeshVendor::Istio)
+        } else if LINKERD.contains(&status.name.as_str()) {
+            Some(MeshVendor::Linkerd)
+        } else {
+            None
+        }
+    });
 
     let container = if let Some(name) = container_name {
         container_statuses
@@ -104,5 +113,5 @@ pub fn choose_container<'a>(
             .or_else(|| container_statuses.first())
     };
 
-    (container, is_mesh)
+    (container, mesh)
 }

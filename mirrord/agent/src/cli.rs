@@ -1,9 +1,13 @@
 #![deny(missing_docs)]
 
 use clap::{Parser, Subcommand};
+use mirrord_protocol::MeshVendor;
 
 const DEFAULT_RUNTIME: &str = "containerd";
 
+/// **Heads-up**: Order of arguments passed to this matter, so if you add a new arg after something
+/// like `Targeted`, it won't work, as `Mode` is a `subcomand`. You would need to add the arg in
+/// `Mode::Targeted` for it to work (that's why `--mesh` is there and not here).
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
@@ -49,6 +53,10 @@ pub enum Mode {
         /// Container runtime to use
         #[arg(short = 'r', long, default_value = DEFAULT_RUNTIME)]
         container_runtime: String,
+
+        /// Which kind of mesh the remote pod is in, see [`MeshVendor`].
+        #[arg(long)]
+        mesh: Option<MeshVendor>,
     },
     /// Inform the agent to use `proc/1/root` as the root directory.
     Ephemeral,
@@ -61,6 +69,14 @@ pub enum Mode {
 impl Mode {
     pub fn is_targetless(&self) -> bool {
         matches!(self, Mode::Targetless)
+    }
+
+    /// Digs into `Mode::Targeted` to get the `MeshVendor`.
+    pub(super) fn mesh(&self) -> Option<MeshVendor> {
+        match *self {
+            Mode::Targeted { mesh, .. } => mesh,
+            _ => None,
+        }
     }
 }
 

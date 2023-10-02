@@ -14,6 +14,7 @@ use k8s_openapi::{
 };
 use kube::{api::ListParams, Api, Client};
 use mirrord_config::target::{DeploymentTarget, PodTarget, RolloutTarget, Target};
+use mirrord_protocol::MeshVendor;
 
 use crate::{
     api::{
@@ -50,7 +51,7 @@ pub struct RuntimeData {
     pub container_name: String,
 
     /// Used to check if we're running with a mesh/sidecar in `detect_mesh_mirror_mode`.
-    pub is_mesh: bool,
+    pub mesh: Option<MeshVendor>,
 }
 
 impl RuntimeData {
@@ -76,7 +77,7 @@ impl RuntimeData {
             .container_statuses
             .clone()
             .ok_or(KubeApiError::ContainerStatusNotFound)?;
-        let (chosen_container, is_mesh) =
+        let (chosen_container, mesh) =
             choose_container(container_name, container_statuses.as_ref());
 
         let chosen_status = chosen_container.ok_or_else(|| {
@@ -117,7 +118,7 @@ impl RuntimeData {
             container_id,
             container_runtime,
             container_name,
-            is_mesh,
+            mesh,
         })
     }
 
