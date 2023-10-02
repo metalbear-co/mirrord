@@ -182,7 +182,10 @@ impl OperatorApi {
 
         let (sender, receiver) = if config.feature.copy_target.enabled {
             operator_api
-                .copy_target(&operator_session_information)
+                .copy_target(
+                    &operator_session_information,
+                    config.feature.copy_target.name.clone(),
+                )
                 .await?
         } else {
             operator_api
@@ -196,15 +199,18 @@ impl OperatorApi {
     pub async fn copy_target(
         self,
         session_information: &OperatorSessionInformation,
+        name: Option<String>,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
         let target = self.target_config.path.clone().expect("Must have config");
 
         let requested = CopyTargetCrd::new(
-            &format!(
-                "{}-copy-{:x}",
-                target.get_target_name(),
-                rand::random::<u32>()
-            ),
+            &name.unwrap_or_else(|| {
+                format!(
+                    "{}-copy-{:x}",
+                    target.get_target_name(),
+                    rand::random::<u32>()
+                )
+            }),
             CopyTargetSpec {
                 target,
                 patch: None,

@@ -20,7 +20,7 @@ pub(super) static DEFAULT_TOLERATIONS: LazyLock<Vec<Toleration>> = LazyLock::new
     }]
 });
 
-pub(super) fn get_agent_image(agent: &AgentConfig) -> String {
+pub fn get_agent_image(agent: &AgentConfig) -> String {
     match &agent.image {
         Some(image) => image.clone(),
         None => concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_owned(),

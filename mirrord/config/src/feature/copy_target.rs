@@ -12,6 +12,9 @@ use crate::{
 pub struct CopyTargetConfig {
     #[config(env = "MIRRORD_COPY_TARGET_ENABLED")]
     pub enabled: bool,
+
+    #[config(env = "MIRRORD_COPY_TARGET_NAME")]
+    pub name: Option<String>,
 }
 
 impl MirrordToggleableConfig for CopyTargetFileConfig {
@@ -21,6 +24,10 @@ impl MirrordToggleableConfig for CopyTargetFileConfig {
             .transpose()?
             .unwrap_or(false);
 
-        Ok(CopyTargetConfig { enabled })
+        let name = FromEnv::new("MIRRORD_COPY_TARGET_NAME")
+            .source_value(context)
+            .transpose()?;
+
+        Ok(CopyTargetConfig { enabled, name })
     }
 }
