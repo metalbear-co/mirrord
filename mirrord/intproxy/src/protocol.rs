@@ -59,7 +59,7 @@ pub enum NewSessionRequest {
     /// Layer initialized from its constructor and has a fresh state.
     New,
     /// Layer re-initialized from a [`fork`](https://man7.org/linux/man-pages/man2/fork.2.html) detour.
-    /// It shares some state with its parent.
+    /// It inherits state from its parent.
     Forked(SessionId),
 }
 
@@ -91,19 +91,31 @@ pub struct OutgoingConnectRequest {
 /// Requests related to `incoming` features.
 #[derive(Encode, Decode, Debug)]
 pub enum IncomingRequest {
+    /// A request made by layer after it starts listening for mirrored connections.
     PortSubscribe(PortSubscribe),
+    /// A request made by the layer before it closes the socket listening for mirrored connections.
     PortUnsubscribe(PortUnsubscribe),
 }
 
+/// A request to start proxying incoming connections.
+/// 
+/// For each connection incoming to the remote port,
+/// the internal proxy will initiate a new connection to the local port specified in `listening_on`.
+/// Through this connection, the proxy will first send the [`SocketAddress`] of the original peer,
+/// serialized with [`crate::codec`]. After that, the proxy will send raw data.
 #[derive(Encode, Decode, Debug)]
 pub struct PortSubscribe {
+    /// Port on the remote pod that layer wants want to mirror.
     pub port: Port,
+    /// Local address on which the layer is listening.
     pub listening_on: SocketAddress,
 }
 
+/// A request to stop proxying incoming connections.
 #[derive(Encode, Decode, Debug)]
 pub struct PortUnsubscribe {
-    pub port: Port,
+    /// Local address on which the layer was listening.
+    pub listening_on: SocketAddress,
 }
 
 /// Messages sent by the internal proxy and handled by the layer.
