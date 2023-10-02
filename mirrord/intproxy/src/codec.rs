@@ -45,6 +45,10 @@ impl<T, W> SyncSender<T, W> {
             _phantom: Default::default(),
         }
     }
+
+    pub fn into_inner(self) -> W {
+        self.writer
+    }
 }
 
 impl<T, W> SyncSender<T, W>
@@ -79,6 +83,10 @@ impl<T, R> SyncReceiver<T, R> {
             reader,
             _phantom: Default::default(),
         }
+    }
+
+    pub fn into_inner(self) -> R {
+        self.reader
     }
 }
 
@@ -134,6 +142,10 @@ impl<T, W> AsyncSender<T, W> {
             _phantom: Default::default(),
         }
     }
+
+    pub fn into_inner(self) -> W {
+        self.writer
+    }
 }
 
 impl<T, W> AsyncSender<T, W>
@@ -168,6 +180,10 @@ impl<T, R> AsyncReceiver<T, R> {
             reader,
             _phantom: Default::default(),
         }
+    }
+
+    pub fn into_inner(self) -> R {
+        self.reader
     }
 }
 

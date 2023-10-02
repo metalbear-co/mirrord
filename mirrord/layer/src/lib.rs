@@ -80,7 +80,6 @@ use ctor::ctor;
 use error::{LayerError, Result};
 use file::{filter::FileFilter, OPEN_FILES};
 use hooks::HookManager;
-use incoming::TcpHandler;
 use libc::{c_int, pid_t};
 use load::ExecutableName;
 use mirrord_config::{
@@ -99,7 +98,6 @@ use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
     debugger_ports::DebuggerPorts, detour::DetourGuard, file::filter::FILE_FILTER, load::LoadType,
-    socket::CONNECTION_QUEUE,
 };
 
 mod common;
@@ -110,14 +108,10 @@ mod error;
 mod exec_utils;
 mod file;
 mod hooks;
-mod incoming;
 mod load;
 mod macros;
 mod proxy_connection;
 mod socket;
-// mod tcp;
-// mod tcp_mirror;
-// mod tcp_steal;
 
 #[cfg(all(
     any(target_arch = "x86_64", target_arch = "aarch64"),
@@ -220,8 +214,6 @@ pub(crate) static EXECUTABLE_PATH: OnceLock<String> = OnceLock::new();
 
 /// Program arguments
 pub(crate) static EXECUTABLE_ARGS: OnceLock<Vec<OsString>> = OnceLock::new();
-
-pub(crate) static INCOMING_HANDLER: OnceLock<Box<dyn TcpHandler + Send + Sync>> = OnceLock::new();
 
 /// Prevent mirrord from connecting to ports used by the IDE debugger
 pub(crate) fn is_debugger_port(addr: &SocketAddr) -> bool {
@@ -608,10 +600,8 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         .expect("Should be set during initialization!")
         .is_active();
 
-    // Remove from sockets, also removing the `ConnectionQueue` associated with the socket.
+    // Remove from sockets.
     if let Some((_, socket)) = SOCKETS.remove(&fd) {
-        CONNECTION_QUEUE.remove(socket.id);
-
         // Closed file is a socket, so if it's already bound to a port - notify agent to stop
         // mirroring/stealing that port.
         socket.close();

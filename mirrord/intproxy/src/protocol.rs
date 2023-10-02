@@ -98,6 +98,7 @@ pub enum IncomingRequest {
 #[derive(Encode, Decode, Debug)]
 pub struct PortSubscribe {
     pub port: Port,
+    pub listening_on: SocketAddress,
 }
 
 #[derive(Encode, Decode, Debug)]
@@ -118,12 +119,9 @@ pub enum ProxyToLayerMessage {
     /// A response to layer's [`OutgoingConnectRequest`]
     OutgoingConnect(RemoteResult<OutgoingConnectResponse>),
     /// A response to layer's [`PortSubscribe`]
-    Incoming(PortSubscribeResult),
-}
-
-#[derive(Encode, Decode, Debug)]
-pub struct PortSubscribeResult {
-    result: RemoteResult<()>,
+    IncomingSubscribe(RemoteResult<()>),
+    /// A response to layer's [`PortUnsubscribe`]
+    IncomingUbsubscribe(RemoteResult<()>),
 }
 
 /// A response to layer's [`OutgoingConnectRequest`].
@@ -387,14 +385,16 @@ impl_request!(
 
 impl_request!(
     req = PortSubscribe,
-    res = PortSubscribeResult,
+    res = RemoteResult<()>,
     req_path = LayerToProxyMessage::Incoming => IncomingRequest::PortSubscribe,
-    res_path = ProxyToLayerMessage::Incoming,
+    res_path = ProxyToLayerMessage::IncomingSubscribe,
 );
 
 impl_request!(
     req = PortUnsubscribe,
+    res = RemoteResult<()>,
     req_path = LayerToProxyMessage::Incoming => IncomingRequest::PortUnsubscribe,
+    res_path = ProxyToLayerMessage::IncomingUbsubscribe,
 );
 
 #[test]

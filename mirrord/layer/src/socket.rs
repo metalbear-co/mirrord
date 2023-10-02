@@ -1,7 +1,6 @@
 //! We implement each hook function in a safe function as much as possible, having the unsafe do the
 //! absolute minimum
 use std::{
-    collections::VecDeque,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
     os::unix::io::RawFd,
     str::FromStr,
@@ -37,72 +36,6 @@ pub(crate) mod id;
 pub(crate) mod ops;
 
 pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock::new(DashMap::new);
-
-/// Holds the connections that have yet to be [`accept`](ops::accept)ed.
-///
-/// ## Details
-///
-/// The connections here are added by
-/// [`TcpHandler::create_local_stream`](crate::tcp::TcpHandler::create_local_stream) when the agent
-/// sends us a [`NewTcpConnection`](mirrord_protocol::tcp::NewTcpConnection).
-///
-/// And they become part of the [`UserSocket`]'s [`SocketState`] when [`ops::accept`] is called.
-///
-/// Finally, we remove a socket's queue when the socket's `fd` is closed in
-/// [`close_layer_fd`](crate::close_layer_fd).
-pub static CONNECTION_QUEUE: LazyLock<ConnectionQueue> = LazyLock::new(ConnectionQueue::default);
-
-/// Struct sent over the socket once created to pass metadata to the hook
-#[derive(Debug)]
-pub(super) struct SocketInformation {
-    /// Address of the incoming peer
-    pub remote_address: SocketAddr,
-
-    /// Address of the local peer (our IP)
-    pub local_address: SocketAddr,
-}
-
-/// poll_agent loop inserts connection data into this queue, and accept reads it.
-#[derive(Debug, Default)]
-pub struct ConnectionQueue {
-    connections: DashMap<SocketId, VecDeque<SocketInformation>>,
-}
-
-impl ConnectionQueue {
-    /// Adds a connection.
-    ///
-    /// See [`TcpHandler::create_local_stream`](crate::tcp::TcpHandler::create_local_stream).
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) fn add(&self, id: SocketId, info: SocketInformation) {
-        self.connections.entry(id).or_default().push_back(info);
-    }
-
-    /// Pops the next connection to be handled from `Self`.
-    ///
-    /// See [`ops::accept].
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) fn pop_front(&self, id: SocketId) -> Option<SocketInformation> {
-        self.connections.get_mut(&id)?.pop_front()
-    }
-
-    /// Removes the [`ConnectionQueue`] associated with the [`UserSocket`].
-    ///
-    /// See [`crate::close_layer_fd].
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) fn remove(&self, id: SocketId) -> Option<VecDeque<SocketInformation>> {
-        self.connections.remove(&id).map(|(_, v)| v)
-    }
-}
-
-impl SocketInformation {
-    #[tracing::instrument(level = "trace")]
-    pub fn new(remote_address: SocketAddr, local_address: SocketAddr) -> Self {
-        Self {
-            remote_address,
-            local_address,
-        }
-    }
-}
 
 /// Contains the addresses of a mirrord connected socket.
 ///

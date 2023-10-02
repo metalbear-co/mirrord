@@ -2,8 +2,8 @@ use alloc::ffi::CString;
 use core::{ffi::CStr, mem};
 use std::{
     io,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    os::unix::io::RawFd,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
+    os::{fd::FromRawFd, unix::io::RawFd},
     path::PathBuf,
     ptr,
     sync::{Arc, OnceLock},
@@ -11,7 +11,10 @@ use std::{
 
 use libc::{c_int, c_void, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::IncomingMode;
-use mirrord_intproxy::protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse};
+use mirrord_intproxy::{
+    codec::SyncReceiver,
+    protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse, PortSubscribe},
+};
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, LookupRecord},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
@@ -24,10 +27,10 @@ use crate::{
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     error::HookError,
     file::{self, OPEN_FILES},
-    incoming::Listen,
-    is_debugger_port, ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_CONFIG,
-    INCOMING_HANDLER, LISTEN_PORTS, OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR,
-    REMOTE_UNIX_STREAMS, TARGETLESS,
+    is_debugger_port,
+    proxy_connection::ProxyError,
+    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_CONFIG, LISTEN_PORTS,
+    OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR, REMOTE_UNIX_STREAMS, TARGETLESS,
 };
 
 /// Holds the pair of [`SocketAddr`] with their hostnames, resolved remotely through
@@ -287,16 +290,10 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
                 Err(error)?
             }
 
-            let listen = Listen {
-                mirror_port: address.port(),
-                requested_port: requested_address.port(),
-                ipv6: address.is_ipv6(),
-                id: socket.id,
-            };
-            INCOMING_HANDLER
-                .get()
-                .expect("Should be set during initialization")
-                .handle_listen(listen)?;
+            common::make_proxy_request_with_response(PortSubscribe {
+                port: requested_address.port(),
+                listening_on: address.into(),
+            })??;
 
             Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(Bound {
                 requested_address,
@@ -637,6 +634,20 @@ pub(super) fn getsockname(
     fill_address(address, address_len, local_address.try_into()?)
 }
 
+/// # SAFETY
+///
+/// `sockfd` must be a descriptor of a TCP socket
+fn init_incoming_connection(sockfd: RawFd) -> Detour<(TcpStream, SocketAddress)> {
+    let stream = unsafe { TcpStream::from_raw_fd(sockfd) };
+    let mut receiver: SyncReceiver<SocketAddress, TcpStream> = SyncReceiver::new(stream);
+    let remote_address = receiver
+        .receive()
+        .map_err(ProxyError::CodecError)?
+        .ok_or(ProxyError::NoRemoteAddress)?;
+
+    Detour::Success((receiver.into_inner(), remote_address))
+}
+
 /// When the fd is "ours", we accept and recv the first bytes that contain metadata on the
 /// connection to be set in our lock.
 ///
@@ -648,35 +659,26 @@ pub(super) fn accept(
     address_len: *mut socklen_t,
     new_fd: RawFd,
 ) -> Detour<RawFd> {
-    let (id, domain, protocol, type_) = {
+    let (domain, protocol, type_) = {
         SOCKETS
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
                 SocketState::Listening(_) => {
-                    Detour::Success((socket.id, socket.domain, socket.protocol, socket.type_))
+                    Detour::Success((socket.domain, socket.protocol, socket.type_))
                 }
                 _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
     };
 
-    let (local_address, remote_address) = {
-        CONNECTION_QUEUE
-            .pop_front(id)
-            .bypass(Bypass::LocalFdNotFound(sockfd))
-            .map(|socket| {
-                (
-                    SocketAddress::Ip(socket.local_address),
-                    SocketAddress::Ip(socket.remote_address),
-                )
-            })?
-    };
+    let (stream, remote_address) = init_incoming_connection(new_fd)?;
 
     let state = SocketState::Connected(Connected {
         remote_address: remote_address.clone(),
-        local_address,
+        local_address: stream.local_addr()?.into(),
         layer_address: None,
     });
+
     let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into()?);
 
     fill_address(address, address_len, remote_address.try_into()?)?;

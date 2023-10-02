@@ -92,7 +92,7 @@ pub(crate) enum HookError {
     #[error("mirrord-layer: Ignored file")]
     FileNotFound,
 
-    #[error("mirrord-layer: Proxy connection failed with `{0}`")]
+    #[error("mirrord-layer: Proxy connection failed: `{0}`")]
     ProxyError(#[from] ProxyError),
 }
 
