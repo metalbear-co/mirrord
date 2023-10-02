@@ -73,8 +73,8 @@ impl Mode {
 
     /// Digs into `Mode::Targeted` to get the `MeshVendor`.
     pub(super) fn mesh(&self) -> Option<MeshVendor> {
-        match self {
-            Mode::Targeted { mesh, .. } => mesh.clone(),
+        match *self {
+            Mode::Targeted { mesh, .. } => mesh,
             _ => None,
         }
     }
