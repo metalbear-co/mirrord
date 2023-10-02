@@ -92,7 +92,7 @@ impl KubernetesAPI {
         Ok(())
     }
 
-    /// Checks if any [`ContainerStatus`] matches a mesh/sidecar name from our `MESH_LIST`, and the
+    /// Checks if any `ContainerStatus` matches a mesh/sidecar name from our `MESH_LIST`, and the
     /// user is running incoming traffic in `IncomigMode::Mirror` mode, printing a warning if it
     /// does.
     #[tracing::instrument(level = "trace", ret, skip(self, progress))]
@@ -215,7 +215,7 @@ impl AgentManagment for KubernetesAPI {
 
         let is_mesh = runtime_data
             .as_ref()
-            .map(|runtime| runtime.is_mesh)
+            .map(|runtime| runtime.mesh.is_some())
             .unwrap_or_default();
 
         if self

@@ -235,6 +235,10 @@ impl<'c> JobTargetedVariant<'c> {
             runtime_data.container_runtime.to_string(),
         ]);
 
+        if let Some(mesh) = runtime_data.mesh {
+            command_line.extend(["--mesh".to_string(), mesh.to_string()]);
+        }
+
         let inner = JobVariant::with_command_line(agent, params, command_line);
 
         JobTargetedVariant {
@@ -418,7 +422,7 @@ mod test {
             &agent,
             &params,
             &RuntimeData {
-                is_mesh: false,
+                mesh: None,
                 pod_name: "pod".to_string(),
                 pod_namespace: None,
                 node_name: "foobaz".to_string(),
