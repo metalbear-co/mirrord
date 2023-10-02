@@ -1,7 +1,5 @@
 #![deny(missing_docs)]
 
-use std::str::FromStr;
-
 use clap::{Parser, Subcommand};
 use mirrord_protocol::MeshVendor;
 
@@ -58,7 +56,7 @@ pub enum Mode {
 
         /// Which kind of mesh the remote pod is in, see [`MeshVendor`].
         #[arg(long)]
-        mesh: Option<String>,
+        mesh: Option<MeshVendor>,
     },
     /// Inform the agent to use `proc/1/root` as the root directory.
     Ephemeral,
@@ -73,15 +71,10 @@ impl Mode {
         matches!(self, Mode::Targetless)
     }
 
-    /// Converts a mesh `Option<String>` to an `Option<MeshVendor>`.
-    ///
-    /// Keep in mind that the [`FromStr`] implementation for [`MeshVendor`] `panic`s if we feed it
-    /// anything other than `"Istio"` or `"Linkerd"`.
+    /// Digs into `Mode::Targeted` to get the `MeshVendor`.
     pub(super) fn mesh(&self) -> Option<MeshVendor> {
         match self {
-            Mode::Targeted { mesh, .. } => mesh
-                .as_ref()
-                .and_then(|mesh| MeshVendor::from_str(mesh).ok()),
+            Mode::Targeted { mesh, .. } => mesh.clone(),
             _ => None,
         }
     }
