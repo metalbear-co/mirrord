@@ -11,7 +11,7 @@ use mirrord_protocol::{
     },
     ClientMessage, ConnectionId, Port, RemoteResult,
 };
-use tokio::sync::mpsc::{Sender, Receiver, self};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::{
     agent_conn::AgentSender,
@@ -42,11 +42,15 @@ impl LayerHttpFilter {
             &config.http_filter.header_filter,
             &config.http_header_filter.filter,
         ) {
-            (Some(path), None, None) => Self::Filter(HttpFilter::Path(Filter::new(path.into()).unwrap())),
+            (Some(path), None, None) => {
+                Self::Filter(HttpFilter::Path(Filter::new(path.into()).unwrap()))
+            }
             (None, Some(header), None) => {
                 Self::Filter(HttpFilter::Header(Filter::new(header.into()).unwrap()))
             }
-            (None, None, Some(header)) => Self::HeaderDeprecated(Filter::new(header.into()).unwrap()),
+            (None, None, Some(header)) => {
+                Self::HeaderDeprecated(Filter::new(header.into()).unwrap())
+            }
             (None, None, None) => Self::None,
             _ => {
                 unreachable!("Only one HTTP filter can be specified at a time, please report bug, config should fail before this.")
@@ -131,11 +135,19 @@ struct ConnectionTask {
 
 impl ConnectionTask {
     pub fn handle(&self) -> ConnectionHandle {
-        let data_tx = self.data_tx.as_ref().cloned().expect("should not be none now");
+        let data_tx = self
+            .data_tx
+            .as_ref()
+            .cloned()
+            .expect("should not be none now");
         ConnectionHandle { data_tx }
     }
 
-    pub fn new(agent_sender: AgentSender, connection_id: ConnectionId, layer_address: SocketAddr) -> Self {
+    pub fn new(
+        agent_sender: AgentSender,
+        connection_id: ConnectionId,
+        layer_address: SocketAddr,
+    ) -> Self {
         let (data_tx, data_rx) = mpsc::channel(512);
 
         Self {
@@ -159,7 +171,10 @@ struct ConnectionHandle {
 
 impl ConnectionHandle {
     async fn consume(&self, data: IncomingData) -> Result<()> {
-        self.data_tx.send(data).await.map_err(|_| IntProxyError::IncomingInterceptorFailed)
+        self.data_tx
+            .send(data)
+            .await
+            .map_err(|_| IntProxyError::IncomingInterceptorFailed)
     }
 }
 
@@ -293,24 +308,42 @@ impl IncomingProxy {
                 Ok(())
             }
             DaemonTcp::Data(data) => {
-                self.pass_to_connection(data.connection_id, IncomingData::Raw(data.bytes)).await
+                self.pass_to_connection(data.connection_id, IncomingData::Raw(data.bytes))
+                    .await
             }
             DaemonTcp::HttpRequest(http_request) => {
-                self.pass_to_connection(http_request.connection_id, IncomingData::HttpRaw(http_request)).await
+                self.pass_to_connection(
+                    http_request.connection_id,
+                    IncomingData::HttpRaw(http_request),
+                )
+                .await
             }
             DaemonTcp::HttpRequestFramed(http_request) => {
-                self.pass_to_connection(http_request.connection_id, IncomingData::HttpFramed(http_request)).await
+                self.pass_to_connection(
+                    http_request.connection_id,
+                    IncomingData::HttpFramed(http_request),
+                )
+                .await
             }
             DaemonTcp::NewConnection(connection) => {
                 // TODO msmolarek
-                let Some(listener) = self.layer_listeners.get(&connection.destination_port).copied() else {
+                let Some(listener) = self
+                    .layer_listeners
+                    .get(&connection.destination_port)
+                    .copied()
+                else {
                     // new connection after the listener has closed
                     return Ok(());
                 };
 
-                let task = ConnectionTask::new(self.agent_sender.clone(), connection.connection_id, listener);
+                let task = ConnectionTask::new(
+                    self.agent_sender.clone(),
+                    connection.connection_id,
+                    listener,
+                );
 
-                self.connections.insert(connection.connection_id, task.handle());
+                self.connections
+                    .insert(connection.connection_id, task.handle());
 
                 tokio::spawn(task.run());
 

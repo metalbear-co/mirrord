@@ -139,8 +139,11 @@ impl ProxySession {
             SimpleProxy::new(layer_conn.sender().clone(), agent_conn.sender().clone());
         let outgoing_proxy =
             OutgoingProxy::new(agent_conn.sender().clone(), layer_conn.sender().clone());
-        let incoming_proxy =
-            IncomingProxy::new(&intproxy.config.feature.network.incoming, agent_conn.sender().clone(), layer_conn.sender().clone());
+        let incoming_proxy = IncomingProxy::new(
+            &intproxy.config.feature.network.incoming,
+            agent_conn.sender().clone(),
+            layer_conn.sender().clone(),
+        );
 
         let ping_pong = PingPong::new(Self::PING_INTERVAL).await;
 
