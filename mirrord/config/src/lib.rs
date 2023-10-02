@@ -394,6 +394,7 @@ impl LayerConfig {
             // for this case we treat these as warnings. They'll become errors once mirrord proper
             // tries to start (if the user somehow managed to not select a target by then).
             if ide {
+                println!("IDE");
                 if self.target.namespace.is_some() {
                     context.add_warning(
                         "A target namespace was specified, but no target was specified. \
