@@ -69,8 +69,8 @@ pub enum MeshVendor {
 impl fmt::Display for MeshVendor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MeshVendor::Linkerd => write!(f, "Linkerd"),
-            MeshVendor::Istio => write!(f, "Istio"),
+            MeshVendor::Linkerd => write!(f, "linkerd"),
+            MeshVendor::Istio => write!(f, "istio"),
         }
     }
 }
@@ -80,8 +80,8 @@ impl FromStr for MeshVendor {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
-            "Linkerd" => Ok(Self::Linkerd),
-            "Istio" => Ok(Self::Istio),
+            "linkerd" => Ok(Self::Linkerd),
+            "istio" => Ok(Self::Istio),
             invalid => Err(MeshVendorParseError(invalid.into())),
         }
     }
