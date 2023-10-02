@@ -292,6 +292,9 @@ fn email_parse(email: &str) -> Result<EmailAddress, String> {
 #[derive(Args, Debug)]
 pub(super) struct VerifyConfigArgs {
     /// Config file path.
+    pub(super) ide: bool,
+
+    /// Config file path.
     pub(super) path: PathBuf,
 }
 
