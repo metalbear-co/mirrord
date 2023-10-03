@@ -178,14 +178,18 @@ impl ProxySession {
 
         loop {
             tokio::select! {
-                Some(msg) = self.layer_rx.recv() => {
-                    self.handle_layer_message(msg).await;
+                msg = self.layer_rx.recv() => match msg {
+                    Some(msg) => self.handle_layer_message(msg).await,
+                    None => {
+                        tracing::trace!("layer connection closed");
+                        break Ok(());
+                    }
                 },
 
                 msg = self.agent_conn.receive() => {
                     let Some(message) = msg else {
-                        tracing::trace!("agent connection closed");
-                        break Ok(());
+                        tracing::error!("agent connection closed");
+                        break Err(IntProxyError::AgentClosedConnection("no reason specified".into()));
                     };
 
                     self.handle_agent_message(message).await?;
