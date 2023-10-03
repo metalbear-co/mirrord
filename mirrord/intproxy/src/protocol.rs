@@ -10,7 +10,7 @@ use mirrord_protocol::{
         XstatFsResponse, XstatRequest, XstatResponse,
     },
     outgoing::SocketAddress,
-    FileRequest, FileResponse, Port, RemoteResult,
+    FileRequest, FileResponse, LogMessage, Port, RemoteResult,
 };
 
 use crate::{bind_nested, impl_request};
@@ -19,6 +19,10 @@ mod macros;
 
 /// An identifier for a message sent from the layer to the internal proxy.
 pub type MessageId = u64;
+
+/// Special [`MessageId`] used by the internal proxy to send messages that are not responses.
+/// The layer should not use this identifier.
+pub const NOT_A_RESPONSE: MessageId = MessageId::MAX;
 
 /// A wrapper for messages sent through the `layer <-> proxy` connection.
 #[derive(Encode, Decode, Debug)]
@@ -138,6 +142,8 @@ pub enum ProxyToLayerMessage {
     IncomingSubscribe(RemoteResult<()>),
     /// A response to layer's [`PortUnsubscribe`]
     IncomingUbsubscribe(RemoteResult<()>),
+    /// Agent log proxied to the layer.
+    AgentLog(LogMessage),
 }
 
 /// A response to layer's [`OutgoingConnectRequest`].

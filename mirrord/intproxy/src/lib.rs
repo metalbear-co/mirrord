@@ -8,8 +8,9 @@ use std::{
 };
 
 use mirrord_config::LayerConfig;
-use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel};
+use mirrord_protocol::{ClientMessage, DaemonMessage};
 use ping_pong::PingPongMessage;
+use protocol::{ProxyToLayerMessage, NOT_A_RESPONSE};
 use semver::VersionReq;
 use system::{ComponentRef, System};
 use tokio::{
@@ -128,6 +129,7 @@ struct ProxySession {
 
     system: System<&'static str, IntProxyError>,
 
+    layer_connector_ref: ComponentRef<LayerConnector>,
     simple_proxy_ref: ComponentRef<SimpleProxy>,
     outgoing_proxy_ref: ComponentRef<OutgoingProxy>,
     ping_pong_ref: ComponentRef<PingPong>,
@@ -162,6 +164,7 @@ impl ProxySession {
             layer_rx,
 
             system,
+            layer_connector_ref,
             simple_proxy_ref,
             outgoing_proxy_ref,
             ping_pong_ref,
@@ -251,12 +254,12 @@ impl ProxySession {
                 Ok(())
             }
             DaemonMessage::LogMessage(log) => {
-                // TODO: we don't have any thread in the layer to handle this
-                match log.level {
-                    LogLevel::Error => tracing::error!("agent error: {}", log.message),
-                    LogLevel::Warn => tracing::warn!("agent warning: {}", log.message),
-                }
-
+                self.layer_connector_ref
+                    .send(LocalMessage {
+                        message_id: NOT_A_RESPONSE,
+                        inner: ProxyToLayerMessage::AgentLog(log),
+                    })
+                    .await;
                 Ok(())
             }
             other => Err(IntProxyError::AgentCommunicationFailed(
