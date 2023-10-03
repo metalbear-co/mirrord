@@ -8,6 +8,30 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.71.0](https://github.com/metalbear-co/mirrord/tree/3.71.0) - 2023-10-03
+
+
+### Added
+
+- Add ability to override container resource requests/limits for job agents via
+  `agent.resources` config.
+  [#1983](https://github.com/metalbear-co/mirrord/issues/1983)
+
+
+### Fixed
+
+- Propagate to the agent that we're in a mesh context (moved `MeshVendor` to a
+  common crate), and handle the special case for `istio`, where the sniffer
+  should capture traffic on the `lo` interface.
+  [#1963](https://github.com/metalbear-co/mirrord/issues/1963)
+
+
+### Internal
+
+- Bump dependencies
+- Remove quotes around regex in release branch check job
+
+
 ## [3.70.0](https://github.com/metalbear-co/mirrord/tree/3.70.0) - 2023-09-27
 
 
