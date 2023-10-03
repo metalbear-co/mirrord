@@ -62,6 +62,7 @@ pub(super) enum Commands {
     InternalProxy,
 
     /// Verify config file without starting mirrord.
+    #[command(hide = true)]
     VerifyConfig(VerifyConfigArgs),
 }
 
