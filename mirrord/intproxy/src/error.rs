@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::{
     agent_conn::AgentCommunicationFailed, layer_conn::LayerCommunicationFailed,
-    ping_pong::PingPongError,
+    ping_pong::PingPongError, system::ComponentError,
 };
 
 #[derive(Error, Debug)]
@@ -36,6 +36,8 @@ pub enum IntProxyError {
     PingPong(#[from] PingPongError),
     #[error("incoming interceptor task failed")]
     IncomingInterceptorFailed,
+    #[error("{0}")]
+    ComponentError(#[from] ComponentError<String>),
 }
 
 pub type Result<T> = core::result::Result<T, IntProxyError>;

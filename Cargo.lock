@@ -3790,6 +3790,7 @@ name = "mirrord-intproxy"
 version = "3.71.2"
 dependencies = [
  "bincode",
+ "derive_more",
  "futures",
  "mirrord-config",
  "mirrord-kube",

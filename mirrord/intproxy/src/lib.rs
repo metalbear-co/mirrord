@@ -1,4 +1,6 @@
 #![feature(lazy_cell)]
+#![feature(async_fn_in_trait)]
+#![feature(return_position_impl_trait_in_trait)]
 
 use std::{
     sync::{Arc, LazyLock},
@@ -6,8 +8,9 @@ use std::{
 };
 
 use mirrord_config::LayerConfig;
-use mirrord_protocol::{ClientMessage, DaemonMessage, FileRequest, LogLevel};
+use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel};
 use semver::VersionReq;
+use system::{ComponentRef, System};
 use tokio::{
     net::{TcpListener, TcpStream},
     task::JoinSet,
@@ -31,6 +34,7 @@ mod ping_pong;
 pub mod protocol;
 mod proxies;
 mod request_queue;
+mod system;
 
 /// Minimal [`mirrord_protocol`] version that allows [`ClientMessage::ReadyForLogs`] message.
 pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
@@ -71,20 +75,19 @@ impl IntProxy {
 
                         any_connection_accepted = true;
 
-
                         let proxy_clone = self.clone();
                         active_connections.spawn(async move {
                             let session = match ProxySession::new(&proxy_clone, stream).await {
                                 Ok(session) => session,
                                 Err(err) => {
-                                    tracing::error!("failed to create a new session for {peer}: {err:?}");
-                                    return;
+                                    tracing::error!("failed to create a new session for {peer}:
+            {err:?}");                                     return;
                                 }
                             };
 
                             if let Err(err) = session.serve_connection().await {
-                                tracing::error!("an error occurred when handling connection from {peer}: {err:?}");
-                            }
+                                tracing::error!("an error occurred when handling connection from
+            {peer}: {err:?}");                             }
                         });
                     },
                     Err(err) => {
@@ -119,9 +122,10 @@ impl IntProxy {
 struct ProxySession {
     agent_conn: AgentConnection,
     layer_conn: LayerConnection,
-    simple_proxy: SimpleProxy,
-    outgoing_proxy: OutgoingProxy,
-    incoming_proxy: IncomingProxy,
+    system: System,
+    simple_proxy_ref: ComponentRef<SimpleProxy>,
+    outgoing_proxy_ref: ComponentRef<OutgoingProxy>,
+    incoming_proxy_ref: ComponentRef<IncomingProxy>,
     ping_pong: PingPong,
 }
 
@@ -135,24 +139,31 @@ impl ProxySession {
 
         let layer_conn = LayerConnection::new(conn);
 
-        let simple_proxy =
-            SimpleProxy::new(layer_conn.sender().clone(), agent_conn.sender().clone());
-        let outgoing_proxy =
-            OutgoingProxy::new(agent_conn.sender().clone(), layer_conn.sender().clone());
-        let incoming_proxy = IncomingProxy::new(
+        let mut system = System::default();
+
+        let simple_proxy_ref = system.register(SimpleProxy::new(
+            layer_conn.sender().clone(),
+            agent_conn.sender().clone(),
+        ));
+        let outgoing_proxy_ref = system.register_attached(OutgoingProxy::new(
+            agent_conn.sender().clone(),
+            layer_conn.sender().clone(),
+        ));
+        let incoming_proxy_ref = system.register_attached(IncomingProxy::new(
             &intproxy.config.feature.network.incoming,
             agent_conn.sender().clone(),
             layer_conn.sender().clone(),
-        );
+        ));
 
         let ping_pong = PingPong::new(Self::PING_INTERVAL).await;
 
         Ok(Self {
             agent_conn,
             layer_conn,
-            simple_proxy,
-            outgoing_proxy,
-            incoming_proxy,
+            system,
+            simple_proxy_ref,
+            outgoing_proxy_ref,
+            incoming_proxy_ref,
             ping_pong,
         })
     }
@@ -176,8 +187,7 @@ impl ProxySession {
                         tracing::trace!("layer connection closed");
                         break Ok(());
                     };
-
-                    self.handle_layer_message(message).await?;
+                    self.handle_layer_message(message).await;
                 },
 
                 agent_message = self.agent_conn.receive() => {
@@ -205,15 +215,29 @@ impl ProxySession {
             DaemonMessage::Pong => Ok(()),
             DaemonMessage::Close(reason) => Err(IntProxyError::AgentClosedConnection(reason)),
             DaemonMessage::TcpOutgoing(msg) => {
-                self.outgoing_proxy.handle_agent_tcp_message(msg).await
+                self.outgoing_proxy_ref.send(msg).await;
+                Ok(())
             }
             DaemonMessage::UdpOutgoing(msg) => {
-                self.outgoing_proxy.handle_agent_udp_message(msg).await
+                self.outgoing_proxy_ref.send(msg).await;
+                Ok(())
             }
-            DaemonMessage::File(msg) => self.simple_proxy.handle_response(msg).await,
-            DaemonMessage::GetAddrInfoResponse(msg) => self.simple_proxy.handle_response(msg).await,
-            DaemonMessage::Tcp(msg) => self.incoming_proxy.handle_agent_message(msg).await,
-            DaemonMessage::TcpSteal(msg) => self.incoming_proxy.handle_agent_message(msg).await,
+            DaemonMessage::File(msg) => {
+                self.simple_proxy_ref.send(msg).await;
+                Ok(())
+            }
+            DaemonMessage::GetAddrInfoResponse(msg) => {
+                self.simple_proxy_ref.send(msg).await;
+                Ok(())
+            }
+            DaemonMessage::Tcp(msg) => {
+                self.incoming_proxy_ref.send(msg).await;
+                Ok(())
+            }
+            DaemonMessage::TcpSteal(msg) => {
+                self.incoming_proxy_ref.send(msg).await;
+                Ok(())
+            }
             DaemonMessage::SwitchProtocolVersionResponse(protocol_version) => {
                 if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
                     if let Err(e) = self
@@ -243,38 +267,33 @@ impl ProxySession {
         }
     }
 
-    async fn handle_layer_message(
-        &mut self,
-        message: LocalMessage<LayerToProxyMessage>,
-    ) -> Result<()> {
+    async fn handle_layer_message(&mut self, message: LocalMessage<LayerToProxyMessage>) {
         match message.inner {
             LayerToProxyMessage::NewSession(..) => todo!(),
-            LayerToProxyMessage::File(req) => match req {
-                req @ (FileRequest::CloseDir(..) | FileRequest::Close(..)) => self
-                    .agent_conn
-                    .sender()
-                    .send(ClientMessage::FileRequest(req))
+            LayerToProxyMessage::File(req) => {
+                self.simple_proxy_ref
+                    .send(LocalMessage {
+                        inner: req,
+                        message_id: message.message_id,
+                    })
                     .await
-                    .map_err(Into::into),
-                req => {
-                    self.simple_proxy
-                        .handle_request(req, message.message_id)
-                        .await
-                }
-            },
+            }
             LayerToProxyMessage::GetAddrInfo(req) => {
-                self.simple_proxy
-                    .handle_request(req, message.message_id)
+                self.simple_proxy_ref
+                    .send(LocalMessage {
+                        inner: req,
+                        message_id: message.message_id,
+                    })
                     .await
             }
             LayerToProxyMessage::OutgoingConnect(req) => {
-                self.outgoing_proxy
-                    .handle_layer_connect_request(req, message.message_id)
+                self.outgoing_proxy_ref
+                    .send((req, message.message_id))
                     .await
             }
             LayerToProxyMessage::Incoming(req) => {
-                self.incoming_proxy
-                    .handle_layer_request(req, message.message_id)
+                self.incoming_proxy_ref
+                    .send((req, message.message_id))
                     .await
             }
         }

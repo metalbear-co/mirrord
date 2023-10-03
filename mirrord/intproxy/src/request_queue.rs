@@ -1,15 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::{
-    error::{IntProxyError, Result},
-    protocol::MessageId,
-};
-
-#[derive(Debug)]
-pub struct RequestWithId<T> {
-    pub id: MessageId,
-    pub request: T,
-}
+use crate::error::{IntProxyError, Result};
 
 /// A request fifo used to match agent responses with layer requests.
 ///
@@ -19,7 +10,7 @@ pub struct RequestWithId<T> {
 /// Instead, its components (e.g. file manager) handle requests sequentially.
 #[derive(Debug)]
 pub struct RequestQueue<T> {
-    inner: VecDeque<RequestWithId<T>>,
+    inner: VecDeque<T>,
 }
 
 impl<T> Default for RequestQueue<T> {
@@ -32,12 +23,12 @@ impl<T> Default for RequestQueue<T> {
 
 impl<T> RequestQueue<T> {
     /// Save request for later.
-    pub fn insert(&mut self, request: T, id: MessageId) {
-        self.inner.push_back(RequestWithId { id, request });
+    pub fn insert(&mut self, request: T) {
+        self.inner.push_back(request);
     }
 
     /// Retrieve and remove oldest request.
-    pub fn get(&mut self) -> Result<RequestWithId<T>> {
+    pub fn get(&mut self) -> Result<T> {
         self.inner
             .pop_front()
             .ok_or(IntProxyError::RequestQueueEmpty)

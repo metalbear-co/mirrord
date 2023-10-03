@@ -22,6 +22,7 @@ use crate::{
         ProxyToLayerMessage,
     },
     request_queue::RequestQueue,
+    system::Component,
 };
 
 mod original;
@@ -217,21 +218,6 @@ impl IncomingProxy {
         Ok(())
     }
 
-    pub async fn handle_layer_request(
-        &mut self,
-        request: IncomingRequest,
-        message_id: MessageId,
-    ) -> Result<()> {
-        match request {
-            IncomingRequest::PortSubscribe(subscribe) => {
-                self.handle_subscribe(subscribe, message_id).await
-            }
-            IncomingRequest::PortUnsubscribe(unsubscribe) => {
-                self.handle_unsubscribe(unsubscribe).await
-            }
-        }
-    }
-
     async fn handle_subscribe(
         &mut self,
         subscribe: PortSubscribe,
@@ -300,56 +286,77 @@ impl IncomingProxy {
             .await
             .map_err(Into::into)
     }
+}
 
-    pub async fn handle_agent_message(&mut self, message: DaemonTcp) -> Result<()> {
-        match message {
-            DaemonTcp::Close(close) => {
-                self.connections.remove(&close.connection_id);
-                Ok(())
-            }
-            DaemonTcp::Data(data) => {
-                self.pass_to_connection(data.connection_id, IncomingData::Raw(data.bytes))
-                    .await
-            }
-            DaemonTcp::HttpRequest(http_request) => {
-                self.pass_to_connection(
-                    http_request.connection_id,
-                    IncomingData::HttpRaw(http_request),
-                )
-                .await
-            }
-            DaemonTcp::HttpRequestFramed(http_request) => {
-                self.pass_to_connection(
-                    http_request.connection_id,
-                    IncomingData::HttpFramed(http_request),
-                )
-                .await
-            }
-            DaemonTcp::NewConnection(connection) => {
-                // TODO msmolarek
-                let Some(listener) = self
-                    .layer_listeners
-                    .get(&connection.destination_port)
-                    .copied()
-                else {
-                    // new connection after the listener has closed
-                    return Ok(());
-                };
+impl Component for IncomingProxy {
+    type Id = &'static str;
 
-                let task = ConnectionTask::new(
-                    self.agent_sender.clone(),
-                    connection.connection_id,
-                    listener,
-                );
-
-                self.connections
-                    .insert(connection.connection_id, task.handle());
-
-                tokio::spawn(task.run());
-
-                Ok(())
-            }
-            DaemonTcp::SubscribeResult(result) => self.handle_subscribe_result(result).await,
-        }
+    fn id(&self) -> Self::Id {
+        "INCOMING_PROXY"
     }
 }
+
+// impl Handler<(IncomingRequest, MessageId)> for IncomingProxy {
+//     async fn handle(&mut self, (request, id): (IncomingRequest, MessageId)) -> Result<()> {
+//         match request {
+//             IncomingRequest::PortSubscribe(subscribe) => self.handle_subscribe(subscribe,
+// id).await,             IncomingRequest::PortUnsubscribe(unsubscribe) => {
+//                 self.handle_unsubscribe(unsubscribe).await
+//             }
+//         }
+//     }
+// }
+
+// impl Handler<DaemonTcp> for IncomingProxy {
+//     async fn handle(&mut self, message: DaemonTcp) -> Result<()> {
+//         match message {
+//             DaemonTcp::Close(close) => {
+//                 self.connections.remove(&close.connection_id);
+//                 Ok(())
+//             }
+//             DaemonTcp::Data(data) => {
+//                 self.pass_to_connection(data.connection_id, IncomingData::Raw(data.bytes))
+//                     .await
+//             }
+//             DaemonTcp::HttpRequest(http_request) => {
+//                 self.pass_to_connection(
+//                     http_request.connection_id,
+//                     IncomingData::HttpRaw(http_request),
+//                 )
+//                 .await
+//             }
+//             DaemonTcp::HttpRequestFramed(http_request) => {
+//                 self.pass_to_connection(
+//                     http_request.connection_id,
+//                     IncomingData::HttpFramed(http_request),
+//                 )
+//                 .await
+//             }
+//             DaemonTcp::NewConnection(connection) => {
+//                 // TODO msmolarek
+//                 let Some(listener) = self
+//                     .layer_listeners
+//                     .get(&connection.destination_port)
+//                     .copied()
+//                 else {
+//                     // new connection after the listener has closed
+//                     return Ok(());
+//                 };
+
+//                 let task = ConnectionTask::new(
+//                     self.agent_sender.clone(),
+//                     connection.connection_id,
+//                     listener,
+//                 );
+
+//                 self.connections
+//                     .insert(connection.connection_id, task.handle());
+
+//                 tokio::spawn(task.run());
+
+//                 Ok(())
+//             }
+//             DaemonTcp::SubscribeResult(result) => self.handle_subscribe_result(result).await,
+//         }
+//     }
+// }

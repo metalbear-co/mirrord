@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use mirrord_protocol::{
-    outgoing::{tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing, DaemonConnect, DaemonRead},
+    outgoing::{DaemonConnect, DaemonRead},
     ConnectionId, RemoteResult,
 };
 
@@ -15,9 +15,11 @@ use crate::{
     },
     proxies::outgoing::interceptor::{InterceptorTask, InterceptorTaskHandle},
     request_queue::RequestQueue,
+    system::{Component, WeakComponentRef},
 };
 
 pub struct OutgoingProxy {
+    self_ref: WeakComponentRef<Self>,
     agent_sender: AgentSender,
     layer_sender: LayerSender,
     interceptors: HashMap<(ConnectionId, NetProtocol), InterceptorTaskHandle>,
@@ -25,65 +27,17 @@ pub struct OutgoingProxy {
 }
 
 impl OutgoingProxy {
-    pub fn new(agent_sender: AgentSender, layer_sender: LayerSender) -> Self {
+    pub fn new(
+        self_ref: WeakComponentRef<Self>,
+        agent_sender: AgentSender,
+        layer_sender: LayerSender,
+    ) -> Self {
         Self {
+            self_ref,
             agent_sender,
             layer_sender,
             interceptors: Default::default(),
             connect_queues: Default::default(),
-        }
-    }
-
-    pub async fn handle_layer_connect_request(
-        &mut self,
-        message: OutgoingConnectRequest,
-        message_id: MessageId,
-    ) -> Result<()> {
-        let OutgoingConnectRequest {
-            remote_address,
-            protocol,
-        } = message;
-
-        self.connect_queues
-            .entry(protocol)
-            .or_default()
-            .insert((), message_id);
-
-        self.agent_sender
-            .send(protocol.wrap_agent_connect(remote_address))
-            .await
-            .map_err(Into::into)
-    }
-
-    pub async fn handle_agent_tcp_message(&mut self, message: DaemonTcpOutgoing) -> Result<()> {
-        match message {
-            DaemonTcpOutgoing::Close(connection_id) => {
-                self.handle_agent_close(connection_id, NetProtocol::Stream);
-                Ok(())
-            }
-            DaemonTcpOutgoing::Connect(connect) => {
-                self.handle_agent_connect(connect, NetProtocol::Stream)
-                    .await
-            }
-            DaemonTcpOutgoing::Read(read) => {
-                self.handle_agent_read(read, NetProtocol::Stream).await
-            }
-        }
-    }
-
-    pub async fn handle_agent_udp_message(&mut self, message: DaemonUdpOutgoing) -> Result<()> {
-        match message {
-            DaemonUdpOutgoing::Close(connection_id) => {
-                self.handle_agent_close(connection_id, NetProtocol::Datagrams);
-                Ok(())
-            }
-            DaemonUdpOutgoing::Connect(connect) => {
-                self.handle_agent_connect(connect, NetProtocol::Datagrams)
-                    .await
-            }
-            DaemonUdpOutgoing::Read(read) => {
-                self.handle_agent_read(read, NetProtocol::Datagrams).await
-            }
         }
     }
 
@@ -164,3 +118,68 @@ impl OutgoingProxy {
             .map_err(Into::into)
     }
 }
+
+impl Component for OutgoingProxy {
+    type Id = &'static str;
+
+    fn id(&self) -> Self::Id {
+        "OUTGOING_PROXY"
+    }
+}
+
+// impl Handler<(OutgoingConnectRequest, MessageId)> for OutgoingProxy {
+//     async fn handle(&mut self, (request, id): (OutgoingConnectRequest, MessageId)) -> Result<()>
+// {         let OutgoingConnectRequest {
+//             remote_address,
+//             protocol,
+//         } = request;
+
+//         self.connect_queues
+//             .entry(protocol)
+//             .or_default()
+//             .insert((), id);
+
+//         self.agent_sender
+//             .send(protocol.wrap_agent_connect(remote_address))
+//             .await
+//             .map_err(Into::into)
+//     }
+// }
+
+// impl Handler<DaemonTcpOutgoing> for OutgoingProxy {
+//     async fn handle(&mut self, message: DaemonTcpOutgoing) -> Result<()> {
+//         match message {
+//             DaemonTcpOutgoing::Close(connection_id) => {
+//                 self.handle_agent_close(connection_id, NetProtocol::Stream);
+//                 Ok(())
+//             }
+//             DaemonTcpOutgoing::Connect(connect) => {
+//                 self.handle_agent_connect(connect, NetProtocol::Stream)
+//                     .await
+//             }
+//             DaemonTcpOutgoing::Read(read) => {
+//                 self.handle_agent_read(read, NetProtocol::Stream).await
+//             }
+//         }
+//     }
+// }
+
+// impl Handler<DaemonUdpOutgoing> for OutgoingProxy {
+//     async fn handle(&mut self, message: DaemonUdpOutgoing) -> Result<()> {
+//         {
+//             match message {
+//                 DaemonUdpOutgoing::Close(connection_id) => {
+//                     self.handle_agent_close(connection_id, NetProtocol::Datagrams);
+//                     Ok(())
+//                 }
+//                 DaemonUdpOutgoing::Connect(connect) => {
+//                     self.handle_agent_connect(connect, NetProtocol::Datagrams)
+//                         .await
+//                 }
+//                 DaemonUdpOutgoing::Read(read) => {
+//                     self.handle_agent_read(read, NetProtocol::Datagrams).await
+//                 }
+//             }
+//         }
+//     }
+// }

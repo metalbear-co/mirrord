@@ -11,18 +11,7 @@ use crate::{
     protocol::NetProtocol,
 };
 
-pub struct InterceptorTaskHandle(Sender<Vec<u8>>);
-
-impl InterceptorTaskHandle {
-    pub async fn send(&self, data: Vec<u8>) -> Result<()> {
-        self.0
-            .send(data)
-            .await
-            .map_err(|_| IntProxyError::OutgoingInterceptorFailed)
-    }
-}
-
-pub struct InterceptorTask {
+pub struct OutgoingInterceptor {
     agent_sender: AgentSender,
     connection_id: ConnectionId,
     protocol: NetProtocol,
@@ -30,7 +19,7 @@ pub struct InterceptorTask {
     task_tx: Option<Sender<Vec<u8>>>,
 }
 
-impl InterceptorTask {
+impl OutgoingInterceptor {
     pub fn new(
         agent_sender: AgentSender,
         connection_id: ConnectionId,
@@ -46,16 +35,6 @@ impl InterceptorTask {
             task_rx,
             task_tx: task_tx.into(),
         }
-    }
-
-    pub fn handle(&self) -> InterceptorTaskHandle {
-        let tx = self
-            .task_tx
-            .as_ref()
-            .expect("interceptor sender should not be dropped before the task is run")
-            .clone();
-
-        InterceptorTaskHandle(tx)
     }
 
     async fn close_remote_stream(&self) -> Result<()> {
