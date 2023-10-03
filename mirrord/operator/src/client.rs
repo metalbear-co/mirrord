@@ -204,13 +204,7 @@ impl OperatorApi {
         let target = self.target_config.path.clone().expect("Must have config");
 
         let requested = CopyTargetCrd::new(
-            &name.unwrap_or_else(|| {
-                format!(
-                    "{}-copy-{:x}",
-                    target.get_target_name(),
-                    rand::random::<u32>()
-                )
-            }),
+            &target.get_target_name(),
             CopyTargetSpec {
                 target,
                 patch: None,
@@ -224,7 +218,7 @@ impl OperatorApi {
             .map_err(KubeApiError::from)?;
 
         let mut builder = Request::builder()
-            .uri(self.copy_url(&created.spec.target.get_target_name()))
+            .uri(self.copy_url(&created.metadata.name.as_deref().expect("Must have name")))
             .header("x-session-id", session_information.session_id.to_string());
 
         if let Some(certificate) = &session_information.client_certificate {
@@ -344,7 +338,7 @@ impl OperatorApi {
         let api_version = CopyTargetCrd::api_version(dt);
         let plural = CopyTargetCrd::plural(dt);
 
-        format!("/apis/{api_version}/proxy/namespaces/{ns}/{plural}/{name}")
+        format!("/apis/{api_version}/proxy/namespaces/{ns}/{plural}/{name}?connect=true")
     }
 
     #[tracing::instrument(level = "debug", skip(self), ret)]
