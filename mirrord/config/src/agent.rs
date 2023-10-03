@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use k8s_openapi::api::core::v1::Toleration;
+use k8s_openapi::api::core::v1::{ResourceRequirements, Toleration};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -213,6 +213,26 @@ pub struct AgentConfig {
     ///
     /// Set to an empty array to have no tolerations at all
     pub tolerations: Option<Vec<Toleration>>,
+
+    /// ### agent.resources {#agent-tolerations}
+    ///
+    /// Set pod resource reqirements. (not with ephemeral agents)
+    /// Default is
+    /// ```json
+    /// {
+    ///   "requests":
+    ///   {
+    ///     "cpu": "10m",
+    ///     "memory": "10Mi"
+    ///   },
+    ///   "limits":
+    ///   {
+    ///     "cpu": "100m",
+    ///       "memory": "100Mi"
+    ///   }
+    /// }
+    /// ```
+    pub resources: Option<ResourceRequirements>,
 
     /// ### agent.check_out_of_pods {#agent-check_out_of_pods}
     ///

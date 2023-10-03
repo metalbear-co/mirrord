@@ -153,6 +153,22 @@ impl ContainerVariant for JobVariant<'_> {
 
         let tolerations = agent.tolerations.as_ref().unwrap_or(&DEFAULT_TOLERATIONS);
 
+        let resources = agent.resources.clone().unwrap_or_else(|| {
+            serde_json::from_value(serde_json::json!({
+                "requests":
+                {
+                    "cpu": "10m",
+                    "memory": "10Mi"
+                },
+                "limits":
+                {
+                    "cpu": "100m",
+                    "memory": "100Mi"
+                },
+            }))
+            .expect("Should be valid ResourceRequirements json")
+        });
+
         serde_json::from_value(json!({
             "metadata": {
                 "name": params.name,
@@ -192,19 +208,8 @@ impl ContainerVariant for JobVariant<'_> {
                                     { "name": "RUST_LOG", "value": agent.log_level },
                                     { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() }
                                 ],
-                                "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
-                                {
-                                    "requests":
-                                    {
-                                        "cpu": "1m",
-                                        "memory": "1Mi"
-                                    },
-                                    "limits":
-                                    {
-                                        "cpu": "100m",
-                                        "memory": "100Mi"
-                                    },
-                                }
+                                // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
+                                "resources": resources
                             }
                         ]
                     }
