@@ -17,6 +17,11 @@ pub enum SerializationError {
     SocketAddress,
 }
 
+/// Error when parsing a `MeshVendor` from the `agent/cli` arguments.
+#[derive(Debug, PartialEq, Clone, Eq, Error)]
+#[error("Failed parsing `MeshVendor` from `{0}`!")]
+pub struct MeshVendorParseError(pub String);
+
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
 pub enum ResponseError {
     #[error("Index allocator is full, operation `{0}` failed!")]

@@ -2,7 +2,7 @@ use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
 use fancy_regex::Regex;
-use mirrord_protocol::Port;
+use mirrord_protocol::{MeshVendor, Port};
 use nix::unistd::getgid;
 use tracing::warn;
 
@@ -166,13 +166,16 @@ where
     }
 }
 
-pub(crate) enum MeshVendor {
-    Linkerd,
-    Istio,
+/// Extends the [`MeshVendor`] type with methods that are only relevant for the agent.
+pub(super) trait MeshVendorExt: Sized {
+    fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Option<Self>>;
+    fn input_chain(&self) -> &str;
+    fn output_chain(&self) -> &str;
+    fn skip_ports_regex(&self) -> &Regex;
 }
 
-impl MeshVendor {
-    pub fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Option<Self>> {
+impl MeshVendorExt for MeshVendor {
+    fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Option<Self>> {
         let output = ipt.list_rules("OUTPUT")?;
 
         Ok(output.iter().find_map(|rule| {

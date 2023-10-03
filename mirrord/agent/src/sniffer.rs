@@ -6,7 +6,7 @@ use std::{
 
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
-    ConnectionId, Port,
+    ConnectionId, MeshVendor, Port,
 };
 use nix::sys::socket::SockaddrStorage;
 use pnet::packet::{
@@ -137,15 +137,22 @@ async fn resolve_interface() -> Result<Option<String>, AgentError> {
 // And to make matters worse, the error reported back to the user is the very generic:
 // "mirrord-layer received an unexpected response from the agent pod!"
 #[tracing::instrument(level = "trace")]
-async fn prepare_sniffer(network_interface: Option<String>) -> Result<RawCapture, AgentError> {
-    // Priority is whatever the user set as an option to mirrord, otherwise we try to get the
-    // appropriate interface.
-    let interface = if let Some(network_interface) = network_interface {
-        network_interface
-    } else {
-        resolve_interface()
+async fn prepare_sniffer(
+    network_interface: Option<String>,
+    mesh: Option<MeshVendor>,
+) -> Result<RawCapture, AgentError> {
+    // Priority is whatever the user set as an option to mirrord, then we check if we're in an istio
+    // mesh, otherwise we try to get the appropriate interface.
+    let interface = match network_interface.or_else(|| {
+        mesh.and_then(|mesh_vendor| match mesh_vendor {
+            MeshVendor::Linkerd => None,
+            MeshVendor::Istio => Some("lo".to_string()),
+        })
+    }) {
+        Some(interface) => interface,
+        None => resolve_interface()
             .await?
-            .unwrap_or_else(|| "eth0".to_string())
+            .unwrap_or_else(|| "eth0".to_string()),
     };
 
     trace!("Using {interface:#?} interface.");
@@ -355,8 +362,9 @@ impl TcpConnectionSniffer {
     pub async fn new(
         receiver: Receiver<SnifferCommand>,
         network_interface: Option<String>,
+        mesh: Option<MeshVendor>,
     ) -> Result<Self, AgentError> {
-        let raw_capture = prepare_sniffer(network_interface).await?;
+        let raw_capture = prepare_sniffer(network_interface, mesh).await?;
 
         Ok(Self {
             receiver,
