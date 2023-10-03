@@ -389,35 +389,33 @@ impl LayerConfig {
             Err(ConfigError::Conflict("Cannot use old http filter and new http filter at the same time. Use only `http_filter` instead of `http_header_filter`".to_string()))?
         }
 
-        if self.target.path.is_none() {
+        if self.target.path.is_none() && !context.ide {
             // In the IDE, a target may be selected after `mirrord verify-config` is run, so we
             // for this case we treat these as warnings. They'll become errors once mirrord proper
             // tries to start (if the user somehow managed to not select a target by then).
-            if !context.ide {
-                if self.target.namespace.is_some() {
-                    Err(ConfigError::TargetNamespaceWithoutTarget)?
-                }
+            if self.target.namespace.is_some() {
+                Err(ConfigError::TargetNamespaceWithoutTarget)?
+            }
 
-                if self.feature.network.incoming.is_steal() {
-                    Err(ConfigError::Conflict("Steal mode is not compatible with a targetless agent, please either disable this option or specify a target.".into()))?
-                }
+            if self.feature.network.incoming.is_steal() {
+                Err(ConfigError::Conflict("Steal mode is not compatible with a targetless agent, please either disable this option or specify a target.".into()))?
+            }
 
-                if self.agent.ephemeral {
-                    Err(ConfigError::Conflict(
-                        "Using an ephemeral container for the agent is not \
+            if self.agent.ephemeral {
+                Err(ConfigError::Conflict(
+                    "Using an ephemeral container for the agent is not \
                          compatible with a targetless agent, please either disable this option or \
                         specify a target."
-                            .into(),
-                    ))?
-                }
+                        .into(),
+                ))?
+            }
 
-                if self.pause {
-                    Err(ConfigError::Conflict(
-                        "The target pause feature is not compatible with a \
+            if self.pause {
+                Err(ConfigError::Conflict(
+                    "The target pause feature is not compatible with a \
                         targetless agent, please either disable this option or specify a target."
-                            .into(),
-                    ))?
-                }
+                        .into(),
+                ))?
             }
         }
         Ok(())
