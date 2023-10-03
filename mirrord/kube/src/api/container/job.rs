@@ -157,8 +157,8 @@ impl ContainerVariant for JobVariant<'_> {
             serde_json::from_value(serde_json::json!({
                 "requests":
                 {
-                    "cpu": "10m",
-                    "memory": "10Mi"
+                    "cpu": "1m",
+                    "memory": "1Mi"
                 },
                 "limits":
                 {

@@ -222,8 +222,8 @@ pub struct AgentConfig {
     /// {
     ///   "requests":
     ///   {
-    ///     "cpu": "10m",
-    ///     "memory": "10Mi"
+    ///     "cpu": "1m",
+    ///     "memory": "1Mi"
     ///   },
     ///   "limits":
     ///   {

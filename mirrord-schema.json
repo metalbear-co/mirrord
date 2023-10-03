@@ -317,8 +317,8 @@
           ]
         },
         "resources": {
-          "title": "agent.resources {#agent-tolerations}",
-          "description": "Set pod resource reqirements. (not with ephemeral agents) Default is ```json { \"requests\": { \"cpu\": \"10m\", \"memory\": \"10Mi\" }, \"limits\": { \"cpu\": \"100m\", \"memory\": \"100Mi\" } } ```",
+          "title": "agent.resources {#agent-resources}",
+          "description": "Set pod resource reqirements. (not with ephemeral agents) Default is ```json { \"requests\": { \"cpu\": \"1m\", \"memory\": \"1Mi\" }, \"limits\": { \"cpu\": \"100m\", \"memory\": \"100Mi\" } } ```",
           "anyOf": [
             {
               "$ref": "#/definitions/io.k8s.api.core.v1.ResourceRequirements"
