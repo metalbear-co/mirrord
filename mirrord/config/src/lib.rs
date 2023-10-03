@@ -393,39 +393,7 @@ impl LayerConfig {
             // In the IDE, a target may be selected after `mirrord verify-config` is run, so we
             // for this case we treat these as warnings. They'll become errors once mirrord proper
             // tries to start (if the user somehow managed to not select a target by then).
-            if context.ide {
-                if self.target.namespace.is_some() {
-                    context.add_warning(
-                        "A target namespace was specified, but no target was detected in config. \
-                        The IDE will prompt you to select a target."
-                            .into(),
-                    );
-                }
-
-                if self.feature.network.incoming.is_steal() {
-                    context.add_warning(
-                        "Steal mode is not compatible with a targetless agent.\
-                        The IDE will prompt you to select a target."
-                            .into(),
-                    );
-                }
-
-                if self.agent.ephemeral {
-                    context.add_warning(
-                        "Using an ephemeral container for the agent is not compatible with a \
-                        targetless agent. The IDE will prompt you to select a target."
-                            .into(),
-                    );
-                }
-
-                if self.pause {
-                    context.add_warning(
-                        "The target pause feature is not compatible with a targetless agent. \
-                        The IDE will prompt you to select a target."
-                            .into(),
-                    );
-                }
-            } else {
+            if !context.ide {
                 if self.target.namespace.is_some() {
                     Err(ConfigError::TargetNamespaceWithoutTarget)?
                 }
