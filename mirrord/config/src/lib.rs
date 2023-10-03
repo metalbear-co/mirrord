@@ -396,30 +396,33 @@ impl LayerConfig {
             if context.ide {
                 if self.target.namespace.is_some() {
                     context.add_warning(
-                        "A target namespace was specified, but no target was specified. \
-                            The IDE will prompt you to select a target."
+                        "A target namespace was specified, but no target was detected in config. \
+                        The IDE will prompt you to select a target."
                             .into(),
                     );
                 }
 
                 if self.feature.network.incoming.is_steal() {
-                    context.add_warning("Steal mode is not compatible with a targetless agent, please either disable this option or specify a target.".into());
+                    context.add_warning(
+                        "Steal mode is not compatible with a targetless agent.\
+                        The IDE will prompt you to select a target."
+                            .into(),
+                    );
                 }
 
                 if self.agent.ephemeral {
                     context.add_warning(
-                        "Using an ephemeral container for the agent is not \
-                        compatible with a targetless agent, please either disable this option or \
-                        specify a target."
+                        "Using an ephemeral container for the agent is not compatible with a \
+                        targetless agent. The IDE will prompt you to select a target."
                             .into(),
                     );
                 }
 
                 if self.pause {
                     context.add_warning(
-                        "The target pause feature is not compatible with a targetless agent, please \
-                        either disable this option or specify a target."
-                            .into()
+                        "The target pause feature is not compatible with a targetless agent. \
+                        The IDE will prompt you to select a target."
+                            .into(),
                     );
                 }
             } else {
