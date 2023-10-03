@@ -290,8 +290,14 @@ fn email_parse(email: &str) -> Result<EmailAddress, String> {
 
 /// Args for the [`super::verify_config`] mirrord-cli command.
 #[derive(Args, Debug)]
+#[command(group(ArgGroup::new("verify-config")))]
 pub(super) struct VerifyConfigArgs {
     /// Config file path.
+    #[arg(long)]
+    pub(super) ide: bool,
+
+    /// Config file path.
+    #[arg(long)]
     pub(super) path: PathBuf,
 }
 

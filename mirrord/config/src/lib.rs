@@ -323,6 +323,10 @@ impl LayerConfig {
     /// We don't call it from `from_env` since we want to verify it only once (from cli)
     ///
     /// Fills `context` with the warnings.
+    ///
+    /// - `ide`: Identifies if this is being called from an IDE context, when using
+    /// `mirrord verify-config`. Turns some _target missing_ errors into warnings, as the target can
+    /// be selected after `verify-config` is run.
     pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
         if self.pause {
             if self.agent.ephemeral && !self.agent.privileged {
@@ -357,8 +361,9 @@ impl LayerConfig {
         {
             Err(ConfigError::Conflict(
                 "Cannot use both HTTP header filter and path filter at the same time".to_string(),
-            ))?;
+            ))?
         }
+
         if self
             .feature
             .network
@@ -381,24 +386,36 @@ impl LayerConfig {
                     .header_filter
                     .is_some())
         {
-            Err(ConfigError::Conflict("Cannot use old http filter and new http filter at the same time. Use only `http_filter` instead of `http_header_filter`".to_string()))?;
+            Err(ConfigError::Conflict("Cannot use old http filter and new http filter at the same time. Use only `http_filter` instead of `http_header_filter`".to_string()))?
         }
-        if self.target.path.is_none() {
+
+        if self.target.path.is_none() && !context.ide {
+            // In the IDE, a target may be selected after `mirrord verify-config` is run, so we
+            // for this case we treat these as warnings. They'll become errors once mirrord proper
+            // tries to start (if the user somehow managed to not select a target by then).
             if self.target.namespace.is_some() {
-                Err(ConfigError::TargetNamespaceWithoutTarget)?;
+                Err(ConfigError::TargetNamespaceWithoutTarget)?
             }
+
             if self.feature.network.incoming.is_steal() {
-                context.add_warning("Steal mode is not compatible with a targetless agent, please either disable this option or specify a target.".into());
+                Err(ConfigError::Conflict("Steal mode is not compatible with a targetless agent, please either disable this option or specify a target.".into()))?
             }
+
             if self.agent.ephemeral {
                 Err(ConfigError::Conflict(
-                    "Using an ephemeral container for the agent is not compatible with a targetless agent, please either disable this option or specify a target.".into(),
-                ))?;
+                    "Using an ephemeral container for the agent is not \
+                         compatible with a targetless agent, please either disable this option or \
+                        specify a target."
+                        .into(),
+                ))?
             }
+
             if self.pause {
                 Err(ConfigError::Conflict(
-                    "The target pause feature is not compatible with a targetless agent, please either disable this option or specify a target.".into(),
-                ))?;
+                    "The target pause feature is not compatible with a \
+                        targetless agent, please either disable this option or specify a target."
+                        .into(),
+                ))?
             }
         }
         Ok(())
