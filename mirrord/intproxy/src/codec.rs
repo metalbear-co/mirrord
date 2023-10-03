@@ -34,7 +34,7 @@ const PREFIX_BYTES: usize = u32::BITS as usize / 8;
 pub struct SyncSender<T, W> {
     buffer: Vec<u8>,
     writer: W,
-    _phantom: std::marker::PhantomData<T>,
+    _phantom: std::marker::PhantomData<fn() -> T>,
 }
 
 impl<T, W> SyncSender<T, W> {
@@ -73,7 +73,7 @@ where
 pub struct SyncReceiver<T, R> {
     buffer: Vec<u8>,
     reader: R,
-    _phantom: std::marker::PhantomData<T>,
+    _phantom: std::marker::PhantomData<fn() -> T>,
 }
 
 impl<T, R> SyncReceiver<T, R> {
@@ -131,7 +131,7 @@ pub fn make_sync_framed<T1: Encode, T2: Decode>(
 pub struct AsyncSender<T, W> {
     buffer: Vec<u8>,
     writer: W,
-    _phantom: std::marker::PhantomData<T>,
+    _phantom: std::marker::PhantomData<fn() -> T>,
 }
 
 impl<T, W> AsyncSender<T, W> {
@@ -170,7 +170,7 @@ where
 pub struct AsyncReceiver<T, R> {
     buffer: Vec<u8>,
     reader: R,
-    _phantom: std::marker::PhantomData<T>,
+    _phantom: std::marker::PhantomData<fn() -> T>,
 }
 
 impl<T, R> AsyncReceiver<T, R> {
