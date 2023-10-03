@@ -214,7 +214,7 @@ pub struct AgentConfig {
     /// Set to an empty array to have no tolerations at all
     pub tolerations: Option<Vec<Toleration>>,
 
-    /// ### agent.resources {#agent-tolerations}
+    /// ### agent.resources {#agent-resources}
     ///
     /// Set pod resource reqirements. (not with ephemeral agents)
     /// Default is
