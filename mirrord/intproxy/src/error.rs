@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     agent_conn::AgentCommunicationFailed, codec::CodecError, ping_pong::PingPongError,
-    proxies::outgoing::proxy::OutgoingProxyError, request_queue::RequestQueueEmpty,
+    proxies::outgoing::OutgoingProxyError, request_queue::RequestQueueEmpty,
     system::ComponentError,
 };
 

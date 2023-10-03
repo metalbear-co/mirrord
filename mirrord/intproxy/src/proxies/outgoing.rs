@@ -21,7 +21,9 @@ use tokio::{
 use crate::protocol::NetProtocol;
 
 mod interceptor;
-pub mod proxy;
+mod proxy;
+
+pub use proxy::{OutgoingProxy, OutgoingProxyError, OutgoingProxyMessage};
 
 impl NetProtocol {
     fn wrap_agent_close(&self, connection_id: ConnectionId) -> ClientMessage {
@@ -144,7 +146,7 @@ enum InnerConnectedSocket {
     UnixStream(UnixStream),
 }
 
-pub struct ConnectedSocket {
+struct ConnectedSocket {
     inner: InnerConnectedSocket,
     is_really_connected: bool,
     buffer: Vec<u8>,

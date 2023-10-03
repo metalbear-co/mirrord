@@ -26,7 +26,7 @@ use crate::{
     layer_conn::LayerConnector,
     ping_pong::PingPong,
     protocol::{LayerToProxyMessage, LocalMessage},
-    proxies::{outgoing::proxy::OutgoingProxy, simple::SimpleProxy},
+    proxies::{outgoing::OutgoingProxy, simple::SimpleProxy},
     system::ComponentError,
 };
 
