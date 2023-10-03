@@ -1,6 +1,10 @@
 use std::collections::VecDeque;
 
-use crate::error::{IntProxyError, Result};
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+#[error("request queue {0} is empty")]
+pub struct RequestQueueEmpty(&'static str);
 
 /// A request fifo used to match agent responses with layer requests.
 ///
@@ -11,26 +15,24 @@ use crate::error::{IntProxyError, Result};
 #[derive(Debug)]
 pub struct RequestQueue<T> {
     inner: VecDeque<T>,
-}
-
-impl<T> Default for RequestQueue<T> {
-    fn default() -> Self {
-        Self {
-            inner: Default::default(),
-        }
-    }
+    name: &'static str,
 }
 
 impl<T> RequestQueue<T> {
+    pub fn new(name: &'static str) -> Self {
+        Self {
+            inner: Default::default(),
+            name,
+        }
+    }
+
     /// Save request for later.
     pub fn insert(&mut self, request: T) {
         self.inner.push_back(request);
     }
 
     /// Retrieve and remove oldest request.
-    pub fn get(&mut self) -> Result<T> {
-        self.inner
-            .pop_front()
-            .ok_or(IntProxyError::RequestQueueEmpty)
+    pub fn get(&mut self) -> Result<T, RequestQueueEmpty> {
+        self.inner.pop_front().ok_or(RequestQueueEmpty(self.name))
     }
 }

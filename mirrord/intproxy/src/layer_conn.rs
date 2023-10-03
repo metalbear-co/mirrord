@@ -1,105 +1,63 @@
-use thiserror::Error;
 use tokio::{
     net::TcpStream,
-    sync::mpsc::{self, error::SendError, Receiver, Sender},
-    task,
+    sync::mpsc::{self, Receiver, Sender},
 };
 
 use crate::{
     codec::{self, CodecError},
     protocol::{LayerToProxyMessage, LocalMessage, ProxyToLayerMessage},
+    system::Component,
 };
 
-#[derive(Error, Debug)]
-pub enum LayerCommunicationFailed {
-    #[error("channel is closed")]
-    ChannelClosed,
-    #[error("binary protocol failed: {0}")]
-    CodecFailed(#[from] CodecError),
+pub struct LayerConnector {
+    stream: TcpStream,
+    incoming_tx: Sender<LocalMessage<LayerToProxyMessage>>,
 }
 
-impl From<SendError<LocalMessage<ProxyToLayerMessage>>> for LayerCommunicationFailed {
-    fn from(_value: SendError<LocalMessage<ProxyToLayerMessage>>) -> Self {
-        Self::ChannelClosed
+impl LayerConnector {
+    pub fn new(stream: TcpStream) -> (Self, Receiver<LocalMessage<LayerToProxyMessage>>) {
+        let (incoming_tx, incoming_rx) = mpsc::channel(512);
+
+        (
+            Self {
+                stream,
+                incoming_tx,
+            },
+            incoming_rx,
+        )
     }
 }
 
-pub type Result<T> = core::result::Result<T, LayerCommunicationFailed>;
+impl Component for LayerConnector {
+    type Message = LocalMessage<ProxyToLayerMessage>;
+    type Error = CodecError;
+    type Id = &'static str;
 
-pub struct LayerConnection {
-    sender: LayerSender,
-    receiver: Receiver<LocalMessage<LayerToProxyMessage>>,
-}
+    fn id(&self) -> Self::Id {
+        "LAYER_CONNECTOR"
+    }
 
-impl LayerConnection {
-    const CHANNEL_SIZE: usize = 512;
-
-    pub fn new(conn: TcpStream) -> LayerConnection {
+    async fn run(self, mut message_rx: Receiver<Self::Message>) -> Result<(), Self::Error> {
         let (mut layer_sender, mut layer_receiver) = codec::make_async_framed::<
             LocalMessage<ProxyToLayerMessage>,
             LocalMessage<LayerToProxyMessage>,
-        >(conn);
+        >(self.stream);
 
-        let (layer_tx, layer_rx) = mpsc::channel(Self::CHANNEL_SIZE);
-        let (proxy_tx, mut proxy_rx) = mpsc::channel(Self::CHANNEL_SIZE);
-
-        task::spawn(async move {
-            loop {
-                tokio::select! {
-                    res = layer_receiver.receive() => {
-                        match res {
-                            Ok(None) => {
-                                tracing::trace!("no more messages from layer to proxy");
-                                break;
-                            }
-                            Ok(Some(message)) => {
-                                if let Err(e) = layer_tx.send(message).await {
-                                    tracing::trace!("internal layer to proxy channel closed, dropping message {:?}", e.0);
-                                    break;
-                                }
-                            }
-                            Err(err) => {
-                                tracing::error!("failed to receive message from layer: {err:?}");
-                                break;
-                            }
+        loop {
+            tokio::select! {
+                msg = message_rx.recv() => match msg {
+                    None => break Ok(()),
+                    Some(msg) => layer_sender.send(&msg).await?,
+                },
+                res = layer_receiver.receive() => match res? {
+                    Some(msg) => {
+                        if self.incoming_tx.send(msg).await.is_err() {
+                            break Ok(());
                         }
                     }
-                    res = proxy_rx.recv() => {
-                        let Some(message) = res else {
-                            tracing::trace!("no more messages from proxy to layer");
-                            break;
-                        };
-
-                        if let Err(err) = layer_sender.send(&message).await {
-                            tracing::error!("failed to send message to layer: {err:?}");
-                            break;
-                        }
-                    }
-                }
+                    None => break Ok(()),
+                },
             }
-        });
-
-        LayerConnection {
-            sender: LayerSender(proxy_tx),
-            receiver: layer_rx,
         }
-    }
-
-    pub fn sender(&self) -> &LayerSender {
-        &self.sender
-    }
-
-    pub async fn receive(&mut self) -> Option<LocalMessage<LayerToProxyMessage>> {
-        self.receiver.recv().await
-    }
-}
-
-#[derive(Clone)]
-pub struct LayerSender(Sender<LocalMessage<ProxyToLayerMessage>>);
-
-impl LayerSender {
-    pub async fn send(&self, message: LocalMessage<ProxyToLayerMessage>) -> Result<()> {
-        self.0.send(message).await?;
-        Ok(())
     }
 }

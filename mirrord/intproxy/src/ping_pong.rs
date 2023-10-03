@@ -1,15 +1,13 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use mirrord_protocol::ClientMessage;
 use thiserror::Error;
-use tokio::time::{self, Interval, MissedTickBehavior};
-use tokio_util::sync::DropGuard;
-
-use crate::{
-    agent_conn::AgentSender,
-    system::{Component, ComponentResult, Producer, ComponentRef, ComponentError, WeakComponentRef},
-    error::{Result, IntProxyError},
+use tokio::{
+    sync::mpsc::Receiver,
+    time::{self, Interval, MissedTickBehavior},
 };
+
+use crate::{agent_conn::AgentSender, system::Component};
 
 #[derive(Error, Debug)]
 pub enum PingPongError {
@@ -20,74 +18,63 @@ pub enum PingPongError {
 }
 
 pub enum PingPongMessage {
-    AgentSentMessage {
-        is_pong: bool,
-    },
-    Tick {
-        requested_at: Instant,
-    }
+    Pong,
+    NotPong,
 }
 
 /// Handles ping pong mechanism on the proxy side.
 /// This mechanism exists to keep the `proxy <-> agent` connection alive
 /// when there are no requests from the layer.
 pub struct PingPong {
-    self_ref: WeakComponentRef<Self>,
     agent_sender: AgentSender,
+    ticker: Interval,
     awaiting_pong: bool,
-    frequency: Duration,
-    last_ping_request: DropGuard,
 }
 
 impl Component for PingPong {
     type Message = PingPongMessage;
     type Id = &'static str;
+    type Error = PingPongError;
 
     fn id(&self) -> Self::Id {
         "PING_PONG"
     }
 
-    async fn handle(&mut self, message: Self::Message) -> Result<()> {
-        match message {
-            PingPongMessage::Tick { requested_at } if requested_at < self.last_ping_request => Ok(()),
-            PingPongMessage::Tick { .. } if self.awaiting_pong => Err(IntProxyError::PingPong(PingPongError::PongTimeout)),
-            PingPongMessage::Tick { .. } => {
-                let Some(strong) = self.self_ref.upgrade() else {
-                    return Ok(());
-                };
-
-                self.agent_sender.send(ClientMessage::Ping).await?;
-                self.awaiting_pong = true;
-
-                self.last_ping_request = Instant::now();
-                strong.delay(self.frequency, PingPongMessage::Tick { requested_at: self.last_ping_request });
-
-                Ok(())
+    async fn run(mut self, mut message_rx: Receiver<Self::Message>) -> Result<(), Self::Error> {
+        loop {
+            tokio::select! {
+                _ = self.ticker.tick() => {
+                    if self.awaiting_pong {
+                        break Err(PingPongError::UnmatchedPong);
+                    } else {
+                        self.agent_sender.send(ClientMessage::Ping).await;
+                        self.awaiting_pong = true;
+                    }
+                }
+                msg = message_rx.recv() => match msg {
+                    None => break Ok(()),
+                    Some(PingPongMessage::Pong) if self.awaiting_pong => self.awaiting_pong = false,
+                    Some(PingPongMessage::Pong) => break Err(PingPongError::UnmatchedPong),
+                    Some(PingPongMessage::NotPong) if self.awaiting_pong => {},
+                    Some(PingPongMessage::NotPong) => {
+                        self.ticker.reset();
+                    }
+                }
             }
-            PingPongMessage::AgentSentMessage { is_pong: true } if !self.awaiting_pong => Err(IntProxyError::PingPong(PingPongError::UnmatchedPong)),
-            PingPongMessage::AgentSentMessage { is_pong: false } if !self.awaiting_pong => {
-                Ok(())
-            }
-            PingPongMessage::AgentSentMessage { is_pong: true } if self.awaiting_pong => {
-                self.awaiting_pong = false;
-                Ok(())
-            }
-            PingPongMessage::AgentSentMessage { .. } => Ok(()),
         }
     }
 }
 
 impl PingPong {
-    pub async fn new(self_ref: ComponentRef<Self>, frequency: Duration, agent_sender: AgentSender) -> Self {
-        let last_ping_request = Instant::now();
-        self_ref.clone().delay(frequency, PingPongMessage::Tick { requested_at: last_ping_request });
+    pub async fn new(frequency: Duration, agent_sender: AgentSender) -> Self {
+        let mut ticker = time::interval(frequency);
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        ticker.tick().await;
 
         Self {
-            self_ref: self_ref.downgrade(),
-            frequency,
             agent_sender,
+            ticker,
             awaiting_pong: false,
-            last_ping_request,
         }
     }
 }

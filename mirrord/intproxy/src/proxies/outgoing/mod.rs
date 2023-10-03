@@ -18,10 +18,7 @@ use tokio::{
     net::{TcpListener, TcpStream, UdpSocket, UnixListener, UnixStream},
 };
 
-use crate::{
-    error::{IntProxyError, Result},
-    protocol::NetProtocol,
-};
+use crate::protocol::NetProtocol;
 
 mod interceptor;
 pub mod proxy;
@@ -51,7 +48,7 @@ impl NetProtocol {
         }
     }
 
-    async fn prepare_socket(self, for_remote_address: SocketAddress) -> Result<PreparedSocket> {
+    async fn prepare_socket(self, for_remote_address: SocketAddress) -> io::Result<PreparedSocket> {
         let socket = match for_remote_address {
             SocketAddress::Ip(addr) => {
                 let ip_addr = match addr.ip() {
@@ -72,7 +69,7 @@ impl NetProtocol {
                 }
                 Self::Datagrams => {
                     tracing::error!("layer requested intercepting outgoing datagrams over unix socket, this is not supported");
-                    return Err(IntProxyError::DatagramOverUnix);
+                    panic!("layer requested outgoing datagrams over unix sockets");
                 }
             },
         };
@@ -91,7 +88,7 @@ impl PreparedSocket {
     /// For unix listeners, relative to the temp dir.
     const UNIX_STREAMS_DIRNAME: &'static str = "mirrord-unix-sockets";
 
-    async fn generate_uds_path() -> Result<PathBuf> {
+    async fn generate_uds_path() -> io::Result<PathBuf> {
         let tmp_dir = env::temp_dir().join(Self::UNIX_STREAMS_DIRNAME);
         if !tmp_dir.exists() {
             fs::create_dir_all(&tmp_dir).await?;
@@ -106,7 +103,7 @@ impl PreparedSocket {
         Ok(tmp_dir.join(random_string))
     }
 
-    fn local_address(&self) -> Result<SocketAddress> {
+    fn local_address(&self) -> io::Result<SocketAddress> {
         let address = match self {
             Self::TcpListener(listener) => listener.local_addr()?.into(),
             Self::UdpSocket(socket) => socket.local_addr()?.into(),
@@ -120,7 +117,7 @@ impl PreparedSocket {
         Ok(address)
     }
 
-    async fn accept(self) -> Result<ConnectedSocket> {
+    async fn accept(self) -> io::Result<ConnectedSocket> {
         let (inner, is_really_connected, buf_size) = match self {
             Self::TcpListener(listener) => {
                 let (stream, _) = listener.accept().await?;
@@ -154,7 +151,7 @@ pub struct ConnectedSocket {
 }
 
 impl ConnectedSocket {
-    async fn send(&mut self, bytes: &[u8]) -> Result<()> {
+    async fn send(&mut self, bytes: &[u8]) -> io::Result<()> {
         match &mut self.inner {
             InnerConnectedSocket::UdpSocket(socket) => {
                 let bytes_sent = socket.send(bytes).await?;
@@ -177,7 +174,7 @@ impl ConnectedSocket {
         }
     }
 
-    async fn receive(&mut self) -> Result<Vec<u8>> {
+    async fn receive(&mut self) -> io::Result<Vec<u8>> {
         match &mut self.inner {
             InnerConnectedSocket::UdpSocket(socket) => {
                 let (received, peer) = socket.recv_from(&mut self.buffer).await?;

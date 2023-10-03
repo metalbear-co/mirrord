@@ -4,8 +4,9 @@ use mirrord_protocol::ResponseError;
 use thiserror::Error;
 
 use crate::{
-    agent_conn::AgentCommunicationFailed, layer_conn::LayerCommunicationFailed,
-    ping_pong::PingPongError, system::ComponentError,
+    agent_conn::AgentCommunicationFailed, codec::CodecError, ping_pong::PingPongError,
+    proxies::outgoing::proxy::OutgoingProxyError, request_queue::RequestQueueEmpty,
+    system::ComponentError,
 };
 
 #[derive(Error, Debug)]
@@ -16,10 +17,6 @@ pub enum IntProxyError {
     AcceptFailed(io::Error),
     #[error("communication with agent failed: {0}")]
     AgentCommunicationFailed(#[from] AgentCommunicationFailed),
-    #[error("communication with layer failed: {0}")]
-    LayerCommunicationFailed(#[from] LayerCommunicationFailed),
-    #[error("request queue is empty")]
-    RequestQueueEmpty,
     #[error("agent closed connection: {0}")]
     AgentClosedConnection(String),
     #[error("received error from agent: {0}")]
@@ -30,14 +27,20 @@ pub enum IntProxyError {
     Io(#[from] io::Error),
     #[error("outgoing interceptor task failed")]
     OutgoingInterceptorFailed,
-    #[error("sending datagrams over unix sockets is not supported")]
-    DatagramOverUnix,
     #[error("ping pong error: {0}")]
     PingPong(#[from] PingPongError),
     #[error("incoming interceptor task failed")]
     IncomingInterceptorFailed,
+
+    #[error("layer connector failed: {0}")]
+    LayerConnectorError(#[from] CodecError),
+    #[error("simple proxy failed: {0}")]
+    SimpleProxyError(#[from] RequestQueueEmpty),
+    #[error("outgoing proxy failed: {0}")]
+    OutgoingProxyError(#[from] OutgoingProxyError),
+
     #[error("{0}")]
-    ComponentError(#[from] ComponentError<String>),
+    ComponentError(#[from] ComponentError<&'static str, Box<IntProxyError>>),
 }
 
 pub type Result<T> = core::result::Result<T, IntProxyError>;

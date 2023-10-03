@@ -100,7 +100,7 @@ impl AgentConnection {
     }
 
     pub async fn ping_pong(&mut self) -> Result<()> {
-        self.sender.send(ClientMessage::Ping).await?;
+        self.sender.send(ClientMessage::Ping).await;
 
         let response = self
             .receiver
@@ -127,8 +127,7 @@ impl AgentConnection {
 pub struct AgentSender(Sender<ClientMessage>);
 
 impl AgentSender {
-    pub async fn send(&self, message: ClientMessage) -> Result<()> {
-        self.0.send(message).await?;
-        Ok(())
+    pub async fn send(&self, message: ClientMessage) {
+        let _ = self.0.send(message).await;
     }
 }
