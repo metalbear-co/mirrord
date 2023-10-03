@@ -1,5 +1,4 @@
 use chrono::NaiveDate;
-use k8s_openapi::api::{apps::v1::Deployment, core::v1::Pod};
 use kube::CustomResource;
 use mirrord_config::target::{Target, TargetConfig};
 use schemars::JsonSchema;

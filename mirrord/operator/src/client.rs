@@ -203,22 +203,33 @@ impl OperatorApi {
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
         let target = self.target_config.path.clone().expect("Must have config");
 
-        let requested = CopyTargetCrd::new(
-            &target.get_target_name(),
-            CopyTargetSpec {
-                target,
-                patch: None,
-            },
-        );
+        let target_copy = match name {
+            Some(requested) => self
+                .copy_target_api
+                .get(&requested)
+                .await
+                .map_err(KubeApiError::from)?,
+            None => {
+                let requested =
+                    CopyTargetCrd::new(&target.get_target_name(), CopyTargetSpec { target });
 
-        let created = self
-            .copy_target_api
-            .create(&PostParams::default(), &requested)
-            .await
-            .map_err(KubeApiError::from)?;
+                self.copy_target_api
+                    .create(&PostParams::default(), &requested)
+                    .await
+                    .map_err(KubeApiError::from)?
+            }
+        };
 
         let mut builder = Request::builder()
-            .uri(self.copy_url(&created.metadata.name.as_deref().expect("Must have name")))
+            .uri(
+                self.copy_url(
+                    target_copy
+                        .metadata
+                        .name
+                        .as_deref()
+                        .expect("Must have name"),
+                ),
+            )
             .header("x-session-id", session_information.session_id.to_string());
 
         if let Some(certificate) = &session_information.client_certificate {
