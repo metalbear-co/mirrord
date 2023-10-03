@@ -136,13 +136,4 @@ pub enum OperatorFeatures {
 )]
 pub struct CopyTargetSpec {
     pub target: Target,
-    pub patch: Option<CopyTargetPatch>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase", tag = "kind", content = "value")]
-pub enum CopyTargetPatch {
-    Deployment(Deployment),
-    Pod(Pod),
-    Rollout(serde_json::Value),
 }
