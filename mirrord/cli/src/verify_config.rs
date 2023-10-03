@@ -67,12 +67,12 @@ enum VerifiedConfig {
 /// }
 /// ```
 pub(super) async fn verify_config(VerifyConfigArgs { ide, path }: VerifyConfigArgs) -> Result<()> {
-    let mut config_context = ConfigContext::default();
+    let mut config_context = ConfigContext::new(ide);
 
     let verified = match LayerFileConfig::from_path(path)
         .and_then(|config| config.generate_config(&mut config_context))
         .and_then(|config| {
-            config.verify(&mut config_context, ide)?;
+            config.verify(&mut config_context)?;
             Ok(config)
         }) {
         Ok(config) => VerifiedConfig::Success {

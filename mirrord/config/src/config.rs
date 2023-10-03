@@ -55,16 +55,32 @@ pub enum ConfigError {
 
 pub type Result<T, E = ConfigError> = std::result::Result<T, E>;
 
-/// Struct used for storing context during building of configuration
+/// Struct used for storing context during building of configuration.
 #[derive(Default)]
 pub struct ConfigContext {
+    /// Are we in a IDE context?
+    ///
+    /// Used by `Config::verify` to change some errors into warnings.
+    pub ide: bool,
+
+    /// The warnings when a config value conflicts with another, but mirrord can keep going.
+    ///
+    /// Some _target_ related errors become warning when `ide == true`.
     warnings: Vec<String>,
 }
 
 impl ConfigContext {
+    pub fn new(ide: bool) -> Self {
+        Self {
+            ide,
+            ..Default::default()
+        }
+    }
+
     pub fn add_warning(&mut self, warning: String) {
         self.warnings.push(warning);
     }
+
     pub fn get_warnings(&self) -> &Vec<String> {
         &self.warnings
     }
@@ -78,7 +94,7 @@ pub trait MirrordConfig {
     type Generated;
 
     /// <!--${internal}-->
-    /// Load configuration from all sources and output as [Self::Generated]
+    /// Load configuration from all sources and output as `Self::Generated`
     /// Pass reference to list of warnings which callee can add warnings into.
     fn generate_config(self, context: &mut ConfigContext) -> Result<Self::Generated>;
 }

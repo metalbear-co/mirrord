@@ -61,7 +61,7 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch)
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, watch);
 
-    config.verify(&mut context, false)?;
+    config.verify(&mut context)?;
     for warning in context.get_warnings() {
         progress.warning(warning);
     }

@@ -224,7 +224,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, watch);
     (&config).collect_analytics(analytics.get_mut());
 
-    config.verify(&mut context, false)?;
+    config.verify(&mut context)?;
     for warning in context.get_warnings() {
         progress.warning(warning);
     }

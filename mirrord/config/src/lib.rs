@@ -327,7 +327,7 @@ impl LayerConfig {
     /// - `ide`: Identifies if this is being called from an IDE context, when using
     /// `mirrord verify-config`. Turns some _target missing_ errors into warnings, as the target can
     /// be selected after `verify-config` is run.
-    pub fn verify(&self, context: &mut ConfigContext, ide: bool) -> Result<(), ConfigError> {
+    pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
         if self.pause {
             if self.agent.ephemeral && !self.agent.privileged {
                 context.add_warning("The target pause feature with ephemeral requires to enable the privileged flag on the agent.".to_string());
@@ -393,7 +393,7 @@ impl LayerConfig {
             // In the IDE, a target may be selected after `mirrord verify-config` is run, so we
             // for this case we treat these as warnings. They'll become errors once mirrord proper
             // tries to start (if the user somehow managed to not select a target by then).
-            if ide {
+            if context.ide {
                 if self.target.namespace.is_some() {
                     context.add_warning(
                         "A target namespace was specified, but no target was specified. \
