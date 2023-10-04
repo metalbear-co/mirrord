@@ -657,9 +657,10 @@ impl OperatorClusterUserRole {
                 },
                 PolicyRule {
                     api_groups: Some(vec!["operator.metalbear.co".to_owned()]),
-                    resources: Some(
-                        vec!["mirrordoperators/certificate".to_owned(), , "copytargets".to_owned()],
-                    ),
+                    resources: Some(vec![
+                        "mirrordoperators/certificate".to_owned(),
+                        "copytargets".to_owned(),
+                    ]),
                     verbs: vec!["create".to_owned()],
                     ..Default::default()
                 },
