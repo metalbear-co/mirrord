@@ -677,6 +677,7 @@ mod tests {
                         ..Default::default()
                     })),
                 })),
+                copy_target: None,
             }),
             connect_tcp: None,
             operator: None,
