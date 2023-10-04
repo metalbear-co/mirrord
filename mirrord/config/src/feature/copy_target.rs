@@ -10,7 +10,7 @@ use crate::{
 #[config(map_to = "CopyTargetFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct CopyTargetConfig {
-    #[config(env = "MIRRORD_COPY_TARGET_ENABLED")]
+    #[config(env = "MIRRORD_COPY_TARGET_ENABLED", default = false)]
     pub enabled: bool,
 
     #[config(env = "MIRRORD_COPY_TARGET_NAME")]
