@@ -212,8 +212,6 @@ impl OutgoingProxy {
 
 #[derive(Error, Debug)]
 pub enum OutgoingProxyError {
-    #[error("connection {0} not found")]
-    NoConnectionId(ConnectionId),
     #[error("{0}")]
     RequestQueueEmpty(#[from] RequestQueueEmpty),
     #[error("failed to prepare interceptor: {0}")]

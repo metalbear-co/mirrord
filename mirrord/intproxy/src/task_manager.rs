@@ -32,8 +32,8 @@ impl<T: Task> MessageBus<T> {
             .expect("task manager main channel closed")
     }
 
-    pub async fn recv(&mut self) -> T::MessageIn {
-        self.rx.recv().await.expect("task channel closed")
+    pub async fn recv(&mut self) -> Option<T::MessageIn> {
+        self.rx.recv().await
     }
 }
 
