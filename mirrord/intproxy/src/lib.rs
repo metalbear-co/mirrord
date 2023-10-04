@@ -7,27 +7,23 @@ use std::{
     time::Duration,
 };
 
+use agent_conn::AgentCommunicationError;
+use layer_conn::LayerConnection;
 use mirrord_config::LayerConfig;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
-use ping_pong::PingPongMessage;
 use protocol::{ProxyToLayerMessage, NOT_A_RESPONSE};
 use semver::VersionReq;
-use system::{ComponentRef, System};
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::mpsc::Receiver,
     task::JoinSet,
     time,
 };
 
 use crate::{
-    agent_conn::{AgentCommunicationFailed, AgentConnectInfo, AgentConnection},
+    agent_conn::{AgentConnectInfo, AgentConnection},
     error::{IntProxyError, Result},
-    layer_conn::LayerConnector,
     ping_pong::PingPong,
     protocol::{LayerToProxyMessage, LocalMessage},
-    proxies::{outgoing::OutgoingProxy, simple::SimpleProxy},
-    system::ComponentError,
 };
 
 pub mod agent_conn;
@@ -38,7 +34,7 @@ mod ping_pong;
 pub mod protocol;
 mod proxies;
 mod request_queue;
-mod system;
+mod task_manager;
 
 /// Minimal [`mirrord_protocol`] version that allows [`ClientMessage::ReadyForLogs`] message.
 pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
@@ -125,49 +121,28 @@ impl IntProxy {
 
 struct ProxySession {
     agent_conn: AgentConnection,
-    layer_rx: Receiver<LocalMessage<LayerToProxyMessage>>,
+    layer_conn: LayerConnection,
 
-    system: System<&'static str, IntProxyError>,
-
-    layer_connector_ref: ComponentRef<LayerConnector>,
-    simple_proxy_ref: ComponentRef<SimpleProxy>,
-    outgoing_proxy_ref: ComponentRef<OutgoingProxy>,
-    ping_pong_ref: ComponentRef<PingPong>,
+    ping_pong: PingPong,
 }
 
 impl ProxySession {
     const PING_INTERVAL: Duration = Duration::from_secs(30);
+    const CHANNEL_SIZE: usize = 512;
 
     async fn new(intproxy: &IntProxy, conn: TcpStream) -> Result<Self> {
         let mut agent_conn =
             AgentConnection::new(&intproxy.config, intproxy.agent_connect_info.as_ref()).await?;
         agent_conn.ping_pong().await?;
 
-        let mut system = System::default();
+        let layer_conn = LayerConnection::new(conn, Self::CHANNEL_SIZE);
 
-        let (layer_connector, layer_rx) = LayerConnector::new(conn);
-        let layer_connector_ref = system.register(layer_connector);
-        let simple_proxy_ref = system.register(SimpleProxy::new(
-            layer_connector_ref.clone(),
-            agent_conn.sender().clone(),
-        ));
-        let outgoing_proxy_ref = system.register(OutgoingProxy::new(
-            layer_connector_ref.clone(),
-            agent_conn.sender().clone(),
-        ));
-
-        let ping_pong_ref =
-            system.register(PingPong::new(Self::PING_INTERVAL, agent_conn.sender().clone()).await);
+        let ping_pong = PingPong::new(Self::PING_INTERVAL, agent_conn.sender().clone()).await;
 
         Ok(Self {
             agent_conn,
-            layer_rx,
-
-            system,
-            layer_connector_ref,
-            simple_proxy_ref,
-            outgoing_proxy_ref,
-            ping_pong_ref,
+            layer_conn,
+            ping_pong,
         })
     }
 
@@ -177,11 +152,13 @@ impl ProxySession {
             .send(ClientMessage::SwitchProtocolVersion(
                 mirrord_protocol::VERSION.clone(),
             ))
-            .await;
+            .await?;
 
         loop {
             tokio::select! {
-                msg = self.layer_rx.recv() => match msg {
+                biased;
+
+                msg = self.layer_conn.receive() => match msg {
                     Some(msg) => self.handle_layer_message(msg).await,
                     None => {
                         tracing::trace!("layer connection closed");
@@ -189,38 +166,18 @@ impl ProxySession {
                     }
                 },
 
-                msg = self.agent_conn.receive() => {
-                    let Some(message) = msg else {
-                        tracing::error!("agent connection closed");
-                        break Err(IntProxyError::AgentClosedConnection("no reason specified".into()));
-                    };
-
-                    self.handle_agent_message(message).await?;
+                res = self.ping_pong.ready() => {
+                    res?;
+                    self.ping_pong.send_ping().await?;
                 },
 
-                Some(res) = self.system.next() => match res {
-                    Ok(id) => tracing::info!("component {id} finished"),
-                    Err(ComponentError::Panic(id)) => {
-                        let err = IntProxyError::ComponentError(ComponentError::Panic(id));
-                        tracing::error!("{err}");
-                        return Err(err);
-                    },
-                    Err(ComponentError::Error(id, e)) => {
-                        let err = IntProxyError::ComponentError(ComponentError::Error(id, e.into()));
-                        tracing::error!("{err}");
-                        return Err(err);
-                    }
-                }
+                msg = self.agent_conn.receive() => self.handle_agent_message(msg?).await?,
             }
         }
     }
 
     async fn handle_agent_message(&mut self, message: DaemonMessage) -> Result<()> {
-        let ping_pong_message = match &message {
-            DaemonMessage::Pong => PingPongMessage::Pong,
-            _ => PingPongMessage::NotPong,
-        };
-        self.ping_pong_ref.send(ping_pong_message).await;
+        self.ping_pong.inspect_agent_message(&message)?;
 
         match message {
             DaemonMessage::Pong => Ok(()),
@@ -248,22 +205,24 @@ impl ProxySession {
                     self.agent_conn
                         .sender()
                         .send(ClientMessage::ReadyForLogs)
-                        .await;
+                        .await?;
                 }
 
                 Ok(())
             }
             DaemonMessage::LogMessage(log) => {
-                self.layer_connector_ref
+                self.layer_conn
+                    .sender()
                     .send(LocalMessage {
                         message_id: NOT_A_RESPONSE,
                         inner: ProxyToLayerMessage::AgentLog(log),
                     })
-                    .await;
+                    .await?;
+
                 Ok(())
             }
-            other => Err(IntProxyError::AgentCommunicationFailed(
-                AgentCommunicationFailed::UnexpectedMessage(other),
+            other => Err(IntProxyError::AgentCommunicationError(
+                AgentCommunicationError::UnexpectedMessage(other),
             )),
         }
     }

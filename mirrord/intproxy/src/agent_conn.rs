@@ -14,38 +14,32 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{
     net::TcpStream,
-    sync::mpsc::{error::SendError, Receiver, Sender},
+    sync::mpsc::{Receiver, Sender},
 };
 
 #[derive(Error, Debug)]
-pub enum AgentCommunicationFailed {
-    #[error("failed to connect: {0}")]
-    ConnectionFailed(#[from] AgentConnectionFailed),
-    #[error("channel is closed")]
+pub enum AgentCommunicationError {
+    #[error("channel closed")]
     ChannelClosed,
     #[error("received unexpected message: {0:?}")]
     UnexpectedMessage(DaemonMessage),
+    #[error("failed to connect: {0}")]
+    ConnectionError(#[from] AgentConnectionError),
 }
 
 #[derive(Error, Debug)]
-pub enum AgentConnectionFailed {
+pub enum AgentConnectionError {
     #[error("{0}")]
     Io(#[from] io::Error),
     #[error("{0}")]
     Operator(#[from] OperatorApiError),
     #[error("{0}")]
     Kube(#[from] KubeApiError),
-    #[error("could not find method for agent connection")]
+    #[error("invalid configuration, could not find method for connection")]
     NoConnectionMethod,
 }
 
-impl From<SendError<ClientMessage>> for AgentCommunicationFailed {
-    fn from(_value: SendError<ClientMessage>) -> Self {
-        Self::ChannelClosed
-    }
-}
-
-pub type Result<T> = core::result::Result<T, AgentCommunicationFailed>;
+pub type Result<T> = core::result::Result<T, AgentCommunicationError>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentConnectInfo {
@@ -69,26 +63,26 @@ impl AgentConnection {
             Some(AgentConnectInfo::Operator(operator_session_information)) => {
                 OperatorApi::connect(config, operator_session_information, None)
                     .await
-                    .map_err(AgentConnectionFailed::Operator)?
+                    .map_err(AgentConnectionError::Operator)?
             }
             Some(AgentConnectInfo::DirectKubernetes(connect_info)) => {
                 let k8s_api = KubernetesAPI::create(config)
                     .await
-                    .map_err(AgentConnectionFailed::Kube)?;
+                    .map_err(AgentConnectionError::Kube)?;
                 k8s_api
                     .create_connection(connect_info.clone())
                     .await
-                    .map_err(AgentConnectionFailed::Kube)?
+                    .map_err(AgentConnectionError::Kube)?
             }
             None => {
                 if let Some(address) = config.connect_tcp.as_ref() {
                     let stream = TcpStream::connect(address)
                         .await
-                        .map_err(AgentConnectionFailed::Io)?;
+                        .map_err(AgentConnectionError::Io)?;
 
                     wrap_raw_connection(stream)
                 } else {
-                    return Err(AgentConnectionFailed::NoConnectionMethod.into());
+                    return Err(AgentConnectionError::NoConnectionMethod.into());
                 }
             }
         };
@@ -100,17 +94,17 @@ impl AgentConnection {
     }
 
     pub async fn ping_pong(&mut self) -> Result<()> {
-        self.sender.send(ClientMessage::Ping).await;
+        self.sender.send(ClientMessage::Ping).await?;
 
         let response = self
             .receiver
             .recv()
             .await
-            .ok_or(AgentCommunicationFailed::ChannelClosed)?;
+            .ok_or(AgentCommunicationError::ChannelClosed)?;
 
         match response {
             DaemonMessage::Pong => Ok(()),
-            other => Err(AgentCommunicationFailed::UnexpectedMessage(other)),
+            other => Err(AgentCommunicationError::UnexpectedMessage(other)),
         }
     }
 
@@ -118,8 +112,11 @@ impl AgentConnection {
         &self.sender
     }
 
-    pub async fn receive(&mut self) -> Option<DaemonMessage> {
-        self.receiver.recv().await
+    pub async fn receive(&mut self) -> Result<DaemonMessage> {
+        self.receiver
+            .recv()
+            .await
+            .ok_or(AgentCommunicationError::ChannelClosed)
     }
 }
 
@@ -127,7 +124,10 @@ impl AgentConnection {
 pub struct AgentSender(Sender<ClientMessage>);
 
 impl AgentSender {
-    pub async fn send(&self, message: ClientMessage) {
-        let _ = self.0.send(message).await;
+    pub async fn send(&self, message: ClientMessage) -> Result<()> {
+        self.0
+            .send(message)
+            .await
+            .map_err(|_| AgentCommunicationError::ChannelClosed)
     }
 }

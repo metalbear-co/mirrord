@@ -1,20 +1,30 @@
-use derive_more::From;
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     ClientMessage, FileRequest, FileResponse, GetEnvVarsRequest,
 };
-use tokio::sync::mpsc::Receiver;
+use thiserror::Error;
 
 use crate::{
-    agent_conn::AgentSender,
-    layer_conn::LayerConnector,
+    agent_conn::{AgentCommunicationError, AgentSender},
+    layer_conn::{LayerCommunicationError, LayerSender},
     protocol::{LocalMessage, ProxyToLayerMessage},
     request_queue::{RequestQueue, RequestQueueEmpty},
-    system::{Component, ComponentRef},
 };
 
+#[derive(Error, Debug)]
+pub enum SimpleProxyError {
+    #[error("communication with agent failed: {0}")]
+    AgentCommunicationError(#[from] AgentCommunicationError),
+    #[error("communication with layer failed: {0}")]
+    LayerCommunicationError(#[from] LayerCommunicationError),
+    #[error("{0}")]
+    RequestQueueEmpty(#[from] RequestQueueEmpty),
+}
+
+type Result<T> = core::result::Result<T, SimpleProxyError>;
+
 #[derive(Default)]
-struct Queues {
+pub struct Queues {
     file_ops: RequestQueue,
     get_addr_info: RequestQueue,
     get_env_vars: RequestQueue,
@@ -23,84 +33,45 @@ struct Queues {
 /// For passing messages between the layer and the agent without custom internal logic.
 pub struct SimpleProxy {
     agent_sender: AgentSender,
-    layer_connector_ref: ComponentRef<LayerConnector>,
+    layer_sender: LayerSender,
     queues: Queues,
 }
 
 impl SimpleProxy {
-    pub fn new(
-        layer_connector_ref: ComponentRef<LayerConnector>,
-        agent_sender: AgentSender,
-    ) -> Self {
+    pub fn new(layer_sender: LayerSender, agent_sender: AgentSender) -> Self {
         Self {
             agent_sender,
-            layer_connector_ref,
+            layer_sender,
             queues: Default::default(),
         }
     }
 
-    async fn handle_request<R: SimpleRequest>(&mut self, request: LocalMessage<R>) {
+    async fn handle_request<R: SimpleRequest>(&mut self, request: LocalMessage<R>) -> Result<()> {
         if let Some(queue) = request.inner.get_queue(&mut self.queues) {
             queue.insert(request.message_id);
         }
 
-        self.agent_sender.send(request.inner.into_message()).await;
+        self.agent_sender
+            .send(request.inner.into_message())
+            .await
+            .map_err(Into::into)
     }
 
-    async fn handle_response<R: SimpleResponse>(
-        &mut self,
-        response: R,
-    ) -> Result<(), RequestQueueEmpty> {
+    async fn handle_response<R: SimpleResponse>(&mut self, response: R) -> Result<()> {
         let message_id = response.get_queue(&mut self.queues).get()?;
 
-        self.layer_connector_ref
+        self.layer_sender
             .send(LocalMessage {
                 message_id,
                 inner: response.into_message(),
             })
-            .await;
+            .await?;
 
         Ok(())
     }
 }
 
-/// Messages handled by [`SimpleProxy`] component.
-#[derive(From)]
-pub enum SimpleProxyMessage {
-    FileRequest(LocalMessage<FileRequest>),
-    FileResponse(FileResponse),
-    GetAddrInfoRequest(LocalMessage<GetAddrInfoRequest>),
-    GetAddrInfoResponse(GetAddrInfoResponse),
-}
-
-impl Component for SimpleProxy {
-    type Message = SimpleProxyMessage;
-    type Id = &'static str;
-    type Error = RequestQueueEmpty;
-
-    fn id(&self) -> Self::Id {
-        "SIMPLE_PROXY"
-    }
-
-    async fn run(
-        mut self,
-        mut message_rx: Receiver<SimpleProxyMessage>,
-    ) -> Result<(), Self::Error> {
-        while let Some(message) = message_rx.recv().await {
-            match message {
-                SimpleProxyMessage::FileRequest(req) => self.handle_request(req).await,
-                SimpleProxyMessage::GetAddrInfoRequest(req) => self.handle_request(req).await,
-
-                SimpleProxyMessage::FileResponse(res) => self.handle_response(res).await?,
-                SimpleProxyMessage::GetAddrInfoResponse(res) => self.handle_response(res).await?,
-            }
-        }
-
-        Ok(())
-    }
-}
-
-trait SimpleRequest {
+pub trait SimpleRequest {
     fn into_message(self) -> ClientMessage;
 
     fn get_queue<'a>(&self, queues: &'a mut Queues) -> Option<&'a mut RequestQueue>;
@@ -139,7 +110,7 @@ impl SimpleRequest for GetEnvVarsRequest {
     }
 }
 
-trait SimpleResponse {
+pub trait SimpleResponse {
     fn into_message(self) -> ProxyToLayerMessage;
 
     fn get_queue<'a>(&self, queues: &'a mut Queues) -> &'a mut RequestQueue;

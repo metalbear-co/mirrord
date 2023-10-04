@@ -1,6 +1,5 @@
 use std::{collections::HashMap, io};
 
-use derive_more::From;
 use mirrord_protocol::{
     outgoing::{tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing, DaemonConnect, DaemonRead},
     ConnectionId, RemoteResult,
@@ -11,13 +10,12 @@ use tokio::sync::mpsc::Receiver;
 use super::interceptor::{InterceptorId, OutgoingInterceptor};
 use crate::{
     agent_conn::AgentSender,
-    layer_conn::LayerConnector,
+    layer_conn::LayerSender,
     protocol::{
         LocalMessage, NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse,
         ProxyToLayerMessage,
     },
     request_queue::{RequestQueue, RequestQueueEmpty},
-    system::{Component, ComponentError, ComponentRef, ComponentResult, System},
 };
 
 #[derive(Default)]
@@ -37,23 +35,16 @@ impl Queues {
 
 pub struct OutgoingProxy {
     agent_sender: AgentSender,
-    layer_connector_ref: ComponentRef<LayerConnector>,
-    interceptors: HashMap<InterceptorId, ComponentRef<OutgoingInterceptor>>,
-    queues: Queues,
-    system: System<InterceptorId, io::Error>,
+    layer_sender: LayerSender,
+    interceptors: Interceptors,
 }
 
 impl OutgoingProxy {
-    pub fn new(
-        layer_connector_ref: ComponentRef<LayerConnector>,
-        agent_sender: AgentSender,
-    ) -> Self {
+    pub fn new(layer_sender: LayerSender, agent_sender: AgentSender) -> Self {
         Self {
             agent_sender,
-            layer_connector_ref,
+            layer_sender,
             interceptors: Default::default(),
-            queues: Default::default(),
-            system: Default::default(),
         }
     }
 
@@ -215,7 +206,6 @@ pub enum OutgoingProxyError {
     InterceptorSetupFailed(#[from] io::Error),
 }
 
-#[derive(From)]
 pub enum OutgoingProxyMessage {
     AgentStreams(DaemonTcpOutgoing),
     AgentDatagrams(DaemonUdpOutgoing),

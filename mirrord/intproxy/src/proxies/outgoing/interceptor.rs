@@ -7,7 +7,7 @@ use mirrord_protocol::{
 use tokio::sync::mpsc::Receiver;
 
 use super::PreparedSocket;
-use crate::{agent_conn::AgentSender, protocol::NetProtocol, system::Component};
+use crate::{agent_conn::AgentSender, protocol::NetProtocol};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct InterceptorId {
