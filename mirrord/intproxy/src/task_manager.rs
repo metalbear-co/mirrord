@@ -37,7 +37,7 @@ impl<T: Task> MessageBus<T> {
     }
 }
 
-pub trait Task: Send + Sized {
+pub trait Task: 'static + Send + Sized {
     type Id: Send + Copy + PartialEq + Eq + Hash;
     type Error: Send;
     type MessageIn: Send;
@@ -68,17 +68,28 @@ pub enum TaskMessageOut<T: Task> {
 }
 
 pub struct TaskManager<T: Task> {
+    channel_capacity: usize,
     main_rx: Receiver<TaskMessageOut<T>>,
     main_tx: Sender<TaskMessageOut<T>>,
-
-    txs: HashMap<T::Id, Sender<T::MessageIn>>,
+    task_txs: HashMap<T::Id, Sender<T::MessageIn>>,
 }
 
 impl<T: Task> TaskManager<T> {
-    pub fn spawn(&mut self, task: T) -> Result<(), TaskManagerError<T>> {
-        let (tx, rx) = mpsc::channel(512);
+    pub fn new(channel_capacity: usize) -> Self {
+        let (main_tx, main_rx) = mpsc::channel(channel_capacity);
 
-        match self.txs.entry(task.id()) {
+        Self {
+            channel_capacity,
+            main_rx,
+            main_tx,
+            task_txs: Default::default(),
+        }
+    }
+
+    pub fn spawn(&mut self, task: T) -> Result<(), TaskManagerError<T>> {
+        let (tx, rx) = mpsc::channel(self.channel_capacity);
+
+        match self.task_txs.entry(task.id()) {
             Entry::Occupied(..) => return Err(TaskManagerError::TaskAlreadyExists(task.id())),
             Entry::Vacant(e) => {
                 e.insert(tx);
@@ -87,7 +98,7 @@ impl<T: Task> TaskManager<T> {
 
         let main_tx_clone = self.main_tx.clone();
 
-        let message_bus = MessageBus {
+        let mut message_bus = MessageBus {
             id: task.id(),
             tx: self.main_tx.clone(),
             rx,
@@ -105,7 +116,7 @@ impl<T: Task> TaskManager<T> {
                 Ok(Ok(())) => Ok(()),
             };
 
-            main_tx_clone
+            let _ = main_tx_clone
                 .send(TaskMessageOut::Result { id, inner: result })
                 .await;
         });
@@ -114,7 +125,7 @@ impl<T: Task> TaskManager<T> {
     }
 
     pub async fn send(&self, task_id: T::Id, msg: T::MessageIn) -> Result<(), TaskManagerError<T>> {
-        self.txs
+        self.task_txs
             .get(&task_id)
             .ok_or(TaskManagerError::TaskDoesNotExist(task_id))?
             .send(msg)
@@ -130,7 +141,7 @@ impl<T: Task> TaskManager<T> {
             .expect("task manager main channel closed");
 
         if let TaskMessageOut::Result { id, .. } = &res {
-            self.txs.remove(id);
+            self.task_txs.remove(id);
         }
 
         res

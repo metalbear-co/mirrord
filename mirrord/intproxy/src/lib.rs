@@ -183,19 +183,19 @@ impl ProxySession {
             DaemonMessage::Pong => Ok(()),
             DaemonMessage::Close(reason) => Err(IntProxyError::AgentClosedConnection(reason)),
             DaemonMessage::TcpOutgoing(msg) => {
-                self.outgoing_proxy_ref.send(msg).await;
+                // self.outgoing_proxy_ref.send(msg).await;
                 Ok(())
             }
             DaemonMessage::UdpOutgoing(msg) => {
-                self.outgoing_proxy_ref.send(msg).await;
+                // self.outgoing_proxy_ref.send(msg).await;
                 Ok(())
             }
             DaemonMessage::File(msg) => {
-                self.simple_proxy_ref.send(msg).await;
+                // self.simple_proxy_ref.send(msg).await;
                 Ok(())
             }
             DaemonMessage::GetAddrInfoResponse(msg) => {
-                self.simple_proxy_ref.send(msg).await;
+                // self.simple_proxy_ref.send(msg).await;
                 Ok(())
             }
             DaemonMessage::Tcp(..) => todo!(),
@@ -231,28 +231,28 @@ impl ProxySession {
         match message.inner {
             LayerToProxyMessage::NewSession(..) => todo!(),
             LayerToProxyMessage::File(req) => {
-                self.simple_proxy_ref
-                    .send(LocalMessage {
-                        inner: req,
-                        message_id: message.message_id,
-                    })
-                    .await
+                // self.simple_proxy_ref
+                //     .send(LocalMessage {
+                //         inner: req,
+                //         message_id: message.message_id,
+                //     })
+                //     .await
             }
             LayerToProxyMessage::GetAddrInfo(req) => {
-                self.simple_proxy_ref
-                    .send(LocalMessage {
-                        inner: req,
-                        message_id: message.message_id,
-                    })
-                    .await
+                // self.simple_proxy_ref
+                //     .send(LocalMessage {
+                //         inner: req,
+                //         message_id: message.message_id,
+                //     })
+                //     .await
             }
             LayerToProxyMessage::OutgoingConnect(req) => {
-                self.outgoing_proxy_ref
-                    .send(LocalMessage {
-                        message_id: message.message_id,
-                        inner: req,
-                    })
-                    .await
+                // self.outgoing_proxy_ref
+                //     .send(LocalMessage {
+                //         message_id: message.message_id,
+                //         inner: req,
+                //     })
+                //     .await
             }
             LayerToProxyMessage::Incoming(..) => todo!(),
         }

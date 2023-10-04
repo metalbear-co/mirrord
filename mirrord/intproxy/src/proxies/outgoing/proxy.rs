@@ -1,21 +1,21 @@
-use std::{collections::HashMap, io};
+use std::io;
 
 use mirrord_protocol::{
     outgoing::{tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing, DaemonConnect, DaemonRead},
     ConnectionId, RemoteResult,
 };
 use thiserror::Error;
-use tokio::sync::mpsc::Receiver;
 
-use super::interceptor::{InterceptorId, OutgoingInterceptor};
+use super::interceptor::{InterceptorId, OutgoingInterceptor, OutgoingInterceptorMessage};
 use crate::{
     agent_conn::AgentSender,
-    layer_conn::LayerSender,
+    layer_conn::{LayerCommunicationError, LayerSender},
     protocol::{
         LocalMessage, NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse,
         ProxyToLayerMessage,
     },
     request_queue::{RequestQueue, RequestQueueEmpty},
+    task_manager::{MessageBus, Task, TaskManager, TaskMessageOut},
 };
 
 #[derive(Default)]
@@ -36,7 +36,8 @@ impl Queues {
 pub struct OutgoingProxy {
     agent_sender: AgentSender,
     layer_sender: LayerSender,
-    interceptors: Interceptors,
+    queues: Queues,
+    interceptors: TaskManager<OutgoingInterceptor>,
 }
 
 impl OutgoingProxy {
@@ -44,15 +45,28 @@ impl OutgoingProxy {
         Self {
             agent_sender,
             layer_sender,
-            interceptors: Default::default(),
+            queues: Default::default(),
+            interceptors: TaskManager::new(512),
         }
     }
 
-    fn handle_agent_close(&mut self, connection_id: ConnectionId, protocol: NetProtocol) {
-        self.interceptors.remove(&InterceptorId {
-            connection_id,
-            protocol,
-        });
+    async fn handle_agent_close(&mut self, connection_id: ConnectionId, protocol: NetProtocol) {
+        let res = self
+            .interceptors
+            .send(
+                InterceptorId {
+                    connection_id,
+                    protocol,
+                },
+                OutgoingInterceptorMessage::AgentClosed,
+            )
+            .await;
+
+        if res.is_err() {
+            tracing::trace!(
+                "agent sent message to closed interceptor, connection id {connection_id}"
+            );
+        }
     }
 
     async fn handle_agent_read(&self, read: RemoteResult<DaemonRead>, protocol: NetProtocol) {
@@ -64,14 +78,22 @@ impl OutgoingProxy {
             return;
         };
 
-        let Some(interceptor_ref) = self.interceptors.get(&InterceptorId {
-            connection_id,
-            protocol,
-        }) else {
-            return;
-        };
+        let res = self
+            .interceptors
+            .send(
+                InterceptorId {
+                    connection_id,
+                    protocol,
+                },
+                OutgoingInterceptorMessage::Bytes(bytes),
+            )
+            .await;
 
-        interceptor_ref.send(bytes).await;
+        if res.is_err() {
+            tracing::trace!(
+                "agent sent message to closed interceptor, connection id {connection_id}"
+            );
+        }
     }
 
     async fn handle_agent_connect(
@@ -84,14 +106,14 @@ impl OutgoingProxy {
         let connect = match connect {
             Ok(connect) => connect,
             Err(e) => {
-                self.layer_connector_ref
+                return self
+                    .layer_sender
                     .send(LocalMessage {
                         message_id,
                         inner: ProxyToLayerMessage::OutgoingConnect(Err(e)),
                     })
-                    .await;
-
-                return Ok(());
+                    .await
+                    .map_err(Into::into);
             }
         };
 
@@ -104,17 +126,10 @@ impl OutgoingProxy {
         let prepared_socket = protocol.prepare_socket(remote_address).await?;
         let layer_address = prepared_socket.local_address()?;
 
-        let interceptor = OutgoingInterceptor::new(
-            self.agent_sender.clone(),
-            connection_id,
-            protocol,
-            prepared_socket,
-        );
-        let id = interceptor.id();
-        let interceptor_ref = self.system.register(interceptor);
-        self.interceptors.insert(id, interceptor_ref);
+        let interceptor = OutgoingInterceptor::new(connection_id, protocol, prepared_socket);
+        self.interceptors.spawn(interceptor);
 
-        self.layer_connector_ref
+        self.layer_sender
             .send(LocalMessage {
                 message_id,
                 inner: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
@@ -122,18 +137,20 @@ impl OutgoingProxy {
                     in_cluster_address: local_address,
                 })),
             })
-            .await;
+            .await?;
 
         Ok(())
     }
 
-    async fn handle_message(
+    async fn handle_agent_message(
         &mut self,
         message: OutgoingProxyMessage,
     ) -> Result<(), OutgoingProxyError> {
         match message {
             OutgoingProxyMessage::AgentDatagrams(msg) => match msg {
-                DaemonUdpOutgoing::Close(id) => self.handle_agent_close(id, NetProtocol::Datagrams),
+                DaemonUdpOutgoing::Close(id) => {
+                    self.handle_agent_close(id, NetProtocol::Datagrams).await
+                }
                 DaemonUdpOutgoing::Connect(connect) => {
                     self.handle_agent_connect(connect, NetProtocol::Datagrams)
                         .await?
@@ -143,7 +160,9 @@ impl OutgoingProxy {
                 }
             },
             OutgoingProxyMessage::AgentStreams(msg) => match msg {
-                DaemonTcpOutgoing::Close(id) => self.handle_agent_close(id, NetProtocol::Stream),
+                DaemonTcpOutgoing::Close(id) => {
+                    self.handle_agent_close(id, NetProtocol::Stream).await
+                }
                 DaemonTcpOutgoing::Connect(connect) => {
                     self.handle_agent_connect(connect, NetProtocol::Stream)
                         .await?
@@ -169,30 +188,25 @@ impl OutgoingProxy {
         Ok(())
     }
 
-    async fn handle_interceptor_result(
+    async fn handle_interceptor_message(
         &mut self,
-        result: ComponentResult<InterceptorId, io::Error>,
-    ) {
-        let id = match result {
-            Ok(id) => {
-                tracing::trace!("outgoing interceptor {id:?} finished");
-                id
-            }
-            Err(ComponentError::Error(id, e)) => {
-                tracing::error!("outgoing interceptor {id:?} failed with {e:?}");
-                id
-            }
-            Err(ComponentError::Panic(id)) => {
-                tracing::error!("outgoing interceptor {id:?} panicked");
-                id
-            }
-        };
+        message: TaskMessageOut<OutgoingInterceptor>,
+    ) -> Result<(), OutgoingProxyError> {
+        todo!()
+        // match result {
+        //     Ok(()) => {
+        //         tracing::trace!("outgoing interceptor {id} finished");
+        //     }
+        //     Err(e) => {
+        //         tracing::error!("outgoing interceptor {id} failed: {e}");
+        //     }
+        // };
 
-        if self.interceptors.remove(&id).is_some() {
-            self.agent_sender
-                .send(id.protocol.wrap_agent_close(id.connection_id))
-                .await;
-        }
+        // if self.interceptors.remove(&id).is_some() {
+        //     self.agent_sender
+        //         .send(id.protocol.wrap_agent_close(id.connection_id))
+        //         .await;
+        // }
     }
 }
 
@@ -204,6 +218,8 @@ pub enum OutgoingProxyError {
     RequestQueueEmpty(#[from] RequestQueueEmpty),
     #[error("failed to prepare interceptor: {0}")]
     InterceptorSetupFailed(#[from] io::Error),
+    #[error("communication with layer failed: {0}")]
+    LayerCommunicationError(#[from] LayerCommunicationError),
 }
 
 pub enum OutgoingProxyMessage {
@@ -212,25 +228,22 @@ pub enum OutgoingProxyMessage {
     ConnectRequest(LocalMessage<OutgoingConnectRequest>),
 }
 
-impl Component for OutgoingProxy {
-    type Id = &'static str;
+impl Task for OutgoingProxy {
+    type MessageOut = ();
     type Error = OutgoingProxyError;
-    type Message = OutgoingProxyMessage;
+    type Id = &'static str;
+    type MessageIn = OutgoingProxyMessage;
 
     fn id(&self) -> Self::Id {
         "OUTGOING_PROXY"
     }
 
-    async fn run(mut self, mut message_rx: Receiver<Self::Message>) -> Result<(), Self::Error> {
+    async fn run(mut self, messages: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         loop {
-            tokio::select! {
-                message = message_rx.recv() => match message {
-                    Some(message) => self.handle_message(message).await?,
-                    None => break Ok(()),
-                },
-
-                Some(res) = self.system.next() => self.handle_interceptor_result(res).await,
-            }
+            // tokio::select! {
+            //     message = messages.recv() => self.handle_agent_message(message).await?,
+            //     message = self.interceptors.receive() =>
+            // self.handle_interceptor_message(message).await?, }
         }
     }
 }

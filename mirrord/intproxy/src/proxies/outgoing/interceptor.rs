@@ -1,13 +1,12 @@
 use std::io;
 
-use mirrord_protocol::{
-    outgoing::{tcp::LayerTcpOutgoing, LayerWrite},
-    ClientMessage, ConnectionId,
-};
-use tokio::sync::mpsc::Receiver;
+use mirrord_protocol::ConnectionId;
 
 use super::PreparedSocket;
-use crate::{agent_conn::AgentSender, protocol::NetProtocol};
+use crate::{
+    protocol::NetProtocol,
+    task_manager::{MessageBus, Task},
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct InterceptorId {
@@ -16,21 +15,14 @@ pub struct InterceptorId {
 }
 
 pub struct OutgoingInterceptor {
-    agent_sender: AgentSender,
     connection_id: ConnectionId,
     protocol: NetProtocol,
     socket: PreparedSocket,
 }
 
 impl OutgoingInterceptor {
-    pub fn new(
-        agent_sender: AgentSender,
-        connection_id: ConnectionId,
-        protocol: NetProtocol,
-        socket: PreparedSocket,
-    ) -> Self {
+    pub fn new(connection_id: ConnectionId, protocol: NetProtocol, socket: PreparedSocket) -> Self {
         Self {
-            agent_sender,
             connection_id,
             protocol,
             socket,
@@ -38,10 +30,16 @@ impl OutgoingInterceptor {
     }
 }
 
-impl Component for OutgoingInterceptor {
-    type Message = Vec<u8>;
+pub enum OutgoingInterceptorMessage {
+    Bytes(Vec<u8>),
+    AgentClosed,
+}
+
+impl Task for OutgoingInterceptor {
+    type MessageOut = Vec<u8>;
     type Error = io::Error;
     type Id = InterceptorId;
+    type MessageIn = OutgoingInterceptorMessage;
 
     fn id(&self) -> Self::Id {
         InterceptorId {
@@ -50,37 +48,25 @@ impl Component for OutgoingInterceptor {
         }
     }
 
-    async fn run(self, mut message_rx: Receiver<Vec<u8>>) -> Result<(), Self::Error> {
+    async fn run(self, messages: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         let mut connected_socket = self.socket.accept().await?;
 
         loop {
             tokio::select! {
                 biased; // To allow local socket to be read before being closed
 
-                read = connected_socket.receive() => {
-                    match read {
-                        Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
-                            continue;
-                        },
-                        Err(fail) => break Err(fail),
-                        Ok(bytes) if bytes.len() == 0 => break Ok(()),
-                        Ok(bytes) => {
-                            let write = LayerWrite {
-                                connection_id: self.connection_id,
-                                bytes,
-                            };
-                            let outgoing_write = LayerTcpOutgoing::Write(write);
-
-                            self.agent_sender.send(ClientMessage::TcpOutgoing(outgoing_write)).await;
-                        }
-                    }
+                read = connected_socket.receive() => match read {
+                    Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
+                        continue;
+                    },
+                    Err(fail) => break Err(fail),
+                    Ok(bytes) if bytes.len() == 0 => break Ok(()),
+                    Ok(bytes) => messages.send(bytes).await,
                 },
 
-                bytes = message_rx.recv() => {
-                    match bytes {
-                        Some(bytes) => connected_socket.send(&bytes).await?,
-                        None => break Ok(()),
-                    }
+                message = messages.recv() => match message {
+                    OutgoingInterceptorMessage::Bytes(b) => connected_socket.send(&b).await?,
+                    OutgoingInterceptorMessage::AgentClosed => break Ok(()),
                 },
             }
         }
