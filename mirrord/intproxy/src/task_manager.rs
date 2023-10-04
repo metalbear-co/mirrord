@@ -9,7 +9,6 @@ use futures::FutureExt;
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
-#[derive(Error, Debug)]
 pub enum TaskManagerError<T: Task> {
     TaskAlreadyExists(T::Id),
     TaskDoesNotExist(T::Id),
@@ -51,8 +50,11 @@ pub trait Task: 'static + Send + Sized {
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
+#[derive(Error, Debug)]
 pub enum TaskError<T: Task> {
+    #[error("{0}")]
     Error(T::Error),
+    #[error("panic")]
     Panic,
 }
 
@@ -112,8 +114,7 @@ impl<T: Task> TaskManager<T> {
 
             let result = match res {
                 Err(..) => Err(TaskError::Panic),
-                Ok(Err(e)) => Err(TaskError::Error(e)),
-                Ok(Ok(())) => Ok(()),
+                Ok(res) => res.map_err(TaskError::Error),
             };
 
             let _ = main_tx_clone

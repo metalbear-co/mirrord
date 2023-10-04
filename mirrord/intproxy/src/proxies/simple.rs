@@ -12,18 +12,18 @@ use crate::{
 /// For passing messages between the layer and the agent without custom internal logic.
 #[derive(Default)]
 pub struct SimpleProxy {
-    file_ops: RequestQueue,
-    get_addr_info: RequestQueue,
+    file_ops_reqs: RequestQueue,
+    get_addr_info_reqs: RequestQueue,
 }
 
-pub enum SimpleProxyMessageIn {
+pub enum SimpleProxyIn {
     FileReq(LocalMessage<FileRequest>),
     AddrInfoReq(LocalMessage<GetAddrInfoRequest>),
     FileRes(FileResponse),
     AddrInfoRes(GetAddrInfoResponse),
 }
 
-pub enum SimpleProxyMessageOut {
+pub enum SimpleProxyOut {
     ToAgent(ClientMessage),
     ToLayer(LocalMessage<ProxyToLayerMessage>),
 }
@@ -31,8 +31,8 @@ pub enum SimpleProxyMessageOut {
 impl Task for SimpleProxy {
     type Error = RequestQueueEmpty;
     type Id = &'static str;
-    type MessageIn = SimpleProxyMessageIn;
-    type MessageOut = SimpleProxyMessageOut;
+    type MessageIn = SimpleProxyIn;
+    type MessageOut = SimpleProxyOut;
 
     fn id(&self) -> Self::Id {
         "SIMPLE_PROXY"
@@ -41,27 +41,27 @@ impl Task for SimpleProxy {
     async fn run(mut self, messages: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         while let Some(msg) = messages.recv().await {
             let out_msg = match msg {
-                SimpleProxyMessageIn::AddrInfoRes(res) => {
-                    let message_id = self.get_addr_info.get()?;
-                    SimpleProxyMessageOut::ToLayer(LocalMessage {
+                SimpleProxyIn::AddrInfoRes(res) => {
+                    let message_id = self.get_addr_info_reqs.get()?;
+                    SimpleProxyOut::ToLayer(LocalMessage {
                         message_id,
                         inner: ProxyToLayerMessage::GetAddrInfo(res),
                     })
                 }
-                SimpleProxyMessageIn::FileRes(res) => {
-                    let message_id = self.file_ops.get()?;
-                    SimpleProxyMessageOut::ToLayer(LocalMessage {
+                SimpleProxyIn::FileRes(res) => {
+                    let message_id = self.file_ops_reqs.get()?;
+                    SimpleProxyOut::ToLayer(LocalMessage {
                         message_id,
                         inner: ProxyToLayerMessage::File(res),
                     })
                 }
-                SimpleProxyMessageIn::AddrInfoReq(req) => {
-                    self.get_addr_info.insert(req.message_id);
-                    SimpleProxyMessageOut::ToAgent(ClientMessage::GetAddrInfoRequest(req.inner))
+                SimpleProxyIn::AddrInfoReq(req) => {
+                    self.get_addr_info_reqs.insert(req.message_id);
+                    SimpleProxyOut::ToAgent(ClientMessage::GetAddrInfoRequest(req.inner))
                 }
-                SimpleProxyMessageIn::FileReq(req) => {
-                    self.get_addr_info.insert(req.message_id);
-                    SimpleProxyMessageOut::ToAgent(ClientMessage::FileRequest(req.inner))
+                SimpleProxyIn::FileReq(req) => {
+                    self.file_ops_reqs.insert(req.message_id);
+                    SimpleProxyOut::ToAgent(ClientMessage::FileRequest(req.inner))
                 }
             };
 

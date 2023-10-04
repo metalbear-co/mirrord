@@ -6,8 +6,8 @@ use std::{
 
 use mirrord_protocol::{
     outgoing::{
-        tcp::LayerTcpOutgoing, udp::LayerUdpOutgoing, LayerClose, LayerConnect, SocketAddress,
-        UnixAddr,
+        tcp::LayerTcpOutgoing, udp::LayerUdpOutgoing, LayerClose, LayerConnect, LayerWrite,
+        SocketAddress, UnixAddr,
     },
     ClientMessage, ConnectionId,
 };
@@ -23,21 +23,34 @@ use crate::protocol::NetProtocol;
 mod interceptor;
 mod proxy;
 
-pub use proxy::{OutgoingProxy, OutgoingProxyError, OutgoingProxyMessage};
+pub use proxy::{OutgoingProxy, OutgoingProxyError};
 
 impl NetProtocol {
-    fn wrap_agent_close(&self, connection_id: ConnectionId) -> ClientMessage {
+    fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Vec<u8>) -> ClientMessage {
+        match self {
+            Self::Datagrams => ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
+                connection_id,
+                bytes,
+            })),
+            Self::Stream => ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
+                connection_id,
+                bytes,
+            })),
+        }
+    }
+
+    fn wrap_agent_close(self, connection_id: ConnectionId) -> ClientMessage {
         match self {
             Self::Datagrams => {
-                ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(LayerClose { connection_id }))
+                ClientMessage::UdpOutgoing(LayerUdpOutgoing::Close(LayerClose { connection_id }))
             }
             Self::Stream => {
-                ClientMessage::UdpOutgoing(LayerUdpOutgoing::Close(LayerClose { connection_id }))
+                ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(LayerClose { connection_id }))
             }
         }
     }
 
-    fn wrap_agent_connect(&self, remote_address: SocketAddress) -> ClientMessage {
+    fn wrap_agent_connect(self, remote_address: SocketAddress) -> ClientMessage {
         match self {
             Self::Datagrams => {
                 ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {

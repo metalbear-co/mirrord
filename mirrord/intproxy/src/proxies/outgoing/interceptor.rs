@@ -30,16 +30,21 @@ impl OutgoingInterceptor {
     }
 }
 
-pub enum OutgoingInterceptorMessage {
+pub enum OutgoingInterceptorIn {
     Bytes(Vec<u8>),
     AgentClosed,
 }
 
+pub enum OutgoingInterceptorOut {
+    Bytes(Vec<u8>),
+    LayerClosed,
+}
+
 impl Task for OutgoingInterceptor {
-    type MessageOut = Vec<u8>;
     type Error = io::Error;
     type Id = InterceptorId;
-    type MessageIn = OutgoingInterceptorMessage;
+    type MessageIn = OutgoingInterceptorIn;
+    type MessageOut = OutgoingInterceptorOut;
 
     fn id(&self) -> Self::Id {
         InterceptorId {
@@ -60,13 +65,22 @@ impl Task for OutgoingInterceptor {
                         continue;
                     },
                     Err(fail) => break Err(fail),
-                    Ok(bytes) if bytes.len() == 0 => break Ok(()),
-                    Ok(bytes) => messages.send(bytes).await,
+                    Ok(bytes) if bytes.len() == 0 => {
+                        messages.send(OutgoingInterceptorOut::LayerClosed).await;
+                        break Ok(());
+                    },
+                    Ok(bytes) => messages.send(OutgoingInterceptorOut::Bytes(bytes)).await,
                 },
 
-                message = messages.recv() => match message {
-                    OutgoingInterceptorMessage::Bytes(b) => connected_socket.send(&b).await?,
-                    OutgoingInterceptorMessage::AgentClosed => break Ok(()),
+                message = messages.recv() => {
+                    let Some(message) = message else {
+                        break Ok(());
+                    };
+
+                    match message {
+                        OutgoingInterceptorIn::Bytes(b) => connected_socket.send(&b).await?,
+                        OutgoingInterceptorIn::AgentClosed => break Ok(()),
+                    }
                 },
             }
         }
