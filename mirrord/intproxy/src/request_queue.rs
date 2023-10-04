@@ -2,9 +2,11 @@ use std::collections::VecDeque;
 
 use thiserror::Error;
 
+use crate::protocol::MessageId;
+
 #[derive(Error, Debug)]
-#[error("request queue {0} is empty")]
-pub struct RequestQueueEmpty(&'static str);
+#[error("request queue is empty")]
+pub struct RequestQueueEmpty;
 
 /// A request fifo used to match agent responses with layer requests.
 ///
@@ -12,27 +14,19 @@ pub struct RequestQueueEmpty(&'static str);
 /// which allows it to easliy match requests with responses from the internal proxy.
 /// However, the agent does not use any mechanism like this.
 /// Instead, its components (e.g. file manager) handle requests sequentially.
-#[derive(Debug)]
-pub struct RequestQueue<T> {
-    inner: VecDeque<T>,
-    name: &'static str,
+#[derive(Debug, Default)]
+pub struct RequestQueue {
+    inner: VecDeque<MessageId>,
 }
 
-impl<T> RequestQueue<T> {
-    pub fn new(name: &'static str) -> Self {
-        Self {
-            inner: Default::default(),
-            name,
-        }
-    }
-
+impl RequestQueue {
     /// Save request for later.
-    pub fn insert(&mut self, request: T) {
-        self.inner.push_back(request);
+    pub fn insert(&mut self, id: MessageId) {
+        self.inner.push_back(id);
     }
 
     /// Retrieve and remove oldest request.
-    pub fn get(&mut self) -> Result<T, RequestQueueEmpty> {
-        self.inner.pop_front().ok_or(RequestQueueEmpty(self.name))
+    pub fn get(&mut self) -> Result<MessageId, RequestQueueEmpty> {
+        self.inner.pop_front().ok_or(RequestQueueEmpty)
     }
 }

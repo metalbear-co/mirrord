@@ -13,29 +13,21 @@ use crate::{
     agent_conn::AgentSender,
     layer_conn::LayerConnector,
     protocol::{
-        LocalMessage, MessageId, NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse,
+        LocalMessage, NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse,
         ProxyToLayerMessage,
     },
     request_queue::{RequestQueue, RequestQueueEmpty},
     system::{Component, ComponentError, ComponentRef, ComponentResult, System},
 };
 
+#[derive(Default)]
 struct Queues {
-    datagrams: RequestQueue<MessageId>,
-    stream: RequestQueue<MessageId>,
-}
-
-impl Default for Queues {
-    fn default() -> Self {
-        Self {
-            datagrams: RequestQueue::new("connect_datagrams"),
-            stream: RequestQueue::new("connect_stream"),
-        }
-    }
+    datagrams: RequestQueue,
+    stream: RequestQueue,
 }
 
 impl Queues {
-    fn get(&mut self, protocol: NetProtocol) -> &mut RequestQueue<MessageId> {
+    fn get(&mut self, protocol: NetProtocol) -> &mut RequestQueue {
         match protocol {
             NetProtocol::Datagrams => &mut self.datagrams,
             NetProtocol::Stream => &mut self.stream,
