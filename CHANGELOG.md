@@ -8,6 +8,16 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.71.1](https://github.com/metalbear-co/mirrord/tree/3.71.1) - 2023-10-04
+
+
+### Fixed
+
+- Adds the optional `--ide` flag to `mirrord verify-config [--ide] --path
+  {/config/path}`, turning some errors into warnings (target related).
+  [#1979](https://github.com/metalbear-co/mirrord/issues/1979)
+
+
 ## [3.71.0](https://github.com/metalbear-co/mirrord/tree/3.71.0) - 2023-10-03
 
 
