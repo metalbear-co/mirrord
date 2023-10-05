@@ -10,5 +10,6 @@ mod pause;
 mod target;
 mod targetless;
 mod traffic;
+mod verify_config;
 
 pub mod utils;
