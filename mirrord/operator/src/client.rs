@@ -64,6 +64,7 @@ pub struct OperatorSessionInformation {
     pub fingerprint: Option<String>,
     pub operator_features: Vec<OperatorFeatures>,
     pub protocol_version: Option<semver::Version>,
+    pub copy_target_name: Option<String>,
 }
 
 impl OperatorSessionInformation {
@@ -73,6 +74,7 @@ impl OperatorSessionInformation {
         fingerprint: Option<String>,
         operator_features: Vec<OperatorFeatures>,
         protocol_version: Option<semver::Version>,
+        copy_target_name: Option<String>,
     ) -> Self {
         Self {
             client_certificate,
@@ -81,6 +83,7 @@ impl OperatorSessionInformation {
             fingerprint,
             operator_features,
             protocol_version,
+            copy_target_name,
         }
     }
 }
@@ -169,7 +172,7 @@ impl OperatorApi {
             return Err(OperatorApiError::InvalidTarget);
         };
 
-        let operator_session_information = OperatorSessionInformation::new(
+        let mut operator_session_information = OperatorSessionInformation::new(
             client_certificate,
             target,
             status.spec.license.fingerprint,
@@ -178,15 +181,17 @@ impl OperatorApi {
                 .spec
                 .protocol_version
                 .and_then(|str_version| str_version.parse().ok()),
+            config.feature.copy_target.name.clone(),
         );
 
         let (sender, receiver) = if config.feature.copy_target.enabled {
-            operator_api
-                .copy_target(
-                    &operator_session_information,
-                    config.feature.copy_target.name.clone(),
-                )
-                .await?
+            let (name, connection) = operator_api
+                .copy_target(&operator_session_information)
+                .await?;
+
+            operator_session_information.copy_target_name = Some(name);
+
+            connection
         } else {
             operator_api
                 .connect_target(&operator_session_information)
@@ -199,14 +204,16 @@ impl OperatorApi {
     pub async fn copy_target(
         self,
         session_information: &OperatorSessionInformation,
-        name: Option<String>,
-    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+    ) -> Result<(
+        String,
+        (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
+    )> {
         let target = self.target_config.path.clone().expect("Must have config");
 
-        let target_copy = match name {
+        let target_copy = match &session_information.copy_target_name {
             Some(requested) => self
                 .copy_target_api
-                .get(&requested)
+                .get(requested)
                 .await
                 .map_err(KubeApiError::from)?,
             None => {
@@ -220,16 +227,10 @@ impl OperatorApi {
             }
         };
 
+        let name = target_copy.metadata.name.clone().expect("Must have name");
+
         let mut builder = Request::builder()
-            .uri(
-                self.copy_url(
-                    target_copy
-                        .metadata
-                        .name
-                        .as_deref()
-                        .expect("Must have name"),
-                ),
-            )
+            .uri(self.copy_url(&name))
             .header("x-session-id", session_information.session_id.to_string());
 
         if let Some(certificate) = &session_information.client_certificate {
@@ -253,11 +254,12 @@ impl OperatorApi {
             .await
             .map_err(KubeApiError::from)?;
 
-        Ok(ConnectionWrapper::wrap(
-            connection,
-            session_information.protocol_version.clone(),
+        Ok((
+            name,
+            ConnectionWrapper::wrap(connection, session_information.protocol_version.clone()),
         ))
     }
+
     /// Connect to session using operator and session information
     pub async fn connect(
         config: &LayerConfig,
@@ -279,10 +281,14 @@ impl OperatorApi {
             analytics
         });
 
-        OperatorApi::new(config)
-            .await?
-            .connect_target(session_information)
-            .await
+        let operator_api = OperatorApi::new(config).await?;
+
+        if config.feature.copy_target.enabled {
+            let (_, connection) = operator_api.copy_target(session_information).await?;
+            Ok(connection)
+        } else {
+            operator_api.connect_target(session_information).await
+        }
     }
 
     async fn new(config: &LayerConfig) -> Result<Self> {
