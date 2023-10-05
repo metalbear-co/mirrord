@@ -9,7 +9,7 @@
 ![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/metalbear-co/mirrord)
 [![Twitter Follow](https://img.shields.io/twitter/follow/metalbearco?style=social)](https://twitter.com/metalbearco)
 
-mirrord lets developers run local processes in the context of their cloud environment.
+[mirrord lets developers run local processes in the context of their Kubernetes environment](https://mirrord.dev/).
 It’s meant to provide the benefits of running your service on a cloud environment (e.g. staging) without actually
 going through the hassle of deploying it there, and without disrupting the environment by deploying untested code.
 It comes as a Visual Studio Code extension, an IntelliJ plugin and a CLI tool. You can read more about it [here](https://mirrord.dev/docs/overview/introduction/).
