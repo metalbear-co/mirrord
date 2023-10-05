@@ -297,7 +297,6 @@ pub(super) struct VerifyConfigArgs {
     pub(super) ide: bool,
 
     /// Config file path.
-    #[arg(long)]
     pub(super) path: PathBuf,
 }
 
