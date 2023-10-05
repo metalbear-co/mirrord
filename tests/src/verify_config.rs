@@ -1,3 +1,6 @@
+/// # Attention
+///
+/// If any of these tests fails, then you're attempting a breaking change!
 #[cfg(test)]
 mod verify_config {
     use std::time::Duration;
@@ -6,12 +9,17 @@ mod verify_config {
 
     use crate::utils::{config_dir, run_verify_config};
 
+    /// Tests `verify-config` with all args, which should be:
+    ///
+    /// ```sh
+    /// mirrord verify-config --ide /path/to/config.json
+    /// ```
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(30))]
     pub async fn full_verify_config(config_dir: &std::path::PathBuf) {
         let mut config_path = config_dir.clone();
-        config_path.push("http_filter_path.json");
+        config_path.push("default_ide.json");
 
         let mut process = run_verify_config(Some(vec![
             "--ide",
@@ -19,49 +27,64 @@ mod verify_config {
         ]))
         .await;
 
-        let res = process.wait().await;
-        assert!(res.success());
+        assert!(process.wait().await.success());
     }
 
+    /// Tests `verify-config` with only `path` as an arg:
+    ///
+    /// ```sh
+    /// mirrord verify-config /path/to/config.json
+    /// ```
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(30))]
     pub async fn no_ide_verify_config(config_dir: &std::path::PathBuf) {
         let mut config_path = config_dir.clone();
-        config_path.push("http_filter_path.json");
+        config_path.push("default_ide.json");
 
         let mut process = run_verify_config(Some(vec![config_path
             .to_str()
             .expect("Valid config path!")]))
         .await;
 
-        let res = process.wait().await;
-        assert!(res.success());
+        assert!(process.wait().await.success());
     }
 
+    /// Tests `verify-config` with only `--ide` as an arg:
+    ///
+    /// The process should fail, as path is a required arg!
+    ///
+    /// ```sh
+    /// mirrord verify-config --ide
+    /// ```
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(30))]
     pub async fn no_path_verify_config(config_dir: &std::path::PathBuf) {
         let mut config_path = config_dir.clone();
-        config_path.push("http_filter_path.json");
+        config_path.push("default_ide.json");
 
         let mut process = run_verify_config(Some(vec!["--ide"])).await;
 
-        let res = process.wait().await;
-        assert!(res.success());
+        assert!(!process.wait().await.success());
     }
 
+    /// Tests `verify-config` without args:
+    ///
+    /// The process should fail, as path is a required arg!
+    ///
+    /// ```sh
+    /// mirrord verify-config
+    /// ```
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(30))]
     pub async fn no_path_no_ide_verify_config(config_dir: &std::path::PathBuf) {
         let mut config_path = config_dir.clone();
-        config_path.push("http_filter_path.json");
+        config_path.push("default_ide.json");
 
         let mut process = run_verify_config(None).await;
 
-        let res = process.wait().await;
-        assert!(res.success());
+        assert!(!process.wait().await.success());
     }
 }
