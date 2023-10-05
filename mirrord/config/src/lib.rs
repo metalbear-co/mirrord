@@ -25,8 +25,12 @@ use tera::Tera;
 use tracing::warn;
 
 use crate::{
-    agent::AgentConfig, config::source::MirrordConfigSource, feature::FeatureConfig,
-    internal_proxy::InternalProxyConfig, target::TargetConfig, util::VecOrSingle,
+    agent::AgentConfig,
+    config::source::MirrordConfigSource,
+    feature::{network::incoming::IncomingMode, FeatureConfig},
+    internal_proxy::InternalProxyConfig,
+    target::TargetConfig,
+    util::VecOrSingle,
 };
 
 const PAUSE_WITHOUT_STEAL_WARNING: &str =
@@ -387,6 +391,18 @@ impl LayerConfig {
                     .is_some())
         {
             Err(ConfigError::Conflict("Cannot use old http filter and new http filter at the same time. Use only `http_filter` instead of `http_header_filter`".to_string()))?
+        }
+
+        if self.feature.copy_target.enabled {
+            if self.target.path.is_none() {
+                Err(ConfigError::Conflict(
+                    "Copy Target feature and Targetless mode are incompatible".into(),
+                ))?
+            }
+
+            if !matches!(self.feature.network.incoming.mode, IncomingMode::Steal) {
+                context.add_warning("using Copy Target feature without steal may result in unreturned responses in cluster because there is underlying app instance isn't copied and theirfore not runnig in copied pod".to_string());
+            }
         }
 
         if self.target.path.is_none() && !context.ide {
