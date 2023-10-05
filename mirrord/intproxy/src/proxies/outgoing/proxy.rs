@@ -43,8 +43,7 @@ impl OutgoingProxy {
     }
 
     async fn handle_agent_close(&mut self, connection_id: ConnectionId, protocol: NetProtocol) {
-        let res = self
-            .interceptors
+        self.interceptors
             .send(
                 InterceptorId {
                     connection_id,
@@ -52,13 +51,7 @@ impl OutgoingProxy {
                 },
                 OutgoingInterceptorIn::AgentClosed,
             )
-            .await;
-
-        if res.is_err() {
-            tracing::trace!(
-                "agent sent message to closed interceptor, connection id {connection_id}"
-            );
-        }
+            .await
     }
 
     async fn handle_agent_read(&self, read: RemoteResult<DaemonRead>, protocol: NetProtocol) {
@@ -70,8 +63,7 @@ impl OutgoingProxy {
             return;
         };
 
-        let res = self
-            .interceptors
+        self.interceptors
             .send(
                 InterceptorId {
                     connection_id,
@@ -79,13 +71,7 @@ impl OutgoingProxy {
                 },
                 OutgoingInterceptorIn::Bytes(bytes),
             )
-            .await;
-
-        if res.is_err() {
-            tracing::trace!(
-                "agent sent message to closed interceptor, connection id {connection_id}"
-            );
-        }
+            .await
     }
 
     async fn handle_agent_connect(

@@ -1,22 +1,12 @@
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    future::Future,
-    hash::Hash,
-    panic::AssertUnwindSafe,
-};
+use std::{collections::HashMap, future::Future, hash::Hash, panic::AssertUnwindSafe};
 
 use futures::FutureExt;
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
-pub enum TaskManagerError<T: Task> {
-    TaskAlreadyExists(T::Id),
-    TaskDoesNotExist(T::Id),
-}
-
 pub struct MessageBus<T: Task> {
     id: T::Id,
-    tx: Sender<TaskMessageOut<T>>,
+    tx: Sender<TaskMessageOut<T::Id, T::MessageOut, T::Error>>,
     rx: Receiver<T::MessageIn>,
 }
 
@@ -51,28 +41,28 @@ pub trait Task: 'static + Send + Sized {
 }
 
 #[derive(Error, Debug)]
-pub enum TaskError<T: Task> {
+pub enum TaskError<E> {
     #[error("{0}")]
-    Error(T::Error),
+    Error(E),
     #[error("panic")]
     Panic,
 }
 
-pub enum TaskMessageOut<T: Task> {
+pub enum TaskMessageOut<I, M, E> {
     Raw {
-        id: T::Id,
-        inner: T::MessageOut,
+        id: I,
+        inner: M,
     },
     Result {
-        id: T::Id,
-        inner: Result<(), TaskError<T>>,
+        id: I,
+        inner: Result<(), TaskError<E>>,
     },
 }
 
 pub struct TaskManager<T: Task> {
     channel_capacity: usize,
-    main_rx: Receiver<TaskMessageOut<T>>,
-    main_tx: Sender<TaskMessageOut<T>>,
+    main_rx: Receiver<TaskMessageOut<T::Id, T::MessageOut, T::Error>>,
+    main_tx: Sender<TaskMessageOut<T::Id, T::MessageOut, T::Error>>,
     task_txs: HashMap<T::Id, Sender<T::MessageIn>>,
 }
 
@@ -88,15 +78,9 @@ impl<T: Task> TaskManager<T> {
         }
     }
 
-    pub fn spawn(&mut self, task: T) -> Result<(), TaskManagerError<T>> {
+    pub fn spawn(&mut self, task: T) {
         let (tx, rx) = mpsc::channel(self.channel_capacity);
-
-        match self.task_txs.entry(task.id()) {
-            Entry::Occupied(..) => return Err(TaskManagerError::TaskAlreadyExists(task.id())),
-            Entry::Vacant(e) => {
-                e.insert(tx);
-            }
-        }
+        self.task_txs.insert(task.id(), tx);
 
         let main_tx_clone = self.main_tx.clone();
 
@@ -121,17 +105,14 @@ impl<T: Task> TaskManager<T> {
                 .send(TaskMessageOut::Result { id, inner: result })
                 .await;
         });
-
-        Ok(())
     }
 
-    pub async fn send(&self, task_id: T::Id, msg: T::MessageIn) -> Result<(), TaskManagerError<T>> {
-        self.task_txs
-            .get(&task_id)
-            .ok_or(TaskManagerError::TaskDoesNotExist(task_id))?
-            .send(msg)
-            .await
-            .map_err(|_| TaskManagerError::TaskDoesNotExist(task_id))
+    pub async fn send(&self, task_id: T::Id, msg: T::MessageIn) {
+        let Some(tx) = self.task_txs.get(&task_id) else {
+            return;
+        };
+
+        let _ = tx.send(msg).await;
     }
 
     pub async fn receive(&mut self) -> TaskMessageOut<T> {
@@ -146,5 +127,52 @@ impl<T: Task> TaskManager<T> {
         }
 
         res
+    }
+}
+
+pub struct ManagedTask<T: Task> {
+    tx: Sender<T::MessageIn>,
+    rx: Receiver<TaskMessageOut<T::Id, T::MessageOut, T::Error>>,
+}
+
+impl<T: Task> ManagedTask<T> {
+    pub fn spawn(task: T, channel_capacity: usize) -> Self {
+        let (tx_in, rx_in) = mpsc::channel(channel_capacity);
+        let (tx_out, rx_out) = mpsc::channel(channel_capacity);
+
+        let mut message_bus = MessageBus {
+            id: task.id(),
+            tx: tx_out.clone(),
+            rx: rx_in,
+        };
+
+        tokio::spawn(async move {
+            let id = task.id();
+            let res = AssertUnwindSafe(task.run(&mut message_bus))
+                .catch_unwind()
+                .await;
+
+            let result = match res {
+                Err(..) => Err(TaskError::Panic),
+                Ok(res) => res.map_err(TaskError::Error),
+            };
+
+            let _ = tx_out
+                .send(TaskMessageOut::Result { id, inner: result })
+                .await;
+        });
+
+        Self {
+            tx: tx_in,
+            rx: rx_out,
+        }
+    }
+
+    pub async fn send(&self, msg: T::MessageIn) {
+        let _ = self.tx.send(msg).await;
+    }
+
+    pub async fn receive(&mut self) -> TaskMessageOut<T> {
+        self.rx.recv().await.expect("cannot receive, task finished")
     }
 }

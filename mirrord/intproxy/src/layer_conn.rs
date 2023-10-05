@@ -67,7 +67,7 @@ pub struct LayerConnection {
 
 impl LayerConnection {
     pub fn new(stream: TcpStream, channel_size: usize) -> Self {
-        let (mut layer_codec_tx, mut layer_codec_rx) = codec::make_async_framed::<
+        let (layer_codec_tx, layer_codec_rx) = codec::make_async_framed::<
             LocalMessage<ProxyToLayerMessage>,
             LocalMessage<LayerToProxyMessage>,
         >(stream);
