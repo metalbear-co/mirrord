@@ -511,6 +511,7 @@ pub async fn run_ls(args: Option<Vec<&str>>, namespace: Option<&str>) -> TestPro
     run_mirrord(mirrord_args, Default::default()).await
 }
 
+/// Runs `mirrord verify-config [--ide] "/path/config.json"`.
 pub async fn run_verify_config(args: Option<Vec<&str>>) -> TestProcess {
     let mut mirrord_args = vec!["verify-config"];
     if let Some(args) = args {
