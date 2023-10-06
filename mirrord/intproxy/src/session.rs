@@ -11,6 +11,7 @@ use crate::{
     ping_pong::{AgentMessageNotification, PingPong},
     protocol::{LayerToProxyMessage, LocalMessage, ProxyToLayerMessage, NOT_A_RESPONSE},
     proxies::{
+        incoming::{IncomingProxy, IncomingProxyMessage},
         outgoing::{OutgoingProxy, OutgoingProxyMessage},
         simple::{SimpleProxy, SimpleProxyMessage},
     },
@@ -21,6 +22,7 @@ use crate::{
 pub enum MainTaskId {
     SimpleProxy,
     OutgoingProxy,
+    IncomingProxy,
     PingPong,
     AgentConnection,
     LayerConnection,
@@ -34,6 +36,7 @@ impl fmt::Display for MainTaskId {
             Self::PingPong => "PING_PONG",
             Self::AgentConnection => "AGENT_CONNECTION",
             Self::LayerConnection => "LAYER_CONNECTION",
+            Self::IncomingProxy => "INCOMING_PROXY",
         };
 
         f.write_str(as_str)
@@ -41,11 +44,12 @@ impl fmt::Display for MainTaskId {
 }
 
 struct Handlers {
-    agent: TaskSender<AgentConnection>,
-    layer: TaskSender<LayerConnection>,
-    simple: TaskSender<SimpleProxy>,
-    outgoing: TaskSender<OutgoingProxy>,
-    ping_pong: TaskSender<PingPong>,
+    agent: TaskSender<ClientMessage>,
+    layer: TaskSender<LocalMessage<ProxyToLayerMessage>>,
+    simple: TaskSender<SimpleProxyMessage>,
+    outgoing: TaskSender<OutgoingProxyMessage>,
+    incoming: TaskSender<IncomingProxyMessage>,
+    ping_pong: TaskSender<AgentMessageNotification>,
 }
 
 pub struct ProxySession {
@@ -85,6 +89,11 @@ impl ProxySession {
             MainTaskId::OutgoingProxy,
             Self::CHANNEL_SIZE,
         );
+        let incoming = background_tasks.register(
+            IncomingProxy::new(&intproxy.config)?,
+            MainTaskId::IncomingProxy,
+            Self::CHANNEL_SIZE,
+        );
 
         Ok(Self {
             background_tasks,
@@ -93,6 +102,7 @@ impl ProxySession {
                 layer,
                 simple,
                 outgoing,
+                incoming,
                 ping_pong,
             },
         })
@@ -186,8 +196,18 @@ impl ProxySession {
                     .send(SimpleProxyMessage::AddrInfoRes(msg))
                     .await
             }
-            DaemonMessage::Tcp(..) => todo!(),
-            DaemonMessage::TcpSteal(..) => todo!(),
+            DaemonMessage::Tcp(msg) => {
+                self.handlers
+                    .incoming
+                    .send(IncomingProxyMessage::AgentMirror(msg))
+                    .await
+            }
+            DaemonMessage::TcpSteal(msg) => {
+                self.handlers
+                    .incoming
+                    .send(IncomingProxyMessage::AgentSteal(msg))
+                    .await
+            }
             DaemonMessage::SwitchProtocolVersionResponse(protocol_version) => {
                 if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
                     self.handlers.agent.send(ClientMessage::ReadyForLogs).await;
@@ -231,7 +251,12 @@ impl ProxySession {
                     .send(OutgoingProxyMessage::LayerConnect(req, message.message_id))
                     .await
             }
-            LayerToProxyMessage::Incoming(..) => todo!(),
+            LayerToProxyMessage::Incoming(req) => {
+                self.handlers
+                    .incoming
+                    .send(IncomingProxyMessage::LayerRequest(message.message_id, req))
+                    .await
+            }
         }
 
         Ok(())

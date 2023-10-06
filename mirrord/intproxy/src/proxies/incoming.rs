@@ -1,428 +1,313 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap},
+    fmt,
     net::SocketAddr,
 };
 
-use bimap::BiMap;
-use futures::TryFutureExt;
-use hyper::{body::Incoming, Response, StatusCode};
+use hyper::Version;
+use mirrord_config::LayerConfig;
 use mirrord_protocol::{
-    tcp::{
-        Filter, HttpFilter, HttpRequestFallback, HttpResponse, HttpResponseFallback,
-        InternalHttpBody, LayerTcpSteal, NewTcpConnection,
-        StealType::{All, FilteredHttp, FilteredHttpEx},
-        TcpClose, TcpData,
-    },
-    ClientMessage, ConnectionId, Port, RequestId,
+    tcp::{DaemonTcp, HttpRequestFallback, HttpResponseFallback, LayerTcpSteal, TcpData},
+    ClientMessage, ConnectionId, Port,
 };
-use streammap_ext::StreamMap;
-use tokio::{
-    io::{AsyncWriteExt, ReadHalf, WriteHalf},
-    net::TcpStream,
-    sync::mpsc::{channel, Sender},
-};
-use tokio_stream::StreamExt;
-use tokio_util::io::ReaderStream;
-use tracing::{error, info, trace, warn};
+use thiserror::Error;
 
+use self::{
+    flavor::{Flavor, IncomingFlavorError},
+    http::{v1::HttpV1, v2::HttpV2},
+    http_interceptor::{HttpInterceptor, HttpInterceptorError},
+    raw_interceptor::{RawInterceptor, RawInterceptorError},
+};
 use crate::{
-    error::LayerError,
-    tcp::{Listen, TcpHandler},
-    tcp_steal::http::{v1::HttpV1, v2::HttpV2, ConnectionTask},
+    background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
+    protocol::{
+        IncomingRequest, LocalMessage, MessageId, PortSubscribe, PortUnsubscribe,
+        ProxyToLayerMessage,
+    },
+    request_queue::{RequestQueue, RequestQueueEmpty},
+    ProxyMessage,
 };
 
-pub(crate) mod http_forwarding;
-
-use self::http::{HttpFilterSettings, LayerHttpFilter};
-use crate::tcp_steal::http_forwarding::HttpForwarderError;
-
+mod flavor;
 mod http;
+mod http_interceptor;
+mod raw_interceptor;
 
-#[tracing::instrument(level = "trace")]
-async fn handle_response(
-    request: HttpRequestFallback,
-    response: Result<Response<Incoming>, hyper::Error>,
-    port: Port,
-    connection_id: ConnectionId,
-    request_id: RequestId,
-) -> Result<HttpResponseFallback, HttpForwarderError> {
-    match response {
-            Err(err) if err.is_closed() => {
-                warn!(
-                    "Sending request to local application failed with: {err:?}.
-                        Seems like the local application closed the connection too early, so
-                        creating a new connection and trying again."
-                );
-                trace!("The request to be retried: {request:?}.");
-                Err(HttpForwarderError::ConnectionClosedTooSoon(request))
-            }
-            Err(err) if err.is_parse() => {
-                warn!("Could not parse HTTP response to filtered HTTP request, got error: {err:?}.");
-                let body_message = format!("mirrord: could not parse HTTP response from local application - {err:?}");
-                Ok(HttpResponseFallback::response_from_request(
-                    request,
-                    StatusCode::BAD_GATEWAY,
-                    &body_message,
-                ))
-            }
-            Err(err) => {
-                warn!("Request to local application failed with: {err:?}.");
-                let body_message = format!("mirrord tried to forward the request to the local application and got {err:?}");
-                Ok(HttpResponseFallback::response_from_request(
-                    request,
-                    StatusCode::BAD_GATEWAY,
-                    &body_message,
-                ))
-            }
-            Ok(res) if matches!(request, HttpRequestFallback::Framed(_)) => Ok(
-                HttpResponse::<InternalHttpBody>::from_hyper_response(res, port, connection_id, request_id)
-                    .await
-                    .map(HttpResponseFallback::Framed)
-                    .unwrap_or_else(|e| {
-                        error!("Failed to read response to filtered http request: {e:?}. \
-                        Please consider reporting this issue on \
-                        https://github.com/metalbear-co/mirrord/issues/new?labels=bug&template=bug_report.yml");
-                        HttpResponseFallback::response_from_request(
-                            request,
-                            StatusCode::BAD_GATEWAY,
-                            "mirrord",
-                        )
-                    }),
-            ),
-            Ok(res) => Ok(
-                HttpResponse::<Vec<u8>>::from_hyper_response(res, port, connection_id, request_id)
-                    .await
-                    .map(HttpResponseFallback::Fallback)
-                    .unwrap_or_else(|e| {
-                        error!("Failed to read response to filtered http request: {e:?}. \
-                        Please consider reporting this issue on \
-                        https://github.com/metalbear-co/mirrord/issues/new?labels=bug&template=bug_report.yml");
-                        HttpResponseFallback::response_from_request(
-                            request,
-                            StatusCode::BAD_GATEWAY,
-                            "mirrord",
-                        )
-                    }),
-            ),
-        }
+#[derive(Error, Debug)]
+enum InterceptorError {
+    #[error("{0}")]
+    Raw(#[from] RawInterceptorError),
+    #[error("{0}")]
+    Http(#[from] HttpInterceptorError),
 }
 
-pub struct TcpStealHandler {
-    ports: HashSet<Listen>,
-    write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
-    read_streams: StreamMap<ConnectionId, ReaderStream<ReadHalf<TcpStream>>>,
-
-    /// Mapping of a ConnectionId to a sender that sends HTTP requests over to a task that is
-    /// running an http client for this connection.
-    http_request_senders: HashMap<ConnectionId, Sender<HttpRequestFallback>>,
-
-    /// Sender of responses from within an http client task back to the main layer task.
-    /// This sender is cloned and moved into those tasks.
-    http_response_sender: Sender<HttpResponseFallback>,
-
-    /// HTTP filter settings
-    http_filter_settings: HttpFilterSettings,
-
-    /// LocalPort:RemotePort mapping.
-    port_mapping: BiMap<u16, u16>,
+pub enum InterceptorMessageOut {
+    Bytes(Vec<u8>),
+    Http(HttpResponseFallback),
 }
 
-impl TcpHandler<true> for TcpStealHandler {
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn handle_new_connection(
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct InterceptorId(pub ConnectionId);
+
+impl fmt::Display for InterceptorId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "incoming interceptor {}", self.0,)
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum IncomingProxyError {
+    #[error("received TCP mirror message while in steal mode: {0:?}")]
+    ReceivedMirrorMessage(DaemonTcp),
+    #[error("received TCP steal message while in mirror mode: {0:?}")]
+    ReceivedStealMessage(DaemonTcp),
+    #[error("{0}")]
+    RequestQueueEmpty(#[from] RequestQueueEmpty),
+    #[error("invalid configuration: {0}")]
+    ConfigurationError(#[from] IncomingFlavorError),
+    #[error("{0:?} is not supported")]
+    UnsupportedHttpVersion(Version),
+}
+
+pub enum IncomingProxyMessage {
+    LayerRequest(MessageId, IncomingRequest),
+    AgentMirror(DaemonTcp),
+    AgentSteal(DaemonTcp),
+}
+
+pub struct IncomingProxy {
+    flavor: Flavor,
+    subscriptions: HashMap<Port, SocketAddr>,
+    subscribe_reqs: RequestQueue,
+    txs_raw: HashMap<InterceptorId, TaskSender<Vec<u8>>>,
+    txs_http: HashMap<InterceptorId, TaskSender<HttpRequestFallback>>,
+    background_tasks: BackgroundTasks<InterceptorId, InterceptorMessageOut, InterceptorError>,
+}
+
+impl IncomingProxy {
+    const CHANNEL_SIZE: usize = 512;
+
+    pub fn new(config: &LayerConfig) -> Result<Self, IncomingProxyError> {
+        let flavor = Flavor::new(config)?;
+
+        Ok(Self {
+            flavor,
+            subscriptions: Default::default(),
+            subscribe_reqs: Default::default(),
+            txs_raw: Default::default(),
+            txs_http: Default::default(),
+            background_tasks: Default::default(),
+        })
+    }
+
+    async fn handle_port_subscribe(
         &mut self,
-        tcp_connection: NewTcpConnection,
-    ) -> Result<(), LayerError> {
-        let stream = self.create_local_stream(&tcp_connection).await?;
-
-        let (read_half, write_half) = tokio::io::split(stream);
-        self.write_streams
-            .insert(tcp_connection.connection_id, write_half);
-        self.read_streams
-            .insert(tcp_connection.connection_id, ReaderStream::new(read_half));
-
-        Ok(())
-    }
-
-    /// Forward incoming data from the agent to the local app.
-    /// Browser -> agent -> layer -> local-app
-    ///                           ^-- You are here.
-    /// # Errors
-    /// If the local connection with the app was closed, returns a
-    /// [`LayerError::AppClosedConnection`] error, which contains a message to send to the agent
-    /// to inform it of the close.
-    #[tracing::instrument(level = "trace", skip(self), fields(data = data.connection_id))]
-    async fn handle_new_data(&mut self, data: TcpData) -> Result<(), LayerError> {
-        let connection = if let Some(conn) = self.write_streams.get_mut(&data.connection_id) {
-            conn
-        } else {
-            trace!(
-                "mirrord got new stolen incoming tcp data for a connection that is already closed: \
-                {:?}",
-                data.connection_id,
-            );
-            return Ok(());
-        };
-
-        trace!(
-            "handle_new_data -> writing {:#?} bytes to id {:#?}",
-            data.bytes.len(),
-            data.connection_id
-        );
-
-        // Returns AppClosedConnection Error with message to send to agent if this fails.
-        connection.write_all(&data.bytes[..]).await.map_err(|err| {
-            trace!(
-                "mirrord could not forward all the incoming data in connection id {}. \
-                    Got error: {:?}",
-                data.connection_id,
-                err
-            );
-            LayerError::AppClosedConnection(self.app_closed_connection(data.connection_id))
-        })?;
-
-        Ok(())
-    }
-
-    /// An http request was stolen by the http filter. Pass it to the local application.
-    ///
-    /// Send a filtered HTTP request to the application in the appropriate port.
-    /// If this is the first filtered HTTP from its remote connection to arrive at this layer, a new
-    /// local connection will be started for it, otherwise it will be sent in the existing local
-    /// connection.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn handle_http_request(
-        &mut self,
-        request: HttpRequestFallback,
-    ) -> Result<(), LayerError> {
-        if let Some(sender) = self.http_request_senders.get(&request.connection_id()) {
-            trace!(
-                "Got an HTTP request from an existing connection, sending it to the client task \
-                to be forwarded to the application."
-            );
-            Ok(sender
-                .send(request)
-                .await
-                .map_err::<HttpForwarderError, _>(From::from)?)
-        } else {
-            Ok(self.create_http_connection(request).await?)
-        }
-    }
-
-    #[tracing::instrument(level = "trace", skip(self))]
-    fn handle_close(&mut self, close: TcpClose) -> Result<(), LayerError> {
-        let TcpClose { connection_id } = close;
-
-        // Dropping the connection -> Sender drops -> Receiver disconnects -> tcp_tunnel ends
-        self.remove_connection(connection_id);
-
-        Ok(())
-    }
-
-    fn ports(&self) -> &HashSet<Listen> {
-        &self.ports
-    }
-
-    fn ports_mut(&mut self) -> &mut HashSet<Listen> {
-        &mut self.ports
-    }
-
-    fn port_mapping_ref(&self) -> &BiMap<u16, u16> {
-        &self.port_mapping
-    }
-
-    #[tracing::instrument(level = "trace", skip(self, tx))]
-    async fn handle_listen(
-        &mut self,
-        mut listen: Listen,
-        tx: &Sender<ClientMessage>,
-    ) -> Result<(), LayerError> {
-        let original_port = listen.requested_port;
-        self.apply_port_mapping(&mut listen);
-        let request_port = listen.requested_port;
-
-        if self.ports_mut().replace(listen).is_some() {
+        message_id: MessageId,
+        subscribe: PortSubscribe,
+        message_bus: &mut MessageBus<Self>,
+    ) {
+        if let Some(old_socket) = self
+            .subscriptions
+            .insert(subscribe.port, subscribe.listening_on)
+        {
             // Since this struct identifies listening sockets by their port (#1558), we can only
             // forward the incoming traffic to one socket with that port.
-            info!(
-                "Received listen hook message for port {request_port} while already listening. \
-                Might be on different address. Sending all incoming traffic to newest socket."
+            tracing::info!(
+                "Received layer subscription message for port {}, listening on {}, while already listening on {}. Sending all incoming traffic to new socket.",
+                subscribe.port,
+                subscribe.listening_on,
+                old_socket,
             );
-            return Ok(());
+
+            message_bus
+                .send(ProxyMessage::ToLayer(LocalMessage {
+                    message_id,
+                    inner: ProxyToLayerMessage::IncomingSubscribe(Ok(())),
+                }))
+                .await;
+
+            return;
         }
 
-        let steal_type = if self.http_filter_settings.ports.contains(&original_port) {
-            match self.http_filter_settings.filter {
-                LayerHttpFilter::None => All(request_port),
-                LayerHttpFilter::HeaderDeprecated(ref header) => {
-                    FilteredHttp(request_port, Filter::new(header.clone())?)
-                }
-                LayerHttpFilter::Header(ref header) => FilteredHttpEx(
-                    request_port,
-                    HttpFilter::Header(Filter::new(header.clone())?),
-                ),
-                LayerHttpFilter::Path(ref path) => {
-                    FilteredHttpEx(request_port, HttpFilter::Path(Filter::new(path.clone())?))
-                }
-            }
-        } else {
-            All(request_port)
-        };
+        let msg = self.flavor.wrap_agent_subscribe(subscribe.port);
+        message_bus.send(ProxyMessage::ToAgent(msg)).await;
 
-        tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
-            steal_type,
-        )))
-        .await
-        .map_err(From::from)
+        self.subscribe_reqs.insert(message_id);
     }
 
-    async fn handle_server_side_socket_close(
+    async fn handle_port_unsubscribe(
         &mut self,
-        port: Port,
-        tx: &Sender<ClientMessage>,
-    ) -> Result<(), LayerError> {
-        if self.ports_mut().remove(&port) {
-            // There is a known issue - https://github.com/metalbear-co/mirrord/issues/1575 - where
-            // the agent is currently not able to keep ongoing connections, so once we send this
-            // message, any ongoing connections are going to be interrupted.
-            tx.send(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(
-                port,
-            )))
-            .await
-            .map_err(From::from)
-        } else {
-            // was not listening on closed socket, could be an outgoing socket.
-            Ok(())
+        unsubscribe: PortUnsubscribe,
+        message_bus: &mut MessageBus<Self>,
+    ) {
+        if self.subscriptions.remove(&unsubscribe.port).is_some() {
+            let msg = self.flavor.wrap_agent_unsubscribe(unsubscribe.port);
+            message_bus.send(ProxyMessage::ToAgent(msg)).await;
         }
+    }
+
+    fn get_or_create_http_interceptor(
+        &mut self,
+        request: &HttpRequestFallback,
+    ) -> Result<Option<&TaskSender<HttpRequestFallback>>, IncomingProxyError> {
+        let id: InterceptorId = InterceptorId(request.connection_id());
+
+        let interceptor = match self.txs_http.entry(id) {
+            Entry::Occupied(e) => e.into_mut(),
+            Entry::Vacant(e) => {
+                let Some(local_destination) = self.subscriptions.get(&request.port()).copied()
+                else {
+                    return Ok(None);
+                };
+
+                let version = request.version();
+                let interceptor = match version {
+                    hyper::Version::HTTP_2 => self.background_tasks.register(
+                        HttpInterceptor::<HttpV2>::new(local_destination),
+                        InterceptorId(request.connection_id()),
+                        Self::CHANNEL_SIZE,
+                    ),
+
+                    version @ hyper::Version::HTTP_3 => {
+                        return Err(IncomingProxyError::UnsupportedHttpVersion(version))
+                    }
+
+                    _http_v1 => self.background_tasks.register(
+                        HttpInterceptor::<HttpV1>::new(local_destination),
+                        InterceptorId(request.connection_id()),
+                        Self::CHANNEL_SIZE,
+                    ),
+                };
+
+                e.insert(interceptor)
+            }
+        };
+
+        Ok(Some(interceptor))
+    }
+
+    async fn handle_agent_message(
+        &mut self,
+        message: DaemonTcp,
+        message_bus: &mut MessageBus<Self>,
+    ) -> Result<(), IncomingProxyError> {
+        match message {
+            DaemonTcp::Close(close) => {
+                self.txs_raw.remove(&InterceptorId(close.connection_id));
+                self.txs_http.remove(&InterceptorId(close.connection_id));
+            }
+            DaemonTcp::Data(data) => {
+                if let Some(interceptor) = self.txs_raw.get(&InterceptorId(data.connection_id)) {
+                    interceptor.send(data.bytes).await;
+                }
+            }
+            DaemonTcp::HttpRequest(req) => {
+                let req = HttpRequestFallback::Fallback(req);
+                let interceptor = self.get_or_create_http_interceptor(&req)?;
+                if let Some(interceptor) = interceptor {
+                    interceptor.send(req).await;
+                }
+            }
+            DaemonTcp::HttpRequestFramed(req) => {
+                let req = HttpRequestFallback::Framed(req);
+                let interceptor = self.get_or_create_http_interceptor(&req)?;
+                if let Some(interceptor) = interceptor {
+                    interceptor.send(req).await;
+                }
+            }
+            DaemonTcp::NewConnection(connection) => {
+                let Some(local_destination) = self
+                    .subscriptions
+                    .get(&connection.destination_port)
+                    .copied()
+                else {
+                    return Ok(());
+                };
+                let remote_source =
+                    SocketAddr::new(connection.remote_address, connection.source_port);
+
+                let id = InterceptorId(connection.connection_id);
+                let interceptor = self.background_tasks.register(
+                    RawInterceptor::new(remote_source, local_destination),
+                    id,
+                    Self::CHANNEL_SIZE,
+                );
+                self.txs_raw.insert(id, interceptor);
+            }
+            DaemonTcp::SubscribeResult(res) => {
+                let message_id = self.subscribe_reqs.get()?;
+
+                message_bus
+                    .send(ProxyMessage::ToLayer(LocalMessage {
+                        message_id,
+                        inner: ProxyToLayerMessage::IncomingSubscribe(res.map(|_| ())),
+                    }))
+                    .await;
+            }
+        }
+
+        Ok(())
     }
 }
 
-impl TcpStealHandler {
-    pub(crate) fn new(
-        http_response_sender: Sender<HttpResponseFallback>,
-        port_mapping: BiMap<u16, u16>,
-        http_filter_settings: HttpFilterSettings,
-    ) -> Self {
-        Self {
-            ports: Default::default(),
-            write_streams: Default::default(),
-            read_streams: Default::default(),
-            http_request_senders: Default::default(),
-            http_response_sender,
-            http_filter_settings,
-            port_mapping,
-        }
-    }
+impl BackgroundTask for IncomingProxy {
+    type Error = IncomingProxyError;
+    type MessageIn = IncomingProxyMessage;
+    type MessageOut = ProxyMessage;
 
-    /// Remove a layer<->local-app connection.
-    /// If the connection is still open, it will be closed, by dropping its read and write streams.
-    fn remove_connection(&mut self, connection_id: ConnectionId) {
-        let _ = self.read_streams.remove(&connection_id);
-        let _ = self.write_streams.remove(&connection_id);
-        let _ = self.http_request_senders.remove(&connection_id);
-    }
+    async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+        loop {
+            tokio::select! {
+                msg = message_bus.recv() => match msg {
+                    None => break Ok(()),
+                    Some(IncomingProxyMessage::LayerRequest(id, req)) => match req {
+                        IncomingRequest::PortSubscribe(subscribe) => self.handle_port_subscribe(id, subscribe, message_bus).await,
+                        IncomingRequest::PortUnsubscribe(unsubscribe) => self.handle_port_unsubscribe(unsubscribe, message_bus).await,
+                    },
+                    Some(IncomingProxyMessage::AgentMirror(msg)) => {
+                        if self.flavor.is_steal() {
+                            break Err(IncomingProxyError::ReceivedMirrorMessage(msg));
+                        }
 
-    /// Remove the connection from all struct members, and return a message to notify the agent.
-    fn app_closed_connection(&mut self, connection_id: ConnectionId) -> ClientMessage {
-        self.remove_connection(connection_id);
-        ClientMessage::TcpSteal(LayerTcpSteal::ConnectionUnsubscribe(connection_id))
-    }
+                        self.handle_agent_message(msg, message_bus).await?;
+                    }
+                    Some(IncomingProxyMessage::AgentSteal(msg)) => {
+                        if !self.flavor.is_steal() {
+                            break Err(IncomingProxyError::ReceivedStealMessage(msg));
+                        }
 
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub async fn next(&mut self) -> Option<ClientMessage> {
-        let (connection_id, value) = self.read_streams.next().await?;
-        match value {
-            Some(Ok(bytes)) => Some(ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
-                connection_id,
-                bytes: bytes.to_vec(),
-            }))),
-            Some(Err(err)) => {
-                info!("connection id {connection_id:?} read error: {err:?}");
-                Some(ClientMessage::TcpSteal(
-                    LayerTcpSteal::ConnectionUnsubscribe(connection_id),
-                ))
+                        self.handle_agent_message(msg, message_bus).await?;
+                    }
+                },
+
+                task_update = self.background_tasks.next() => match task_update {
+                    (id, TaskUpdate::Finished(res)) => {
+                        tracing::trace!("{id} finished: {res:?}");
+                        if self.txs_raw.contains_key(&id) || self.txs_http.contains_key(&id) {
+                            let msg = self.flavor.wrap_agent_unsubscribe_connection(id.0);
+                            message_bus.send(ProxyMessage::ToAgent(msg)).await;
+                        }
+                    },
+                    (id, TaskUpdate::Message(msg)) if self.flavor.is_steal() => match msg {
+                        InterceptorMessageOut::Bytes(bytes) => {
+                            let msg = ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
+                                connection_id: id.0,
+                                bytes,
+                            }));
+                            message_bus.send(ProxyMessage::ToAgent(msg)).await;
+                        },
+                        InterceptorMessageOut::Http(HttpResponseFallback::Fallback(res)) => {
+                            let msg = ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(res));
+                            message_bus.send(ProxyMessage::ToAgent(msg)).await;
+                        },
+                        InterceptorMessageOut::Http(HttpResponseFallback::Framed(res)) => {
+                            let msg = ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(res));
+                            message_bus.send(ProxyMessage::ToAgent(msg)).await;
+                        }
+                    },
+                    _ => {}
+                },
             }
-            None => Some(self.app_closed_connection(connection_id)),
         }
-    }
-
-    /// Create a new TCP connection with the application to send all the filtered HTTP requests
-    /// from this connection in.
-    /// Spawn a task that receives requests on a channel and sends them to the application on that
-    /// new TCP connection. The sender of that channel is stored in [`self.request_senders`].
-    /// The responses from all the http client tasks will arrive together at
-    /// [`self.response_receiver`].
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn create_http_connection(
-        &mut self,
-        http_request: HttpRequestFallback,
-    ) -> Result<(), LayerError> {
-        let port = http_request.port();
-        let connection_id = http_request.connection_id();
-
-        let listen = self
-            .ports()
-            .get(&port)
-            .ok_or(LayerError::NewConnectionAfterSocketClose(connection_id))?;
-        let addr: SocketAddr = listen.into();
-
-        let (request_sender, request_receiver) = channel(1024);
-
-        let response_sender = self.http_response_sender.clone();
-
-        let http_version = http_request.version();
-
-        tokio::spawn(async move {
-            trace!("HTTP/{http_version:?} client task started.");
-            let connection_task_result = match http_version {
-                hyper::Version::HTTP_2 => {
-                    ConnectionTask::<HttpV2>::new(
-                        addr,
-                        request_receiver,
-                        response_sender,
-                        port,
-                        connection_id,
-                    )
-                    .and_then(ConnectionTask::start)
-                    .await
-                }
-                hyper::Version::HTTP_3 => {
-                    error!("mirrord (currently) does not support HTTP/3!");
-                    todo!()
-                }
-                _http_v1 => {
-                    ConnectionTask::<HttpV1>::new(
-                        addr,
-                        request_receiver,
-                        response_sender,
-                        port,
-                        connection_id,
-                    )
-                    .and_then(ConnectionTask::start)
-                    .await
-                }
-            };
-
-            if let Err(e) = connection_task_result {
-                error!(
-                    "Error while forwarding http connection {connection_id} (port {port}): {e:?}."
-                )
-            } else {
-                trace!(
-                    "Filtered http connection {connection_id} (port {port}) closed without errors."
-                )
-            }
-        });
-
-        request_sender
-            .send(http_request)
-            .await
-            .map_err::<HttpForwarderError, _>(From::from)?;
-        // Give the forwarder a channel to send the task new requests from the same connection.
-        self.http_request_senders
-            .insert(connection_id, request_sender);
-
-        trace!("main task done creating http connection.");
-        Ok(())
     }
 }

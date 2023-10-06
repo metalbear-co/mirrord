@@ -16,13 +16,13 @@ use tokio::{
 #[derive(Error, Debug)]
 pub enum CodecError {
     #[error("encoding failed: {0}")]
-    EncodingFailed(#[from] EncodeError),
+    EncodeError(#[from] EncodeError),
     #[error("decoding failed: {0}")]
-    DecodingFailed(#[from] DecodeError),
+    DecodeError(#[from] DecodeError),
     #[error("message too long: {0}")]
-    MessageTooLong(#[from] TryFromIntError),
+    MessageTooLongError(#[from] TryFromIntError),
     #[error("io failed: {0}")]
-    Io(#[from] io::Error),
+    IoError(#[from] io::Error),
 }
 
 pub type Result<T> = core::result::Result<T, CodecError>;

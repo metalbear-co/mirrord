@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, net::SocketAddr};
 
 use bincode::{Decode, Encode};
 use mirrord_protocol::{
@@ -129,7 +129,7 @@ pub struct PortSubscribe {
     /// Port on the remote pod that layer wants want to mirror.
     pub port: Port,
     /// Local address on which the layer is listening.
-    pub listening_on: SocketAddress,
+    pub listening_on: SocketAddr,
 }
 
 /// A request to stop proxying incoming connections.

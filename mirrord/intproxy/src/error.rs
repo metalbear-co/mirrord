@@ -7,7 +7,7 @@ use crate::{
     agent_conn::{AgentClosedConnection, AgentConnectionError},
     codec::CodecError,
     ping_pong::PingPongError,
-    proxies::outgoing::OutgoingProxyError,
+    proxies::{incoming::IncomingProxyError, outgoing::OutgoingProxyError},
     request_queue::RequestQueueEmpty,
     session::MainTaskId,
 };
@@ -40,6 +40,8 @@ pub enum IntProxyError {
     SimpleProxy(#[from] RequestQueueEmpty),
     #[error("outgoing proxy failed: {0}")]
     OutgoingProxy(#[from] OutgoingProxyError),
+    #[error("incoming proxy failed: {0}")]
+    IncomingProxy(#[from] IncomingProxyError),
 }
 
 pub type Result<T> = core::result::Result<T, IntProxyError>;

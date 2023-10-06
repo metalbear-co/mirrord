@@ -55,7 +55,7 @@ where
     Err: 'static + Send,
     MOut: Send + Unpin,
 {
-    pub fn register<T>(&mut self, task: T, id: Id, channel_size: usize) -> TaskSender<T>
+    pub fn register<T>(&mut self, task: T, id: Id, channel_size: usize) -> TaskSender<T::MessageIn>
     where
         T: 'static + BackgroundTask<MessageOut = MOut> + Send,
         Err: From<T::Error>,
@@ -128,10 +128,10 @@ pub enum TaskUpdate<MOut, Err> {
     Finished(Result<(), TaskError<Err>>),
 }
 
-pub struct TaskSender<T: BackgroundTask>(Sender<T::MessageIn>);
+pub struct TaskSender<M>(Sender<M>);
 
-impl<T: BackgroundTask> TaskSender<T> {
-    pub async fn send(&self, message: T::MessageIn) {
+impl<M> TaskSender<M> {
+    pub async fn send(&self, message: M) {
         let _ = self.0.send(message).await;
     }
 }

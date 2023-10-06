@@ -33,7 +33,7 @@ pub enum OutgoingProxyError {
 pub struct OutgoingProxy {
     datagrams_reqs: RequestQueue,
     stream_reqs: RequestQueue,
-    txs: HashMap<InterceptorId, TaskSender<Interceptor>>,
+    txs: HashMap<InterceptorId, TaskSender<Vec<u8>>>,
     background_tasks: BackgroundTasks<InterceptorId, Vec<u8>, io::Error>,
 }
 

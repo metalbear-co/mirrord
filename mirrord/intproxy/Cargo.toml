@@ -30,5 +30,10 @@ tokio.workspace = true
 tracing.workspace = true
 tokio-util.workspace = true
 tokio-stream.workspace = true
+hyper = { workspace = true, features = ["client", "http1", "http2"] }
+hyper-util.workspace = true
+http-body-util.workspace = true
+fancy-regex.workspace = true
+bytes.workspace = true
 
 rand = "0.8"

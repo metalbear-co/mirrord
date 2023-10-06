@@ -3790,7 +3790,12 @@ name = "mirrord-intproxy"
 version = "3.71.2"
 dependencies = [
  "bincode",
+ "bytes",
+ "fancy-regex",
  "futures",
+ "http-body-util",
+ "hyper 1.0.0-rc.4",
+ "hyper-util",
  "mirrord-config",
  "mirrord-kube",
  "mirrord-operator",
@@ -3851,9 +3856,7 @@ dependencies = [
  "frida-gum",
  "hashbrown 0.14.1",
  "http-body 1.0.0-rc.2",
- "http-body-util",
  "hyper 1.0.0-rc.4",
- "hyper-util",
  "itertools",
  "k8s-openapi",
  "libc",
