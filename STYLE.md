@@ -2,7 +2,7 @@
 
 ## Rust
 
-- When naming Senders and Receivers, use a_tx and b_rx respectively - where a is the thing the Sender is sending, and b is the thing Receiver is receiving. e.g. agent_message_sender, http_response_receiver.
+- When naming Senders and Receivers, use `a_tx` and `b_rx` respectively - where `a` is the thing the Sender is sending, and `b` is the thing Receiver is receiving. E.g. `agent_message_tx`, `http_response_rx`.
     - Document above the declaration of the variable/struct member what’s being sent from where to where. Suggested format:
       `<src> --<what's being sent>—> <dst>`.
 
