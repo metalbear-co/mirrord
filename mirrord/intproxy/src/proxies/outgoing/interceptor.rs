@@ -1,59 +1,31 @@
-use std::io;
+use std::{fmt, io};
 
 use mirrord_protocol::ConnectionId;
-
-use super::PreparedSocket;
-use crate::{
-    protocol::NetProtocol,
-    task_manager::{MessageBus, Task},
+use thiserror::Error;
+use tokio::{
+    sync::mpsc::{self, Receiver, Sender},
+    task::JoinHandle,
 };
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct InterceptorId {
-    pub connection_id: ConnectionId,
-    pub protocol: NetProtocol,
+use super::PreparedSocket;
+use crate::{error::BackgroundTaskDown, protocol::NetProtocol};
+
+#[derive(Error, Debug)]
+pub enum InterceptorError {
+    #[error("background task panicked")]
+    Panic,
+    #[error("{0}")]
+    Io(io::Error),
 }
 
-pub struct OutgoingInterceptor {
-    connection_id: ConnectionId,
-    protocol: NetProtocol,
+struct BackgroundTask {
+    tx: Sender<Vec<u8>>,
+    rx: Receiver<Vec<u8>>,
     socket: PreparedSocket,
 }
 
-impl OutgoingInterceptor {
-    pub fn new(connection_id: ConnectionId, protocol: NetProtocol, socket: PreparedSocket) -> Self {
-        Self {
-            connection_id,
-            protocol,
-            socket,
-        }
-    }
-}
-
-pub enum OutgoingInterceptorIn {
-    Bytes(Vec<u8>),
-    AgentClosed,
-}
-
-pub enum OutgoingInterceptorOut {
-    Bytes(Vec<u8>),
-    LayerClosed,
-}
-
-impl Task for OutgoingInterceptor {
-    type Error = io::Error;
-    type Id = InterceptorId;
-    type MessageIn = OutgoingInterceptorIn;
-    type MessageOut = OutgoingInterceptorOut;
-
-    fn id(&self) -> Self::Id {
-        InterceptorId {
-            connection_id: self.connection_id,
-            protocol: self.protocol,
-        }
-    }
-
-    async fn run(self, messages: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+impl BackgroundTask {
+    async fn run(mut self) -> io::Result<()> {
         let mut connected_socket = self.socket.accept().await?;
 
         loop {
@@ -61,28 +33,88 @@ impl Task for OutgoingInterceptor {
                 biased; // To allow local socket to be read before being closed
 
                 read = connected_socket.receive() => match read {
-                    Err(fail) if fail.kind() == std::io::ErrorKind::WouldBlock => {
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                         continue;
                     },
-                    Err(fail) => break Err(fail),
-                    Ok(bytes) if bytes.len() == 0 => {
-                        messages.send(OutgoingInterceptorOut::LayerClosed).await;
-                        break Ok(());
+                    Err(e) => break Err(e),
+                    Ok(bytes) if bytes.len() == 0 => break Ok(()),
+                    Ok(bytes) => {
+                        if self.tx.send(bytes).await.is_err() {
+                            break Ok(());
+                        }
                     },
-                    Ok(bytes) => messages.send(OutgoingInterceptorOut::Bytes(bytes)).await,
                 },
 
-                message = messages.recv() => {
-                    let Some(message) = message else {
-                        break Ok(());
-                    };
-
-                    match message {
-                        OutgoingInterceptorIn::Bytes(b) => connected_socket.send(&b).await?,
-                        OutgoingInterceptorIn::AgentClosed => break Ok(()),
-                    }
+                bytes = self.rx.recv() => match bytes {
+                    Some(bytes) => connected_socket.send(&bytes).await?,
+                    None => break Ok(()),
                 },
             }
         }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct InterceptorId {
+    pub connection_id: ConnectionId,
+    pub protocol: NetProtocol,
+}
+
+impl fmt::Display for InterceptorId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "outgoing interceptor {}-{}",
+            self.connection_id, self.protocol
+        )
+    }
+}
+
+pub struct Interceptor {
+    id: InterceptorId,
+    task: JoinHandle<io::Result<()>>,
+    tx: Sender<Vec<u8>>,
+}
+
+impl Interceptor {
+    const CHANNEL_SIZE: usize = 512;
+
+    pub fn new(
+        connection_id: ConnectionId,
+        protocol: NetProtocol,
+        socket: PreparedSocket,
+        tx: Sender<Vec<u8>>,
+    ) -> Self {
+        let (to_layer_tx, to_layer_rx) = mpsc::channel(Self::CHANNEL_SIZE);
+
+        let task = BackgroundTask {
+            tx,
+            rx: to_layer_rx,
+            socket,
+        };
+
+        let task = tokio::spawn(task.run());
+
+        let interceptor = Self {
+            id: InterceptorId {
+                connection_id,
+                protocol,
+            },
+            task,
+            tx: to_layer_tx,
+        };
+
+        interceptor
+    }
+
+    pub async fn send_bytes(&self, bytes: Vec<u8>) -> Result<(), BackgroundTaskDown> {
+        self.tx.send(bytes).await.map_err(|_| BackgroundTaskDown)
+    }
+
+    pub async fn result(self) -> Result<(), InterceptorError> {
+        self.task
+            .await
+            .map_err(|_| InterceptorError::Panic)?
+            .map_err(InterceptorError::Io)
     }
 }

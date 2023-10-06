@@ -1,3 +1,5 @@
+use std::fmt;
+
 use bincode::{Decode, Encode};
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
@@ -85,6 +87,17 @@ pub enum NetProtocol {
     /// which alters this socket's behavior. Currently, we require this call to happen before we
     /// intercept outgoing UDP.
     Datagrams,
+}
+
+impl fmt::Display for NetProtocol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let as_str = match self {
+            Self::Stream => "STREAM",
+            Self::Datagrams => "DGRAM",
+        };
+
+        f.write_str(as_str)
+    }
 }
 
 /// A request to initiate a new outgoing connection.

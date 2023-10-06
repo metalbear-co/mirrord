@@ -29,5 +29,6 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tokio-util.workspace = true
+tokio-stream.workspace = true
+
 rand = "0.8"
-semver = { workspace = true, features = ["serde"] }

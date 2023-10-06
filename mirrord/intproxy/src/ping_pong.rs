@@ -1,80 +1,115 @@
 use std::time::Duration;
 
-use mirrord_protocol::ClientMessage;
+use mirrord_protocol::{ClientMessage, DaemonMessage};
 use thiserror::Error;
-use tokio::time::{self, Interval, MissedTickBehavior};
+use tokio::{
+    sync::mpsc::{self, Receiver, Sender},
+    task::JoinHandle,
+    time::{self, Interval, MissedTickBehavior},
+};
 
-use crate::task_manager::Task;
+use crate::{error::BackgroundTaskDown, ProxyMessage};
 
 #[derive(Error, Debug)]
 pub enum PingPongError {
+    #[error("background task panicked")]
+    Panic,
     #[error("received an unexpected pong from the agent")]
     UnmatchedPong,
     #[error("agent did not respond to ping in time")]
     PongTimeout,
+    #[error("a ping message was sent while already waiting for a pong")]
+    DuplicatePing,
 }
 
-pub struct AgentSentMessage {
-    pub pong: bool,
+struct AgentSentMessage {
+    pong: bool,
+}
+
+struct BackgroundTask {
+    ticker: Interval,
+    awaiting_pong: bool,
+    tx: Sender<ProxyMessage>,
+    rx: Receiver<AgentSentMessage>,
+}
+
+impl BackgroundTask {
+    async fn run(mut self) -> Result<(), PingPongError> {
+        self.ticker.tick().await;
+
+        loop {
+            tokio::select! {
+                _ = self.tx.closed() => break Ok(()),
+
+                _ = self.ticker.tick() => {
+                    if self.awaiting_pong {
+                        break Err(PingPongError::PongTimeout);
+                    } else {
+                        let _ = self.tx.send(ProxyMessage::ToAgent(ClientMessage::Ping)).await;
+                        self.ticker.reset();
+                        self.awaiting_pong = true;
+                    }
+                },
+
+                msg = self.rx.recv() => match (msg, self.awaiting_pong) {
+                    (None, _) => break Ok(()),
+                    (Some(AgentSentMessage { pong: true }), true) => {
+                        self.awaiting_pong = false;
+                        self.ticker.reset();
+                    },
+                    (Some(AgentSentMessage { pong: false }), true) => {},
+                    (Some(AgentSentMessage { pong: true }), false) => break Err(PingPongError::UnmatchedPong),
+                    (Some(AgentSentMessage { pong: false }), false) => {
+                        self.ticker.reset();
+                    }
+                },
+            }
+        }
+    }
 }
 
 /// Handles ping pong mechanism on the proxy side.
 /// This mechanism exists to keep the `proxy <-> agent` connection alive
 /// when there are no requests from the layer.
 pub struct PingPong {
-    ticker: Interval,
-    awaiting_pong: bool,
+    task: JoinHandle<Result<(), PingPongError>>,
+    tx: Sender<AgentSentMessage>,
 }
 
 impl PingPong {
-    pub async fn new(frequency: Duration) -> Self {
+    const CHANNEL_SIZE: usize = 512;
+
+    pub fn new(frequency: Duration, tx: Sender<ProxyMessage>) -> Self {
         let mut ticker = time::interval(frequency);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
-        ticker.tick().await;
 
-        Self {
+        let (task_tx, task_rx) = mpsc::channel(Self::CHANNEL_SIZE);
+
+        let task = BackgroundTask {
             ticker,
             awaiting_pong: false,
-        }
-    }
-}
+            tx,
+            rx: task_rx,
+        };
 
-impl Task for PingPong {
-    type Id = &'static str;
-    type Error = PingPongError;
-    type MessageIn = AgentSentMessage;
-    type MessageOut = ClientMessage;
+        let task = tokio::spawn(task.run());
 
-    fn id(&self) -> Self::Id {
-        "PING_PONG"
+        Self { task, tx: task_tx }
     }
 
-    async fn run(
-        mut self,
-        messages: &mut crate::task_manager::MessageBus<Self>,
-    ) -> Result<(), Self::Error> {
-        loop {
-            tokio::select! {
-                msg = messages.recv() => match msg {
-                    None => break Ok(()),
-                    Some(AgentSentMessage { pong: true }) if self.awaiting_pong => {
-                        self.ticker.reset();
-                    }
-                    Some(AgentSentMessage { pong: true }) => break Err(PingPongError::UnmatchedPong),
-                    Some(AgentSentMessage { pong: false }) if self.awaiting_pong => {}
-                    Some(AgentSentMessage { pong: false }) => {
-                        self.ticker.reset();
-                    }
-                },
+    pub async fn handle_agent_message(
+        &mut self,
+        message: &DaemonMessage,
+    ) -> Result<(), BackgroundTaskDown> {
+        self.tx
+            .send(AgentSentMessage {
+                pong: matches!(message, DaemonMessage::Pong),
+            })
+            .await
+            .map_err(|_| BackgroundTaskDown)
+    }
 
-                _ = self.ticker.tick() => if self.awaiting_pong {
-                    break Err(PingPongError::PongTimeout)
-                } else {
-                    messages.send(ClientMessage::Ping).await;
-                    self.awaiting_pong = true;
-                    self.ticker.reset();
-                },
-            }
-        }
+    pub async fn result(self) -> Result<(), PingPongError> {
+        self.task.await.map_err(|_| PingPongError::Panic)?
     }
 }

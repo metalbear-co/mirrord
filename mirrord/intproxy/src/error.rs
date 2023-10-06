@@ -30,3 +30,7 @@ pub enum IntProxyError {
 }
 
 pub type Result<T> = core::result::Result<T, IntProxyError>;
+
+#[derive(Error, Debug)]
+#[error("background task is down")]
+pub struct BackgroundTaskDown;

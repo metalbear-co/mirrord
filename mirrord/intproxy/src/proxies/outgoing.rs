@@ -23,7 +23,7 @@ use crate::protocol::NetProtocol;
 mod interceptor;
 mod proxy;
 
-pub use proxy::{OutgoingProxy, OutgoingProxyError, OutgoingProxyIn, OutgoingProxyOut};
+pub use proxy::OutgoingProxy;
 
 impl NetProtocol {
     fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Vec<u8>) -> ClientMessage {
