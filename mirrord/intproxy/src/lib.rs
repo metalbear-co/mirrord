@@ -1,8 +1,11 @@
+#![feature(async_fn_in_trait)]
+#![feature(return_position_impl_trait_in_trait)]
+
 use std::{sync::Arc, time::Duration};
 
 use mirrord_config::LayerConfig;
-use mirrord_protocol::ClientMessage;
-use protocol::{LocalMessage, ProxyToLayerMessage};
+use mirrord_protocol::{ClientMessage, DaemonMessage};
+use protocol::{LayerToProxyMessage, LocalMessage, ProxyToLayerMessage};
 use tokio::{net::TcpListener, task::JoinSet, time};
 
 use crate::{
@@ -12,6 +15,7 @@ use crate::{
 };
 
 pub mod agent_conn;
+mod background_tasks;
 pub mod codec;
 pub mod error;
 mod layer_conn;
@@ -21,9 +25,12 @@ mod proxies;
 mod request_queue;
 mod session;
 
+#[derive(Debug)]
 pub enum ProxyMessage {
     ToAgent(ClientMessage),
     ToLayer(LocalMessage<ProxyToLayerMessage>),
+    FromAgent(DaemonMessage),
+    FromLayer(LocalMessage<LayerToProxyMessage>),
 }
 
 pub struct IntProxy {

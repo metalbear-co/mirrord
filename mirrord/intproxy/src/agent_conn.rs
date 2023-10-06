@@ -17,15 +17,10 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 
-#[derive(Error, Debug)]
-pub enum AgentCommunicationError {
-    #[error("channel closed")]
-    ChannelClosed,
-    #[error("received unexpected message: {0:?}")]
-    UnexpectedMessage(DaemonMessage),
-    #[error("failed to connect: {0}")]
-    ConnectionError(#[from] AgentConnectionError),
-}
+use crate::{
+    background_tasks::{BackgroundTask, MessageBus},
+    ProxyMessage,
+};
 
 #[derive(Error, Debug)]
 pub enum AgentConnectionError {
@@ -39,8 +34,6 @@ pub enum AgentConnectionError {
     NoConnectionMethod,
 }
 
-pub type Result<T> = core::result::Result<T, AgentCommunicationError>;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentConnectInfo {
     /// Connect to the agent through the operator.
@@ -50,16 +43,16 @@ pub enum AgentConnectInfo {
 }
 
 pub struct AgentConnection {
-    sender: AgentSender,
-    receiver: Receiver<DaemonMessage>,
+    agent_tx: Sender<ClientMessage>,
+    agent_rx: Receiver<DaemonMessage>,
 }
 
 impl AgentConnection {
     pub async fn new(
         config: &LayerConfig,
         connect_info: Option<&AgentConnectInfo>,
-    ) -> Result<Self> {
-        let (sender, receiver) = match connect_info.as_ref() {
+    ) -> Result<Self, AgentConnectionError> {
+        let (agent_tx, agent_rx) = match connect_info.as_ref() {
             Some(AgentConnectInfo::Operator(operator_session_information)) => {
                 OperatorApi::connect(config, operator_session_information, None)
                     .await
@@ -87,47 +80,32 @@ impl AgentConnection {
             }
         };
 
-        Ok(AgentConnection {
-            sender: AgentSender(sender),
-            receiver,
-        })
-    }
-
-    pub async fn ping_pong(&mut self) -> Result<()> {
-        self.sender.send(ClientMessage::Ping).await?;
-
-        let response = self
-            .receiver
-            .recv()
-            .await
-            .ok_or(AgentCommunicationError::ChannelClosed)?;
-
-        match response {
-            DaemonMessage::Pong => Ok(()),
-            other => Err(AgentCommunicationError::UnexpectedMessage(other)),
-        }
-    }
-
-    pub fn sender(&self) -> &AgentSender {
-        &self.sender
-    }
-
-    pub async fn receive(&mut self) -> Result<DaemonMessage> {
-        self.receiver
-            .recv()
-            .await
-            .ok_or(AgentCommunicationError::ChannelClosed)
+        Ok(AgentConnection { agent_tx, agent_rx })
     }
 }
 
-#[derive(Clone)]
-pub struct AgentSender(Sender<ClientMessage>);
+#[derive(Error, Debug)]
+#[error("agent unexpectedly closed connection")]
+pub struct AgentClosedConnection;
 
-impl AgentSender {
-    pub async fn send(&self, message: ClientMessage) -> Result<()> {
-        self.0
-            .send(message)
-            .await
-            .map_err(|_| AgentCommunicationError::ChannelClosed)
+impl BackgroundTask for AgentConnection {
+    type Error = AgentClosedConnection;
+    type MessageIn = ClientMessage;
+    type MessageOut = ProxyMessage;
+
+    async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+        loop {
+            tokio::select! {
+                msg = message_bus.recv() => match msg {
+                    None => break Ok(()),
+                    Some(msg) => self.agent_tx.send(msg).await.map_err(|_| AgentClosedConnection)?,
+                },
+
+                msg = self.agent_rx.recv() => match msg {
+                    None => break Err(AgentClosedConnection),
+                    Some(msg) => message_bus.send(ProxyMessage::FromAgent(msg)).await,
+                }
+            }
+        }
     }
 }

@@ -1,214 +1,206 @@
-use std::{
-    env, io,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    path::PathBuf,
-};
+use std::{collections::HashMap, io};
 
 use mirrord_protocol::{
-    outgoing::{
-        tcp::LayerTcpOutgoing, udp::LayerUdpOutgoing, LayerClose, LayerConnect, LayerWrite,
-        SocketAddress, UnixAddr,
-    },
-    ClientMessage, ConnectionId,
+    outgoing::{tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing, DaemonConnect, DaemonRead},
+    RemoteResult, ResponseError,
 };
-use rand::{distributions::Alphanumeric, Rng};
-use tokio::{
-    fs,
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream, UdpSocket, UnixListener, UnixStream},
-};
+use thiserror::Error;
 
-use crate::protocol::NetProtocol;
+use self::interceptor::{Interceptor, InterceptorId};
+use crate::{
+    background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
+    protocol::{
+        LocalMessage, MessageId, NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse,
+        ProxyToLayerMessage,
+    },
+    request_queue::{RequestQueue, RequestQueueEmpty},
+    ProxyMessage,
+};
 
 mod interceptor;
-mod proxy;
+mod protocols;
 
-pub use proxy::OutgoingProxy;
+#[derive(Error, Debug)]
+pub enum OutgoingProxyError {
+    #[error("agent error: {0}")]
+    ResponseError(#[from] ResponseError),
+    #[error("failed to match connect response: {0}")]
+    RequestQueueEmpty(#[from] RequestQueueEmpty),
+    #[error("failed to prepare local listener: {0}")]
+    ListenerSetupError(#[from] io::Error),
+}
 
-impl NetProtocol {
-    fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Vec<u8>) -> ClientMessage {
-        match self {
-            Self::Datagrams => ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
-                connection_id,
-                bytes,
-            })),
-            Self::Stream => ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
-                connection_id,
-                bytes,
-            })),
+pub struct OutgoingProxy {
+    datagrams_reqs: RequestQueue,
+    stream_reqs: RequestQueue,
+    txs: HashMap<InterceptorId, TaskSender<Interceptor>>,
+    background_tasks: BackgroundTasks<InterceptorId, Vec<u8>, io::Error>,
+}
+
+impl Default for OutgoingProxy {
+    fn default() -> Self {
+        Self {
+            datagrams_reqs: Default::default(),
+            stream_reqs: Default::default(),
+            txs: Default::default(),
+            background_tasks: Default::default(),
+        }
+    }
+}
+
+impl OutgoingProxy {
+    const CHANNEL_SIZE: usize = 512;
+
+    fn queue(&mut self, protocol: NetProtocol) -> &mut RequestQueue {
+        match protocol {
+            NetProtocol::Datagrams => &mut self.datagrams_reqs,
+            NetProtocol::Stream => &mut self.stream_reqs,
         }
     }
 
-    fn wrap_agent_close(self, connection_id: ConnectionId) -> ClientMessage {
-        match self {
-            Self::Datagrams => {
-                ClientMessage::UdpOutgoing(LayerUdpOutgoing::Close(LayerClose { connection_id }))
-            }
-            Self::Stream => {
-                ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(LayerClose { connection_id }))
-            }
-        }
-    }
+    async fn handle_agent_read(
+        &mut self,
+        read: RemoteResult<DaemonRead>,
+        protocol: NetProtocol,
+    ) -> Result<(), OutgoingProxyError> {
+        let DaemonRead {
+            connection_id,
+            bytes,
+        } = read?;
 
-    fn wrap_agent_connect(self, remote_address: SocketAddress) -> ClientMessage {
-        match self {
-            Self::Datagrams => {
-                ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
-                    remote_address,
-                }))
-            }
-            Self::Stream => ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
-                remote_address,
-            })),
-        }
-    }
-
-    async fn prepare_socket(self, for_remote_address: SocketAddress) -> io::Result<PreparedSocket> {
-        let socket = match for_remote_address {
-            SocketAddress::Ip(addr) => {
-                let ip_addr = match addr.ip() {
-                    IpAddr::V4(..) => IpAddr::V4(Ipv4Addr::LOCALHOST),
-                    IpAddr::V6(..) => IpAddr::V6(Ipv6Addr::LOCALHOST),
-                };
-                let bind_at = SocketAddr::new(ip_addr, 0);
-
-                match self {
-                    Self::Datagrams => PreparedSocket::UdpSocket(UdpSocket::bind(bind_at).await?),
-                    Self::Stream => PreparedSocket::TcpListener(TcpListener::bind(bind_at).await?),
-                }
-            }
-            SocketAddress::Unix(..) => match self {
-                Self::Stream => {
-                    let path = PreparedSocket::generate_uds_path().await?;
-                    PreparedSocket::UnixListener(UnixListener::bind(path)?)
-                }
-                Self::Datagrams => {
-                    tracing::error!("layer requested intercepting outgoing datagrams over unix socket, this is not supported");
-                    panic!("layer requested outgoing datagrams over unix sockets");
-                }
-            },
+        let id = InterceptorId {
+            connection_id,
+            protocol,
         };
 
-        Ok(socket)
-    }
-}
+        let Some(interceptor) = self.txs.get(&id) else {
+            tracing::trace!("{id} does not exist");
+            return Ok(());
+        };
 
-enum PreparedSocket {
-    UdpSocket(UdpSocket),
-    TcpListener(TcpListener),
-    UnixListener(UnixListener),
-}
+        interceptor.send(bytes).await;
 
-impl PreparedSocket {
-    /// For unix listeners, relative to the temp dir.
-    const UNIX_STREAMS_DIRNAME: &'static str = "mirrord-unix-sockets";
-
-    async fn generate_uds_path() -> io::Result<PathBuf> {
-        let tmp_dir = env::temp_dir().join(Self::UNIX_STREAMS_DIRNAME);
-        if !tmp_dir.exists() {
-            fs::create_dir_all(&tmp_dir).await?;
-        }
-
-        let random_string: String = rand::thread_rng()
-            .sample_iter(Alphanumeric)
-            .take(16)
-            .map(char::from)
-            .collect();
-
-        Ok(tmp_dir.join(random_string))
+        Ok(())
     }
 
-    fn local_address(&self) -> io::Result<SocketAddress> {
-        let address = match self {
-            Self::TcpListener(listener) => listener.local_addr()?.into(),
-            Self::UdpSocket(socket) => socket.local_addr()?.into(),
-            Self::UnixListener(listener) => {
-                let addr = listener.local_addr()?;
-                let pathname = addr.as_pathname().unwrap().to_path_buf();
-                SocketAddress::Unix(UnixAddr::Pathname(pathname))
+    async fn handle_connect_response(
+        &mut self,
+        connect: RemoteResult<DaemonConnect>,
+        protocol: NetProtocol,
+        message_bus: &mut MessageBus<Self>,
+    ) -> Result<(), OutgoingProxyError> {
+        let message_id = self.queue(protocol).get()?;
+
+        let connect = match connect {
+            Ok(connect) => connect,
+            Err(e) => {
+                message_bus
+                    .send(ProxyMessage::ToLayer(LocalMessage {
+                        message_id,
+                        inner: ProxyToLayerMessage::OutgoingConnect(Err(e)),
+                    }))
+                    .await;
+                return Ok(());
             }
         };
 
-        Ok(address)
-    }
+        let DaemonConnect {
+            connection_id,
+            remote_address,
+            local_address,
+        } = connect;
 
-    async fn accept(self) -> io::Result<ConnectedSocket> {
-        let (inner, is_really_connected, buf_size) = match self {
-            Self::TcpListener(listener) => {
-                let (stream, _) = listener.accept().await?;
-                (InnerConnectedSocket::TcpStream(stream), true, 1024)
-            }
-            Self::UdpSocket(socket) => (InnerConnectedSocket::UdpSocket(socket), false, 1500),
-            Self::UnixListener(listener) => {
-                let (stream, _) = listener.accept().await?;
-                (InnerConnectedSocket::UnixStream(stream), true, 1024)
-            }
+        let prepared_socket = protocol.prepare_socket(remote_address).await?;
+        let layer_address = prepared_socket.local_address()?;
+
+        let id = InterceptorId {
+            connection_id,
+            protocol,
         };
 
-        Ok(ConnectedSocket {
-            inner,
-            is_really_connected,
-            buffer: vec![0; buf_size],
-        })
+        let interceptor = self.background_tasks.register(
+            Interceptor::new(prepared_socket),
+            id,
+            Self::CHANNEL_SIZE,
+        );
+        self.txs.insert(id, interceptor);
+
+        message_bus
+            .send(ProxyMessage::ToLayer(LocalMessage {
+                message_id,
+                inner: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
+                    layer_address,
+                    in_cluster_address: local_address,
+                })),
+            }))
+            .await;
+
+        Ok(())
+    }
+
+    async fn handle_connect_request(
+        &mut self,
+        message_id: MessageId,
+        request: OutgoingConnectRequest,
+        message_bus: &mut MessageBus<Self>,
+    ) {
+        self.queue(request.protocol).insert(message_id);
+
+        let msg = request.protocol.wrap_agent_connect(request.remote_address);
+        message_bus.send(ProxyMessage::ToAgent(msg)).await;
     }
 }
 
-enum InnerConnectedSocket {
-    UdpSocket(UdpSocket),
-    TcpStream(TcpStream),
-    UnixStream(UnixStream),
+pub enum OutgoingProxyMessage {
+    AgentStream(DaemonTcpOutgoing),
+    AgentDatagrams(DaemonUdpOutgoing),
+    LayerConnect(OutgoingConnectRequest, MessageId),
 }
 
-struct ConnectedSocket {
-    inner: InnerConnectedSocket,
-    is_really_connected: bool,
-    buffer: Vec<u8>,
-}
+impl BackgroundTask for OutgoingProxy {
+    type Error = OutgoingProxyError;
+    type MessageIn = OutgoingProxyMessage;
+    type MessageOut = ProxyMessage;
 
-impl ConnectedSocket {
-    async fn send(&mut self, bytes: &[u8]) -> io::Result<()> {
-        match &mut self.inner {
-            InnerConnectedSocket::UdpSocket(socket) => {
-                let bytes_sent = socket.send(bytes).await?;
+    async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+        loop {
+            tokio::select! {
+                msg = message_bus.recv() => match msg {
+                    None => break Ok(()),
+                    Some(OutgoingProxyMessage::AgentStream(req)) => match req {
+                        DaemonTcpOutgoing::Close(close) => {
+                            let id = InterceptorId { connection_id: close, protocol: NetProtocol::Stream};
+                            self.txs.remove(&id);
+                        },
+                        DaemonTcpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Stream).await?,
+                        DaemonTcpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Stream, message_bus).await?,
+                    }
+                    Some(OutgoingProxyMessage::AgentDatagrams(req)) => match req {
+                        DaemonUdpOutgoing::Close(close) => {
+                            let id = InterceptorId { connection_id: close, protocol: NetProtocol::Datagrams};
+                            self.txs.remove(&id);
+                        }
+                        DaemonUdpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Datagrams).await?,
+                        DaemonUdpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Datagrams, message_bus).await?,
+                    }
+                    Some(OutgoingProxyMessage::LayerConnect(req, id)) => self.handle_connect_request(id, req, message_bus).await,
+                },
 
-                if bytes_sent != bytes.len() {
-                    Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "failed to send all bytes",
-                    ))?;
-                }
+                task_update = self.background_tasks.next(), if !self.background_tasks.is_empty() => match task_update {
+                    (id, TaskUpdate::Message(bytes)) => {
+                        let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
+                        message_bus.send(ProxyMessage::ToAgent(msg)).await;
+                    }
+                    (id, TaskUpdate::Finished(res)) => {
+                        tracing::trace!("{id} finished: {res:?}");
 
-                Ok(())
-            }
-            InnerConnectedSocket::TcpStream(stream) => {
-                stream.write_all(bytes).await.map_err(Into::into)
-            }
-            InnerConnectedSocket::UnixStream(stream) => {
-                stream.write_all(bytes).await.map_err(Into::into)
-            }
-        }
-    }
-
-    async fn receive(&mut self) -> io::Result<Vec<u8>> {
-        match &mut self.inner {
-            InnerConnectedSocket::UdpSocket(socket) => {
-                let (received, peer) = socket.recv_from(&mut self.buffer).await?;
-
-                if !self.is_really_connected {
-                    socket.connect(peer).await?;
-                }
-
-                let bytes = self.buffer.get(..received).unwrap().to_vec();
-
-                Ok(bytes)
-            }
-            InnerConnectedSocket::TcpStream(stream) => {
-                let received = stream.read(&mut self.buffer).await?;
-                Ok(self.buffer.get(..received).unwrap().to_vec())
-            }
-            InnerConnectedSocket::UnixStream(stream) => {
-                let received = stream.read(&mut self.buffer).await?;
-                Ok(self.buffer.get(..received).unwrap().to_vec())
+                        if self.txs.remove(&id).is_some() {
+                            let msg = id.protocol.wrap_agent_close(id.connection_id);
+                            let _ = message_bus.send(ProxyMessage::ToAgent(msg)).await;
+                            self.txs.remove(&id);
+                        }
+                    }
+                },
             }
         }
     }

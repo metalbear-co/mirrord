@@ -1,147 +1,239 @@
-use std::time::Duration;
+use std::{fmt, time::Duration};
 
 use mirrord_protocol::{ClientMessage, DaemonMessage, CLIENT_READY_FOR_LOGS};
-use tokio::{net::TcpStream, sync::mpsc::{Receiver, self}};
+use tokio::net::TcpStream;
 
 use crate::{
-    agent_conn::{AgentCommunicationError, AgentConnection},
+    agent_conn::AgentConnection,
+    background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
     error::{IntProxyError, Result},
     layer_conn::LayerConnection,
-    ping_pong::PingPong,
+    ping_pong::{AgentMessageNotification, PingPong},
     protocol::{LayerToProxyMessage, LocalMessage, ProxyToLayerMessage, NOT_A_RESPONSE},
-    proxies::{outgoing::OutgoingProxy, simple::SimpleProxy},
+    proxies::{
+        outgoing::{OutgoingProxy, OutgoingProxyMessage},
+        simple::{SimpleProxy, SimpleProxyMessage},
+    },
     IntProxy, ProxyMessage,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MainTaskId {
+    SimpleProxy,
+    OutgoingProxy,
+    PingPong,
+    AgentConnection,
+    LayerConnection,
+}
+
+impl fmt::Display for MainTaskId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let as_str = match self {
+            Self::SimpleProxy => "SIMPLE_PROXY",
+            Self::OutgoingProxy => "OUTGOING_PROXY",
+            Self::PingPong => "PING_PONG",
+            Self::AgentConnection => "AGENT_CONNECTION",
+            Self::LayerConnection => "LAYER_CONNECTION",
+        };
+
+        f.write_str(as_str)
+    }
+}
+
+struct Handlers {
+    agent: TaskSender<AgentConnection>,
+    layer: TaskSender<LayerConnection>,
+    simple: TaskSender<SimpleProxy>,
+    outgoing: TaskSender<OutgoingProxy>,
+    ping_pong: TaskSender<PingPong>,
+}
+
 pub struct ProxySession {
-    main_rx: Receiver<ProxyMessage>,
-
-    agent_conn: AgentConnection,
-    layer_conn: LayerConnection,
-
-    simple_proxy: SimpleProxy,
-    outgoing_proxy: OutgoingProxy,
-    ping_pong: PingPong,
+    handlers: Handlers,
+    background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
 }
 
 impl ProxySession {
     const PING_INTERVAL: Duration = Duration::from_secs(30);
     const CHANNEL_SIZE: usize = 512;
 
-    pub async fn new(intproxy: &IntProxy, conn: TcpStream) -> Result<Self> {
-        let (main_tx, main_rx) = mpsc::channel(Self::CHANNEL_SIZE);
-
-        let mut agent_conn =
+    pub async fn new(intproxy: &IntProxy, stream: TcpStream) -> Result<Self> {
+        let agent_conn =
             AgentConnection::new(&intproxy.config, intproxy.agent_connect_info.as_ref()).await?;
-        agent_conn.ping_pong().await?;
 
-        let layer_conn = LayerConnection::new(conn, Self::CHANNEL_SIZE);
-
-        let simple_proxy = SimpleProxy::new(main_tx.clone());
-        let outgoing_proxy = OutgoingProxy::new(main_tx.clone());
-        let ping_pong = PingPong::new(Self::PING_INTERVAL, main_tx.clone());
+        let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
+            Default::default();
+        let agent =
+            background_tasks.register(agent_conn, MainTaskId::AgentConnection, Self::CHANNEL_SIZE);
+        let layer = background_tasks.register(
+            LayerConnection::new(stream),
+            MainTaskId::LayerConnection,
+            Self::CHANNEL_SIZE,
+        );
+        let ping_pong = background_tasks.register(
+            PingPong::new(Self::PING_INTERVAL),
+            MainTaskId::PingPong,
+            Self::CHANNEL_SIZE,
+        );
+        let simple = background_tasks.register(
+            SimpleProxy::default(),
+            MainTaskId::SimpleProxy,
+            Self::CHANNEL_SIZE,
+        );
+        let outgoing = background_tasks.register(
+            OutgoingProxy::default(),
+            MainTaskId::OutgoingProxy,
+            Self::CHANNEL_SIZE,
+        );
 
         Ok(Self {
-            main_rx,
-
-            agent_conn,
-            layer_conn,
-
-            simple_proxy,
-            outgoing_proxy,
-            ping_pong,
+            background_tasks,
+            handlers: Handlers {
+                agent,
+                layer,
+                simple,
+                outgoing,
+                ping_pong,
+            },
         })
     }
 
     pub async fn serve_connection(mut self) -> Result<()> {
-        self.agent_conn
-            .sender()
+        self.handlers
+            .agent
             .send(ClientMessage::SwitchProtocolVersion(
                 mirrord_protocol::VERSION.clone(),
             ))
-            .await?;
+            .await;
 
-        loop {
-            tokio::select! {
-                biased;
-
-                msg = self.layer_conn.receive() => match msg {
-                    Some(msg) => self.handle_layer_message(msg).await,
-                    None => {
-                        tracing::trace!("layer connection closed");
-                        break Ok(());
-                    }
-                },
-
-                msg = self.agent_conn.receive() => self.handle_agent_message(msg?).await?,
-
-                Some(msg) = self.main_rx.recv() => match msg {
-                    ProxyMessage::ToLayer(msg) => self.layer_conn.sender().send(msg).await?,
-                    ProxyMessage::ToAgent(msg) => self.agent_conn.sender().send(msg).await?,
-                },
-            }
-        }
-    }
-
-    async fn handle_agent_message(&mut self, message: DaemonMessage) -> Result<()> {
-        self.ping_pong.handle_agent_message(&message).await;
-
-        let res = match message {
-            DaemonMessage::Pong => Ok(()),
-            DaemonMessage::Close(reason) => {
-                return Err(IntProxyError::AgentClosedConnection(reason))
-            }
-            DaemonMessage::TcpOutgoing(msg) => self.outgoing_proxy.handle_agent_stream_msg(msg).await,
-            DaemonMessage::UdpOutgoing(msg) => self.outgoing_proxy.handle_agent_datagrams_msg(msg).await,
-            DaemonMessage::File(msg) => self.simple_proxy.handle_file_res(msg).await,
-            DaemonMessage::GetAddrInfoResponse(msg) => self.simple_proxy.handle_addr_info_res(msg).await,
-            DaemonMessage::Tcp(..) => todo!(),
-            DaemonMessage::TcpSteal(..) => todo!(),
-            DaemonMessage::SwitchProtocolVersionResponse(protocol_version) => {
-                if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
-                    self.agent_conn
-                        .sender()
-                        .send(ClientMessage::ReadyForLogs)
-                        .await?;
+        let res = loop {
+            match self.background_tasks.next().await {
+                (MainTaskId::LayerConnection, TaskUpdate::Finished(Ok(()))) => {
+                    tracing::info!("layer closed connection, exiting");
+                    break Ok(());
                 }
-
-                Ok(())
-            }
-            DaemonMessage::LogMessage(log) => {
-                self.layer_conn
-                    .sender()
-                    .send(LocalMessage {
-                        message_id: NOT_A_RESPONSE,
-                        inner: ProxyToLayerMessage::AgentLog(log),
-                    })
-                    .await?;
-                Ok(())
-            }
-            other => {
-                return Err(IntProxyError::AgentCommunicationError(
-                    AgentCommunicationError::UnexpectedMessage(other),
-                ))
+                (task_id, TaskUpdate::Finished(Ok(()))) => {
+                    tracing::error!("task {task_id} exited unexpectedly");
+                    break Err(IntProxyError::TaskExit(task_id));
+                }
+                (task_id, TaskUpdate::Finished(Err(TaskError::Panic))) => {
+                    tracing::error!("task {task_id} panicked");
+                    break Err(IntProxyError::TaskPanic(task_id));
+                }
+                (task_id, TaskUpdate::Finished(Err(TaskError::Error(e)))) => {
+                    tracing::error!("task {task_id} failed: {e}");
+                    break Err(e);
+                }
+                (_, TaskUpdate::Message(msg)) => {
+                    if let Err(e) = self.handle(msg).await {
+                        break Err(e);
+                    }
+                }
             }
         };
 
-        if res.is_err() {
-            tracing::error!("one of background tasks is down");
+        let task_results = self.background_tasks.results().await;
+        for (id, res) in task_results {
+            tracing::trace!("{id} result: {res:?}");
+        }
+
+        res
+    }
+
+    async fn handle(&mut self, msg: ProxyMessage) -> Result<()> {
+        match msg {
+            ProxyMessage::FromAgent(msg) => self.handle_agent_message(msg).await?,
+            ProxyMessage::FromLayer(msg) => self.handle_layer_message(msg).await?,
+            ProxyMessage::ToAgent(msg) => self.handlers.agent.send(msg).await,
+            ProxyMessage::ToLayer(msg) => self.handlers.layer.send(msg).await,
         }
 
         Ok(())
     }
 
-    async fn handle_layer_message(&mut self, message: LocalMessage<LayerToProxyMessage>) {
+    async fn handle_agent_message(&mut self, message: DaemonMessage) -> Result<()> {
+        self.handlers
+            .ping_pong
+            .send(AgentMessageNotification {
+                pong: matches!(message, DaemonMessage::Pong),
+            })
+            .await;
+
+        match message {
+            DaemonMessage::Pong => {}
+            DaemonMessage::Close(reason) => return Err(IntProxyError::AgentFailed(reason)),
+            DaemonMessage::TcpOutgoing(msg) => {
+                self.handlers
+                    .outgoing
+                    .send(OutgoingProxyMessage::AgentStream(msg))
+                    .await
+            }
+            DaemonMessage::UdpOutgoing(msg) => {
+                self.handlers
+                    .outgoing
+                    .send(OutgoingProxyMessage::AgentDatagrams(msg))
+                    .await
+            }
+            DaemonMessage::File(msg) => {
+                self.handlers
+                    .simple
+                    .send(SimpleProxyMessage::FileRes(msg))
+                    .await
+            }
+            DaemonMessage::GetAddrInfoResponse(msg) => {
+                self.handlers
+                    .simple
+                    .send(SimpleProxyMessage::AddrInfoRes(msg))
+                    .await
+            }
+            DaemonMessage::Tcp(..) => todo!(),
+            DaemonMessage::TcpSteal(..) => todo!(),
+            DaemonMessage::SwitchProtocolVersionResponse(protocol_version) => {
+                if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
+                    self.handlers.agent.send(ClientMessage::ReadyForLogs).await;
+                }
+            }
+            DaemonMessage::LogMessage(log) => {
+                self.handlers
+                    .layer
+                    .send(LocalMessage {
+                        message_id: NOT_A_RESPONSE,
+                        inner: ProxyToLayerMessage::AgentLog(log),
+                    })
+                    .await;
+            }
+            other => {
+                return Err(IntProxyError::UnexpectedAgentMessage(other));
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_layer_message(&self, message: LocalMessage<LayerToProxyMessage>) -> Result<()> {
         match message.inner {
             LayerToProxyMessage::NewSession(..) => todo!(),
             LayerToProxyMessage::File(req) => {
-                self.simple_proxy.handle_file_req(req, message.message_id)
+                self.handlers
+                    .simple
+                    .send(SimpleProxyMessage::FileReq(message.message_id, req))
+                    .await;
             }
-            LayerToProxyMessage::GetAddrInfo(req) => self
-                .simple_proxy
-                .handle_addr_info_req(req, message.message_id),
-            LayerToProxyMessage::OutgoingConnect(req) => {}
+            LayerToProxyMessage::GetAddrInfo(req) => {
+                self.handlers
+                    .simple
+                    .send(SimpleProxyMessage::AddrInfoReq(message.message_id, req))
+                    .await
+            }
+            LayerToProxyMessage::OutgoingConnect(req) => {
+                self.handlers
+                    .outgoing
+                    .send(OutgoingProxyMessage::LayerConnect(req, message.message_id))
+                    .await
+            }
             LayerToProxyMessage::Incoming(..) => todo!(),
         }
+
+        Ok(())
     }
 }
