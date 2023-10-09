@@ -8,7 +8,7 @@
 //! on this behavior and stores [`MessageId`]s of layer's requests in multiple queues. Upon
 //! receiving a response from the agent, correct [`MessageId`] is taken from the right queue.
 
-use std::collections::VecDeque;
+use std::{collections::VecDeque, fmt};
 
 use thiserror::Error;
 
@@ -24,18 +24,30 @@ pub struct RequestQueueEmpty;
 /// A queue used to match agent responses with layer requests.
 /// A single queue can be used for multiple types of requests only if the agent preserves order
 /// between them.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct RequestQueue {
     inner: VecDeque<MessageId>,
 }
 
+impl fmt::Debug for RequestQueue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RequestQueue")
+            .field("queue_len", &self.inner.len())
+            .field("front", &self.inner.front().copied())
+            .field("back", &self.inner.back().copied())
+            .finish()
+    }
+}
+
 impl RequestQueue {
     /// Save the request at the end of this queue.
+    #[tracing::instrument(level = "trace")]
     pub fn insert(&mut self, id: MessageId) {
         self.inner.push_back(id);
     }
 
     /// Retrieve and remove a requests from the front of this queue.
+    #[tracing::instrument(level = "trace")]
     pub fn get(&mut self) -> Result<MessageId, RequestQueueEmpty> {
         self.inner.pop_front().ok_or(RequestQueueEmpty)
     }
