@@ -29,6 +29,11 @@ impl LayerConnection {
             layer_codec_tx,
         }
     }
+
+    async fn send_and_flush(&mut self, msg: &LocalMessage<ProxyToLayerMessage>) -> Result<(), CodecError> {
+        self.layer_codec_tx.send(msg).await?;
+        self.layer_codec_tx.flush().await
+    }
 }
 
 impl BackgroundTask for LayerConnection {
@@ -53,7 +58,7 @@ impl BackgroundTask for LayerConnection {
 
                 msg = message_bus.recv() => match msg {
                     Some(msg) => {
-                        if let Err(e) = self.layer_codec_tx.send(&msg).await {
+                        if let Err(e) = self.send_and_flush(&msg).await {
                             tracing::error!("layer connection failed with {e:?} when sending {msg:?}");
                             break Err(e);
                         }

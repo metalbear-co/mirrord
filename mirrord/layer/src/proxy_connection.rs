@@ -102,7 +102,9 @@ impl ProxyConnection {
             inner: message,
         };
 
-        self.sender.lock()?.send(&message)?;
+        let mut guard = self.sender.lock()?;
+        guard.send(&message)?;
+        guard.flush()?;
 
         Ok(message_id)
     }
