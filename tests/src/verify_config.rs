@@ -1,6 +1,11 @@
 /// # Attention
 ///
 /// If any of these tests fails, then you're attempting a breaking change!
+///
+/// Do **NOT** modify these tests if you change the cli for `verify-config`, unless we're ok with
+/// a breaking change!
+///
+/// You should probably only add new tests here.
 #[cfg(test)]
 mod verify_config {
     use std::time::Duration;
@@ -9,15 +14,15 @@ mod verify_config {
 
     use crate::utils::{config_dir, run_verify_config};
 
-    /// Tests `verify-config` with all args, which should be:
+    /// Tests `verify-config` with `path` and `--ide` args, which should be:
     ///
     /// ```sh
     /// mirrord verify-config --ide /path/to/config.json
     /// ```
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(30))]
-    pub async fn full_verify_config(config_dir: &std::path::PathBuf) {
+    pub async fn path_ide_verify_config(config_dir: &std::path::PathBuf) {
         let mut config_path = config_dir.clone();
         config_path.push("default_ide.json");
 
@@ -36,7 +41,7 @@ mod verify_config {
     /// mirrord verify-config /path/to/config.json
     /// ```
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(30))]
     pub async fn no_ide_verify_config(config_dir: &std::path::PathBuf) {
         let mut config_path = config_dir.clone();
@@ -58,7 +63,7 @@ mod verify_config {
     /// mirrord verify-config --ide
     /// ```
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(30))]
     pub async fn no_path_verify_config(config_dir: &std::path::PathBuf) {
         let mut config_path = config_dir.clone();
@@ -77,7 +82,7 @@ mod verify_config {
     /// mirrord verify-config
     /// ```
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(30))]
     pub async fn no_path_no_ide_verify_config(config_dir: &std::path::PathBuf) {
         let mut config_path = config_dir.clone();
