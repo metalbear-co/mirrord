@@ -7,7 +7,7 @@ use tokio::net::{
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    codec::{self, AsyncReceiver, AsyncSender, CodecError},
+    codec::{self, AsyncDecoder, AsyncEncoder, CodecError},
     protocol::{LayerToProxyMessage, LocalMessage, ProxyToLayerMessage},
     ProxyMessage,
 };
@@ -15,8 +15,8 @@ use crate::{
 /// Handles logic of the `layer <-> proxy` connection.
 /// Run as a [`BackgroundTask`] by each [`ProxySession`](crate::session::ProxySession).
 pub struct LayerConnection {
-    layer_codec_tx: AsyncSender<LocalMessage<ProxyToLayerMessage>, OwnedWriteHalf>,
-    layer_codec_rx: AsyncReceiver<LocalMessage<LayerToProxyMessage>, OwnedReadHalf>,
+    layer_codec_tx: AsyncEncoder<LocalMessage<ProxyToLayerMessage>, OwnedWriteHalf>,
+    layer_codec_rx: AsyncDecoder<LocalMessage<LayerToProxyMessage>, OwnedReadHalf>,
 }
 
 impl LayerConnection {

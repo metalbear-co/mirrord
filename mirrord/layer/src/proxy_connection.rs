@@ -10,7 +10,7 @@ use std::{
 };
 
 use mirrord_intproxy::{
-    codec::{self, CodecError, SyncReceiver, SyncSender},
+    codec::{self, CodecError, SyncDecoder, SyncEncoder},
     protocol::{
         IsLayerRequest, IsLayerRequestWithResponse, LayerToProxyMessage, LocalMessage, MessageId,
         NewSessionRequest, ProxyToLayerMessage, SessionId, NOT_A_RESPONSE,
@@ -45,7 +45,7 @@ pub type Result<T> = core::result::Result<T, ProxyError>;
 
 #[derive(Debug)]
 pub struct ProxyConnection {
-    sender: Mutex<SyncSender<LocalMessage<LayerToProxyMessage>, TcpStream>>,
+    sender: Mutex<SyncEncoder<LocalMessage<LayerToProxyMessage>, TcpStream>>,
     responses: Mutex<ResponseManager>,
     next_message_id: AtomicU64,
     session_id: SessionId,
@@ -131,12 +131,12 @@ impl ProxyConnection {
 
 #[derive(Debug)]
 struct ResponseManager {
-    receiver: SyncReceiver<LocalMessage<ProxyToLayerMessage>, TcpStream>,
+    receiver: SyncDecoder<LocalMessage<ProxyToLayerMessage>, TcpStream>,
     outstanding_responses: HashMap<u64, ProxyToLayerMessage>,
 }
 
 impl ResponseManager {
-    fn new(receiver: SyncReceiver<LocalMessage<ProxyToLayerMessage>, TcpStream>) -> Self {
+    fn new(receiver: SyncDecoder<LocalMessage<ProxyToLayerMessage>, TcpStream>) -> Self {
         Self {
             receiver,
             outstanding_responses: Default::default(),

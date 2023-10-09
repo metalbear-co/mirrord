@@ -12,7 +12,7 @@ use std::{
 use libc::{c_int, c_void, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::IncomingMode;
 use mirrord_intproxy::{
-    codec::SyncReceiver,
+    codec::SyncDecoder,
     protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse, PortSubscribe},
 };
 use mirrord_protocol::{
@@ -640,7 +640,7 @@ pub(super) fn getsockname(
 /// `sockfd` must be a descriptor of a TCP socket
 fn init_incoming_connection(sockfd: RawFd) -> Detour<(TcpStream, SocketAddress)> {
     let stream = unsafe { TcpStream::from_raw_fd(sockfd) };
-    let mut receiver: SyncReceiver<SocketAddress, TcpStream> = SyncReceiver::new(stream);
+    let mut receiver: SyncDecoder<SocketAddress, TcpStream> = SyncDecoder::new(stream);
     let remote_address = receiver
         .receive()
         .map_err(ProxyError::CodecError)?

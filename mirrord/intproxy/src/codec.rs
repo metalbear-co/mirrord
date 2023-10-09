@@ -1,3 +1,11 @@
+//! Custom codec used in `layer <-> proxy` communication.
+//! Supports both synchronous (required by the layer) and asynchronous (convenient for the proxy)
+//! IO.
+//!
+//! An encoded message consists of two parts:
+//! * prefix: 4 bytes containing payload length in bytes (big-endian [`u32`])
+//! * payload: a value of a known type, encoded with [`bincode`]
+
 use std::{
     io::{self, ErrorKind, Read, Write},
     num::TryFromIntError,
@@ -13,31 +21,44 @@ use tokio::{
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
 };
 
+/// Errors that can occur when using this codec.
 #[derive(Error, Debug)]
 pub enum CodecError {
+    /// Encoding a message failed.
     #[error("encoding failed: {0}")]
     EncodeError(#[from] EncodeError),
+    /// Decoding a message failed.
     #[error("decoding failed: {0}")]
     DecodeError(#[from] DecodeError),
+    /// Encoded message was too long for this codec.
     #[error("message too long: {0}")]
     MessageTooLongError(#[from] TryFromIntError),
+    /// IO failed.
     #[error("io failed: {0}")]
     IoError(#[from] io::Error),
 }
 
+/// Alias for [`Result`](core::result::Result) type used by this codec.
 pub type Result<T> = core::result::Result<T, CodecError>;
 
+/// Initial buffer size used by wrappers in this module.
+/// Buffers are used to encode and decode messages in memory.
 const BUFFER_SIZE: usize = 1024;
+
+/// Length of the message prefix used by this codec.
+/// Determines the maximum length of the message.
 const PREFIX_BYTES: usize = u32::BITS as usize / 8;
 
+/// Handles sending messages of type `T` through the underlying [Write] of type `W`.
 #[derive(Debug)]
-pub struct SyncSender<T, W> {
+pub struct SyncEncoder<T, W> {
     buffer: Vec<u8>,
     writer: W,
     _phantom: std::marker::PhantomData<fn() -> T>,
 }
 
-impl<T, W> SyncSender<T, W> {
+impl<T, W> SyncEncoder<T, W> {
+    /// Wraps the underlying IO handler.
     pub fn new(writer: W) -> Self {
         Self {
             buffer: Vec::with_capacity(BUFFER_SIZE),
@@ -46,16 +67,18 @@ impl<T, W> SyncSender<T, W> {
         }
     }
 
+    /// Unwraps the underlying IO handler.
     pub fn into_inner(self) -> W {
         self.writer
     }
 }
 
-impl<T, W> SyncSender<T, W>
+impl<T, W> SyncEncoder<T, W>
 where
     T: Encode,
     W: Write,
 {
+    /// Encodes the given value into the inner IO handler.
     pub fn send(&mut self, value: &T) -> Result<()> {
         self.buffer.resize(PREFIX_BYTES, 0);
         let bytes: u32 =
@@ -67,16 +90,23 @@ where
 
         Ok(())
     }
+
+    /// Flushes the inner IO handler.
+    pub fn flush(&mut self) -> Result<()> {
+        self.writer.flush().map_err(Into::into)
+    }
 }
 
+/// Handles receiving messages of type `T` from the underlying [Write] of type `W`.
 #[derive(Debug)]
-pub struct SyncReceiver<T, R> {
+pub struct SyncDecoder<T, R> {
     buffer: Vec<u8>,
     reader: R,
     _phantom: std::marker::PhantomData<fn() -> T>,
 }
 
-impl<T, R> SyncReceiver<T, R> {
+impl<T, R> SyncDecoder<T, R> {
+    /// Wraps the unerlying IO handler.
     pub fn new(reader: R) -> Self {
         Self {
             buffer: Vec::with_capacity(BUFFER_SIZE),
@@ -85,16 +115,19 @@ impl<T, R> SyncReceiver<T, R> {
         }
     }
 
+    /// Unwraps the underlying IO handler.
     pub fn into_inner(self) -> R {
         self.reader
     }
 }
 
-impl<T, R> SyncReceiver<T, R>
+impl<T, R> SyncDecoder<T, R>
 where
     T: Decode,
     R: Read,
 {
+    /// Decodes the next message from the underlying IO handler.
+    /// Does not read any excessive bytes.
     pub fn receive(&mut self) -> Result<Option<T>> {
         let mut len_buffer = [0; 4];
         match self.reader.read_exact(&mut len_buffer) {
@@ -113,28 +146,32 @@ where
     }
 }
 
+/// Creates a new pair of [`SyncEncoder`] and [`SyncDecoder`], using the given synchronous
+/// [`TcpStream`](std::net::TcpStream).
 pub fn make_sync_framed<T1: Encode, T2: Decode>(
     stream: std::net::TcpStream,
 ) -> Result<(
-    SyncSender<T1, std::net::TcpStream>,
-    SyncReceiver<T2, std::net::TcpStream>,
+    SyncEncoder<T1, std::net::TcpStream>,
+    SyncDecoder<T2, std::net::TcpStream>,
 )> {
     let stream_cloned = stream.try_clone()?;
 
-    let sender = SyncSender::new(stream);
-    let receiver = SyncReceiver::new(stream_cloned);
+    let sender = SyncEncoder::new(stream);
+    let receiver = SyncDecoder::new(stream_cloned);
 
     Ok((sender, receiver))
 }
 
+/// Handles sending messages of type `T` through the underlying [AsyncWrite] of type `W`.
 #[derive(Debug)]
-pub struct AsyncSender<T, W> {
+pub struct AsyncEncoder<T, W> {
     buffer: Vec<u8>,
     writer: W,
     _phantom: std::marker::PhantomData<fn() -> T>,
 }
 
-impl<T, W> AsyncSender<T, W> {
+impl<T, W> AsyncEncoder<T, W> {
+    /// Wraps the underlying IO handler.
     pub fn new(writer: W) -> Self {
         Self {
             buffer: Vec::with_capacity(BUFFER_SIZE),
@@ -143,16 +180,18 @@ impl<T, W> AsyncSender<T, W> {
         }
     }
 
+    /// Unwraps the underlying IO handler.
     pub fn into_inner(self) -> W {
         self.writer
     }
 }
 
-impl<T, W> AsyncSender<T, W>
+impl<T, W> AsyncEncoder<T, W>
 where
     T: Encode,
     W: AsyncWrite + Unpin,
 {
+    /// Encodes the given value into the inner IO handler.
     pub async fn send(&mut self, value: &T) -> Result<()> {
         self.buffer.resize(PREFIX_BYTES, 0);
         let bytes: u32 =
@@ -164,16 +203,23 @@ where
 
         Ok(())
     }
+
+    /// Flushes the inner IO handler.
+    pub async fn flush(&mut self) -> Result<()> {
+        self.writer.flush().await.map_err(Into::into)
+    }
 }
 
+/// Handles receiving messages of type `T` from the underlying [AsyncRead] of type `W`.
 #[derive(Debug)]
-pub struct AsyncReceiver<T, R> {
+pub struct AsyncDecoder<T, R> {
     buffer: Vec<u8>,
     reader: R,
     _phantom: std::marker::PhantomData<fn() -> T>,
 }
 
-impl<T, R> AsyncReceiver<T, R> {
+impl<T, R> AsyncDecoder<T, R> {
+    /// Wraps the underlying IO handler.
     pub fn new(reader: R) -> Self {
         Self {
             buffer: Vec::with_capacity(BUFFER_SIZE),
@@ -182,16 +228,19 @@ impl<T, R> AsyncReceiver<T, R> {
         }
     }
 
+    /// Unwraps the underlying IO handler.
     pub fn into_inner(self) -> R {
         self.reader
     }
 }
 
-impl<T, R> AsyncReceiver<T, R>
+impl<T, R> AsyncDecoder<T, R>
 where
     T: Decode,
     R: AsyncRead + Unpin,
 {
+    /// Decodes the next message from the underlying IO handler.
+    /// Does not read any excessive bytes.
     pub async fn receive(&mut self) -> Result<Option<T>> {
         let mut len_buffer = [0; 4];
         match self.reader.read_exact(&mut len_buffer).await {
@@ -210,16 +259,18 @@ where
     }
 }
 
+/// Creates a new pair of [`AsyncEncoder`] and [`AsyncDecoder`], using the given asynchronous
+/// [`TcpStream`](tokio::net::TcpStream).
 pub fn make_async_framed<T1: Encode, T2: Decode>(
     stream: tokio::net::TcpStream,
 ) -> (
-    AsyncSender<T1, OwnedWriteHalf>,
-    AsyncReceiver<T2, OwnedReadHalf>,
+    AsyncEncoder<T1, OwnedWriteHalf>,
+    AsyncDecoder<T2, OwnedReadHalf>,
 ) {
     let (reader, writer) = stream.into_split();
 
-    let sender = AsyncSender::new(writer);
-    let receiver = AsyncReceiver::new(reader);
+    let sender = AsyncEncoder::new(writer);
+    let receiver = AsyncDecoder::new(reader);
 
     (sender, receiver)
 }
