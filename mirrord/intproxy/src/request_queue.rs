@@ -5,8 +5,8 @@
 //! However, the agent does not use any mechanism like this.
 //! Instead, its components (e.g. file manager) handle requests of the same kind (e.g.
 //! [`FileRequest`](mirrord_protocol::codec::FileRequest)s) sequentially. The internal proxy relies
-//! on this behavior and stores [`MessageId`]s of layer's requests in multiple queues. Upon receiving a response from the agent,
-//! correct [`MessageId`] is taken from the right queue.
+//! on this behavior and stores [`MessageId`]s of layer's requests in multiple queues. Upon
+//! receiving a response from the agent, correct [`MessageId`] is taken from the right queue.
 
 use std::collections::VecDeque;
 
@@ -22,7 +22,8 @@ use crate::protocol::MessageId;
 pub struct RequestQueueEmpty;
 
 /// A queue used to match agent responses with layer requests.
-/// A single queue can be used for multiple types of requests only if the agent preserves order between them.
+/// A single queue can be used for multiple types of requests only if the agent preserves order
+/// between them.
 #[derive(Debug, Default)]
 pub struct RequestQueue {
     inner: VecDeque<MessageId>,

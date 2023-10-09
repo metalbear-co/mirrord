@@ -1,3 +1,7 @@
+//! Protocol used in communication between the layer and the internal proxy.
+//! This protocol does not have to be backwards compatible and can be changed freely, as the
+//! internal proxy and the layer are shipped together in a single binary.
+
 use std::{fmt, net::SocketAddr};
 
 use bincode::{Decode, Encode};
@@ -20,6 +24,7 @@ use crate::{bind_nested, impl_request};
 mod macros;
 
 /// An identifier for a message sent from the layer to the internal proxy.
+/// The layer uses this to match proxy responses with awaiting requests.
 pub type MessageId = u64;
 
 /// Special [`MessageId`] used by the internal proxy to send messages that are not responses.
@@ -29,7 +34,7 @@ pub const NOT_A_RESPONSE: MessageId = MessageId::MAX;
 /// A wrapper for messages sent through the `layer <-> proxy` connection.
 #[derive(Encode, Decode, Debug)]
 pub struct LocalMessage<T> {
-    /// Message identifier. The layer matches responses to requests based on this.
+    /// Message identifier.
     pub message_id: MessageId,
     /// The actual message.
     pub inner: T,
@@ -48,12 +53,13 @@ pub enum LayerToProxyMessage {
     GetAddrInfo(GetAddrInfoRequest),
     /// A request to initiate a new outgoing connection.
     OutgoingConnect(OutgoingConnectRequest),
-    /// Requests related to incoming.
+    /// Requests related to incoming connections.
     Incoming(IncomingRequest),
 }
 
 /// Unique `layer <-> proxy` session identifier.
 /// Each connection between the layer and the internal proxy belongs to a separate session.
+/// New connection is established when the layer initializes or forks.
 pub type SessionId = u64;
 
 /// A layer's request to start a new session with the internal proxy.
@@ -64,6 +70,8 @@ pub type SessionId = u64;
 /// # Note
 ///
 /// Sharing state between [`exec`](https://man7.org/linux/man-pages/man3/exec.3.html) calls is currently not supported.
+/// Therefore, when the layer initializes, it uses [`NewSessionRequest::New`] and does not inherit
+/// any state.
 #[derive(Encode, Decode, Debug)]
 pub enum NewSessionRequest {
     /// Layer initialized from its constructor and has a fresh state.
@@ -109,12 +117,12 @@ pub struct OutgoingConnectRequest {
     pub protocol: NetProtocol,
 }
 
-/// Requests related to `incoming` features.
+/// Requests related to incoming connections.
 #[derive(Encode, Decode, Debug)]
 pub enum IncomingRequest {
-    /// A request made by layer after it starts listening for mirrored connections.
+    /// A request made by layer when it starts listening for mirrored connections.
     PortSubscribe(PortSubscribe),
-    /// A request made by the layer before it closes the socket listening for mirrored connections.
+    /// A request made by the layer when it closes the socket listening for mirrored connections.
     PortUnsubscribe(PortUnsubscribe),
 }
 
@@ -164,7 +172,7 @@ pub enum ProxyToLayerMessage {
 pub struct OutgoingConnectResponse {
     /// The address the layer should connect to instead of the address requested by the user.
     pub layer_address: SocketAddress,
-    /// Local address of the pod.
+    /// In-cluster address of the pod.
     pub in_cluster_address: SocketAddress,
 }
 
@@ -172,9 +180,6 @@ pub struct OutgoingConnectResponse {
 pub trait IsLayerRequest: Sized {
     /// Wraps this request so that it can be sent through the connection.
     fn wrap(self) -> LayerToProxyMessage;
-
-    /// Checks whether the message contains a request of this type.
-    fn check(message: &LayerToProxyMessage) -> bool;
 
     /// Tries to unwrap a request of this type from the message.
     /// On error, returns the message as it was.
@@ -196,9 +201,6 @@ pub trait IsLayerRequestWithResponse: IsLayerRequest {
 
     /// Wraps the response so that it can be sent through the connection.
     fn wrap_response(response: Self::Response) -> ProxyToLayerMessage;
-
-    /// Checks whether the message contains a response of valid type.
-    fn check_response(response: &ProxyToLayerMessage) -> bool;
 
     /// Tries to unwrap a response of valid type from the message.
     /// On error, returns the message as it was.

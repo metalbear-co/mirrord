@@ -38,7 +38,8 @@ macro_rules! bind_nested {
 /// for [`OpenFileRequest`](mirrord_protocol::file::OpenFileRequest) generates both
 /// [`IsLayerRequest`](super::IsLayerRequest) and
 /// [`IsLayerRequestWithResponse`](super::IsLayerRequestWithResponse) traits. Invocation for
-/// [`CloseFileRequest`] generates only [`IsLayerRequest`](super::IsLayerRequest) trait.
+/// [`CloseFileRequest`](mirrord_protocol::file::CloseFileRequest) generates only
+/// [`IsLayerRequest`](super::IsLayerRequest) trait.
 #[macro_export]
 macro_rules! impl_request {
     (
@@ -59,13 +60,6 @@ macro_rules! impl_request {
                 bind_nested!(response, $($res_variants),+)
             }
 
-            fn check_response(response: &ProxyToLayerMessage) -> bool {
-                match response {
-                    bind_nested!(_inner, $($res_variants),+) => true,
-                    _ => false,
-                }
-            }
-
             fn try_unwrap_response(response: ProxyToLayerMessage) -> Result<Self::Response, ProxyToLayerMessage> {
                 match response {
                     bind_nested!(inner, $($res_variants),+) => Ok(inner),
@@ -82,13 +76,6 @@ macro_rules! impl_request {
         impl IsLayerRequest for $req_type {
             fn wrap(self) -> LayerToProxyMessage {
                 bind_nested!(self, $($req_variants),+)
-            }
-
-            fn check(message: &LayerToProxyMessage) -> bool {
-                match message {
-                    bind_nested!(_inner, $($req_variants),+) => true,
-                    _ => false,
-                }
             }
 
             fn try_unwrap(message: LayerToProxyMessage) -> Result<Self, LayerToProxyMessage> {
