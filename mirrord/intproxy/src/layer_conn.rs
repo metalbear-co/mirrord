@@ -30,7 +30,10 @@ impl LayerConnection {
         }
     }
 
-    async fn send_and_flush(&mut self, msg: &LocalMessage<ProxyToLayerMessage>) -> Result<(), CodecError> {
+    async fn send_and_flush(
+        &mut self,
+        msg: &LocalMessage<ProxyToLayerMessage>,
+    ) -> Result<(), CodecError> {
         self.layer_codec_tx.send(msg).await?;
         self.layer_codec_tx.flush().await
     }

@@ -142,6 +142,7 @@ impl ProxySession {
             }
         };
 
+        std::mem::drop(self.handlers);
         let task_results = self.background_tasks.results().await;
         for (id, res) in task_results {
             tracing::trace!("{id} result: {res:?}");
