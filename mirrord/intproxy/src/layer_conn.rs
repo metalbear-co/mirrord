@@ -1,3 +1,5 @@
+//! Implementation of `layer <-> proxy` connection through a [`TcpStream`].
+
 use tokio::net::{
     tcp::{OwnedReadHalf, OwnedWriteHalf},
     TcpStream,
@@ -10,12 +12,15 @@ use crate::{
     ProxyMessage,
 };
 
+/// Handles logic of the `layer <-> proxy` connection.
+/// Run as a [`BackgroundTask`] by each [`ProxySession`](crate::session::ProxySession).
 pub struct LayerConnection {
     layer_codec_tx: AsyncSender<LocalMessage<ProxyToLayerMessage>, OwnedWriteHalf>,
     layer_codec_rx: AsyncReceiver<LocalMessage<LayerToProxyMessage>, OwnedReadHalf>,
 }
 
 impl LayerConnection {
+    /// Wraps a raw [`TcpStream`] to be used as a `layer <-> proxy` connection.
     pub fn new(stream: TcpStream) -> Self {
         let (layer_codec_tx, layer_codec_rx) = codec::make_async_framed(stream);
 
@@ -34,19 +39,29 @@ impl BackgroundTask for LayerConnection {
     async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), CodecError> {
         loop {
             tokio::select! {
-                res = self.layer_codec_rx.receive() => {
-                    let msg = res?;
-                    match msg {
-                        Some(msg) => message_bus.send(ProxyMessage::FromLayer(msg)).await,
-                        None => break Ok(()),
+                res = self.layer_codec_rx.receive() => match res {
+                    Err(e) => {
+                        tracing::error!("layer connection failed with {e:?} when receiving");
+                        break Err(e);
+                    },
+                    Ok(None) => {
+                        tracing::trace!("no more messages from the layer, exiting");
+                        break Ok(());
                     }
+                    Ok(Some(msg)) => message_bus.send(ProxyMessage::FromLayer(msg)).await,
                 },
 
                 msg = message_bus.recv() => match msg {
                     Some(msg) => {
-                        self.layer_codec_tx.send(&msg).await?;
+                        if let Err(e) = self.layer_codec_tx.send(&msg).await {
+                            tracing::error!("layer connection failed with {e:?} when sending {msg:?}");
+                            break Err(e);
+                        }
                     },
-                    None => break Ok(()),
+                    None => {
+                        tracing::trace!("no more messages from the proxy, exiting");
+                        break Ok(());
+                    },
                 },
             }
         }
