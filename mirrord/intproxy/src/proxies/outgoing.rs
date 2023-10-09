@@ -1,12 +1,14 @@
-use std::{collections::HashMap, io};
+//! Handles the logic of the `outgoing` feature.
+
+use std::{collections::HashMap, fmt, io};
 
 use mirrord_protocol::{
     outgoing::{tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing, DaemonConnect, DaemonRead},
-    RemoteResult, ResponseError,
+    ConnectionId, RemoteResult, ResponseError,
 };
 use thiserror::Error;
 
-use self::interceptor::{Interceptor, InterceptorId};
+use self::interceptor::Interceptor;
 use crate::{
     background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
     protocol::{
@@ -20,16 +22,58 @@ use crate::{
 mod interceptor;
 mod protocols;
 
+/// Errors that can occur when handling the `outgoing` feature.
 #[derive(Error, Debug)]
 pub enum OutgoingProxyError {
+    /// The agent sent an error not bound to any [`ConnectionId`](mirrord_protocol::ConnectionId).
+    /// This is assumed to be a general agent error.
+    /// Originates only from the [`RemoteResult<DaemonRead>`] message.
     #[error("agent error: {0}")]
     ResponseError(#[from] ResponseError),
+    /// The agent sent a [`DaemonConnect`] response, but the [`RequestQueue`] for layer's connec
+    /// requests was empty. This should never happen.
     #[error("failed to match connect response: {0}")]
     RequestQueueEmpty(#[from] RequestQueueEmpty),
-    #[error("failed to prepare local listener: {0}")]
-    ListenerSetupError(#[from] io::Error),
+    /// The proxy failed to prepare a new local socket for the intercepted connection.
+    #[error("failed to prepare local socket: {0}")]
+    SocketSetupError(#[from] io::Error),
 }
 
+/// Id of a single [`Interceptor`] task.
+/// Used to manage [`Interceptor`]s with the [`BackgroundTasks`] struct.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct InterceptorId {
+    /// Id of the intercepted connection.
+    pub connection_id: ConnectionId,
+    /// Network protocol used.
+    pub protocol: NetProtocol,
+}
+
+impl fmt::Display for InterceptorId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "outgoing interceptor {}-{}",
+            self.connection_id, self.protocol
+        )
+    }
+}
+
+/// Handles logic and state of the `outgoing` feature.
+/// Run as a [`BackgroundTask`] by each [`ProxySession`](crate::session::ProxySession).
+///
+/// # Flow
+///
+/// 1. Proxy receives an [`OutgoingConnectRequest`] from the layer and sends a corresponding
+///    [`LayerConnect`](mirrord_protocol::outgoing::LayerConnect) to the agent.
+/// 2. Proxy receives a confirmation from the agent.
+/// 3. Proxy creates a new socket and starts a new outgoing [`Interceptor`] background task to
+///    manage it.
+/// 4. Proxy sends a confirmation to the layer.
+/// 5. The layer connects to the socket managed by the [`Interceptor`] task.
+/// 6. The proxy passes the data between the agent and the [`Interceptor`] task.
+/// 7. If the layer closes the connection, the [`Interceptor`] exits and the proxy notifies the
+///    agent. If the agent closes the connection, the proxy shuts down the [`Interceptor`].
 pub struct OutgoingProxy {
     datagrams_reqs: RequestQueue,
     stream_reqs: RequestQueue,
@@ -49,8 +93,10 @@ impl Default for OutgoingProxy {
 }
 
 impl OutgoingProxy {
+    /// Used when registering new [`Interceptor`] tasks in the [`BackgroundTasks`] struct.
     const CHANNEL_SIZE: usize = 512;
 
+    /// Retrieves correct [`RequestQueue`] for the given [`NetProtocol`].
     fn queue(&mut self, protocol: NetProtocol) -> &mut RequestQueue {
         match protocol {
             NetProtocol::Datagrams => &mut self.datagrams_reqs,
@@ -58,6 +104,9 @@ impl OutgoingProxy {
         }
     }
 
+    /// Passes the data to the correct [`Interceptor`] task.
+    /// Fails when the agent sends an error, because this error cannot be traced back to an exact
+    /// connection.
     async fn handle_agent_read(
         &mut self,
         read: RemoteResult<DaemonRead>,
@@ -74,7 +123,9 @@ impl OutgoingProxy {
         };
 
         let Some(interceptor) = self.txs.get(&id) else {
-            tracing::trace!("{id} does not exist");
+            tracing::trace!(
+                "{id} does not exist, received data for connection that is already closed"
+            );
             return Ok(());
         };
 
@@ -83,6 +134,9 @@ impl OutgoingProxy {
         Ok(())
     }
 
+    /// Handles agent's response to a connection request.
+    /// Prepares a local socket and registers a new [`Interceptor`] task for this connection.
+    /// Replies to the layer's request.
     async fn handle_connect_response(
         &mut self,
         connect: RemoteResult<DaemonConnect>,
@@ -138,6 +192,7 @@ impl OutgoingProxy {
         Ok(())
     }
 
+    /// Saves the layer's request id and sends the connection request to the agent.
     async fn handle_connect_request(
         &mut self,
         message_id: MessageId,
@@ -195,6 +250,7 @@ impl BackgroundTask for OutgoingProxy {
                         tracing::trace!("{id} finished: {res:?}");
 
                         if self.txs.remove(&id).is_some() {
+                            tracing::trace!("local connection closed, notifying the agent");
                             let msg = id.protocol.wrap_agent_close(id.connection_id);
                             let _ = message_bus.send(ProxyMessage::ToAgent(msg)).await;
                             self.txs.remove(&id);

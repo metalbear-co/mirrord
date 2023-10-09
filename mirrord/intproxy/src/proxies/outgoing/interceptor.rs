@@ -1,18 +1,23 @@
-use std::{fmt, io};
+//! [`BackgroundTask`] used by [`OutgoingProxy`](super::OutgoingProxy) to manage a single
+//! intercepted connection.
 
-use mirrord_protocol::ConnectionId;
+use std::io;
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    protocol::NetProtocol,
     proxies::outgoing::protocols::PreparedSocket,
 };
 
+/// Manages a single intercepted connection.
+/// Multiple instances are run as [`BackgroundTask`]s by one [`OutgoingProxy`](super::OutgoingProxy)
+/// to manage individual connections.
 pub struct Interceptor {
     socket: PreparedSocket,
 }
 
 impl Interceptor {
+    /// Creates a new instance. This instance will use the provided [`PreparedSocket`] to accept the
+    /// layer's connection and manage it.
     pub fn new(socket: PreparedSocket) -> Self {
         Self { socket }
     }
@@ -45,21 +50,5 @@ impl BackgroundTask for Interceptor {
                 },
             }
         }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct InterceptorId {
-    pub connection_id: ConnectionId,
-    pub protocol: NetProtocol,
-}
-
-impl fmt::Display for InterceptorId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "outgoing interceptor {}-{}",
-            self.connection_id, self.protocol
-        )
     }
 }

@@ -1,3 +1,6 @@
+//! The most basic proxying logic. Handles cases when the only job to do in the internal proxy is to
+//! pass requests and responses between the layer and the agent.
+
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     ClientMessage, FileRequest, FileResponse,
@@ -18,6 +21,7 @@ pub enum SimpleProxyMessage {
 }
 
 /// For passing messages between the layer and the agent without custom internal logic.
+/// Run as a [`BackgroundTask`] by each [`ProxySession`](crate::session::ProxySession).
 #[derive(Default)]
 pub struct SimpleProxy {
     file_reqs: RequestQueue,

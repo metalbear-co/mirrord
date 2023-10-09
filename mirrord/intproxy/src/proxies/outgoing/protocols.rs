@@ -1,3 +1,6 @@
+//! Utilities for handling multiple network protocol stacks within one
+//! [`OutgoingProxy`](super::OutgoingProxy).
+
 use std::{
     env, io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -21,6 +24,8 @@ use tokio::{
 use crate::protocol::NetProtocol;
 
 impl NetProtocol {
+    /// Creates a [`LayerWrite`] message and wraps it into the common [`ClientMessage`] type.
+    /// The enum path used here depends on this protocol.
     pub fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Vec<u8>) -> ClientMessage {
         match self {
             Self::Datagrams => ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
@@ -34,6 +39,8 @@ impl NetProtocol {
         }
     }
 
+    /// Creates a [`LayerClose`] message and wraps it into the common [`ClientMessage`] type.
+    /// The enum path used here depends on this protocol.
     pub fn wrap_agent_close(self, connection_id: ConnectionId) -> ClientMessage {
         match self {
             Self::Datagrams => {
@@ -45,6 +52,8 @@ impl NetProtocol {
         }
     }
 
+    /// Creates a [`LayerConnect`] message and wraps it into the common [`ClientMessage`] type.
+    /// The enum path used here depends on this protocol.
     pub fn wrap_agent_connect(self, remote_address: SocketAddress) -> ClientMessage {
         match self {
             Self::Datagrams => {
@@ -58,6 +67,7 @@ impl NetProtocol {
         }
     }
 
+    /// Opens a new socket for intercepting a connection to the given remote address.
     pub async fn prepare_socket(
         self,
         for_remote_address: SocketAddress,
@@ -91,7 +101,9 @@ impl NetProtocol {
     }
 }
 
+/// A socket prepared to accept an intercepted connection.
 pub enum PreparedSocket {
+    /// There is no real listening/accepting here, see [`NetProtocol::Datagrams`] for more info.
     UdpSocket(UdpSocket),
     TcpListener(TcpListener),
     UnixListener(UnixListener),
@@ -116,6 +128,7 @@ impl PreparedSocket {
         Ok(tmp_dir.join(random_string))
     }
 
+    /// Returns the address of this socket.
     pub fn local_address(&self) -> io::Result<SocketAddress> {
         let address = match self {
             Self::TcpListener(listener) => listener.local_addr()?.into(),
@@ -130,6 +143,8 @@ impl PreparedSocket {
         Ok(address)
     }
 
+    /// Accepts one connection on this socket and returns a new socket for sending and receiving
+    /// data.
     pub async fn accept(self) -> io::Result<ConnectedSocket> {
         let (inner, is_really_connected, buf_size) = match self {
             Self::TcpListener(listener) => {
@@ -157,13 +172,16 @@ enum InnerConnectedSocket {
     UnixStream(UnixStream),
 }
 
+/// A socket for intercepted connection with the layer.
 pub struct ConnectedSocket {
     inner: InnerConnectedSocket,
+    /// Meaningful only when `inner` is [`InnerConnectedSocket::UdpSocket`].
     is_really_connected: bool,
     buffer: Vec<u8>,
 }
 
 impl ConnectedSocket {
+    /// Sends all given data to the layer.
     pub async fn send(&mut self, bytes: &[u8]) -> io::Result<()> {
         match &mut self.inner {
             InnerConnectedSocket::UdpSocket(socket) => {
@@ -187,14 +205,17 @@ impl ConnectedSocket {
         }
     }
 
+    /// Receives some data from the layer.
     pub async fn receive(&mut self) -> io::Result<Vec<u8>> {
         match &mut self.inner {
             InnerConnectedSocket::UdpSocket(socket) => {
-                let (received, peer) = socket.recv_from(&mut self.buffer).await?;
-
                 if !self.is_really_connected {
+                    let peer = socket.peek_sender().await?;
                     socket.connect(peer).await?;
+                    self.is_really_connected = true;
                 }
+
+                let received = socket.recv(&mut self.buffer).await?;
 
                 let bytes = self.buffer.get(..received).unwrap().to_vec();
 
