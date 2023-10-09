@@ -1,3 +1,5 @@
+//! Utilities for handling toggleable `steal` feature in [`IncomingProxy`](super::IncomingProxy).
+
 use std::collections::HashSet;
 
 use mirrord_config::LayerConfig;
@@ -7,20 +9,26 @@ use mirrord_protocol::{
 };
 use thiserror::Error;
 
+/// HTTP filter used by the layer with the `steal` feature.
 pub enum StealHttpFilter {
+    /// No filter.
     None,
+    /// Header filter, deprecated.
     HeaderDeprecated(Filter),
+    /// More recent filter (header or path).
     Filter(HttpFilter),
 }
 
+/// Settings for handling HTTP with the `steal` feature.
 pub struct StealHttpSettings {
     /// The HTTP filter to use.
     pub filter: StealHttpFilter,
-    /// Ports to filter HTTP on
+    /// Ports to filter HTTP on.
     pub ports: HashSet<Port>,
 }
 
 impl StealHttpSettings {
+    /// Returns [`StealType`] to be used with the given port.
     fn steal_type(&self, port: Port) -> StealType {
         if !self.ports.contains(&port) {
             return StealType::All(port);
@@ -36,16 +44,23 @@ impl StealHttpSettings {
     }
 }
 
-pub enum Flavor {
+/// Operation mode for the [`IncomingProxy`](super::IncomingProxy).
+pub enum IncomingMode {
+    /// The agent sends data to both the user application and the remote target.
+    /// Data coming from the layer is discarded.
     Mirror,
+    /// The agent sends data only to the user application.
+    /// Data coming from the layer is sent to the agent.
     Steal(StealHttpSettings),
 }
 
-impl Flavor {
+impl IncomingMode {
+    /// Returns whether the `steal` feature is enabled.
     pub fn is_steal(&self) -> bool {
         matches!(self, Self::Steal(..))
     }
 
+    /// Returns a port subscription request correct for this mode.
     pub fn wrap_agent_subscribe(&self, port: Port) -> ClientMessage {
         match self {
             Self::Mirror => ClientMessage::Tcp(LayerTcp::PortSubscribe(port)),
@@ -55,6 +70,7 @@ impl Flavor {
         }
     }
 
+    /// Returns a port unsubscription request correct for this mode.
     pub fn wrap_agent_unsubscribe(&self, port: Port) -> ClientMessage {
         match self {
             Self::Mirror => ClientMessage::Tcp(LayerTcp::PortUnsubscribe(port)),
@@ -62,6 +78,7 @@ impl Flavor {
         }
     }
 
+    /// Returns a connection unsubscription request correct for this mode.
     pub fn wrap_agent_unsubscribe_connection(&self, connection_id: ConnectionId) -> ClientMessage {
         match self {
             Self::Mirror => ClientMessage::Tcp(LayerTcp::ConnectionUnsubscribe(connection_id)),
@@ -71,6 +88,7 @@ impl Flavor {
         }
     }
 
+    /// Creates a new instance from the given [`LayerConfig`].
     pub fn new(config: &LayerConfig) -> Result<Self, IncomingFlavorError> {
         if !config.feature.network.incoming.is_steal() {
             return Ok(Self::Mirror);
@@ -119,10 +137,13 @@ impl Flavor {
     }
 }
 
+/// Errors that can occur when extracting [`IncomingMode`] from the [`LayerConfig`].
 #[derive(Error, Debug)]
 pub enum IncomingFlavorError {
+    /// Failed to create a [`Filter`] from a regex.
     #[error("invalid filter expression: `{0}`")]
     InvalidFilterError(fancy_regex::Error),
+    /// Multiple HTTP filters were specified.
     #[error("multiple HTTP filters specified")]
     MultipleFiltersError,
 }

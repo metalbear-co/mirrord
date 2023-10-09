@@ -82,7 +82,7 @@ impl BackgroundTask for PingPong {
 
                 msg = message_bus.recv() => match (msg, self.awaiting_pong) {
                     (None, _) => {
-                        tracing::trace!("no more messages, exiting");
+                        tracing::trace!("message bus closed, exiting");
                         break Ok(())
                     },
                     (Some(AgentMessageNotification { pong: true }), true) => {

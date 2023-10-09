@@ -53,7 +53,7 @@ impl BackgroundTask for LayerConnection {
                         break Err(e);
                     },
                     Ok(None) => {
-                        tracing::trace!("no more messages from the layer, exiting");
+                        tracing::trace!("message bus closed, exiting");
                         break Ok(());
                     }
                     Ok(Some(msg)) => message_bus.send(ProxyMessage::FromLayer(msg)).await,

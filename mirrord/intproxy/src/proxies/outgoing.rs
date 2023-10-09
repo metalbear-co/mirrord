@@ -75,9 +75,13 @@ impl fmt::Display for InterceptorId {
 /// 7. If the layer closes the connection, the [`Interceptor`] exits and the proxy notifies the
 ///    agent. If the agent closes the connection, the proxy shuts down the [`Interceptor`].
 pub struct OutgoingProxy {
+    /// For [`OutgoingConnectRequest`]s related to [`NetProtocol::Datagrams`].
     datagrams_reqs: RequestQueue,
+    /// For [`OutgoingConnectRequest`]s related to [`NetProtocol::Stream`].
     stream_reqs: RequestQueue,
+    /// [`TaskSender`]s for active [`Interceptor`] tasks.
     txs: HashMap<InterceptorId, TaskSender<Vec<u8>>>,
+    /// For managing [`Interceptor`] tasks.
     background_tasks: BackgroundTasks<InterceptorId, Vec<u8>, io::Error>,
 }
 
@@ -206,6 +210,7 @@ impl OutgoingProxy {
     }
 }
 
+/// Messages consumed by the [`OutgoingProxy`] running as a [`BackgroundTask`].
 pub enum OutgoingProxyMessage {
     AgentStream(DaemonTcpOutgoing),
     AgentDatagrams(DaemonUdpOutgoing),
@@ -221,7 +226,10 @@ impl BackgroundTask for OutgoingProxy {
         loop {
             tokio::select! {
                 msg = message_bus.recv() => match msg {
-                    None => break Ok(()),
+                    None => {
+                        tracing::trace!("message bus closed, exiting");
+                        break Ok(());
+                    },
                     Some(OutgoingProxyMessage::AgentStream(req)) => match req {
                         DaemonTcpOutgoing::Close(close) => {
                             let id = InterceptorId { connection_id: close, protocol: NetProtocol::Stream};
@@ -241,7 +249,7 @@ impl BackgroundTask for OutgoingProxy {
                     Some(OutgoingProxyMessage::LayerConnect(req, id)) => self.handle_connect_request(id, req, message_bus).await,
                 },
 
-                task_update = self.background_tasks.next(), if !self.background_tasks.is_empty() => match task_update {
+                Some(task_update) = self.background_tasks.next() => match task_update {
                     (id, TaskUpdate::Message(bytes)) => {
                         let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
                         message_bus.send(ProxyMessage::ToAgent(msg)).await;

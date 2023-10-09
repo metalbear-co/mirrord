@@ -1,3 +1,6 @@
+//! [`BackgroundTask`] used by [`Incoming`](super::IncomingProxy) to manage a single
+//! intercepted raw connection.
+
 use std::{
     io::{self, ErrorKind},
     net::SocketAddr,
@@ -17,23 +20,32 @@ use tokio::{
 use super::InterceptorMessageOut;
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    codec::{self, CodecError},
+    codec::{AsyncEncoder, CodecError},
 };
 
+/// Errors that can occur when executing [`RawInterceptor`] as a [`BackgroundTask`].
 #[derive(Error, Debug)]
 pub enum RawInterceptorError {
+    /// IO failed.
     #[error("io failed: {0}")]
     IoError(#[from] io::Error),
+    /// [`codec`](crate::codec) failed.
     #[error("{0}")]
     CodecError(#[from] CodecError),
 }
 
+/// Manages a single intercepted raw connection.
+/// Multiple instances are run as [`BackgroundTask`]s by one [`IncomingProxy`](super::IncomingProxy)
+/// to manage individual connections.
 pub struct RawInterceptor {
+    /// Original source of data provided by the agent.
     remote_source: SocketAddr,
+    /// Local layer listener.
     local_destination: SocketAddr,
 }
 
 impl RawInterceptor {
+    /// Creates a new instance. This instance will connect to the provided `local_destination`.
     pub fn new(remote_source: SocketAddr, local_destination: SocketAddr) -> Self {
         Self {
             remote_source,
@@ -41,15 +53,19 @@ impl RawInterceptor {
         }
     }
 
+    /// Connects to the local listener and sends it encoded address of the remote peer.
     async fn connect_and_send_source(
         &self,
-    ) -> Result<(OwnedWriteHalf, OwnedReadHalf), RawInterceptorError> {
+    ) -> Result<(OwnedReadHalf, OwnedWriteHalf), RawInterceptorError> {
         let stream = TcpStream::connect(self.local_destination).await?;
 
-        let (mut codec_tx, codec_rx) = codec::make_async_framed::<SocketAddr, SocketAddr>(stream);
+        let mut codec_tx: AsyncEncoder<SocketAddr, TcpStream> = AsyncEncoder::new(stream);
         codec_tx.send(&self.remote_source).await?;
+        codec_tx.flush().await?;
 
-        Ok((codec_tx.into_inner(), codec_rx.into_inner()))
+        let stream = codec_tx.into_inner();
+
+        Ok(stream.into_split())
     }
 }
 
@@ -59,7 +75,7 @@ impl BackgroundTask for RawInterceptor {
     type MessageOut = InterceptorMessageOut;
 
     async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-        let (mut write_half, mut read_half) = self.connect_and_send_source().await?;
+        let (mut read_half, mut write_half) = self.connect_and_send_source().await?;
 
         let mut buffer = vec![0; 1024];
         let mut remote_closed = false;
@@ -78,13 +94,19 @@ impl BackgroundTask for RawInterceptor {
                 },
 
                 msg = message_bus.recv(), if !remote_closed => match msg {
-                    None => remote_closed = true,
+                    None => {
+                        tracing::trace!("message bus closed, waiting 1 second before exiting");
+                        remote_closed = true;
+                    },
                     Some(data) => {
                         write_half.write_all(&data).await?;
                     }
                 },
 
-                _ = time::sleep(Duration::from_secs(1)), if remote_closed => break Ok(()),
+                _ = time::sleep(Duration::from_secs(1)), if remote_closed => {
+                    tracing::trace!("layer silent for 1 second and message bus is closed, exiting");
+                    break Ok(());
+                },
             }
         }
     }

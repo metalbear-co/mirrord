@@ -1,3 +1,5 @@
+//! Utility macros for implementing traits on [`protocol`](super) types.
+
 /// A helper macro for binding inner-most values from complex enum expressions.
 /// Accepts an identifier and a non-empty sequence of enum paths.
 ///

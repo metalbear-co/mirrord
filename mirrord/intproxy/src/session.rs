@@ -117,7 +117,7 @@ impl ProxySession {
             .await;
 
         let res = loop {
-            match self.background_tasks.next().await {
+            match self.background_tasks.next().await.unwrap() {
                 (MainTaskId::LayerConnection, TaskUpdate::Finished(Ok(()))) => {
                     tracing::info!("layer closed connection, exiting");
                     break Ok(());

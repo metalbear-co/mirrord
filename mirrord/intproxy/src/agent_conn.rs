@@ -120,7 +120,7 @@ impl BackgroundTask for AgentConnection {
             tokio::select! {
                 msg = message_bus.recv() => match msg {
                     None => {
-                        tracing::trace!("no more messages from the agent, exiting");
+                        tracing::trace!("message bus closed, exiting");
                         break Ok(());
                     },
                     Some(msg) => {

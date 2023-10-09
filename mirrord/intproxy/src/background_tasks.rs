@@ -122,16 +122,11 @@ where
         TaskSender(in_msg_tx)
     }
 
-    /// Returns whether this struct has any registered tasks.
-    pub fn is_empty(&self) -> bool {
-        self.streams.is_empty()
-    }
-
     /// Returns the next update from one of registered tasks.
-    pub async fn next(&mut self) -> (Id, TaskUpdate<MOut, Err>) {
-        let (id, msg) = self.streams.next().await.unwrap();
+    pub async fn next(&mut self) -> Option<(Id, TaskUpdate<MOut, Err>)> {
+        let (id, msg) = self.streams.next().await?;
 
-        match msg {
+        let msg = match msg {
             Some(msg) => (id, TaskUpdate::Message(msg)),
             None => {
                 let res = self
@@ -144,7 +139,9 @@ where
                     Ok(res) => (id, TaskUpdate::Finished(res.map_err(TaskError::Error))),
                 }
             }
-        }
+        };
+
+        Some(msg)
     }
 
     /// Waits for all registered tasks to finish and returns their results.

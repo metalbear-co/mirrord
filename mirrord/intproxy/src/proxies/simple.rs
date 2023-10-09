@@ -24,7 +24,9 @@ pub enum SimpleProxyMessage {
 /// Run as a [`BackgroundTask`] by each [`ProxySession`](crate::session::ProxySession).
 #[derive(Default)]
 pub struct SimpleProxy {
+    /// For [`FileRequest`]s.
     file_reqs: RequestQueue,
+    /// For [`GetAddrInfoRequest`]s.
     addr_info_reqs: RequestQueue,
 }
 
