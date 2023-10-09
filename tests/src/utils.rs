@@ -511,6 +511,22 @@ pub async fn run_ls(args: Option<Vec<&str>>, namespace: Option<&str>) -> TestPro
     run_mirrord(mirrord_args, Default::default()).await
 }
 
+/// Runs `mirrord verify-config [--ide] "/path/config.json"`.
+///
+/// ## Attention
+///
+/// The `verify-config` tests are here to guarantee that your changes do not break backwards
+/// compatability, so you should not modify them, only add new tests (unless breakage is
+/// wanted/required).
+pub async fn run_verify_config(args: Option<Vec<&str>>) -> TestProcess {
+    let mut mirrord_args = vec!["verify-config"];
+    if let Some(args) = args {
+        mirrord_args.extend(args);
+    }
+
+    run_mirrord(mirrord_args, Default::default()).await
+}
+
 #[fixture]
 pub async fn kube_client() -> Client {
     let mut config = Config::infer().await.unwrap();
