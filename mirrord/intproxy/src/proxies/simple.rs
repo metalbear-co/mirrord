@@ -10,7 +10,7 @@ use crate::{
     background_tasks::{BackgroundTask, MessageBus},
     protocol::{LocalMessage, MessageId, ProxyToLayerMessage},
     request_queue::{RequestQueue, RequestQueueEmpty},
-    ProxyMessage,
+    session::ProxyMessage,
 };
 
 pub enum SimpleProxyMessage {
@@ -39,7 +39,10 @@ impl BackgroundTask for SimpleProxy {
         loop {
             tokio::select! {
                 msg = message_bus.recv() => match msg {
-                    None => break Ok(()),
+                    None => {
+                        tracing::trace!("message bus closed, exiting");
+                        break Ok(());
+                    },
                     Some(SimpleProxyMessage::FileReq(id, req)) => {
                         self.file_reqs.insert(id);
                         message_bus.send(ProxyMessage::ToAgent(ClientMessage::FileRequest(req))).await;

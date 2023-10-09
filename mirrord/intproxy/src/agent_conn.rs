@@ -22,7 +22,7 @@ use tokio::{
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    ProxyMessage,
+    session::ProxyMessage,
 };
 
 /// Errors that can occur when the internal proxy tries to establish a connection with the agent.

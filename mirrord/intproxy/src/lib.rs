@@ -4,8 +4,6 @@
 use std::{sync::Arc, time::Duration};
 
 use mirrord_config::LayerConfig;
-use mirrord_protocol::{ClientMessage, DaemonMessage};
-use protocol::{LayerToProxyMessage, LocalMessage, ProxyToLayerMessage};
 use tokio::{net::TcpListener, task::JoinSet, time};
 
 use crate::{
@@ -24,14 +22,6 @@ pub mod protocol;
 mod proxies;
 mod request_queue;
 mod session;
-
-#[derive(Debug)]
-pub enum ProxyMessage {
-    ToAgent(ClientMessage),
-    ToLayer(LocalMessage<ProxyToLayerMessage>),
-    FromAgent(DaemonMessage),
-    FromLayer(LocalMessage<LayerToProxyMessage>),
-}
 
 pub struct IntProxy {
     config: LayerConfig,

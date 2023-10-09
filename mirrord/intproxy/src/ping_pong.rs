@@ -13,7 +13,7 @@ use tokio::time::{self, Interval, MissedTickBehavior};
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    ProxyMessage,
+    session::ProxyMessage,
 };
 
 /// Errors that can occur when handling ping pong.

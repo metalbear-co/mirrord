@@ -15,16 +15,24 @@ use crate::{
         outgoing::{OutgoingProxy, OutgoingProxyMessage},
         simple::{SimpleProxy, SimpleProxyMessage},
     },
-    IntProxy, ProxyMessage,
+    IntProxy,
 };
 
+/// Enumerated ids of main [`BackgroundTask`](crate::background_tasks::BackgroundTask)s used by
+/// [`ProxySession`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MainTaskId {
+    /// For [`SimpleProxy`].
     SimpleProxy,
+    /// For [`OutgoingProxy`].
     OutgoingProxy,
+    /// For [`IncomingProxy`].
     IncomingProxy,
+    /// For [`PingPong`].
     PingPong,
+    /// For [`AgentConnection`].
     AgentConnection,
+    /// For [`LayerConnection`].
     LayerConnection,
 }
 
@@ -43,24 +51,52 @@ impl fmt::Display for MainTaskId {
     }
 }
 
+/// Messages sent back to the [`ProxySession`] from the main background tasks. See [`MainTaskId`].
+#[derive(Debug)]
+pub enum ProxyMessage {
+    /// Message to be sent to the agent. Handled by [`AgentConnection`].
+    ToAgent(ClientMessage),
+    /// Message to be sent to the layer. Handled by [`LayerConnection`].
+    ToLayer(LocalMessage<ProxyToLayerMessage>),
+    /// Message received from the agent. Handled by one of the main background tasks.
+    FromAgent(DaemonMessage),
+    /// Message received from the layer. Handled by one of the main background tasks.
+    FromLayer(LocalMessage<LayerToProxyMessage>),
+}
+
+/// [`TaskSender`]s for main background tasks. See [`MainTaskId`].
 struct Handlers {
+    /// For [`AgentConnection`].
     agent: TaskSender<ClientMessage>,
+    /// For [`LayerConnection`].
     layer: TaskSender<LocalMessage<ProxyToLayerMessage>>,
+    /// For [`SimpleProxy`].
     simple: TaskSender<SimpleProxyMessage>,
+    /// For [`OutgoingProxy`].
     outgoing: TaskSender<OutgoingProxyMessage>,
+    /// For [`IncomingProxy`].
     incoming: TaskSender<IncomingProxyMessage>,
+    /// For [`PingPong`].
     ping_pong: TaskSender<AgentMessageNotification>,
 }
 
+/// Single internal proxy session between the layer and the agent.
+///
+/// Utilizes a [`BackgroundTasks`] manager and several
+/// [`BackgroundTask`](crate::background_tasks::BackgroundTask)s to implement proxying logic.
 pub struct ProxySession {
     handlers: Handlers,
     background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
 }
 
 impl ProxySession {
+    /// How long can the `proxy <-> agent` connection remain silent.
     const PING_INTERVAL: Duration = Duration::from_secs(30);
+    /// For creating communicating with the main background tasks. See [`MainTaskId`].
     const CHANNEL_SIZE: usize = 512;
 
+    /// Crates a new session. This session will use the provided `stream` to talk with the layer
+    /// instance.
     pub async fn new(intproxy: &IntProxy, stream: TcpStream) -> Result<Self> {
         let agent_conn =
             AgentConnection::new(&intproxy.config, intproxy.agent_connect_info.as_ref()).await?;
@@ -108,6 +144,8 @@ impl ProxySession {
         })
     }
 
+    /// Handles proxying between the connected layer and the agent.
+    /// Runs until the layer closes the connection or an error occurs.
     pub async fn serve_connection(mut self) -> Result<()> {
         self.handlers
             .agent
@@ -151,6 +189,7 @@ impl ProxySession {
         res
     }
 
+    /// Routes a [`ProxyMessage`] to the correct background task.
     async fn handle(&mut self, msg: ProxyMessage) -> Result<()> {
         match msg {
             ProxyMessage::FromAgent(msg) => self.handle_agent_message(msg).await?,
@@ -162,6 +201,8 @@ impl ProxySession {
         Ok(())
     }
 
+    /// Routes most messages from the agent to the correct background task.
+    /// Some messages are handled here.
     async fn handle_agent_message(&mut self, message: DaemonMessage) -> Result<()> {
         self.handlers
             .ping_pong
@@ -231,6 +272,8 @@ impl ProxySession {
         Ok(())
     }
 
+    /// Routes a message from the layer to the correct background task.
+    /// [`LayerToProxyMessage::NewSession`] is an exception, as it is handled here.
     async fn handle_layer_message(&self, message: LocalMessage<LayerToProxyMessage>) -> Result<()> {
         match message.inner {
             LayerToProxyMessage::NewSession(..) => todo!(),

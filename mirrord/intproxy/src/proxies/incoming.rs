@@ -27,7 +27,7 @@ use crate::{
         ProxyToLayerMessage,
     },
     request_queue::{RequestQueue, RequestQueueEmpty},
-    ProxyMessage,
+    session::ProxyMessage,
 };
 
 mod http;
@@ -164,6 +164,7 @@ impl IncomingProxy {
     /// However, if a subscription for the same port already exists, this method does not make any
     /// request to the agent. Instead, it immediately responds to the layer and starts
     /// redirecting connections to the new listener.
+    #[tracing::instrument(level = "trace", skip(self, message_bus))]
     async fn handle_port_subscribe(
         &mut self,
         message_id: MessageId,
@@ -200,6 +201,7 @@ impl IncomingProxy {
     }
 
     /// Sends a request to the agent to stop sending incoming connections for the specified port.
+    #[tracing::instrument(level = "trace", skip(self, message_bus))]
     async fn handle_port_unsubscribe(
         &mut self,
         unsubscribe: PortUnsubscribe,
@@ -214,6 +216,7 @@ impl IncomingProxy {
     /// Retrieves or creates [`HttpInterceptor`] for the given [`HttpRequestFallback`].
     /// The request may or may not belong to an existing connection (unlike [`RawInterceptor`]s,
     /// [`HttpInterceptor`]s are created lazily).
+    #[tracing::instrument(level = "trace", skip(self))]
     fn get_or_create_http_interceptor(
         &mut self,
         request: &HttpRequestFallback,
@@ -259,6 +262,7 @@ impl IncomingProxy {
     }
 
     /// Handles all agent messages.
+    #[tracing::instrument(level = "trace", skip(self, message_bus))]
     async fn handle_agent_message(
         &mut self,
         message: DaemonTcp,

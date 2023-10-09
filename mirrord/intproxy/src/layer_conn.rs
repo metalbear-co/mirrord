@@ -9,7 +9,7 @@ use crate::{
     background_tasks::{BackgroundTask, MessageBus},
     codec::{self, AsyncDecoder, AsyncEncoder, CodecError},
     protocol::{LayerToProxyMessage, LocalMessage, ProxyToLayerMessage},
-    ProxyMessage,
+    session::ProxyMessage,
 };
 
 /// Handles logic of the `layer <-> proxy` connection.
