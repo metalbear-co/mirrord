@@ -162,7 +162,7 @@ impl OpenDir {
         #[cfg(target_os = "macos")]
         let dirent = libc::dirent {
             d_ino: 0,
-            reclen: 0,
+            d_reclen: 0,
             d_type: 0,
             d_name: [0; 1024],
             d_seekoff: 0,
