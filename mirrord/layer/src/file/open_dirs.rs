@@ -198,18 +198,18 @@ pub fn assign_direntry(
     out_entry: &mut libc::dirent,
     getdents: bool,
 ) -> Result<(), HookError> {
-    (*out_entry).d_ino = in_entry.inode;
-    (*out_entry).d_reclen = if getdents {
+    out_entry.d_ino = in_entry.inode;
+    out_entry.d_reclen = if getdents {
         // The structs written by the kernel for the getdents syscall do not have a fixed size.
         in_entry.get_d_reclen64()
     } else {
         std::mem::size_of::<libc::dirent>() as u16
     };
-    (*out_entry).d_type = in_entry.file_type;
+    out_entry.d_type = in_entry.file_type;
 
     let dir_name = CString::new(in_entry.name)?;
     let dir_name_bytes = dir_name.as_bytes_with_nul();
-    (*out_entry)
+    out_entry
         .d_name
         .get_mut(..dir_name_bytes.len())
         .expect("directory name length exceeds limit")
@@ -217,14 +217,14 @@ pub fn assign_direntry(
 
     #[cfg(target_os = "macos")]
     {
-        (*out_entry).d_seekoff = in_entry.position;
+        out_entry.d_seekoff = in_entry.position;
         // name length should be without null
-        (*out_entry).d_namlen = dir_name.to_bytes().len() as u16;
+        out_entry.d_namlen = dir_name.to_bytes().len() as u16;
     }
 
     #[cfg(target_os = "linux")]
     {
-        (*out_entry).d_off = in_entry.position as i64;
+        out_entry.d_off = in_entry.position as i64;
     }
     Ok(())
 }
@@ -236,24 +236,24 @@ pub fn assign_direntry64(
     out_entry: &mut libc::dirent64,
     getdents: bool,
 ) -> Result<(), HookError> {
-    (*out_entry).d_ino = in_entry.inode;
-    (*out_entry).d_reclen = if getdents {
+    out_entry.d_ino = in_entry.inode;
+    out_entry.d_reclen = if getdents {
         // The structs written by the kernel for the getdents syscall do not have a fixed size.
         in_entry.get_d_reclen64()
     } else {
         std::mem::size_of::<libc::dirent64>() as u16
     };
-    (*out_entry).d_type = in_entry.file_type;
+    out_entry.d_type = in_entry.file_type;
 
     let dir_name = CString::new(in_entry.name)?;
     let dir_name_bytes = dir_name.as_bytes_with_nul();
-    (*out_entry)
+    out_entry
         .d_name
         .get_mut(..dir_name_bytes.len())
         .expect("directory name length exceeds limit")
         .copy_from_slice(bytemuck::cast_slice(dir_name_bytes));
 
-    (*out_entry).d_off = in_entry.position as i64;
+    out_entry.d_off = in_entry.position as i64;
 
     Ok(())
 }
