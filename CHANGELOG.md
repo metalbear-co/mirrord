@@ -8,6 +8,23 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.71.2](https://github.com/metalbear-co/mirrord/tree/3.71.2) - 2023-10-10
+
+
+### Fixed
+
+- Reverted breaking change in CLI for config verify
+  [#1993](https://github.com/metalbear-co/mirrord/issues/1993)
+- Adding some e2e tests for  to protect against breaking changes in the cli.
+  [#1997](https://github.com/metalbear-co/mirrord/issues/1997)
+
+
+### Internal
+
+- Add homepage link to README
+- Example in style guide conforms with the rule it's supposed to explain.
+
+
 ## [3.71.1](https://github.com/metalbear-co/mirrord/tree/3.71.1) - 2023-10-04
 
 
