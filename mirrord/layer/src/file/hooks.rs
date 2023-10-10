@@ -5,7 +5,7 @@ use core::ffi::{c_size_t, c_ssize_t};
 ///
 /// NOTICE: If a file operation fails, it might be because it depends on some `libc` function
 /// that is not being hooked (`strace` the program to check).
-use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
+use std::{os::unix::io::RawFd, ptr, slice, time::Duration};
 
 #[cfg(target_os = "linux")]
 use errno::{set_errno, Errno};
@@ -19,7 +19,7 @@ use libc::{dirent64, stat64, EBADF, EINVAL, ENOENT, ENOTDIR};
 use libc::{O_DIRECTORY, O_RDONLY};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
-    DirEntryInternal, FsMetadataInternal, MetadataInternal, ReadFileResponse, WriteFileResponse,
+    FsMetadataInternal, MetadataInternal, ReadFileResponse, WriteFileResponse,
 };
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
@@ -28,7 +28,7 @@ use tracing::trace;
 #[cfg(target_os = "linux")]
 use tracing::{error, info, warn};
 
-use super::{ops::*, OpenOptionsInternalExt};
+use super::{open_dirs, ops::*, OpenOptionsInternalExt};
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 use crate::close_layer_fd;
 #[cfg(target_os = "macos")]
@@ -39,7 +39,10 @@ use crate::{
     common::CheckedInto,
     detour::{Detour, DetourGuard},
     error::HookError,
-    file::ops::{access, lseek, open, read, write},
+    file::{
+        open_dirs::OPEN_DIRS,
+        ops::{access, lseek, open, read, write},
+    },
     hooks::HookManager,
     replace,
 };
@@ -165,81 +168,21 @@ pub(crate) unsafe extern "C" fn fdopendir_detour(fd: RawFd) -> usize {
     fdopendir(fd).unwrap_or_bypass_with(|_| FN_FDOPENDIR(fd))
 }
 
-/// Assign DirEntryInternal to dirent
-unsafe fn assign_direntry(
-    in_entry: DirEntryInternal,
-    out_entry: *mut dirent,
-    getdents: bool,
-) -> Result<(), HookError> {
-    (*out_entry).d_ino = in_entry.inode;
-    (*out_entry).d_reclen = if getdents {
-        // The structs written by the kernel for the getdents syscall do not have a fixed size.
-        in_entry.get_d_reclen64()
-    } else {
-        std::mem::size_of::<dirent>() as u16
-    };
-    (*out_entry).d_type = in_entry.file_type;
-
-    let dir_name = CString::new(in_entry.name)?;
-    let dir_name_bytes = dir_name.as_bytes_with_nul();
-    (*out_entry)
-        .d_name
-        .get_mut(..dir_name_bytes.len())
-        .expect("directory name length exceeds limit")
-        .copy_from_slice(bytemuck::cast_slice(dir_name_bytes));
-
-    #[cfg(target_os = "macos")]
-    {
-        (*out_entry).d_seekoff = in_entry.position;
-        // name length should be without null
-        (*out_entry).d_namlen = dir_name.to_bytes().len() as u16;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        (*out_entry).d_off = in_entry.position as i64;
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "linux")]
-unsafe fn assign_direntry64(
-    in_entry: DirEntryInternal,
-    out_entry: *mut dirent64,
-    getdents: bool,
-) -> Result<(), HookError> {
-    (*out_entry).d_ino = in_entry.inode;
-    (*out_entry).d_reclen = if getdents {
-        // The structs written by the kernel for the getdents syscall do not have a fixed size.
-        in_entry.get_d_reclen64()
-    } else {
-        std::mem::size_of::<dirent64>() as u16
-    };
-    (*out_entry).d_type = in_entry.file_type;
-
-    let dir_name = CString::new(in_entry.name)?;
-    let dir_name_bytes = dir_name.as_bytes_with_nul();
-    (*out_entry)
-        .d_name
-        .get_mut(..dir_name_bytes.len())
-        .expect("directory name length exceeds limit")
-        .copy_from_slice(bytemuck::cast_slice(dir_name_bytes));
-
-    (*out_entry).d_off = in_entry.position as i64;
-
-    Ok(())
-}
-
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn readdir_r_detour(
     dirp: *mut DIR,
     entry: *mut dirent,
     result: *mut *mut dirent,
 ) -> c_int {
-    readdir_r(dirp as usize)
+    let Some(entry_ref) = entry.as_mut() else {
+        return EINVAL;
+    };
+
+    OPEN_DIRS
+        .read_r(dirp as usize)
         .map(|resp| {
             if let Some(direntry) = resp {
-                match assign_direntry(direntry, entry, false) {
+                match open_dirs::assign_direntry(direntry, entry_ref, false) {
                     Err(e) => return c_int::from(e),
                     Ok(()) => {
                         *result = entry;
@@ -262,10 +205,15 @@ pub(crate) unsafe extern "C" fn readdir64_r_detour(
     entry: *mut dirent64,
     result: *mut *mut dirent64,
 ) -> c_int {
-    readdir_r(dirp as usize)
+    let Some(entry_ref) = entry.as_mut() else {
+        return EINVAL;
+    };
+
+    OPEN_DIRS
+        .read_r(dirp as usize)
         .map(|resp| {
             if let Some(direntry) = resp {
-                match assign_direntry64(direntry, entry, false) {
+                match open_dirs::assign_direntry64(direntry, entry_ref, false) {
                     Err(e) => return c_int::from(e),
                     Ok(()) => {
                         *result = entry;
@@ -281,9 +229,37 @@ pub(crate) unsafe extern "C" fn readdir64_r_detour(
         .unwrap_or_bypass_with(|_| FN_READDIR64_R(dirp, entry, result))
 }
 
+#[cfg(target_os = "linux")]
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn readdir64_detour(dirp: *mut DIR) -> usize {
+    match OPEN_DIRS.read64(dirp as usize) {
+        Detour::Success(entry) => entry as usize,
+        Detour::Bypass(..) => FN_READDIR64(dirp),
+        Detour::Error(e) => {
+            set_errno(Errno(e.into()));
+            std::ptr::null::<dirent64>() as usize
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn readdir_detour(dirp: *mut DIR) -> usize {
+    match OPEN_DIRS.read(dirp as usize) {
+        Detour::Success(entry) => entry as usize,
+        Detour::Bypass(..) => FN_READDIR64(dirp),
+        Detour::Error(e) => {
+            set_errno(Errno(e.into()));
+            std::ptr::null::<dirent>() as usize
+        }
+    }
+}
+
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn closedir_detour(dirp: *mut DIR) -> c_int {
-    closedir(dirp as usize).unwrap_or_bypass_with(|_| FN_CLOSEDIR(dirp))
+    OPEN_DIRS
+        .close(dirp as usize)
+        .unwrap_or_bypass_with(|_| FN_CLOSEDIR(dirp))
 }
 
 /// Equivalent to `open_detour`, **except** when `raw_path` specifies a relative path.
@@ -359,7 +335,13 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
                     set_errno(Errno(EINVAL));
                     return -1;
                 }
-                match assign_direntry(dent, next, true) {
+
+                let Some(next_ref) = next.as_mut() else {
+                    set_errno(Errno(EINVAL));
+                    return -1;
+                };
+
+                match open_dirs::assign_direntry(dent, next_ref, true) {
                     Err(e) => {
                         error!(
                             "Error while trying to write remote dir entry to local buffer: {e:?}"
@@ -1069,6 +1051,21 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             readdir64_r_detour,
             FnReaddir64_r,
             FN_READDIR64_R
+        );
+        #[cfg(target_os = "linux")]
+        replace!(
+            hook_manager,
+            "readdir64",
+            readdir64_detour,
+            FnReaddir64,
+            FN_READDIR64
+        );
+        replace!(
+            hook_manager,
+            "readdir",
+            readdir_detour,
+            FnReaddir,
+            FN_READDIR
         );
         // aarch + macOS hooks fail
         // because macOs internally calls this with pointer authentication
