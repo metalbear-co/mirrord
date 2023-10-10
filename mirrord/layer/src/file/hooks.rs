@@ -242,12 +242,11 @@ pub(crate) unsafe extern "C" fn readdir64_detour(dirp: *mut DIR) -> usize {
     }
 }
 
-#[cfg(target_os = "linux")]
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn readdir_detour(dirp: *mut DIR) -> usize {
     match OPEN_DIRS.read(dirp as usize) {
         Detour::Success(entry) => entry as usize,
-        Detour::Bypass(..) => FN_READDIR64(dirp),
+        Detour::Bypass(..) => FN_READDIR(dirp),
         Detour::Error(e) => {
             set_errno(Errno(e.into()));
             std::ptr::null::<dirent>() as usize
