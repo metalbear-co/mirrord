@@ -11,10 +11,10 @@ use std::{os::unix::io::RawFd, ptr, slice, time::Duration};
 use errno::{set_errno, Errno};
 use libc::{
     self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
-    AT_FDCWD, DIR,
+    AT_FDCWD, DIR, EINVAL,
 };
 #[cfg(target_os = "linux")]
-use libc::{dirent64, stat64, EBADF, EINVAL, ENOENT, ENOTDIR};
+use libc::{dirent64, stat64, EBADF, ENOENT, ENOTDIR};
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 use libc::{O_DIRECTORY, O_RDONLY};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};

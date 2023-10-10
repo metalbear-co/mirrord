@@ -150,17 +150,30 @@ struct OpenDir {
 
 impl OpenDir {
     fn new(local_fd: DirStreamFd, remote_fd: RemoteFd) -> Self {
+        #[cfg(not(target_os = "macos"))]
+        let dirent = libc::dirent {
+            d_ino: 0,
+            d_off: 0,
+            d_reclen: 0,
+            d_type: 0,
+            d_name: [0; 256],
+        };
+
+        #[cfg(target_os = "macos")]
+        let dirent = libc::dirent {
+            d_ino: 0,
+            reclen: 0,
+            d_type: 0,
+            d_name: [0; 1024],
+            d_seekoff: 0,
+            d_namlen: 0,
+        };
+
         Self {
             closed: false,
             local_fd,
             remote_fd,
-            dirent: libc::dirent {
-                d_ino: 0,
-                d_off: 0,
-                d_reclen: 0,
-                d_type: 0,
-                d_name: [0; 256],
-            },
+            dirent,
             #[cfg(target_os = "linux")]
             dirent64: libc::dirent64 {
                 d_ino: 0,
