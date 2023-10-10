@@ -7,6 +7,7 @@ use crate::{
     agent_conn::{AgentClosedConnection, AgentConnectionError},
     codec::CodecError,
     ping_pong::PingPongError,
+    protocol::LayerToProxyMessage,
     proxies::{incoming::IncomingProxyError, outgoing::OutgoingProxyError},
     request_queue::RequestQueueEmpty,
     session::MainTaskId,
@@ -24,11 +25,16 @@ pub enum IntProxyError {
     AgentFailed(String),
     #[error("agent sent unexpected message: {0:?}")]
     UnexpectedAgentMessage(DaemonMessage),
+    #[error("layer sent unexpected message: {0:?}")]
+    UnexpectedLayerMessage(LayerToProxyMessage),
 
     #[error("background task {0} exited unexpectedly")]
     TaskExit(MainTaskId),
     #[error("background task {0} panicked")]
     TaskPanic(MainTaskId),
+
+    #[error("task handling proxy sessino panicked")]
+    ProxySessionPanic,
 
     #[error("{0}")]
     AgentConnectionError(#[from] AgentClosedConnection),

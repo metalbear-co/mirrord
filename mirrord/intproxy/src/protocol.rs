@@ -58,7 +58,6 @@ pub enum LayerToProxyMessage {
 }
 
 /// Unique `layer <-> proxy` session identifier.
-/// Each connection between the layer and the internal proxy belongs to a separate session.
 /// New connection is established when the layer initializes or forks.
 pub type SessionId = u64;
 
@@ -75,9 +74,11 @@ pub type SessionId = u64;
 #[derive(Encode, Decode, Debug)]
 pub enum NewSessionRequest {
     /// Layer initialized from its constructor and has a fresh state.
+    /// This session will be handled by a new [`ProxySession`](crate::session::ProxySession).
     New,
     /// Layer re-initialized from a [`fork`](https://man7.org/linux/man-pages/man2/fork.2.html) detour.
     /// It inherits state from its parent.
+    /// This session will be handled by parent's [`ProxySession`](crate::session::ProxySession).
     Forked(SessionId),
 }
 

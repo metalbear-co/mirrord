@@ -13,7 +13,7 @@ use crate::{
     background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
     protocol::{
         LocalMessage, MessageId, NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse,
-        ProxyToLayerMessage,
+        ProxyToLayerMessage, SessionId,
     },
     request_queue::{RequestQueue, RequestQueueEmpty},
     session::ProxyMessage,
@@ -149,16 +149,19 @@ impl OutgoingProxy {
         protocol: NetProtocol,
         message_bus: &mut MessageBus<Self>,
     ) -> Result<(), OutgoingProxyError> {
-        let message_id = self.queue(protocol).get()?;
+        let (message_id, session_id) = self.queue(protocol).get()?;
 
         let connect = match connect {
             Ok(connect) => connect,
             Err(e) => {
                 message_bus
-                    .send(ProxyMessage::ToLayer(LocalMessage {
-                        message_id,
-                        inner: ProxyToLayerMessage::OutgoingConnect(Err(e)),
-                    }))
+                    .send(ProxyMessage::ToLayer(
+                        LocalMessage {
+                            message_id,
+                            inner: ProxyToLayerMessage::OutgoingConnect(Err(e)),
+                        },
+                        session_id,
+                    ))
                     .await;
                 return Ok(());
             }
@@ -186,13 +189,16 @@ impl OutgoingProxy {
         self.txs.insert(id, interceptor);
 
         message_bus
-            .send(ProxyMessage::ToLayer(LocalMessage {
-                message_id,
-                inner: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
-                    layer_address,
-                    in_cluster_address: local_address,
-                })),
-            }))
+            .send(ProxyMessage::ToLayer(
+                LocalMessage {
+                    message_id,
+                    inner: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
+                        layer_address,
+                        in_cluster_address: local_address,
+                    })),
+                },
+                session_id,
+            ))
             .await;
 
         Ok(())
@@ -203,10 +209,11 @@ impl OutgoingProxy {
     async fn handle_connect_request(
         &mut self,
         message_id: MessageId,
+        session_id: SessionId,
         request: OutgoingConnectRequest,
         message_bus: &mut MessageBus<Self>,
     ) {
-        self.queue(request.protocol).insert(message_id);
+        self.queue(request.protocol).insert(message_id, session_id);
 
         let msg = request.protocol.wrap_agent_connect(request.remote_address);
         message_bus.send(ProxyMessage::ToAgent(msg)).await;
@@ -217,7 +224,7 @@ impl OutgoingProxy {
 pub enum OutgoingProxyMessage {
     AgentStream(DaemonTcpOutgoing),
     AgentDatagrams(DaemonUdpOutgoing),
-    LayerConnect(OutgoingConnectRequest, MessageId),
+    LayerConnect(OutgoingConnectRequest, MessageId, SessionId),
 }
 
 impl BackgroundTask for OutgoingProxy {
@@ -249,7 +256,12 @@ impl BackgroundTask for OutgoingProxy {
                         DaemonUdpOutgoing::Read(read) => self.handle_agent_read(read, NetProtocol::Datagrams).await?,
                         DaemonUdpOutgoing::Connect(connect) => self.handle_connect_response(connect, NetProtocol::Datagrams, message_bus).await?,
                     }
-                    Some(OutgoingProxyMessage::LayerConnect(req, id)) => self.handle_connect_request(id, req, message_bus).await,
+                    Some(OutgoingProxyMessage::LayerConnect(req, message_id, session_id)) => self.handle_connect_request(
+                        message_id,
+                        session_id,
+                        req,
+                        message_bus
+                    ).await,
                 },
 
                 Some(task_update) = self.background_tasks.next() => match task_update {

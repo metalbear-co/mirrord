@@ -7,16 +7,19 @@
 //! [`FileRequest`](mirrord_protocol::codec::FileRequest)s) sequentially. The internal proxy relies
 //! on this behavior and stores [`MessageId`]s of layer's requests in multiple queues. Upon
 //! receiving a response from the agent, correct [`MessageId`] is taken from the right queue.
+//!
+//! Additionaly, single [`ProxySession`](crate::session::ProxySession) handles multiple layer
+//! instances (coming from forks). This fifo stores their [`SessionId`]s as well.
 
 use std::{collections::VecDeque, fmt};
 
 use thiserror::Error;
 
-use crate::protocol::MessageId;
+use crate::protocol::{MessageId, SessionId};
 
-/// Erorr returned when the proxy attempts to retrieve [`MessageId`] of a request corresponding to a
-/// response received from the agent, but the [`RequestQueue`] is empty. This error should never
-/// happen.
+/// Erorr returned when the proxy attempts to retrieve [`MessageId`] and [`SessionId`] of a request
+/// corresponding to a response received from the agent, but the [`RequestQueue`] is empty. This
+/// error should never happen.
 #[derive(Error, Debug)]
 #[error("request queue is empty")]
 pub struct RequestQueueEmpty;
@@ -26,7 +29,7 @@ pub struct RequestQueueEmpty;
 /// between them.
 #[derive(Default)]
 pub struct RequestQueue {
-    inner: VecDeque<MessageId>,
+    inner: VecDeque<(MessageId, SessionId)>,
 }
 
 impl fmt::Debug for RequestQueue {
@@ -42,13 +45,13 @@ impl fmt::Debug for RequestQueue {
 impl RequestQueue {
     /// Save the request at the end of this queue.
     #[tracing::instrument(level = "trace")]
-    pub fn insert(&mut self, id: MessageId) {
-        self.inner.push_back(id);
+    pub fn insert(&mut self, message_id: MessageId, session_id: SessionId) {
+        self.inner.push_back((message_id, session_id));
     }
 
-    /// Retrieve and remove a requests from the front of this queue.
+    /// Retrieve and remove a request from the front of this queue.
     #[tracing::instrument(level = "trace")]
-    pub fn get(&mut self) -> Result<MessageId, RequestQueueEmpty> {
+    pub fn get(&mut self) -> Result<(MessageId, SessionId), RequestQueueEmpty> {
         self.inner.pop_front().ok_or(RequestQueueEmpty)
     }
 }

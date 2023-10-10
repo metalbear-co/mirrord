@@ -24,7 +24,7 @@ use crate::{
     background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
     protocol::{
         IncomingRequest, LocalMessage, MessageId, PortSubscribe, PortUnsubscribe,
-        ProxyToLayerMessage,
+        ProxyToLayerMessage, SessionId,
     },
     request_queue::{RequestQueue, RequestQueueEmpty},
     session::ProxyMessage,
@@ -87,7 +87,7 @@ pub enum IncomingProxyError {
 
 /// Messages consumed by [`IncomingProxy`] running as a [`BackgroundTask`].
 pub enum IncomingProxyMessage {
-    LayerRequest(MessageId, IncomingRequest),
+    LayerRequest(MessageId, SessionId, IncomingRequest),
     AgentMirror(DaemonTcp),
     AgentSteal(DaemonTcp),
 }
@@ -168,6 +168,7 @@ impl IncomingProxy {
     async fn handle_port_subscribe(
         &mut self,
         message_id: MessageId,
+        session_id: SessionId,
         subscribe: PortSubscribe,
         message_bus: &mut MessageBus<Self>,
     ) {
@@ -185,10 +186,13 @@ impl IncomingProxy {
             );
 
             message_bus
-                .send(ProxyMessage::ToLayer(LocalMessage {
-                    message_id,
-                    inner: ProxyToLayerMessage::IncomingSubscribe(Ok(())),
-                }))
+                .send(ProxyMessage::ToLayer(
+                    LocalMessage {
+                        message_id,
+                        inner: ProxyToLayerMessage::IncomingSubscribe(Ok(())),
+                    },
+                    session_id,
+                ))
                 .await;
 
             return;
@@ -197,7 +201,7 @@ impl IncomingProxy {
         let msg = self.flavor.wrap_agent_subscribe(subscribe.port);
         message_bus.send(ProxyMessage::ToAgent(msg)).await;
 
-        self.subscribe_reqs.insert(message_id);
+        self.subscribe_reqs.insert(message_id, session_id);
     }
 
     /// Sends a request to the agent to stop sending incoming connections for the specified port.
@@ -322,13 +326,16 @@ impl IncomingProxy {
                 self.txs_raw.insert(id, interceptor);
             }
             DaemonTcp::SubscribeResult(res) => {
-                let message_id = self.subscribe_reqs.get()?;
+                let (message_id, session_id) = self.subscribe_reqs.get()?;
 
                 message_bus
-                    .send(ProxyMessage::ToLayer(LocalMessage {
-                        message_id,
-                        inner: ProxyToLayerMessage::IncomingSubscribe(res.map(|_| ())),
-                    }))
+                    .send(ProxyMessage::ToLayer(
+                        LocalMessage {
+                            message_id,
+                            inner: ProxyToLayerMessage::IncomingSubscribe(res.map(|_| ())),
+                        },
+                        session_id,
+                    ))
                     .await;
             }
         }
@@ -350,8 +357,8 @@ impl BackgroundTask for IncomingProxy {
                         tracing::trace!("message bus closed, exiting");
                         break Ok(());
                     },
-                    Some(IncomingProxyMessage::LayerRequest(id, req)) => match req {
-                        IncomingRequest::PortSubscribe(subscribe) => self.handle_port_subscribe(id, subscribe, message_bus).await,
+                    Some(IncomingProxyMessage::LayerRequest(message_id, session_id, req)) => match req {
+                        IncomingRequest::PortSubscribe(subscribe) => self.handle_port_subscribe(message_id, session_id, subscribe, message_bus).await,
                         IncomingRequest::PortUnsubscribe(unsubscribe) => self.handle_port_unsubscribe(unsubscribe, message_bus).await,
                     },
                     Some(IncomingProxyMessage::AgentMirror(msg)) => {
