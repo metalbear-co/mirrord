@@ -38,7 +38,7 @@ use crate::{
 ///
 /// Used by [`connect_outgoing`] to retrieve the hostname from the address that the user called
 /// [`connect`] with, so we can resolve it locally when neccessary.
-pub(super) static REMOTE_DNS_REVERSE_MAPPING: LazyLock<DashMap<SocketAddr, String>> =
+pub(super) static REMOTE_DNS_REVERSE_MAPPING: LazyLock<DashMap<IpAddr, String>> =
     LazyLock::new(|| DashMap::with_capacity(8));
 
 /// Hostname initialized from the agent with [`gethostname`].
@@ -732,15 +732,12 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
 /// Handles the remote communication part of [`getaddrinfo`], call this if you want to resolve a DNS
 /// through the agent, but don't need to deal with all the [`libc::getaddrinfo`] stuff.
 #[tracing::instrument(level = "trace", ret)]
-pub(super) fn remote_getaddrinfo(
-    node: String,
-    service: u16,
-) -> HookResult<Vec<(String, SocketAddr)>> {
+pub(super) fn remote_getaddrinfo(node: String) -> HookResult<Vec<(String, IpAddr)>> {
     let addr_info_list = common::make_proxy_request_with_response(GetAddrInfoRequest { node })?.0?;
 
     Ok(addr_info_list
         .into_iter()
-        .map(|LookupRecord { name, ip }| (name, SocketAddr::from((ip, service))))
+        .map(|LookupRecord { name, ip }| (name, ip))
         .collect())
 }
 
@@ -802,7 +799,7 @@ pub(super) fn getaddrinfo(
     let service = service.map_or(0, |s| s.parse().unwrap_or_default());
 
     // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
-    let result = remote_getaddrinfo(node.clone(), service)?
+    let result = remote_getaddrinfo(node.clone())?
         .into_iter()
         .map(|(name, address)| {
             // Cache the resolved hosts to use in the outgoing traffic filter.
@@ -810,7 +807,7 @@ pub(super) fn getaddrinfo(
                 let _ = REMOTE_DNS_REVERSE_MAPPING.insert(address, node.clone());
             }
 
-            let rawish_sock_addr = SockAddr::from(address);
+            let rawish_sock_addr = SockAddr::from(SocketAddr::new(address, service));
             let ai_addrlen = rawish_sock_addr.len();
             let ai_family = rawish_sock_addr.family() as _;
 

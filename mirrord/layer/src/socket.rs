@@ -196,8 +196,7 @@ enum ConnectionThrough {
     Remote(SocketAddr),
 }
 
-/// Holds the [`OutgoingFilter`]s set up by the user, after a little bit of checking, see
-/// [`OutgoingSelector::new`].
+/// Holds the [`OutgoingFilter`]s set up by the user.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) enum OutgoingSelector {
     #[default]
@@ -390,59 +389,58 @@ impl OutgoingSelector {
         };
 
         // Resolves a list of host names, depending on how the user sets the remote `dns` feature.
-        let resolve = |unresolved: HashSet<(ProtocolFilter, String, u16)>| {
-            const USUAL_AMOUNT_OF_ADDRESSES: usize = 8;
-            let amount_of_addresses = unresolved.len() * USUAL_AMOUNT_OF_ADDRESSES;
-            let mut unresolved = unresolved.into_iter();
+        let resolve =
+            |unresolved: HashSet<(ProtocolFilter, String, u16)>| {
+                const USUAL_AMOUNT_OF_ADDRESSES: usize = 8;
+                let amount_of_addresses = unresolved.len() * USUAL_AMOUNT_OF_ADDRESSES;
+                let mut unresolved = unresolved.into_iter();
 
-            let resolved =
-                if *REMOTE_DNS.get().expect("REMOTE_DNS should be set by now!") && REMOTE {
-                    // Resolve DNS through the agent.
-                    unresolved
-                        .try_fold(
-                            HashSet::with_capacity(amount_of_addresses),
-                            |mut resolved, (protocol, name, port)| {
-                                let addresses = remote_getaddrinfo(name, port)?.into_iter().map(
-                                    |(_, address)| OutgoingFilter {
-                                        protocol,
-                                        address: AddressFilter::Socket(SocketAddr::new(
-                                            address.ip(),
-                                            port,
-                                        )),
-                                    },
-                                );
+                let resolved =
+                    if *REMOTE_DNS.get().expect("REMOTE_DNS should be set by now!") && REMOTE {
+                        // Resolve DNS through the agent.
+                        unresolved
+                            .try_fold(
+                                HashSet::with_capacity(amount_of_addresses),
+                                |mut resolved, (protocol, name, port)| {
+                                    let addresses = remote_getaddrinfo(name)?.into_iter().map(
+                                        |(_, address)| OutgoingFilter {
+                                            protocol,
+                                            address: AddressFilter::Socket(SocketAddr::new(
+                                                address, port,
+                                            )),
+                                        },
+                                    );
 
-                                resolved.extend(addresses);
-                                Ok::<_, HookError>(resolved)
-                            },
-                        )?
-                        .into_iter()
-                } else {
-                    // Resolve DNS locally.
-                    unresolved
-                        .try_fold(
-                            HashSet::with_capacity(amount_of_addresses),
-                            |mut resolved: HashSet<OutgoingFilter>, (protocol, name, port)| {
-                                let addresses =
-                                    format!("{name}:{port}").to_socket_addrs()?.map(|address| {
-                                        OutgoingFilter {
+                                    resolved.extend(addresses);
+                                    Ok::<_, HookError>(resolved)
+                                },
+                            )?
+                            .into_iter()
+                    } else {
+                        // Resolve DNS locally.
+                        unresolved
+                            .try_fold(
+                                HashSet::with_capacity(amount_of_addresses),
+                                |mut resolved: HashSet<OutgoingFilter>, (protocol, name, port)| {
+                                    let addresses = format!("{name}:{port}")
+                                        .to_socket_addrs()?
+                                        .map(|address| OutgoingFilter {
                                             protocol,
                                             address: AddressFilter::Socket(SocketAddr::new(
                                                 address.ip(),
                                                 port,
                                             )),
-                                        }
-                                    });
+                                        });
 
-                                resolved.extend(addresses);
-                                Ok::<_, HookError>(resolved)
-                            },
-                        )?
-                        .into_iter()
-                };
+                                    resolved.extend(addresses);
+                                    Ok::<_, HookError>(resolved)
+                                },
+                            )?
+                            .into_iter()
+                    };
 
-            Ok::<_, HookError>(resolved)
-        };
+                Ok::<_, HookError>(resolved)
+            };
 
         match self {
             OutgoingSelector::Unfiltered => Ok(HashSet::new()),
@@ -473,7 +471,7 @@ impl OutgoingSelector {
     #[tracing::instrument(level = "trace", ret)]
     fn get_local_address_to_connect(address: SocketAddr) -> Detour<ConnectionThrough> {
         if let Some((cached_hostname, port)) = REMOTE_DNS_REVERSE_MAPPING
-            .get(&SocketAddr::from((address.ip(), 0)))
+            .get(&address.ip())
             .map(|addr| (addr.value().clone(), address.port()))
         {
             let _guard = DetourGuard::new();
@@ -551,8 +549,7 @@ impl ProtocolExt for Protocol {
     }
 }
 
-/// Trait that expands `std` and `socket2` sockets.
-pub(crate) trait SocketAddrExt {
+pub trait SocketAddrExt {
     /// Converts a raw [`sockaddr`] pointer into a more _Rusty_ type
     fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<Self>
     where
