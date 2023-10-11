@@ -7,7 +7,6 @@ use core::ffi::{c_size_t, c_ssize_t};
 /// that is not being hooked (`strace` the program to check).
 use std::{os::unix::io::RawFd, ptr, slice, time::Duration};
 
-#[cfg(target_os = "linux")]
 use errno::{set_errno, Errno};
 use libc::{
     self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
