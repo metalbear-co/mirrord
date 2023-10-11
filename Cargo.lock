@@ -3082,7 +3082,7 @@ dependencies = [
 
 [[package]]
 name = "issue2001"
-version = "3.71.1"
+version = "3.71.2"
 dependencies = [
  "libc",
 ]
