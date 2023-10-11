@@ -2,23 +2,57 @@ use std::{collections::HashMap, fmt, time::Duration};
 
 use mirrord_config::LayerConfig;
 use mirrord_protocol::{ClientMessage, ConnectionId, DaemonMessage, CLIENT_READY_FOR_LOGS};
+use thiserror::Error;
 use tokio::{net::TcpStream, time};
 
 use crate::{
-    agent_conn::{AgentConnectInfo, AgentConnection},
+    agent_conn::{AgentClosedConnection, AgentConnectInfo, AgentConnection, AgentConnectionError},
     background_tasks::{
         BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
     },
-    error::{IntProxyError, Result},
+    codec::CodecError,
     layer_conn::LayerConnection,
-    ping_pong::{AgentMessageNotification, PingPong},
+    ping_pong::{AgentMessageNotification, PingPong, PingPongError},
     protocol::{LayerToProxyMessage, LocalMessage, ProxyToLayerMessage, SessionId, NOT_A_RESPONSE},
     proxies::{
-        incoming::{IncomingProxy, IncomingProxyMessage},
-        outgoing::{OutgoingProxy, OutgoingProxyMessage},
+        incoming::{IncomingProxy, IncomingProxyError, IncomingProxyMessage},
+        outgoing::{OutgoingProxy, OutgoingProxyError, OutgoingProxyMessage},
         simple::{SimpleProxy, SimpleProxyMessage},
     },
+    request_queue::RequestQueueEmpty,
 };
+
+#[derive(Error, Debug)]
+pub enum ProxySessionError {
+    #[error("connecting with agent failed: {0}")]
+    AgentConnectFailed(#[from] AgentConnectionError),
+    #[error("agent closed connection with error: {0}")]
+    AgentFailed(String),
+    #[error("agent sent unexpected message: {0:?}")]
+    UnexpectedAgentMessage(DaemonMessage),
+    #[error("layer sent unexpected message: {0:?}")]
+    UnexpectedLayerMessage(LayerToProxyMessage),
+
+    #[error("background task {0} exited unexpectedly")]
+    TaskExit(MainTaskId),
+    #[error("background task {0} panicked")]
+    TaskPanic(MainTaskId),
+
+    #[error("{0}")]
+    AgentConnectionError(#[from] AgentClosedConnection),
+    #[error("ping pong failed: {0}")]
+    PingPong(#[from] PingPongError),
+    #[error("layer connection failed: {0}")]
+    LayerConnectionError(#[from] CodecError),
+    #[error("simple proxy failed: {0}")]
+    SimpleProxy(#[from] RequestQueueEmpty),
+    #[error("outgoing proxy failed: {0}")]
+    OutgoingProxy(#[from] OutgoingProxyError),
+    #[error("incoming proxy failed: {0}")]
+    IncomingProxy(#[from] IncomingProxyError),
+}
+
+pub type Result<T> = core::result::Result<T, ProxySessionError>;
 
 /// Enumerated ids of main [`BackgroundTask`](crate::background_tasks::BackgroundTask)s used by
 /// [`ProxySession`].
@@ -89,7 +123,7 @@ struct Handlers {
 /// the [`IntProxy`].
 pub struct ProxySession {
     handlers: Handlers,
-    background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
+    background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxySessionError>,
 }
 
 impl ProxySession {
@@ -105,7 +139,7 @@ impl ProxySession {
     ) -> Result<Self> {
         let agent_conn = AgentConnection::new(config, agent_connect_info).await?;
 
-        let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
+        let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxySessionError> =
             Default::default();
         let agent =
             background_tasks.register(agent_conn, MainTaskId::AgentConnection, Self::CHANNEL_SIZE);
@@ -162,7 +196,7 @@ impl ProxySession {
     async fn handle_task_update(
         &mut self,
         task_id: MainTaskId,
-        update: TaskUpdate<ProxyMessage, IntProxyError>,
+        update: TaskUpdate<ProxyMessage, ProxySessionError>,
     ) -> Result<()> {
         match (task_id, update) {
             (MainTaskId::LayerConnection(id), TaskUpdate::Finished(Ok(()))) => {
@@ -171,7 +205,7 @@ impl ProxySession {
             (task_id, TaskUpdate::Finished(res)) => match res {
                 Ok(()) => {
                     tracing::error!("task {task_id} finished unexpectedly");
-                    return Err(IntProxyError::TaskExit(task_id));
+                    return Err(ProxySessionError::TaskExit(task_id));
                 }
                 Err(TaskError::Error(e)) => {
                     tracing::error!("task {task_id} failed: {e}");
@@ -179,7 +213,7 @@ impl ProxySession {
                 }
                 Err(TaskError::Panic) => {
                     tracing::error!("task {task_id} panicked");
-                    return Err(IntProxyError::TaskPanic(task_id));
+                    return Err(ProxySessionError::TaskPanic(task_id));
                 }
             },
             (_, TaskUpdate::Message(msg)) => self.handle(msg).await?,
@@ -200,7 +234,7 @@ impl ProxySession {
 
         match message {
             DaemonMessage::Pong => {}
-            DaemonMessage::Close(reason) => return Err(IntProxyError::AgentFailed(reason)),
+            DaemonMessage::Close(reason) => return Err(ProxySessionError::AgentFailed(reason)),
             DaemonMessage::TcpOutgoing(msg) => {
                 self.handlers
                     .outgoing
@@ -253,7 +287,7 @@ impl ProxySession {
                 }
             }
             other => {
-                return Err(IntProxyError::UnexpectedAgentMessage(other));
+                return Err(ProxySessionError::UnexpectedAgentMessage(other));
             }
         }
 
@@ -307,7 +341,7 @@ impl ProxySession {
                     ))
                     .await
             }
-            other => return Err(IntProxyError::UnexpectedLayerMessage(other)),
+            other => return Err(ProxySessionError::UnexpectedLayerMessage(other)),
         }
 
         Ok(())
@@ -317,7 +351,7 @@ impl ProxySession {
 pub struct NewSessionStream(pub TcpStream, pub SessionId);
 
 impl BackgroundTask for ProxySession {
-    type Error = IntProxyError;
+    type Error = ProxySessionError;
     type MessageIn = NewSessionStream;
     type MessageOut = ();
 

@@ -14,7 +14,6 @@ use std::{
     env,
     io::Write,
     net::{Ipv4Addr, SocketAddrV4},
-    sync::Arc,
     time::Duration,
 };
 
@@ -186,8 +185,9 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
         detach_io()?;
     }
 
-    let proxy = Arc::new(IntProxy::new(config, agent_connect_info, listener));
-    proxy.run().await?;
+    IntProxy::new(config, agent_connect_info, listener)
+        .run()
+        .await?;
 
     main_connection_cancellation_token.cancel();
 
