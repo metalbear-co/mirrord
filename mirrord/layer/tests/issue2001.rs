@@ -29,12 +29,10 @@ async fn test_issue2001(
         )
         .await;
 
-    let fd = 1;
-
     layer_connection
         .expect_file_open_with_options(
             "/tmp",
-            fd,
+            10,
             OpenOptionsInternal {
                 read: true,
                 write: false,
@@ -48,22 +46,22 @@ async fn test_issue2001(
 
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 1 }))
+        ClientMessage::FileRequest(FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 10 }))
     );
 
     layer_connection
         .codec
         .send(DaemonMessage::File(FileResponse::OpenDir(Ok(
-            OpenDirResponse { fd: 2 },
+            OpenDirResponse { fd: 11 },
         ))))
         .await
         .unwrap();
 
-    layer_connection.expect_file_close(1).await;
+    layer_connection.expect_file_close(10).await;
 
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 2 })),
+        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 11 })),
     );
 
     layer_connection
@@ -83,7 +81,7 @@ async fn test_issue2001(
 
     assert_eq!(
         layer_connection.codec.next().await.unwrap().unwrap(),
-        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 2 })),
+        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 11 })),
     );
 
     layer_connection

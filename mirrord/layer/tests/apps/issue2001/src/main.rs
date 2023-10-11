@@ -8,8 +8,10 @@ fn main() {
 
     unsafe {
         let dir = libc::opendir(dir_path.into_raw() as *const _);
+        assert!(!dir.is_null());
 
         let dirent_1 = libc::readdir(dir);
+        assert!(!dirent_1.is_null());
         let name = CStr::from_ptr((*dirent_1).d_name.as_ptr())
             .to_str()
             .unwrap();
@@ -19,7 +21,7 @@ fn main() {
         let dirent_2 = libc::readdir64(dir);
         #[cfg(target_os = "macos")]
         let dirent_2 = libc::readdir(dir);
-
+        assert!(!dirent_2.is_null());
         let name = CStr::from_ptr((*dirent_2).d_name.as_ptr())
             .to_str()
             .unwrap();
