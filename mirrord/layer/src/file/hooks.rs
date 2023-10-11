@@ -1129,7 +1129,7 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             hook_manager,
             "readdir",
             readdir_detour,
-            FnReaddir_r,
+            FnReaddir,
             FN_READDIR
         );
         replace!(
