@@ -10,7 +10,7 @@ use rand::distributions::{Alphanumeric, DistString};
 use tokio::sync::oneshot;
 use tracing::{error, trace};
 
-use super::{filter::FILE_FILTER, hooks::FN_OPEN, *};
+use super::{filter::FILE_FILTER, hooks::FN_OPEN, open_dirs::OPEN_DIRS, *};
 use crate::{
     common::blocking_send_hook_message,
     detour::{Bypass, Detour},
@@ -240,39 +240,6 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
     OPEN_FILES.remove(&fd);
 
     Detour::Success(local_dir_fd as usize)
-}
-
-// fetches the current entry in the directory stream created by `fdopendir`
-#[tracing::instrument(level = "trace")]
-pub(crate) fn readdir_r(dir_stream: usize) -> Detour<Option<DirEntryInternal>> {
-    let remote_fd = *OPEN_DIRS
-        .get(&dir_stream)
-        .ok_or(Bypass::LocalDirStreamNotFound(dir_stream))?;
-
-    let (dir_channel_tx, dir_channel_rx) = oneshot::channel();
-
-    let requesting_dir = ReadDir {
-        remote_fd,
-        dir_channel_tx,
-    };
-
-    blocking_send_file_message(FileOperation::ReadDir(requesting_dir))?;
-
-    let ReadDirResponse { direntry } = dir_channel_rx.blocking_recv()??;
-    Detour::Success(direntry)
-}
-
-#[tracing::instrument(level = "trace")]
-pub(crate) fn closedir(dir_stream: usize) -> Detour<c_int> {
-    let remote_fd = *OPEN_DIRS
-        .get(&dir_stream)
-        .ok_or(Bypass::LocalDirStreamNotFound(dir_stream))?;
-
-    let requesting_dir = CloseDir { fd: remote_fd };
-
-    blocking_send_file_message(FileOperation::CloseDir(requesting_dir))?;
-
-    Detour::Success(0)
 }
 
 #[tracing::instrument(level = "trace")]

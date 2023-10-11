@@ -40,6 +40,7 @@ use crate::{
 
 pub(crate) mod filter;
 pub(crate) mod hooks;
+pub(crate) mod open_dirs;
 pub(crate) mod ops;
 
 type LocalFd = RawFd;
@@ -56,9 +57,6 @@ pub(crate) struct DirStream {
 /// Opens file `A`, receives fd 1, then dups, receives 2 - both stay open, until both are closed.
 /// Previously in such scenario we would close the remote, causing issues.
 pub(crate) static OPEN_FILES: LazyLock<DashMap<LocalFd, Arc<ops::RemoteFile>>> =
-    LazyLock::new(|| DashMap::with_capacity(4));
-
-pub(crate) static OPEN_DIRS: LazyLock<DashMap<DirStreamFd, RemoteFd>> =
     LazyLock::new(|| DashMap::with_capacity(4));
 
 /// Extension trait for [`OpenOptionsInternal`], used to convert between `libc`-ish open options and
