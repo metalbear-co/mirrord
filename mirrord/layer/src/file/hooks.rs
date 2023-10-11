@@ -1127,6 +1127,13 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         );
         replace!(
             hook_manager,
+            "readdir",
+            readdir_detour,
+            FnReaddir_r,
+            FN_READDIR
+        );
+        replace!(
+            hook_manager,
             "opendir$INODE64",
             opendir_detour,
             FnOpendir,
