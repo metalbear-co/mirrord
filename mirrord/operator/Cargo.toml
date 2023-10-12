@@ -69,5 +69,5 @@ serde_yaml = { version = "0.9", optional = true }
 thiserror.workspace = true
 semver.workspace = true
 tokio = { workspace = true, optional = true }
-tokio-tungstenite = { version = "0.19", optional = true }
+tokio-tungstenite = { version = "0.20.1", optional = true }
 tracing = { workspace = true, optional = true }
