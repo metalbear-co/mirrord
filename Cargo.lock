@@ -513,6 +513,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-socks5"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77f634add2445eb2c1f785642a67ca1073fedd71e73dc3ca69435ef9b9bdedc7"
+dependencies = [
+ "async-trait",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.73"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2818,6 +2829,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper-socks2"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc38166fc2732d450e9372388d269eb38ff0b75a3cfb4c542e65b2f6893629c4"
+dependencies = [
+ "async-socks5",
+ "futures",
+ "http",
+ "hyper 0.14.27",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "hyper-timeout"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3171,20 +3196,17 @@ dependencies = [
 
 [[package]]
 name = "k8s-openapi"
-version = "0.18.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd990069640f9db34b3b0f7a1afc62a05ffaa3be9b66aa3c313f58346df7f788"
+checksum = "edc3606fd16aca7989db2f84bb25684d0270c6d6fa1dbcd0025af7b4130523a6"
 dependencies = [
  "base64 0.21.4",
  "bytes",
  "chrono",
- "http",
- "percent-encoding",
  "schemars",
  "serde",
  "serde-value",
  "serde_json",
- "url",
 ]
 
 [[package]]
@@ -3204,9 +3226,8 @@ checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
 
 [[package]]
 name = "kube"
-version = "0.84.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14bd236a6f6ddeac3fefa2863eb4e363cb3a2c49d66619e181b5b8f8f0787575"
+version = "0.86.0"
+source = "git+https://github.com/Razz4780/kube?branch=support_socks5_proxy#c75200784b2a64a9c0fa4f45815f379aa41d1608"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -3217,26 +3238,26 @@ dependencies = [
 
 [[package]]
 name = "kube-client"
-version = "0.84.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04a28620131ca89b2509e52f5e1b71bfa3e61a50321836b2ae373bc18e0309e6"
+version = "0.86.0"
+source = "git+https://github.com/Razz4780/kube?branch=support_socks5_proxy#c75200784b2a64a9c0fa4f45815f379aa41d1608"
 dependencies = [
  "base64 0.20.0",
  "bytes",
  "chrono",
- "dirs-next",
  "either",
  "form_urlencoded",
  "futures",
+ "home",
  "http",
  "http-body 0.4.5",
  "hyper 0.14.27",
  "hyper-rustls 0.24.1",
+ "hyper-socks2",
  "hyper-timeout",
  "jsonpath_lib",
  "k8s-openapi",
  "kube-core",
- "pem 1.1.1",
+ "pem 3.0.2",
  "pin-project",
  "rand",
  "rustls 0.21.7",
@@ -3247,7 +3268,7 @@ dependencies = [
  "serde_yaml",
  "thiserror",
  "tokio",
- "tokio-tungstenite 0.19.0",
+ "tokio-tungstenite 0.20.1",
  "tokio-util",
  "tower",
  "tower-http",
@@ -3256,9 +3277,8 @@ dependencies = [
 
 [[package]]
 name = "kube-core"
-version = "0.84.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8227a989f1eeee3bcbf045165d6aca462af3744ecd4dfdcfba81051fb7de428e"
+version = "0.86.0"
+source = "git+https://github.com/Razz4780/kube?branch=support_socks5_proxy#c75200784b2a64a9c0fa4f45815f379aa41d1608"
 dependencies = [
  "chrono",
  "form_urlencoded",
@@ -3274,9 +3294,8 @@ dependencies = [
 
 [[package]]
 name = "kube-derive"
-version = "0.84.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19d227fcf3e12f53ea1a38d4766a8c29f8b27795579e4146464effb88d52dd99"
+version = "0.86.0"
+source = "git+https://github.com/Razz4780/kube?branch=support_socks5_proxy#c75200784b2a64a9c0fa4f45815f379aa41d1608"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -3287,15 +3306,15 @@ dependencies = [
 
 [[package]]
 name = "kube-runtime"
-version = "0.84.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6834a4a1f53a8528d5f346cdd141a77dbda31beb33dab4bf24fa4ecf6c508744"
+version = "0.86.0"
+source = "git+https://github.com/Razz4780/kube?branch=support_socks5_proxy#c75200784b2a64a9c0fa4f45815f379aa41d1608"
 dependencies = [
  "ahash",
  "async-trait",
  "backoff",
  "derivative",
  "futures",
+ "hashbrown 0.14.1",
  "json-patch",
  "k8s-openapi",
  "kube-client",
@@ -3916,7 +3935,7 @@ dependencies = [
  "serde_yaml",
  "thiserror",
  "tokio",
- "tokio-tungstenite 0.19.0",
+ "tokio-tungstenite 0.20.1",
  "tracing",
 ]
 
@@ -4383,6 +4402,16 @@ name = "pem"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b13fe415cdf3c8e44518e18a7c95a13431d9bdf6d15367d82b23c377fdd441a"
+dependencies = [
+ "base64 0.21.4",
+ "serde",
+]
+
+[[package]]
+name = "pem"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3163d2912b7c3b52d651a055f2c7eec9ba5cd22d26ef75b8dd3a59980b185923"
 dependencies = [
  "base64 0.21.4",
  "serde",
