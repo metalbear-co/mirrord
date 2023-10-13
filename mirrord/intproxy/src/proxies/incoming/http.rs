@@ -1,24 +1,72 @@
-use std::future::Future;
+use std::convert::Infallible;
 
-use hyper::{body::Incoming, Response};
+use bytes::Bytes;
+use http_body_util::combinators::BoxBody;
+use hyper::{
+    body::Incoming,
+    client::conn::{http1, http2},
+    Response, Version,
+};
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use mirrord_protocol::tcp::HttpRequestFallback;
 use tokio::net::TcpStream;
 
-pub mod v1;
-pub mod v2;
+use super::http_interceptor::HttpInterceptorError;
 
 /// Handles the differences between hyper's HTTP/1 and HTTP/2 connections.
-///
-/// Thanks to this trait being implemented for both [`v1::HttpV1Connector`] and
-/// [`v2::HttpV2Connector`], we can have most of the implementation for dealing with requests in
-/// [`HttpInterceptor`](super::http_interceptor::HttpInterceptor).
-pub trait HttpConnector: Sized {
-    /// Calls the appropriate `HTTP/V` `handshake` method and returns a new connector.
-    fn handshake(target_stream: TcpStream) -> impl Future<Output = hyper::Result<Self>> + Send;
+pub enum HttpConnector {
+    V1(http1::SendRequest<BoxBody<Bytes, Infallible>>),
+    V2(http2::SendRequest<BoxBody<Bytes, Infallible>>),
+}
 
-    /// Sends the [`HttpRequestFallback`] to its destination and returns the response.
-    fn send_request(
+impl HttpConnector {
+    pub async fn handshake(
+        version: Version,
+        target_stream: TcpStream,
+    ) -> Result<Self, HttpInterceptorError> {
+        match version {
+            Version::HTTP_2 => {
+                let (sender, connection) =
+                    http2::handshake(TokioExecutor::default(), TokioIo::new(target_stream)).await?;
+                tokio::spawn(connection);
+
+                Ok(Self::V2(sender))
+            }
+
+            Version::HTTP_3 => Err(HttpInterceptorError::UnsupportedHttpVersion(version)),
+
+            _http_v1 => {
+                let (sender, connection) = http1::handshake(TokioIo::new(target_stream)).await?;
+                tokio::spawn(connection);
+
+                Ok(Self::V1(sender))
+            }
+        }
+    }
+
+    pub async fn send_request(
         &mut self,
-        request: HttpRequestFallback,
-    ) -> impl Future<Output = hyper::Result<Response<Incoming>>> + Send;
+        req: HttpRequestFallback,
+    ) -> Result<Response<Incoming>, HttpInterceptorError> {
+        match self {
+            Self::V1(sender) => {
+                // Solves a "connection was not ready" client error.
+                // https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/barbara_tries_unix_socket.html#the-single-magical-line
+                sender.ready().await?;
+                sender
+                    .send_request(req.into_hyper())
+                    .await
+                    .map_err(Into::into)
+            }
+            Self::V2(sender) => {
+                // Solves a "connection was not ready" client error.
+                // https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/barbara_tries_unix_socket.html#the-single-magical-line
+                sender.ready().await?;
+                sender
+                    .send_request(req.into_hyper())
+                    .await
+                    .map_err(Into::into)
+            }
+        }
+    }
 }

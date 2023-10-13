@@ -22,8 +22,8 @@ pub struct MessageBus<T: BackgroundTask> {
 
 impl<T: BackgroundTask> MessageBus<T> {
     /// Attempts to send a message to this task's parent.
-    pub async fn send(&self, msg: T::MessageOut) {
-        let _ = self.tx.send(msg).await;
+    pub async fn send<M: Into<T::MessageOut>>(&self, msg: M) {
+        let _ = self.tx.send(msg.into()).await;
     }
 
     /// Receives a message from this task's parent.
@@ -91,7 +91,7 @@ where
     /// # Panics
     ///
     /// This method panics when attempting to register a task with a duplicate id.
-    pub fn register<T>(&mut self, task: T, id: Id, channel_size: usize) -> TaskSender<T::MessageIn>
+    pub fn register<T>(&mut self, task: T, id: Id, channel_size: usize) -> TaskSender<T>
     where
         T: 'static + BackgroundTask<MessageOut = MOut> + Send,
         Err: From<T::Error>,
@@ -183,11 +183,11 @@ pub enum TaskUpdate<MOut, Err> {
 /// A struct that can be used to send messages to a [`BackgroundTask`] registered in the
 /// [`BackgroundTasks`] struct. Dropping this sender will close the channel of messages consumed by
 /// the task (see [`MessageBus`]). This should trigger task exit.
-pub struct TaskSender<M>(Sender<M>);
+pub struct TaskSender<T: BackgroundTask>(Sender<T::MessageIn>);
 
-impl<M> TaskSender<M> {
+impl<T: BackgroundTask> TaskSender<T> {
     /// Attempt to send a message to the task.
-    pub async fn send(&self, message: M) {
-        let _ = self.0.send(message).await;
+    pub async fn send<M: Into<T::MessageIn>>(&self, msg: M) {
+        let _ = self.0.send(msg.into()).await;
     }
 }

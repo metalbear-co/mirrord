@@ -11,9 +11,10 @@ use thiserror::Error;
 use self::interceptor::Interceptor;
 use crate::{
     background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
+    main_tasks::ToLayer,
     protocol::{
-        LayerId, LocalMessage, MessageId, NetProtocol, OutgoingConnectRequest,
-        OutgoingConnectResponse, ProxyToLayerMessage,
+        LayerId, MessageId, NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse,
+        ProxyToLayerMessage,
     },
     request_queue::{RequestQueue, RequestQueueEmpty},
     ProxyMessage,
@@ -80,7 +81,7 @@ pub struct OutgoingProxy {
     /// For [`OutgoingConnectRequest`]s related to [`NetProtocol::Stream`].
     stream_reqs: RequestQueue,
     /// [`TaskSender`]s for active [`Interceptor`] tasks.
-    txs: HashMap<InterceptorId, TaskSender<Vec<u8>>>,
+    txs: HashMap<InterceptorId, TaskSender<Interceptor>>,
     /// For managing [`Interceptor`] tasks.
     background_tasks: BackgroundTasks<InterceptorId, Vec<u8>, io::Error>,
 }
@@ -149,20 +150,19 @@ impl OutgoingProxy {
         protocol: NetProtocol,
         message_bus: &mut MessageBus<Self>,
     ) -> Result<(), OutgoingProxyError> {
-        let (message_id, session_id) = self.queue(protocol).get()?;
+        let (message_id, layer_id) = self.queue(protocol).get()?;
 
         let connect = match connect {
             Ok(connect) => connect,
             Err(e) => {
                 message_bus
-                    .send(ProxyMessage::ToLayer(
-                        LocalMessage {
-                            message_id,
-                            inner: ProxyToLayerMessage::OutgoingConnect(Err(e)),
-                        },
-                        session_id,
-                    ))
+                    .send(ToLayer {
+                        message: ProxyToLayerMessage::OutgoingConnect(Err(e)),
+                        message_id,
+                        layer_id,
+                    })
                     .await;
+
                 return Ok(());
             }
         };
@@ -189,16 +189,14 @@ impl OutgoingProxy {
         self.txs.insert(id, interceptor);
 
         message_bus
-            .send(ProxyMessage::ToLayer(
-                LocalMessage {
-                    message_id,
-                    inner: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
-                        layer_address,
-                        in_cluster_address: local_address,
-                    })),
-                },
-                session_id,
-            ))
+            .send(ToLayer {
+                message: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
+                    layer_address,
+                    in_cluster_address: local_address,
+                })),
+                message_id,
+                layer_id,
+            })
             .await;
 
         Ok(())

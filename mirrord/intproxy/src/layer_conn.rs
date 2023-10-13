@@ -8,6 +8,7 @@ use tokio::net::{
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
     codec::{self, AsyncDecoder, AsyncEncoder, CodecError},
+    main_tasks::FromLayer,
     protocol::{LayerId, LayerToProxyMessage, LocalMessage, ProxyToLayerMessage},
     ProxyMessage,
 };
@@ -17,18 +18,18 @@ use crate::{
 pub struct LayerConnection {
     layer_codec_tx: AsyncEncoder<LocalMessage<ProxyToLayerMessage>, OwnedWriteHalf>,
     layer_codec_rx: AsyncDecoder<LocalMessage<LayerToProxyMessage>, OwnedReadHalf>,
-    session_id: LayerId,
+    layer_id: LayerId,
 }
 
 impl LayerConnection {
     /// Wraps a raw [`TcpStream`] to be used as a `layer <-> proxy` connection.
-    pub fn new(stream: TcpStream, session_id: LayerId) -> Self {
+    pub fn new(stream: TcpStream, layer_id: LayerId) -> Self {
         let (layer_codec_tx, layer_codec_rx) = codec::make_async_framed(stream);
 
         Self {
             layer_codec_rx,
             layer_codec_tx,
-            session_id,
+            layer_id,
         }
     }
 
@@ -58,7 +59,7 @@ impl BackgroundTask for LayerConnection {
                         tracing::trace!("message bus closed, exiting");
                         break Ok(());
                     }
-                    Ok(Some(msg)) => message_bus.send(ProxyMessage::FromLayer(msg, self.session_id)).await,
+                    Ok(Some(msg)) => message_bus.send(FromLayer { message: msg.inner, message_id: msg.message_id, layer_id: self.layer_id }).await,
                 },
 
                 msg = message_bus.recv() => match msg {

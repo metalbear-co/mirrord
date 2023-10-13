@@ -9,7 +9,7 @@
 //! receiving a response from the agent, correct [`MessageId`] is taken from the right queue.
 //!
 //! Additionaly, single internal proxy handles multiple layer
-//! instances (coming from forks). This fifo stores their [`SessionId`]s as well.
+//! instances (coming from forks). This fifo stores their [`LayerId`]s as well.
 
 use std::{collections::VecDeque, fmt};
 
@@ -17,7 +17,7 @@ use thiserror::Error;
 
 use crate::protocol::{LayerId, MessageId};
 
-/// Erorr returned when the proxy attempts to retrieve [`MessageId`] and [`SessionId`] of a request
+/// Erorr returned when the proxy attempts to retrieve [`MessageId`] and [`LayerId`] of a request
 /// corresponding to a response received from the agent, but the [`RequestQueue`] is empty. This
 /// error should never happen.
 #[derive(Error, Debug)]
@@ -45,8 +45,8 @@ impl fmt::Debug for RequestQueue {
 impl RequestQueue {
     /// Save the request at the end of this queue.
     #[tracing::instrument(level = "trace")]
-    pub fn insert(&mut self, message_id: MessageId, session_id: LayerId) {
-        self.inner.push_back((message_id, session_id));
+    pub fn insert(&mut self, message_id: MessageId, layer_id: LayerId) {
+        self.inner.push_back((message_id, layer_id));
     }
 
     /// Retrieve and remove a request from the front of this queue.

@@ -107,10 +107,10 @@ impl AgentConnection {
 /// [`tokio::task`], which handles raw IO. The original (e.g. some IO error) is not available.
 #[derive(Error, Debug)]
 #[error("agent unexpectedly closed connection")]
-pub struct AgentClosedConnection;
+pub struct AgentChannelError;
 
 impl BackgroundTask for AgentConnection {
-    type Error = AgentClosedConnection;
+    type Error = AgentChannelError;
     type MessageIn = ClientMessage;
     type MessageOut = ProxyMessage;
 
@@ -125,7 +125,7 @@ impl BackgroundTask for AgentConnection {
                     Some(msg) => {
                         if self.agent_tx.send(msg).await.is_err() {
                             tracing::error!("failed to send message to the agent, inner task down");
-                            break Err(AgentClosedConnection);
+                            break Err(AgentChannelError);
                         }
                     }
                 },
@@ -133,7 +133,7 @@ impl BackgroundTask for AgentConnection {
                 msg = self.agent_rx.recv() => match msg {
                     None => {
                         tracing::error!("failed to receive message from the agent, inner task down");
-                        break Err(AgentClosedConnection);
+                        break Err(AgentChannelError);
                     }
                     Some(msg) => message_bus.send(ProxyMessage::FromAgent(msg)).await,
                 }

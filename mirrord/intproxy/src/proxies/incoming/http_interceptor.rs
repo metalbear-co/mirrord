@@ -1,9 +1,9 @@
 //! [`BackgroundTask`] used by [`Incoming`](super::IncomingProxy) to manage a single
 //! intercepted HTTP connection.
 
-use std::{io, marker::PhantomData, net::SocketAddr};
+use std::{io, net::SocketAddr};
 
-use hyper::StatusCode;
+use hyper::{StatusCode, Version};
 use mirrord_protocol::tcp::{
     HttpRequestFallback, HttpResponse, HttpResponseFallback, InternalHttpBody,
 };
@@ -31,31 +31,33 @@ pub enum HttpInterceptorError {
     /// The layer closed connection too soon to send a request.
     #[error("connection closed too soon")]
     ConnectionClosedTooSoon(HttpRequestFallback),
+    #[error("{0:?} is not supported")]
+    UnsupportedHttpVersion(Version),
 }
 
 /// Manages a single intercepted HTTP connection.
 /// Multiple instances are run as [`BackgroundTask`]s by one [`IncomingProxy`](super::IncomingProxy)
 /// to manage individual connections.
-pub struct HttpInterceptor<V> {
+pub struct HttpInterceptor {
     local_destination: SocketAddr,
-    _phantom: PhantomData<fn() -> V>,
+    version: Version,
 }
 
-impl<V> HttpInterceptor<V> {
+impl HttpInterceptor {
     /// Crates a new instance. This instance will send requests to the given `local_destination`.
-    pub fn new(local_destination: SocketAddr) -> Self {
+    pub fn new(local_destination: SocketAddr, version: Version) -> Self {
         Self {
             local_destination,
-            _phantom: Default::default(),
+            version,
         }
     }
 }
 
-impl<V: HttpConnector> HttpInterceptor<V> {
+impl HttpInterceptor {
     /// Prepares an HTTP connection.
-    async fn connect_to_application(&self) -> Result<V, HttpInterceptorError> {
+    async fn connect_to_application(&self) -> Result<HttpConnector, HttpInterceptorError> {
         let target_stream = self.connect_and_send_source().await?;
-        V::handshake(target_stream).await.map_err(Into::into)
+        HttpConnector::handshake(self.version, target_stream).await
     }
 
     /// Connects to the local listener and sends it encoded address of the remote peer.
@@ -75,12 +77,12 @@ impl<V: HttpConnector> HttpInterceptor<V> {
     async fn handle_response(
         &self,
         request: HttpRequestFallback,
-        response: Result<hyper::Response<hyper::body::Incoming>, hyper::Error>,
+        response: Result<hyper::Response<hyper::body::Incoming>, HttpInterceptorError>,
     ) -> Result<HttpResponseFallback, HttpInterceptorError> {
         match response {
-                Err(err) if err.is_closed() => {
+                Err(HttpInterceptorError::HyperError(e)) if e.is_closed() => {
                     tracing::warn!(
-                        "Sending request to local application failed with: {err:?}. \
+                        "Sending request to local application failed with: {e:?}. \
                         Seems like the local application closed the connection too early, so \
                         creating a new connection and trying again."
                     );
@@ -89,9 +91,9 @@ impl<V: HttpConnector> HttpInterceptor<V> {
                     Err(HttpInterceptorError::ConnectionClosedTooSoon(request))
                 }
 
-                Err(err) if err.is_parse() => {
-                    tracing::warn!("Could not parse HTTP response to filtered HTTP request, got error: {err:?}.");
-                    let body_message = format!("mirrord: could not parse HTTP response from local application - {err:?}");
+                Err(HttpInterceptorError::HyperError(e)) if e.is_parse() => {
+                    tracing::warn!("Could not parse HTTP response to filtered HTTP request, got error: {e:?}.");
+                    let body_message = format!("mirrord: could not parse HTTP response from local application - {e:?}");
                     Ok(HttpResponseFallback::response_from_request(
                         request,
                         StatusCode::BAD_GATEWAY,
@@ -161,7 +163,7 @@ impl<V: HttpConnector> HttpInterceptor<V> {
     async fn send_to_user(
         &mut self,
         request: HttpRequestFallback,
-        connector: &mut V,
+        connector: &mut HttpConnector,
     ) -> Result<HttpResponseFallback, HttpInterceptorError> {
         let response = connector.send_request(request.clone()).await;
         let response = self.handle_response(request, response).await;
@@ -182,7 +184,7 @@ impl<V: HttpConnector> HttpInterceptor<V> {
     }
 }
 
-impl<V: HttpConnector + Send> BackgroundTask for HttpInterceptor<V> {
+impl BackgroundTask for HttpInterceptor {
     type Error = HttpInterceptorError;
     type MessageIn = HttpRequestFallback;
     type MessageOut = InterceptorMessageOut;

@@ -15,16 +15,15 @@ use mirrord_protocol::{
 use thiserror::Error;
 
 use self::{
-    http::{v1::HttpV1Connector, v2::HttpV2Connector},
     http_interceptor::{HttpInterceptor, HttpInterceptorError},
     incoming_mode::{IncomingFlavorError, IncomingMode},
     raw_interceptor::{RawInterceptor, RawInterceptorError},
 };
 use crate::{
     background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
+    main_tasks::ToLayer,
     protocol::{
-        IncomingRequest, LayerId, LocalMessage, MessageId, PortSubscribe, PortUnsubscribe,
-        ProxyToLayerMessage,
+        IncomingRequest, LayerId, MessageId, PortSubscribe, PortUnsubscribe, ProxyToLayerMessage,
     },
     request_queue::{RequestQueue, RequestQueueEmpty},
     ProxyMessage,
@@ -134,9 +133,9 @@ pub struct IncomingProxy {
     /// For [`PortSubscribe`] requests.
     subscribe_reqs: RequestQueue,
     /// [`TaskSender`]s for active [`RawInterceptor`]s.
-    txs_raw: HashMap<InterceptorId, TaskSender<Vec<u8>>>,
+    txs_raw: HashMap<InterceptorId, TaskSender<RawInterceptor>>,
     /// [`TaskSender`]s for active [`HttpInterceptor`]s.
-    txs_http: HashMap<InterceptorId, TaskSender<HttpRequestFallback>>,
+    txs_http: HashMap<InterceptorId, TaskSender<HttpInterceptor>>,
     /// For managing both [`RawInterceptor`]s and [`HttpInterceptor`]s.
     background_tasks: BackgroundTasks<InterceptorId, InterceptorMessageOut, InterceptorError>,
 }
@@ -168,7 +167,7 @@ impl IncomingProxy {
     async fn handle_port_subscribe(
         &mut self,
         message_id: MessageId,
-        session_id: LayerId,
+        layer_id: LayerId,
         subscribe: PortSubscribe,
         message_bus: &mut MessageBus<Self>,
     ) {
@@ -186,13 +185,11 @@ impl IncomingProxy {
             );
 
             message_bus
-                .send(ProxyMessage::ToLayer(
-                    LocalMessage {
-                        message_id,
-                        inner: ProxyToLayerMessage::IncomingSubscribe(Ok(())),
-                    },
-                    session_id,
-                ))
+                .send(ToLayer {
+                    message_id,
+                    layer_id,
+                    message: ProxyToLayerMessage::IncomingUbsubscribe(Ok(())),
+                })
                 .await;
 
             return;
@@ -201,7 +198,7 @@ impl IncomingProxy {
         let msg = self.flavor.wrap_agent_subscribe(subscribe.port);
         message_bus.send(ProxyMessage::ToAgent(msg)).await;
 
-        self.subscribe_reqs.insert(message_id, session_id);
+        self.subscribe_reqs.insert(message_id, layer_id);
     }
 
     /// Sends a request to the agent to stop sending incoming connections for the specified port.
@@ -224,7 +221,7 @@ impl IncomingProxy {
     fn get_or_create_http_interceptor(
         &mut self,
         request: &HttpRequestFallback,
-    ) -> Result<Option<&TaskSender<HttpRequestFallback>>, IncomingProxyError> {
+    ) -> Result<Option<&TaskSender<HttpInterceptor>>, IncomingProxyError> {
         let id: InterceptorId = InterceptorId(request.connection_id());
 
         let interceptor = match self.txs_http.entry(id) {
@@ -240,23 +237,11 @@ impl IncomingProxy {
                 };
 
                 let version = request.version();
-                let interceptor = match version {
-                    hyper::Version::HTTP_2 => self.background_tasks.register(
-                        HttpInterceptor::<HttpV2Connector>::new(local_destination),
-                        InterceptorId(request.connection_id()),
-                        Self::CHANNEL_SIZE,
-                    ),
-
-                    version @ hyper::Version::HTTP_3 => {
-                        return Err(IncomingProxyError::UnsupportedHttpVersion(version))
-                    }
-
-                    _http_v1 => self.background_tasks.register(
-                        HttpInterceptor::<HttpV1Connector>::new(local_destination),
-                        InterceptorId(request.connection_id()),
-                        Self::CHANNEL_SIZE,
-                    ),
-                };
+                let interceptor = self.background_tasks.register(
+                    HttpInterceptor::new(local_destination, version),
+                    InterceptorId(request.connection_id()),
+                    Self::CHANNEL_SIZE,
+                );
 
                 e.insert(interceptor)
             }
@@ -326,16 +311,14 @@ impl IncomingProxy {
                 self.txs_raw.insert(id, interceptor);
             }
             DaemonTcp::SubscribeResult(res) => {
-                let (message_id, session_id) = self.subscribe_reqs.get()?;
+                let (message_id, layer_id) = self.subscribe_reqs.get()?;
 
                 message_bus
-                    .send(ProxyMessage::ToLayer(
-                        LocalMessage {
-                            message_id,
-                            inner: ProxyToLayerMessage::IncomingSubscribe(res.map(|_| ())),
-                        },
-                        session_id,
-                    ))
+                    .send(ToLayer {
+                        message_id,
+                        layer_id,
+                        message: ProxyToLayerMessage::IncomingSubscribe(res.map(|_| ())),
+                    })
                     .await;
             }
         }

@@ -8,7 +8,8 @@ use mirrord_protocol::{
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    protocol::{LayerId, LocalMessage, MessageId, ProxyToLayerMessage},
+    main_tasks::ToLayer,
+    protocol::{LayerId, MessageId, ProxyToLayerMessage},
     request_queue::{RequestQueue, RequestQueueEmpty},
     ProxyMessage,
 };
@@ -36,31 +37,46 @@ impl BackgroundTask for SimpleProxy {
     type MessageOut = ProxyMessage;
 
     async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), RequestQueueEmpty> {
-        loop {
-            tokio::select! {
-                msg = message_bus.recv() => match msg {
-                    None => {
-                        tracing::trace!("message bus closed, exiting");
-                        break Ok(());
-                    },
-                    Some(SimpleProxyMessage::FileReq(message_id, session_id, req)) => {
-                        self.file_reqs.insert(message_id, session_id);
-                        message_bus.send(ProxyMessage::ToAgent(ClientMessage::FileRequest(req))).await;
-                    }
-                    Some(SimpleProxyMessage::FileRes(res)) => {
-                        let (message_id, session_id) = self.file_reqs.get()?;
-                        message_bus.send(ProxyMessage::ToLayer(LocalMessage { message_id, inner: ProxyToLayerMessage::File(res) }, session_id)).await;
-                    }
-                    Some(SimpleProxyMessage::AddrInfoReq(message_id, session_id, req)) => {
-                        self.addr_info_reqs.insert(message_id, session_id);
-                        message_bus.send(ProxyMessage::ToAgent(ClientMessage::GetAddrInfoRequest(req))).await;
-                    }
-                    Some(SimpleProxyMessage::AddrInfoRes(res)) => {
-                        let (message_id, session_id) = self.addr_info_reqs.get()?;
-                        message_bus.send(ProxyMessage::ToLayer(LocalMessage { message_id, inner: ProxyToLayerMessage::GetAddrInfo(res)}, session_id)).await;
-                    }
+        while let Some(msg) = message_bus.recv().await {
+            match msg {
+                SimpleProxyMessage::FileReq(message_id, session_id, req) => {
+                    self.file_reqs.insert(message_id, session_id);
+                    message_bus
+                        .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(req)))
+                        .await;
+                }
+                SimpleProxyMessage::FileRes(res) => {
+                    let (message_id, layer_id) = self.file_reqs.get()?;
+                    message_bus
+                        .send(ToLayer {
+                            message_id,
+                            message: ProxyToLayerMessage::File(res),
+                            layer_id,
+                        })
+                        .await;
+                }
+                SimpleProxyMessage::AddrInfoReq(message_id, session_id, req) => {
+                    self.addr_info_reqs.insert(message_id, session_id);
+                    message_bus
+                        .send(ProxyMessage::ToAgent(ClientMessage::GetAddrInfoRequest(
+                            req,
+                        )))
+                        .await;
+                }
+                SimpleProxyMessage::AddrInfoRes(res) => {
+                    let (message_id, layer_id) = self.addr_info_reqs.get()?;
+                    message_bus
+                        .send(ToLayer {
+                            message_id,
+                            message: ProxyToLayerMessage::GetAddrInfo(res),
+                            layer_id,
+                        })
+                        .await;
                 }
             }
         }
+
+        tracing::trace!("message bus closed, exiting");
+        Ok(())
     }
 }
