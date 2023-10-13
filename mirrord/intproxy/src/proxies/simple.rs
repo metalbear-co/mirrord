@@ -3,12 +3,14 @@
 
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
+    file::{CloseDirRequest, CloseFileRequest, OpenDirResponse, OpenFileResponse},
     ClientMessage, FileRequest, FileResponse,
 };
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    main_tasks::ToLayer,
+    layer_resources::LayerResources,
+    main_tasks::{LayerClosed, LayerForked, ToLayer},
     protocol::{LayerId, MessageId, ProxyToLayerMessage},
     request_queue::{RequestQueue, RequestQueueEmpty},
     ProxyMessage,
@@ -19,12 +21,22 @@ pub enum SimpleProxyMessage {
     FileRes(FileResponse),
     AddrInfoReq(MessageId, LayerId, GetAddrInfoRequest),
     AddrInfoRes(GetAddrInfoResponse),
+    LayerForked(LayerForked),
+    LayerClosed(LayerClosed),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum RemoteFd {
+    File(u64),
+    Dir(u64),
 }
 
 /// For passing messages between the layer and the agent without custom internal logic.
 /// Run as a [`BackgroundTask`].
 #[derive(Default)]
 pub struct SimpleProxy {
+    /// Open remote file descriptors.
+    remote_fds: LayerResources<RemoteFd>,
     /// For [`FileRequest`]s.
     file_reqs: RequestQueue,
     /// For [`GetAddrInfoRequest`]s.
@@ -39,10 +51,68 @@ impl BackgroundTask for SimpleProxy {
     async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), RequestQueueEmpty> {
         while let Some(msg) = message_bus.recv().await {
             match msg {
+                SimpleProxyMessage::FileReq(
+                    _,
+                    layer_id,
+                    FileRequest::Close(CloseFileRequest { fd }),
+                ) => {
+                    let do_close = self.remote_fds.remove(layer_id, RemoteFd::File(fd));
+                    if do_close {
+                        message_bus
+                            .send(ClientMessage::FileRequest(FileRequest::Close(
+                                CloseFileRequest { fd },
+                            )))
+                            .await;
+                    }
+                }
+                SimpleProxyMessage::FileReq(
+                    _,
+                    layer_id,
+                    FileRequest::CloseDir(CloseDirRequest { remote_fd }),
+                ) => {
+                    let do_close = self.remote_fds.remove(layer_id, RemoteFd::Dir(remote_fd));
+                    if do_close {
+                        message_bus
+                            .send(ClientMessage::FileRequest(FileRequest::CloseDir(
+                                CloseDirRequest { remote_fd },
+                            )))
+                            .await;
+                    }
+                }
                 SimpleProxyMessage::FileReq(message_id, session_id, req) => {
                     self.file_reqs.insert(message_id, session_id);
                     message_bus
                         .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(req)))
+                        .await;
+                }
+                SimpleProxyMessage::FileRes(FileResponse::Open(Ok(OpenFileResponse { fd }))) => {
+                    let (message_id, layer_id) = self.file_reqs.get()?;
+
+                    self.remote_fds.add(layer_id, RemoteFd::File(fd));
+
+                    message_bus
+                        .send(ToLayer {
+                            message_id,
+                            message: ProxyToLayerMessage::File(FileResponse::Open(Ok(
+                                OpenFileResponse { fd },
+                            ))),
+                            layer_id,
+                        })
+                        .await;
+                }
+                SimpleProxyMessage::FileRes(FileResponse::OpenDir(Ok(OpenDirResponse { fd }))) => {
+                    let (message_id, layer_id) = self.file_reqs.get()?;
+
+                    self.remote_fds.add(layer_id, RemoteFd::Dir(fd));
+
+                    message_bus
+                        .send(ToLayer {
+                            message_id,
+                            message: ProxyToLayerMessage::File(FileResponse::OpenDir(Ok(
+                                OpenDirResponse { fd },
+                            ))),
+                            layer_id,
+                        })
                         .await;
                 }
                 SimpleProxyMessage::FileRes(res) => {
@@ -72,6 +142,21 @@ impl BackgroundTask for SimpleProxy {
                             layer_id,
                         })
                         .await;
+                }
+                SimpleProxyMessage::LayerClosed(LayerClosed { id }) => {
+                    for to_close in self.remote_fds.remove_all(id) {
+                        let req = match to_close {
+                            RemoteFd::Dir(remote_fd) => {
+                                FileRequest::CloseDir(CloseDirRequest { remote_fd })
+                            }
+                            RemoteFd::File(fd) => FileRequest::Close(CloseFileRequest { fd }),
+                        };
+
+                        message_bus.send(ClientMessage::FileRequest(req)).await;
+                    }
+                }
+                SimpleProxyMessage::LayerForked(LayerForked { child, parent }) => {
+                    self.remote_fds.clone_all(parent, child);
                 }
             }
         }

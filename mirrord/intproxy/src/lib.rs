@@ -23,6 +23,7 @@ use crate::{
     agent_conn::AgentConnectInfo,
     background_tasks::TaskError,
     error::IntProxyError,
+    main_tasks::LayerClosed,
     protocol::{LayerToProxyMessage, LocalMessage},
 };
 
@@ -32,6 +33,7 @@ pub mod codec;
 pub mod error;
 mod layer_conn;
 mod layer_initializer;
+mod layer_resources;
 mod main_tasks;
 mod ping_pong;
 pub mod protocol;
@@ -164,6 +166,11 @@ impl IntProxy {
                         child: new_layer.id,
                         parent,
                     };
+
+                    self.task_txs
+                        .simple
+                        .send(SimpleProxyMessage::LayerForked(msg))
+                        .await;
                 }
             }
             ProxyMessage::FromAgent(msg) => self.handle_agent_message(msg).await?,
@@ -196,6 +203,13 @@ impl IntProxy {
         match (task_id, update) {
             (MainTaskId::LayerConnection(LayerId(id)), TaskUpdate::Finished(Ok(()))) => {
                 tracing::trace!("layer connection {id} closed");
+
+                let msg = LayerClosed { id: LayerId(id) };
+
+                self.task_txs
+                    .simple
+                    .send(SimpleProxyMessage::LayerClosed(msg))
+                    .await;
             }
             (task_id, TaskUpdate::Finished(res)) => match res {
                 Ok(()) => {
