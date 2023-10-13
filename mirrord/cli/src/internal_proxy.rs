@@ -185,8 +185,12 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
         detach_io()?;
     }
 
-    IntProxy::new(config, agent_connect_info, listener)
-        .run()
+    let first_connection_timeout = Duration::from_secs(config.internal_proxy.start_idle_timeout);
+    let consecutive_connection_timeout = Duration::from_secs(config.internal_proxy.idle_timeout);
+
+    IntProxy::new(&config, agent_connect_info.as_ref(), listener)
+        .await?
+        .run(first_connection_timeout, consecutive_connection_timeout)
         .await?;
 
     main_connection_cancellation_token.cancel();

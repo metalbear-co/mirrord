@@ -8,20 +8,20 @@ use mirrord_protocol::{
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    protocol::{LocalMessage, MessageId, ProxyToLayerMessage, SessionId},
+    protocol::{LayerId, LocalMessage, MessageId, ProxyToLayerMessage},
     request_queue::{RequestQueue, RequestQueueEmpty},
-    session::ProxyMessage,
+    ProxyMessage,
 };
 
 pub enum SimpleProxyMessage {
-    FileReq(MessageId, SessionId, FileRequest),
+    FileReq(MessageId, LayerId, FileRequest),
     FileRes(FileResponse),
-    AddrInfoReq(MessageId, SessionId, GetAddrInfoRequest),
+    AddrInfoReq(MessageId, LayerId, GetAddrInfoRequest),
     AddrInfoRes(GetAddrInfoResponse),
 }
 
 /// For passing messages between the layer and the agent without custom internal logic.
-/// Run as a [`BackgroundTask`] by each [`ProxySession`](crate::session::ProxySession).
+/// Run as a [`BackgroundTask`].
 #[derive(Default)]
 pub struct SimpleProxy {
     /// For [`FileRequest`]s.

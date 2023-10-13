@@ -23,11 +23,11 @@ use self::{
 use crate::{
     background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
     protocol::{
-        IncomingRequest, LocalMessage, MessageId, PortSubscribe, PortUnsubscribe,
-        ProxyToLayerMessage, SessionId,
+        IncomingRequest, LayerId, LocalMessage, MessageId, PortSubscribe, PortUnsubscribe,
+        ProxyToLayerMessage,
     },
     request_queue::{RequestQueue, RequestQueueEmpty},
-    session::ProxyMessage,
+    ProxyMessage,
 };
 
 mod http;
@@ -87,13 +87,13 @@ pub enum IncomingProxyError {
 
 /// Messages consumed by [`IncomingProxy`] running as a [`BackgroundTask`].
 pub enum IncomingProxyMessage {
-    LayerRequest(MessageId, SessionId, IncomingRequest),
+    LayerRequest(MessageId, LayerId, IncomingRequest),
     AgentMirror(DaemonTcp),
     AgentSteal(DaemonTcp),
 }
 
 /// Handles logic and state of the `incoming` feature.
-/// Run as a [`BackgroundTask`] by each [`ProxySession`](crate::session::ProxySession).
+/// Run as a [`BackgroundTask`].
 ///
 /// Handles two types of communication: raw TCP and HTTP.
 ///
@@ -168,7 +168,7 @@ impl IncomingProxy {
     async fn handle_port_subscribe(
         &mut self,
         message_id: MessageId,
-        session_id: SessionId,
+        session_id: LayerId,
         subscribe: PortSubscribe,
         message_bus: &mut MessageBus<Self>,
     ) {

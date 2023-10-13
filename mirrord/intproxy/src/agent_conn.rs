@@ -22,7 +22,7 @@ use tokio::{
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    session::ProxyMessage,
+    ProxyMessage,
 };
 
 /// Errors that can occur when the internal proxy tries to establish a connection with the agent.
@@ -51,8 +51,7 @@ pub enum AgentConnectInfo {
     DirectKubernetes(AgentKubernetesConnectInfo),
 }
 
-/// Handles logic of the `proxy <-> agent` connection.
-/// Run as a [`BackgroundTask`] by each [`ProxySession`](crate::session::ProxySession).
+/// Handles logic of the `proxy <-> agent` connection as a [`BackgroundTask`].
 ///
 /// # Note
 /// The raw IO is managed in a separate [`tokio::task`] created in a different mirrord crate.

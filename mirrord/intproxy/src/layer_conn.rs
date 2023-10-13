@@ -8,21 +8,21 @@ use tokio::net::{
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
     codec::{self, AsyncDecoder, AsyncEncoder, CodecError},
-    protocol::{LayerToProxyMessage, LocalMessage, ProxyToLayerMessage, SessionId},
-    session::ProxyMessage,
+    protocol::{LayerId, LayerToProxyMessage, LocalMessage, ProxyToLayerMessage},
+    ProxyMessage,
 };
 
-/// Handles logic of the `layer <-> proxy` connection.
-/// Run as a [`BackgroundTask`] by each [`ProxySession`](crate::session::ProxySession).
+/// Handles logic of a single `layer <-> proxy` connection.
+/// Run as a [`BackgroundTask`].
 pub struct LayerConnection {
     layer_codec_tx: AsyncEncoder<LocalMessage<ProxyToLayerMessage>, OwnedWriteHalf>,
     layer_codec_rx: AsyncDecoder<LocalMessage<LayerToProxyMessage>, OwnedReadHalf>,
-    session_id: SessionId,
+    session_id: LayerId,
 }
 
 impl LayerConnection {
     /// Wraps a raw [`TcpStream`] to be used as a `layer <-> proxy` connection.
-    pub fn new(stream: TcpStream, session_id: SessionId) -> Self {
+    pub fn new(stream: TcpStream, session_id: LayerId) -> Self {
         let (layer_codec_tx, layer_codec_rx) = codec::make_async_framed(stream);
 
         Self {

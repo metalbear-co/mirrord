@@ -12,11 +12,11 @@ use self::interceptor::Interceptor;
 use crate::{
     background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
     protocol::{
-        LocalMessage, MessageId, NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse,
-        ProxyToLayerMessage, SessionId,
+        LayerId, LocalMessage, MessageId, NetProtocol, OutgoingConnectRequest,
+        OutgoingConnectResponse, ProxyToLayerMessage,
     },
     request_queue::{RequestQueue, RequestQueueEmpty},
-    session::ProxyMessage,
+    ProxyMessage,
 };
 
 mod interceptor;
@@ -60,7 +60,7 @@ impl fmt::Display for InterceptorId {
 }
 
 /// Handles logic and state of the `outgoing` feature.
-/// Run as a [`BackgroundTask`] by each [`ProxySession`](crate::session::ProxySession).
+/// Run as a [`BackgroundTask`].
 ///
 /// # Flow
 ///
@@ -209,7 +209,7 @@ impl OutgoingProxy {
     async fn handle_connect_request(
         &mut self,
         message_id: MessageId,
-        session_id: SessionId,
+        session_id: LayerId,
         request: OutgoingConnectRequest,
         message_bus: &mut MessageBus<Self>,
     ) {
@@ -224,7 +224,7 @@ impl OutgoingProxy {
 pub enum OutgoingProxyMessage {
     AgentStream(DaemonTcpOutgoing),
     AgentDatagrams(DaemonUdpOutgoing),
-    LayerConnect(OutgoingConnectRequest, MessageId, SessionId),
+    LayerConnect(OutgoingConnectRequest, MessageId, LayerId),
 }
 
 impl BackgroundTask for OutgoingProxy {

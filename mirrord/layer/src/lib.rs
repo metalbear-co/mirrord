@@ -468,8 +468,11 @@ fn layer_start(mut config: LayerConfig) {
     unsafe {
         let new_session = match PROXY_CONNECTION.take() {
             Some(conn) => {
-                let previous_id = conn.session_id();
-                tracing::trace!("starting layer <-> proxy session forked from {previous_id}");
+                let previous_id = conn.layer_id();
+                tracing::trace!(
+                    "starting layer <-> proxy session forked from {}",
+                    previous_id.0
+                );
                 ProxyConnection::new(
                     address,
                     NewSessionRequest::Forked(previous_id),

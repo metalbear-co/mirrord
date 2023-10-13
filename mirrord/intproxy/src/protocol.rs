@@ -59,7 +59,8 @@ pub enum LayerToProxyMessage {
 
 /// Unique `layer <-> proxy` session identifier.
 /// New connection is established when the layer initializes or forks.
-pub type SessionId = u64;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Encode, Decode)]
+pub struct LayerId(pub u64);
 
 /// A layer's request to start a new session with the internal proxy.
 /// Contains info about layer's state.
@@ -73,13 +74,11 @@ pub type SessionId = u64;
 /// any state.
 #[derive(Encode, Decode, Debug)]
 pub enum NewSessionRequest {
-    /// Layer initialized from its constructor and has a fresh state.
-    /// This session will be handled by a new [`ProxySession`](crate::session::ProxySession).
+    /// Layer initialized from its constructor, has a fresh state.
     New,
     /// Layer re-initialized from a [`fork`](https://man7.org/linux/man-pages/man2/fork.2.html) detour.
     /// It inherits state from its parent.
-    /// This session will be handled by parent's [`ProxySession`](crate::session::ProxySession).
-    Forked(SessionId),
+    Forked(LayerId),
 }
 
 /// Supported network protocols when intercepting outgoing connections.
@@ -153,7 +152,7 @@ pub struct PortUnsubscribe {
 pub enum ProxyToLayerMessage {
     /// A response to [`NewSessionRequest`]. Contains the identifier of the new `layer <-> proxy`
     /// session.
-    NewSession(SessionId),
+    NewSession(LayerId),
     /// A response to layer's [`FileRequest`].
     File(FileResponse),
     /// A response to layer's [`GetAddrInfoRequest`].

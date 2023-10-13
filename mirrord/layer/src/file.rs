@@ -6,10 +6,9 @@ use std::{
 use dashmap::DashMap;
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::file::{
-    AccessFileRequest, CloseDirRequest, CloseFileRequest, DirEntryInternal, FdOpenDirRequest,
-    OpenDirResponse, OpenOptionsInternal, OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse,
-    ReadFileRequest, ReadLimitedFileRequest, SeekFileRequest, WriteFileRequest,
-    WriteLimitedFileRequest, XstatFsRequest, XstatRequest,
+    AccessFileRequest, CloseFileRequest, DirEntryInternal, FdOpenDirRequest, OpenDirResponse,
+    OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest, ReadLimitedFileRequest,
+    SeekFileRequest, WriteFileRequest, WriteLimitedFileRequest, XstatFsRequest, XstatRequest,
 };
 /// File operations on remote pod.
 ///

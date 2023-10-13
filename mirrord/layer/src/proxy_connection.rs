@@ -12,8 +12,8 @@ use std::{
 use mirrord_intproxy::{
     codec::{self, CodecError, SyncDecoder, SyncEncoder},
     protocol::{
-        IsLayerRequest, IsLayerRequestWithResponse, LayerToProxyMessage, LocalMessage, MessageId,
-        NewSessionRequest, ProxyToLayerMessage, SessionId, NOT_A_RESPONSE,
+        IsLayerRequest, IsLayerRequestWithResponse, LayerId, LayerToProxyMessage, LocalMessage,
+        MessageId, NewSessionRequest, ProxyToLayerMessage, NOT_A_RESPONSE,
     },
 };
 use mirrord_protocol::LogLevel;
@@ -48,7 +48,7 @@ pub struct ProxyConnection {
     sender: Mutex<SyncEncoder<LocalMessage<LayerToProxyMessage>, TcpStream>>,
     responses: Mutex<ResponseManager>,
     next_message_id: AtomicU64,
-    session_id: SessionId,
+    layer_id: LayerId,
 }
 
 impl ProxyConnection {
@@ -73,7 +73,7 @@ impl ProxyConnection {
 
         let mut responses = ResponseManager::new(receiver);
         let response = responses.receive(0)?;
-        let ProxyToLayerMessage::NewSession(session_id) = &response else {
+        let ProxyToLayerMessage::NewSession(layer_id) = &response else {
             return Err(ProxyError::UnexpectedResponse(response));
         };
 
@@ -81,7 +81,7 @@ impl ProxyConnection {
             sender: Mutex::new(sender),
             responses: Mutex::new(responses),
             next_message_id: AtomicU64::new(1),
-            session_id: *session_id,
+            layer_id: *layer_id,
         })
     }
 
@@ -126,8 +126,8 @@ impl ProxyConnection {
         self.send(request.wrap())
     }
 
-    pub fn session_id(&self) -> SessionId {
-        self.session_id
+    pub fn layer_id(&self) -> LayerId {
+        self.layer_id
     }
 }
 

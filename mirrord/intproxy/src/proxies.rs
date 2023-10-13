@@ -1,7 +1,5 @@
-//! Sub-proxies of the internal proxy. Each of these encapsulate logic for handling a group of
-//! related requests and communicate only with the [`ProxySession`](crate::session::ProxySession).
-//! Each of those is run by every [`ProxySession`](crate::session::ProxySession) as a
-//! [`BackgroundTask`](crate::background_tasks::BackgroundTask).
+//! Sub-proxies of the internal proxy. Each of these encapsulates logic for handling a group of
+//! related requests and exchanges messages only with the [`IntProxy`](crate::IntProxy).
 
 pub mod incoming;
 pub mod outgoing;

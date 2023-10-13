@@ -13,7 +13,7 @@ use tokio::time::{self, Interval, MissedTickBehavior};
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    session::ProxyMessage,
+    ProxyMessage,
 };
 
 /// Errors that can occur when handling ping pong.
@@ -35,7 +35,7 @@ pub struct AgentMessageNotification {
 }
 
 /// Encapsulates logic of the ping pong mechanism on the proxy side.
-/// Run as a [`BackgroundTask`] by each [`ProxySession`](crate::session::ProxySession).
+/// Run as a [`BackgroundTask`].
 pub struct PingPong {
     /// How long can the `proxy <-> agent` connection remain silent.
     ticker: Interval,
