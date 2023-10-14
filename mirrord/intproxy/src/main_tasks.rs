@@ -99,13 +99,13 @@ impl fmt::Display for MainTaskId {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct LayerForked {
     pub child: LayerId,
     pub parent: LayerId,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct LayerClosed {
     pub id: LayerId,
 }

@@ -21,7 +21,8 @@ use self::{
 };
 use crate::{
     background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
-    main_tasks::ToLayer,
+    layer_resources::LayerResources,
+    main_tasks::{LayerClosed, LayerForked, ToLayer},
     protocol::{
         IncomingRequest, LayerId, MessageId, PortSubscribe, PortUnsubscribe, ProxyToLayerMessage,
     },
@@ -87,6 +88,8 @@ pub enum IncomingProxyError {
 /// Messages consumed by [`IncomingProxy`] running as a [`BackgroundTask`].
 pub enum IncomingProxyMessage {
     LayerRequest(MessageId, LayerId, IncomingRequest),
+    LayerForked(LayerForked),
+    LayerClosed(LayerClosed),
     AgentMirror(DaemonTcp),
     AgentSteal(DaemonTcp),
 }
@@ -128,8 +131,10 @@ pub enum IncomingProxyMessage {
 pub struct IncomingProxy {
     /// Mode this proxy operates in.
     flavor: IncomingMode,
-    /// Active subscriptions. Maps ports on the remote target to addresses of layer's listeners.
-    subscriptions: HashMap<Port, SocketAddr>,
+    /// For keeping track of active subscriptions across forks.
+    subscriptions: LayerResources<Port>,
+    /// Mapping from subscribed ports on the remote target to addresses of layer's listeners.
+    layer_listeners: HashMap<Port, SocketAddr>,
     /// For [`PortSubscribe`] requests.
     subscribe_reqs: RequestQueue,
     /// [`TaskSender`]s for active [`RawInterceptor`]s.
@@ -152,6 +157,7 @@ impl IncomingProxy {
         Ok(Self {
             flavor,
             subscriptions: Default::default(),
+            layer_listeners: Default::default(),
             subscribe_reqs: Default::default(),
             txs_raw: Default::default(),
             txs_http: Default::default(),
@@ -172,7 +178,7 @@ impl IncomingProxy {
         message_bus: &mut MessageBus<Self>,
     ) {
         if let Some(old_socket) = self
-            .subscriptions
+            .layer_listeners
             .insert(subscribe.port, subscribe.listening_on)
         {
             // Since this struct identifies listening sockets by their port (#1558), we can only
@@ -208,7 +214,7 @@ impl IncomingProxy {
         unsubscribe: PortUnsubscribe,
         message_bus: &mut MessageBus<Self>,
     ) {
-        if self.subscriptions.remove(&unsubscribe.port).is_some() {
+        if self.layer_listeners.remove(&unsubscribe.port).is_some() {
             let msg = self.flavor.wrap_agent_unsubscribe(unsubscribe.port);
             message_bus.send(ProxyMessage::ToAgent(msg)).await;
         }
@@ -227,7 +233,7 @@ impl IncomingProxy {
         let interceptor = match self.txs_http.entry(id) {
             Entry::Occupied(e) => e.into_mut(),
             Entry::Vacant(e) => {
-                let Some(local_destination) = self.subscriptions.get(&request.port()).copied()
+                let Some(local_destination) = self.layer_listeners.get(&request.port()).copied()
                 else {
                     tracing::trace!(
                         "received a new http request for port {} that is no longer mirrored",
@@ -288,7 +294,7 @@ impl IncomingProxy {
             }
             DaemonTcp::NewConnection(connection) => {
                 let Some(local_destination) = self
-                    .subscriptions
+                    .layer_listeners
                     .get(&connection.destination_port)
                     .copied()
                 else {
@@ -325,6 +331,21 @@ impl IncomingProxy {
 
         Ok(())
     }
+
+    fn handle_layer_fork(&mut self, msg: LayerForked) {
+        let LayerForked { child, parent } = msg;
+        self.subscriptions.clone_all(child, parent);
+    }
+
+    async fn handle_layer_close(&mut self, msg: LayerClosed, message_bus: &mut MessageBus<Self>) {
+        let LayerClosed { id } = msg;
+        for to_close in self.subscriptions.remove_all(id) {
+            self.layer_listeners.remove(&to_close);
+            message_bus
+                .send(self.flavor.wrap_agent_unsubscribe(to_close))
+                .await;
+        }
+    }
 }
 
 impl BackgroundTask for IncomingProxy {
@@ -358,6 +379,8 @@ impl BackgroundTask for IncomingProxy {
 
                         self.handle_agent_message(msg, message_bus).await?;
                     }
+                    Some(IncomingProxyMessage::LayerClosed(msg)) => self.handle_layer_close(msg, message_bus).await,
+                    Some(IncomingProxyMessage::LayerForked(msg)) => self.handle_layer_fork(msg),
                 },
 
                 Some(task_update) = self.background_tasks.next() => match task_update {

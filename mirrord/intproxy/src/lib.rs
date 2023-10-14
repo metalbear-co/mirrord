@@ -171,6 +171,10 @@ impl IntProxy {
                         .simple
                         .send(SimpleProxyMessage::LayerForked(msg))
                         .await;
+                    self.task_txs
+                        .incoming
+                        .send(IncomingProxyMessage::LayerForked(msg))
+                        .await;
                 }
             }
             ProxyMessage::FromAgent(msg) => self.handle_agent_message(msg).await?,
@@ -209,6 +213,10 @@ impl IntProxy {
                 self.task_txs
                     .simple
                     .send(SimpleProxyMessage::LayerClosed(msg))
+                    .await;
+                self.task_txs
+                    .incoming
+                    .send(IncomingProxyMessage::LayerClosed(msg))
                     .await;
             }
             (task_id, TaskUpdate::Finished(res)) => match res {
