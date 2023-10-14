@@ -274,20 +274,18 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
 /// Calls [`layer_pre_initialization`], which runs mirrord-layer.
 #[ctor]
 fn mirrord_layer_entry_point() {
-    // If we try to use `#[cfg(not(test))]`, it gives a bunch of unused warnings, unless you specify
-    // a profile, for example `cargo check --profile=dev`.
-    if !cfg!(test) {
-        let _ = panic::catch_unwind(|| {
-            if let Err(fail) = layer_pre_initialization() {
-                match fail {
-                    LayerError::NoProcessFound => (),
-                    _ => {
-                        eprintln!("mirrord layer setup failed with {fail:?}");
-                        std::process::exit(-1)
-                    }
-                }
-            }
-        });
+    let res = panic::catch_unwind(|| match layer_pre_initialization() {
+        Err(LayerError::NoProcessFound) => {}
+        Err(e) => {
+            eprintln!("mirrord layer setup failed with {e:?}");
+            std::process::exit(-1)
+        }
+        Ok(()) => {}
+    });
+
+    if res.is_err() {
+        eprintln!("mirrord layer setup panicked");
+        std::process::exit(-1);
     }
 }
 
@@ -387,7 +385,7 @@ fn set_globals(config: &LayerConfig) {
 
 /// Occurs after [`layer_pre_initialization`] has succeeded.
 ///
-/// Starts the main parts of mirrord-layer.
+/// Initialized the main parts of mirrord-layer.
 ///
 /// ## Details
 ///
@@ -395,13 +393,11 @@ fn set_globals(config: &LayerConfig) {
 ///
 /// 1. [`tracing_subscriber`], or [`mirrord_console`];
 ///
-/// 2. Connects to the mirrord-agent with [`connection::connect`];
+/// 2. Connects to the internal proxy;
 ///
 /// 3. Initializes some of our globals;
 ///
 /// 4. Replaces the [`libc`] calls with our hooks with [`enable_hooks`];
-///
-/// 5. Starts the main mirrord-layer thread.
 fn layer_start(mut config: LayerConfig) {
     if config.target.path.is_none() {
         // Use localwithoverrides on targetless regardless of user config.
@@ -458,38 +454,22 @@ fn layer_start(mut config: LayerConfig) {
         return;
     }
 
-    let address = config
-        .connect_tcp
-        .as_ref()
-        .expect("layer loaded without proxy address to connect to")
-        .parse()
-        .expect("couldn't parse proxy address");
-
     unsafe {
-        let new_session = match PROXY_CONNECTION.take() {
-            Some(conn) => {
-                let previous_id = conn.layer_id();
-                tracing::trace!(
-                    "starting layer <-> proxy session forked from {}",
-                    previous_id.0
-                );
-                ProxyConnection::new(
-                    address,
-                    NewSessionRequest::Forked(previous_id),
-                    Duration::from_secs(5),
-                )
-                .expect("failed to initialize proxy connection")
-            }
-            None => {
-                tracing::trace!("starting new layer <-> proxy session");
-                ProxyConnection::new(address, NewSessionRequest::New, Duration::from_secs(5))
-                    .expect("failed to initialize proxy connection")
-            }
-        };
+        if PROXY_CONNECTION.get().is_none() {
+            let address = config
+                .connect_tcp
+                .as_ref()
+                .expect("layer loaded without proxy address to connect to")
+                .parse()
+                .expect("couldn't parse proxy address");
 
-        PROXY_CONNECTION
-            .set(new_session)
-            .expect("Setting PROXY_CONNECTION singleton");
+            let new_connection =
+                ProxyConnection::new(address, NewSessionRequest::New, Duration::from_secs(5))
+                    .expect("failed to initialize proxy connection");
+            PROXY_CONNECTION
+                .set(new_connection)
+                .expect("setting PROXY_CONNECTION singleton")
+        }
     }
 }
 
@@ -636,13 +616,27 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
     tracing::debug!("Process {} forking!.", std::process::id());
+
+    let parent_connection = PROXY_CONNECTION.get().expect("PROXY_CONNECTION not set");
+    let new_connection = ProxyConnection::new(
+        parent_connection.proxy_addr(),
+        NewSessionRequest::Forked(parent_connection.layer_id()),
+        Duration::from_secs(5),
+    )
+    .expect("failed to establish proxy connection for child");
+
     let res = FN_FORK();
     if res == 0 {
         tracing::debug!("Child process initializing layer.");
+        PROXY_CONNECTION
+            .set(new_connection)
+            .expect("setting PROXY_CONNECTION");
         mirrord_layer_entry_point()
     } else {
         tracing::debug!("Child process id is {res}.");
+        std::mem::drop(new_connection);
     }
+
     res
 }
 

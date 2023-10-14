@@ -49,6 +49,7 @@ pub struct ProxyConnection {
     responses: Mutex<ResponseManager>,
     next_message_id: AtomicU64,
     layer_id: LayerId,
+    proxy_addr: SocketAddr,
 }
 
 impl ProxyConnection {
@@ -82,6 +83,7 @@ impl ProxyConnection {
             responses: Mutex::new(responses),
             next_message_id: AtomicU64::new(1),
             layer_id: *layer_id,
+            proxy_addr,
         })
     }
 
@@ -128,6 +130,10 @@ impl ProxyConnection {
 
     pub fn layer_id(&self) -> LayerId {
         self.layer_id
+    }
+
+    pub fn proxy_addr(&self) -> SocketAddr {
+        self.proxy_addr
     }
 }
 
