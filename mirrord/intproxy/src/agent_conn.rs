@@ -1,7 +1,7 @@
 //! Implementation of `proxy <-> agent` connection through [`mpsc`](tokio::sync::mpsc) channels
 //! created in different mirrord crates.
 
-use std::io;
+use std::{io, net::SocketAddr};
 
 use mirrord_config::LayerConfig;
 use mirrord_kube::{
@@ -88,9 +88,7 @@ impl AgentConnection {
             }
             None => {
                 if let Some(address) = config.connect_tcp.as_ref() {
-                    let stream = TcpStream::connect(address)
-                        .await
-                        .map_err(AgentConnectionError::Io)?;
+                    let stream = TcpStream::connect(address).await?;
 
                     wrap_raw_connection(stream)
                 } else {
@@ -99,7 +97,14 @@ impl AgentConnection {
             }
         };
 
-        Ok(AgentConnection { agent_tx, agent_rx })
+        Ok(Self { agent_tx, agent_rx })
+    }
+
+    pub async fn new_for_raw_address(address: SocketAddr) -> Result<Self, AgentConnectionError> {
+        let stream = TcpStream::connect(address).await?;
+        let (agent_tx, agent_rx) = wrap_raw_connection(stream);
+
+        Ok(Self { agent_tx, agent_rx })
     }
 }
 

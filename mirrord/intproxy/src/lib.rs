@@ -67,7 +67,10 @@ impl IntProxy {
         listener: TcpListener,
     ) -> Result<Self, IntProxyError> {
         let agent_conn = AgentConnection::new(config, agent_connect_info).await?;
+        Ok(Self::new_with_connection(agent_conn, listener))
+    }
 
+    pub fn new_with_connection(agent_conn: AgentConnection, listener: TcpListener) -> Self {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
             Default::default();
 
@@ -94,12 +97,12 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
         let incoming = background_tasks.register(
-            IncomingProxy::new(config)?,
+            IncomingProxy::default(),
             MainTaskId::IncomingProxy,
             Self::CHANNEL_SIZE,
         );
 
-        Ok(Self {
+        Self {
             any_connection_accepted: false,
             background_tasks,
             task_txs: TaskTxs {
@@ -111,7 +114,7 @@ impl IntProxy {
                 incoming,
                 ping_pong,
             },
-        })
+        }
     }
 
     pub async fn run(

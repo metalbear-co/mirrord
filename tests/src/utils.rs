@@ -220,7 +220,7 @@ impl TestProcess {
         exit_status
     }
 
-    pub async fn from_child(mut child: Child, tempdir: Option<TempDir>) -> TestProcess {
+    pub fn from_child(mut child: Child, tempdir: Option<TempDir>) -> TestProcess {
         let stderr_data = Arc::new(RwLock::new(String::new()));
         let stdout_data = Arc::new(RwLock::new(String::new()));
         let child_stderr = child.stderr.take().unwrap();
@@ -287,7 +287,7 @@ impl TestProcess {
             .spawn()
             .unwrap();
         println!("Started application.");
-        TestProcess::from_child(child, None).await
+        TestProcess::from_child(child, None)
     }
 }
 
@@ -451,7 +451,7 @@ pub async fn run_mirrord(args: Vec<&str>, env: HashMap<&str, &str>) -> TestProce
         server.id().unwrap()
     );
     // We need to hold temp dir until the process is finished
-    TestProcess::from_child(server, Some(temp_dir)).await
+    TestProcess::from_child(server, Some(temp_dir))
 }
 
 /// Run `mirrord exec` with the given cmd, optional target (`None` for targetless), namespace,

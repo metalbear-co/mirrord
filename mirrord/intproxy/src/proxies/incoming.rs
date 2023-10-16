@@ -4,19 +4,18 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     fmt,
     net::SocketAddr,
+    sync::Arc,
 };
 
 use hyper::Version;
-use mirrord_config::LayerConfig;
 use mirrord_protocol::{
-    tcp::{DaemonTcp, HttpRequestFallback, HttpResponseFallback, LayerTcpSteal, TcpData},
-    ClientMessage, ConnectionId, Port,
+    tcp::{DaemonTcp, HttpRequestFallback, HttpResponseFallback, TcpData},
+    ConnectionId, Port,
 };
 use thiserror::Error;
 
 use self::{
     http_interceptor::{HttpInterceptor, HttpInterceptorError},
-    incoming_mode::{IncomingFlavorError, IncomingMode},
     raw_interceptor::{RawInterceptor, RawInterceptorError},
 };
 use crate::{
@@ -24,7 +23,8 @@ use crate::{
     layer_resources::LayerResources,
     main_tasks::{LayerClosed, LayerForked, ToLayer},
     protocol::{
-        IncomingRequest, LayerId, MessageId, PortSubscribe, PortUnsubscribe, ProxyToLayerMessage,
+        IncomingMode, IncomingRequest, LayerId, MessageId, PortSubscribe, PortUnsubscribe,
+        ProxyToLayerMessage,
     },
     request_queue::{RequestQueue, RequestQueueEmpty},
     ProxyMessage,
@@ -76,9 +76,6 @@ pub enum IncomingProxyError {
     /// This should never happen.
     #[error("{0}")]
     RequestQueueEmpty(#[from] RequestQueueEmpty),
-    /// `incoming` feature configuration was invalid.
-    #[error("invalid configuration: {0}")]
-    ConfigurationError(#[from] IncomingFlavorError),
     /// The agent sent an HTTP request with unsupported [`Version`].
     /// [`Version::HTTP_3`] is currently not supported.
     #[error("{0:?} is not supported")]
@@ -92,6 +89,16 @@ pub enum IncomingProxyMessage {
     LayerClosed(LayerClosed),
     AgentMirror(DaemonTcp),
     AgentSteal(DaemonTcp),
+}
+
+struct InterceptorHandle<I: BackgroundTask> {
+    tx: TaskSender<I>,
+    mode: Arc<IncomingMode>,
+}
+
+struct LayerSubscription {
+    local_listener: SocketAddr,
+    mode: Arc<IncomingMode>,
 }
 
 /// Handles logic and state of the `incoming` feature.
@@ -128,19 +135,18 @@ pub enum IncomingProxyMessage {
 ///    interceptor are discarded.
 /// 6. If the layer closes the connection, the [`HttpInterceptor`] exits and the proxy notifies the
 ///    agent. If the agent closes the connection, the proxy shuts down the [`HttpInterceptor`].
+#[derive(Default)]
 pub struct IncomingProxy {
-    /// Mode this proxy operates in.
-    flavor: IncomingMode,
     /// For keeping track of active subscriptions across forks.
     subscriptions: LayerResources<Port>,
     /// Mapping from subscribed ports on the remote target to addresses of layer's listeners.
-    layer_listeners: HashMap<Port, SocketAddr>,
+    layer_listeners: HashMap<Port, LayerSubscription>,
     /// For [`PortSubscribe`] requests.
     subscribe_reqs: RequestQueue,
     /// [`TaskSender`]s for active [`RawInterceptor`]s.
-    txs_raw: HashMap<InterceptorId, TaskSender<RawInterceptor>>,
+    interceptors_raw: HashMap<InterceptorId, InterceptorHandle<RawInterceptor>>,
     /// [`TaskSender`]s for active [`HttpInterceptor`]s.
-    txs_http: HashMap<InterceptorId, TaskSender<HttpInterceptor>>,
+    interceptors_http: HashMap<InterceptorId, InterceptorHandle<HttpInterceptor>>,
     /// For managing both [`RawInterceptor`]s and [`HttpInterceptor`]s.
     background_tasks: BackgroundTasks<InterceptorId, InterceptorMessageOut, InterceptorError>,
 }
@@ -149,21 +155,6 @@ impl IncomingProxy {
     /// Used when registering new [`RawInterceptor`] and [`HttpInterceptor`] tasks in the
     /// [`BackgroundTasks`] struct.
     const CHANNEL_SIZE: usize = 512;
-
-    /// Creates a new instance based on the provided [`LayerConfig`].
-    pub fn new(config: &LayerConfig) -> Result<Self, IncomingProxyError> {
-        let flavor = IncomingMode::new(config)?;
-
-        Ok(Self {
-            flavor,
-            subscriptions: Default::default(),
-            layer_listeners: Default::default(),
-            subscribe_reqs: Default::default(),
-            txs_raw: Default::default(),
-            txs_http: Default::default(),
-            background_tasks: Default::default(),
-        })
-    }
 
     /// Stores subscription request id and sends a corresponding request to the agent.
     /// However, if a subscription for the same port already exists, this method does not make any
@@ -177,31 +168,36 @@ impl IncomingProxy {
         subscribe: PortSubscribe,
         message_bus: &mut MessageBus<Self>,
     ) {
-        if let Some(old_socket) = self
-            .layer_listeners
-            .insert(subscribe.port, subscribe.listening_on)
-        {
+        let mode = Arc::new(subscribe.mode);
+
+        if let Some(old_subscription) = self.layer_listeners.insert(
+            subscribe.port,
+            LayerSubscription {
+                local_listener: subscribe.listening_on,
+                mode: mode.clone(),
+            },
+        ) {
             // Since this struct identifies listening sockets by their port (#1558), we can only
             // forward the incoming traffic to one socket with that port.
             tracing::info!(
                 "Received layer subscription message for port {}, listening on {}, while already listening on {}. Sending all incoming traffic to new socket.",
                 subscribe.port,
                 subscribe.listening_on,
-                old_socket,
+                old_subscription.local_listener,
             );
 
             message_bus
                 .send(ToLayer {
                     message_id,
                     layer_id,
-                    message: ProxyToLayerMessage::IncomingUbsubscribe(Ok(())),
+                    message: ProxyToLayerMessage::IncomingSubscribe(Ok(())),
                 })
                 .await;
 
             return;
         }
 
-        let msg = self.flavor.wrap_agent_subscribe(subscribe.port);
+        let msg = mode.wrap_agent_subscribe(subscribe.port);
         message_bus.send(ProxyMessage::ToAgent(msg)).await;
 
         self.subscribe_reqs.insert(message_id, layer_id);
@@ -214,8 +210,8 @@ impl IncomingProxy {
         unsubscribe: PortUnsubscribe,
         message_bus: &mut MessageBus<Self>,
     ) {
-        if self.layer_listeners.remove(&unsubscribe.port).is_some() {
-            let msg = self.flavor.wrap_agent_unsubscribe(unsubscribe.port);
+        if let Some(subscription) = self.layer_listeners.remove(&unsubscribe.port) {
+            let msg = subscription.mode.wrap_agent_unsubscribe(unsubscribe.port);
             message_bus.send(ProxyMessage::ToAgent(msg)).await;
         }
     }
@@ -230,11 +226,10 @@ impl IncomingProxy {
     ) -> Result<Option<&TaskSender<HttpInterceptor>>, IncomingProxyError> {
         let id: InterceptorId = InterceptorId(request.connection_id());
 
-        let interceptor = match self.txs_http.entry(id) {
+        let interceptor = match self.interceptors_http.entry(id) {
             Entry::Occupied(e) => e.into_mut(),
             Entry::Vacant(e) => {
-                let Some(local_destination) = self.layer_listeners.get(&request.port()).copied()
-                else {
+                let Some(subscription) = self.layer_listeners.get(&request.port()) else {
                     tracing::trace!(
                         "received a new http request for port {} that is no longer mirrored",
                         request.port()
@@ -244,16 +239,19 @@ impl IncomingProxy {
 
                 let version = request.version();
                 let interceptor = self.background_tasks.register(
-                    HttpInterceptor::new(local_destination, version),
+                    HttpInterceptor::new(subscription.local_listener, version),
                     InterceptorId(request.connection_id()),
                     Self::CHANNEL_SIZE,
                 );
 
-                e.insert(interceptor)
+                e.insert(InterceptorHandle {
+                    tx: interceptor,
+                    mode: subscription.mode.clone(),
+                })
             }
         };
 
-        Ok(Some(interceptor))
+        Ok(Some(&interceptor.tx))
     }
 
     /// Handles all agent messages.
@@ -265,12 +263,17 @@ impl IncomingProxy {
     ) -> Result<(), IncomingProxyError> {
         match message {
             DaemonTcp::Close(close) => {
-                self.txs_raw.remove(&InterceptorId(close.connection_id));
-                self.txs_http.remove(&InterceptorId(close.connection_id));
+                self.interceptors_raw
+                    .remove(&InterceptorId(close.connection_id));
+                self.interceptors_http
+                    .remove(&InterceptorId(close.connection_id));
             }
             DaemonTcp::Data(data) => {
-                if let Some(interceptor) = self.txs_raw.get(&InterceptorId(data.connection_id)) {
-                    interceptor.send(data.bytes).await;
+                if let Some(interceptor) = self
+                    .interceptors_raw
+                    .get(&InterceptorId(data.connection_id))
+                {
+                    interceptor.tx.send(data.bytes).await;
                 } else {
                     tracing::trace!(
                         "received new data for connection {} that is already closed",
@@ -293,10 +296,7 @@ impl IncomingProxy {
                 }
             }
             DaemonTcp::NewConnection(connection) => {
-                let Some(local_destination) = self
-                    .layer_listeners
-                    .get(&connection.destination_port)
-                    .copied()
+                let Some(subscription) = self.layer_listeners.get(&connection.destination_port)
                 else {
                     tracing::trace!(
                         "received a new connection for port {} that is no longer mirrored",
@@ -310,11 +310,17 @@ impl IncomingProxy {
 
                 let id = InterceptorId(connection.connection_id);
                 let interceptor = self.background_tasks.register(
-                    RawInterceptor::new(remote_source, local_destination),
+                    RawInterceptor::new(remote_source, subscription.local_listener),
                     id,
                     Self::CHANNEL_SIZE,
                 );
-                self.txs_raw.insert(id, interceptor);
+                self.interceptors_raw.insert(
+                    id,
+                    InterceptorHandle {
+                        tx: interceptor,
+                        mode: subscription.mode.clone(),
+                    },
+                );
             }
             DaemonTcp::SubscribeResult(res) => {
                 let (message_id, layer_id) = self.subscribe_reqs.get()?;
@@ -340,10 +346,22 @@ impl IncomingProxy {
     async fn handle_layer_close(&mut self, msg: LayerClosed, message_bus: &mut MessageBus<Self>) {
         let LayerClosed { id } = msg;
         for to_close in self.subscriptions.remove_all(id) {
-            self.layer_listeners.remove(&to_close);
+            let Some(subscription) = self.layer_listeners.remove(&to_close) else {
+                continue;
+            };
             message_bus
-                .send(self.flavor.wrap_agent_unsubscribe(to_close))
+                .send(subscription.mode.wrap_agent_unsubscribe(to_close))
                 .await;
+        }
+    }
+
+    fn get_mode(&self, interceptor_id: InterceptorId) -> Option<&IncomingMode> {
+        if let Some(handle) = self.interceptors_raw.get(&interceptor_id) {
+            Some(&handle.mode)
+        } else if let Some(handle) = self.interceptors_http.get(&interceptor_id) {
+            Some(&handle.mode)
+        } else {
+            None
         }
     }
 }
@@ -366,17 +384,9 @@ impl BackgroundTask for IncomingProxy {
                         IncomingRequest::PortUnsubscribe(unsubscribe) => self.handle_port_unsubscribe(unsubscribe, message_bus).await,
                     },
                     Some(IncomingProxyMessage::AgentMirror(msg)) => {
-                        if self.flavor.is_steal() {
-                            break Err(IncomingProxyError::ReceivedMirrorMessage(msg));
-                        }
-
                         self.handle_agent_message(msg, message_bus).await?;
                     }
                     Some(IncomingProxyMessage::AgentSteal(msg)) => {
-                        if !self.flavor.is_steal() {
-                            break Err(IncomingProxyError::ReceivedStealMessage(msg));
-                        }
-
                         self.handle_agent_message(msg, message_bus).await?;
                     }
                     Some(IncomingProxyMessage::LayerClosed(msg)) => self.handle_layer_close(msg, message_bus).await,
@@ -386,29 +396,35 @@ impl BackgroundTask for IncomingProxy {
                 Some(task_update) = self.background_tasks.next() => match task_update {
                     (id, TaskUpdate::Finished(res)) => {
                         tracing::trace!("{id} finished: {res:?}");
-                        if self.txs_raw.contains_key(&id) || self.txs_http.contains_key(&id) {
-                            let msg = self.flavor.wrap_agent_unsubscribe_connection(id.0);
-                            message_bus.send(ProxyMessage::ToAgent(msg)).await;
+
+                        let Some(mode) = self.get_mode(id) else { continue };
+                        let msg = mode.wrap_agent_unsubscribe_connection(id.0);
+                        message_bus.send(ProxyMessage::ToAgent(msg)).await;
+                    },
+
+                    (id, TaskUpdate::Message(msg)) => {
+                        let Some(mode) = self.get_mode(id) else { continue };
+
+                        let msg = match msg {
+                            InterceptorMessageOut::Bytes(bytes) => {
+                                let data = TcpData {
+                                    connection_id: id.0,
+                                    bytes,
+                                };
+                                mode.wrap_raw_response(data)
+                            },
+                            InterceptorMessageOut::Http(HttpResponseFallback::Fallback(res)) => {
+                                mode.wrap_http_response(res)
+                            },
+                            InterceptorMessageOut::Http(HttpResponseFallback::Framed(res)) => {
+                                mode.wrap_http_response_framed(res)
+                            }
+                        };
+
+                        if let Some(msg) = msg {
+                            message_bus.send(msg).await;
                         }
                     },
-                    (id, TaskUpdate::Message(msg)) if self.flavor.is_steal() => match msg {
-                        InterceptorMessageOut::Bytes(bytes) => {
-                            let msg = ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
-                                connection_id: id.0,
-                                bytes,
-                            }));
-                            message_bus.send(ProxyMessage::ToAgent(msg)).await;
-                        },
-                        InterceptorMessageOut::Http(HttpResponseFallback::Fallback(res)) => {
-                            let msg = ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(res));
-                            message_bus.send(ProxyMessage::ToAgent(msg)).await;
-                        },
-                        InterceptorMessageOut::Http(HttpResponseFallback::Framed(res)) => {
-                            let msg = ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(res));
-                            message_bus.send(ProxyMessage::ToAgent(msg)).await;
-                        }
-                    },
-                    _ => {}
                 },
             }
         }

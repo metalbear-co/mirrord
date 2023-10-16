@@ -286,6 +286,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
             common::make_proxy_request_with_response(PortSubscribe {
                 port: requested_address.port(),
                 listening_on: address.into(),
+                mode: crate::global_state().incoming_mode().clone(),
             })??;
 
             Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(Bound {

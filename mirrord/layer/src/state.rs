@@ -8,6 +8,7 @@ use mirrord_config::{
     util::VecOrSingle,
     LayerConfig,
 };
+use mirrord_intproxy::protocol::IncomingMode;
 use regex::RegexSet;
 
 use crate::{
@@ -27,6 +28,7 @@ pub struct LayerState {
     remote_unix_streams: RegexSet,
     outgoing_selector: OutgoingSelector,
     proxy_address: SocketAddr,
+    incoming_mode: IncomingMode,
 }
 
 impl LayerState {
@@ -55,6 +57,9 @@ impl LayerState {
             .parse()
             .expect("failed to parse internal proxy address");
 
+        let incoming_mode = IncomingMode::new(&config.feature.network.incoming)
+            .expect("failed to create incoming traffic filter");
+
         Self {
             config,
             file_filter,
@@ -62,6 +67,7 @@ impl LayerState {
             remote_unix_streams,
             outgoing_selector,
             proxy_address,
+            incoming_mode,
         }
     }
 
@@ -112,5 +118,9 @@ impl LayerState {
 
     pub fn proxy_address(&self) -> SocketAddr {
         self.proxy_address
+    }
+
+    pub fn incoming_mode(&self) -> &IncomingMode {
+        &self.incoming_mode
     }
 }
