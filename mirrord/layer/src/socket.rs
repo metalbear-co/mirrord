@@ -385,7 +385,7 @@ impl OutgoingSelector {
             let amount_of_addresses = unresolved.len() * USUAL_AMOUNT_OF_ADDRESSES;
             let mut unresolved = unresolved.into_iter();
 
-            let resolved = if crate::global_state().remote_dns_enabled() && REMOTE {
+            let resolved = if crate::setup().remote_dns_enabled() && REMOTE {
                 // Resolve DNS through the agent.
                 unresolved
                     .try_fold(

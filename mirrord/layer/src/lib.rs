@@ -89,7 +89,7 @@ use mirrord_intproxy::protocol::NewSessionRequest;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use proxy_connection::ProxyConnection;
 use socket::SOCKETS;
-use state::LayerState;
+use state::LayerSetup;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{debugger_ports::DebuggerPorts, detour::DetourGuard, load::LoadType};
@@ -136,23 +136,23 @@ const TRACE_ONLY_ENV: &str = "MIRRORD_LAYER_TRACE_ONLY";
 /// [`common::make_proxy_request_no_response`] functions instead.
 static mut PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
 
-static STATE: OnceLock<LayerState> = OnceLock::new();
+static SETUP: OnceLock<LayerSetup> = OnceLock::new();
 
-fn global_state() -> &'static LayerState {
-    STATE.get().expect("layer state is not initialized")
+fn setup() -> &'static LayerSetup {
+    SETUP.get().expect("layer is not initialized")
 }
 
 // The following statics are to avoid using CoreFoundation or high level macOS APIs
 // that aren't safe to use after fork.
 
 /// Executable we're loaded to
-pub(crate) static EXECUTABLE_NAME: OnceLock<ExecutableName> = OnceLock::new();
+static EXECUTABLE_NAME: OnceLock<ExecutableName> = OnceLock::new();
 
 /// Executable path we're loaded to
-pub(crate) static EXECUTABLE_PATH: OnceLock<String> = OnceLock::new();
+static EXECUTABLE_PATH: OnceLock<String> = OnceLock::new();
 
 /// Program arguments
-pub(crate) static EXECUTABLE_ARGS: OnceLock<Vec<OsString>> = OnceLock::new();
+static EXECUTABLE_ARGS: OnceLock<Vec<OsString>> = OnceLock::new();
 
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
 fn layer_pre_initialization() -> Result<(), LayerError> {
@@ -247,11 +247,11 @@ fn init_tracing() {
 ///
 /// Sets up a few things based on the [`LayerConfig`] given by the user:
 ///
-/// 1. [`tracing_subscriber`], or [`mirrord_console`];
+/// 1. [`tracing_subscriber`] or [`mirrord_console`];
 ///
-/// 2. Connects to the internal proxy;
+/// 2. Global [`STATE`];
 ///
-/// 3. Initializes some of our globals;
+/// 3. Global [`PROXY_CONNECTION`];
 ///
 /// 4. Replaces the [`libc`] calls with our hooks with [`enable_hooks`];
 fn layer_start(mut config: LayerConfig) {
@@ -277,15 +277,15 @@ fn layer_start(mut config: LayerConfig) {
 
     // does not need to be atomic because on the first call there are never other threads.
     // Will be false when manually called from fork hook.
-    if STATE.get().is_none() {
+    if SETUP.get().is_none() {
         // If we're here it's not a fork, we're in the ctor.
         init_tracing(); // todo tracing is broken
 
         let debugger_ports = DebuggerPorts::from_env();
-        let state = LayerState::new(config, debugger_ports);
-        STATE.set(state).unwrap();
+        let state = LayerSetup::new(config, debugger_ports);
+        SETUP.set(state).unwrap();
 
-        let state = global_state();
+        let state = setup();
         enable_hooks(
             state.fs_config().is_active(),
             state.remote_dns_enabled(),
@@ -312,7 +312,7 @@ fn layer_start(mut config: LayerConfig) {
 
     unsafe {
         if PROXY_CONNECTION.get().is_none() {
-            let address = global_state().proxy_address();
+            let address = setup().proxy_address();
             let new_connection =
                 ProxyConnection::new(address, NewSessionRequest::New, Duration::from_secs(5))
                     .expect("failed to initialize proxy connection");
@@ -433,7 +433,7 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         // Closed file is a socket, so if it's already bound to a port - notify agent to stop
         // mirroring/stealing that port.
         socket.close();
-    } else if global_state().fs_config().is_active() {
+    } else if setup().fs_config().is_active() {
         OPEN_FILES.remove(&fd);
     }
 }

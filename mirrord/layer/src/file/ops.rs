@@ -142,7 +142,7 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
         Detour::Bypass(Bypass::RelativePath(path.clone()))?
     };
 
-    crate::global_state()
+    crate::setup()
         .filter_ignored_file(path.to_str().unwrap_or_default(), open_options.is_write())?;
 
     let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)?;
@@ -339,7 +339,7 @@ pub(crate) fn access(path: Detour<PathBuf>, mode: u8) -> Detour<c_int> {
         Detour::Bypass(Bypass::RelativePath(path.clone()))?
     };
 
-    crate::global_state().filter_ignored_file(path.to_str().unwrap_or_default(), false)?;
+    crate::setup().filter_ignored_file(path.to_str().unwrap_or_default(), false)?;
 
     let access = AccessFileRequest {
         pathname: path,
@@ -373,7 +373,7 @@ pub(crate) fn xstat(
                         // Calls with non absolute paths are sent to libc::fstatat.
                         return Detour::Bypass(Bypass::RelativePath(path));
                     } else {
-                        crate::global_state()
+                        crate::setup()
                             .filter_ignored_file(path.to_str().unwrap_or_default(), false)?;
                         None
                     }
@@ -390,7 +390,7 @@ pub(crate) fn xstat(
                 // Calls with non absolute paths are sent to libc::open.
                 return Detour::Bypass(Bypass::RelativePath(path));
             }
-            crate::global_state().filter_ignored_file(path.to_str().unwrap_or_default(), false)?;
+            crate::setup().filter_ignored_file(path.to_str().unwrap_or_default(), false)?;
             (Some(path), None)
         }
         // fstat

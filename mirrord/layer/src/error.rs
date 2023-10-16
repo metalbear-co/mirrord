@@ -157,14 +157,8 @@ pub(crate) enum LayerError {
     #[error("Exec failed with error {0:?}, please report this error!")]
     ExecFailed(exec::Error),
 
-    #[error("mirrord-layer: Expected a value for config `{0}`, but found nothing!")]
-    MissingConfigValue(String),
-
     #[error("mirrord-layer: Something went wrong with the outgoing filter `{0}`.")]
     OutgoingFilterError(#[from] OutgoingFilterError),
-
-    #[error("mirrord-layer: Failed to connect to internal proxy at {0}: {1}")]
-    InternalProxyConnectionFailed(SocketAddr, io::Error),
 }
 
 impl From<SerializationError> for LayerError {

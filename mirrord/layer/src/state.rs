@@ -18,10 +18,8 @@ use crate::{
     socket::OutgoingSelector,
 };
 
-/// Complete layer state that can be safely used in multi-threaded applications and single-threaded
-/// applications using forks.
 #[derive(Debug)]
-pub struct LayerState {
+pub struct LayerSetup {
     config: LayerConfig,
     file_filter: FileFilter,
     debugger_ports: DebuggerPorts,
@@ -31,7 +29,7 @@ pub struct LayerState {
     incoming_mode: IncomingMode,
 }
 
-impl LayerState {
+impl LayerSetup {
     pub fn new(config: LayerConfig, debugger_ports: DebuggerPorts) -> Self {
         let file_filter = FileFilter::new(config.feature.fs.clone());
 
