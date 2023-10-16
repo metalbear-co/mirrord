@@ -34,12 +34,11 @@ fn get_rw_test_file_env_vars() -> Vec<(&'static str, &'static str)> {
 async fn self_open(dylib_path: &PathBuf) {
     let application = Application::Go19SelfOpen;
 
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![], None)
         .await;
 
-    assert!(layer_connection.is_ended().await);
-
+    assert_eq!(intproxy.try_recv().await, None);
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
     test_process.assert_no_error_in_stdout().await;
@@ -76,11 +75,9 @@ async fn read_from_mirrord_bin(dylib_path: &PathBuf) {
         vec![path_in_mirrord_bin.to_string_lossy().to_string()],
     );
 
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![], None)
         .await;
-
-    assert!(layer_connection.is_ended().await);
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
@@ -146,7 +143,7 @@ async fn pwrite(
         ))))
         .await;
 
-        intproxy.expect_file_close(fd).await;
+    intproxy.expect_file_close(fd).await;
 
     // Rust compiles with newer libc on Linux that uses statx
     #[cfg(target_os = "macos")]
@@ -220,7 +217,7 @@ async fn node_close(
     #[values(Application::NodeFileOps)] application: Application,
     dylib_path: &PathBuf,
 ) {
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
             // add rw override for the specific path
@@ -231,7 +228,7 @@ async fn node_close(
 
     let fd = 1;
 
-    layer_connection
+    intproxy
         .expect_file_open_for_reading("/tmp/test_file.txt", fd)
         .await;
 
@@ -241,7 +238,7 @@ async fn node_close(
     {
         let read_amount = contents.len();
         assert_eq!(
-            layer_connection.codec.next().await.unwrap().unwrap(),
+            intproxy.recv().await,
             ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
                 path: None,
                 fd: Some(1),
@@ -256,18 +253,16 @@ async fn node_close(
             blocks: 3,
             ..Default::default()
         };
-        layer_connection
-            .codec
+        intproxy
             .send(DaemonMessage::File(FileResponse::Xstat(Ok(
                 XstatResponse { metadata },
             ))))
-            .await
-            .unwrap();
+            .await;
     }
 
-    layer_connection.expect_file_read(contents, fd).await;
+    intproxy.expect_file_read(contents, fd).await;
 
-    layer_connection.expect_file_close(fd).await;
+    intproxy.expect_file_close(fd).await;
 
     // Assert all clear
     test_process.wait_assert_success().await;
@@ -341,7 +336,7 @@ async fn go_dir(
     #[values(Application::Go19Dir, Application::Go20Dir)] application: Application,
     dylib_path: &PathBuf,
 ) {
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
             vec![("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo")],
@@ -350,12 +345,10 @@ async fn go_dir(
         .await;
 
     let fd = 1;
-    layer_connection
-        .expect_file_open_for_reading("/tmp/foo", fd)
-        .await;
+    intproxy.expect_file_open_for_reading("/tmp/foo", fd).await;
 
     assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        intproxy.recv().await;,
         ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
             path: None,
             fd: Some(1),
@@ -372,34 +365,29 @@ async fn go_dir(
         ..Default::default()
     };
 
-    layer_connection
-        .codec
+    intproxy
         .send(DaemonMessage::File(FileResponse::Xstat(Ok(
             XstatResponse { metadata },
         ))))
-        .await
-        .unwrap();
+        .await;
 
     assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        layer_connection.recv.recv().await,
         ClientMessage::FileRequest(FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 1 }))
     );
 
-    layer_connection
-        .codec
+    intproxy
         .send(DaemonMessage::File(FileResponse::OpenDir(Ok(
             OpenDirResponse { fd: 2 },
         ))))
-        .await
-        .unwrap();
+        .await;
 
     assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 2 }))
     );
 
-    layer_connection
-        .codec
+    intproxy
         .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
             ReadDirResponse {
                 direntry: Some(DirEntryInternal {
@@ -410,16 +398,14 @@ async fn go_dir(
                 }),
             },
         ))))
-        .await
-        .unwrap();
+        .await;
 
     assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 2 }))
     );
 
-    layer_connection
-        .codec
+    intproxy
         .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
             ReadDirResponse {
                 direntry: Some(DirEntryInternal {
@@ -430,28 +416,25 @@ async fn go_dir(
                 }),
             },
         ))))
-        .await
-        .unwrap();
+        .await;
 
     assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 2 }))
     );
 
-    layer_connection
-        .codec
+    intproxy
         .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
             ReadDirResponse { direntry: None },
         ))))
-        .await
-        .unwrap();
+        .await;
 
     assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::CloseDir(CloseDirRequest { remote_fd: 2 }))
     );
 
-    layer_connection.expect_file_close(fd).await;
+    intproxy.expect_file_close(fd).await;
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
@@ -474,9 +457,7 @@ async fn go_dir_on_linux(
         .await;
 
     let fd = 1;
-    intproxy
-        .expect_file_open_for_reading("/tmp/foo", fd)
-        .await;
+    intproxy.expect_file_open_for_reading("/tmp/foo", fd).await;
 
     // Go calls a bare syscall, the layer hooks it and sends the request to the agent.
     assert_matches!(
@@ -565,7 +546,7 @@ async fn go_dir_bypass(
     let path_string = tmp_dir.to_str().unwrap().to_string();
 
     // But make this path local so that in the getdents64 detour we get to the bypass.
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, _intproxy) = application
         .start_process_with_layer(
             dylib_path,
             vec![
@@ -575,8 +556,6 @@ async fn go_dir_bypass(
             None,
         )
         .await;
-
-    assert!(layer_connection.is_ended().await);
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
@@ -598,23 +577,23 @@ async fn read_go(
     application: Application,
     dylib_path: &PathBuf,
 ) {
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![("MIRRORD_FILE_MODE", "read")], None)
         .await;
 
     let fd = 1;
-    layer_connection
+    intproxy
         .expect_file_open_for_reading("/app/test.txt", fd)
         .await;
 
     // Different go versions (mac/linux, 1.18/1.19/1.20) use different amounts of xstat calls here.
     // We accept and answer however many xstat calls the app does, then we verify and answer the
     // read calls.
-    layer_connection
+    intproxy
         .consume_xstats_then_expect_file_read("Pineapples.", fd)
         .await;
 
-    layer_connection.expect_file_close(fd).await;
+    intproxy.expect_file_close(fd).await;
     // Notify Go test app that the close detour completed and it can exit.
     // (The go app waits for this, since Go does not wait for the close detour to complete before
     // returning from `Close`).
@@ -623,8 +602,6 @@ async fn read_go(
         Signal::SIGTERM,
     )
     .unwrap();
-
-    assert!(layer_connection.is_ended().await);
 
     // Assert all clear
     test_process.wait_assert_success().await;
@@ -653,8 +630,6 @@ async fn write_go(
         .consume_xstats_then_expect_file_write("Pineapples.", 1)
         .await;
 
-    assert!(layer_connection.is_ended().await);
-
     // Assert all clear
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
@@ -669,24 +644,20 @@ async fn lseek_go(
     application: Application,
     dylib_path: &PathBuf,
 ) {
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;
 
     let fd = 1;
-    layer_connection
+    intproxy
         .expect_file_open_with_read_flag("/app/test.txt", fd)
         .await;
 
-    layer_connection
+    intproxy
         .consume_xstats_then_expect_file_lseek(SeekFromInternal::Current(4), fd)
         .await;
 
-    layer_connection
-        .expect_single_file_read("apples.", fd)
-        .await;
-
-    assert!(layer_connection.is_ended().await);
+    intproxy.expect_single_file_read("apples.", fd).await;
 
     // Assert all clear
     test_process.wait_assert_success().await;
@@ -706,14 +677,13 @@ async fn faccessat_go(
     application: Application,
     dylib_path: &PathBuf,
 ) {
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;
 
-    layer_connection
+    intproxy
         .expect_file_access(PathBuf::from("/app/test.txt"), O_RDWR as u8)
         .await;
-    assert!(layer_connection.is_ended().await);
 
     // Assert all clear
     test_process.wait_assert_success().await;

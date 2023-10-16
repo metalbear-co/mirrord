@@ -4,7 +4,6 @@
 
 use std::{assert_matches::assert_matches, path::PathBuf, time::Duration};
 
-use futures::StreamExt;
 use mirrord_protocol::{
     tcp::{LayerTcpSteal, StealType},
     ClientMessage,
@@ -28,7 +27,7 @@ async fn listen_ports(
 ) {
     let mut config_path = config_dir.clone();
     config_path.push("listen_ports.json");
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
             vec![("MIRRORD_FILE_MODE", "local")],
@@ -37,28 +36,28 @@ async fn listen_ports(
         .await;
 
     assert_matches!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        intproxy.recv().await,
         ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(80)))
     );
 
     TcpStream::connect("127.0.0.1:51222").await.unwrap();
 
     assert_matches!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        intproxy.recv().await,
         ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(40000)))
     );
 
     TcpStream::connect("127.0.0.1:40000").await.unwrap();
 
     loop {
-        match layer_connection.codec.next().await {
-            Some(Ok(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(40000)))) => {}
-            Some(Ok(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(80)))) => {}
+        match intproxy.try_recv().await {
+            Some(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(40000))) => {}
+            Some(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(80))) => {}
             None => break,
             other => panic!("unexpected message: {:?}", other),
         }
     }
-    assert!(layer_connection.is_ended().await);
+    assert_eq!(intproxy.try_recv().await, None);
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
     test_process.assert_no_error_in_stdout().await;

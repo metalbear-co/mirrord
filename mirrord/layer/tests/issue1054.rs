@@ -20,7 +20,7 @@ async fn test_issue1054(
     let mut config_path = config_dir.clone();
     config_path.push("port_mapping.json");
 
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer_and_port(
             dylib_path,
             vec![
@@ -34,10 +34,10 @@ async fn test_issue1054(
 
     println!("Application subscribed to port, sending tcp messages.");
 
-    let new_connection_id = layer_connection
+    let new_connection_id = intproxy
         .send_new_connection(application.get_app_port())
         .await;
-    layer_connection.send_close(new_connection_id).await;
+    intproxy.send_close(new_connection_id).await;
 
     test_process.wait_assert_success().await;
     test_process

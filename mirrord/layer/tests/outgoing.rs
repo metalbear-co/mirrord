@@ -16,7 +16,6 @@ use rstest::rstest;
 mod common;
 
 pub use common::*;
-use futures::{SinkExt, TryStreamExt};
 
 // TODO: add a test for when DNS lookup is unsuccessful, to make sure the layer returns a valid
 //      error to the user application.
@@ -35,10 +34,9 @@ use futures::{SinkExt, TryStreamExt};
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn outgoing_udp(dylib_path: &PathBuf) {
-    let (mut test_process, layer_connection) = Application::RustOutgoingUdp
+    let (mut test_process, mut intproxy) = Application::RustOutgoingUdp
         .start_process_with_layer(dylib_path, vec![], None)
         .await;
-    let mut conn = layer_connection.codec;
 
     let peers = RUST_OUTGOING_PEERS
         .split(',')
@@ -46,7 +44,7 @@ async fn outgoing_udp(dylib_path: &PathBuf) {
         .collect::<Vec<_>>();
 
     for peer in peers {
-        let msg = conn.try_next().await.unwrap().unwrap();
+        let msg = intproxy.recv().await;
         let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
             remote_address: SocketAddress::Ip(addr),
         })) = msg
@@ -54,17 +52,17 @@ async fn outgoing_udp(dylib_path: &PathBuf) {
             panic!("Invalid message received from layer: {msg:?}");
         };
         assert_eq!(addr, peer);
-        conn.send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Ok(
-            DaemonConnect {
-                connection_id: 0,
-                remote_address: addr.into(),
-                local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
-            },
-        ))))
-        .await
-        .unwrap();
+        intproxy
+            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Ok(
+                DaemonConnect {
+                    connection_id: 0,
+                    remote_address: addr.into(),
+                    local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
+                },
+            ))))
+            .await;
 
-        let msg = conn.try_next().await.unwrap().unwrap();
+        let msg = intproxy.recv().await;
         let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
             connection_id: 0,
             bytes,
@@ -72,17 +70,17 @@ async fn outgoing_udp(dylib_path: &PathBuf) {
         else {
             panic!("Invalid message received from layer: {msg:?}");
         };
-        conn.send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
-            DaemonRead {
-                connection_id: 0,
-                bytes,
-            },
-        ))))
-        .await
-        .unwrap();
-        conn.send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(0)))
-            .await
-            .unwrap();
+        intproxy
+            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
+                DaemonRead {
+                    connection_id: 0,
+                    bytes,
+                },
+            ))))
+            .await;
+        intproxy
+            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(0)))
+            .await;
     }
 
     test_process.wait_assert_success().await;
@@ -102,10 +100,9 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &PathBuf, con
     });
     let config = config.as_ref().map(|path_buf| path_buf.to_str().unwrap());
 
-    let (mut test_process, layer_connection) = Application::RustOutgoingTcp
+    let (mut test_process, mut intproxy) = Application::RustOutgoingTcp
         .start_process_with_layer(dylib_path, vec![], config)
         .await;
-    let mut conn = layer_connection.codec;
 
     let peers = RUST_OUTGOING_PEERS
         .split(',')
@@ -113,7 +110,7 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &PathBuf, con
         .collect::<Vec<_>>();
 
     for peer in peers {
-        let msg = conn.try_next().await.unwrap().unwrap();
+        let msg = intproxy.recv().await;
         let ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
             remote_address: SocketAddress::Ip(addr),
         })) = msg
@@ -121,17 +118,17 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &PathBuf, con
             panic!("Invalid message received from layer: {msg:?}");
         };
         assert_eq!(addr, peer);
-        conn.send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
-            DaemonConnect {
-                connection_id: 0,
-                remote_address: addr.into(),
-                local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
-            },
-        ))))
-        .await
-        .unwrap();
+        intproxy
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
+                DaemonConnect {
+                    connection_id: 0,
+                    remote_address: addr.into(),
+                    local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
+                },
+            ))))
+            .await;
 
-        let msg = conn.try_next().await.unwrap().unwrap();
+        let msg = intproxy.recv().await;
         let ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
             connection_id: 0,
             bytes,
@@ -139,17 +136,17 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &PathBuf, con
         else {
             panic!("Invalid message received from layer: {msg:?}");
         };
-        conn.send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
-            DaemonRead {
-                connection_id: 0,
-                bytes,
-            },
-        ))))
-        .await
-        .unwrap();
-        conn.send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(0)))
-            .await
-            .unwrap();
+        intproxy
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
+                DaemonRead {
+                    connection_id: 0,
+                    bytes,
+                },
+            ))))
+            .await;
+        intproxy
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(0)))
+            .await;
     }
 
     test_process.wait_assert_success().await;

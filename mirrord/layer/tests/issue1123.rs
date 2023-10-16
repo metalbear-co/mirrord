@@ -16,8 +16,7 @@ async fn test_issue1123(
     #[values(Application::RustIssue1123)] application: Application,
     dylib_path: &PathBuf,
 ) {
-    // `_layer_connection` has to be kept alive, otherwise we crash before the app is done.
-    let (mut test_process, _layer_connection) = application
+    let (mut test_process, _intproxy) = application
         .start_process_with_layer(
             dylib_path,
             vec![

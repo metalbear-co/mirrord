@@ -4,7 +4,6 @@
 use std::{path::PathBuf, time::Duration};
 
 use rstest::rstest;
-use tokio_stream::StreamExt;
 
 mod common;
 
@@ -18,13 +17,13 @@ use mirrord_protocol::tcp::LayerTcp;
 #[timeout(Duration::from_secs(60))]
 async fn self_connect(dylib_path: &PathBuf) {
     let application = Application::PythonSelfConnect;
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer_and_port(dylib_path, vec![("MIRRORD_FILE_MODE", "local")], None)
         .await;
-    match layer_connection.codec.next().await {
+    match intproxy.try_recv().await {
         // Accepting both a PortUnsubscribe and a hangup without it, so that this test does not
         // depend on unrelated implementation details.
-        Some(Ok(mirrord_protocol::ClientMessage::Tcp(LayerTcp::PortUnsubscribe(_)))) | None => {}
+        Some(mirrord_protocol::ClientMessage::Tcp(LayerTcp::PortUnsubscribe(_))) | None => {}
 
         // We want to make sure the layer does not try to connect to itself via the agent by sending
         // messages, but a message was sent by the layer to the agent. If that message is not about
@@ -33,7 +32,7 @@ async fn self_connect(dylib_path: &PathBuf) {
         // won't just pass by accident if we change the outgoing connection's implementation.
         _ => panic!("Expected the application to exit without sending further messages"),
     }
-    assert!(layer_connection.is_ended().await);
+    assert_eq!(intproxy.try_recv().await, None);
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
     test_process.assert_no_error_in_stdout().await;

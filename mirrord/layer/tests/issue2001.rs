@@ -3,7 +3,6 @@
 
 use std::{path::PathBuf, time::Duration};
 
-use futures::{stream::StreamExt, SinkExt};
 use mirrord_protocol::{file::*, *};
 use rstest::rstest;
 
@@ -21,7 +20,7 @@ async fn test_issue2001(
     #[values(Application::RustIssue2001)] application: Application,
     dylib_path: &PathBuf,
 ) {
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
             vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp")],
@@ -29,7 +28,7 @@ async fn test_issue2001(
         )
         .await;
 
-    layer_connection
+    intproxy
         .expect_file_open_with_options(
             "/tmp",
             10,
@@ -45,27 +44,24 @@ async fn test_issue2001(
         .await;
 
     assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 10 }))
     );
 
-    layer_connection
-        .codec
+    intproxy
         .send(DaemonMessage::File(FileResponse::OpenDir(Ok(
             OpenDirResponse { fd: 11 },
         ))))
-        .await
-        .unwrap();
+        .await;
 
-    layer_connection.expect_file_close(10).await;
+    intproxy.expect_file_close(10).await;
 
     assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 11 })),
     );
 
-    layer_connection
-        .codec
+    intproxy
         .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
             ReadDirResponse {
                 direntry: Some(DirEntryInternal {
@@ -76,16 +72,14 @@ async fn test_issue2001(
                 }),
             },
         ))))
-        .await
-        .unwrap();
+        .await;
 
     assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 11 })),
     );
 
-    layer_connection
-        .codec
+    intproxy
         .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
             ReadDirResponse {
                 direntry: Some(DirEntryInternal {
@@ -96,8 +90,7 @@ async fn test_issue2001(
                 }),
             },
         ))))
-        .await
-        .unwrap();
+        .await;
 
     test_process.wait_assert_success().await;
     test_process

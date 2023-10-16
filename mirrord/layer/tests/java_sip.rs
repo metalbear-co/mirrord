@@ -27,7 +27,7 @@ async fn java_temurin_sip(dylib_path: &PathBuf) {
     let env = get_env_no_fs(dylib_path.to_str().unwrap(), &addr);
 
     let mut test_process = application.get_test_process(env).await;
-    let _layer_connection = LayerConnection::get_initialized_connection(&listener).await;
+    let _intproxy = TestIntProxy::new(listener).await;
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;

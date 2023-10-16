@@ -2,7 +2,6 @@
 #![warn(clippy::indexing_slicing)]
 use std::{path::PathBuf, time::Duration};
 
-use futures::{stream::StreamExt, SinkExt};
 use mirrord_protocol::{file::*, *};
 use rstest::rstest;
 
@@ -20,7 +19,7 @@ async fn test_issue1899(
     #[values(Application::RustIssue1899)] application: Application,
     dylib_path: &PathBuf,
 ) {
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
             vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp")],
@@ -30,7 +29,7 @@ async fn test_issue1899(
 
     let fd = 1;
 
-    layer_connection
+    intproxy
         .expect_file_open_with_options(
             "/tmp",
             fd,
@@ -46,17 +45,15 @@ async fn test_issue1899(
         .await;
 
     assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 1 }))
     );
 
-    layer_connection
-        .codec
+    intproxy
         .send(DaemonMessage::File(FileResponse::OpenDir(Ok(
             OpenDirResponse { fd: 2 },
         ))))
-        .await
-        .unwrap();
+        .await;
 
     test_process.wait_assert_success().await;
     test_process

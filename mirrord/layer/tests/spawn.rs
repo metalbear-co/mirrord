@@ -3,7 +3,6 @@
 
 use std::{path::PathBuf, time::Duration};
 
-use futures::StreamExt;
 use mirrord_protocol::{ClientMessage, FileRequest};
 use rstest::rstest;
 
@@ -23,48 +22,32 @@ pub use common::*;
 #[timeout(Duration::from_secs(60))]
 async fn node_spawn(dylib_path: &PathBuf) {
     let application = Application::NodeSpawn;
-    let (mut test_process, listener) = application
-        .get_test_process_and_listener(dylib_path, vec![("MIRRORD_FILE_MODE", "local")], None)
+    let (mut test_process, mut intproxy) = application
+        .start_process_with_layer(dylib_path, vec![("MIRRORD_FILE_MODE", "local")], None)
         .await;
 
-    // Accept the connection from the layer and verify initial messages.
-    let _node_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    println!("NODE LAYER CONNECTION HANDLED");
-
-    // Accept the connection from the layer and verify initial messages.
-    let mut sh_layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-    println!("SH LAYER CONNECTION HANDLED");
-
-    // There is a 3rd layer connection that happens on macos, where `/bin/sh` starts `bash`, and
-    // thus we have to handle the `gethostname` messasges after it.
-    let _last_layer_connection = if cfg!(target_os = "macos") {
-        let mut bash_layer_connection =
-            LayerConnection::get_initialized_connection(&listener).await;
-        println!("BASH LAYER CONNECTION HANDLED");
+    if cfg!(target_os = "macos") {
         // flow isn't deterministic, so just handle everything until it ends.
         loop {
-            let msg = bash_layer_connection.codec.next().await;
+            let msg = intproxy.try_recv().await;
             match msg {
-                Some(Ok(ClientMessage::FileRequest(FileRequest::Open(_)))) => {
-                    bash_layer_connection.answer_file_open().await
+                Some(ClientMessage::FileRequest(FileRequest::Open(_))) => {
+                    intproxy.answer_file_open().await
                 }
-                Some(Ok(ClientMessage::FileRequest(FileRequest::Read(_)))) => {
-                    bash_layer_connection
+                Some(ClientMessage::FileRequest(FileRequest::Read(_))) => {
+                    intproxy
                         .answer_file_read(b"metalbear-hostname".to_vec())
                         .await
                 }
-                Some(Ok(ClientMessage::FileRequest(FileRequest::Close(_)))) => {}
+                Some(ClientMessage::FileRequest(FileRequest::Close(_))) => {}
                 None => break,
                 _ => {
-                    panic!("Unexpected message from bash layer connection {msg:?}")
+                    panic!("Unexpected message from layer connection {msg:?}")
                 }
             }
         }
-        bash_layer_connection
     } else {
-        // Meanwhile on linux, we handle it after the 2nd connection, in the `/bin/sh` handler.
-        sh_layer_connection.handle_gethostname::<true>(None).await;
-        sh_layer_connection
+        intproxy.handle_gethostname::<true>(None).await;
     };
 
     test_process.wait_assert_success().await;

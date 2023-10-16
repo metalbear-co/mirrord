@@ -2,7 +2,6 @@
 #![warn(clippy::indexing_slicing)]
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
-use futures::{SinkExt, TryStreamExt};
 use mirrord_protocol::{
     outgoing::{
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
@@ -30,14 +29,13 @@ async fn test_issue1776(
 ) {
     let mut config_path = config_dir.clone();
     config_path.push("issue1776.json");
-    let (mut test_process, layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![], Some(config_path.to_str().unwrap()))
         .await;
 
     println!("Application started, preparing to resolve DNS with sendmsg/recvmsg.");
-    let mut connection = layer_connection.codec;
 
-    let client_msg = connection.try_next().await.unwrap().unwrap();
+    let client_msg = intproxy.recv().await;
     let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
         remote_address: SocketAddress::Ip(addr),
     })) = client_msg
@@ -47,7 +45,7 @@ async fn test_issue1776(
 
     println!("connecting to address {addr:#?}");
 
-    connection
+    intproxy
         .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Ok(
             DaemonConnect {
                 connection_id: 0,
@@ -55,10 +53,9 @@ async fn test_issue1776(
                 local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
             },
         ))))
-        .await
-        .unwrap();
+        .await;
 
-    let client_msg = connection.try_next().await.unwrap().unwrap();
+    let client_msg = intproxy.recv().await;
     let ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
         connection_id: 0, ..
     })) = client_msg
@@ -66,20 +63,18 @@ async fn test_issue1776(
         panic!("Invalid message received from layer: {client_msg:?}");
     };
 
-    connection
+    intproxy
         .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
             DaemonRead {
                 connection_id: 0,
                 bytes: vec![0; 4],
             },
         ))))
-        .await
-        .unwrap();
+        .await;
 
-    connection
+    intproxy
         .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(0)))
-        .await
-        .unwrap();
+        .await;
 
     test_process.wait_assert_success().await;
     test_process
@@ -104,13 +99,13 @@ async fn test_issue1776_port_not_53(
 ) {
     let mut config_path = config_dir.clone();
     config_path.push("issue1776.json");
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![], Some(config_path.to_str().unwrap()))
         .await;
 
     println!("Application started, preparing to send UDP packet.");
 
-    assert!(layer_connection.codec.try_next().await.unwrap().is_none());
+    assert_eq!(intproxy.try_recv().await, None);
 
     test_process.wait_assert_success().await;
     test_process

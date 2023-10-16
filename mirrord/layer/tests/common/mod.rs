@@ -66,13 +66,12 @@ impl TestIntProxy {
     }
 
     pub async fn recv(&mut self) -> ClientMessage {
+        self.try_recv().await.expect("intproxy connection closed")
+    }
+
+    pub async fn try_recv(&mut self) -> Option<ClientMessage> {
         loop {
-            let msg = self
-                .codec
-                .next()
-                .await
-                .expect("intproxy connection closed")
-                .expect("inproxy connection failed");
+            let msg = self.codec.next().await?.expect("inproxy connection failed");
 
             match msg {
                 ClientMessage::Ping => {
@@ -81,7 +80,7 @@ impl TestIntProxy {
                         .await
                         .expect("inproxy connection failed");
                 }
-                other => break other,
+                other => break Some(other),
             }
         }
     }
@@ -212,15 +211,6 @@ impl TestIntProxy {
         );
 
         Some(())
-    }
-
-    pub async fn is_ended(&mut self) -> bool {
-        if let Some(msg) = self.codec.next().await {
-            println!("Got unexpected message: {msg:?}");
-            false
-        } else {
-            true
-        }
     }
 
     /// Send the layer a message telling it the target got a new incoming connection.
@@ -949,54 +939,21 @@ impl Application {
         TestProcess::start_process(executable, self.get_args(), env).await
     }
 
-    /// Start the test process and return the started process and a tcp listener that the layer is
-    /// supposed to connect to.
-    pub async fn get_test_process_and_listener(
-        &self,
-        dylib_path: &PathBuf,
-        extra_env_vars: Vec<(&str, &str)>,
-        configuration_file: Option<&str>,
-    ) -> (TestProcess, TcpListener) {
-        let fake_agent_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let fake_agent_address = fake_agent_listener.local_addr().unwrap();
+    // /// Start the test process and return the started process and a tcp listener that the layer
+    // is /// supposed to connect to.
+    // pub async fn get_test_process_and_listener(
+    //     &self,
+    //     dylib_path: &PathBuf,
+    //     extra_env_vars: Vec<(&str, &str)>,
+    //     configuration_file: Option<&str>,
+    // ) -> (TestProcess, TcpListener) { let intproxy_listener =
+    //   TcpListener::bind("127.0.0.1:0").await.unwrap(); let intproxy_address =
+    //   intproxy_listener.local_addr().unwrap().to_string(); let env = get_env(
+    //   dylib_path.to_str().unwrap(), &intproxy_address, extra_env_vars, configuration_file, ); let
+    //   test_process = self.get_test_process(env).await;
 
-        let intproxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let intproxy_address = intproxy_listener.local_addr().unwrap();
-
-        tokio::spawn(async move {
-            let fake_agent_conn =
-                match AgentConnection::new_for_raw_address(fake_agent_address).await {
-                    Ok(conn) => conn,
-                    Err(e) => {
-                        println!(
-                        "intproxy failed to connect to fake agent at {fake_agent_address}: {e:?}"
-                    );
-                        return;
-                    }
-                };
-
-            let intproxy = IntProxy::new_with_connection(fake_agent_conn, intproxy_listener);
-            let res = intproxy
-                .run(Duration::from_secs(5), Duration::from_secs(5))
-                .await;
-            if let Err(e) = res {
-                println!("intproxy task failed: {e:?}");
-            }
-        });
-
-        println!("intproxy listening on {intproxy_address}, fake agent listening on {fake_agent_address}");
-
-        let intproxy_address = intproxy_address.to_string();
-        let env = get_env(
-            dylib_path.to_str().unwrap(),
-            &intproxy_address,
-            extra_env_vars,
-            configuration_file,
-        );
-        let test_process = self.get_test_process(env).await;
-
-        (test_process, fake_agent_listener)
-    }
+    //     (test_process, intproxy_listener)
+    // }
 
     /// Start the process of this application, with the layer lib loaded.
     /// Will start it with env from `get_env` plus whatever is passed in `extra_env_vars`.
@@ -1006,11 +963,17 @@ impl Application {
         extra_env_vars: Vec<(&str, &str)>,
         configuration_file: Option<&str>,
     ) -> (TestProcess, TestIntProxy) {
-        let (test_process, listener) = self
-            .get_test_process_and_listener(dylib_path, extra_env_vars, configuration_file)
-            .await;
-        let intproxy = TestIntProxy::new(listener).await;
-        (test_process, intproxy)
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let env = get_env(
+            dylib_path.to_str().unwrap(),
+            &address,
+            extra_env_vars,
+            configuration_file,
+        );
+        let test_process = self.get_test_process(env).await;
+
+        (test_process, TestIntProxy::new(listener).await)
     }
 
     /// Like `start_process_with_layer`, but also verify a port subscribe.
@@ -1020,13 +983,20 @@ impl Application {
         extra_env_vars: Vec<(&str, &str)>,
         configuration_file: Option<&str>,
     ) -> (TestProcess, TestIntProxy) {
-        let (test_process, listener) = self
-            .get_test_process_and_listener(dylib_path, extra_env_vars, configuration_file)
-            .await;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let env = get_env(
+            dylib_path.to_str().unwrap(),
+            &address,
+            extra_env_vars,
+            configuration_file,
+        );
+        let test_process = self.get_test_process(env).await;
 
-        let intproxy = TestIntProxy::new_with_app_port(listener, self.get_app_port()).await;
-
-        (test_process, intproxy)
+        (
+            test_process,
+            TestIntProxy::new_with_app_port(listener, self.get_app_port()).await,
+        )
     }
 }
 
