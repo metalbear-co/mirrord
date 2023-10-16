@@ -7,7 +7,6 @@ use std::assert_matches::assert_matches;
 use std::{env, fs};
 use std::{env::temp_dir, path::PathBuf, time::Duration};
 
-use futures::{stream::StreamExt, SinkExt};
 use libc::{pid_t, O_RDWR};
 use mirrord_protocol::{file::*, *};
 #[cfg(target_os = "macos")]
@@ -102,7 +101,7 @@ async fn pwrite(
     dylib_path: &PathBuf,
 ) {
     // add rw override for the specific path
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
             vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt")],
@@ -112,7 +111,7 @@ async fn pwrite(
 
     let fd = 1;
 
-    layer_connection
+    intproxy
         .expect_file_open_with_options(
             "/tmp/test_file.txt",
             fd,
@@ -128,7 +127,7 @@ async fn pwrite(
         .await;
 
     assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::WriteLimited(WriteLimitedFileRequest {
             remote_fd: fd,
             start_from: 0,
@@ -141,22 +140,20 @@ async fn pwrite(
     );
 
     // reply to pwrite
-    layer_connection
-        .codec
+    intproxy
         .send(DaemonMessage::File(FileResponse::WriteLimited(Ok(
             WriteFileResponse { written_amount: 37 },
         ))))
-        .await
-        .unwrap();
+        .await;
 
-    layer_connection.expect_file_close(fd).await;
+        intproxy.expect_file_close(fd).await;
 
     // Rust compiles with newer libc on Linux that uses statx
     #[cfg(target_os = "macos")]
     {
         // lstat test
         assert_eq!(
-            layer_connection.codec.next().await.unwrap().unwrap(),
+            intproxy.recv().await,
             ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
                 path: Some("/tmp/test_file.txt".to_string().into()),
                 fd: None,
@@ -171,8 +168,7 @@ async fn pwrite(
             blocks: 3,
             ..Default::default()
         };
-        layer_connection
-            .codec
+        intproxy
             .send(DaemonMessage::File(FileResponse::Xstat(Ok(
                 XstatResponse { metadata },
             ))))
@@ -181,7 +177,7 @@ async fn pwrite(
 
         // fstat test
         assert_eq!(
-            layer_connection.codec.next().await.unwrap().unwrap(),
+            intproxy.recv().await,
             ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
                 path: Some("/tmp/test_file.txt".to_string().into()),
                 fd: None,
@@ -196,8 +192,7 @@ async fn pwrite(
             blocks: 7,
             ..Default::default()
         };
-        layer_connection
-            .codec
+        intproxy
             .send(DaemonMessage::File(FileResponse::Xstat(Ok(
                 XstatResponse { metadata },
             ))))
@@ -288,7 +283,7 @@ async fn go_stat(
     dylib_path: &PathBuf,
 ) {
     // add rw override for the specific path
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
             vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt")],
@@ -298,7 +293,7 @@ async fn go_stat(
 
     let fd = 1;
 
-    layer_connection
+    intproxy
         .expect_file_open_with_options(
             "/tmp/test_file.txt",
             fd,
@@ -314,7 +309,7 @@ async fn go_stat(
         .await;
 
     assert_eq!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
             path: Some("/tmp/test_file.txt".to_string().into()),
             fd: None,
@@ -329,13 +324,11 @@ async fn go_stat(
         blocks: 3,
         ..Default::default()
     };
-    layer_connection
-        .codec
+    intproxy
         .send(DaemonMessage::File(FileResponse::Xstat(Ok(
             XstatResponse { metadata },
         ))))
-        .await
-        .unwrap();
+        .await;
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
 }
@@ -472,7 +465,7 @@ async fn go_dir_on_linux(
     #[values(Application::Go19Dir, Application::Go20Dir)] application: Application,
     dylib_path: &PathBuf,
 ) {
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
             vec![("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo")],
@@ -481,13 +474,13 @@ async fn go_dir_on_linux(
         .await;
 
     let fd = 1;
-    layer_connection
+    intproxy
         .expect_file_open_for_reading("/tmp/foo", fd)
         .await;
 
     // Go calls a bare syscall, the layer hooks it and sends the request to the agent.
     assert_matches!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::GetDEnts64(GetDEnts64Request {
             remote_fd: 1,
             .. // Don't want to commit to a specific buffer size.
@@ -516,8 +509,7 @@ async fn go_dir_on_linux(
         .map(|entry| entry.get_d_reclen64())
         .sum::<u16>() as u64;
 
-    layer_connection
-        .codec
+    intproxy
         .send(DaemonMessage::File(FileResponse::GetDEnts64(Ok(
             GetDEnts64Response {
                 fd: 1,
@@ -525,12 +517,11 @@ async fn go_dir_on_linux(
                 result_size,
             },
         ))))
-        .await
-        .unwrap();
+        .await;
 
     // The caller keeps calling the syscall until it gets an "empty" result.
     assert_matches!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::GetDEnts64(GetDEnts64Request {
             remote_fd: 1,
             ..
@@ -538,8 +529,7 @@ async fn go_dir_on_linux(
     );
 
     // "Empty" result: no entries, total size of 0.
-    layer_connection
-        .codec
+    intproxy
         .send(DaemonMessage::File(FileResponse::GetDEnts64(Ok(
             GetDEnts64Response {
                 fd: 1,
@@ -547,10 +537,9 @@ async fn go_dir_on_linux(
                 result_size: 0,
             },
         ))))
-        .await
-        .unwrap();
+        .await;
 
-    layer_connection.expect_file_close(fd).await;
+    intproxy.expect_file_close(fd).await;
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;

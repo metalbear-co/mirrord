@@ -1,21 +1,15 @@
 #![feature(c_variadic)]
 #![feature(result_option_inspect)]
-#![feature(const_trait_impl)]
 #![feature(naked_functions)]
-#![feature(result_flattening)]
 #![feature(io_error_uncategorized)]
 #![feature(let_chains)]
-#![feature(async_closure)]
 #![feature(try_trait_v2)]
 #![feature(try_trait_v2_residual)]
-#![feature(trait_alias)]
 #![feature(c_size_t)]
 #![feature(pointer_byte_offsets)]
 #![feature(lazy_cell)]
-#![feature(async_fn_in_trait)]
 #![feature(once_cell_try)]
 #![allow(rustdoc::private_intra_doc_links)]
-#![allow(incomplete_features)]
 #![warn(clippy::indexing_slicing)]
 
 //! Loaded dynamically with your local process.
@@ -205,6 +199,10 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
 /// Calls [`layer_pre_initialization`], which runs mirrord-layer.
 #[ctor]
 fn mirrord_layer_entry_point() {
+    if cfg!(test) {
+        return;
+    }
+
     let res = panic::catch_unwind(|| match layer_pre_initialization() {
         Err(LayerError::NoProcessFound) => {}
         Err(e) => {

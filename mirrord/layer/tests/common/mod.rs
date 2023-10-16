@@ -29,61 +29,80 @@ pub const RUST_OUTGOING_PEERS: &str = "1.1.1.1:1111,2.2.2.2:2222,3.3.3.3:3333";
 /// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
 pub const RUST_OUTGOING_LOCAL: &str = "4.4.4.4:4444";
 
-pub struct LayerConnection {
-    pub codec: Framed<TcpStream, DaemonCodec>,
+pub struct TestIntProxy {
+    codec: Framed<TcpStream, DaemonCodec>,
     num_connections: u64,
 }
 
-impl LayerConnection {
-    /// Accept a connection from the layer
-    /// Return the codec of the accepted stream.
-    async fn accept_library_connection(listener: &TcpListener) -> Framed<TcpStream, DaemonCodec> {
-        let (stream, _) = listener.accept().await.unwrap();
-        println!("Got connection from library.");
+impl TestIntProxy {
+    pub async fn new(listener: TcpListener) -> Self {
+        let fake_agent_listener = TcpListener::bind("127.0.0.1.0").await.unwrap();
+        let fake_agent_address = fake_agent_listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let agent_conn = AgentConnection::new_for_raw_address(fake_agent_address)
+                .await
+                .unwrap();
+            let intproxy = IntProxy::new_with_connection(agent_conn, listener);
+            intproxy
+                .run(Duration::from_secs(5), Duration::from_secs(5))
+                .await
+                .unwrap();
+        });
+
+        let (stream, _buffer_size) = fake_agent_listener.accept().await.unwrap();
         let mut codec = Framed::new(stream, DaemonCodec::new());
 
-        assert!(matches!(
-            codec.next().await,
-            None | Some(Ok(ClientMessage::SwitchProtocolVersion(_)))
-        ));
+        let msg = codec.next().await;
+        assert!(
+            matches!(msg, Some(Ok(ClientMessage::SwitchProtocolVersion(_))),),
+            "unexpected message: {msg:?}",
+        );
 
-        codec
-    }
-
-    /// Accept the library's connection and verify initial ENV message
-    pub async fn get_initialized_connection(listener: &TcpListener) -> LayerConnection {
-        let codec = Self::accept_library_connection(listener).await;
-        println!("Got connection from layer.");
-        LayerConnection {
+        Self {
             codec,
             num_connections: 0,
         }
     }
 
-    /// Accept the library's connection and verify initial ENV message, `FileRequest` message
-    /// (depends on tested program), and PortSubscribe message caused by the listen hook.
-    ///
-    /// Handle flask's 2 process behaviour.
-    pub async fn get_initialized_connection_with_port(
-        listener: &TcpListener,
-        app_port: u16,
-    ) -> LayerConnection {
-        let mut codec = Self::accept_library_connection(listener).await;
-        let msg = codec
-            .next()
-            .await
-            .expect("no message received from the library connection")
-            .expect("failed to receive message from library");
+    pub async fn recv(&mut self) -> ClientMessage {
+        loop {
+            let msg = self
+                .codec
+                .next()
+                .await
+                .expect("intproxy connection closed")
+                .expect("inproxy connection failed");
 
+            match msg {
+                ClientMessage::Ping => {
+                    self.codec
+                        .send(DaemonMessage::Pong)
+                        .await
+                        .expect("inproxy connection failed");
+                }
+                other => break other,
+            }
+        }
+    }
+
+    pub async fn send(&mut self, msg: DaemonMessage) {
+        self.codec
+            .send(msg)
+            .await
+            .expect("intproxy connection failed");
+    }
+
+    pub async fn new_with_app_port(listener: TcpListener, app_port: u16) -> Self {
+        let mut res = Self::new(listener).await;
+
+        let msg = res.recv().await;
         println!("Got first message from library: {:?}", msg);
 
         match msg {
             ClientMessage::Tcp(LayerTcp::PortSubscribe(port)) => {
                 assert_eq!(app_port, port);
-                Self {
-                    codec,
-                    num_connections: 0,
-                }
+                res
             }
             ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
                 path,
@@ -98,15 +117,9 @@ impl LayerConnection {
                     },
             })) => {
                 assert_eq!(path, PathBuf::from("/etc/hostname"));
-                let mut layer_connection = Self {
-                    codec,
-                    num_connections: 0,
-                };
 
-                layer_connection
-                    .handle_gethostname::<false>(Some(app_port))
-                    .await;
-                layer_connection
+                res.handle_gethostname::<false>(Some(app_port)).await;
+                res
             }
             unexpected => panic!("Initialized connection with unexpected message {unexpected:#?}"),
         }
@@ -133,7 +146,7 @@ impl LayerConnection {
         // Should we call `codec.next` or was it called outside already?
         if FIRST_CALL {
             // open file
-            let open_file_request = self.codec.next().await?.unwrap();
+            let open_file_request = self.recv().await;
 
             assert_eq!(
                 open_file_request,
@@ -285,7 +298,7 @@ impl LayerConnection {
     pub async fn expect_file_open_with_read_flag(&mut self, file_name: &str, fd: u64) {
         // Verify the app tries to open the expected file.
         assert_matches!(
-            self.codec.next().await.unwrap().unwrap(),
+            self.recv().await,
             ClientMessage::FileRequest(FileRequest::Open(
                 mirrord_protocol::file::OpenFileRequest {
                     path,
@@ -331,7 +344,7 @@ impl LayerConnection {
     ) {
         // Verify the app tries to open the expected file.
         assert_eq!(
-            self.codec.next().await.unwrap().unwrap(),
+            self.recv().await,
             ClientMessage::FileRequest(FileRequest::Open(
                 mirrord_protocol::file::OpenFileRequest {
                     path: file_name.to_string().into(),
@@ -353,7 +366,7 @@ impl LayerConnection {
     pub async fn expect_file_open_with_whatever_options(&mut self, file_name: &str, fd: u64) {
         // Verify the app tries to open the expected file.
         assert_matches!(
-            self.codec.next().await.unwrap().unwrap(),
+            self.recv().await,
             ClientMessage::FileRequest(FileRequest::Open(
                 mirrord_protocol::file::OpenFileRequest {
                     path,
@@ -516,7 +529,7 @@ impl LayerConnection {
     /// Send back a response.
     pub async fn expect_file_access(&mut self, pathname: PathBuf, mode: u8) {
         assert_eq!(
-            self.codec.next().await.unwrap().unwrap(),
+            self.recv().await,
             ClientMessage::FileRequest(FileRequest::Access(AccessFileRequest { pathname, mode }))
         );
 
@@ -531,7 +544,7 @@ impl LayerConnection {
     /// Assert that the layer sends an xstat request with the given fd, answer the request.
     pub async fn expect_xstat(&mut self, path: Option<PathBuf>, fd: Option<u64>) {
         assert_eq!(
-            self.codec.next().await.unwrap().unwrap(),
+            self.recv().await,
             ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
                 path,
                 fd,
@@ -551,7 +564,7 @@ impl LayerConnection {
 
     /// Consume messages from the codec and return the first non-xstat message.
     pub async fn consume_xstats(&mut self) -> ClientMessage {
-        let mut message = self.codec.next().await.unwrap().unwrap();
+        let mut message = self.recv().await;
         while let ClientMessage::FileRequest(FileRequest::Xstat(_xstat_request)) = message {
             // Answer xstat.
             self.codec
@@ -562,7 +575,7 @@ impl LayerConnection {
                 ))))
                 .await
                 .unwrap();
-            message = self.codec.next().await.unwrap().unwrap();
+            message = self.recv().await;
         }
         message
     }
@@ -992,12 +1005,12 @@ impl Application {
         dylib_path: &PathBuf,
         extra_env_vars: Vec<(&str, &str)>,
         configuration_file: Option<&str>,
-    ) -> (TestProcess, LayerConnection) {
+    ) -> (TestProcess, TestIntProxy) {
         let (test_process, listener) = self
             .get_test_process_and_listener(dylib_path, extra_env_vars, configuration_file)
             .await;
-        let layer_connection = LayerConnection::get_initialized_connection(&listener).await;
-        (test_process, layer_connection)
+        let intproxy = TestIntProxy::new(listener).await;
+        (test_process, intproxy)
     }
 
     /// Like `start_process_with_layer`, but also verify a port subscribe.
@@ -1006,16 +1019,14 @@ impl Application {
         dylib_path: &PathBuf,
         extra_env_vars: Vec<(&str, &str)>,
         configuration_file: Option<&str>,
-    ) -> (TestProcess, LayerConnection) {
+    ) -> (TestProcess, TestIntProxy) {
         let (test_process, listener) = self
             .get_test_process_and_listener(dylib_path, extra_env_vars, configuration_file)
             .await;
 
-        let layer_connection =
-            LayerConnection::get_initialized_connection_with_port(&listener, self.get_app_port())
-                .await;
+        let intproxy = TestIntProxy::new_with_app_port(listener, self.get_app_port()).await;
 
-        (test_process, layer_connection)
+        (test_process, intproxy)
     }
 }
 

@@ -1,4 +1,4 @@
-use std::{env::VarError, io, net::SocketAddr, ptr, str::ParseBoolError};
+use std::{env::VarError, net::SocketAddr, ptr, str::ParseBoolError};
 
 use errno::set_errno;
 use ignore_codes::*;
@@ -132,12 +132,6 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: Failed to find a process to hook mirrord into!")]
     NoProcessFound,
-
-    #[error("mirrord-layer: Port {0} is already being stolen by another mirrord client!")]
-    PortAlreadyStolen(u16),
-
-    #[error("mirrord-layer: Got unexpected response error from agent: {0}")]
-    UnexpectedResponseError(ResponseError),
 
     // #[error("mirrord-layer: Stolen HTTP request forwarding failed with `{0}`.")]
     // HttpForwardingError(#[from] HttpForwarderError),
