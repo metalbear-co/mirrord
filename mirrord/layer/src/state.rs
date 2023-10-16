@@ -65,10 +65,6 @@ impl LayerState {
         }
     }
 
-    pub fn file_filter(&self) -> &FileFilter {
-        &self.file_filter
-    }
-
     pub fn fs_config(&self) -> &FsConfig {
         &self.config.feature.fs
     }
@@ -89,7 +85,6 @@ impl LayerState {
         self.config.target.path.is_none()
     }
 
-    #[clippy::must_use]
     pub fn filter_ignored_file(&self, path: &str, write: bool) -> Detour<()> {
         self.file_filter
             .continue_or_bypass_with(path, write, || Bypass::IgnoredFile(path.into()))

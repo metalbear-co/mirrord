@@ -58,6 +58,7 @@ mirrord-sip = { path = "../sip" }
 null-terminated = "0.3"
 
 [dev-dependencies]
+mirrord-intproxy = { path = "../intproxy" }
 k8s-openapi.workspace = true
 chrono = { version = "0.4", features = ["clock"] }
 base64 = "0.21"
@@ -69,6 +70,9 @@ tower = "0.4"
 tokio = { version = "1", features = ["rt", "net", "macros"] }
 tests = { path = "../../tests" }
 flaky_test = "0.1.0"
+futures.workspace = true
+actix-codec.workspace = true
+tokio-stream.workspace = true
 
 [lib]
 crate_type = ["cdylib"]
