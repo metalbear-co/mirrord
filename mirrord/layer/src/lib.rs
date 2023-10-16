@@ -83,7 +83,7 @@ use mirrord_intproxy::protocol::NewSessionRequest;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use proxy_connection::ProxyConnection;
 use socket::SOCKETS;
-use state::LayerSetup;
+use setup::LayerSetup;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{debugger_ports::DebuggerPorts, detour::DetourGuard, load::LoadType};
@@ -100,7 +100,7 @@ mod load;
 mod macros;
 mod proxy_connection;
 mod socket;
-mod state;
+mod setup;
 
 #[cfg(all(
     any(target_arch = "x86_64", target_arch = "aarch64"),
