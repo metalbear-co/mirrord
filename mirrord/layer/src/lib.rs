@@ -73,32 +73,26 @@
 extern crate alloc;
 extern crate core;
 
-use std::{ffi::OsString, net::SocketAddr, panic, sync::OnceLock, time::Duration};
+use std::{ffi::OsString, panic, sync::OnceLock, time::Duration};
 
-use bimap::BiMap;
 use ctor::ctor;
 use error::{LayerError, Result};
-use file::{filter::FileFilter, OPEN_FILES};
+use file::OPEN_FILES;
 use hooks::HookManager;
 use libc::{c_int, pid_t};
 use load::ExecutableName;
 use mirrord_config::{
-    feature::{
-        fs::{FsConfig, FsModeConfig},
-        network::incoming::{IncomingConfig, IncomingMode},
-    },
+    feature::{fs::FsModeConfig, network::incoming::IncomingMode},
     LayerConfig,
 };
 use mirrord_intproxy::protocol::NewSessionRequest;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use proxy_connection::ProxyConnection;
-use regex::RegexSet;
-use socket::{OutgoingSelector, SOCKETS};
+use socket::SOCKETS;
+use state::LayerState;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
-use crate::{
-    debugger_ports::DebuggerPorts, detour::DetourGuard, file::filter::FILE_FILTER, load::LoadType,
-};
+use crate::{debugger_ports::DebuggerPorts, detour::DetourGuard, load::LoadType};
 
 mod common;
 mod debugger_ports;
@@ -112,6 +106,7 @@ mod load;
 mod macros;
 mod proxy_connection;
 mod socket;
+mod state;
 
 #[cfg(all(
     any(target_arch = "x86_64", target_arch = "aarch64"),
@@ -139,69 +134,13 @@ const TRACE_ONLY_ENV: &str = "MIRRORD_LAYER_TRACE_ONLY";
 /// Global connection to the internal proxy.
 /// Should not be used directly. Use [`common::make_proxy_request_with_response`] or
 /// [`common::make_proxy_request_no_response`] functions instead.
-pub(crate) static mut PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
+static mut PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
 
-pub(crate) static LAYER_INITIALIZED: OnceLock<()> = OnceLock::new();
+static STATE: OnceLock<LayerState> = OnceLock::new();
 
-/// Holds the file operations configuration, as specified by [`FsConfig`].
-///
-/// ## Usage
-///
-/// Mainly used to share the [`FsConfig`] in places where we can't easily pass this as an argument
-/// to some function:
-///
-/// 1. [`close_layer_fd`];
-/// 2. [`go_hooks`] file operations.
-pub(crate) static FILE_MODE: OnceLock<FsConfig> = OnceLock::new();
-
-/// Tells us if the user enabled the Tcp outgoing feature in [`OutgoingConfig`].
-///
-/// ## Usage
-///
-/// Used to change the behavior of the `socket::ops::connect` hook operation.
-pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
-
-/// Tells us if the user enabled the Udp outgoing feature in [`OutgoingConfig`].
-///
-/// ## Usage
-///
-/// Used to change the behavior of the `socket::ops::connect` hook operation.
-pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
-
-/// Unix streams to connect to remotely.
-///
-/// ## Usage
-///
-/// Used to change the behavior of the `socket::ops::connect` hook operation.
-pub(crate) static REMOTE_UNIX_STREAMS: OnceLock<Option<RegexSet>> = OnceLock::new();
-
-/// Tells us if the user enabled wants to ignore localhots connections in [`OutgoingConfig`].
-///
-/// ## Usage
-///
-/// When true, localhost connections will stay local (won't go to the remote pod localhost)
-pub(crate) static OUTGOING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
-
-/// Incoming config [`IncomingConfig`].
-pub(crate) static INCOMING_CONFIG: OnceLock<IncomingConfig> = OnceLock::new();
-
-/// Indicates this is a targetless run, so that users can be warned if their application is
-/// mirroring/stealing from a targetless agent.
-pub(crate) static TARGETLESS: OnceLock<bool> = OnceLock::new();
-
-/// Whether to resolve DNS locally or through the remote pod.
-pub(crate) static REMOTE_DNS: OnceLock<bool> = OnceLock::new();
-
-/// Selector for how outgoing connection will behave, either sending traffic via the remote or from
-/// local app, according to how the user set up the `remote`, and `local` filter, in
-/// `feature.network.outgoing`.
-pub(crate) static OUTGOING_SELECTOR: OnceLock<OutgoingSelector> = OnceLock::new();
-
-/// Ports to ignore because they are used by the IDE debugger
-pub(crate) static DEBUGGER_IGNORED_PORTS: OnceLock<DebuggerPorts> = OnceLock::new();
-
-/// Mapping of ports to use for binding local sockets created by us for intercepting.
-pub(crate) static LISTEN_PORTS: OnceLock<BiMap<u16, u16>> = OnceLock::new();
+fn global_state() -> &'static LayerState {
+    STATE.get().expect("layer state is not initialized")
+}
 
 // The following statics are to avoid using CoreFoundation or high level macOS APIs
 // that aren't safe to use after fork.
@@ -214,14 +153,6 @@ pub(crate) static EXECUTABLE_PATH: OnceLock<String> = OnceLock::new();
 
 /// Program arguments
 pub(crate) static EXECUTABLE_ARGS: OnceLock<Vec<OsString>> = OnceLock::new();
-
-/// Prevent mirrord from connecting to ports used by the IDE debugger
-pub(crate) fn is_debugger_port(addr: &SocketAddr) -> bool {
-    DEBUGGER_IGNORED_PORTS
-        .get()
-        .expect("DEBUGGER_IGNORED_PORTS not initialized")
-        .contains(addr)
-}
 
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
 fn layer_pre_initialization() -> Result<(), LayerError> {
@@ -308,81 +239,6 @@ fn init_tracing() {
     };
 }
 
-/// Set the shared static variables according to the layer's configuration.
-/// These have to be global because they have to be accessed from hooks (which are called by user
-/// code in user threads).
-///
-/// Would panic if any of the variables is already set. This should never be the case.
-fn set_globals(config: &LayerConfig) {
-    FILE_MODE
-        .set(config.feature.fs.clone())
-        .expect("Setting FILE_MODE failed.");
-    INCOMING_CONFIG
-        .set(config.feature.network.incoming.clone())
-        .expect("SETTING INCOMING_CONFIG singleton");
-
-    // These must come before `OutgoingSelector::new`.
-    ENABLED_TCP_OUTGOING
-        .set(config.feature.network.outgoing.tcp)
-        .expect("Setting ENABLED_TCP_OUTGOING singleton");
-    ENABLED_UDP_OUTGOING
-        .set(config.feature.network.outgoing.udp)
-        .expect("Setting ENABLED_UDP_OUTGOING singleton");
-
-    REMOTE_DNS
-        .set(config.feature.network.dns)
-        .expect("Setting REMOTE_DNS singleton");
-
-    {
-        let outgoing_selector: OutgoingSelector = config
-            .feature
-            .network
-            .outgoing
-            .filter
-            .clone()
-            .try_into()
-            .expect("Failed setting up outgoing traffic filter!");
-
-        // This will crash the app if it comes before `ENABLED_(TCP|UDP)_OUTGOING`!
-        OUTGOING_SELECTOR
-            .set(outgoing_selector)
-            .expect("Setting OUTGOING_SELECTOR singleton");
-    }
-
-    REMOTE_UNIX_STREAMS
-        .set(
-            config
-                .feature
-                .network
-                .outgoing
-                .unix_streams
-                .clone()
-                .map(|vec_or_single| vec_or_single.to_vec())
-                .map(RegexSet::new)
-                .transpose()
-                .expect("Invalid unix stream regex set."),
-        )
-        .expect("Setting REMOTE_UNIX_STREAMS failed.");
-
-    OUTGOING_IGNORE_LOCALHOST
-        .set(config.feature.network.outgoing.ignore_localhost)
-        .expect("Setting OUTGOING_IGNORE_LOCALHOST singleton");
-
-    TARGETLESS
-        .set(config.target.path.is_none())
-        .expect("Setting TARGETLESS singleton");
-
-    FILE_FILTER.get_or_init(|| FileFilter::new(config.feature.fs.clone()));
-
-    DEBUGGER_IGNORED_PORTS
-        .set(DebuggerPorts::from_env())
-        .expect("Setting DEBUGGER_IGNORED_PORTS failed");
-
-    LISTEN_PORTS
-        .set(config.feature.network.incoming.listen_ports.clone())
-        .expect("Setting LISTEN_PORTS failed");
-}
-
 /// Occurs after [`layer_pre_initialization`] has succeeded.
 ///
 /// Initialized the main parts of mirrord-layer.
@@ -421,19 +277,19 @@ fn layer_start(mut config: LayerConfig) {
 
     // does not need to be atomic because on the first call there are never other threads.
     // Will be false when manually called from fork hook.
-    if LAYER_INITIALIZED.get().is_none() {
+    if STATE.get().is_none() {
         // If we're here it's not a fork, we're in the ctor.
-        let _ = LAYER_INITIALIZED.set(());
-        init_tracing();
-        set_globals(&config);
+        init_tracing(); // todo tracing is broken
+
+        let debugger_ports = DebuggerPorts::from_env();
+        let state = LayerState::new(config, debugger_ports);
+        STATE.set(state).unwrap();
+
+        let state = global_state();
         enable_hooks(
-            config.feature.fs.is_active(),
-            config.feature.network.dns,
-            config
-                .sip_binaries
-                .clone()
-                .map(|x| x.to_vec())
-                .unwrap_or_default(),
+            state.fs_config().is_active(),
+            state.remote_dns_enabled(),
+            state.sip_binaries(),
         );
     }
 
@@ -456,13 +312,7 @@ fn layer_start(mut config: LayerConfig) {
 
     unsafe {
         if PROXY_CONNECTION.get().is_none() {
-            let address = config
-                .connect_tcp
-                .as_ref()
-                .expect("layer loaded without proxy address to connect to")
-                .parse()
-                .expect("couldn't parse proxy address");
-
+            let address = global_state().proxy_address();
             let new_connection =
                 ProxyConnection::new(address, NewSessionRequest::New, Duration::from_secs(5))
                     .expect("failed to initialize proxy connection");
@@ -578,17 +428,12 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
 /// Removes the `fd` key from either [`SOCKETS`] or [`OPEN_FILES`].
 /// **DON'T ADD LOGS HERE SINCE CALLER MIGHT CLOSE STDOUT/STDERR CAUSING THIS TO CRASH**
 pub(crate) fn close_layer_fd(fd: c_int) {
-    let file_mode_active = FILE_MODE
-        .get()
-        .expect("Should be set during initialization!")
-        .is_active();
-
     // Remove from sockets.
     if let Some((_, socket)) = SOCKETS.remove(&fd) {
         // Closed file is a socket, so if it's already bound to a port - notify agent to stop
         // mirroring/stealing that port.
         socket.close();
-    } else if file_mode_active {
+    } else if global_state().fs_config().is_active() {
         OPEN_FILES.remove(&fd);
     }
 }

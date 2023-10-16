@@ -5,7 +5,7 @@
 use errno::errno;
 use tracing::trace;
 
-use crate::{close_detour, file::hooks::*, socket::hooks::*, FILE_MODE};
+use crate::{close_detour, file::hooks::*, socket::hooks::*};
 
 #[cfg_attr(
     all(target_os = "linux", target_arch = "x86_64"),
@@ -45,11 +45,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
         libc::SYS_close => close_detour(param1 as _) as i64,
         libc::SYS_connect => connect_detour(param1 as _, param2 as _, param3 as _) as i64,
 
-        _ if FILE_MODE
-            .get()
-            .expect("FILE_MODE needs to be initialized")
-            .is_active() =>
-        {
+        _ if crate::global_state().fs_config().is_active() => {
             match syscall {
                 libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
                 libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,

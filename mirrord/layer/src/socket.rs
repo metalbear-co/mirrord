@@ -10,11 +10,8 @@ use std::{
 use dashmap::DashMap;
 use hashbrown::hash_set::HashSet;
 use libc::{c_int, sockaddr, socklen_t};
-use mirrord_config::{
-    feature::network::outgoing::{
-        AddressFilter, OutgoingFilter, OutgoingFilterConfig, ProtocolFilter,
-    },
-    util::VecOrSingle,
+use mirrord_config::feature::network::outgoing::{
+    AddressFilter, OutgoingConfig, OutgoingFilter, OutgoingFilterConfig, ProtocolFilter,
 };
 use mirrord_intproxy::protocol::{NetProtocol, PortUnsubscribe};
 use mirrord_protocol::outgoing::SocketAddress;
@@ -26,9 +23,8 @@ use self::id::SocketId;
 use crate::{
     common,
     detour::{Bypass, Detour, DetourGuard, OptionExt},
-    error::{HookError, HookResult, LayerError},
+    error::{HookError, HookResult},
     socket::ops::{remote_getaddrinfo, REMOTE_DNS_REVERSE_MAPPING},
-    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, REMOTE_DNS,
 };
 
 pub(super) mod hooks;
@@ -208,55 +204,50 @@ pub(crate) enum OutgoingSelector {
     Local(HashSet<OutgoingFilter>),
 }
 
-impl TryFrom<Option<OutgoingFilterConfig>> for OutgoingSelector {
-    type Error = LayerError;
+impl OutgoingSelector {
+    fn build_selector<'a, I: Iterator<Item = &'a str>>(
+        filters: I,
+        tcp_enabled: bool,
+        udp_enabled: bool,
+    ) -> HashSet<OutgoingFilter> {
+        filters
+            .map(|filter| OutgoingFilter::from_str(filter).expect("invalid outgoing filter"))
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .filter(|OutgoingFilter { protocol, .. }| match protocol {
+                ProtocolFilter::Any => tcp_enabled || udp_enabled,
+                ProtocolFilter::Tcp => tcp_enabled,
+                ProtocolFilter::Udp => udp_enabled,
+            })
+            .collect::<HashSet<_>>()
+    }
 
-    /// Builds the [`OutgoingSelector`] from the user config (list of filters), removing filters
+    /// Builds a new instance from the user config, removing filters
     /// that would create inconsitencies, by checking if their protocol is enabled for outgoing
     /// traffic, and thus we avoid making this check on every [`ops::connect`] call.
     ///
     /// It also removes duplicated filters, by putting them into a [`HashSet`].
-    fn try_from(value: Option<OutgoingFilterConfig>) -> Result<Self, Self::Error> {
-        let enabled_tcp = *ENABLED_TCP_OUTGOING
-            .get()
-            .expect("ENABLED_TCP_OUTGOING should be set before initializing OutgoingSelector!");
-
-        let enabled_udp = *ENABLED_UDP_OUTGOING
-            .get()
-            .expect("ENABLED_TCP_OUTGOING should be set before initializing OutgoingSelector!");
-
-        let build_selector = |list: VecOrSingle<String>| {
-            Ok::<_, LayerError>(
-                list.to_vec()
-                    .into_iter()
-                    .map(|filter| OutgoingFilter::from_str(&filter))
-                    .collect::<Result<HashSet<_>, _>>()?
-                    .into_iter()
-                    .filter(|OutgoingFilter { protocol, .. }| match protocol {
-                        ProtocolFilter::Any => enabled_tcp || enabled_udp,
-                        ProtocolFilter::Tcp => enabled_tcp,
-                        ProtocolFilter::Udp => enabled_udp,
-                    })
-                    .collect::<HashSet<_>>(),
-            )
-        };
-
-        match value {
-            None => Ok(Self::Unfiltered),
+    pub fn new(config: &OutgoingConfig) -> Self {
+        match &config.filter {
+            None => Self::Unfiltered,
             Some(OutgoingFilterConfig::Remote(list)) | Some(OutgoingFilterConfig::Local(list))
                 if list.is_empty() =>
             {
-                Err(LayerError::MissingConfigValue(
-                    "Outgoing traffic filter cannot be empty!".to_string(),
-                ))
+                panic!("outgoing traffic filter cannot be empty");
             }
-            Some(OutgoingFilterConfig::Remote(list)) => Ok(Self::Remote(build_selector(list)?)),
-            Some(OutgoingFilterConfig::Local(list)) => Ok(Self::Local(build_selector(list)?)),
+            Some(OutgoingFilterConfig::Remote(list)) => Self::Remote(Self::build_selector(
+                list.as_slice().iter().map(String::as_str),
+                config.tcp,
+                config.udp,
+            )),
+            Some(OutgoingFilterConfig::Local(list)) => Self::Local(Self::build_selector(
+                list.as_slice().iter().map(String::as_str),
+                config.tcp,
+                config.udp,
+            )),
         }
     }
-}
 
-impl OutgoingSelector {
     /// Checks if the `address` matches the specified outgoing filter.
     ///
     /// Returns either a [`ConnectionThrough::Remote`] or [`ConnectionThroughLocal`], with the
@@ -389,58 +380,58 @@ impl OutgoingSelector {
         };
 
         // Resolves a list of host names, depending on how the user sets the remote `dns` feature.
-        let resolve =
-            |unresolved: HashSet<(ProtocolFilter, String, u16)>| {
-                const USUAL_AMOUNT_OF_ADDRESSES: usize = 8;
-                let amount_of_addresses = unresolved.len() * USUAL_AMOUNT_OF_ADDRESSES;
-                let mut unresolved = unresolved.into_iter();
+        let resolve = |unresolved: HashSet<(ProtocolFilter, String, u16)>| {
+            const USUAL_AMOUNT_OF_ADDRESSES: usize = 8;
+            let amount_of_addresses = unresolved.len() * USUAL_AMOUNT_OF_ADDRESSES;
+            let mut unresolved = unresolved.into_iter();
 
-                let resolved =
-                    if *REMOTE_DNS.get().expect("REMOTE_DNS should be set by now!") && REMOTE {
-                        // Resolve DNS through the agent.
-                        unresolved
-                            .try_fold(
-                                HashSet::with_capacity(amount_of_addresses),
-                                |mut resolved, (protocol, name, port)| {
-                                    let addresses = remote_getaddrinfo(name)?.into_iter().map(
-                                        |(_, address)| OutgoingFilter {
-                                            protocol,
-                                            address: AddressFilter::Socket(SocketAddr::new(
-                                                address, port,
-                                            )),
-                                        },
-                                    );
+            let resolved = if crate::global_state().remote_dns_enabled() && REMOTE {
+                // Resolve DNS through the agent.
+                unresolved
+                    .try_fold(
+                        HashSet::with_capacity(amount_of_addresses),
+                        |mut resolved, (protocol, name, port)| {
+                            let addresses =
+                                remote_getaddrinfo(name)?.into_iter().map(|(_, address)| {
+                                    OutgoingFilter {
+                                        protocol,
+                                        address: AddressFilter::Socket(SocketAddr::new(
+                                            address, port,
+                                        )),
+                                    }
+                                });
 
-                                    resolved.extend(addresses);
-                                    Ok::<_, HookError>(resolved)
-                                },
-                            )?
-                            .into_iter()
-                    } else {
-                        // Resolve DNS locally.
-                        unresolved
-                            .try_fold(
-                                HashSet::with_capacity(amount_of_addresses),
-                                |mut resolved: HashSet<OutgoingFilter>, (protocol, name, port)| {
-                                    let addresses = format!("{name}:{port}")
-                                        .to_socket_addrs()?
-                                        .map(|address| OutgoingFilter {
-                                            protocol,
-                                            address: AddressFilter::Socket(SocketAddr::new(
-                                                address.ip(),
-                                                port,
-                                            )),
-                                        });
+                            resolved.extend(addresses);
+                            Ok::<_, HookError>(resolved)
+                        },
+                    )?
+                    .into_iter()
+            } else {
+                // Resolve DNS locally.
+                unresolved
+                    .try_fold(
+                        HashSet::with_capacity(amount_of_addresses),
+                        |mut resolved: HashSet<OutgoingFilter>, (protocol, name, port)| {
+                            let addresses =
+                                format!("{name}:{port}").to_socket_addrs()?.map(|address| {
+                                    OutgoingFilter {
+                                        protocol,
+                                        address: AddressFilter::Socket(SocketAddr::new(
+                                            address.ip(),
+                                            port,
+                                        )),
+                                    }
+                                });
 
-                                    resolved.extend(addresses);
-                                    Ok::<_, HookError>(resolved)
-                                },
-                            )?
-                            .into_iter()
-                    };
-
-                Ok::<_, HookError>(resolved)
+                            resolved.extend(addresses);
+                            Ok::<_, HookError>(resolved)
+                        },
+                    )?
+                    .into_iter()
             };
+
+            Ok::<_, HookError>(resolved)
+        };
 
         match self {
             OutgoingSelector::Unfiltered => Ok(HashSet::new()),

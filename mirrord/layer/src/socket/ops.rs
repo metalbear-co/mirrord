@@ -27,10 +27,7 @@ use crate::{
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     error::HookError,
     file::{self, OPEN_FILES},
-    is_debugger_port,
     proxy_connection::ProxyError,
-    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_CONFIG, LISTEN_PORTS,
-    OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR, REMOTE_UNIX_STREAMS, TARGETLESS,
 };
 
 /// Holds the pair of [`SocketAddr`] with their hostnames, resolved remotely through
@@ -149,9 +146,7 @@ pub(super) fn bind(
 ) -> Detour<i32> {
     let requested_address = SocketAddr::try_from_raw(raw_address, address_length)?;
     let requested_port = requested_address.port();
-    let incoming_config = INCOMING_CONFIG
-        .get()
-        .expect("`INCOMING_CONFIG` not set. Please report a bug");
+    let incoming_config = crate::global_state().incoming_config();
 
     let ignore_localhost = incoming_config.ignore_localhost;
 
@@ -176,7 +171,7 @@ pub(super) fn bind(
 
     // To handle #1458, we don't ignore port `0` for UDP.
     if (is_ignored_port(&requested_address) && matches!(socket.kind, SocketKind::Tcp(_)))
-        || is_debugger_port(&requested_address)
+        || crate::global_state().is_debugger_port(&requested_address)
         || incoming_config.ignore_ports.contains(&requested_port)
     {
         Err(Bypass::Port(requested_address.port()))?;
@@ -198,9 +193,9 @@ pub(super) fn bind(
     // try to bind the requested port, if not available get a random port
     // if there's configuration and binding fails with the requested port
     // we return address not available and not fallback to a random port.
-    let listen_port = LISTEN_PORTS
-        .get()
-        .expect("`LISTEN_PORTS` not set. Please report a bug")
+    let listen_port = crate::global_state()
+        .incoming_config()
+        .listen_ports
         .get_by_left(&requested_address.port())
         .cloned();
 
@@ -257,19 +252,15 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
             .map(|(_, socket)| socket)
             .bypass(Bypass::LocalFdNotFound(sockfd))?
     };
-    let incoming = INCOMING_CONFIG
-        .get()
-        .expect("`INCOMING_CONFIG` not set. Please report a bug");
 
-    if matches!(incoming.mode, IncomingMode::Off) {
+    if matches!(
+        crate::global_state().incoming_config().mode,
+        IncomingMode::Off
+    ) {
         return Detour::Bypass(Bypass::DisabledIncoming);
     }
 
-    if TARGETLESS
-        .get()
-        .copied()
-        .expect("Should be set during initialization!")
-    {
+    if crate::global_state().targetless() {
         warn!(
             "Listening while running targetless. A targetless agent is not exposed by \
         any service. Therefore, letting this port bind happen locally instead of on the \
@@ -277,6 +268,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
         );
         return Detour::Bypass(Bypass::BindWhenTargetless);
     }
+
     match socket.state {
         SocketState::Bound(Bound {
             requested_address,
@@ -379,8 +371,8 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
         // Can't just connect to whatever `remote_address` is, as it might be a remotely resolved
         // address, in a local connection context (or vice-versa), so we let `remote_connection`
         // handle this address trickery.
-        match OUTGOING_SELECTOR
-            .get()?
+        match crate::global_state()
+            .outgoing_selector()
             .get_connection_through(remote_address.as_socket()?, protocol)?
         {
             ConnectionThrough::Remote(addr) => {
@@ -410,12 +402,7 @@ fn connect_to_local_address(
     user_socket_info: &UserSocket,
     ip_address: SocketAddr,
 ) -> Detour<Option<ConnectResult>> {
-    let ignore_localhost = OUTGOING_IGNORE_LOCALHOST
-        .get()
-        .copied()
-        .expect("Should be set during initialization!");
-
-    if ignore_localhost {
+    if crate::global_state().outgoing_config().ignore_localhost {
         Detour::Bypass(Bypass::IgnoreLocalhost(ip_address.port()))
     } else {
         Detour::Success(
@@ -467,9 +454,7 @@ pub(super) fn connect(
     let remote_address = SockAddr::try_from_raw(raw_address, address_length)?;
     let optional_ip_address = remote_address.as_socket();
 
-    let unix_streams = REMOTE_UNIX_STREAMS
-        .get()
-        .expect("Should be set during initialization!");
+    let unix_streams = crate::global_state().remote_unix_streams();
 
     info!("in connect {:#?}", SOCKETS);
 
@@ -489,7 +474,7 @@ pub(super) fn connect(
             }
         }
 
-        if is_ignored_port(&ip_address) || is_debugger_port(&ip_address) {
+        if is_ignored_port(&ip_address) || crate::global_state().is_debugger_port(&ip_address) {
             return Detour::Bypass(Bypass::Port(ip_address.port()));
         }
     } else if remote_address.is_unix() {
@@ -501,11 +486,11 @@ pub(super) fn connect(
                 .map(String::from_utf8_lossy))
             .map(String::from);
 
-        if !address.as_ref().is_some_and(|address_name| {
-            unix_streams
-                .as_ref()
-                .is_some_and(|regex_set| regex_set.is_match(address_name))
-        }) {
+        let handle_remotely = address
+            .as_ref()
+            .map(|addr| unix_streams.is_match(addr))
+            .unwrap_or(false);
+        if !handle_remotely {
             return Detour::Bypass(Bypass::UnixSocket(address));
         }
     } else {
@@ -513,15 +498,8 @@ pub(super) fn connect(
         return Detour::Bypass(Bypass::Domain(remote_address.domain().into()));
     }
 
-    let enabled_tcp_outgoing = ENABLED_TCP_OUTGOING
-        .get()
-        .copied()
-        .expect("Should be set during initialization!");
-
-    let enabled_udp_outgoing = ENABLED_UDP_OUTGOING
-        .get()
-        .copied()
-        .expect("Should be set during initialization!");
+    let enabled_tcp_outgoing = crate::global_state().outgoing_config().tcp;
+    let enabled_udp_outgoing = crate::global_state().outgoing_config().udp;
 
     match NetProtocol::from(user_socket_info.kind) {
         NetProtocol::Datagrams if enabled_udp_outgoing => connect_outgoing::<true>(
@@ -530,13 +508,11 @@ pub(super) fn connect(
             user_socket_info,
             NetProtocol::Datagrams,
         ),
+
         NetProtocol::Stream => match user_socket_info.state {
             SocketState::Initialized
                 if (optional_ip_address.is_some() && enabled_tcp_outgoing)
-                    || (remote_address.is_unix()
-                        && unix_streams
-                            .as_ref()
-                            .is_some_and(|streams| !streams.is_empty())) =>
+                    || (remote_address.is_unix() && !unix_streams.is_empty()) =>
             {
                 connect_outgoing::<true>(
                     sockfd,
@@ -545,6 +521,7 @@ pub(super) fn connect(
                     NetProtocol::Stream,
                 )
             }
+
             SocketState::Bound(Bound { address, .. }) => {
                 trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
 
@@ -562,8 +539,10 @@ pub(super) fn connect(
                     Detour::Bypass(Bypass::MirrorConnect)
                 }
             }
+
             _ => Detour::Bypass(Bypass::DisabledOutgoing),
         },
+
         _ => Detour::Bypass(Bypass::DisabledOutgoing),
     }
 }
