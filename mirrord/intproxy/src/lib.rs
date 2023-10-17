@@ -9,7 +9,7 @@ use layer_conn::LayerConnection;
 use layer_initializer::LayerInitializer;
 use main_tasks::{FromLayer, LayerForked, MainTaskId, ProxyMessage, ToLayer};
 use mirrord_config::LayerConfig;
-use mirrord_protocol::{ClientMessage, DaemonMessage, CLIENT_READY_FOR_LOGS};
+use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, CLIENT_READY_FOR_LOGS};
 use ping_pong::{AgentMessageNotification, PingPong};
 use protocol::LayerId;
 use proxies::{
@@ -303,9 +303,10 @@ impl IntProxy {
                     self.task_txs.agent.send(ClientMessage::ReadyForLogs).await;
                 }
             }
-            DaemonMessage::LogMessage(log) => {
-                tracing::trace!("agent log: {log:?}");
-            }
+            DaemonMessage::LogMessage(log) => match log.level {
+                LogLevel::Error => tracing::error!("agent log: {}", log.message),
+                LogLevel::Warn => tracing::warn!("agent log: {}", log.message),
+            },
             other => {
                 return Err(IntProxyError::UnexpectedAgentMessage(other));
             }
