@@ -17,6 +17,7 @@ pub struct Hello {
 }
 
 impl Hello {
+    /// Creates a new [`Hello`] message from the environment of the current process.
     pub fn from_env() -> Self {
         Self {
             process_info: ProcessInfo {
@@ -31,6 +32,8 @@ impl Hello {
     }
 }
 
+/// Variants of this enum match those of [`Level`].
+/// Created because [`Level`] does not implement [`Encode`]/[`Decode`].
 #[derive(Debug, Encode, Decode)]
 pub enum EncodableLevel {
     Error,
@@ -77,4 +80,19 @@ pub struct Record {
     pub module_path: Option<String>,
     pub file: Option<String>,
     pub line: Option<u32>,
+}
+
+impl<'a> From<&'a log::Record<'_>> for Record {
+    fn from(record: &'a log::Record) -> Self {
+        Self {
+            metadata: Metadata {
+                level: record.level().into(),
+                target: record.target().to_string(),
+            },
+            message: record.args().to_string(),
+            module_path: record.module_path().map(|s| s.to_string()),
+            file: record.file().map(|s| s.to_string()),
+            line: record.line(),
+        }
+    }
 }

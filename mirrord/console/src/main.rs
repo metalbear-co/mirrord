@@ -1,17 +1,22 @@
 use bincode::Decode;
 use mirrord_console::protocol::{Hello, Record};
 use mirrord_intproxy::codec::AsyncDecoder;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::{
+    io::BufReader,
+    net::{TcpListener, TcpStream},
+};
 use tracing::metadata::LevelFilter;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 struct ConnectionWrapper {
-    conn: TcpStream,
+    conn: BufReader<TcpStream>,
 }
 
 impl ConnectionWrapper {
     fn new(conn: TcpStream) -> Self {
-        Self { conn }
+        Self {
+            conn: BufReader::new(conn),
+        }
     }
 
     async fn next_message<T>(&mut self) -> Option<T>
