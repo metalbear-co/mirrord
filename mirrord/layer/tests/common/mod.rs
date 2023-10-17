@@ -51,18 +51,27 @@ impl TestIntProxy {
         });
 
         let (stream, _buffer_size) = fake_agent_listener.accept().await.unwrap();
-        let mut codec = Framed::new(stream, DaemonCodec::new());
+        let codec = Framed::new(stream, DaemonCodec::new());
 
-        let msg = codec.next().await;
-        assert!(
-            matches!(msg, Some(Ok(ClientMessage::SwitchProtocolVersion(_))),),
-            "unexpected message: {msg:?}",
-        );
-
-        Self {
+        let mut res = Self {
             codec,
             num_connections: 0,
-        }
+        };
+
+        let msg = res.recv().await;
+        let ClientMessage::SwitchProtocolVersion(version) = msg else {
+            panic!("unexpected message: {msg:?}");
+        };
+
+        res.send(DaemonMessage::SwitchProtocolVersionResponse(version))
+            .await;
+
+        let msg = res.recv().await;
+        let ClientMessage::ReadyForLogs = msg else {
+            panic!("unexpected message: {msg:?}");
+        };
+
+        res
     }
 
     pub async fn recv(&mut self) -> ClientMessage {
