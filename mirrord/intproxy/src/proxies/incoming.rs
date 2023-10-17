@@ -20,12 +20,12 @@ use self::{
 };
 use crate::{
     background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
-    remote_resources::RemoteResources,
     main_tasks::{LayerClosed, LayerForked, ToLayer},
     protocol::{
         IncomingRequest, LayerId, MessageId, PortSubscribe, PortSubscription, PortUnsubscribe,
         ProxyToLayerMessage,
     },
+    remote_resources::RemoteResources,
     request_queue::{RequestQueue, RequestQueueEmpty},
     ProxyMessage,
 };

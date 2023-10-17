@@ -5,8 +5,8 @@ use std::{
 
 use crate::protocol::LayerId;
 
-/// For tracking remote resources allocated in the agent: open files and directories, port subscriptions.
-/// Remote resources can be shared by multiple layer instances because of forks.
+/// For tracking remote resources allocated in the agent: open files and directories, port
+/// subscriptions. Remote resources can be shared by multiple layer instances because of forks.
 pub struct RemoteResources<T> {
     by_layer: HashMap<LayerId, HashSet<T>>,
     counts: HashMap<T, usize>,
@@ -26,8 +26,9 @@ where
     T: Clone + PartialEq + Eq + Hash,
 {
     /// Adds the given resource to the layer instance with the given [`LayerId`].
-    /// 
-    /// Used when the layer opens a resource, e.g. with [`OpenFileRequest`](mirrord_protocol::file::OpenFileRequest).
+    ///
+    /// Used when the layer opens a resource, e.g. with
+    /// [`OpenFileRequest`](mirrord_protocol::file::OpenFileRequest).
     pub fn add(&mut self, layer_id: LayerId, resource: T) {
         self.by_layer
             .entry(layer_id)
@@ -39,8 +40,9 @@ where
 
     /// Removes the given resource from the layer instance with the given [`LayerId`].
     /// Returns whether the resource should be closed on the agent size.
-    /// 
-    /// Can be used when the layer closes the resource, e.g. with [`CloseFileRequest`](mirrord_protocol::file::CloseFileRequest).
+    ///
+    /// Can be used when the layer closes the resource, e.g. with
+    /// [`CloseFileRequest`](mirrord_protocol::file::CloseFileRequest).
     pub fn remove(&mut self, layer_id: LayerId, resource: T) -> bool {
         let removed = match self.by_layer.entry(layer_id) {
             Entry::Occupied(mut e) => {
@@ -70,8 +72,9 @@ where
         }
     }
 
-    /// Clones all resources held by the layer instance with id `src` to the layer instance with the id `dst`.
-    /// 
+    /// Clones all resources held by the layer instance with id `src` to the layer instance with the
+    /// id `dst`.
+    ///
     /// Can be used when the layer forks.
     pub fn clone_all(&mut self, src: LayerId, dst: LayerId) {
         let Some(resources) = self.by_layer.get(&src).cloned() else {
@@ -87,7 +90,7 @@ where
 
     /// Removes all resources held by the given layer instance.
     /// Returns an [`Iterator`] over resources that should be closed on the agent size.
-    /// 
+    ///
     /// Can be used when the layer closes the connection.
     pub fn remove_all(&mut self, layer_id: LayerId) -> impl '_ + Iterator<Item = T> {
         let resources = self.by_layer.remove(&layer_id).unwrap_or_default();

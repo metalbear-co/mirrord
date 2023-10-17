@@ -9,9 +9,9 @@ use mirrord_protocol::{
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    remote_resources::RemoteResources,
     main_tasks::{LayerClosed, LayerForked, ToLayer},
     protocol::{LayerId, MessageId, ProxyToLayerMessage},
+    remote_resources::RemoteResources,
     request_queue::{RequestQueue, RequestQueueEmpty},
     ProxyMessage,
 };

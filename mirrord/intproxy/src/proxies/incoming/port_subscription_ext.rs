@@ -17,8 +17,8 @@ fn get_port(steal_type: &StealType) -> Port {
     }
 }
 
-/// Trait for [`PortSubscription`] that handles differences in [`mirrord_protocol`] between the `steal` and the `mirror` flow.
-/// Allows to unify logic for both flows.
+/// Trait for [`PortSubscription`] that handles differences in [`mirrord_protocol::tcp`] between the
+/// `steal` and the `mirror` flow. Allows to unify logic for both flows.
 pub trait PortSubscriptionExt {
     /// Returns the subscribed port.
     fn port(&self) -> Port;

@@ -1,7 +1,8 @@
 //! # PR NOTE
-//! 
+//!
 //! Copied from old `HttpV` trait and its implementations (`HttpV1` and `HttpV2`).
-//! A bit simplified - turned into the [`HttpConnection`] enum after removing unnecessary associated types.
+//! A bit simplified - turned into the [`HttpConnection`] enum after removing unnecessary associated
+//! types.
 
 use std::convert::Infallible;
 

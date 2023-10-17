@@ -33,11 +33,11 @@ pub mod codec;
 pub mod error;
 mod layer_conn;
 mod layer_initializer;
-mod remote_resources;
 mod main_tasks;
 mod ping_pong;
 pub mod protocol;
 mod proxies;
+mod remote_resources;
 mod request_queue;
 
 /// [`TaskSender`]s for main background tasks. See [`MainTaskId`].

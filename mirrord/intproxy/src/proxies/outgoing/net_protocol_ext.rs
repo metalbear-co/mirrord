@@ -23,10 +23,27 @@ use tokio::{
 
 use crate::protocol::NetProtocol;
 
-impl NetProtocol {
+/// Trait for [`NetProtocol`] that handles differences in [`mirrord_protocol::outgoing`] between
+/// network protocols. Allows to unify logic.
+pub trait NetProtocolExt: Sized {
     /// Creates a [`LayerWrite`] message and wraps it into the common [`ClientMessage`] type.
     /// The enum path used here depends on this protocol.
-    pub fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Vec<u8>) -> ClientMessage {
+    fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Vec<u8>) -> ClientMessage;
+
+    /// Creates a [`LayerClose`] message and wraps it into the common [`ClientMessage`] type.
+    /// The enum path used here depends on this protocol.
+    fn wrap_agent_close(self, connection_id: ConnectionId) -> ClientMessage;
+
+    /// Creates a [`LayerConnect`] message and wraps it into the common [`ClientMessage`] type.
+    /// The enum path used here depends on this protocol.
+    fn wrap_agent_connect(self, remote_address: SocketAddress) -> ClientMessage;
+
+    /// Opens a new socket for intercepting a connection to the given remote address.
+    async fn prepare_socket(self, for_remote_address: SocketAddress) -> io::Result<PreparedSocket>;
+}
+
+impl NetProtocolExt for NetProtocol {
+    fn wrap_agent_write(self, connection_id: ConnectionId, bytes: Vec<u8>) -> ClientMessage {
         match self {
             Self::Datagrams => ClientMessage::UdpOutgoing(LayerUdpOutgoing::Write(LayerWrite {
                 connection_id,
@@ -39,9 +56,7 @@ impl NetProtocol {
         }
     }
 
-    /// Creates a [`LayerClose`] message and wraps it into the common [`ClientMessage`] type.
-    /// The enum path used here depends on this protocol.
-    pub fn wrap_agent_close(self, connection_id: ConnectionId) -> ClientMessage {
+    fn wrap_agent_close(self, connection_id: ConnectionId) -> ClientMessage {
         match self {
             Self::Datagrams => {
                 ClientMessage::UdpOutgoing(LayerUdpOutgoing::Close(LayerClose { connection_id }))
@@ -52,9 +67,7 @@ impl NetProtocol {
         }
     }
 
-    /// Creates a [`LayerConnect`] message and wraps it into the common [`ClientMessage`] type.
-    /// The enum path used here depends on this protocol.
-    pub fn wrap_agent_connect(self, remote_address: SocketAddress) -> ClientMessage {
+    fn wrap_agent_connect(self, remote_address: SocketAddress) -> ClientMessage {
         match self {
             Self::Datagrams => {
                 ClientMessage::UdpOutgoing(LayerUdpOutgoing::Connect(LayerConnect {
@@ -67,11 +80,7 @@ impl NetProtocol {
         }
     }
 
-    /// Opens a new socket for intercepting a connection to the given remote address.
-    pub async fn prepare_socket(
-        self,
-        for_remote_address: SocketAddress,
-    ) -> io::Result<PreparedSocket> {
+    async fn prepare_socket(self, for_remote_address: SocketAddress) -> io::Result<PreparedSocket> {
         let socket = match for_remote_address {
             SocketAddress::Ip(addr) => {
                 let ip_addr = match addr.ip() {

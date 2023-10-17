@@ -5,7 +5,7 @@ use std::io;
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    proxies::outgoing::protocols::PreparedSocket,
+    proxies::outgoing::net_protocol_ext::PreparedSocket,
 };
 
 /// Manages a single intercepted connection.
