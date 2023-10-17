@@ -277,7 +277,7 @@ fn layer_start(mut config: LayerConfig) {
     // Will be false when manually called from fork hook.
     if SETUP.get().is_none() {
         // If we're here it's not a fork, we're in the ctor.
-        init_tracing(); // todo tracing is broken
+        init_tracing();
 
         let debugger_ports = DebuggerPorts::from_env();
         let state = LayerSetup::new(config, debugger_ports);
