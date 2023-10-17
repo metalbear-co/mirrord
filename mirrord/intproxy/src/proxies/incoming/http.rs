@@ -1,3 +1,8 @@
+//! # PR NOTE
+//! 
+//! Copied from old `HttpV` trait and its implementations (`HttpV1` and `HttpV2`).
+//! A bit simplified - turned into the [`HttpConnection`] enum after removing unnecessary associated types.
+
 use std::convert::Infallible;
 
 use bytes::Bytes;
@@ -14,12 +19,12 @@ use tokio::net::TcpStream;
 use super::http_interceptor::HttpInterceptorError;
 
 /// Handles the differences between hyper's HTTP/1 and HTTP/2 connections.
-pub enum HttpConnector {
+pub enum HttpConnection {
     V1(http1::SendRequest<BoxBody<Bytes, Infallible>>),
     V2(http2::SendRequest<BoxBody<Bytes, Infallible>>),
 }
 
-impl HttpConnector {
+impl HttpConnection {
     pub async fn handshake(
         version: Version,
         target_stream: TcpStream,

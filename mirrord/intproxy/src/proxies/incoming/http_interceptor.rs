@@ -1,5 +1,10 @@
 //! [`BackgroundTask`] used by [`Incoming`](super::IncomingProxy) to manage a single
 //! intercepted HTTP connection.
+//! 
+//! # PR NOTE
+//! 
+//! Most logic copied from old HTTP `ConnectionTask`.
+//! Added sending remote peer's address in `connect_and_send_source`.
 
 use std::{io, net::SocketAddr};
 
@@ -10,7 +15,7 @@ use mirrord_protocol::tcp::{
 use thiserror::Error;
 use tokio::net::TcpStream;
 
-use super::{http::HttpConnector, InterceptorMessageOut};
+use super::{http::HttpConnection, InterceptorMessageOut};
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
     codec::{AsyncEncoder, CodecError},
@@ -55,9 +60,9 @@ impl HttpInterceptor {
 
 impl HttpInterceptor {
     /// Prepares an HTTP connection.
-    async fn connect_to_application(&self) -> Result<HttpConnector, HttpInterceptorError> {
+    async fn connect_to_application(&self) -> Result<HttpConnection, HttpInterceptorError> {
         let target_stream = self.connect_and_send_source().await?;
-        HttpConnector::handshake(self.version, target_stream).await
+        HttpConnection::handshake(self.version, target_stream).await
     }
 
     /// Connects to the local listener and sends it encoded address of the remote peer.
@@ -163,20 +168,20 @@ impl HttpInterceptor {
     async fn send_to_user(
         &mut self,
         request: HttpRequestFallback,
-        connector: &mut HttpConnector,
+        connection: &mut HttpConnection,
     ) -> Result<HttpResponseFallback, HttpInterceptorError> {
-        let response = connector.send_request(request.clone()).await;
+        let response = connection.send_request(request.clone()).await;
         let response = self.handle_response(request, response).await;
 
         // Retry once if the connection was closed.
         if let Err(HttpInterceptorError::ConnectionClosedTooSoon(request)) = response {
             tracing::trace!("Request {request:#?} connection was closed too soon, retrying once!");
 
-            // Create a new connector for this second attempt.
-            let new_connector = self.connect_to_application().await?;
-            *connector = new_connector;
+            // Create a new connection for this second attempt.
+            let new_connection = self.connect_to_application().await?;
+            *connection = new_connection;
 
-            let response = connector.send_request(request.clone()).await;
+            let response = connection.send_request(request.clone()).await;
             self.handle_response(request, response).await
         } else {
             response
@@ -190,10 +195,10 @@ impl BackgroundTask for HttpInterceptor {
     type MessageOut = InterceptorMessageOut;
 
     async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-        let mut connector = self.connect_to_application().await?;
+        let mut connection = self.connect_to_application().await?;
 
         while let Some(request) = message_bus.recv().await {
-            let response = self.send_to_user(request, &mut connector).await?;
+            let response = self.send_to_user(request, &mut connection).await?;
 
             message_bus
                 .send(InterceptorMessageOut::Http(response))

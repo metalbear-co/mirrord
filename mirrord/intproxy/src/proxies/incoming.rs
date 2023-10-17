@@ -132,8 +132,8 @@ struct InterceptorHandle<I: BackgroundTask> {
 ///    agent. If the agent closes the connection, the proxy shuts down the [`HttpInterceptor`].
 #[derive(Default)]
 pub struct IncomingProxy {
-    /// For keeping track of active subscriptions across forks.
-    subscribed_ports: RemoteResources<Port>,
+    /// For keeping track of active port subscriptions on the agent side.
+    remote_subscriptions: RemoteResources<Port>,
     /// Mapping from subscribed port on the remote target to layer's [`PortSubscribe`] request.
     subscriptions: HashMap<Port, PortSubscribe>,
     /// For matching agent's responses with layer's [`PortSubscribe`] requests.
@@ -187,7 +187,7 @@ impl IncomingProxy {
             return;
         }
 
-        let msg = subscribe.subscription.wrap_agent_subscribe();
+        let msg = subscribe.subscription.agent_subscribe();
         message_bus.send(ProxyMessage::ToAgent(msg)).await;
 
         self.subscribe_reqs.insert(message_id, layer_id);
@@ -331,12 +331,12 @@ impl IncomingProxy {
 
     fn handle_layer_fork(&mut self, msg: LayerForked) {
         let LayerForked { child, parent } = msg;
-        self.subscribed_ports.clone_all(child, parent);
+        self.remote_subscriptions.clone_all(child, parent);
     }
 
     async fn handle_layer_close(&mut self, msg: LayerClosed, message_bus: &mut MessageBus<Self>) {
         let LayerClosed { id } = msg;
-        for to_close in self.subscribed_ports.remove_all(id) {
+        for to_close in self.remote_subscriptions.remove_all(id) {
             let Some(subscription) = self.subscriptions.remove(&to_close) else {
                 continue;
             };

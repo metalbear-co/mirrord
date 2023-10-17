@@ -8,6 +8,7 @@ use mirrord_protocol::{
 use super::InterceptorMessageOut;
 use crate::protocol::PortSubscription;
 
+/// Retrieves subscribed port from the given [`StealType`].
 fn get_port(steal_type: &StealType) -> Port {
     match steal_type {
         StealType::All(port) => *port,
@@ -16,19 +17,23 @@ fn get_port(steal_type: &StealType) -> Port {
     }
 }
 
+/// Trait for [`PortSubscription`] that handles differences in [`mirrord_protocol`] between the `steal` and the `mirror` flow.
+/// Allows to unify logic for both flows.
 pub trait PortSubscriptionExt {
+    /// Returns the subscribed port.
     fn port(&self) -> Port;
 
-    /// Returns a correct port subscription request.
-    fn wrap_agent_subscribe(&self) -> ClientMessage;
+    /// Returns a subscribe request to be sent to the agent.
+    fn agent_subscribe(&self) -> ClientMessage;
 
-    /// Returns a port unsubscription request correct for this mode.
+    /// Returns an unsubscribe request to be sent to the agent.
     fn wrap_agent_unsubscribe(&self) -> ClientMessage;
 
-    /// Returns a connection unsubscription request correct for this mode.
+    /// Returns an unsubscribe connection request to be sent to the agent.
     fn wrap_agent_unsubscribe_connection(&self, connection_id: ConnectionId) -> ClientMessage;
 
     /// Returns a message to be sent to the agent in response to data coming from an interceptor.
+    /// [`None`] means that the data should be discarded.
     fn wrap_response(
         &self,
         res: InterceptorMessageOut,
@@ -44,7 +49,8 @@ impl PortSubscriptionExt for PortSubscription {
         }
     }
 
-    fn wrap_agent_subscribe(&self) -> ClientMessage {
+    /// [`LayerTcp::PortSubscribe`] or [`LayerTcpSteal::PortSubscribe`].
+    fn agent_subscribe(&self) -> ClientMessage {
         match self {
             Self::Mirror(port) => ClientMessage::Tcp(LayerTcp::PortSubscribe(*port)),
             Self::Steal(steal_type) => {
@@ -53,7 +59,7 @@ impl PortSubscriptionExt for PortSubscription {
         }
     }
 
-    /// Returns a port unsubscription request correct for this mode.
+    /// [`LayerTcp::PortUnsubscribe`] or [`LayerTcpSteal::PortUnsubscribe`].
     fn wrap_agent_unsubscribe(&self) -> ClientMessage {
         match self {
             Self::Mirror(port) => ClientMessage::Tcp(LayerTcp::PortUnsubscribe(*port)),
@@ -63,7 +69,7 @@ impl PortSubscriptionExt for PortSubscription {
         }
     }
 
-    /// Returns a connection unsubscription request correct for this mode.
+    /// [`LayerTcp::ConnectionUnsubscribe`] or [`LayerTcpSteal::ConnectionUnsubscribe`].
     fn wrap_agent_unsubscribe_connection(&self, connection_id: ConnectionId) -> ClientMessage {
         match self {
             Self::Mirror(..) => ClientMessage::Tcp(LayerTcp::ConnectionUnsubscribe(connection_id)),
@@ -73,6 +79,8 @@ impl PortSubscriptionExt for PortSubscription {
         }
     }
 
+    /// Always [`None`] for the `mirror` mode - data coming from the layer is discarded.
+    /// Corrent [`LayerTcpSteal`] variant for the `steal` mode.
     fn wrap_response(
         &self,
         res: InterceptorMessageOut,
