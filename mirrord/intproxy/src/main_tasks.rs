@@ -5,7 +5,8 @@ use tokio::net::TcpStream;
 
 use crate::protocol::{LayerId, LayerToProxyMessage, MessageId, ProxyToLayerMessage};
 
-/// Messages sent back to the [`IntProxy`](crate::IntProxy) from the main background tasks. See [`MainTaskId`].
+/// Messages sent back to the [`IntProxy`](crate::IntProxy) from the main background tasks. See
+/// [`MainTaskId`].
 #[derive(Debug)]
 pub enum ProxyMessage {
     /// Message to be sent to the agent.

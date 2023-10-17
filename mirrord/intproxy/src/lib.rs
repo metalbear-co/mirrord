@@ -51,6 +51,11 @@ struct TaskTxs {
     ping_pong: TaskSender<PingPong>,
 }
 
+/// This struct contains logic for proxying between multiple layer instances and one agent.
+/// It maintains a singe agent connection.
+///
+/// Utilizes multiple [`BackgroundTask`](background_tasks::BackgroundTask)s to split logic of
+/// different mirrod features (e.g. file operations and incoming traffic).
 pub struct IntProxy {
     any_connection_accepted: bool,
     background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
@@ -58,9 +63,14 @@ pub struct IntProxy {
 }
 
 impl IntProxy {
+    /// Size of channels used to communicate with main tasks (see [`MainTaskId`]).
     const CHANNEL_SIZE: usize = 512;
+    /// How long can the agent connection remain silent.
     const PING_INTERVAL: Duration = Duration::from_secs(30);
 
+    /// Initiates a new agent connection and creates a new [`IntProxy`].
+    /// The returned instance will accept connections from the layers using the given
+    /// [`TcpListener`].
     pub async fn new(
         config: &LayerConfig,
         agent_connect_info: Option<&AgentConnectInfo>,
@@ -70,6 +80,9 @@ impl IntProxy {
         Ok(Self::new_with_connection(agent_conn, listener))
     }
 
+    /// Creates a new [`IntProxy`] using existing [`AgentConnection`].
+    /// The returned instance will accept connections from the layers using the given
+    /// [`TcpListener`].
     pub fn new_with_connection(agent_conn: AgentConnection, listener: TcpListener) -> Self {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
             Default::default();
@@ -117,10 +130,13 @@ impl IntProxy {
         }
     }
 
+    /// Runs main event loop of this proxy.
+    /// Expects to accept the first layer connection within the given `first_timeout`.
+    /// Exits after `idle_timeout` when there are no more layer connections.
     pub async fn run(
         mut self,
         first_timeout: Duration,
-        consecutive_timeout: Duration,
+        idle_timeout: Duration,
     ) -> Result<(), IntProxyError> {
         self.task_txs
             .agent
@@ -141,7 +157,7 @@ impl IntProxy {
                     }
                 },
 
-                _ = time::sleep(consecutive_timeout), if self.any_connection_accepted && self.task_txs.layers.is_empty() => {
+                _ = time::sleep(idle_timeout), if self.any_connection_accepted && self.task_txs.layers.is_empty() => {
                     if self.task_txs.layers.is_empty() {
                         tracing::trace!("intproxy timeout, no active connections. Exiting.");
                         break;
@@ -161,6 +177,7 @@ impl IntProxy {
     }
 
     /// Routes a [`ProxyMessage`] to the correct background task.
+    /// [`ProxyMessage::NewLayer`] is handled here, as an exception.
     async fn handle(&mut self, msg: ProxyMessage) -> Result<(), IntProxyError> {
         match msg {
             ProxyMessage::NewLayer(new_layer) => {
@@ -196,6 +213,7 @@ impl IntProxy {
                     message_id,
                     layer_id,
                 } = msg;
+
                 if let Some(tx) = self.task_txs.layers.get(&layer_id) {
                     tx.send(LocalMessage {
                         message_id,
@@ -209,6 +227,7 @@ impl IntProxy {
         Ok(())
     }
 
+    /// Handles a [`TaskUpdate`] from one of the main tasks (see [`MainTaskId`]).
     async fn handle_task_update(
         &mut self,
         task_id: MainTaskId,
