@@ -1,3 +1,8 @@
+//! # PR NOTE
+//!
+//! Mostly the same as the old `ConsoleLogger`, except that it uses a [`tokio::task`] instead of
+//! [`std::thread`].
+
 use drain::Watch;
 use log::LevelFilter;
 use mirrord_intproxy::codec::AsyncEncoder;

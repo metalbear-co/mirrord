@@ -1,3 +1,8 @@
+//! # PR NOTE
+//!
+//! Basically multiple old `static`s aggregated into one struct.
+//! Initialization logic not changed.
+
 use std::{collections::HashSet, net::SocketAddr};
 
 use mirrord_config::{
@@ -22,6 +27,9 @@ use crate::{
     socket::OutgoingSelector,
 };
 
+/// Complete layer setup.
+/// Contains [`LayerConfig`] and derived from it structs, which are used in multiple places across
+/// the layer.
 #[derive(Debug)]
 pub struct LayerSetup {
     config: LayerConfig,
@@ -146,7 +154,7 @@ pub struct StealHttpSettings {
     pub ports: HashSet<Port>,
 }
 
-/// Operation mode for the [`IncomingProxy`](super::IncomingProxy).
+/// Operation mode for the `incoming` feature.
 #[derive(Debug)]
 pub enum IncomingMode {
     /// The agent sends data to both the user application and the remote target.
@@ -206,7 +214,7 @@ impl IncomingMode {
         Self::Steal(StealHttpSettings { filter, ports })
     }
 
-    /// Returns [`PortSubscription`] to be used with the given port.
+    /// Returns [`PortSubscription`] request to be used for the given port.
     pub fn subscription(&self, port: Port) -> PortSubscription {
         let Self::Steal(steal) = self else {
             return PortSubscription::Mirror(port);
