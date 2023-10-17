@@ -133,12 +133,16 @@ pub enum IncomingRequest {
 pub struct PortSubscribe {
     /// Local address on which the layer is listening.
     pub listening_on: SocketAddr,
+    /// Instructions on how to execute mirroring.
     pub subscription: PortSubscription,
 }
 
+/// Instructions for the internal proxy and the agent on how to execute port mirroring.
 #[derive(Encode, Decode, Debug, Clone)]
 pub enum PortSubscription {
+    /// Wrapped [`StealType`] specifies how to execute port mirroring.
     Steal(StealType),
+    /// All data coming to the wrapped [`Port`] should be copied and sent to the layer.
     Mirror(Port),
 }
 

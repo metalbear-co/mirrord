@@ -132,7 +132,7 @@ struct InterceptorHandle<I: BackgroundTask> {
 ///    agent. If the agent closes the connection, the proxy shuts down the [`HttpInterceptor`].
 #[derive(Default)]
 pub struct IncomingProxy {
-    /// For keeping track of active port subscriptions on the agent side.
+    /// Remote ports subscribed by layers. Allows tracking across layer forks.
     remote_subscriptions: RemoteResources<Port>,
     /// Mapping from subscribed port on the remote target to layer's [`PortSubscribe`] request.
     subscriptions: HashMap<Port, PortSubscribe>,
@@ -142,7 +142,7 @@ pub struct IncomingProxy {
     interceptors_raw: HashMap<InterceptorId, InterceptorHandle<RawInterceptor>>,
     /// [`TaskSender`]s for active [`HttpInterceptor`]s.
     interceptors_http: HashMap<InterceptorId, InterceptorHandle<HttpInterceptor>>,
-    /// For managing both [`RawInterceptor`]s and [`HttpInterceptor`]s.
+    /// For receiving updates from both [`RawInterceptor`]s and [`HttpInterceptor`]s.
     background_tasks: BackgroundTasks<InterceptorId, InterceptorMessageOut, InterceptorError>,
 }
 

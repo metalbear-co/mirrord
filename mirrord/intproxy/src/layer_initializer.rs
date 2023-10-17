@@ -25,6 +25,9 @@ pub enum LayerInitializerError {
     UnexpectedMessage(LayerToProxyMessage),
 }
 
+/// Handles logic for accepting new layer connections.
+/// Run as a [`BackgroundTask`].
+#[derive(Debug)]
 pub struct LayerInitializer {
     listener: TcpListener,
     next_layer_id: LayerId,
@@ -38,6 +41,8 @@ impl LayerInitializer {
         }
     }
 
+    /// Initialize connection with the new layer, assigning fresh [`LayerId`].
+    #[tracing::instrument(level = "trace" ret)]
     async fn handle_new_stream(
         &mut self,
         stream: TcpStream,

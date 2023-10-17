@@ -5,8 +5,7 @@ use tokio::net::TcpStream;
 
 use crate::protocol::{LayerId, LayerToProxyMessage, MessageId, ProxyToLayerMessage};
 
-/// Messages sent back to the [`IntProxy`](crate::IntProxy) from the main background tasks. See
-/// [`MainTaskId`](crate::).
+/// Messages sent back to the [`IntProxy`](crate::IntProxy) from the main background tasks. See [`MainTaskId`].
 #[derive(Debug)]
 pub enum ProxyMessage {
     /// Message to be sent to the agent.
@@ -39,6 +38,7 @@ pub struct FromLayer {
 pub struct NewLayer {
     pub stream: TcpStream,
     pub id: LayerId,
+    /// [`LayerId`] of the fork parent.
     pub parent_id: Option<LayerId>,
 }
 
@@ -99,12 +99,14 @@ impl fmt::Display for MainTaskId {
     }
 }
 
+/// Notification about layer for. Useful to some background tasks.
 #[derive(Debug, Clone, Copy)]
 pub struct LayerForked {
     pub child: LayerId,
     pub parent: LayerId,
 }
 
+/// Notification about layer for. Useful to some background tasks.
 #[derive(Debug, Clone, Copy)]
 pub struct LayerClosed {
     pub id: LayerId,

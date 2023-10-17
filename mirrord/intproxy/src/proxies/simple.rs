@@ -35,7 +35,7 @@ enum RemoteFd {
 /// Run as a [`BackgroundTask`].
 #[derive(Default)]
 pub struct SimpleProxy {
-    /// Open remote file descriptors.
+    /// Remote descriptors for open files and directories. Allows tracking across layer forks.
     remote_fds: RemoteResources<RemoteFd>,
     /// For [`FileRequest`]s.
     file_reqs: RequestQueue,
