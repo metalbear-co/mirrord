@@ -2,10 +2,9 @@
 //! This protocol does not have to be backwards compatible and can be changed freely, as the
 //! internal proxy and the layer are shipped together in a single binary.
 
-use std::{collections::HashSet, fmt, net::SocketAddr};
+use std::{fmt, net::SocketAddr};
 
 use bincode::{Decode, Encode};
-use mirrord_config::feature::network::incoming::IncomingConfig;
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     file::{
@@ -17,10 +16,9 @@ use mirrord_protocol::{
         XstatFsResponse, XstatRequest, XstatResponse,
     },
     outgoing::SocketAddress,
-    tcp::{Filter, HttpFilter},
+    tcp::StealType,
     FileRequest, FileResponse, Port, RemoteResult,
 };
-use thiserror::Error;
 
 use crate::{bind_nested, impl_request};
 
@@ -133,12 +131,15 @@ pub enum IncomingRequest {
 /// serialized with [`crate::codec`]. After that, the proxy will send raw data.
 #[derive(Encode, Decode, Debug)]
 pub struct PortSubscribe {
-    /// Port on the remote pod that layer wants want to mirror.
-    pub port: Port,
     /// Local address on which the layer is listening.
     pub listening_on: SocketAddr,
-    /// Instructions to agent on how to handle incoming remote connections.
-    pub mode: IncomingMode,
+    pub subscription: PortSubscription,
+}
+
+#[derive(Encode, Decode, Debug)]
+pub enum PortSubscription {
+    Steal(StealType),
+    Mirror(Port),
 }
 
 /// A request to stop proxying incoming connections.
@@ -173,98 +174,6 @@ pub struct OutgoingConnectResponse {
     pub layer_address: SocketAddress,
     /// In-cluster address of the pod.
     pub in_cluster_address: SocketAddress,
-}
-
-/// HTTP filter used by the layer with the `steal` feature.
-#[derive(Debug, Encode, Decode, Clone)]
-pub enum StealHttpFilter {
-    /// No filter.
-    None,
-    /// Header filter, deprecated.
-    HeaderDeprecated(Filter),
-    /// More recent filter (header or path).
-    Filter(HttpFilter),
-}
-
-/// Settings for handling HTTP with the `steal` feature.
-#[derive(Debug, Encode, Decode, Clone)]
-pub struct StealHttpSettings {
-    /// The HTTP filter to use.
-    pub filter: StealHttpFilter,
-    /// Ports to filter HTTP on.
-    pub ports: HashSet<Port>,
-}
-
-/// Operation mode for the [`IncomingProxy`](super::IncomingProxy).
-#[derive(Debug, Encode, Decode, Clone)]
-pub enum IncomingMode {
-    /// The agent sends data to both the user application and the remote target.
-    /// Data coming from the layer is discarded.
-    Mirror,
-    /// The agent sends data only to the user application.
-    /// Data coming from the layer is sent to the agent.
-    Steal(StealHttpSettings),
-}
-
-impl IncomingMode {
-    /// Creates a new instance from the given [`LayerConfig`].
-    pub fn new(config: &IncomingConfig) -> Result<Self, IncomingFlavorError> {
-        if !config.is_steal() {
-            return Ok(Self::Mirror);
-        }
-
-        let http_header_filter_config = &config.http_header_filter;
-        let http_filter_config = &config.http_filter;
-
-        let ports = {
-            if http_header_filter_config.filter.is_some() {
-                http_header_filter_config
-                    .ports
-                    .as_slice()
-                    .iter()
-                    .copied()
-                    .collect()
-            } else {
-                http_filter_config
-                    .ports
-                    .as_slice()
-                    .iter()
-                    .copied()
-                    .collect()
-            }
-        };
-
-        let filter = match (
-            &http_filter_config.path_filter,
-            &http_filter_config.header_filter,
-            &http_header_filter_config.filter,
-        ) {
-            (Some(path), None, None) => StealHttpFilter::Filter(HttpFilter::Path(
-                Filter::new(path.into()).map_err(IncomingFlavorError::InvalidFilterError)?,
-            )),
-            (None, Some(header), None) => StealHttpFilter::Filter(HttpFilter::Header(
-                Filter::new(header.into()).map_err(IncomingFlavorError::InvalidFilterError)?,
-            )),
-            (None, None, Some(header)) => StealHttpFilter::HeaderDeprecated(
-                Filter::new(header.into()).map_err(IncomingFlavorError::InvalidFilterError)?,
-            ),
-            (None, None, None) => StealHttpFilter::None,
-            _ => return Err(IncomingFlavorError::MultipleFiltersError),
-        };
-
-        Ok(Self::Steal(StealHttpSettings { filter, ports }))
-    }
-}
-
-/// Errors that can occur when extracting [`IncomingMode`] from the [`LayerConfig`].
-#[derive(Error, Debug)]
-pub enum IncomingFlavorError {
-    /// Failed to create a [`Filter`] from a regex.
-    #[error("invalid filter expression: `{0}`")]
-    InvalidFilterError(fancy_regex::Error),
-    /// Multiple HTTP filters were specified.
-    #[error("multiple HTTP filters specified")]
-    MultipleFiltersError,
 }
 
 /// A helper trait for `layer -> proxy` requests.

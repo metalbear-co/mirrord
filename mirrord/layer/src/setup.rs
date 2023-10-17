@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{collections::HashSet, net::SocketAddr};
 
 use mirrord_config::{
     feature::{
@@ -8,7 +8,11 @@ use mirrord_config::{
     util::VecOrSingle,
     LayerConfig,
 };
-use mirrord_intproxy::protocol::IncomingMode;
+use mirrord_intproxy::protocol::PortSubscription;
+use mirrord_protocol::{
+    tcp::{Filter, HttpFilter, StealType},
+    Port,
+};
 use regex::RegexSet;
 
 use crate::{
@@ -55,8 +59,7 @@ impl LayerSetup {
             .parse()
             .expect("failed to parse internal proxy address");
 
-        let incoming_mode = IncomingMode::new(&config.feature.network.incoming)
-            .expect("failed to create incoming traffic filter");
+        let incoming_mode = IncomingMode::new(&config.feature.network.incoming);
 
         Self {
             config,
@@ -120,5 +123,104 @@ impl LayerSetup {
 
     pub fn incoming_mode(&self) -> &IncomingMode {
         &self.incoming_mode
+    }
+}
+
+/// HTTP filter used by the layer with the `steal` feature.
+#[derive(Debug)]
+pub enum StealHttpFilter {
+    /// No filter.
+    None,
+    /// Header filter, deprecated.
+    HeaderDeprecated(Filter),
+    /// More recent filter (header or path).
+    Filter(HttpFilter),
+}
+
+/// Settings for handling HTTP with the `steal` feature.
+#[derive(Debug)]
+pub struct StealHttpSettings {
+    /// The HTTP filter to use.
+    pub filter: StealHttpFilter,
+    /// Ports to filter HTTP on.
+    pub ports: HashSet<Port>,
+}
+
+/// Operation mode for the [`IncomingProxy`](super::IncomingProxy).
+#[derive(Debug)]
+pub enum IncomingMode {
+    /// The agent sends data to both the user application and the remote target.
+    /// Data coming from the layer is discarded.
+    Mirror,
+    /// The agent sends data only to the user application.
+    /// Data coming from the layer is sent to the agent.
+    Steal(StealHttpSettings),
+}
+
+impl IncomingMode {
+    /// Creates a new instance from the given [`LayerConfig`].
+    fn new(config: &IncomingConfig) -> Self {
+        if !config.is_steal() {
+            return Self::Mirror;
+        }
+
+        let http_header_filter_config = &config.http_header_filter;
+        let http_filter_config = &config.http_filter;
+
+        let ports = {
+            if http_header_filter_config.filter.is_some() {
+                http_header_filter_config
+                    .ports
+                    .as_slice()
+                    .iter()
+                    .copied()
+                    .collect()
+            } else {
+                http_filter_config
+                    .ports
+                    .as_slice()
+                    .iter()
+                    .copied()
+                    .collect()
+            }
+        };
+
+        let filter = match (
+            &http_filter_config.path_filter,
+            &http_filter_config.header_filter,
+            &http_header_filter_config.filter,
+        ) {
+            (Some(path), None, None) => StealHttpFilter::Filter(HttpFilter::Path(
+                Filter::new(path.into()).expect("invalid filter expression"),
+            )),
+            (None, Some(header), None) => StealHttpFilter::Filter(HttpFilter::Header(
+                Filter::new(header.into()).expect("invalid filter expression"),
+            )),
+            (None, None, Some(header)) => StealHttpFilter::HeaderDeprecated(
+                Filter::new(header.into()).expect("invalid filter expression"),
+            ),
+            (None, None, None) => StealHttpFilter::None,
+            _ => panic!("multiple HTTP filters specified"),
+        };
+
+        Self::Steal(StealHttpSettings { filter, ports })
+    }
+
+    /// Returns [`PortSubscription`] to be used with the given port.
+    pub fn subscription(&self, port: Port) -> PortSubscription {
+        let Self::Steal(steal) = self else {
+            return PortSubscription::Mirror(port);
+        };
+
+        let steal_type = match &steal.filter {
+            _ if !steal.ports.contains(&port) => StealType::All(port),
+            StealHttpFilter::None => StealType::All(port),
+            StealHttpFilter::HeaderDeprecated(filter) => {
+                StealType::FilteredHttp(port, filter.clone())
+            }
+            StealHttpFilter::Filter(filter) => StealType::FilteredHttpEx(port, filter.clone()),
+        };
+
+        PortSubscription::Steal(steal_type)
     }
 }
