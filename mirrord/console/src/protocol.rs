@@ -1,7 +1,9 @@
-use log::Level;
-use serde::{Deserialize, Serialize};
+use std::{env, process};
 
-#[derive(Debug, Serialize, Deserialize)]
+use bincode::{Decode, Encode};
+use log::Level;
+
+#[derive(Debug, Encode, Decode)]
 pub struct ProcessInfo {
     pub args: Vec<String>,
     pub env: Vec<String>,
@@ -9,18 +11,66 @@ pub struct ProcessInfo {
     pub id: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Encode, Decode)]
 pub struct Hello {
     pub process_info: ProcessInfo,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+impl Hello {
+    pub fn from_env() -> Self {
+        Self {
+            process_info: ProcessInfo {
+                args: env::args().collect(),
+                env: env::vars().map(|(k, v)| format!("{k}={v}")).collect(),
+                cwd: env::current_dir()
+                    .map(|p| p.to_str().map(String::from))
+                    .unwrap_or(None),
+                id: process::id().into(),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Encode, Decode)]
+pub enum EncodableLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+impl From<Level> for EncodableLevel {
+    fn from(value: Level) -> Self {
+        match value {
+            Level::Debug => Self::Debug,
+            Level::Error => Self::Error,
+            Level::Info => Self::Info,
+            Level::Trace => Self::Trace,
+            Level::Warn => Self::Warn,
+        }
+    }
+}
+
+impl From<EncodableLevel> for Level {
+    fn from(value: EncodableLevel) -> Self {
+        match value {
+            EncodableLevel::Debug => Self::Debug,
+            EncodableLevel::Error => Self::Error,
+            EncodableLevel::Info => Self::Info,
+            EncodableLevel::Trace => Self::Trace,
+            EncodableLevel::Warn => Self::Warn,
+        }
+    }
+}
+
+#[derive(Debug, Encode, Decode)]
 pub struct Metadata {
-    pub level: Level,
+    pub level: EncodableLevel,
     pub target: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Encode, Decode)]
 pub struct Record {
     pub metadata: Metadata,
     pub message: String,

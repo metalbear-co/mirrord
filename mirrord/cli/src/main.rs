@@ -409,22 +409,23 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 fn main() -> miette::Result<()> {
     let cli = Cli::parse();
 
-    if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
-        mirrord_console::init_logger(&console_addr)?;
-    } else if !init_ext_error_handler(&cli.commands) {
-        registry()
-            .with(fmt::layer().with_writer(std::io::stderr))
-            .with(EnvFilter::from_default_env())
-            .init();
-    }
-
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(CliError::RuntimeError)?;
+
     let (signal, watch) = drain::channel();
 
     let res: Result<(), CliError> = rt.block_on(async move {
+        if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
+            mirrord_console::init_async_logger(&console_addr, watch.clone(), 124).await?;
+        } else if !init_ext_error_handler(&cli.commands) {
+            registry()
+                .with(fmt::layer().with_writer(std::io::stderr))
+                .with(EnvFilter::from_default_env())
+                .init();
+        }
+
         match cli.commands {
             Commands::Exec(args) => exec(&args, watch).await?,
             Commands::Extract { path } => {
@@ -459,8 +460,7 @@ fn main() -> miette::Result<()> {
             });
     });
 
-    res?;
-    Ok(())
+    res.map_err(Into::into)
 }
 
 // only ls and ext commands need the errors in json format
