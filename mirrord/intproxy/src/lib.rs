@@ -33,7 +33,7 @@ pub mod codec;
 pub mod error;
 mod layer_conn;
 mod layer_initializer;
-mod layer_resources;
+mod remote_resources;
 mod main_tasks;
 mod ping_pong;
 pub mod protocol;

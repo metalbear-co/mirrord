@@ -20,7 +20,7 @@ use self::{
 };
 use crate::{
     background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
-    layer_resources::LayerResources,
+    remote_resources::RemoteResources,
     main_tasks::{LayerClosed, LayerForked, ToLayer},
     protocol::{
         IncomingRequest, LayerId, MessageId, PortSubscribe, PortSubscription, PortUnsubscribe,
@@ -133,7 +133,7 @@ struct InterceptorHandle<I: BackgroundTask> {
 #[derive(Default)]
 pub struct IncomingProxy {
     /// For keeping track of active subscriptions across forks.
-    subscribed_ports: LayerResources<Port>,
+    subscribed_ports: RemoteResources<Port>,
     /// Mapping from subscribed port on the remote target to layer's [`PortSubscribe`] request.
     subscriptions: HashMap<Port, PortSubscribe>,
     /// For matching agent's responses with layer's [`PortSubscribe`] requests.

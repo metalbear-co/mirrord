@@ -9,7 +9,7 @@ use mirrord_protocol::{
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    layer_resources::LayerResources,
+    remote_resources::RemoteResources,
     main_tasks::{LayerClosed, LayerForked, ToLayer},
     protocol::{LayerId, MessageId, ProxyToLayerMessage},
     request_queue::{RequestQueue, RequestQueueEmpty},
@@ -36,7 +36,7 @@ enum RemoteFd {
 #[derive(Default)]
 pub struct SimpleProxy {
     /// Open remote file descriptors.
-    remote_fds: LayerResources<RemoteFd>,
+    remote_fds: RemoteResources<RemoteFd>,
     /// For [`FileRequest`]s.
     file_reqs: RequestQueue,
     /// For [`GetAddrInfoRequest`]s.
