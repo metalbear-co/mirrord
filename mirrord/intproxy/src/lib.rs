@@ -11,7 +11,7 @@ use main_tasks::{FromLayer, LayerForked, MainTaskId, ProxyMessage, ToLayer};
 use mirrord_config::LayerConfig;
 use mirrord_protocol::{ClientMessage, DaemonMessage, CLIENT_READY_FOR_LOGS};
 use ping_pong::{AgentMessageNotification, PingPong};
-use protocol::{LayerId, ProxyToLayerMessage, NOT_A_RESPONSE};
+use protocol::LayerId;
 use proxies::{
     incoming::{IncomingProxy, IncomingProxyMessage},
     outgoing::{OutgoingProxy, OutgoingProxyMessage},
@@ -122,6 +122,13 @@ impl IntProxy {
         first_timeout: Duration,
         consecutive_timeout: Duration,
     ) -> Result<(), IntProxyError> {
+        self.task_txs
+            .agent
+            .send(ClientMessage::SwitchProtocolVersion(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await;
+
         loop {
             tokio::select! {
                 Some((task_id, task_update)) = self.background_tasks.next() => {
@@ -297,14 +304,7 @@ impl IntProxy {
                 }
             }
             DaemonMessage::LogMessage(log) => {
-                if let Some(sender) = self.task_txs.layers.values().next() {
-                    sender
-                        .send(LocalMessage {
-                            message_id: NOT_A_RESPONSE,
-                            inner: ProxyToLayerMessage::AgentLog(log),
-                        })
-                        .await;
-                }
+                tracing::trace!("agent log: {log:?}");
             }
             other => {
                 return Err(IntProxyError::UnexpectedAgentMessage(other));

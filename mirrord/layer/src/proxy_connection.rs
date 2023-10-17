@@ -13,10 +13,9 @@ use mirrord_intproxy::{
     codec::{self, CodecError, SyncDecoder, SyncEncoder},
     protocol::{
         IsLayerRequest, IsLayerRequestWithResponse, LayerId, LayerToProxyMessage, LocalMessage,
-        MessageId, NewSessionRequest, ProxyToLayerMessage, NOT_A_RESPONSE,
+        MessageId, NewSessionRequest, ProxyToLayerMessage,
     },
 };
-use mirrord_protocol::LogLevel;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -92,13 +91,7 @@ impl ProxyConnection {
     }
 
     pub fn send(&self, message: LayerToProxyMessage) -> Result<MessageId> {
-        let message_id = loop {
-            match self.next_message_id() {
-                NOT_A_RESPONSE => continue,
-                other => break other,
-            }
-        };
-
+        let message_id = self.next_message_id();
         let message = LocalMessage {
             message_id,
             inner: message,
@@ -166,21 +159,8 @@ impl ResponseManager {
                 break Ok(response.inner);
             }
 
-            if response.message_id == NOT_A_RESPONSE {
-                Self::handle_custom_message(response.inner);
-            } else {
-                self.outstanding_responses
-                    .insert(response.message_id, response.inner);
-            }
-        }
-    }
-
-    fn handle_custom_message(message: ProxyToLayerMessage) {
-        if let ProxyToLayerMessage::AgentLog(log) = message {
-            match log.level {
-                LogLevel::Warn => tracing::warn!("agent warning: {}", log.message),
-                LogLevel::Error => tracing::error!("agent error: {}", log.message),
-            }
+            self.outstanding_responses
+                .insert(response.message_id, response.inner);
         }
     }
 }

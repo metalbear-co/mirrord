@@ -18,7 +18,7 @@ use mirrord_protocol::{
     },
     outgoing::SocketAddress,
     tcp::{Filter, HttpFilter},
-    FileRequest, FileResponse, LogMessage, Port, RemoteResult,
+    FileRequest, FileResponse, Port, RemoteResult,
 };
 use thiserror::Error;
 
@@ -29,10 +29,6 @@ mod macros;
 /// An identifier for a message sent from the layer to the internal proxy.
 /// The layer uses this to match proxy responses with awaiting requests.
 pub type MessageId = u64;
-
-/// Special [`MessageId`] used by the internal proxy to send messages that are not responses.
-/// The layer should not use this identifier.
-pub const NOT_A_RESPONSE: MessageId = MessageId::MAX;
 
 /// A wrapper for messages sent through the `layer <-> proxy` connection.
 #[derive(Encode, Decode, Debug)]
@@ -168,8 +164,6 @@ pub enum ProxyToLayerMessage {
     IncomingSubscribe(RemoteResult<()>),
     /// A response to layer's [`PortUnsubscribe`]
     IncomingUnsubscribe(RemoteResult<()>),
-    /// Agent log proxied to the layer.
-    AgentLog(LogMessage),
 }
 
 /// A response to layer's [`OutgoingConnectRequest`].
