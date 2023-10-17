@@ -129,14 +129,14 @@ pub enum IncomingRequest {
 /// the internal proxy will initiate a new connection to the local port specified in `listening_on`.
 /// Through this connection, the proxy will first send the [`SocketAddress`] of the original peer,
 /// serialized with [`crate::codec`]. After that, the proxy will send raw data.
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct PortSubscribe {
     /// Local address on which the layer is listening.
     pub listening_on: SocketAddr,
     pub subscription: PortSubscription,
 }
 
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub enum PortSubscription {
     Steal(StealType),
     Mirror(Port),

@@ -4,7 +4,6 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     fmt,
     net::SocketAddr,
-    sync::Arc,
 };
 
 use hyper::Version;
@@ -94,12 +93,7 @@ pub enum IncomingProxyMessage {
 
 struct InterceptorHandle<I: BackgroundTask> {
     tx: TaskSender<I>,
-    subscription: Arc<PortSubscription>,
-}
-
-struct LayerSubscription {
-    local_listener: SocketAddr,
-    subscription: Arc<PortSubscription>,
+    subscription: PortSubscription,
 }
 
 /// Handles logic and state of the `incoming` feature.
@@ -139,10 +133,10 @@ struct LayerSubscription {
 #[derive(Default)]
 pub struct IncomingProxy {
     /// For keeping track of active subscriptions across forks.
-    subscriptions: LayerResources<Port>,
-    /// Mapping from subscribed ports on the remote target to addresses of layer's listeners.
-    layer_listeners: HashMap<Port, LayerSubscription>,
-    /// For [`PortSubscribe`] requests.
+    subscribed_ports: LayerResources<Port>,
+    /// Mapping from subscribed port on the remote target to layer's [`PortSubscribe`] request.
+    subscriptions: HashMap<Port, PortSubscribe>,
+    /// For matching agent's responses with layer's [`PortSubscribe`] requests.
     subscribe_reqs: RequestQueue,
     /// [`TaskSender`]s for active [`RawInterceptor`]s.
     interceptors_raw: HashMap<InterceptorId, InterceptorHandle<RawInterceptor>>,
@@ -169,22 +163,17 @@ impl IncomingProxy {
         subscribe: PortSubscribe,
         message_bus: &mut MessageBus<Self>,
     ) {
-        let subscription = Arc::new(subscribe.subscription);
-
-        if let Some(old_subscription) = self.layer_listeners.insert(
-            subscription.port(),
-            LayerSubscription {
-                local_listener: subscribe.listening_on,
-                subscription: subscription.clone(),
-            },
-        ) {
+        if let Some(old_subscription) = self
+            .subscriptions
+            .insert(subscribe.subscription.port(), subscribe.clone())
+        {
             // Since this struct identifies listening sockets by their port (#1558), we can only
             // forward the incoming traffic to one socket with that port.
             tracing::info!(
                 "Received layer subscription message for port {}, listening on {}, while already listening on {}. Sending all incoming traffic to new socket.",
-                subscription.port(),
+                subscribe.subscription.port(),
                 subscribe.listening_on,
-                old_subscription.local_listener,
+                old_subscription.listening_on,
             );
 
             message_bus
@@ -198,7 +187,7 @@ impl IncomingProxy {
             return;
         }
 
-        let msg = subscription.wrap_agent_subscribe();
+        let msg = subscribe.subscription.wrap_agent_subscribe();
         message_bus.send(ProxyMessage::ToAgent(msg)).await;
 
         self.subscribe_reqs.insert(message_id, layer_id);
@@ -211,7 +200,7 @@ impl IncomingProxy {
         unsubscribe: PortUnsubscribe,
         message_bus: &mut MessageBus<Self>,
     ) {
-        if let Some(subscription) = self.layer_listeners.remove(&unsubscribe.port) {
+        if let Some(subscription) = self.subscriptions.remove(&unsubscribe.port) {
             let msg = subscription.subscription.wrap_agent_unsubscribe();
             message_bus.send(ProxyMessage::ToAgent(msg)).await;
         }
@@ -230,17 +219,18 @@ impl IncomingProxy {
         let interceptor = match self.interceptors_http.entry(id) {
             Entry::Occupied(e) => e.into_mut(),
             Entry::Vacant(e) => {
-                let Some(subscription) = self.layer_listeners.get(&request.port()) else {
+                let Some(subscription) = self.subscriptions.get(&request.port()) else {
                     tracing::trace!(
                         "received a new http request for port {} that is no longer mirrored",
                         request.port()
                     );
+
                     return Ok(None);
                 };
 
                 let version = request.version();
                 let interceptor = self.background_tasks.register(
-                    HttpInterceptor::new(subscription.local_listener, version),
+                    HttpInterceptor::new(subscription.listening_on, version),
                     InterceptorId(request.connection_id()),
                     Self::CHANNEL_SIZE,
                 );
@@ -297,7 +287,7 @@ impl IncomingProxy {
                 }
             }
             DaemonTcp::NewConnection(connection) => {
-                let Some(subscription) = self.layer_listeners.get(&connection.destination_port)
+                let Some(subscription) = self.subscriptions.get(&connection.destination_port)
                 else {
                     tracing::trace!(
                         "received a new connection for port {} that is no longer mirrored",
@@ -311,7 +301,7 @@ impl IncomingProxy {
 
                 let id = InterceptorId(connection.connection_id);
                 let interceptor = self.background_tasks.register(
-                    RawInterceptor::new(remote_source, subscription.local_listener),
+                    RawInterceptor::new(remote_source, subscription.listening_on),
                     id,
                     Self::CHANNEL_SIZE,
                 );
@@ -341,13 +331,13 @@ impl IncomingProxy {
 
     fn handle_layer_fork(&mut self, msg: LayerForked) {
         let LayerForked { child, parent } = msg;
-        self.subscriptions.clone_all(child, parent);
+        self.subscribed_ports.clone_all(child, parent);
     }
 
     async fn handle_layer_close(&mut self, msg: LayerClosed, message_bus: &mut MessageBus<Self>) {
         let LayerClosed { id } = msg;
-        for to_close in self.subscriptions.remove_all(id) {
-            let Some(subscription) = self.layer_listeners.remove(&to_close) else {
+        for to_close in self.subscribed_ports.remove_all(id) {
+            let Some(subscription) = self.subscriptions.remove(&to_close) else {
                 continue;
             };
             message_bus
@@ -356,7 +346,7 @@ impl IncomingProxy {
         }
     }
 
-    fn get_mode(&self, interceptor_id: InterceptorId) -> Option<&PortSubscription> {
+    fn get_subscription(&self, interceptor_id: InterceptorId) -> Option<&PortSubscription> {
         if let Some(handle) = self.interceptors_raw.get(&interceptor_id) {
             Some(&handle.subscription)
         } else if let Some(handle) = self.interceptors_http.get(&interceptor_id) {
@@ -398,14 +388,15 @@ impl BackgroundTask for IncomingProxy {
                     (id, TaskUpdate::Finished(res)) => {
                         tracing::trace!("{id} finished: {res:?}");
 
-                        let Some(mode) = self.get_mode(id) else { continue };
-                        let msg = mode.wrap_agent_unsubscribe_connection(id.0);
-                        message_bus.send(ProxyMessage::ToAgent(msg)).await;
+                        let msg = self.get_subscription(id).map(|s| s.wrap_agent_unsubscribe_connection(id.0));
+                        if let Some(msg) = msg {
+                            message_bus.send(ProxyMessage::ToAgent(msg)).await;
+                        }
                     },
 
                     (id, TaskUpdate::Message(msg)) => {
-                        let Some(mode) = self.get_mode(id) else { continue };
-                        if let Some(msg) = mode.wrap_response(msg, id.0) {
+                        let msg = self.get_subscription(id).and_then(|s| s.wrap_response(msg, id.0));
+                        if let Some(msg) = msg {
                             message_bus.send(msg).await;
                         }
                     },
