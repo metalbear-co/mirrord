@@ -164,8 +164,12 @@ impl<'c> EphemeralTargetedVariant<'c> {
         params: &'c ContainerParams,
         runtime_data: &'c RuntimeData,
     ) -> Self {
-        let mut command_line = base_command_line(agent, params, runtime_data.mesh);
+        let mut command_line = base_command_line(agent, params);
+
         command_line.extend(["ephemeral".to_string()]);
+        if let Some(mesh) = runtime_data.mesh {
+            command_line.extend(["--mesh".to_string(), mesh.to_string()]);
+        }
 
         EphemeralTargetedVariant {
             agent,

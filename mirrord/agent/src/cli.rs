@@ -41,10 +41,6 @@ pub struct Args {
 
     #[arg(long, default_value = "1.2.1")]
     pub base_protocol_version: semver::Version,
-
-    /// Which kind of mesh the remote pod is in, see [`MeshVendor`].
-    #[arg(long)]
-    pub(super) mesh: Option<MeshVendor>,
 }
 
 #[derive(Clone, Debug, Default, Subcommand)]
@@ -58,15 +54,22 @@ pub enum Mode {
         #[arg(short = 'r', long, default_value = DEFAULT_RUNTIME)]
         container_runtime: String,
 
-        // TODO(alex): Remove this `mesh` arg from here at some point. It'll be a breaking change
-        // until all users have an agent image that can deal with `--mesh` from `Args`.
+        // TODO(alex): We should remove this arg from here and put into the general `Args`, but
+        // this would be a breaking change, as the agent would be started as:
+        // `agent --mesh targeted` becomes incompatible when a new layer version tries to
+        // initialize an old agent version.
         /// Which kind of mesh the remote pod is in, see [`MeshVendor`].
-        #[deprecated = "Moved to be part of general `Args`, remains here to avoid breaking change!"]
         #[arg(long)]
         mesh: Option<MeshVendor>,
     },
     /// Inform the agent to use `proc/1/root` as the root directory.
-    Ephemeral,
+    Ephemeral {
+        // TODO(alex): Same issue here, we want to remove this at some point, and move it to
+        // `Args`.
+        /// Which kind of mesh the remote pod is in, see [`MeshVendor`].
+        #[arg(long)]
+        mesh: Option<MeshVendor>,
+    },
     #[default]
     Targetless,
     #[clap(hide = true)]
@@ -78,13 +81,12 @@ impl Mode {
         matches!(self, Mode::Targetless)
     }
 
-    // TODO(alex): Remove this when `mesh` option is removed from `cli::Mode`.
-    /// Digs into `Mode::Targeted` to get the `MeshVendor`.
-    #[allow(deprecated)]
-    #[deprecated = "`mesh` was moved to `Args`."]
+    // TODO(alex): Remove this when `mesh` option is removed from `cli::Mode`, and put into
+    // `cli::Args`.
+    /// Digs into `Mode` subcomand to get the `MeshVendor`.
     pub(super) fn mesh(&self) -> Option<MeshVendor> {
         match *self {
-            Mode::Targeted { mesh, .. } => mesh,
+            Mode::Targeted { mesh, .. } | Mode::Ephemeral { mesh, .. } => mesh,
             _ => None,
         }
     }

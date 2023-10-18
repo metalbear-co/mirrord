@@ -113,7 +113,7 @@ pub struct JobVariant<'c> {
 
 impl<'c> JobVariant<'c> {
     pub fn new(agent: &'c AgentConfig, params: &'c ContainerParams) -> Self {
-        let mut command_line = base_command_line(agent, params, None);
+        let mut command_line = base_command_line(agent, params);
 
         command_line.push("targetless".to_owned());
 
@@ -230,7 +230,7 @@ impl<'c> JobTargetedVariant<'c> {
         params: &'c ContainerParams,
         runtime_data: &'c RuntimeData,
     ) -> Self {
-        let mut command_line = base_command_line(agent, params, runtime_data.mesh);
+        let mut command_line = base_command_line(agent, params);
 
         command_line.extend([
             "targeted".to_owned(),
@@ -239,6 +239,10 @@ impl<'c> JobTargetedVariant<'c> {
             "--container-runtime".to_owned(),
             runtime_data.container_runtime.to_string(),
         ]);
+
+        if let Some(mesh) = runtime_data.mesh {
+            command_line.extend(["--mesh".to_string(), mesh.to_string()]);
+        }
 
         let inner = JobVariant::with_command_line(agent, params, command_line);
 
