@@ -570,7 +570,10 @@ async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
         (None, None)
     } else {
         let cancellation_token = cancellation_token.clone();
-        let mesh = args.mode.mesh();
+
+        // TODO(alex): Use `args.mesh` directly when `mesh` option is removed from `cli::Mode`.
+        #[allow(deprecated)]
+        let mesh = args.mode.mesh().or(args.mesh);
 
         let watched_task = WatchedTask::new(
             TcpConnectionSniffer::TASK_NAME,

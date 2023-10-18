@@ -41,6 +41,10 @@ pub struct Args {
 
     #[arg(long, default_value = "1.2.1")]
     pub base_protocol_version: semver::Version,
+
+    /// Which kind of mesh the remote pod is in, see [`MeshVendor`].
+    #[arg(long)]
+    pub(super) mesh: Option<MeshVendor>,
 }
 
 #[derive(Clone, Debug, Default, Subcommand)]
@@ -54,7 +58,10 @@ pub enum Mode {
         #[arg(short = 'r', long, default_value = DEFAULT_RUNTIME)]
         container_runtime: String,
 
+        // TODO(alex): Remove this `mesh` arg from here at some point. It'll be a breaking change
+        // until all users have an agent image that can deal with `--mesh` from `Args`.
         /// Which kind of mesh the remote pod is in, see [`MeshVendor`].
+        #[deprecated = "Moved to be part of general `Args`, remains here to avoid breaking change!"]
         #[arg(long)]
         mesh: Option<MeshVendor>,
     },
@@ -71,7 +78,10 @@ impl Mode {
         matches!(self, Mode::Targetless)
     }
 
+    // TODO(alex): Remove this when `mesh` option is removed from `cli::Mode`.
     /// Digs into `Mode::Targeted` to get the `MeshVendor`.
+    #[allow(deprecated)]
+    #[deprecated = "`mesh` was moved to `Args`."]
     pub(super) fn mesh(&self) -> Option<MeshVendor> {
         match *self {
             Mode::Targeted { mesh, .. } => mesh,

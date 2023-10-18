@@ -4,6 +4,7 @@ use futures::{AsyncBufReadExt, TryStreamExt};
 use k8s_openapi::api::core::v1::{Pod, Toleration};
 use kube::{api::LogParams, Api};
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
+use mirrord_protocol::MeshVendor;
 use regex::Regex;
 use tracing::warn;
 
@@ -38,15 +39,24 @@ pub(super) fn get_capabilities(agent: &AgentConfig) -> Vec<LinuxCapability> {
         .collect()
 }
 
-pub(super) fn base_command_line(agent: &AgentConfig, params: &ContainerParams) -> Vec<String> {
+pub(super) fn base_command_line(
+    agent: &AgentConfig,
+    params: &ContainerParams,
+    mesh: Option<MeshVendor>,
+) -> Vec<String> {
     let mut command_line = vec![
         "./mirrord-agent".to_owned(),
         "-l".to_owned(),
         params.port.to_string(),
     ];
+
     if let Some(timeout) = agent.communication_timeout {
         command_line.push("-t".to_owned());
         command_line.push(timeout.to_string());
+    }
+
+    if let Some(mesh) = mesh {
+        command_line.extend(["--mesh".to_string(), mesh.to_string()]);
     }
 
     #[cfg(debug_assertions)]
