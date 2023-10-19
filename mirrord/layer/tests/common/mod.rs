@@ -948,22 +948,6 @@ impl Application {
         TestProcess::start_process(executable, self.get_args(), env).await
     }
 
-    // /// Start the test process and return the started process and a tcp listener that the layer
-    // is /// supposed to connect to.
-    // pub async fn get_test_process_and_listener(
-    //     &self,
-    //     dylib_path: &PathBuf,
-    //     extra_env_vars: Vec<(&str, &str)>,
-    //     configuration_file: Option<&str>,
-    // ) -> (TestProcess, TcpListener) { let intproxy_listener =
-    //   TcpListener::bind("127.0.0.1:0").await.unwrap(); let intproxy_address =
-    //   intproxy_listener.local_addr().unwrap().to_string(); let env = get_env(
-    //   dylib_path.to_str().unwrap(), &intproxy_address, extra_env_vars, configuration_file, ); let
-    //   test_process = self.get_test_process(env).await;
-
-    //     (test_process, intproxy_listener)
-    // }
-
     /// Start the process of this application, with the layer lib loaded.
     /// Will start it with env from `get_env` plus whatever is passed in `extra_env_vars`.
     pub async fn start_process_with_layer(
