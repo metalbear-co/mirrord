@@ -19,6 +19,25 @@ use crate::{
 /// 1 Megabyte. Large read requests can lead to timeouts.
 const MAX_READ_SIZE: u64 = 1024 * 1024;
 
+/// Helper macro for checking if the given path should be handled remotely.
+/// Uses global [`crate::setup`].
+///
+/// Should the file be ignored, this macro exists current context with [`Bypass::IgnoredFile`].
+///
+/// # Arguments
+///
+/// * `path` - [`PathBuf`]
+/// * `write` - [`bool`], stating whether the file is accessed for writing
+macro_rules! ensure_not_ignored {
+    ($path:expr, $write:expr) => {
+        crate::setup().file_filter().continue_or_bypass_with(
+            $path.to_str().unwrap_or_default(),
+            $write,
+            || Bypass::IgnoredFile($path.clone()),
+        )?;
+    };
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RemoteFile {
     pub fd: u64,
@@ -142,8 +161,7 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
         Detour::Bypass(Bypass::RelativePath(path.clone()))?
     };
 
-    crate::setup()
-        .filter_ignored_file(path.to_str().unwrap_or_default(), open_options.is_write())?;
+    ensure_not_ignored!(path, open_options.is_write());
 
     let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)?;
 
@@ -339,7 +357,7 @@ pub(crate) fn access(path: Detour<PathBuf>, mode: u8) -> Detour<c_int> {
         Detour::Bypass(Bypass::RelativePath(path.clone()))?
     };
 
-    crate::setup().filter_ignored_file(path.to_str().unwrap_or_default(), false)?;
+    ensure_not_ignored!(path, false);
 
     let access = AccessFileRequest {
         pathname: path,
@@ -373,8 +391,7 @@ pub(crate) fn xstat(
                         // Calls with non absolute paths are sent to libc::fstatat.
                         return Detour::Bypass(Bypass::RelativePath(path));
                     } else {
-                        crate::setup()
-                            .filter_ignored_file(path.to_str().unwrap_or_default(), false)?;
+                        ensure_not_ignored!(path, false);
                         None
                     }
                 } else {
@@ -390,7 +407,7 @@ pub(crate) fn xstat(
                 // Calls with non absolute paths are sent to libc::open.
                 return Detour::Bypass(Bypass::RelativePath(path));
             }
-            crate::setup().filter_ignored_file(path.to_str().unwrap_or_default(), false)?;
+            ensure_not_ignored!(path, false);
             (Some(path), None)
         }
         // fstat

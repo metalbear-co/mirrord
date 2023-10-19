@@ -20,12 +20,7 @@ use mirrord_protocol::{
 };
 use regex::RegexSet;
 
-use crate::{
-    debugger_ports::DebuggerPorts,
-    detour::{Bypass, Detour},
-    file::filter::FileFilter,
-    socket::OutgoingSelector,
-};
+use crate::{debugger_ports::DebuggerPorts, file::filter::FileFilter, socket::OutgoingSelector};
 
 /// Complete layer setup.
 /// Contains [`LayerConfig`] and derived from it structs, which are used in multiple places across
@@ -84,6 +79,10 @@ impl LayerSetup {
         &self.config.feature.fs
     }
 
+    pub fn file_filter(&self) -> &FileFilter {
+        &self.file_filter
+    }
+
     pub fn incoming_config(&self) -> &IncomingConfig {
         &self.config.feature.network.incoming
     }
@@ -98,11 +97,6 @@ impl LayerSetup {
 
     pub fn targetless(&self) -> bool {
         self.config.target.path.is_none()
-    }
-
-    pub fn filter_ignored_file(&self, path: &str, write: bool) -> Detour<()> {
-        self.file_filter
-            .continue_or_bypass_with(path, write, || Bypass::IgnoredFile(path.into()))
     }
 
     pub fn sip_binaries(&self) -> Vec<String> {
