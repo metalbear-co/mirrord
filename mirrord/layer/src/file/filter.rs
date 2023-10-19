@@ -13,12 +13,15 @@ use mirrord_config::{
     util::VecOrSingle,
 };
 use regex::{RegexSet, RegexSetBuilder};
-use tracing::warn;
 
 use crate::{
     detour::{Bypass, Detour},
     error::HookError,
 };
+
+mod not_found_by_default;
+mod read_local_by_default;
+mod read_remote_by_default;
 
 /// List of files that mirrord should use locally, as they probably exist only in the local user
 /// machine, or are system configuration files (that could break the process if we used the remote
@@ -29,72 +32,7 @@ use crate::{
 fn generate_local_set() -> RegexSet {
     // To handle the problem of injecting `open` and friends into project runners (like in a call to
     // `node app.js`, or `cargo run app`), we're ignoring files from the current working directory.
-    let current_dir = env::current_dir().unwrap();
-    let current_binary = env::current_exe().unwrap();
-    let temp_dir = env::temp_dir();
-    let patterns = [
-        r"^.+\.so$",
-        r"^.+\.d$",
-        r"^.+\.pyc$",
-        r"^.+\.py$",
-        r"^.+\.jar$",
-        r"^.+\.js$",
-        r"^.+\.pth$",
-        r"^.+\.plist$",
-        r"^.*venv\.cfg$",
-        r"^/proc/.*$",
-        r"^/sys/.*$",
-        r"^/lib/.*$",
-        r"^/etc/.*$",
-        r"^/usr(/|$).*$",
-        r"^/home(/|$).*$",
-        r"^/bin/.*$",
-        r"^/sbin/.*$",
-        r"^/dev/.*$",
-        r"^/opt(/|$)",
-        r"^/tmp(/|$)",
-        r"^/snap/.*$",
-        // support for nixOS.
-        r"^/nix/.*$",
-        r".+\.asdf/.+",
-        r"^/home/iojs/.*$",
-        r"^/home/runner/.*$",
-        // dotnet: `/tmp/clr-debug-pipe-1`
-        r"^.*clr-.*-pipe-.*$",
-        // dotnet: `/home/{username}/{project}.pdb`
-        r"^.*\.pdb$",
-        // dotnet: `/home/{username}/{project}.dll`
-        r"^.*\.dll$",
-        // jvm.cfg or ANYTHING/jvm.cfg
-        r".*(^|/)jvm\.cfg$",
-        // TODO: `node` searches for this file in multiple directories, bypassing some of our
-        // ignore regexes, maybe other "project runners" will do the same.
-        r"^.*/package.json$",
-        // asdf
-        r".*/\.tool-versions$",
-        // macOS
-        #[cfg(target_os = "macos")]
-        "^/Volumes(/|$)",
-        #[cfg(target_os = "macos")]
-        r"^/private(/|$)",
-        #[cfg(target_os = "macos")]
-        r"^/var/folders(/|$)",
-        #[cfg(target_os = "macos")]
-        r"^/Users",
-        #[cfg(target_os = "macos")]
-        r"^/Library",
-        #[cfg(target_os = "macos")]
-        r"^/Applications",
-        #[cfg(target_os = "macos")]
-        r"^/System",
-        #[cfg(target_os = "macos")]
-        r"^/var/run/com.apple",
-        &format!("^{}", temp_dir.to_string_lossy()),
-        &format!("^.*{}.*$", current_dir.to_string_lossy()),
-        &format!("^.*{}.*$", current_binary.to_string_lossy()),
-        "^/$", // root
-    ];
-    RegexSetBuilder::new(patterns)
+    read_local_by_default::regex_set_builder()
         .case_insensitive(true)
         .build()
         .expect("Building local path regex set failed")
@@ -102,12 +40,7 @@ fn generate_local_set() -> RegexSet {
 
 /// List of files that mirrord should use remotely read only
 fn generate_remote_ro_set() -> RegexSet {
-    let patterns = [
-        // for dns resolving
-        r"^/etc/resolv.conf$",
-        r"^/etc/hosts$",
-        r"^/etc/hostname$",
-    ];
+    let patterns = read_remote_by_default::PATHS;
     RegexSetBuilder::new(patterns)
         .case_insensitive(true)
         .build()
@@ -122,7 +55,7 @@ fn generate_not_found_set() -> RegexSet {
 
     let home_clean = regex::escape(home.trim_end_matches('/'));
 
-    let patterns = [r"\.aws", r"\.config/gcloud", r"\.kube", r"\.azure"]
+    let patterns = not_found_by_default::PATHS
         .into_iter()
         .map(|cloud_dir| format!("^{home_clean}/{cloud_dir}"));
 
