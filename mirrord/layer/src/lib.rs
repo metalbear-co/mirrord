@@ -461,6 +461,10 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
     tracing::debug!("Process {} forking!.", std::process::id());
 
     let parent_connection = PROXY_CONNECTION.get().expect("PROXY_CONNECTION not set");
+
+    // After fork, this new connection lives both in the parent and in the child.
+    // The child will have access to cloned file descriptor of the underlying socket.
+    // The parent will close its descriptor at the end of this scope.
     let new_connection = ProxyConnection::new(
         parent_connection.proxy_addr(),
         NewSessionRequest::Forked(parent_connection.layer_id()),
@@ -469,15 +473,18 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
     .expect("failed to establish proxy connection for child");
 
     let res = FN_FORK();
+
     if res == 0 {
         tracing::debug!("Child process initializing layer.");
+
+        PROXY_CONNECTION.take();
         PROXY_CONNECTION
             .set(new_connection)
             .expect("setting PROXY_CONNECTION");
+
         mirrord_layer_entry_point()
-    } else {
+    } else if res > 0 {
         tracing::debug!("Child process id is {res}.");
-        std::mem::drop(new_connection);
     }
 
     res
