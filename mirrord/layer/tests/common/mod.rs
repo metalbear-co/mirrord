@@ -36,7 +36,7 @@ pub struct TestIntProxy {
 
 impl TestIntProxy {
     pub async fn new(listener: TcpListener) -> Self {
-        let fake_agent_listener = TcpListener::bind("127.0.0.1.0").await.unwrap();
+        let fake_agent_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let fake_agent_address = fake_agent_listener.local_addr().unwrap();
 
         tokio::spawn(async move {
