@@ -167,17 +167,15 @@ impl UserSocket {
     /// Inform internal proxy about closing a listening port.
     #[tracing::instrument(level = "trace", ret)]
     pub(crate) fn close(&self) {
-        match self {
-            Self {
-                state: SocketState::Listening(bound),
-                kind: SocketKind::Tcp(..),
-                ..
-            } => {
-                let _ = common::make_proxy_request_no_response(PortUnsubscribe {
-                    port: bound.requested_address.port(),
-                });
-            }
-            _ => {}
+        if let Self {
+            state: SocketState::Listening(bound),
+            kind: SocketKind::Tcp(..),
+            ..
+        } = self
+        {
+            let _ = common::make_proxy_request_no_response(PortUnsubscribe {
+                port: bound.requested_address.port(),
+            });
         }
     }
 }
