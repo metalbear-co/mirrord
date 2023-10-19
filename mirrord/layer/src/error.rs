@@ -133,8 +133,6 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed to find a process to hook mirrord into!")]
     NoProcessFound,
 
-    // #[error("mirrord-layer: Stolen HTTP request forwarding failed with `{0}`.")]
-    // HttpForwardingError(#[from] HttpForwarderError),
     #[error("mirrord-layer: Regex creation failed with `{0}`.")]
     Regex(#[from] fancy_regex::Error),
 
