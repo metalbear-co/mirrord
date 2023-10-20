@@ -894,10 +894,10 @@ impl Application {
             | Application::Go19FileOps
             | Application::Go20FileOps
             | Application::NodeHTTP
-            | Application::RustIssue1123
             | Application::RustIssue1054
             | Application::PythonFlaskHTTP => 80,
             Application::PythonFastApiHTTP => 9999,
+            Application::RustIssue1123 => 41222,
             Application::PythonListen => 21232,
             Application::PythonDontLoad
             | Application::RustFileOps

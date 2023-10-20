@@ -4,8 +4,7 @@ use std::net::{SocketAddr, TcpListener};
 fn main() {
     println!("test issue 1123: START");
     let localhost: SocketAddr = "127.0.0.1:41222".parse().unwrap();
-    let _ = TcpListener::bind(localhost)
-        .map(|_| TcpListener::bind(localhost).expect_err("Second bind should have failed!"))
-        .expect("First bind success!");
+    let _listener_1 = TcpListener::bind(localhost).expect_err("fist bind failed");
+    TcpListener::bind(localhost).expect_err("second bind did not fail!");
     println!("test issue 1123: SUCCESS");
 }

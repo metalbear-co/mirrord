@@ -2,6 +2,7 @@
 #![warn(clippy::indexing_slicing)]
 use std::{path::PathBuf, time::Duration};
 
+use mirrord_protocol::{tcp::LayerTcp, ClientMessage};
 use rstest::rstest;
 
 mod common;
@@ -16,10 +17,13 @@ async fn test_issue1123(
     #[values(Application::RustIssue1123)] application: Application,
     dylib_path: &PathBuf,
 ) {
-    let (mut test_process, _intproxy) = application
-        .start_process_with_layer(
+    let port = application.get_app_port();
+
+    let (mut test_process, mut intproxy) = application
+        .start_process_with_layer_and_port(
             dylib_path,
             vec![
+                ("RUST_LOG", "mirrord=trace"),
                 ("MIRRORD_FILE_MODE", "local"),
                 ("MIRRORD_UDP_OUTGOING", "false"),
                 ("MIRRORD_REMOTE_DNS", "false"),
@@ -28,7 +32,12 @@ async fn test_issue1123(
         )
         .await;
 
-    println!("Application subscribed to port, sending tcp messages.");
+    println!("Application subscribed to port.");
+
+    let msg = intproxy.recv().await;
+    assert_eq!(msg, ClientMessage::Tcp(LayerTcp::PortUnsubscribe(port)));
+
+    assert_eq!(intproxy.try_recv().await, None);
 
     test_process.wait_assert_success().await;
     test_process
