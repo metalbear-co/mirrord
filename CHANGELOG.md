@@ -8,6 +8,31 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.72.1](https://github.com/metalbear-co/mirrord/tree/3.72.1) - 2023-10-18
+
+
+### Fixed
+
+- Added `--mesh` option under `cli::Mode::Ephemeral`, allowing the agent to run
+  in a mesh context with an ephemeral target.
+  [#2009](https://github.com/metalbear-co/mirrord/issues/2009)
+
+
+## [3.72.0](https://github.com/metalbear-co/mirrord/tree/3.72.0) - 2023-10-12
+
+
+### Added
+
+- SOCKS5 proxy is now supported.
+  [#1734](https://github.com/metalbear-co/mirrord/issues/1734)
+
+
+### Fixed
+
+- Implemented missing hooks for `readdir` and `readdir64`.
+  [#2001](https://github.com/metalbear-co/mirrord/issues/2001)
+
+
 ## [3.71.2](https://github.com/metalbear-co/mirrord/tree/3.71.2) - 2023-10-10
 
 

@@ -107,7 +107,7 @@ impl State {
 
                 (false, Some(container_handle), pid)
             }
-            cli::Mode::Ephemeral => {
+            cli::Mode::Ephemeral { .. } => {
                 let container_handle = ContainerHandle::new(
                     runtime::Container::Ephemeral(runtime::EphemeralContainer {}),
                     watch,
@@ -570,6 +570,7 @@ async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
         (None, None)
     } else {
         let cancellation_token = cancellation_token.clone();
+
         let mesh = args.mode.mesh();
 
         let watched_task = WatchedTask::new(
