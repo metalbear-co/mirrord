@@ -28,13 +28,15 @@ const CONTAINERD_DEFAULT_SOCK_PATH: &str = "/host/run/containerd/containerd.sock
 const CONTAINERD_ALTERNATIVE_SOCK_PATH: &str = "/host/run/dockershim.sock";
 const CONTAINERD_K3S_SOCK_PATH: &str = "/host/run/k3s/containerd/containerd.sock";
 const CONTAINERD_MICROK8S_SOCK_PATH: &str = "/host/var/snap/microk8s/common/run/containerd.sock";
+const CONTAINERD_K0S_SOCK_PATH: &str = "/host/run/k0s/containerd.sock";
 
 /// Possible containerd socket paths, evaluated from left to right.
-const CONTAINERD_SOCK_PATHS: [&str; 4] = [
+const CONTAINERD_SOCK_PATHS: [&str; 5] = [
     CONTAINERD_DEFAULT_SOCK_PATH,
     CONTAINERD_ALTERNATIVE_SOCK_PATH,
     CONTAINERD_K3S_SOCK_PATH,
     CONTAINERD_MICROK8S_SOCK_PATH,
+    CONTAINERD_K0S_SOCK_PATH,
 ];
 
 const DEFAULT_CONTAINERD_NAMESPACE: &str = "k8s.io";
