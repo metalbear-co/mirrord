@@ -84,7 +84,10 @@ where
         let bytes: u32 =
             bincode::encode_into_std_write(value, &mut self.buffer, bincode::config::standard())?
                 .try_into()?;
-        self.buffer[..PREFIX_BYTES].copy_from_slice(&bytes.to_be_bytes());
+        self.buffer
+            .get_mut(..PREFIX_BYTES)
+            .expect("buffer too short")
+            .copy_from_slice(&bytes.to_be_bytes());
 
         self.writer.write_all(&self.buffer)?;
 
@@ -197,7 +200,10 @@ where
         let bytes: u32 =
             bincode::encode_into_std_write(value, &mut self.buffer, bincode::config::standard())?
                 .try_into()?;
-        self.buffer[..PREFIX_BYTES].copy_from_slice(&bytes.to_be_bytes());
+        self.buffer
+            .get_mut(..PREFIX_BYTES)
+            .expect("buffer to short")
+            .copy_from_slice(&bytes.to_be_bytes());
 
         self.writer.write_all(&self.buffer).await?;
 
