@@ -485,6 +485,8 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
         mirrord_layer_entry_point()
     } else if res > 0 {
         tracing::debug!("Child process id is {res}.");
+    } else {
+        tracing::debug!("fork failed");
     }
 
     res
