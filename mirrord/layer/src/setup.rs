@@ -1,8 +1,3 @@
-//! # PR NOTE
-//!
-//! Basically multiple old `static`s aggregated into one struct.
-//! Initialization logic not changed.
-
 use std::{collections::HashSet, net::SocketAddr};
 
 use mirrord_config::{

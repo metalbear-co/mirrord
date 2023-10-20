@@ -1,10 +1,5 @@
 //! [`BackgroundTask`] used by [`Incoming`](super::IncomingProxy) to manage a single
 //! intercepted HTTP connection.
-//!
-//! # PR NOTE
-//!
-//! Most logic copied from old HTTP `ConnectionTask`.
-//! Added sending remote peer's address in `connect_and_send_source`.
 
 use std::{io, net::SocketAddr};
 

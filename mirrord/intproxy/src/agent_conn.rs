@@ -1,9 +1,5 @@
 //! Implementation of `proxy <-> agent` connection through [`mpsc`](tokio::sync::mpsc) channels
 //! created in different mirrord crates.
-//!
-//! # PR NOTE
-//!
-//! Logic for creating a new [`AgentConnection`] copied from the old `cli` crate.
 
 use std::{io, net::SocketAddr};
 
