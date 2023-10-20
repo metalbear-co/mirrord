@@ -279,12 +279,13 @@ impl OutgoingSelector {
         protocol: NetProtocol,
     ) -> Detour<ConnectionThrough> {
         // Closure that checks if the current filter matches the enabled protocols.
-        let filter_protocol = move |outgoing: &&OutgoingFilter| match (outgoing.protocol, protocol)
-        {
-            (ProtocolFilter::Any, _) => true,
-            (ProtocolFilter::Tcp, NetProtocol::Stream) => true,
-            (ProtocolFilter::Udp, NetProtocol::Datagrams) => true,
-            _ => false,
+        let filter_protocol = move |outgoing: &&OutgoingFilter| {
+            matches!(
+                (outgoing.protocol, protocol),
+                (ProtocolFilter::Any, _)
+                    | (ProtocolFilter::Tcp, NetProtocol::Stream)
+                    | (ProtocolFilter::Udp, NetProtocol::Datagrams)
+            )
         };
 
         // Closure to skip hostnames, as these filters will be dealt with after being resolved.

@@ -40,7 +40,7 @@ impl BackgroundTask for Interceptor {
                         continue;
                     },
                     Err(e) => break Err(e),
-                    Ok(bytes) if bytes.len() == 0 => break Ok(()),
+                    Ok(bytes) if bytes.is_empty() => break Ok(()),
                     Ok(bytes) => message_bus.send(bytes).await,
                 },
 

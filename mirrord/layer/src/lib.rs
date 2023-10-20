@@ -67,7 +67,7 @@
 extern crate alloc;
 extern crate core;
 
-use std::{ffi::OsString, panic, sync::OnceLock, time::Duration};
+use std::{cmp::Ordering, ffi::OsString, panic, sync::OnceLock, time::Duration};
 
 use ctor::ctor;
 use error::{LayerError, Result};
@@ -474,19 +474,19 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
 
     let res = FN_FORK();
 
-    if res == 0 {
-        tracing::debug!("Child process initializing layer.");
+    match res.cmp(&0) {
+        Ordering::Equal => {
+            tracing::debug!("Child process initializing layer.");
 
-        PROXY_CONNECTION.take();
-        PROXY_CONNECTION
-            .set(new_connection)
-            .expect("setting PROXY_CONNECTION");
+            PROXY_CONNECTION.take();
+            PROXY_CONNECTION
+                .set(new_connection)
+                .expect("setting PROXY_CONNECTION");
 
-        mirrord_layer_entry_point()
-    } else if res > 0 {
-        tracing::debug!("Child process id is {res}.");
-    } else {
-        tracing::debug!("fork failed");
+            mirrord_layer_entry_point()
+        }
+        Ordering::Greater => tracing::debug!("Child process id is {res}."),
+        Ordering::Less => tracing::debug!("fork failed"),
     }
 
     res

@@ -56,7 +56,7 @@ impl BackgroundTask for RawInterceptor {
 
                 res = read_half.read(&mut buffer[..]) => match res {
                     Err(e) if e.kind() == ErrorKind::WouldBlock => {},
-                    Err(e) => break Err(e.into()),
+                    Err(e) => break Err(e),
                     Ok(0) => break Ok(()),
                     Ok(read) => {
                         message_bus.send(InterceptorMessageOut::Bytes(buffer.get(..read).unwrap().to_vec())).await;

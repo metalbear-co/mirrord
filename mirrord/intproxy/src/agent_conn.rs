@@ -92,7 +92,7 @@ impl AgentConnection {
 
                     wrap_raw_connection(stream)
                 } else {
-                    return Err(AgentConnectionError::NoConnectionMethod.into());
+                    return Err(AgentConnectionError::NoConnectionMethod);
                 }
             }
         };

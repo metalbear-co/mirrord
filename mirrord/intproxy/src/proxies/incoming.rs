@@ -393,7 +393,7 @@ impl IncomingProxy {
         self.remote_subscriptions.clone_all(child, parent);
     }
 
-    async fn handle_layer_close(&mut self, msg: LayerClosed, message_bus: &mut MessageBus<Self>) {
+    async fn handle_layer_close(&mut self, msg: LayerClosed, message_bus: &MessageBus<Self>) {
         let LayerClosed { id } = msg;
         for to_close in self.remote_subscriptions.remove_all(id) {
             let Some(subscription) = self.subscriptions.remove(&to_close) else {

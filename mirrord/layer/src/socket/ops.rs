@@ -279,7 +279,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
             }
 
             common::make_proxy_request_with_response(PortSubscribe {
-                listening_on: address.into(),
+                listening_on: address,
                 subscription: crate::setup()
                     .incoming_mode()
                     .subscription(requested_address.port()),

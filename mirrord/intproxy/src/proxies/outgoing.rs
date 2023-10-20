@@ -76,6 +76,7 @@ impl fmt::Display for InterceptorId {
 /// 6. The proxy passes the data between the agent and the [`Interceptor`] task.
 /// 7. If the layer closes the connection, the [`Interceptor`] exits and the proxy notifies the
 ///    agent. If the agent closes the connection, the proxy shuts down the [`Interceptor`].
+#[derive(Default)]
 pub struct OutgoingProxy {
     /// For [`OutgoingConnectRequest`]s related to [`NetProtocol::Datagrams`].
     datagrams_reqs: RequestQueue,
@@ -85,17 +86,6 @@ pub struct OutgoingProxy {
     txs: HashMap<InterceptorId, TaskSender<Interceptor>>,
     /// For managing [`Interceptor`] tasks.
     background_tasks: BackgroundTasks<InterceptorId, Vec<u8>, io::Error>,
-}
-
-impl Default for OutgoingProxy {
-    fn default() -> Self {
-        Self {
-            datagrams_reqs: Default::default(),
-            stream_reqs: Default::default(),
-            txs: Default::default(),
-            background_tasks: Default::default(),
-        }
-    }
 }
 
 impl OutgoingProxy {
