@@ -19,8 +19,8 @@ use crate::{
 /// 3. `"local"` - Read from the local file system.
 /// 5. `"disable"` - Disable file operations.
 ///
-/// > Note: There are pre-defined exceptions to the mode, so some paths will be read locally by
-/// > default in all modes.
+/// > Note: by default, some paths are read locally or remotely, regardless of the selected FS mode.
+/// > This is described in further detail below.
 ///
 /// Besides the default behavior, the user can specify behavior for specific regex patterns.
 /// Case insensitive.
