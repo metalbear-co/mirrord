@@ -19,6 +19,9 @@ use crate::{
 /// 3. `"local"` - Read from the local file system.
 /// 5. `"disable"` - Disable file operations.
 ///
+/// > Note: There are pre-defined exceptions to the mode, so some paths will be read locally by
+/// > default in all modes.
+///
 /// Besides the default behavior, the user can specify behavior for specific regex patterns.
 /// Case insensitive.
 ///
@@ -37,8 +40,22 @@ use crate::{
 /// **Warning**: Specifying the same path in two lists is unsupported and can lead to undefined
 /// behaviour.
 ///
-/// 2. Check our "special list" - we have an internal at compile time list
-/// for different behavior based on patterns to provide better UX.
+/// 2. There are pre-defined exceptions to the set FS mode.
+///   a. Paths that match
+///      [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs)
+///      are read locally by default.
+///   b. Paths that match
+///      [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_remote_by_default.rs)
+///      are read remotely by default when the mode is `localwithoverrides`.
+///   c. Paths that match
+///      [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/not_found_by_default.rs)
+///      under the running user's home directory will be failed to be found by default when the mode
+///      is not `local`.
+/// In order to override that default setting for a path, or a pattern, include it the appropriate
+/// pattern set from above. E.g. in order to read files under `/etc/` remotely even though it is
+/// covered by
+/// [the set of patterns that are read locally by default](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs),
+/// add `"^/etc/."` to the `read_only` set.
 ///
 /// 3. If none of the above match, use the default behavior (mode).
 ///
