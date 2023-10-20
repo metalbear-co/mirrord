@@ -49,7 +49,7 @@ use crate::{
 ///      are read remotely by default when the mode is `localwithoverrides`.
 ///   c. Paths that match
 ///      [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/not_found_by_default.rs)
-///      under the running user's home directory will be failed to be found by default when the mode
+///      under the running user's home directory will not be found by the application when the mode
 ///      is not `local`.
 /// In order to override that default setting for a path, or a pattern, include it the appropriate
 /// pattern set from above. E.g. in order to read files under `/etc/` remotely even though it is
