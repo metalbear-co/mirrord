@@ -181,6 +181,8 @@ impl IntProxy {
     async fn handle(&mut self, msg: ProxyMessage) -> Result<(), IntProxyError> {
         match msg {
             ProxyMessage::NewLayer(new_layer) => {
+                self.any_connection_accepted = true;
+
                 let tx = self.background_tasks.register(
                     LayerConnection::new(new_layer.stream, new_layer.id),
                     MainTaskId::LayerConnection(new_layer.id),
@@ -247,6 +249,8 @@ impl IntProxy {
                     .incoming
                     .send(IncomingProxyMessage::LayerClosed(msg))
                     .await;
+
+                self.task_txs.layers.remove(&LayerId(id));
             }
             (task_id, TaskUpdate::Finished(res)) => match res {
                 Ok(()) => {

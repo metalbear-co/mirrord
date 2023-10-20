@@ -48,6 +48,7 @@ impl TestIntProxy {
                 .run(Duration::from_secs(5), Duration::from_secs(5))
                 .await
                 .unwrap();
+            println!("test IntProxy finished");
         });
 
         let (stream, _buffer_size) = fake_agent_listener.accept().await.unwrap();
@@ -110,6 +111,8 @@ impl TestIntProxy {
         match msg {
             ClientMessage::Tcp(LayerTcp::PortSubscribe(port)) => {
                 assert_eq!(app_port, port);
+                res.send(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(port))))
+                    .await;
                 res
             }
             ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
@@ -199,7 +202,7 @@ impl TestIntProxy {
             .expect("Close request success!")
             .expect("Close request exists!");
 
-        println!("Should be a close file request: {read_request:#?}");
+        println!("Should be a close file request: {close_request:#?}");
         assert_eq!(
             close_request,
             ClientMessage::FileRequest(FileRequest::Close(
@@ -218,6 +221,11 @@ impl TestIntProxy {
             port_subscribe,
             ClientMessage::Tcp(LayerTcp::PortSubscribe(port))
         );
+
+        self.codec
+            .send(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(port))))
+            .await
+            .expect("failed to send PortSubscribe result");
 
         Some(())
     }
@@ -889,7 +897,7 @@ impl Application {
             | Application::RustIssue1123
             | Application::RustIssue1054
             | Application::PythonFlaskHTTP => 80,
-            Application::PythonFastApiHTTP => 1234,
+            Application::PythonFastApiHTTP => 9999,
             Application::PythonListen => 21232,
             Application::PythonDontLoad
             | Application::RustFileOps

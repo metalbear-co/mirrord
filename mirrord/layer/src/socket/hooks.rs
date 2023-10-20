@@ -1,6 +1,10 @@
 use alloc::ffi::CString;
 use core::{cmp, ffi::CStr, mem};
-use std::{os::unix::io::RawFd, sync::LazyLock};
+use std::{
+    net::TcpStream,
+    os::{fd::FromRawFd, unix::io::RawFd},
+    sync::LazyLock,
+};
 
 use dashmap::DashSet;
 use errno::{set_errno, Errno};
@@ -119,7 +123,8 @@ pub(crate) unsafe extern "C" fn accept_detour(
     if accept_result == -1 {
         accept_result
     } else {
-        accept(sockfd, address, address_len, accept_result).unwrap_or_bypass(accept_result)
+        let stream = TcpStream::from_raw_fd(accept_result);
+        accept(sockfd, address, address_len, stream).unwrap_or_bypass(accept_result)
     }
 }
 
@@ -136,7 +141,8 @@ pub(crate) unsafe extern "C" fn accept4_detour(
     if accept_result == -1 {
         accept_result
     } else {
-        accept(sockfd, address, address_len, accept_result).unwrap_or_bypass(accept_result)
+        let stream = TcpStream::from_raw_fd(accept_result);
+        accept(sockfd, address, address_len, stream).unwrap_or_bypass(accept_result)
     }
 }
 
@@ -163,7 +169,13 @@ pub(super) unsafe extern "C" fn _accept_nocancel_detour(
     address_len: *mut socklen_t,
 ) -> c_int {
     let accept_result = FN__ACCEPT_NOCANCEL(sockfd, address, address_len);
-    accept(sockfd, address, address_len, accept_result).unwrap_or_bypass(accept_result)
+
+    if accept_result == -1 {
+        accept_result
+    } else {
+        let stream = TcpStream::from_raw_fd(accept_result);
+        accept(sockfd, address, address_len, stream).unwrap_or_bypass(accept_result)
+    }
 }
 
 /// <https://github.com/metalbear-co/mirrord/issues/184>

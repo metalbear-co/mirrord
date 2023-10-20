@@ -20,6 +20,7 @@ async fn fork(dylib_path: &PathBuf) {
     intproxy
         .expect_file_open_with_whatever_options("/path/to/some/file", 1)
         .await;
+    intproxy.expect_file_close(1).await;
 
     assert_eq!(intproxy.try_recv().await, None);
 

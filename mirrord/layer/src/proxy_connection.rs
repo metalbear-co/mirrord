@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt::Debug,
     io,
     net::{SocketAddr, TcpStream},
     sync::{
@@ -108,16 +109,22 @@ impl ProxyConnection {
         self.responses.lock()?.receive(response_id)
     }
 
-    pub fn make_request_with_response<T: IsLayerRequestWithResponse>(
-        &self,
-        request: T,
-    ) -> Result<T::Response> {
+    #[tracing::instrument(level = "trace", skip(self), ret)]
+    pub fn make_request_with_response<T>(&self, request: T) -> Result<T::Response>
+    where
+        T: IsLayerRequestWithResponse + Debug,
+        T::Response: Debug,
+    {
         let response_id = self.send(request.wrap())?;
         let response = self.receive(response_id)?;
         T::try_unwrap_response(response).map_err(ProxyError::UnexpectedResponse)
     }
 
-    pub fn make_request_no_response<T: IsLayerRequest>(&self, request: T) -> Result<MessageId> {
+    #[tracing::instrument(level = "trace", skip(self), ret)]
+    pub fn make_request_no_response<T: IsLayerRequest + Debug>(
+        &self,
+        request: T,
+    ) -> Result<MessageId> {
         self.send(request.wrap())
     }
 

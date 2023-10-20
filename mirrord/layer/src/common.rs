@@ -1,5 +1,5 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{ffi::CStr, path::PathBuf};
+use std::{ffi::CStr, fmt::Debug, path::PathBuf};
 
 use libc::c_char;
 use mirrord_intproxy::protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};
@@ -17,9 +17,11 @@ use crate::{
 
 /// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
 /// Blocks until the proxy responds.
-pub fn make_proxy_request_with_response<T: IsLayerRequestWithResponse>(
-    request: T,
-) -> HookResult<T::Response> {
+pub fn make_proxy_request_with_response<T>(request: T) -> HookResult<T::Response>
+where
+    T: IsLayerRequestWithResponse + Debug,
+    T::Response: Debug,
+{
     // SAFETY: mutation happens only on initialization.
     unsafe {
         PROXY_CONNECTION
@@ -32,7 +34,9 @@ pub fn make_proxy_request_with_response<T: IsLayerRequestWithResponse>(
 
 /// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
 /// Blocks until the request is sent.
-pub fn make_proxy_request_no_response<T: IsLayerRequest>(request: T) -> HookResult<MessageId> {
+pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
+    request: T,
+) -> HookResult<MessageId> {
     // SAFETY: mutation happens only on initialization.
     unsafe {
         PROXY_CONNECTION

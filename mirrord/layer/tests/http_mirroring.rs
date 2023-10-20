@@ -18,7 +18,6 @@ pub use common::*;
 /// NOTE: Flask, FastAPI mirroring tests are flaky and have been decorated with the flaky_test
 /// macro. Some speculation is that it is because of lack of mid session mirroring. flaky_test can
 /// be removed once https://github.com/metalbear-co/mirrord/pull/1887 is merged.
-
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
@@ -27,13 +26,15 @@ async fn mirroring_with_http(
     #[values(
         Application::PythonFlaskHTTP,
         Application::PythonFastApiHTTP,
-        Application::NodeHTTP
+        Application::NodeHTTP,
+        Application::Go19HTTP,
+        Application::Go20HTTP
     )]
     application: Application,
     dylib_path: &PathBuf,
     config_dir: &PathBuf,
 ) {
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer_and_port(
             dylib_path,
             vec![
@@ -48,25 +49,25 @@ async fn mirroring_with_http(
 
     println!("Application subscribed to port, sending HTTP requests.");
 
-    layer_connection
+    intproxy
         .send_connection_then_data(
             "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n",
             application.get_app_port(),
         )
         .await;
-    layer_connection
+    intproxy
         .send_connection_then_data(
             "POST / HTTP/1.1\r\nHost: localhost\r\n\r\npost-data",
             application.get_app_port(),
         )
         .await;
-    layer_connection
+    intproxy
         .send_connection_then_data(
             "PUT / HTTP/1.1\r\nHost: localhost\r\n\r\nput-data",
             application.get_app_port(),
         )
         .await;
-    layer_connection
+    intproxy
         .send_connection_then_data(
             "DELETE / HTTP/1.1\r\nHost: localhost\r\n\r\ndelete-data",
             application.get_app_port(),
@@ -88,17 +89,4 @@ async fn mirroring_with_http(
         .await;
     test_process.assert_no_error_in_stdout().await;
     test_process.assert_no_error_in_stderr().await;
-}
-
-/// Run the http mirroring test only on MacOS, because of a known crash on Linux.
-#[cfg(target_os = "macos")]
-#[rstest]
-#[tokio::test]
-#[timeout(Duration::from_secs(60))]
-async fn mirroring_with_http_go(
-    dylib_path: &PathBuf,
-    config_dir: &PathBuf,
-    #[values(Application::Go19HTTP, Application::Go20HTTP)] application: Application,
-) {
-    mirroring_with_http(application, dylib_path, config_dir).await;
 }

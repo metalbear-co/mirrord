@@ -3,7 +3,7 @@ use core::{ffi::CStr, mem};
 use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
-    os::{fd::FromRawFd, unix::io::RawFd},
+    os::{fd::IntoRawFd, unix::io::RawFd},
     path::PathBuf,
     ptr,
     sync::{Arc, OnceLock},
@@ -245,7 +245,6 @@ pub(super) fn bind(
 /// later be routed to the fake local port.
 #[tracing::instrument(level = "trace", ret)]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
-    // TODO msmolarek: port mapping?
     let mut socket = {
         SOCKETS
             .remove(&sockfd)
@@ -613,18 +612,39 @@ pub(super) fn getsockname(
     fill_address(address, address_len, local_address.try_into()?)
 }
 
-/// # SAFETY
-///
-/// `sockfd` must be a descriptor of a TCP socket
-fn init_incoming_connection(sockfd: RawFd) -> Detour<(TcpStream, SocketAddress)> {
-    let stream = unsafe { TcpStream::from_raw_fd(sockfd) };
-    let mut receiver: SyncDecoder<SocketAddress, TcpStream> = SyncDecoder::new(stream);
-    let remote_address = receiver
+/// Initiated incoming TCP connection.
+/// See [`PortSubscribe`].
+#[derive(Debug)]
+struct InitiatedIncomingConnection {
+    /// Raw file descriptor of the TCP connection.
+    fd: RawFd,
+    /// Local address of the TCP connection.
+    local_address: SocketAddr,
+    /// Address of the *real* remote peer (e.g. some pod in the cluster).
+    remote_address: SocketAddr,
+}
+
+/// Prepares a new incoming TCP connection.
+/// This *must* be called on every new mirrored/stolen TCP connection.
+/// See [`PortSubscribe`].
+#[tracing::instrument(level = "trace", ret)]
+fn init_incoming_connection(stream: TcpStream) -> Detour<InitiatedIncomingConnection> {
+    let mut decoder: SyncDecoder<SocketAddr, TcpStream> = SyncDecoder::new(stream);
+    let remote_address = decoder
         .receive()
         .map_err(ProxyError::CodecError)?
         .ok_or(ProxyError::NoRemoteAddress)?;
 
-    Detour::Success((receiver.into_inner(), remote_address))
+    let stream = decoder.into_inner();
+
+    let local_address = stream.local_addr()?;
+    let fd = stream.into_raw_fd();
+
+    Detour::Success(InitiatedIncomingConnection {
+        fd,
+        local_address,
+        remote_address,
+    })
 }
 
 /// When the fd is "ours", we accept and recv the first bytes that contain metadata on the
@@ -636,7 +656,7 @@ pub(super) fn accept(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-    new_fd: RawFd,
+    new_stream: TcpStream,
 ) -> Detour<RawFd> {
     let (domain, protocol, type_) = {
         SOCKETS
@@ -650,21 +670,25 @@ pub(super) fn accept(
             })?
     };
 
-    let (stream, remote_address) = init_incoming_connection(new_fd)?;
+    let InitiatedIncomingConnection {
+        fd,
+        local_address,
+        remote_address,
+    } = init_incoming_connection(new_stream)?;
 
     let state = SocketState::Connected(Connected {
-        remote_address: remote_address.clone(),
-        local_address: stream.local_addr()?.into(),
+        remote_address: remote_address.into(),
+        local_address: local_address.into(),
         layer_address: None,
     });
 
     let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into()?);
 
-    fill_address(address, address_len, remote_address.try_into()?)?;
+    fill_address(address, address_len, remote_address.into())?;
 
-    SOCKETS.insert(new_fd, Arc::new(new_socket));
+    SOCKETS.insert(fd, Arc::new(new_socket));
 
-    Detour::Success(new_fd)
+    Detour::Success(fd)
 }
 
 #[tracing::instrument(level = "trace")]
