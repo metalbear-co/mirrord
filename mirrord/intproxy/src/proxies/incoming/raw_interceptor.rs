@@ -3,7 +3,7 @@
 
 use std::{
     io::{self, ErrorKind},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     time::Duration,
 };
 
@@ -21,6 +21,7 @@ use super::InterceptorMessageOut;
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
     codec::{AsyncEncoder, CodecError},
+    protocol::IncomingConnectionMetadata,
 };
 
 /// Errors that can occur when executing [`RawInterceptor`] as a [`BackgroundTask`].
@@ -38,29 +39,36 @@ pub enum RawInterceptorError {
 /// Multiple instances are run as [`BackgroundTask`]s by one [`IncomingProxy`](super::IncomingProxy)
 /// to manage individual connections.
 pub struct RawInterceptor {
-    /// Original source of data provided by the agent.
-    remote_source: SocketAddr,
+    conn_metadata: IncomingConnectionMetadata,
     /// Local layer listener.
     local_destination: SocketAddr,
 }
 
 impl RawInterceptor {
     /// Creates a new instance. This instance will connect to the provided `local_destination`.
-    pub fn new(remote_source: SocketAddr, local_destination: SocketAddr) -> Self {
+    pub fn new(
+        remote_source: SocketAddr,
+        local_address: IpAddr,
+        local_destination: SocketAddr,
+    ) -> Self {
         Self {
-            remote_source,
+            conn_metadata: IncomingConnectionMetadata {
+                remote_source,
+                local_address,
+            },
             local_destination,
         }
     }
 
     /// Connects to the local listener and sends it encoded address of the remote peer.
-    async fn connect_and_send_source(
+    async fn connect_and_send_info(
         &self,
     ) -> Result<(OwnedReadHalf, OwnedWriteHalf), RawInterceptorError> {
         let stream = TcpStream::connect(self.local_destination).await?;
 
-        let mut codec_tx: AsyncEncoder<SocketAddr, TcpStream> = AsyncEncoder::new(stream);
-        codec_tx.send(&self.remote_source).await?;
+        let mut codec_tx: AsyncEncoder<IncomingConnectionMetadata, TcpStream> =
+            AsyncEncoder::new(stream);
+        codec_tx.send(&self.conn_metadata).await?;
         codec_tx.flush().await?;
 
         let stream = codec_tx.into_inner();
@@ -75,7 +83,7 @@ impl BackgroundTask for RawInterceptor {
     type MessageOut = InterceptorMessageOut;
 
     async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-        let (mut read_half, mut write_half) = self.connect_and_send_source().await?;
+        let (mut read_half, mut write_half) = self.connect_and_send_info().await?;
 
         let mut buffer = vec![0; 1024];
         let mut remote_closed = false;

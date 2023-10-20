@@ -8,7 +8,7 @@ use std::{
 
 use hyper::Version;
 use mirrord_protocol::{
-    tcp::{DaemonTcp, HttpRequestFallback, HttpResponseFallback},
+    tcp::{DaemonTcp, HttpRequestFallback, HttpResponseFallback, NewTcpConnection},
     ConnectionId, Port,
 };
 use thiserror::Error;
@@ -286,22 +286,23 @@ impl IncomingProxy {
                     interceptor.send(req).await;
                 }
             }
-            DaemonTcp::NewConnection(connection) => {
-                let Some(subscription) = self.subscriptions.get(&connection.destination_port)
-                else {
-                    tracing::trace!(
-                        "received a new connection for port {} that is no longer mirrored",
-                        connection.destination_port,
-                    );
+            DaemonTcp::NewConnection(NewTcpConnection {
+                connection_id,
+                remote_address,
+                destination_port,
+                source_port,
+                local_address,
+            }) => {
+                let Some(subscription) = self.subscriptions.get(&destination_port) else {
+                    tracing::trace!("received a new connection for port {destination_port} that is no longer mirrored");
                     return Ok(());
                 };
 
-                let remote_source =
-                    SocketAddr::new(connection.remote_address, connection.source_port);
+                let remote_source = SocketAddr::new(remote_address, source_port);
 
-                let id = InterceptorId(connection.connection_id);
+                let id = InterceptorId(connection_id);
                 let interceptor = self.background_tasks.register(
-                    RawInterceptor::new(remote_source, subscription.listening_on),
+                    RawInterceptor::new(remote_source, local_address, subscription.listening_on),
                     id,
                     Self::CHANNEL_SIZE,
                 );

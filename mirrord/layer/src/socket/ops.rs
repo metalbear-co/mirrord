@@ -13,7 +13,10 @@ use libc::{c_int, c_void, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::IncomingMode;
 use mirrord_intproxy::{
     codec::SyncDecoder,
-    protocol::{NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse, PortSubscribe},
+    protocol::{
+        IncomingConnectionMetadata, NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse,
+        PortSubscribe,
+    },
 };
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, LookupRecord},
@@ -612,39 +615,19 @@ pub(super) fn getsockname(
     fill_address(address, address_len, local_address.try_into()?)
 }
 
-/// Initiated incoming TCP connection.
-/// See [`PortSubscribe`].
-#[derive(Debug)]
-struct InitiatedIncomingConnection {
-    /// Raw file descriptor of the TCP connection.
-    fd: RawFd,
-    /// Local address of the TCP connection.
-    local_address: SocketAddr,
-    /// Address of the *real* remote peer (e.g. some pod in the cluster).
-    remote_address: SocketAddr,
-}
-
 /// Prepares a new incoming TCP connection.
 /// This *must* be called on every new mirrored/stolen TCP connection.
 /// See [`PortSubscribe`].
 #[tracing::instrument(level = "trace", ret)]
-fn init_incoming_connection(stream: TcpStream) -> Detour<InitiatedIncomingConnection> {
-    let mut decoder: SyncDecoder<SocketAddr, TcpStream> = SyncDecoder::new(stream);
-    let remote_address = decoder
+fn init_incoming_connection(stream: &mut TcpStream) -> Detour<IncomingConnectionMetadata> {
+    let mut decoder: SyncDecoder<IncomingConnectionMetadata, &mut TcpStream> =
+        SyncDecoder::new(stream);
+    let metadata = decoder
         .receive()
         .map_err(ProxyError::CodecError)?
         .ok_or(ProxyError::NoRemoteAddress)?;
 
-    let stream = decoder.into_inner();
-
-    let local_address = stream.local_addr()?;
-    let fd = stream.into_raw_fd();
-
-    Detour::Success(InitiatedIncomingConnection {
-        fd,
-        local_address,
-        remote_address,
-    })
+    Detour::Success(metadata)
 }
 
 /// When the fd is "ours", we accept and recv the first bytes that contain metadata on the
@@ -656,36 +639,41 @@ pub(super) fn accept(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-    new_stream: TcpStream,
+    mut new_stream: TcpStream,
 ) -> Detour<RawFd> {
-    let (domain, protocol, type_) = {
+    let (domain, protocol, type_, port) = {
         SOCKETS
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
-                SocketState::Listening(_) => {
-                    Detour::Success((socket.domain, socket.protocol, socket.type_))
-                }
+                SocketState::Listening(Bound {
+                    requested_address, ..
+                }) => Detour::Success((
+                    socket.domain,
+                    socket.protocol,
+                    socket.type_,
+                    requested_address.port(),
+                )),
                 _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
     };
 
-    let InitiatedIncomingConnection {
-        fd,
+    let IncomingConnectionMetadata {
         local_address,
-        remote_address,
-    } = init_incoming_connection(new_stream)?;
+        remote_source,
+    } = init_incoming_connection(&mut new_stream)?;
 
     let state = SocketState::Connected(Connected {
-        remote_address: remote_address.into(),
-        local_address: local_address.into(),
+        remote_address: remote_source.into(),
+        local_address: SocketAddr::new(local_address, port).into(),
         layer_address: None,
     });
 
     let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into()?);
 
-    fill_address(address, address_len, remote_address.into())?;
+    fill_address(address, address_len, remote_source.into())?;
 
+    let fd = new_stream.into_raw_fd();
     SOCKETS.insert(fd, Arc::new(new_socket));
 
     Detour::Success(fd)

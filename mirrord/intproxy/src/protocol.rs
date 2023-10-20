@@ -2,7 +2,10 @@
 //! This protocol does not have to be backwards compatible and can be changed freely, as the
 //! internal proxy and the layer are shipped together in a single binary.
 
-use std::{fmt, net::SocketAddr};
+use std::{
+    fmt,
+    net::{IpAddr, SocketAddr},
+};
 
 use bincode::{Decode, Encode};
 use mirrord_protocol::{
@@ -127,7 +130,7 @@ pub enum IncomingRequest {
 ///
 /// For each connection incoming to the remote port,
 /// the internal proxy will initiate a new connection to the local port specified in `listening_on`.
-/// Through this connection, the proxy will first send the [`SocketAddress`] of the original peer,
+/// Through this connection, the proxy will first send the [`IncomingConnectionMetadata`],
 /// serialized with [`crate::codec`]. After that, the proxy will send raw data.
 #[derive(Encode, Decode, Debug, Clone)]
 pub struct PortSubscribe {
@@ -135,6 +138,27 @@ pub struct PortSubscribe {
     pub listening_on: SocketAddr,
     /// Instructions on how to execute mirroring.
     pub subscription: PortSubscription,
+}
+
+/// Metadata of the intercepted incoming TCP connection.
+#[derive(Encode, Decode, Debug, Clone)]
+pub struct IncomingConnectionMetadata {
+    /// Original source of data, provided by the agent. Meant to be exposed to the user instead of
+    /// the real source, which will always be localhost.
+    ///
+    /// # Note
+    ///
+    /// Due to limitiations of the `intproxy <-> agent` protocol, HTTP connections will send the
+    /// real source (localhost).
+    pub remote_source: SocketAddr,
+    /// Address of the local socket, provided by the agent. Meant to be exposed to the user instead
+    /// of real source, which will always be localhost.
+    ///
+    /// # Note
+    ///
+    /// Due to limitations of the `intproxy <-> agent` protocol, HTTP connections will send the
+    /// real address (localhost).
+    pub local_address: IpAddr,
 }
 
 /// Instructions for the internal proxy and the agent on how to execute port mirroring.

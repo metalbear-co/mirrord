@@ -19,6 +19,7 @@ use super::{http::HttpConnection, InterceptorMessageOut};
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
     codec::{AsyncEncoder, CodecError},
+    protocol::IncomingConnectionMetadata,
 };
 
 /// Errors that can occur when executing [`HttpInterceptor`] as a [`BackgroundTask`].
@@ -69,9 +70,14 @@ impl HttpInterceptor {
     async fn connect_and_send_source(&self) -> Result<TcpStream, HttpInterceptorError> {
         let stream = TcpStream::connect(self.local_destination).await?;
         let local_address = stream.local_addr()?;
+        let metadata = IncomingConnectionMetadata {
+            remote_source: local_address,
+            local_address: local_address.ip(),
+        };
 
-        let mut codec_tx: AsyncEncoder<SocketAddr, TcpStream> = AsyncEncoder::new(stream);
-        codec_tx.send(&local_address).await?;
+        let mut codec_tx: AsyncEncoder<IncomingConnectionMetadata, TcpStream> =
+            AsyncEncoder::new(stream);
+        codec_tx.send(&metadata).await?;
         codec_tx.flush().await?;
 
         Ok(codec_tx.into_inner())
