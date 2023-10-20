@@ -5,10 +5,11 @@
 use std::{assert_matches::assert_matches, path::PathBuf, time::Duration};
 
 use mirrord_protocol::{
-    tcp::{LayerTcpSteal, StealType},
-    ClientMessage,
+    tcp::{DaemonTcp, LayerTcpSteal, StealType},
+    ClientMessage, DaemonMessage,
 };
 use rstest::rstest;
+use tokio::io::AsyncWriteExt;
 
 mod common;
 
@@ -30,7 +31,10 @@ async fn listen_ports(
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
-            vec![("MIRRORD_FILE_MODE", "local")],
+            vec![
+                ("RUST_LOG", "mirrord=trace"),
+                ("MIRRORD_FILE_MODE", "local"),
+            ],
             Some(config_path.to_str().unwrap()),
         )
         .await;
@@ -39,15 +43,25 @@ async fn listen_ports(
         intproxy.recv().await,
         ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(80)))
     );
-
-    TcpStream::connect("127.0.0.1:51222").await.unwrap();
+    intproxy
+        .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(80))))
+        .await;
+    let mut stream = TcpStream::connect("127.0.0.1:51222").await.unwrap();
+    println!("connected to listener at port 51222");
+    stream.write_all(b"HELLO").await.unwrap();
 
     assert_matches!(
         intproxy.recv().await,
         ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(40000)))
     );
-
-    TcpStream::connect("127.0.0.1:40000").await.unwrap();
+    intproxy
+        .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(
+            40000,
+        ))))
+        .await;
+    let mut stream = TcpStream::connect("127.0.0.1:40000").await.unwrap();
+    println!("connected to listener at port 40000");
+    stream.write_all(b"HELLO").await.unwrap();
 
     loop {
         match intproxy.try_recv().await {

@@ -11,12 +11,9 @@ use std::{
 
 use libc::{c_int, c_void, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::IncomingMode;
-use mirrord_intproxy::{
-    codec::SyncDecoder,
-    protocol::{
-        IncomingConnectionMetadata, NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse,
-        PortSubscribe,
-    },
+use mirrord_intproxy::protocol::{
+    ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
+    OutgoingConnectResponse, PortSubscribe,
 };
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, LookupRecord},
@@ -30,7 +27,6 @@ use crate::{
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     error::HookError,
     file::{self, OPEN_FILES},
-    proxy_connection::ProxyError,
 };
 
 /// Holds the pair of [`IpAddr`] with their hostnames, resolved remotely through
@@ -615,21 +611,6 @@ pub(super) fn getsockname(
     fill_address(address, address_len, local_address.try_into()?)
 }
 
-/// Prepares a new incoming TCP connection.
-/// This *must* be called on every new mirrored/stolen TCP connection.
-/// See [`PortSubscribe`].
-#[tracing::instrument(level = "trace", ret)]
-fn init_incoming_connection(stream: &mut TcpStream) -> Detour<IncomingConnectionMetadata> {
-    let mut decoder: SyncDecoder<IncomingConnectionMetadata, &mut TcpStream> =
-        SyncDecoder::new(stream);
-    let metadata = decoder
-        .receive()
-        .map_err(ProxyError::CodecError)?
-        .ok_or(ProxyError::NoRemoteAddress)?;
-
-    Detour::Success(metadata)
-}
-
 /// When the fd is "ours", we accept and recv the first bytes that contain metadata on the
 /// connection to be set in our lock.
 ///
@@ -639,29 +620,34 @@ pub(super) fn accept(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-    mut new_stream: TcpStream,
+    new_stream: TcpStream,
 ) -> Detour<RawFd> {
-    let (domain, protocol, type_, port) = {
+    let (domain, protocol, type_, port, listener_address) = {
         SOCKETS
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
                 SocketState::Listening(Bound {
-                    requested_address, ..
+                    requested_address,
+                    address,
                 }) => Detour::Success((
                     socket.domain,
                     socket.protocol,
                     socket.type_,
                     requested_address.port(),
+                    *address,
                 )),
                 _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
     };
 
-    let IncomingConnectionMetadata {
-        local_address,
+    let ConnMetadataResponse {
         remote_source,
-    } = init_incoming_connection(&mut new_stream)?;
+        local_address,
+    } = common::make_proxy_request_with_response(ConnMetadataRequest {
+        listener_address,
+        peer_address: new_stream.peer_addr()?,
+    })?;
 
     let state = SocketState::Connected(Connected {
         remote_address: remote_source.into(),

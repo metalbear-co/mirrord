@@ -2,8 +2,8 @@
 
 use std::{
     collections::{hash_map::Entry, HashMap},
-    fmt,
-    net::SocketAddr,
+    fmt, io,
+    net::{IpAddr, SocketAddr},
 };
 
 use hyper::Version;
@@ -12,18 +12,19 @@ use mirrord_protocol::{
     ConnectionId, Port,
 };
 use thiserror::Error;
+use tokio::net::TcpSocket;
 
 use self::{
     http_interceptor::{HttpInterceptor, HttpInterceptorError},
     port_subscription_ext::PortSubscriptionExt,
-    raw_interceptor::{RawInterceptor, RawInterceptorError},
+    raw_interceptor::RawInterceptor,
 };
 use crate::{
     background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
     main_tasks::{LayerClosed, LayerForked, ToLayer},
     protocol::{
-        IncomingRequest, LayerId, MessageId, PortSubscribe, PortSubscription, PortUnsubscribe,
-        ProxyToLayerMessage,
+        ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
+        MessageId, PortSubscribe, PortSubscription, PortUnsubscribe, ProxyToLayerMessage,
     },
     remote_resources::RemoteResources,
     request_queue::{RequestQueue, RequestQueueEmpty},
@@ -39,7 +40,7 @@ mod raw_interceptor;
 #[derive(Error, Debug)]
 enum InterceptorError {
     #[error("{0}")]
-    Raw(#[from] RawInterceptorError),
+    Raw(#[from] io::Error),
     #[error("{0}")]
     Http(#[from] HttpInterceptorError),
 }
@@ -80,6 +81,8 @@ pub enum IncomingProxyError {
     /// [`Version::HTTP_3`] is currently not supported.
     #[error("{0:?} is not supported")]
     UnsupportedHttpVersion(Version),
+    #[error("{0}")]
+    Io(#[from] io::Error),
 }
 
 /// Messages consumed by [`IncomingProxy`] running as a [`BackgroundTask`].
@@ -96,6 +99,35 @@ struct InterceptorHandle<I: BackgroundTask> {
     subscription: PortSubscription,
 }
 
+#[derive(Default)]
+struct MetadataStore {
+    prepared_responses: HashMap<ConnMetadataRequest, ConnMetadataResponse>,
+    expected_requests: HashMap<InterceptorId, ConnMetadataRequest>,
+}
+
+impl MetadataStore {
+    fn get(&mut self, req: ConnMetadataRequest) -> ConnMetadataResponse {
+        self.prepared_responses
+            .remove(&req)
+            .unwrap_or_else(|| ConnMetadataResponse {
+                remote_source: req.peer_address,
+                local_address: req.listener_address.ip(),
+            })
+    }
+
+    fn expect(&mut self, req: ConnMetadataRequest, from: InterceptorId, res: ConnMetadataResponse) {
+        self.expected_requests.insert(from, req.clone());
+        self.prepared_responses.insert(req, res);
+    }
+
+    fn no_longer_expect(&mut self, from: InterceptorId) {
+        let Some(req) = self.expected_requests.remove(&from) else {
+            return;
+        };
+        self.prepared_responses.remove(&req);
+    }
+}
+
 /// Handles logic and state of the `incoming` feature.
 /// Run as a [`BackgroundTask`].
 ///
@@ -108,8 +140,7 @@ struct InterceptorHandle<I: BackgroundTask> {
 /// 2. Proxy receives a confirmation from the agent and responds to the layer.
 /// 3. Proxy receives [`NewTcpConnection`](mirrord_protocol::tcp::NewTcpConnection) messages from
 ///    the agent. For each connection, it creates a new [`RawInterceptor`] task.
-/// 4. The interceptor connects to the socket specified in the original [`PortSubscribe`] request
-///    and sends the address of the remote peer encoded with [`codec`](crate::codec).
+/// 4. The interceptor connects to the socket specified in the original [`PortSubscribe`] request.
 /// 5. The proxy passes the data between the agent and the [`RawInterceptor`] task. If the proxy
 ///    does not operate in the `steal` mode, data coming from the interceptor is discarded.
 /// 6. If the layer closes the connection, the [`RawInterceptor`] exits and the proxy notifies the
@@ -123,8 +154,7 @@ struct InterceptorHandle<I: BackgroundTask> {
 /// 3. Proxy receives [`HttpRequest`](mirrord_protocol::tcp::HttpRequest)s from the agent. If there
 ///    is no registered [`HttpInterceptor`] task for the [`ConnectionId`] specified in the request,
 ///    the proxy creates one.
-/// 4. The interceptor connects to the socket specified in the original [`PortSubscribe`] request
-///    and sends the address of the remote peer encoded with [`codec`](crate::codec).
+/// 4. The interceptor connects to the socket specified in the original [`PortSubscribe`] request.
 /// 5. The proxy passes the requests and the responses between the agent and the [`HttpInterceptor`]
 ///    task. If the proxy does not operate in the `steal` mode, responses coming from the
 ///    interceptor are discarded.
@@ -144,6 +174,8 @@ pub struct IncomingProxy {
     interceptors_http: HashMap<InterceptorId, InterceptorHandle<HttpInterceptor>>,
     /// For receiving updates from both [`RawInterceptor`]s and [`HttpInterceptor`]s.
     background_tasks: BackgroundTasks<InterceptorId, InterceptorMessageOut, InterceptorError>,
+    /// For managing intercepted connections metadata.
+    metadata_store: MetadataStore,
 }
 
 impl IncomingProxy {
@@ -180,7 +212,7 @@ impl IncomingProxy {
                 .send(ToLayer {
                     message_id,
                     layer_id,
-                    message: ProxyToLayerMessage::IncomingSubscribe(Ok(())),
+                    message: ProxyToLayerMessage::Incoming(IncomingResponse::PortSubscribe(Ok(()))),
                 })
                 .await;
 
@@ -298,11 +330,35 @@ impl IncomingProxy {
                     return Ok(());
                 };
 
-                let remote_source = SocketAddr::new(remote_address, source_port);
+                let interceptor_socket = match subscription.listening_on.ip() {
+                    addr @ IpAddr::V4(..) => {
+                        let socket = TcpSocket::new_v4()?;
+                        socket.bind(SocketAddr::new(addr, 0))?;
+                        socket
+                    }
+                    addr @ IpAddr::V6(..) => {
+                        let socket = TcpSocket::new_v6()?;
+                        socket.bind(SocketAddr::new(addr, 0))?;
+                        socket
+                    }
+                };
 
                 let id = InterceptorId(connection_id);
+
+                self.metadata_store.expect(
+                    ConnMetadataRequest {
+                        listener_address: subscription.listening_on,
+                        peer_address: interceptor_socket.local_addr()?,
+                    },
+                    id,
+                    ConnMetadataResponse {
+                        remote_source: SocketAddr::new(remote_address, source_port),
+                        local_address,
+                    },
+                );
+
                 let interceptor = self.background_tasks.register(
-                    RawInterceptor::new(remote_source, local_address, subscription.listening_on),
+                    RawInterceptor::new(subscription.listening_on, interceptor_socket),
                     id,
                     Self::CHANNEL_SIZE,
                 );
@@ -321,7 +377,9 @@ impl IncomingProxy {
                     .send(ToLayer {
                         message_id,
                         layer_id,
-                        message: ProxyToLayerMessage::IncomingSubscribe(res.map(|_| ())),
+                        message: ProxyToLayerMessage::Incoming(IncomingResponse::PortSubscribe(
+                            res.map(|_| ()),
+                        )),
                     })
                     .await;
             }
@@ -371,9 +429,13 @@ impl BackgroundTask for IncomingProxy {
                         tracing::trace!("message bus closed, exiting");
                         break Ok(());
                     },
-                    Some(IncomingProxyMessage::LayerRequest(message_id, session_id, req)) => match req {
-                        IncomingRequest::PortSubscribe(subscribe) => self.handle_port_subscribe(message_id, session_id, subscribe, message_bus).await,
+                    Some(IncomingProxyMessage::LayerRequest(message_id, layer_id, req)) => match req {
+                        IncomingRequest::PortSubscribe(subscribe) => self.handle_port_subscribe(message_id, layer_id, subscribe, message_bus).await,
                         IncomingRequest::PortUnsubscribe(unsubscribe) => self.handle_port_unsubscribe(unsubscribe, message_bus).await,
+                        IncomingRequest::ConnMetadata(req) => {
+                            let res = self.metadata_store.get(req);
+                            message_bus.send(ToLayer { message_id, layer_id, message: ProxyToLayerMessage::Incoming(IncomingResponse::ConnMetadata(res))  }).await;
+                        }
                     },
                     Some(IncomingProxyMessage::AgentMirror(msg)) => {
                         self.handle_agent_message(msg, message_bus).await?;
@@ -388,6 +450,8 @@ impl BackgroundTask for IncomingProxy {
                 Some(task_update) = self.background_tasks.next() => match task_update {
                     (id, TaskUpdate::Finished(res)) => {
                         tracing::trace!("{id} finished: {res:?}");
+
+                        self.metadata_store.no_longer_expect(id);
 
                         let msg = self.get_subscription(id).map(|s| s.wrap_agent_unsubscribe_connection(id.0));
                         if let Some(msg) = msg {

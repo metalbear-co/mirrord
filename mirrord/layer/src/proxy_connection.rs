@@ -31,8 +31,6 @@ pub enum ProxyError {
     LockPoisoned,
     #[error("{0}")]
     IoFailed(#[from] io::Error),
-    #[error("no remote address sent for new incoming connection")]
-    NoRemoteAddress,
 }
 
 impl<T> From<PoisonError<T>> for ProxyError {

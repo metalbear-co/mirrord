@@ -3,87 +3,49 @@
 
 use std::{
     io::{self, ErrorKind},
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     time::Duration,
 };
 
-use thiserror::Error;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpStream,
-    },
+    net::TcpSocket,
     time,
 };
 
 use super::InterceptorMessageOut;
-use crate::{
-    background_tasks::{BackgroundTask, MessageBus},
-    codec::{AsyncEncoder, CodecError},
-    protocol::IncomingConnectionMetadata,
-};
-
-/// Errors that can occur when executing [`RawInterceptor`] as a [`BackgroundTask`].
-#[derive(Error, Debug)]
-pub enum RawInterceptorError {
-    /// IO failed.
-    #[error("io failed: {0}")]
-    IoError(#[from] io::Error),
-    /// [`codec`](crate::codec) failed.
-    #[error("{0}")]
-    CodecError(#[from] CodecError),
-}
+use crate::background_tasks::{BackgroundTask, MessageBus};
 
 /// Manages a single intercepted raw connection.
 /// Multiple instances are run as [`BackgroundTask`]s by one [`IncomingProxy`](super::IncomingProxy)
 /// to manage individual connections.
 pub struct RawInterceptor {
-    conn_metadata: IncomingConnectionMetadata,
     /// Local layer listener.
     local_destination: SocketAddr,
+    /// Socket to make a connection from.
+    /// This socket is already bound to an address.
+    socket: TcpSocket,
 }
 
 impl RawInterceptor {
-    /// Creates a new instance. This instance will connect to the provided `local_destination`.
-    pub fn new(
-        remote_source: SocketAddr,
-        local_address: IpAddr,
-        local_destination: SocketAddr,
-    ) -> Self {
+    /// Creates a new instance. This instance will connect to the provided `local_destination` using
+    /// the given `socket`.
+    pub fn new(local_destination: SocketAddr, socket: TcpSocket) -> Self {
         Self {
-            conn_metadata: IncomingConnectionMetadata {
-                remote_source,
-                local_address,
-            },
             local_destination,
+            socket,
         }
-    }
-
-    /// Connects to the local listener and sends it encoded address of the remote peer.
-    async fn connect_and_send_info(
-        &self,
-    ) -> Result<(OwnedReadHalf, OwnedWriteHalf), RawInterceptorError> {
-        let stream = TcpStream::connect(self.local_destination).await?;
-
-        let mut codec_tx: AsyncEncoder<IncomingConnectionMetadata, TcpStream> =
-            AsyncEncoder::new(stream);
-        codec_tx.send(&self.conn_metadata).await?;
-        codec_tx.flush().await?;
-
-        let stream = codec_tx.into_inner();
-
-        Ok(stream.into_split())
     }
 }
 
 impl BackgroundTask for RawInterceptor {
-    type Error = RawInterceptorError;
+    type Error = io::Error;
     type MessageIn = Vec<u8>;
     type MessageOut = InterceptorMessageOut;
 
     async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-        let (mut read_half, mut write_half) = self.connect_and_send_info().await?;
+        let stream = self.socket.connect(self.local_destination).await?;
+        let (mut read_half, mut write_half) = stream.into_split();
 
         let mut buffer = vec![0; 1024];
         let mut remote_closed = false;

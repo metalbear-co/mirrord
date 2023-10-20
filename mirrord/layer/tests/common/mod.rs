@@ -686,7 +686,7 @@ impl Application {
             Application::Fork => String::from("tests/apps/fork/out.c_test_app"),
             Application::NodeHTTP => String::from("node"),
             Application::JavaTemurinSip => format!(
-                "{}/.sdkman/candidates/java/17.0.6-tem/bin/java",
+                "{}/.jdks/corretto-17.0.7/bin/java",
                 std::env::var("HOME").unwrap(),
             ),
             Application::Go19HTTP => String::from("tests/apps/app_go/19.go_test_app"),

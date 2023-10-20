@@ -16,11 +16,7 @@ use thiserror::Error;
 use tokio::net::TcpStream;
 
 use super::{http::HttpConnection, InterceptorMessageOut};
-use crate::{
-    background_tasks::{BackgroundTask, MessageBus},
-    codec::{AsyncEncoder, CodecError},
-    protocol::IncomingConnectionMetadata,
-};
+use crate::background_tasks::{BackgroundTask, MessageBus};
 
 /// Errors that can occur when executing [`HttpInterceptor`] as a [`BackgroundTask`].
 #[derive(Error, Debug)]
@@ -31,12 +27,10 @@ pub enum HttpInterceptorError {
     /// Hyper failed.
     #[error("hyper failed: {0}")]
     HyperError(#[from] hyper::Error),
-    /// [`codec`](crate::codec) failed.
-    #[error("proxy codec failed: {0}")]
-    CodecError(#[from] CodecError),
     /// The layer closed connection too soon to send a request.
     #[error("connection closed too soon")]
     ConnectionClosedTooSoon(HttpRequestFallback),
+    /// Received a request with unsupported HTTP version.
     #[error("{0:?} is not supported")]
     UnsupportedHttpVersion(Version),
 }
@@ -62,25 +56,8 @@ impl HttpInterceptor {
 impl HttpInterceptor {
     /// Prepares an HTTP connection.
     async fn connect_to_application(&self) -> Result<HttpConnection, HttpInterceptorError> {
-        let target_stream = self.connect_and_send_source().await?;
+        let target_stream = TcpStream::connect(self.local_destination).await?;
         HttpConnection::handshake(self.version, target_stream).await
-    }
-
-    /// Connects to the local listener and sends it encoded address of the remote peer.
-    async fn connect_and_send_source(&self) -> Result<TcpStream, HttpInterceptorError> {
-        let stream = TcpStream::connect(self.local_destination).await?;
-        let local_address = stream.local_addr()?;
-        let metadata = IncomingConnectionMetadata {
-            remote_source: local_address,
-            local_address: local_address.ip(),
-        };
-
-        let mut codec_tx: AsyncEncoder<IncomingConnectionMetadata, TcpStream> =
-            AsyncEncoder::new(stream);
-        codec_tx.send(&metadata).await?;
-        codec_tx.flush().await?;
-
-        Ok(codec_tx.into_inner())
     }
 
     /// Handles the result of sending an HTTP request.

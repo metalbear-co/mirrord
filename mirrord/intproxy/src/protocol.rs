@@ -124,25 +124,26 @@ pub enum IncomingRequest {
     PortSubscribe(PortSubscribe),
     /// A request made by the layer when it closes the socket listening for mirrored connections.
     PortUnsubscribe(PortUnsubscribe),
+    /// A request made by the layer when it accepts a connection on the socket that is listening
+    /// for mirrored connections.
+    ConnMetadata(ConnMetadataRequest),
 }
 
-/// A request to start proxying incoming connections.
-///
-/// For each connection incoming to the remote port,
-/// the internal proxy will initiate a new connection to the local port specified in `listening_on`.
-/// Through this connection, the proxy will first send the [`IncomingConnectionMetadata`],
-/// serialized with [`crate::codec`]. After that, the proxy will send raw data.
-#[derive(Encode, Decode, Debug, Clone)]
-pub struct PortSubscribe {
-    /// Local address on which the layer is listening.
-    pub listening_on: SocketAddr,
-    /// Instructions on how to execute mirroring.
-    pub subscription: PortSubscription,
+/// A request for additional metadata for accepted connection.
+/// The layer should use this each time it accepts a connection on a socket that is listening for
+/// mirrored connections ([`PortSubscribe`]).
+#[derive(Encode, Decode, Debug, Eq, PartialEq, Hash, Clone)]
+pub struct ConnMetadataRequest {
+    /// Address of the listener that accepted the connection.
+    pub listener_address: SocketAddr,
+    /// Address of connection peer.
+    pub peer_address: SocketAddr,
 }
 
-/// Metadata of the intercepted incoming TCP connection.
+/// A response to layer's [`ConnMetadataRequest`].
+/// Contains metadata useful for hooking `getsockname` and `getpeername`.
 #[derive(Encode, Decode, Debug, Clone)]
-pub struct IncomingConnectionMetadata {
+pub struct ConnMetadataResponse {
     /// Original source of data, provided by the agent. Meant to be exposed to the user instead of
     /// the real source, which will always be localhost.
     ///
@@ -159,6 +160,18 @@ pub struct IncomingConnectionMetadata {
     /// Due to limitations of the `intproxy <-> agent` protocol, HTTP connections will send the
     /// real address (localhost).
     pub local_address: IpAddr,
+}
+
+/// A request to start proxying incoming connections.
+///
+/// For each connection incoming to the remote port,
+/// the internal proxy will initiate a new connection to the local port specified in `listening_on`.
+#[derive(Encode, Decode, Debug, Clone)]
+pub struct PortSubscribe {
+    /// Local address on which the layer is listening.
+    pub listening_on: SocketAddr,
+    /// Instructions on how to execute mirroring.
+    pub subscription: PortSubscription,
 }
 
 /// Instructions for the internal proxy and the agent on how to execute port mirroring.
@@ -187,12 +200,21 @@ pub enum ProxyToLayerMessage {
     File(FileResponse),
     /// A response to layer's [`GetAddrInfoRequest`].
     GetAddrInfo(GetAddrInfoResponse),
-    /// A response to layer's [`OutgoingConnectRequest`]
+    /// A response to layer's [`OutgoingConnectRequest`].
     OutgoingConnect(RemoteResult<OutgoingConnectResponse>),
-    /// A response to layer's [`PortSubscribe`]
-    IncomingSubscribe(RemoteResult<()>),
-    /// A response to layer's [`PortUnsubscribe`]
-    IncomingUnsubscribe(RemoteResult<()>),
+    /// A response to layer's [`IncomingRequest`].
+    Incoming(IncomingResponse),
+}
+
+/// A response to layer's [`IncomingRequest`].
+#[derive(Encode, Decode, Debug)]
+pub enum IncomingResponse {
+    /// A response to layer's [`PortSubscribe`].
+    PortSubscribe(RemoteResult<()>),
+    /// A response to layer's [`PortUnsubscribe`].
+    PortUnsubscribe(RemoteResult<()>),
+    /// A response to layers' [`ConnMetadataRequest`].
+    ConnMetadata(ConnMetadataResponse),
 }
 
 /// A response to layer's [`OutgoingConnectRequest`].
@@ -356,12 +378,19 @@ impl_request!(
     req = PortSubscribe,
     res = RemoteResult<()>,
     req_path = LayerToProxyMessage::Incoming => IncomingRequest::PortSubscribe,
-    res_path = ProxyToLayerMessage::IncomingSubscribe,
+    res_path = ProxyToLayerMessage::Incoming => IncomingResponse::PortSubscribe,
 );
 
 impl_request!(
     req = PortUnsubscribe,
     res = RemoteResult<()>,
     req_path = LayerToProxyMessage::Incoming => IncomingRequest::PortUnsubscribe,
-    res_path = ProxyToLayerMessage::IncomingUnsubscribe,
+    res_path = ProxyToLayerMessage::Incoming => IncomingResponse::PortUnsubscribe,
+);
+
+impl_request!(
+    req = ConnMetadataRequest,
+    res = ConnMetadataResponse,
+    req_path = LayerToProxyMessage::Incoming => IncomingRequest::ConnMetadata,
+    res_path = ProxyToLayerMessage::Incoming => IncomingResponse::ConnMetadata,
 );
