@@ -1,8 +1,7 @@
 use alloc::ffi::CString;
 use core::{cmp, ffi::CStr, mem};
 use std::{
-    net::TcpStream,
-    os::{fd::FromRawFd, unix::io::RawFd},
+    os::unix::io::RawFd,
     sync::LazyLock,
 };
 
@@ -123,8 +122,7 @@ pub(crate) unsafe extern "C" fn accept_detour(
     if accept_result == -1 {
         accept_result
     } else {
-        let stream = TcpStream::from_raw_fd(accept_result);
-        accept(sockfd, address, address_len, stream).unwrap_or_bypass(accept_result)
+        accept(sockfd, address, address_len, accept_result).unwrap_or_bypass(accept_result)
     }
 }
 
@@ -141,8 +139,7 @@ pub(crate) unsafe extern "C" fn accept4_detour(
     if accept_result == -1 {
         accept_result
     } else {
-        let stream = TcpStream::from_raw_fd(accept_result);
-        accept(sockfd, address, address_len, stream).unwrap_or_bypass(accept_result)
+        accept(sockfd, address, address_len, accept_result).unwrap_or_bypass(accept_result)
     }
 }
 
@@ -173,8 +170,7 @@ pub(super) unsafe extern "C" fn _accept_nocancel_detour(
     if accept_result == -1 {
         accept_result
     } else {
-        let stream = TcpStream::from_raw_fd(accept_result);
-        accept(sockfd, address, address_len, stream).unwrap_or_bypass(accept_result)
+        accept(sockfd, address, address_len, accept_result).unwrap_or_bypass(accept_result)
     }
 }
 

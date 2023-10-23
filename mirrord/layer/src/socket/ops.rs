@@ -3,7 +3,7 @@ use core::{ffi::CStr, mem};
 use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
-    os::{fd::IntoRawFd, unix::io::RawFd},
+    os::{fd::{IntoRawFd, FromRawFd}, unix::io::RawFd},
     path::PathBuf,
     ptr,
     sync::{Arc, OnceLock},
@@ -623,7 +623,7 @@ pub(super) fn accept(
     sockfd: RawFd,
     address: *mut sockaddr,
     address_len: *mut socklen_t,
-    new_stream: TcpStream,
+    new_fd: RawFd,
 ) -> Detour<RawFd> {
     let (domain, protocol, type_, port, listener_address) = {
         SOCKETS
@@ -644,12 +644,19 @@ pub(super) fn accept(
             })?
     };
 
+    let peer_address = {
+        let stream = unsafe { TcpStream::from_raw_fd(new_fd) };
+        let peer_address = stream.peer_addr();
+        let _fd = stream.into_raw_fd();
+        peer_address?
+    };
+
     let ConnMetadataResponse {
         remote_source,
         local_address,
     } = common::make_proxy_request_with_response(ConnMetadataRequest {
         listener_address,
-        peer_address: new_stream.peer_addr()?,
+        peer_address,
     })?;
 
     let state = SocketState::Connected(Connected {
@@ -662,10 +669,9 @@ pub(super) fn accept(
 
     fill_address(address, address_len, remote_source.into())?;
 
-    let fd = new_stream.into_raw_fd();
-    SOCKETS.insert(fd, Arc::new(new_socket));
+    SOCKETS.insert(new_fd, Arc::new(new_socket));
 
-    Detour::Success(fd)
+    Detour::Success(new_fd)
 }
 
 #[tracing::instrument(level = "trace")]
