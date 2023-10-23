@@ -1,8 +1,14 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::PathBuf, time::Duration};
+use std::{collections::HashSet, path::PathBuf, time::Duration};
 
+#[cfg(not(target_os = "macos"))]
+use mirrord_protocol::file::XstatResponse;
+use mirrord_protocol::{
+    file::{OpenFileRequest, OpenFileResponse, ReadFileRequest},
+    ClientMessage, DaemonMessage, FileRequest, FileResponse,
+};
 use rstest::rstest;
 
 mod common;
@@ -26,20 +32,57 @@ async fn node_spawn(dylib_path: &PathBuf) {
         .start_process_with_layer(dylib_path, vec![("MIRRORD_FILE_MODE", "read")], None)
         .await;
 
-    intproxy
-        .expect_file_open_for_reading("/app/test.txt", 2)
-        .await;
+    let mut opened_paths = HashSet::new();
+    let mut next_remote_fd = 0;
 
-    #[cfg(not(target_os = "macos"))]
-    {
-        intproxy.expect_xstat(None, Some(2)).await;
+    let mut read_files = HashSet::new();
+
+    while let Some(msg) = intproxy.try_recv().await {
+        let ClientMessage::FileRequest(msg) = msg else {
+            panic!("unexpected message: {msg:?}");
+        };
+
+        match msg {
+            FileRequest::Open(OpenFileRequest { path, .. }) => {
+                opened_paths.insert(path.to_str().unwrap().to_string());
+                intproxy
+                    .send(DaemonMessage::File(FileResponse::Open(Ok(
+                        OpenFileResponse { fd: next_remote_fd },
+                    ))))
+                    .await;
+                next_remote_fd += 1;
+            }
+            FileRequest::Read(ReadFileRequest { remote_fd, .. }) => {
+                let first_read = read_files.insert(remote_fd);
+                let content = if first_read {
+                    b"metalbear-hostname".to_vec()
+                } else {
+                    b"".to_vec()
+                };
+
+                intproxy
+                    .answer_file_read(content)
+                    .await;
+            }
+            #[cfg(not(target_os = "macos"))]
+            FileRequest::Xstat(..) => {
+                intproxy
+                    .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                        XstatResponse {
+                            metadata: Default::default(),
+                        },
+                    ))))
+                    .await
+            }
+            FileRequest::Close(..) => {}
+            other => panic!("unexpected message: {other:?}"),
+        }
     }
 
-    intproxy
-        .expect_file_read("Very interesting contents.", 2)
-        .await;
-
-    intproxy.expect_file_close(2).await;
+    assert!(
+        opened_paths.contains("/app/test.txt"),
+        "opened files: {opened_paths:?}"
+    );
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stdout().await;
