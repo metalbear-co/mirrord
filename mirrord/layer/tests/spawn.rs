@@ -60,9 +60,7 @@ async fn node_spawn(dylib_path: &PathBuf) {
                     b"".to_vec()
                 };
 
-                intproxy
-                    .answer_file_read(content)
-                    .await;
+                intproxy.answer_file_read(content).await;
             }
             #[cfg(not(target_os = "macos"))]
             FileRequest::Xstat(..) => {
