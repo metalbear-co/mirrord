@@ -17,7 +17,8 @@ use crate::{
 /// 1. `"read"` - Read from the remote file system (default)
 /// 2. `"write"` - Read/Write from the remote file system.
 /// 3. `"local"` - Read from the local file system.
-/// 4. `"localwithoverrides"` - perform fs operation locally, unless the path matches a pre-defined or user-specified exception.
+/// 4. `"localwithoverrides"` - perform fs operation locally, unless the path matches a pre-defined
+///    or user-specified exception.
 ///
 /// > Note: by default, some paths are read locally or remotely, regardless of the selected FS mode.
 /// > This is described in further detail below.
