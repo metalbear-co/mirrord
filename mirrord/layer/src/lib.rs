@@ -189,7 +189,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
     match given_process.load_type(config) {
         LoadType::Full(config) => layer_start(*config),
         #[cfg(target_os = "macos")]
-        LoadType::SIPOnly => sip_only_layer_start(*config, patch_binaries),
+        LoadType::SIPOnly(config) => sip_only_layer_start(*config, patch_binaries),
         LoadType::Skip => {}
     }
 
