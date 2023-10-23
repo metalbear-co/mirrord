@@ -520,7 +520,7 @@ mod traffic {
             .to_string();
         let executable = vec![app_path.as_str()];
 
-        let mut process = run_exec_with_target(executable, &service.target, None, None, vec![("RUST_LOG", "warn,mirrord=trace")].into()).await;
+        let mut process = run_exec_with_target(executable, &service.target, None, None, None).await;
         let res = process.wait().await;
 
         // The test application panics if it does not successfully connect to the socket, send data,

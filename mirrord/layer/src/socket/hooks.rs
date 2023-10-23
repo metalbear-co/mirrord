@@ -1,9 +1,6 @@
 use alloc::ffi::CString;
 use core::{cmp, ffi::CStr, mem};
-use std::{
-    os::unix::io::RawFd,
-    sync::LazyLock,
-};
+use std::{os::unix::io::RawFd, sync::LazyLock};
 
 use dashmap::DashSet;
 use errno::{set_errno, Errno};

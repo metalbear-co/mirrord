@@ -3,7 +3,10 @@ use core::{ffi::CStr, mem};
 use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
-    os::{fd::{IntoRawFd, FromRawFd}, unix::io::RawFd},
+    os::{
+        fd::{FromRawFd, IntoRawFd},
+        unix::io::RawFd,
+    },
     path::PathBuf,
     ptr,
     sync::{Arc, OnceLock},
