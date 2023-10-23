@@ -75,6 +75,8 @@ use file::OPEN_FILES;
 use hooks::HookManager;
 use libc::{c_int, pid_t};
 use load::ExecutableName;
+#[cfg(target_os = "macos")]
+use mirrord_config::feature::fs::FsConfig;
 use mirrord_config::{
     feature::{fs::FsModeConfig, network::incoming::IncomingMode},
     LayerConfig,
@@ -179,7 +181,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
                     .get()
                     .expect("EXECUTABLE_ARGS needs to be set!"),
             );
-            error!("Couldn't execute {:?}", err);
+            tracing::error!("Couldn't execute {:?}", err);
             return Err(LayerError::ExecFailed(err));
         }
     }
@@ -187,7 +189,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
     match given_process.load_type(config) {
         LoadType::Full(config) => layer_start(*config),
         #[cfg(target_os = "macos")]
-        LoadType::SIPOnly => sip_only_layer_start(patch_binaries),
+        LoadType::SIPOnly => sip_only_layer_start(*config, patch_binaries),
         LoadType::Skip => {}
     }
 
@@ -324,20 +326,24 @@ fn layer_start(mut config: LayerConfig) {
 /// We need to hook execve syscall to allow mirrord-layer to be loaded with sip patch when loading
 /// mirrord-layer on a process where specified to skip with MIRRORD_SKIP_PROCESSES
 #[cfg(target_os = "macos")]
-fn sip_only_layer_start(patch_binaries: Vec<String>) {
+fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
     let mut hook_manager = HookManager::default();
 
     unsafe { exec_utils::enable_execve_hook(&mut hook_manager, patch_binaries) };
+
     // we need to hook file access to patch path to our temp bin.
-    FILE_FILTER
-        .set(FileFilter::new(FsConfig {
-            mode: FsModeConfig::Local,
-            read_write: None,
-            read_only: None,
-            local: None,
-            not_found: None,
-        }))
-        .expect("FILE_FILTER set failed");
+    config.feature.fs = FsConfig {
+        mode: FsModeConfig::Local,
+        read_write: None,
+        read_only: None,
+        local: None,
+        not_found: None,
+    };
+    let debugger_ports = DebuggerPorts::from_env();
+    let setup = LayerSetup::new(config, debugger_ports);
+
+    SETUP.set(setup).expect("SETUP set failed");
+
     unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
 }
 
