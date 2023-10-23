@@ -8,6 +8,27 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.73.0](https://github.com/metalbear-co/mirrord/tree/3.73.0) - 2023-10-23
+
+
+### Added
+
+- Added k0s support - add k0s containerd socket path.
+  [#2014](https://github.com/metalbear-co/mirrord/issues/2014)
+
+
+### Fixed
+
+- Clarify more about the pre-defined FS exceptions in docs, link to lists.
+  [#2020](https://github.com/metalbear-co/mirrord/issues/2020)
+
+
+### Internal
+
+- Move path pattern default sets to separate files so that we can link to them
+  from docs. [#2019](https://github.com/metalbear-co/mirrord/issues/2019)
+
+
 ## [3.72.1](https://github.com/metalbear-co/mirrord/tree/3.72.1) - 2023-10-18
 
 
