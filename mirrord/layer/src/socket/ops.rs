@@ -285,6 +285,9 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
                     .subscription(requested_address.port()),
             })??;
 
+            // this log message is expected by some E2E tests
+            tracing::debug!("daemon subscribed port {}", requested_address.port());
+
             Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(Bound {
                 requested_address,
                 address,
