@@ -75,7 +75,7 @@ async fn read_from_mirrord_bin(dylib_path: &PathBuf) {
         vec![path_in_mirrord_bin.to_string_lossy().to_string()],
     );
 
-    let (mut test_process, mut intproxy) = application
+    let (mut test_process, _intproxy) = application
         .start_process_with_layer(dylib_path, vec![], None)
         .await;
 
@@ -169,8 +169,7 @@ async fn pwrite(
             .send(DaemonMessage::File(FileResponse::Xstat(Ok(
                 XstatResponse { metadata },
             ))))
-            .await
-            .unwrap();
+            .await;
 
         // fstat test
         assert_eq!(
@@ -193,8 +192,7 @@ async fn pwrite(
             .send(DaemonMessage::File(FileResponse::Xstat(Ok(
                 XstatResponse { metadata },
             ))))
-            .await
-            .unwrap();
+            .await;
     }
     // Assert all clear
     test_process.wait_assert_success().await;
@@ -348,7 +346,7 @@ async fn go_dir(
     intproxy.expect_file_open_for_reading("/tmp/foo", fd).await;
 
     assert_eq!(
-        intproxy.recv().await;,
+        intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
             path: None,
             fd: Some(1),
@@ -372,7 +370,7 @@ async fn go_dir(
         .await;
 
     assert_eq!(
-        layer_connection.recv.recv().await,
+        intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 1 }))
     );
 
