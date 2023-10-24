@@ -8,6 +8,15 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.73.1](https://github.com/metalbear-co/mirrord/tree/3.73.1) - 2023-10-24
+
+
+### Fixed
+
+- Fixed `KUBERNETES_EXEC_INFO` environment variable passed to `kubectl`
+  authentication plugins.
+
+
 ## [3.73.0](https://github.com/metalbear-co/mirrord/tree/3.73.0) - 2023-10-23
 
 
