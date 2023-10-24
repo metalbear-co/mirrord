@@ -1,0 +1,1 @@
+Fixed `KUBERNETES_EXEC_INFO` environment variable passed to `kubectl` authentication plugins.
