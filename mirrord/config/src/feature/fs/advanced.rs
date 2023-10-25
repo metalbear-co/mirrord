@@ -38,25 +38,22 @@ use crate::{
 /// no specified order if two lists match the same path, we will use the first one (and we
 /// do not guarantee what is first).
 ///
-/// **Warning**: Specifying the same path in two lists is unsupported and can lead to undefined
-/// behaviour.
+///     **Warning**: Specifying the same path in two lists is unsupported and can lead to undefined
+///     behaviour.
 ///
 /// 2. There are pre-defined exceptions to the set FS mode.
-///   a. Paths that match
-///      [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs)
-///      are read locally by default.
-///   b. Paths that match
-///      [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_remote_by_default.rs)
-///      are read remotely by default when the mode is `localwithoverrides`.
-///   c. Paths that match
-///      [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/not_found_by_default.rs)
-///      under the running user's home directory will not be found by the application when the mode
-///      is not `local`.
-/// In order to override that default setting for a path, or a pattern, include it the appropriate
-/// pattern set from above. E.g. in order to read files under `/etc/` remotely even though it is
-/// covered by
-/// [the set of patterns that are read locally by default](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs),
-/// add `"^/etc/."` to the `read_only` set.
+///     1. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs)
+///        are read locally by default.
+///     2. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_remote_by_default.rs)
+///        are read remotely by default when the mode is `localwithoverrides`.
+///     3. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/not_found_by_default.rs)
+///        under the running user's home directory will not be found by the application when the
+///        mode is not `local`.
+///
+///     In order to override that default setting for a path, or a pattern, include it the
+///     appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even
+///     though it is covered by [the set of patterns that are read locally by default](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs),
+///     add `"^/etc/."` to the `read_only` set.
 ///
 /// 3. If none of the above match, use the default behavior (mode).
 ///
