@@ -31,6 +31,7 @@ done = {method: False for method in HttpMethod}
 
 def kill_later():
     def kill_thread():
+        print("killing with a signal after 1 second")
         time.sleep(1)
         kill(getpid(), SIGTERM)
 

@@ -19,6 +19,7 @@ mirrord-config = { path = "../config"}
 mirrord-protocol = { path = "../protocol"}
 mirrord-layer-macro = { path = "./macro"}
 mirrord-console = { path = "../console" }
+mirrord-intproxy = { path = "../intproxy" }
 
 ctor = "0.2"
 libc.workspace = true
@@ -27,16 +28,11 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 # change to upstream once https://github.com/frida/frida-rust/pull/99 is merged
 frida-gum = { git = "https://github.com/metalbear-co/frida-rust", version = "0.13", features = ["auto-download"], branch="capstone_remove" }
-futures.workspace = true
 
-tokio = { workspace = true, features = ["fs", "rt", "rt-multi-thread", "macros"] }
 serde.workspace = true
 serde_json.workspace = true
 
-actix-codec.workspace = true
 bytes.workspace = true
-tokio-stream.workspace = true
-tokio-util.workspace = true
 thiserror.workspace = true
 trust-dns-resolver.workspace = true
 num-traits.workspace = true
@@ -52,9 +48,6 @@ urlencoding = "2"
 itertools = "0.10"
 os_info = "3"
 bytemuck = "1"
-hyper = { workspace = true, features = ["client", "http1", "http2"] }
-hyper-util.workspace = true
-http-body-util  = { workspace = true }
 bimap.workspace = true
 dashmap = "5.4"
 hashbrown = "0.14"
@@ -65,6 +58,7 @@ mirrord-sip = { path = "../sip" }
 null-terminated = "0.3"
 
 [dev-dependencies]
+mirrord-intproxy = { path = "../intproxy" }
 k8s-openapi.workspace = true
 chrono = { version = "0.4", features = ["clock"] }
 base64 = "0.21"
@@ -76,6 +70,9 @@ tower = "0.4"
 tokio = { version = "1", features = ["rt", "net", "macros"] }
 tests = { path = "../../tests" }
 flaky_test = "0.1.0"
+futures.workspace = true
+actix-codec.workspace = true
+tokio-stream.workspace = true
 
 [lib]
 crate_type = ["cdylib"]

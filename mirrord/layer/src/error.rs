@@ -4,17 +4,13 @@ use errno::set_errno;
 use ignore_codes::*;
 use libc::{c_char, DIR, FILE};
 use mirrord_config::{config::ConfigError, feature::network::outgoing::OutgoingFilterError};
-use mirrord_protocol::{
-    tcp::LayerTcp, ClientMessage, ConnectionId, ResponseError, SerializationError,
-};
+use mirrord_protocol::{ResponseError, SerializationError};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
 use thiserror::Error;
-use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 use tracing::{error, info};
 
-use super::HookMessage;
-use crate::tcp_steal::http_forwarding::HttpForwarderError;
+use crate::proxy_connection::ProxyError;
 
 /// Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
 mod ignore_codes {
@@ -51,14 +47,11 @@ pub(crate) enum HookError {
     #[error("mirrord-layer: Null pointer found!")]
     NullPointer,
 
-    #[error("mirrord-layer: Receiver failed with `{0}`!")]
-    RecvError(#[from] RecvError),
-
     #[error("mirrord-layer: IO failed with `{0}`!")]
     IO(#[from] std::io::Error),
 
-    #[error("mirrord-layer: Could not get HOOK_SENDER, can't send a hook message!")]
-    CannotGetHookSender,
+    #[error("mirrord-layer: Could not get PROXY_CONNECTION, can't send a hook message!")]
+    CannotGetProxyConnection,
 
     #[error("mirrord-layer: Converting int failed with `{0}`!")]
     TryFromInt(#[from] std::num::TryFromIntError),
@@ -68,9 +61,6 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: Failed converting `to_str` with `{0}`!")]
     Utf8(#[from] std::str::Utf8Error),
-
-    #[error("mirrord-layer: Sender<HookMessage> failed with `{0}`!")]
-    SendErrorHookMessage(#[from] SendError<HookMessage>),
 
     #[error("mirrord-layer: Failed creating local file for `remote_fd` `{0}`!")]
     LocalFileCreation(u64),
@@ -101,13 +91,15 @@ pub(crate) enum HookError {
     /// filter.
     #[error("mirrord-layer: Ignored file")]
     FileNotFound,
+
+    #[error("mirrord-layer: Proxy connection failed: `{0}`")]
+    ProxyError(#[from] ProxyError),
 }
 
 /// Errors internal to mirrord-layer.
 ///
-/// You'll encounter these when the layer is performing some of its internal operations (mostly when
-/// handling messsages, like [`HookMessage`], or
-/// [`DaemonMessage`](mirrord_protocol::codec::DaemonMessage)).
+/// You'll encounter these when the layer is performing some of its internal operations, mostly when
+/// handling [`ProxyToLayerMessage`](mirrord_intproxy::protocol::ProxyToLayerMessage).
 #[derive(Error, Debug)]
 pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed while getting a response!")]
@@ -129,40 +121,8 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Parsing `bool` value failed with `{0}`!")]
     ParseBoolError(#[from] ParseBoolError),
 
-    #[error("mirrord-layer: Sender<Vec<u8>> failed with `{0}`!")]
-    SendErrorConnection(#[from] SendError<Vec<u8>>),
-
-    #[error("mirrord-layer: Sender<LayerTcp> failed with `{0}`!")]
-    SendErrorLayerTcp(#[from] SendError<LayerTcp>),
-
-    #[error("mirrord-layer: Sender<ClientMessage> failed with `{0}`!")]
-    SendErrorClientMessage(#[from] SendError<ClientMessage>),
-
-    #[error("mirrord-layer: Failed to get `Sender` for sending tcp response!")]
-    SendErrorTcpResponse,
-
-    #[error("mirrord-layer: Failed to get `Sender` for sending udp response!")]
-    SendErrorUdpResponse,
-
-    #[error("mirrord-layer: JoinError failed with `{0}`!")]
-    Join(#[from] tokio::task::JoinError),
-
-    #[error("mirrord-layer: Failed to get `Sender` for sending file response!")]
-    SendErrorFileResponse,
-
-    #[error("mirrord-layer: Failed to get `Sender` for sending getaddrinfo response!")]
-    SendErrorGetAddrInfoResponse,
-
     #[error("mirrord-layer: IO failed with `{0}`!")]
     IO(#[from] std::io::Error),
-
-    #[error("mirrord-layer: No connection found for id `{0}`!")]
-    NoConnectionId(ConnectionId),
-
-    #[error(
-        "mirrord-layer: Got new connection from daemon after layer already closed that socket."
-    )]
-    NewConnectionAfterSocketClose(ConnectionId),
 
     #[error("mirrord-layer: JSON convert error")]
     JSONConvertError(#[from] serde_json::Error),
@@ -173,23 +133,8 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed to find a process to hook mirrord into!")]
     NoProcessFound,
 
-    #[error("mirrord-layer: Port {0} is already being stolen by another mirrord client!")]
-    PortAlreadyStolen(u16),
-
-    #[error("mirrord-layer: Got unexpected response error from agent: {0}")]
-    UnexpectedResponseError(ResponseError),
-
-    #[error("mirrord-layer: Stolen HTTP request forwarding failed with `{0}`.")]
-    HttpForwardingError(#[from] HttpForwarderError),
-
     #[error("mirrord-layer: Regex creation failed with `{0}`.")]
     Regex(#[from] fancy_regex::Error),
-
-    #[error("mirrord-layer: Agent closed connection with error: {0}")]
-    AgentErrorClosed(String),
-
-    #[error("mirrord-layer: local app closed the connection with mirrord.")]
-    AppClosedConnection(ClientMessage),
 
     // `From` implemented below, not with `#[from]` so that when new variants of
     // `SerializationError` are added, they are mapped into different variants of
@@ -203,9 +148,6 @@ pub(crate) enum LayerError {
     #[cfg(target_os = "macos")]
     #[error("Exec failed with error {0:?}, please report this error!")]
     ExecFailed(exec::Error),
-
-    #[error("mirrord-layer: Expected a value for config `{0}`, but found nothing!")]
-    MissingConfigValue(String),
 
     #[error("mirrord-layer: Something went wrong with the outgoing filter `{0}`.")]
     OutgoingFilterError(#[from] OutgoingFilterError),
@@ -265,11 +207,10 @@ impl From<HookError> for i64 {
         };
 
         let libc_error = match fail {
-            HookError::SendErrorHookMessage(_) => libc::EBADMSG,
-            HookError::RecvError(_) => libc::EBADMSG,
             HookError::Null(_) => libc::EINVAL,
             HookError::TryFromInt(_) => libc::EINVAL,
-            HookError::CannotGetHookSender => libc::EINVAL,
+            HookError::CannotGetProxyConnection => libc::EINVAL,
+            HookError::ProxyError(_) => libc::EINVAL,
             HookError::IO(io_fail) => io_fail.raw_os_error().unwrap_or(libc::EIO),
             HookError::LockError => libc::EINVAL,
             HookError::ResponseError(response_fail) => match response_fail {

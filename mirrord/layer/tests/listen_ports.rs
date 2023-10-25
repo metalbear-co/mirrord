@@ -4,12 +4,12 @@
 
 use std::{assert_matches::assert_matches, path::PathBuf, time::Duration};
 
-use futures::StreamExt;
 use mirrord_protocol::{
-    tcp::{LayerTcpSteal, StealType},
-    ClientMessage,
+    tcp::{DaemonTcp, LayerTcpSteal, StealType},
+    ClientMessage, DaemonMessage,
 };
 use rstest::rstest;
+use tokio::io::AsyncWriteExt;
 
 mod common;
 
@@ -28,37 +28,50 @@ async fn listen_ports(
 ) {
     let mut config_path = config_dir.clone();
     config_path.push("listen_ports.json");
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
-            vec![("MIRRORD_FILE_MODE", "local")],
+            vec![
+                ("RUST_LOG", "mirrord=trace"),
+                ("MIRRORD_FILE_MODE", "local"),
+            ],
             Some(config_path.to_str().unwrap()),
         )
         .await;
 
     assert_matches!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        intproxy.recv().await,
         ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(80)))
     );
-
-    TcpStream::connect("127.0.0.1:51222").await.unwrap();
+    intproxy
+        .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(80))))
+        .await;
+    let mut stream = TcpStream::connect("127.0.0.1:51222").await.unwrap();
+    println!("connected to listener at port 51222");
+    stream.write_all(b"HELLO").await.unwrap();
 
     assert_matches!(
-        layer_connection.codec.next().await.unwrap().unwrap(),
+        intproxy.recv().await,
         ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(40000)))
     );
-
-    TcpStream::connect("127.0.0.1:40000").await.unwrap();
+    intproxy
+        .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(
+            40000,
+        ))))
+        .await;
+    let mut stream = TcpStream::connect("127.0.0.1:40000").await.unwrap();
+    println!("connected to listener at port 40000");
+    stream.write_all(b"HELLO").await.unwrap();
 
     loop {
-        match layer_connection.codec.next().await {
-            Some(Ok(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(40000)))) => {}
-            Some(Ok(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(80)))) => {}
+        match intproxy.try_recv().await {
+            Some(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(40000))) => {}
+            Some(ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(80))) => {}
             None => break,
             other => panic!("unexpected message: {:?}", other),
         }
     }
-    assert!(layer_connection.is_ended().await);
+    assert_eq!(intproxy.try_recv().await, None);
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
     test_process.assert_no_error_in_stdout().await;

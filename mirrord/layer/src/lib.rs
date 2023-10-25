@@ -1,21 +1,15 @@
 #![feature(c_variadic)]
 #![feature(result_option_inspect)]
-#![feature(const_trait_impl)]
 #![feature(naked_functions)]
-#![feature(result_flattening)]
 #![feature(io_error_uncategorized)]
 #![feature(let_chains)]
-#![feature(async_closure)]
 #![feature(try_trait_v2)]
 #![feature(try_trait_v2_residual)]
-#![feature(trait_alias)]
 #![feature(c_size_t)]
 #![feature(pointer_byte_offsets)]
 #![feature(lazy_cell)]
-#![feature(async_fn_in_trait)]
 #![feature(once_cell_try)]
 #![allow(rustdoc::private_intra_doc_links)]
-#![allow(incomplete_features)]
 #![warn(clippy::indexing_slicing)]
 
 //! Loaded dynamically with your local process.
@@ -73,62 +67,32 @@
 extern crate alloc;
 extern crate core;
 
-use std::{collections::VecDeque, ffi::OsString, net::SocketAddr, panic, sync::OnceLock};
+use std::{cmp::Ordering, ffi::OsString, panic, sync::OnceLock, time::Duration};
 
-use bimap::BiMap;
-use common::ResponseChannel;
 use ctor::ctor;
-use dns::GetAddrInfo;
 use error::{LayerError, Result};
-use file::{filter::FileFilter, OPEN_FILES};
+use file::OPEN_FILES;
 use hooks::HookManager;
 use libc::{c_int, pid_t};
 use load::ExecutableName;
+#[cfg(target_os = "macos")]
+use mirrord_config::feature::fs::FsConfig;
 use mirrord_config::{
-    feature::{
-        fs::{FsConfig, FsModeConfig},
-        network::{
-            incoming::{IncomingConfig, IncomingMode},
-            NetworkConfig,
-        },
-        FeatureConfig,
-    },
+    feature::{fs::FsModeConfig, network::incoming::IncomingMode},
     LayerConfig,
 };
+use mirrord_intproxy::protocol::NewSessionRequest;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
-use mirrord_protocol::{
-    dns::{DnsLookup, GetAddrInfoRequest},
-    tcp::{HttpResponseFallback, LayerTcpSteal},
-    ClientMessage, DaemonMessage, CLIENT_READY_FOR_LOGS,
-};
-use outgoing::{tcp::TcpOutgoingHandler, udp::UdpOutgoingHandler};
-use regex::RegexSet;
-use socket::{OutgoingSelector, SOCKETS};
-use tcp::TcpHandler;
-use tcp_mirror::TcpMirrorHandler;
-use tcp_steal::TcpStealHandler;
-use tokio::{
-    runtime::Runtime,
-    select,
-    sync::mpsc::{channel, Receiver, Sender},
-};
-use tracing::{debug, error, info, trace, warn};
+use proxy_connection::ProxyConnection;
+use setup::LayerSetup;
+use socket::SOCKETS;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
-use crate::{
-    common::HookMessage,
-    debugger_ports::DebuggerPorts,
-    detour::DetourGuard,
-    file::{filter::FILE_FILTER, FileHandler},
-    load::LoadType,
-    socket::CONNECTION_QUEUE,
-};
+use crate::{debugger_ports::DebuggerPorts, detour::DetourGuard, load::LoadType};
 
 mod common;
-mod connection;
 mod debugger_ports;
 mod detour;
-mod dns;
 mod error;
 #[cfg(target_os = "macos")]
 mod exec_utils;
@@ -136,11 +100,9 @@ mod file;
 mod hooks;
 mod load;
 mod macros;
-mod outgoing;
+mod proxy_connection;
+mod setup;
 mod socket;
-mod tcp;
-mod tcp_mirror;
-mod tcp_steal;
 
 #[cfg(all(
     any(target_arch = "x86_64", target_arch = "aarch64"),
@@ -156,114 +118,37 @@ use crate::go::go_hooks;
 
 const TRACE_ONLY_ENV: &str = "MIRRORD_LAYER_TRACE_ONLY";
 
-fn build_runtime() -> Runtime {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-}
-
 // TODO: We don't really need a lock, we just need a type that:
 //  1. Can be initialized as static (with a const constructor or whatever)
 //  2. Is `Sync` (because shared static vars have to be).
-//  3. Can replace the held `Sender` with a different one (because we need to reset it on `fork`).
+//  3. Can replace the held [`ProxyConnection`] with a different one (because we need to reset it on
+//     `fork`).
 //  We only ever set it in the ctor or in the `fork` hook (in the child process), and in both cases
 //  there are no other threads yet in that process, so we don't need write synchronization.
 //  Assuming it's safe to call `send` simultaneously from two threads, on two references to the
 //  same `Sender` (is it), we also don't need read synchronization.
-/// [`Sender`] for the [`HookMessage`]s that are handled internally, and converted (when applicable)
-/// to [`ClientMessage`]s.
-///
-/// The messages sent through here originate from the hooks, and are (usually) converted
-/// to [`ClientMessage`]s.
-///
-/// ## Usage
-///
-/// You probably don't want to use this directly, instead prefer calling
-/// [`blocking_send_hook_message`](common::blocking_send_hook_message) to send internal messages.
-pub(crate) static mut HOOK_SENDER: OnceLock<Sender<HookMessage>> = OnceLock::new();
+/// Global connection to the internal proxy.
+/// Should not be used directly. Use [`common::make_proxy_request_with_response`] or
+/// [`common::make_proxy_request_no_response`] functions instead.
+static mut PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
 
-pub(crate) static LAYER_INITIALIZED: OnceLock<()> = OnceLock::new();
+static SETUP: OnceLock<LayerSetup> = OnceLock::new();
 
-/// Holds the file operations configuration, as specified by [`FsConfig`].
-///
-/// ## Usage
-///
-/// Mainly used to share the [`FsConfig`] in places where we can't easily pass this as an argument
-/// to some function:
-///
-/// 1. [`close_layer_fd`];
-/// 2. [`go_hooks`] file operations.
-pub(crate) static FILE_MODE: OnceLock<FsConfig> = OnceLock::new();
-
-/// Tells us if the user enabled the Tcp outgoing feature in [`OutgoingConfig`].
-///
-/// ## Usage
-///
-/// Used to change the behavior of the `socket::ops::connect` hook operation.
-pub(crate) static ENABLED_TCP_OUTGOING: OnceLock<bool> = OnceLock::new();
-
-/// Tells us if the user enabled the Udp outgoing feature in [`OutgoingConfig`].
-///
-/// ## Usage
-///
-/// Used to change the behavior of the `socket::ops::connect` hook operation.
-pub(crate) static ENABLED_UDP_OUTGOING: OnceLock<bool> = OnceLock::new();
-
-/// Unix streams to connect to remotely.
-///
-/// ## Usage
-///
-/// Used to change the behavior of the `socket::ops::connect` hook operation.
-pub(crate) static REMOTE_UNIX_STREAMS: OnceLock<Option<RegexSet>> = OnceLock::new();
-
-/// Tells us if the user enabled wants to ignore localhots connections in [`OutgoingConfig`].
-///
-/// ## Usage
-///
-/// When true, localhost connections will stay local (won't go to the remote pod localhost)
-pub(crate) static OUTGOING_IGNORE_LOCALHOST: OnceLock<bool> = OnceLock::new();
-
-/// Incoming config [`IncomingConfig`].
-pub(crate) static INCOMING_CONFIG: OnceLock<IncomingConfig> = OnceLock::new();
-
-/// Indicates this is a targetless run, so that users can be warned if their application is
-/// mirroring/stealing from a targetless agent.
-pub(crate) static TARGETLESS: OnceLock<bool> = OnceLock::new();
-
-/// Whether to resolve DNS locally or through the remote pod.
-pub(crate) static REMOTE_DNS: OnceLock<bool> = OnceLock::new();
-
-/// Selector for how outgoing connection will behave, either sending traffic via the remote or from
-/// local app, according to how the user set up the `remote`, and `local` filter, in
-/// `feature.network.outgoing`.
-pub(crate) static OUTGOING_SELECTOR: OnceLock<OutgoingSelector> = OnceLock::new();
-
-/// Ports to ignore because they are used by the IDE debugger
-pub(crate) static DEBUGGER_IGNORED_PORTS: OnceLock<DebuggerPorts> = OnceLock::new();
-
-/// Mapping of ports to use for binding local sockets created by us for intercepting.
-pub(crate) static LISTEN_PORTS: OnceLock<BiMap<u16, u16>> = OnceLock::new();
+fn setup() -> &'static LayerSetup {
+    SETUP.get().expect("layer is not initialized")
+}
 
 // The following statics are to avoid using CoreFoundation or high level macOS APIs
 // that aren't safe to use after fork.
 
 /// Executable we're loaded to
-pub(crate) static EXECUTABLE_NAME: OnceLock<ExecutableName> = OnceLock::new();
+static EXECUTABLE_NAME: OnceLock<ExecutableName> = OnceLock::new();
 
 /// Executable path we're loaded to
-pub(crate) static EXECUTABLE_PATH: OnceLock<String> = OnceLock::new();
+static EXECUTABLE_PATH: OnceLock<String> = OnceLock::new();
 
 /// Program arguments
-pub(crate) static EXECUTABLE_ARGS: OnceLock<Vec<OsString>> = OnceLock::new();
-
-/// Prevent mirrord from connecting to ports used by the IDE debugger
-pub(crate) fn is_debugger_port(addr: &SocketAddr) -> bool {
-    DEBUGGER_IGNORED_PORTS
-        .get()
-        .expect("DEBUGGER_IGNORED_PORTS not initialized")
-        .contains(addr)
-}
+static EXECUTABLE_ARGS: OnceLock<Vec<OsString>> = OnceLock::new();
 
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
 fn layer_pre_initialization() -> Result<(), LayerError> {
@@ -296,7 +181,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
                     .get()
                     .expect("EXECUTABLE_ARGS needs to be set!"),
             );
-            error!("Couldn't execute {:?}", err);
+            tracing::error!("Couldn't execute {:?}", err);
             return Err(LayerError::ExecFailed(err));
         }
     }
@@ -304,7 +189,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
     match given_process.load_type(config) {
         LoadType::Full(config) => layer_start(*config),
         #[cfg(target_os = "macos")]
-        LoadType::SIPOnly => sip_only_layer_start(patch_binaries),
+        LoadType::SIPOnly(config) => sip_only_layer_start(*config, patch_binaries),
         LoadType::Skip => {}
     }
 
@@ -316,20 +201,22 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
 /// Calls [`layer_pre_initialization`], which runs mirrord-layer.
 #[ctor]
 fn mirrord_layer_entry_point() {
-    // If we try to use `#[cfg(not(test))]`, it gives a bunch of unused warnings, unless you specify
-    // a profile, for example `cargo check --profile=dev`.
-    if !cfg!(test) {
-        let _ = panic::catch_unwind(|| {
-            if let Err(fail) = layer_pre_initialization() {
-                match fail {
-                    LayerError::NoProcessFound => (),
-                    _ => {
-                        eprintln!("mirrord layer setup failed with {fail:?}");
-                        std::process::exit(-1)
-                    }
-                }
-            }
-        });
+    if cfg!(test) {
+        return;
+    }
+
+    let res = panic::catch_unwind(|| match layer_pre_initialization() {
+        Err(LayerError::NoProcessFound) => {}
+        Err(e) => {
+            eprintln!("mirrord layer setup failed with {e:?}");
+            std::process::exit(-1)
+        }
+        Ok(()) => {}
+    });
+
+    if res.is_err() {
+        eprintln!("mirrord layer setup panicked");
+        std::process::exit(-1);
     }
 }
 
@@ -352,98 +239,21 @@ fn init_tracing() {
     };
 }
 
-/// Set the shared static variables according to the layer's configuration.
-/// These have to be global because they have to be accessed from hooks (which are called by user
-/// code in user threads).
-///
-/// Would panic if any of the variables is already set. This should never be the case.
-fn set_globals(config: &LayerConfig) {
-    FILE_MODE
-        .set(config.feature.fs.clone())
-        .expect("Setting FILE_MODE failed.");
-    INCOMING_CONFIG
-        .set(config.feature.network.incoming.clone())
-        .expect("SETTING INCOMING_CONFIG singleton");
-
-    // These must come before `OutgoingSelector::new`.
-    ENABLED_TCP_OUTGOING
-        .set(config.feature.network.outgoing.tcp)
-        .expect("Setting ENABLED_TCP_OUTGOING singleton");
-    ENABLED_UDP_OUTGOING
-        .set(config.feature.network.outgoing.udp)
-        .expect("Setting ENABLED_UDP_OUTGOING singleton");
-
-    REMOTE_DNS
-        .set(config.feature.network.dns)
-        .expect("Setting REMOTE_DNS singleton");
-
-    {
-        let outgoing_selector: OutgoingSelector = config
-            .feature
-            .network
-            .outgoing
-            .filter
-            .clone()
-            .try_into()
-            .expect("Failed setting up outgoing traffic filter!");
-
-        // This will crash the app if it comes before `ENABLED_(TCP|UDP)_OUTGOING`!
-        OUTGOING_SELECTOR
-            .set(outgoing_selector)
-            .expect("Setting OUTGOING_SELECTOR singleton");
-    }
-
-    REMOTE_UNIX_STREAMS
-        .set(
-            config
-                .feature
-                .network
-                .outgoing
-                .unix_streams
-                .clone()
-                .map(|vec_or_single| vec_or_single.to_vec())
-                .map(RegexSet::new)
-                .transpose()
-                .expect("Invalid unix stream regex set."),
-        )
-        .expect("Setting REMOTE_UNIX_STREAMS failed.");
-
-    OUTGOING_IGNORE_LOCALHOST
-        .set(config.feature.network.outgoing.ignore_localhost)
-        .expect("Setting OUTGOING_IGNORE_LOCALHOST singleton");
-
-    TARGETLESS
-        .set(config.target.path.is_none())
-        .expect("Setting TARGETLESS singleton");
-
-    FILE_FILTER.get_or_init(|| FileFilter::new(config.feature.fs.clone()));
-
-    DEBUGGER_IGNORED_PORTS
-        .set(DebuggerPorts::from_env())
-        .expect("Setting DEBUGGER_IGNORED_PORTS failed");
-
-    LISTEN_PORTS
-        .set(config.feature.network.incoming.listen_ports.clone())
-        .expect("Setting LISTEN_PORTS failed");
-}
-
 /// Occurs after [`layer_pre_initialization`] has succeeded.
 ///
-/// Starts the main parts of mirrord-layer.
+/// Initialized the main parts of mirrord-layer.
 ///
 /// ## Details
 ///
 /// Sets up a few things based on the [`LayerConfig`] given by the user:
 ///
-/// 1. [`tracing_subscriber`], or [`mirrord_console`];
+/// 1. [`tracing_subscriber`] or [`mirrord_console`];
 ///
-/// 2. Connects to the mirrord-agent with [`connection::connect`];
+/// 2. Global [`STATE`];
 ///
-/// 3. Initializes some of our globals;
+/// 3. Global [`PROXY_CONNECTION`];
 ///
 /// 4. Replaces the [`libc`] calls with our hooks with [`enable_hooks`];
-///
-/// 5. Starts the main mirrord-layer thread.
 fn layer_start(mut config: LayerConfig) {
     if config.target.path.is_none() {
         // Use localwithoverrides on targetless regardless of user config.
@@ -467,25 +277,25 @@ fn layer_start(mut config: LayerConfig) {
 
     // does not need to be atomic because on the first call there are never other threads.
     // Will be false when manually called from fork hook.
-    if LAYER_INITIALIZED.get().is_none() {
+    if SETUP.get().is_none() {
         // If we're here it's not a fork, we're in the ctor.
-        let _ = LAYER_INITIALIZED.set(());
         init_tracing();
-        set_globals(&config);
+
+        let debugger_ports = DebuggerPorts::from_env();
+        let state = LayerSetup::new(config, debugger_ports);
+        SETUP.set(state).unwrap();
+
+        let state = setup();
         enable_hooks(
-            config.feature.fs.is_active(),
-            config.feature.network.dns,
-            config
-                .sip_binaries
-                .clone()
-                .map(|x| x.to_vec())
-                .unwrap_or_default(),
+            state.fs_config().is_active(),
+            state.remote_dns_enabled(),
+            state.sip_binaries(),
         );
     }
 
     let _detour_guard = DetourGuard::new();
-    info!("Initializing mirrord-layer!");
-    trace!(
+    tracing::info!("Initializing mirrord-layer!");
+    tracing::trace!(
         "Loaded into executable: {}, on pid {}, with args: {:?}",
         EXECUTABLE_PATH
             .get()
@@ -500,400 +310,41 @@ fn layer_start(mut config: LayerConfig) {
         return;
     }
 
-    let address = config
-        .connect_tcp
-        .as_ref()
-        .expect("layer loaded without proxy address to connect to")
-        .parse()
-        .expect("couldn't parse proxy address");
-
-    let runtime = build_runtime();
-    let (tx, rx) = runtime.block_on(connection::connect_to_proxy(address));
-    let (sender, receiver) = channel::<HookMessage>(1000);
-
-    // SAFETY: mutation of `HOOK_SENDER` happens only in the ctor, or in the fork hook, and in all
-    // of those cases there's only one thread so we can do this safely.
     unsafe {
-        if let Some(old_sender) = HOOK_SENDER.take() {
-            // HOOK_SENDER is already set, we're currently on a fork detour.
-
-            // we can't call drop since it might trigger the traceback that can be seen here
-            // https://github.com/metalbear-co/mirrord/issues/1792
-            // so we leak it.
-            std::mem::forget(old_sender);
+        if PROXY_CONNECTION.get().is_none() {
+            let address = setup().proxy_address();
+            let new_connection =
+                ProxyConnection::new(address, NewSessionRequest::New, Duration::from_secs(5))
+                    .expect("failed to initialize proxy connection");
+            PROXY_CONNECTION
+                .set(new_connection)
+                .expect("setting PROXY_CONNECTION singleton")
         }
-        HOOK_SENDER
-            .set(sender)
-            .expect("Setting HOOK_SENDER singleton");
-    };
-
-    start_layer_thread(tx, rx, receiver, config, runtime);
+    }
 }
 
 /// We need to hook execve syscall to allow mirrord-layer to be loaded with sip patch when loading
 /// mirrord-layer on a process where specified to skip with MIRRORD_SKIP_PROCESSES
 #[cfg(target_os = "macos")]
-fn sip_only_layer_start(patch_binaries: Vec<String>) {
+fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
     let mut hook_manager = HookManager::default();
 
     unsafe { exec_utils::enable_execve_hook(&mut hook_manager, patch_binaries) };
+
     // we need to hook file access to patch path to our temp bin.
-    FILE_FILTER
-        .set(FileFilter::new(FsConfig {
-            mode: FsModeConfig::Local,
-            read_write: None,
-            read_only: None,
-            local: None,
-            not_found: None,
-        }))
-        .expect("FILE_FILTER set failed");
+    config.feature.fs = FsConfig {
+        mode: FsModeConfig::Local,
+        read_write: None,
+        read_only: None,
+        local: None,
+        not_found: None,
+    };
+    let debugger_ports = DebuggerPorts::from_env();
+    let setup = LayerSetup::new(config, debugger_ports);
+
+    SETUP.set(setup).expect("SETUP set failed");
+
     unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
-}
-
-/// Acts as an API to the various features of mirrord-layer, holding the actual feature handler
-/// types.
-struct Layer {
-    /// Used by the many `T::handle_hook_message` functions to send [`ClientMessage`]s to
-    /// mirrord-agent.
-    ///
-    /// The [`Receiver`] lives in the
-    /// [`wrap_raw_connection`](mirrord_kube::api::wrap_raw_connection) loop, where we read from
-    /// this channel and send the messages to the agent.
-    tx: Sender<ClientMessage>,
-
-    /// Used in the [`thread_loop`] to read [`DaemonMessage`]s and pass them to
-    /// `handle_daemon_message`.
-    ///
-    /// The [`Sender`] lives in the [`wrap_raw_connection`](mirrord_kube::api::wrap_raw_connection)
-    /// loop, where we receive the remote [`DaemonMessage`]s, and send them through it.
-    rx: Receiver<DaemonMessage>,
-
-    /// Handler to the TCP mirror operations, see [`TcpMirrorHandler`].
-    tcp_mirror_handler: TcpMirrorHandler,
-
-    /// Handler to the TCP outgoing operations, see [`TcpOutgoingHandler`].
-    tcp_outgoing_handler: TcpOutgoingHandler,
-
-    /// Handler to the UDP outgoing operations, see [`UdpOutgoingHandler`].
-    udp_outgoing_handler: UdpOutgoingHandler,
-    // TODO: Starting to think about a better abstraction over this whole mess. File operations are
-    // pretty much just `std::fs::File` things, so I think the best approach would be to create
-    // a `FakeFile`, and implement `std::io` traits on it.
-    //
-    // Maybe every `FakeFile` could hold it's own `oneshot` channel, read more about this on the
-    // `common` module above `XHook` structs.
-    file_handler: FileHandler,
-
-    /// Handles the DNS lookup response we get from the agent, see
-    /// `getaddrinfo`.
-    ///
-    /// Unlike most of the other [`DaemonMessage`] handlers, this message is handled directly in
-    /// `handle_daemon_message`.
-    ///
-    /// These are a list of [`oneshot::Sender`](tokio::sync::oneshot::Sender) channels containing
-    /// the [`RemoteResult`](mirrord_protocol::codec::RemoteResult)s of the [`DnsLookup`] operation
-    /// from the agent.
-    getaddrinfo_handler_queue: VecDeque<ResponseChannel<DnsLookup>>,
-
-    /// Handler to the TCP stealer operations, see [`UdpOutgoingHandler`].
-    pub tcp_steal_handler: TcpStealHandler,
-
-    /// Receives responses in the layer loop to be forwarded to the agent.
-    ///
-    /// Part of the stealer HTTP traffic feature, see `http`.
-    pub http_response_receiver: Receiver<HttpResponseFallback>,
-
-    /// Sets the way we handle [`HookMessage::Tcp`] in `handle_hook_message`:
-    ///
-    /// - `true`: uses `tcp_steal_handler`;
-    /// - `false`: uses `tcp_mirror_handler`.
-    steal: bool,
-}
-
-impl Layer {
-    fn new(
-        tx: Sender<ClientMessage>,
-        rx: Receiver<DaemonMessage>,
-        incoming: IncomingConfig,
-    ) -> Layer {
-        // TODO: buffer size?
-        let (http_response_sender, http_response_receiver) = channel(1024);
-        let steal = incoming.is_steal();
-        let IncomingConfig {
-            http_header_filter,
-            http_filter,
-            port_mapping,
-            ..
-        } = incoming;
-
-        Self {
-            tx,
-            rx,
-            tcp_mirror_handler: TcpMirrorHandler::new(port_mapping.clone()),
-            tcp_outgoing_handler: TcpOutgoingHandler::default(),
-            udp_outgoing_handler: Default::default(),
-            file_handler: FileHandler::default(),
-            getaddrinfo_handler_queue: VecDeque::new(),
-            tcp_steal_handler: TcpStealHandler::new(
-                http_response_sender,
-                port_mapping,
-                (http_filter, http_header_filter).into(),
-            ),
-            http_response_receiver,
-            steal,
-        }
-    }
-
-    /// Sends a [`ClientMessage`] through `Layer::tx` to the [`Receiver`] in
-    /// [`wrap_raw_connection`](mirrord_kube::api::wrap_raw_connection).
-    async fn send(&mut self, msg: ClientMessage) -> Result<(), ClientMessage> {
-        self.tx.send(msg).await.map_err(|err| err.0)
-    }
-
-    /// Passes most of the [`HookMessage`]s to their appropriate handlers, together with the
-    /// `Layer::tx` channel.
-    ///
-    /// ## Special case
-    ///
-    /// The [`HookMessage::GetAddrInfo`] message is dealt with here, we convert it to a
-    /// [`ClientMessage::GetAddrInfoRequest`], and send it with [`Self::send`].
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn handle_hook_message(&mut self, hook_message: HookMessage) {
-        match hook_message {
-            HookMessage::Tcp(message) => {
-                if self.steal {
-                    self.tcp_steal_handler
-                        .handle_hook_message(message, &self.tx)
-                        .await
-                        .unwrap();
-                } else {
-                    self.tcp_mirror_handler
-                        .handle_hook_message(message, &self.tx)
-                        .await
-                        .unwrap();
-                }
-            }
-            HookMessage::File(message) => {
-                self.file_handler
-                    .handle_hook_message(message, &self.tx)
-                    .await
-                    .unwrap();
-            }
-            HookMessage::GetAddrinfo(GetAddrInfo {
-                node,
-                hook_channel_tx,
-            }) => {
-                self.getaddrinfo_handler_queue.push_back(hook_channel_tx);
-                let request = ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node });
-
-                self.send(request).await.unwrap();
-            }
-            HookMessage::TcpOutgoing(message) => self
-                .tcp_outgoing_handler
-                .handle_hook_message(message, &self.tx)
-                .await
-                .unwrap(),
-            HookMessage::UdpOutgoing(message) => self
-                .udp_outgoing_handler
-                .handle_hook_message(message, &self.tx)
-                .await
-                .unwrap(),
-        }
-    }
-
-    /// Passes most of the [`DaemonMessage`]s to their appropriate handlers.
-    ///
-    /// ## Special case
-    ///
-    /// ### [`DaemonMessage::GetEnvVarsResponse`] and [`DaemonMessage::PauseTarget`]
-    ///
-    /// Handled during mirrord-layer initialization, this message should never make it this far.
-    ///
-    /// ### [`DaemonMessage::GetAddrInfoResponse`]
-    ///
-    /// Also (somewhat) dealt with here, as there is no dedicated handler for it. We just pass the
-    /// response along in one of the feature's channels from
-    /// `Self::getaddrinfo_handler_queue`.
-    ///
-    /// ### [`DaemonMessage::LogMessage`]
-    ///
-    /// This message is handled in protocol level `wrap_raw_connection`.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn handle_daemon_message(&mut self, daemon_message: DaemonMessage) -> Result<()> {
-        match daemon_message {
-            DaemonMessage::Tcp(message) => {
-                self.tcp_mirror_handler.handle_daemon_message(message).await
-            }
-            DaemonMessage::TcpSteal(message) => {
-                self.tcp_steal_handler.handle_daemon_message(message).await
-            }
-            DaemonMessage::File(message) => self.file_handler.handle_daemon_message(message).await,
-            DaemonMessage::TcpOutgoing(message) => {
-                self.tcp_outgoing_handler
-                    .handle_daemon_message(message)
-                    .await
-            }
-            DaemonMessage::UdpOutgoing(message) => {
-                self.udp_outgoing_handler
-                    .handle_daemon_message(message)
-                    .await
-            }
-            DaemonMessage::Pong => {
-                warn!(
-                    "Received pong from agent - internal proxy should handle it, please report it."
-                );
-                Ok(())
-            }
-            DaemonMessage::GetEnvVarsResponse(_) => {
-                unreachable!("We get env vars only on initialization right now, shouldn't happen")
-            }
-            DaemonMessage::GetAddrInfoResponse(get_addr_info) => self
-                .getaddrinfo_handler_queue
-                .pop_front()
-                .ok_or(LayerError::SendErrorGetAddrInfoResponse)?
-                .send(get_addr_info.0)
-                .map_err(|_| LayerError::SendErrorGetAddrInfoResponse),
-            DaemonMessage::Close(error_message) => Err(LayerError::AgentErrorClosed(error_message)),
-            DaemonMessage::LogMessage(_) => Ok(()),
-            DaemonMessage::PauseTarget(_) => {
-                unreachable!("We set pausing target only on initialization, shouldn't happen")
-            }
-            DaemonMessage::SwitchProtocolVersionResponse(protocol_version) => {
-                if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
-                    if let Err(err) = self.tx.send(ClientMessage::ReadyForLogs).await {
-                        warn!("Unable to ready-up for logs: {err}");
-                    }
-                }
-
-                Ok(())
-            }
-        }
-    }
-}
-
-/// Main loop of mirrord-layer.
-///
-/// ## Parameters
-///
-/// - `receiver`: receives the [`HookMessage`]s and pass them along with
-///   `Layer::handle_hook_message`;
-///
-/// - `tx`, `rx`: see `Layer::tx`](link), and [`Layer::rx`;
-///
-/// - `config`: the mirrord-layer configuration, see [`LayerConfig`].
-///
-/// ## Details
-///
-/// We have our big loop here that is initialized in a separate task by [`start_layer_thread`].
-///
-/// In this loop we:
-///
-/// - Pass [`HookMessage`]s to be handled by the [`Layer`];
-///
-/// - Read from the [`Layer`] feature handlers [`Receiver`]s, to turn outgoing messages into
-///   [`ClientMessage`]s, sending them with `Layer::send`;
-async fn thread_loop(
-    mut receiver: Receiver<HookMessage>,
-    tx: Sender<ClientMessage>,
-    rx: Receiver<DaemonMessage>,
-    config: LayerConfig,
-) {
-    let LayerConfig {
-        feature:
-            FeatureConfig {
-                network: NetworkConfig { incoming, .. },
-                ..
-            },
-        ..
-    } = config;
-    let mut layer = Layer::new(tx, rx, incoming);
-
-    if let Err(err) = layer
-        .tx
-        .send(ClientMessage::SwitchProtocolVersion(
-            mirrord_protocol::VERSION.clone(),
-        ))
-        .await
-    {
-        warn!("Unable to switch protocol: {err}");
-    }
-
-    loop {
-        select! {
-            hook_message = receiver.recv() => {
-                layer.handle_hook_message(hook_message.unwrap()).await;
-            }
-            Some(tcp_outgoing_message) = layer.tcp_outgoing_handler.recv() => {
-                if let Err(fail) =
-                    layer.send(ClientMessage::TcpOutgoing(tcp_outgoing_message)).await {
-                        error!("Error sending client message: {:#?}", fail);
-                        break;
-                    }
-            }
-            Some(udp_outgoing_message) = layer.udp_outgoing_handler.recv() => {
-                if let Err(fail) =
-                    layer.send(ClientMessage::UdpOutgoing(udp_outgoing_message)).await {
-                        error!("Error sending client message: {:#?}", fail);
-                        break;
-                    }
-            }
-            daemon_message = layer.rx.recv() => {
-                match daemon_message {
-                    Some(message) => {
-                        match layer.handle_daemon_message(message).await {
-                            Err(LayerError::SendErrorConnection(_)) => {
-                                info!("Connection closed by agent");
-                                continue;
-                            }
-                            Err(LayerError::AppClosedConnection(connection_unsubscribe)) => {
-                                layer.send(connection_unsubscribe).await.unwrap();
-                            }
-                            Err(err) => {
-                                error!("Error handling daemon message: {:?}", err);
-                                break;
-                            }
-                            Ok(()) => {}
-                        }
-                    },
-                    None => {
-                        error!("agent connection lost");
-                        break;
-                    }
-                }
-            },
-            Some(message) = layer.tcp_steal_handler.next() => {
-                layer.send(message).await.unwrap();
-            }
-            Some(response) = layer.http_response_receiver.recv() => {
-                let message = match response {
-                    HttpResponseFallback::Framed(res) => ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(res)),
-                    HttpResponseFallback::Fallback(res) => ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(res))
-                };
-
-                layer.send(message).await.unwrap();
-            }
-        }
-    }
-    graceful_exit!("mirrord has encountered an error and is now exiting.");
-}
-
-/// Initializes mirrord-layer's [`thread_loop`] in a separate [`tokio::task`].
-#[tracing::instrument(level = "trace", skip(tx, rx, receiver))]
-fn start_layer_thread(
-    tx: Sender<ClientMessage>,
-    rx: Receiver<DaemonMessage>,
-    receiver: Receiver<HookMessage>,
-    config: LayerConfig,
-    runtime: Runtime,
-) {
-    std::thread::spawn(move || {
-        let _guard = DetourGuard::new();
-        runtime.block_on(thread_loop(receiver, tx, rx, config));
-        runtime.block_on(async move {
-            // wait for background tasks to finish
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        });
-    });
 }
 
 /// Prepares the [`HookManager`] and [`replace!`]s [`libc`] calls with our hooks, according to what
@@ -981,19 +432,12 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
 /// Removes the `fd` key from either [`SOCKETS`] or [`OPEN_FILES`].
 /// **DON'T ADD LOGS HERE SINCE CALLER MIGHT CLOSE STDOUT/STDERR CAUSING THIS TO CRASH**
 pub(crate) fn close_layer_fd(fd: c_int) {
-    let file_mode_active = FILE_MODE
-        .get()
-        .expect("Should be set during initialization!")
-        .is_active();
-
-    // Remove from sockets, also removing the `ConnectionQueue` associated with the socket.
+    // Remove from sockets.
     if let Some((_, socket)) = SOCKETS.remove(&fd) {
-        CONNECTION_QUEUE.remove(socket.id);
-
         // Closed file is a socket, so if it's already bound to a port - notify agent to stop
         // mirroring/stealing that port.
         socket.close();
-    } else if file_mode_active {
+    } else if setup().fs_config().is_active() {
         OPEN_FILES.remove(&fd);
     }
 }
@@ -1020,14 +464,37 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 /// on macOS, be wary what we do in this path as we might trigger https://github.com/metalbear-co/mirrord/issues/1745
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
-    debug!("Process {} forking!.", std::process::id());
+    tracing::debug!("Process {} forking!.", std::process::id());
+
+    let parent_connection = PROXY_CONNECTION.get().expect("PROXY_CONNECTION not set");
+
+    // After fork, this new connection lives both in the parent and in the child.
+    // The child will have access to cloned file descriptor of the underlying socket.
+    // The parent will close its descriptor at the end of this scope.
+    let new_connection = ProxyConnection::new(
+        parent_connection.proxy_addr(),
+        NewSessionRequest::Forked(parent_connection.layer_id()),
+        Duration::from_secs(5),
+    )
+    .expect("failed to establish proxy connection for child");
+
     let res = FN_FORK();
-    if res == 0 {
-        debug!("Child process initializing layer.");
-        mirrord_layer_entry_point()
-    } else {
-        debug!("Child process id is {res}.");
+
+    match res.cmp(&0) {
+        Ordering::Equal => {
+            tracing::debug!("Child process initializing layer.");
+
+            PROXY_CONNECTION.take();
+            PROXY_CONNECTION
+                .set(new_connection)
+                .expect("setting PROXY_CONNECTION");
+
+            mirrord_layer_entry_point()
+        }
+        Ordering::Greater => tracing::debug!("Child process id is {res}."),
+        Ordering::Less => tracing::debug!("fork failed"),
     }
+
     res
 }
 

@@ -40,8 +40,8 @@ async fn skip_based_on_exec_name(dylib_path: &PathBuf) {
         .unwrap()
         .to_string();
 
-    let (mut test_process, _listener) = symlinked_app
-        .get_test_process_and_listener(dylib_path, vec![("MIRRORD_SKIP_PROCESSES", &ignore)], None)
+    let (mut test_process, _intproxy) = symlinked_app
+        .start_process_with_layer(dylib_path, vec![("MIRRORD_SKIP_PROCESSES", &ignore)], None)
         .await;
 
     test_process.wait_assert_success().await;
@@ -62,8 +62,8 @@ async fn skip_based_on_invocation_name(dylib_path: &PathBuf) {
         .unwrap()
         .to_string();
 
-    let (mut test_process, _listener) = symlinked_app
-        .get_test_process_and_listener(dylib_path, vec![("MIRRORD_SKIP_PROCESSES", &ignore)], None)
+    let (mut test_process, _intproxy) = symlinked_app
+        .start_process_with_layer(dylib_path, vec![("MIRRORD_SKIP_PROCESSES", &ignore)], None)
         .await;
 
     test_process.wait_assert_success().await;
@@ -77,12 +77,12 @@ async fn dont_skip(dylib_path: &PathBuf) {
     let app = Application::OpenFile;
     let symlinked_app = symlink_app(&app).await;
 
-    let (mut test_process, listener) = symlinked_app
-        .get_test_process_and_listener(dylib_path, vec![], None)
+    let (mut test_process, mut intproxy) = symlinked_app
+        .start_process_with_layer(dylib_path, vec![], None)
         .await;
 
-    let mut conn = LayerConnection::get_initialized_connection(&listener).await;
-    conn.expect_file_open_for_reading("/etc/resolv.conf", 5)
+    intproxy
+        .expect_file_open_for_reading("/etc/resolv.conf", 5)
         .await;
 
     test_process.wait_assert_success().await;

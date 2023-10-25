@@ -34,6 +34,7 @@ async fn main() {
         .nth(1)
         .unwrap_or_else(|| DEFAULT_SOCKET_ADDRESS.to_string());
 
+    let _ = std::fs::remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path).unwrap();
 
     let server_handle = tokio::spawn(server(listener));

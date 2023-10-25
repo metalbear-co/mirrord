@@ -111,7 +111,7 @@ impl ExecutableName {
             #[cfg(target_os = "macos")]
             if sip::is_sip_only(self) {
                 trace!("Loading into process: {self}, but only hooking exec/spawn.");
-                return LoadType::SIPOnly;
+                return LoadType::SIPOnly(Box::new(config));
             }
 
             trace!("Not loading into process: {self}.");
@@ -149,7 +149,7 @@ pub enum LoadType {
     Full(Box<LayerConfig>),
     /// Only load sip patch required hooks
     #[cfg(target_os = "macos")]
-    SIPOnly,
+    SIPOnly(Box<LayerConfig>),
 
     /// Skip on current process
     Skip,

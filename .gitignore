@@ -1,6 +1,8 @@
 out
 dist
 node_modules
+package-lock.json
+package.json
 __pycache__
 .vscode-test/
 *.vsix

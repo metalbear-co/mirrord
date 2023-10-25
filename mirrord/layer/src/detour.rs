@@ -212,6 +212,7 @@ pub(crate) enum Bypass {
 /// Conversion from `Option`:
 /// - `Option::Some` -> `Detour::Success`
 /// - `Option::None` -> `Detour::Bypass`
+#[must_use = "this `Detour` may be an `Error` or a `Bypass` variant, which should be handled"]
 #[derive(Debug)]
 pub(crate) enum Detour<S = ()> {
     /// Equivalent to `Result::Ok`

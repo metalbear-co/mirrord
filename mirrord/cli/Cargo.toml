@@ -24,6 +24,7 @@ mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
 mirrord-console = { path = "../console" }
 mirrord-analytics = { path = "../analytics" }
+mirrord-intproxy = { path = "../intproxy" }
 
 actix-codec.workspace = true
 clap.workspace = true

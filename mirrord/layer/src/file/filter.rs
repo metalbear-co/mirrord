@@ -1,12 +1,12 @@
-/// Controls which files are ignored (open local) by mirrord file operations.
+/// Controls which files are ignored (opened locally) by mirrord file operations.
 ///
-/// There are 3 ways of setting this up:
+/// There are 2 ways of setting this up:
 ///
 /// 1. no configuration (default): will bypass file operations for file paths and types that
 /// match [`generate_local_set`];
 ///
 /// 2. Using the overrides for `read_only`, `read_write` and `local`.
-use std::{env, sync::OnceLock};
+use std::env;
 
 use mirrord_config::{
     feature::fs::{FsConfig, FsModeConfig},
@@ -65,11 +65,8 @@ fn generate_not_found_set() -> RegexSet {
         .expect("Building not found path regex set failed")
 }
 
-/// Global filter used by file operations to bypass (use local) or continue (use remote).
-pub(crate) static FILE_FILTER: OnceLock<FileFilter> = OnceLock::new();
-
 #[derive(Debug)]
-pub(crate) struct FileFilter {
+pub struct FileFilter {
     read_only: RegexSet,
     read_write: RegexSet,
     local: RegexSet,
@@ -94,7 +91,7 @@ impl FileFilter {
     /// behavior, if not, it checks if the path matches the default exclude list.
     /// If not, it does the default behavior set by user (default is read only remote).
     #[tracing::instrument(level = "trace")]
-    pub(crate) fn new(fs_config: FsConfig) -> Self {
+    pub fn new(fs_config: FsConfig) -> Self {
         let FsConfig {
             read_write,
             read_only,
@@ -131,7 +128,7 @@ impl FileFilter {
     /// and the whether the path is queried for write converting the result a `Detour`.
     ///
     /// `op` is used to lazily initialize a `Bypass` case.
-    pub(crate) fn continue_or_bypass_with<F>(&self, text: &str, write: bool, op: F) -> Detour<()>
+    pub fn continue_or_bypass_with<F>(&self, text: &str, write: bool, op: F) -> Detour<()>
     where
         F: FnOnce() -> Bypass,
     {

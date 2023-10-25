@@ -2,8 +2,11 @@ use alloc::ffi::CString;
 use core::{ffi::CStr, mem};
 use std::{
     io,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    os::unix::io::RawFd,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
+    os::{
+        fd::{FromRawFd, IntoRawFd},
+        unix::io::RawFd,
+    },
     path::PathBuf,
     ptr,
     sync::{Arc, OnceLock},
@@ -11,34 +14,30 @@ use std::{
 
 use libc::{c_int, c_void, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::IncomingMode;
+use mirrord_intproxy::protocol::{
+    ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
+    OutgoingConnectResponse, PortSubscribe,
+};
 use mirrord_protocol::{
-    dns::LookupRecord,
+    dns::{GetAddrInfoRequest, LookupRecord},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
 use socket2::SockAddr;
-use tokio::sync::oneshot;
 use tracing::{error, info, trace};
 
 use super::{hooks::*, *};
 use crate::{
-    common::{blocking_send_hook_message, HookMessage},
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
-    dns::GetAddrInfo,
     error::HookError,
     file::{self, OPEN_FILES},
-    is_debugger_port,
-    outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing, Connect, RemoteConnection},
-    tcp::{Listen, TcpIncoming},
-    ENABLED_TCP_OUTGOING, ENABLED_UDP_OUTGOING, INCOMING_CONFIG, LISTEN_PORTS,
-    OUTGOING_IGNORE_LOCALHOST, OUTGOING_SELECTOR, REMOTE_UNIX_STREAMS, TARGETLESS,
 };
 
-/// Holds the pair of [`SocketAddr`] with their hostnames, resolved remotely through
+/// Holds the pair of [`IpAddr`] with their hostnames, resolved remotely through
 /// [`getaddrinfo`].
 ///
 /// Used by [`connect_outgoing`] to retrieve the hostname from the address that the user called
 /// [`connect`] with, so we can resolve it locally when neccessary.
-pub(super) static REMOTE_DNS_REVERSE_MAPPING: LazyLock<DashMap<SocketAddr, String>> =
+pub(super) static REMOTE_DNS_REVERSE_MAPPING: LazyLock<DashMap<IpAddr, String>> =
     LazyLock::new(|| DashMap::with_capacity(8));
 
 /// Hostname initialized from the agent with [`gethostname`].
@@ -149,9 +148,7 @@ pub(super) fn bind(
 ) -> Detour<i32> {
     let requested_address = SocketAddr::try_from_raw(raw_address, address_length)?;
     let requested_port = requested_address.port();
-    let incoming_config = INCOMING_CONFIG
-        .get()
-        .expect("`INCOMING_CONFIG` not set. Please report a bug");
+    let incoming_config = crate::setup().incoming_config();
 
     let ignore_localhost = incoming_config.ignore_localhost;
 
@@ -176,7 +173,7 @@ pub(super) fn bind(
 
     // To handle #1458, we don't ignore port `0` for UDP.
     if (is_ignored_port(&requested_address) && matches!(socket.kind, SocketKind::Tcp(_)))
-        || is_debugger_port(&requested_address)
+        || crate::setup().is_debugger_port(&requested_address)
         || incoming_config.ignore_ports.contains(&requested_port)
     {
         Err(Bypass::Port(requested_address.port()))?;
@@ -198,9 +195,9 @@ pub(super) fn bind(
     // try to bind the requested port, if not available get a random port
     // if there's configuration and binding fails with the requested port
     // we return address not available and not fallback to a random port.
-    let listen_port = LISTEN_PORTS
-        .get()
-        .expect("`LISTEN_PORTS` not set. Please report a bug")
+    let listen_port = crate::setup()
+        .incoming_config()
+        .listen_ports
         .get_by_left(&requested_address.port())
         .cloned();
 
@@ -256,19 +253,12 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
             .map(|(_, socket)| socket)
             .bypass(Bypass::LocalFdNotFound(sockfd))?
     };
-    let incoming = INCOMING_CONFIG
-        .get()
-        .expect("`INCOMING_CONFIG` not set. Please report a bug");
 
-    if matches!(incoming.mode, IncomingMode::Off) {
+    if matches!(crate::setup().incoming_config().mode, IncomingMode::Off) {
         return Detour::Bypass(Bypass::DisabledIncoming);
     }
 
-    if TARGETLESS
-        .get()
-        .copied()
-        .expect("Should be set during initialization!")
-    {
+    if crate::setup().targetless() {
         warn!(
             "Listening while running targetless. A targetless agent is not exposed by \
         any service. Therefore, letting this port bind happen locally instead of on the \
@@ -276,6 +266,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
         );
         return Detour::Bypass(Bypass::BindWhenTargetless);
     }
+
     match socket.state {
         SocketState::Bound(Bound {
             requested_address,
@@ -283,17 +274,22 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
         }) => {
             let listen_result = unsafe { FN_LISTEN(sockfd, backlog) };
             if listen_result != 0 {
+                let error = io::Error::last_os_error();
+
                 error!("listen -> Failed `listen` sockfd {:#?}", sockfd);
 
-                Err(io::Error::last_os_error())?
+                Err(error)?
             }
 
-            blocking_send_hook_message(HookMessage::Tcp(TcpIncoming::Listen(Listen {
-                mirror_port: address.port(),
-                requested_port: requested_address.port(),
-                ipv6: address.is_ipv6(),
-                id: socket.id,
-            })))?;
+            common::make_proxy_request_with_response(PortSubscribe {
+                listening_on: address,
+                subscription: crate::setup()
+                    .incoming_mode()
+                    .subscription(requested_address.port()),
+            })??;
+
+            // this log message is expected by some E2E tests
+            tracing::debug!("daemon subscribed port {}", requested_address.port());
 
             Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(Bound {
                 requested_address,
@@ -315,40 +311,32 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
 /// This returns errno so we can restore the correct errno in case result is -1 (until we get
 /// back to the hook we might call functions that will corrupt errno)
 #[tracing::instrument(level = "trace", ret)]
-fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
+fn connect_outgoing<const CALL_CONNECT: bool>(
     sockfd: RawFd,
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
+    protocol: NetProtocol,
 ) -> Detour<ConnectResult> {
     // Closure that performs the connection with mirrord messaging.
     let remote_connection = |remote_address: SockAddr| {
         // Prepare this socket to be intercepted.
-        let (mirror_tx, mirror_rx) = oneshot::channel();
+        let remote_address = SocketAddress::try_from(remote_address).unwrap();
 
-        let connect = Connect {
+        let request = OutgoingConnectRequest {
             remote_address: remote_address.clone(),
-            channel_tx: mirror_tx,
+            protocol,
         };
+        let response = common::make_proxy_request_with_response(request)??;
 
-        let hook_message = match PROTOCOL {
-            TCP => {
-                let connect_hook = TcpOutgoing::Connect(connect);
-                HookMessage::TcpOutgoing(connect_hook)
-            }
-            UDP => {
-                let connect_hook = UdpOutgoing::Connect(connect);
-                HookMessage::UdpOutgoing(connect_hook)
-            }
-        };
-
-        blocking_send_hook_message(hook_message)?;
-        let RemoteConnection {
+        let OutgoingConnectResponse {
             layer_address,
-            user_app_address,
-        } = mirror_rx.blocking_recv()??;
+            in_cluster_address,
+        } = response;
 
         // Connect to the interceptor socket that is listening.
         let connect_result: ConnectResult = if CALL_CONNECT {
+            let layer_address = SockAddr::try_from(layer_address.clone())?;
+
             unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
         } else {
             ConnectResult {
@@ -366,9 +354,9 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
         }
 
         let connected = Connected {
-            remote_address: remote_address.try_into()?,
-            local_address: user_app_address.try_into()?,
-            layer_address: Some(layer_address.try_into()?),
+            remote_address,
+            local_address: in_cluster_address,
+            layer_address: Some(layer_address),
         };
 
         trace!("we are connected {connected:#?}");
@@ -386,9 +374,9 @@ fn connect_outgoing<const PROTOCOL: ConnectProtocol, const CALL_CONNECT: bool>(
         // Can't just connect to whatever `remote_address` is, as it might be a remotely resolved
         // address, in a local connection context (or vice-versa), so we let `remote_connection`
         // handle this address trickery.
-        match OUTGOING_SELECTOR
-            .get()?
-            .get_connection_through::<PROTOCOL>(remote_address.as_socket()?)?
+        match crate::setup()
+            .outgoing_selector()
+            .get_connection_through(remote_address.as_socket()?, protocol)?
         {
             ConnectionThrough::Remote(addr) => {
                 let connect_result = remote_connection(SockAddr::from(addr))?;
@@ -417,12 +405,7 @@ fn connect_to_local_address(
     user_socket_info: &UserSocket,
     ip_address: SocketAddr,
 ) -> Detour<Option<ConnectResult>> {
-    let ignore_localhost = OUTGOING_IGNORE_LOCALHOST
-        .get()
-        .copied()
-        .expect("Should be set during initialization!");
-
-    if ignore_localhost {
+    if crate::setup().outgoing_config().ignore_localhost {
         Detour::Bypass(Bypass::IgnoreLocalhost(ip_address.port()))
     } else {
         Detour::Success(
@@ -474,9 +457,7 @@ pub(super) fn connect(
     let remote_address = SockAddr::try_from_raw(raw_address, address_length)?;
     let optional_ip_address = remote_address.as_socket();
 
-    let unix_streams = REMOTE_UNIX_STREAMS
-        .get()
-        .expect("Should be set during initialization!");
+    let unix_streams = crate::setup().remote_unix_streams();
 
     info!("in connect {:#?}", SOCKETS);
 
@@ -496,7 +477,7 @@ pub(super) fn connect(
             }
         }
 
-        if is_ignored_port(&ip_address) || is_debugger_port(&ip_address) {
+        if is_ignored_port(&ip_address) || crate::setup().is_debugger_port(&ip_address) {
             return Detour::Bypass(Bypass::Port(ip_address.port()));
         }
     } else if remote_address.is_unix() {
@@ -508,11 +489,11 @@ pub(super) fn connect(
                 .map(String::from_utf8_lossy))
             .map(String::from);
 
-        if !address.as_ref().is_some_and(|address_name| {
-            unix_streams
-                .as_ref()
-                .is_some_and(|regex_set| regex_set.is_match(address_name))
-        }) {
+        let handle_remotely = address
+            .as_ref()
+            .map(|addr| unix_streams.is_match(addr))
+            .unwrap_or(false);
+        if !handle_remotely {
             return Detour::Bypass(Bypass::UnixSocket(address));
         }
     } else {
@@ -520,30 +501,30 @@ pub(super) fn connect(
         return Detour::Bypass(Bypass::Domain(remote_address.domain().into()));
     }
 
-    let enabled_tcp_outgoing = ENABLED_TCP_OUTGOING
-        .get()
-        .copied()
-        .expect("Should be set during initialization!");
+    let enabled_tcp_outgoing = crate::setup().outgoing_config().tcp;
+    let enabled_udp_outgoing = crate::setup().outgoing_config().udp;
 
-    let enabled_udp_outgoing = ENABLED_UDP_OUTGOING
-        .get()
-        .copied()
-        .expect("Should be set during initialization!");
+    match NetProtocol::from(user_socket_info.kind) {
+        NetProtocol::Datagrams if enabled_udp_outgoing => connect_outgoing::<true>(
+            sockfd,
+            remote_address,
+            user_socket_info,
+            NetProtocol::Datagrams,
+        ),
 
-    match user_socket_info.kind {
-        SocketKind::Udp(_) if enabled_udp_outgoing => {
-            connect_outgoing::<UDP, true>(sockfd, remote_address, user_socket_info)
-        }
-        SocketKind::Tcp(_) => match user_socket_info.state {
+        NetProtocol::Stream => match user_socket_info.state {
             SocketState::Initialized
                 if (optional_ip_address.is_some() && enabled_tcp_outgoing)
-                    || (remote_address.is_unix()
-                        && unix_streams
-                            .as_ref()
-                            .is_some_and(|streams| !streams.is_empty())) =>
+                    || (remote_address.is_unix() && !unix_streams.is_empty()) =>
             {
-                connect_outgoing::<TCP, true>(sockfd, remote_address, user_socket_info)
+                connect_outgoing::<true>(
+                    sockfd,
+                    remote_address,
+                    user_socket_info,
+                    NetProtocol::Stream,
+                )
             }
+
             SocketState::Bound(Bound { address, .. }) => {
                 trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
 
@@ -561,8 +542,10 @@ pub(super) fn connect(
                     Detour::Bypass(Bypass::MirrorConnect)
                 }
             }
+
             _ => Detour::Bypass(Bypass::DisabledOutgoing),
         },
+
         _ => Detour::Bypass(Bypass::DisabledOutgoing),
     }
 }
@@ -645,38 +628,49 @@ pub(super) fn accept(
     address_len: *mut socklen_t,
     new_fd: RawFd,
 ) -> Detour<RawFd> {
-    let (id, domain, protocol, type_) = {
+    let (domain, protocol, type_, port, listener_address) = {
         SOCKETS
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
-                SocketState::Listening(_) => {
-                    Detour::Success((socket.id, socket.domain, socket.protocol, socket.type_))
-                }
+                SocketState::Listening(Bound {
+                    requested_address,
+                    address,
+                }) => Detour::Success((
+                    socket.domain,
+                    socket.protocol,
+                    socket.type_,
+                    requested_address.port(),
+                    *address,
+                )),
                 _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
             })?
     };
 
-    let (local_address, remote_address) = {
-        CONNECTION_QUEUE
-            .pop_front(id)
-            .bypass(Bypass::LocalFdNotFound(sockfd))
-            .map(|socket| {
-                (
-                    SocketAddress::Ip(socket.local_address),
-                    SocketAddress::Ip(socket.remote_address),
-                )
-            })?
+    let peer_address = {
+        let stream = unsafe { TcpStream::from_raw_fd(new_fd) };
+        let peer_address = stream.peer_addr();
+        let _fd = stream.into_raw_fd();
+        peer_address?
     };
 
-    let state = SocketState::Connected(Connected {
-        remote_address: remote_address.clone(),
+    let ConnMetadataResponse {
+        remote_source,
         local_address,
+    } = common::make_proxy_request_with_response(ConnMetadataRequest {
+        listener_address,
+        peer_address,
+    })?;
+
+    let state = SocketState::Connected(Connected {
+        remote_address: remote_source.into(),
+        local_address: SocketAddr::new(local_address, port).into(),
         layer_address: None,
     });
+
     let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into()?);
 
-    fill_address(address, address_len, remote_address.try_into()?)?;
+    fill_address(address, address_len, remote_source.into())?;
 
     SOCKETS.insert(new_fd, Arc::new(new_socket));
 
@@ -726,23 +720,12 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
 /// Handles the remote communication part of [`getaddrinfo`], call this if you want to resolve a DNS
 /// through the agent, but don't need to deal with all the [`libc::getaddrinfo`] stuff.
 #[tracing::instrument(level = "trace", ret)]
-pub(super) fn remote_getaddrinfo(
-    node: String,
-    service: u16,
-) -> HookResult<Vec<(String, SocketAddr)>> {
-    let (hook_channel_tx, hook_channel_rx) = oneshot::channel();
-    let hook = GetAddrInfo {
-        node,
-        hook_channel_tx,
-    };
-
-    blocking_send_hook_message(HookMessage::GetAddrinfo(hook))?;
-
-    let addr_info_list = hook_channel_rx.blocking_recv()??;
+pub(super) fn remote_getaddrinfo(node: String) -> HookResult<Vec<(String, IpAddr)>> {
+    let addr_info_list = common::make_proxy_request_with_response(GetAddrInfoRequest { node })?.0?;
 
     Ok(addr_info_list
         .into_iter()
-        .map(|LookupRecord { name, ip }| (name, SocketAddr::from((ip, service))))
+        .map(|LookupRecord { name, ip }| (name, ip))
         .collect())
 }
 
@@ -804,7 +787,7 @@ pub(super) fn getaddrinfo(
     let service = service.map_or(0, |s| s.parse().unwrap_or_default());
 
     // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
-    let result = remote_getaddrinfo(node.clone(), service)?
+    let result = remote_getaddrinfo(node.clone())?
         .into_iter()
         .map(|(name, address)| {
             // Cache the resolved hosts to use in the outgoing traffic filter.
@@ -812,7 +795,7 @@ pub(super) fn getaddrinfo(
                 let _ = REMOTE_DNS_REVERSE_MAPPING.insert(address, node.clone());
             }
 
-            let rawish_sock_addr = SockAddr::from(address);
+            let rawish_sock_addr = SockAddr::from(SocketAddr::new(address, service));
             let ai_addrlen = rawish_sock_addr.len();
             let ai_family = rawish_sock_addr.family() as _;
 
@@ -1049,7 +1032,12 @@ pub(super) fn send_to(
             )
         }
     } else {
-        connect_outgoing::<UDP, false>(sockfd, destination, user_socket_info)?;
+        connect_outgoing::<false>(
+            sockfd,
+            destination,
+            user_socket_info,
+            NetProtocol::Datagrams,
+        )?;
 
         let layer_address: SockAddr = SOCKETS
             .get(&sockfd)
@@ -1124,7 +1112,12 @@ pub(super) fn sendmsg(
 
         unsafe { FN_SENDMSG(sockfd, true_message_header.as_ref(), flags) }
     } else {
-        connect_outgoing::<UDP, false>(sockfd, destination, user_socket_info)?;
+        connect_outgoing::<false>(
+            sockfd,
+            destination,
+            user_socket_info,
+            NetProtocol::Datagrams,
+        )?;
 
         let layer_address: SockAddr = SOCKETS
             .get(&sockfd)

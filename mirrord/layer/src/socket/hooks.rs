@@ -163,7 +163,12 @@ pub(super) unsafe extern "C" fn _accept_nocancel_detour(
     address_len: *mut socklen_t,
 ) -> c_int {
     let accept_result = FN__ACCEPT_NOCANCEL(sockfd, address, address_len);
-    accept(sockfd, address, address_len, accept_result).unwrap_or_bypass(accept_result)
+
+    if accept_result == -1 {
+        accept_result
+    } else {
+        accept(sockfd, address, address_len, accept_result).unwrap_or_bypass(accept_result)
+    }
 }
 
 /// <https://github.com/metalbear-co/mirrord/issues/184>

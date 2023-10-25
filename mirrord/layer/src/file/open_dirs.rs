@@ -7,12 +7,11 @@ use std::{
 };
 
 use dashmap::DashMap;
-use mirrord_protocol::file::{DirEntryInternal, ReadDirResponse};
-use tokio::sync::oneshot;
+use mirrord_protocol::file::{CloseDirRequest, DirEntryInternal, ReadDirRequest, ReadDirResponse};
 
-use super::{CloseDir, DirStreamFd, FileOperation, ReadDir, RemoteFd};
+use super::{DirStreamFd, RemoteFd};
 use crate::{
-    common::{blocking_send_hook_message, HookMessage},
+    common,
     detour::{Bypass, Detour},
     error::HookError,
 };
@@ -129,11 +128,10 @@ impl OpenDirs {
 
         let mut guard = dir.lock().expect("lock poisoned");
         guard.closed = true;
-        let requesting_dir = CloseDir {
-            fd: guard.remote_fd,
-        };
 
-        blocking_send_hook_message(HookMessage::File(FileOperation::CloseDir(requesting_dir)))?;
+        common::make_proxy_request_no_response(CloseDirRequest {
+            remote_fd: guard.remote_fd,
+        })?;
 
         Detour::Success(0)
     }
@@ -191,16 +189,10 @@ impl OpenDir {
             return Detour::Bypass(Bypass::LocalDirStreamNotFound(self.local_fd));
         }
 
-        let (dir_channel_tx, dir_channel_rx) = oneshot::channel();
-
-        let requesting_dir = ReadDir {
-            remote_fd: self.remote_fd,
-            dir_channel_tx,
-        };
-
-        blocking_send_hook_message(HookMessage::File(FileOperation::ReadDir(requesting_dir)))?;
-
-        let ReadDirResponse { direntry } = dir_channel_rx.blocking_recv()??;
+        let ReadDirResponse { direntry } =
+            common::make_proxy_request_with_response(ReadDirRequest {
+                remote_fd: self.remote_fd,
+            })??;
         Detour::Success(direntry)
     }
 }

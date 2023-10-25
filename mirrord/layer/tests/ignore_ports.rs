@@ -22,7 +22,7 @@ async fn ignore_ports(
 ) {
     let mut config_path = config_dir.clone();
     config_path.push("ignore_ports.json");
-    let (mut test_process, mut layer_connection) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
             vec![("MIRRORD_FILE_MODE", "local")],
@@ -31,7 +31,8 @@ async fn ignore_ports(
         .await;
 
     // Make sure no listen request was made.
-    assert!(layer_connection.is_ended().await);
+    assert_eq!(intproxy.try_recv().await, None,);
+
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
     test_process.assert_no_error_in_stdout().await;

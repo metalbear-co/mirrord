@@ -1,94 +1,50 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{collections::VecDeque, ffi::CStr, path::PathBuf};
+use std::{ffi::CStr, fmt::Debug, path::PathBuf};
 
 use libc::c_char;
-use mirrord_protocol::{file::OpenOptionsInternal, RemoteResult};
+use mirrord_intproxy::protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};
+use mirrord_protocol::file::OpenOptionsInternal;
 #[cfg(target_os = "macos")]
 use mirrord_sip::{MIRRORD_TEMP_BIN_DIR_CANONIC_STRING, MIRRORD_TEMP_BIN_DIR_STRING};
-use tokio::sync::oneshot;
 use tracing::warn;
 
 use crate::{
     detour::{Bypass, Detour},
-    dns::GetAddrInfo,
     error::{HookError, HookResult},
-    file::{FileOperation, OpenOptionsInternalExt},
-    outgoing::{tcp::TcpOutgoing, udp::UdpOutgoing},
-    tcp::TcpIncoming,
-    HOOK_SENDER,
+    file::OpenOptionsInternalExt,
+    PROXY_CONNECTION,
 };
 
-/// Type alias for a queue of responses from the agent, where these responses are [`RemoteResult`]s.
-///
-/// ## Usage
-///
-/// We have no identifiers for the hook requests, so if hook responses were sent asynchronously we
-/// would have no way to match them back to their requests. However, requests are sent out
-/// synchronously, and responses are sent back synchronously, so keeping them in order is how we
-/// maintain our way to match them.
-///
-/// - The usual flow is:
-///
-/// 1. `push_back` the [`oneshot::Sender`] that will be used to produce the [`RemoteResult`];
-///
-/// 2. When the operation gets a response from the agent:
-///     1. `pop_front` to get the [`oneshot::Sender`], then;
-///     2. `Sender::send` the result back to the operation that initiated the request.
-pub(crate) type ResponseDeque<T> = VecDeque<ResponseChannel<T>>;
-
-/// Type alias for the channel that sends a response from the agent.
-///
-/// See [`ResponseDeque`] for usage details.
-pub(crate) type ResponseChannel<T> = oneshot::Sender<RemoteResult<T>>;
-
-/// Sends a [`HookMessage`] through the global [`HOOK_SENDER`] channel.
-///
-/// ## Flow
-///
-/// hook function -> [`HookMessage`] -> [`blocking_send_hook_message`] -> [`ClientMessage`]
-///
-/// ## Usage
-///
-/// - [`file::ops`](crate::file::ops): most of the file operations are blocking, and thus this
-///   function is extensively used there;
-///
-/// - [`socket::ops`](crate::socket::ops): used by some functions that are _blocking-ish_.
-///
-/// [`ClientMessage`]: mirrord_protocol::codec::ClientMessage
-pub(crate) fn blocking_send_hook_message(message: HookMessage) -> HookResult<()> {
+/// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
+/// Blocks until the proxy responds.
+pub fn make_proxy_request_with_response<T>(request: T) -> HookResult<T::Response>
+where
+    T: IsLayerRequestWithResponse + Debug,
+    T::Response: Debug,
+{
     // SAFETY: mutation happens only on initialization.
     unsafe {
-        HOOK_SENDER
+        PROXY_CONNECTION
             .get()
-            .ok_or(HookError::CannotGetHookSender)?
-            .blocking_send(message)
+            .ok_or(HookError::CannotGetProxyConnection)?
+            .make_request_with_response(request)
             .map_err(Into::into)
     }
 }
 
-/// These messages are handled internally by the layer, and become `ClientMessage`s sent to
-/// the agent.
-///
-/// Most hook detours will send a [`HookMessage`] that will be converted to an equivalent
-/// `ClientMessage` after some internal handling is done. Usually this means taking a sender
-/// channel from this message, and pushing it into a [`ResponseDeque`], while taking the other
-/// fields of the message to become a `ClientMessage`.
-#[derive(Debug)]
-pub(crate) enum HookMessage {
-    /// TCP incoming messages originating from a hook, see [`TcpIncoming`].
-    Tcp(TcpIncoming),
-
-    /// TCP outgoing messages originating from a hook, see [`TcpOutgoing`].
-    TcpOutgoing(TcpOutgoing),
-
-    /// UDP outgoing messages originating from a hook, see [`UdpOutgoing`].
-    UdpOutgoing(UdpOutgoing),
-
-    /// File messages originating from a hook, see [`FileOperation`].
-    File(FileOperation),
-
-    /// Message originating from `getaddrinfo`, see [`GetAddrInfo`].
-    GetAddrinfo(GetAddrInfo),
+/// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
+/// Blocks until the request is sent.
+pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
+    request: T,
+) -> HookResult<MessageId> {
+    // SAFETY: mutation happens only on initialization.
+    unsafe {
+        PROXY_CONNECTION
+            .get()
+            .ok_or(HookError::CannotGetProxyConnection)?
+            .make_request_no_response(request)
+            .map_err(Into::into)
+    }
 }
 
 /// Converts raw pointer values `P` to some other type.

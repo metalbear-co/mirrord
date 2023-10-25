@@ -21,7 +21,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, trace};
 
 use crate::{
-    connection::{create_and_connect, AgentConnectInfo, AgentConnection},
+    connection::{create_and_connect, AgentConnection, AGENT_CONNECT_INFO_ENV_KEY},
     error::CliError,
     extract::extract_library,
     Result,
@@ -163,7 +163,7 @@ impl MirrordExecution {
             .stdin(std::process::Stdio::null());
 
         let connect_info = serde_json::to_string(&connect_info)?;
-        proxy_command.env(AgentConnectInfo::env_key(), connect_info);
+        proxy_command.env(AGENT_CONNECT_INFO_ENV_KEY, connect_info);
 
         let mut proxy_process = proxy_command
             .spawn()
