@@ -3803,7 +3803,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy"
-version = "3.72.1"
+version = "3.73.1"
 dependencies = [
  "bincode",
  "bytes",
