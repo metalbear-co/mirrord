@@ -387,7 +387,7 @@ async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
 
 /// Register the email to the waitlist.
 async fn register_to_waitlist(email: EmailAddress) -> Result<()> {
-    const WAITLIST_API: &str = "https://waitlist.metalbear.co/v1/waitlist";
+    const WAITLIST_API: &str = "https://waitlist.metalbear.co/v1/waitlist?source=cli";
     let mut params = HashMap::new();
     params.insert("email", email.to_string());
     reqwest::Client::new()
