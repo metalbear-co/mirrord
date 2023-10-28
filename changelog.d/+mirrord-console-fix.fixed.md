@@ -1,0 +1,1 @@
+Fixed logging using `mirrord-console`.
