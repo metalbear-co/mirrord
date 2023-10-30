@@ -3,6 +3,7 @@ use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
 use self::{env::EnvConfig, fs::FsConfig, network::NetworkConfig};
+use crate::MirrordConfigSource;
 
 pub mod env;
 pub mod fs;
@@ -56,6 +57,7 @@ pub mod network;
 ///       },
 ///       "dns": false
 ///     },
+///     "copy_target": false
 ///   }
 /// }
 /// ```
@@ -76,6 +78,13 @@ pub struct FeatureConfig {
     /// ## feature.network {#feature-network}
     #[config(nested, toggleable)]
     pub network: NetworkConfig,
+
+    /// ## feature.copy_target {#feature-copy-target}
+    /// 
+    /// Creates a new copy of the target. This copy will be used instead of the original target.
+    /// This is feature requires mirrord operator.
+    #[config(env = "MIRRORD_COPY_TARGET_ENABLED", default = false)]
+    pub copy_target: bool,
 }
 
 impl CollectAnalytics for &FeatureConfig {
@@ -83,5 +92,6 @@ impl CollectAnalytics for &FeatureConfig {
         analytics.add("env", &self.env);
         analytics.add("fs", &self.fs);
         analytics.add("network", &self.network);
+        analytics.add("copy_target", self.copy_target);
     }
 }
