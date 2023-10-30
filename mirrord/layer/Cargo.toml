@@ -69,7 +69,6 @@ test-cdylib = "*"
 tower = "0.4"
 tokio = { version = "1", features = ["rt", "net", "macros"] }
 tests = { path = "../../tests" }
-flaky_test = "0.1.0"
 futures.workspace = true
 actix-codec.workspace = true
 tokio-stream.workspace = true
