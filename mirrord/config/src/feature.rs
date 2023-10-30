@@ -80,7 +80,7 @@ pub struct FeatureConfig {
     pub network: NetworkConfig,
 
     /// ## feature.copy_target {#feature-copy-target}
-    /// 
+    ///
     /// Creates a new copy of the target. This copy will be used instead of the original target.
     /// This is feature requires mirrord operator.
     #[config(env = "MIRRORD_COPY_TARGET_ENABLED", default = false)]

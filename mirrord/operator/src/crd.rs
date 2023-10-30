@@ -1,6 +1,6 @@
 use chrono::NaiveDate;
 use kube::CustomResource;
-use mirrord_config::target::{Target, TargetConfig};
+use mirrord_config::target::{PodTarget, Target, TargetConfig};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -121,4 +121,32 @@ pub struct LicenseInfoOwned {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub enum OperatorFeatures {
     ProxyApi,
+}
+
+/// This [`Resource`](kube::Resource) represents a copy pod created from an existing [`Target`]
+/// (operator's copy pod feature).
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+    group = "operator.metalbear.co",
+    version = "v1",
+    kind = "CopyTarget",
+    struct = "CopyTargetCrd",
+    namespaced
+)]
+pub struct CopyTargetSpec {
+    /// Original target.
+    pub target: Target,
+    /// How long should the operator keep this pod alive after its creation.
+    /// The pod is deleted when this timout has expired and there are no connected clients.
+    pub idle_ttl: Option<u32>,
+}
+
+impl CopyTargetCrd {
+    pub fn into_target_name(self) -> String {
+        let target = Target::Pod(PodTarget {
+            pod: self.metadata.name.expect("missing resource name"),
+            container: None,
+        });
+        TargetCrd::target_name(&target)
+    }
 }
