@@ -1,6 +1,6 @@
 use chrono::NaiveDate;
 use kube::CustomResource;
-use mirrord_config::target::{PodTarget, Target, TargetConfig};
+use mirrord_config::target::{Target, TargetConfig};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -139,14 +139,4 @@ pub struct CopyTargetSpec {
     /// How long should the operator keep this pod alive after its creation.
     /// The pod is deleted when this timout has expired and there are no connected clients.
     pub idle_ttl: Option<u32>,
-}
-
-impl CopyTargetCrd {
-    pub fn into_target_name(self) -> String {
-        let target = Target::Pod(PodTarget {
-            pod: self.metadata.name.expect("missing resource name"),
-            container: None,
-        });
-        TargetCrd::target_name(&target)
-    }
 }

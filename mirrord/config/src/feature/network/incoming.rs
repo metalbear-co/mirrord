@@ -427,7 +427,7 @@ impl FromStr for IncomingMode {
 /// - `"continue"`: Continue with normal execution
 /// - `"override"`: If port lock detected then override it with new lock and force close the
 ///   original locking connection.
-#[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
+#[derive(Default, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ConcurrentSteal {
     /// <!--${internal}-->

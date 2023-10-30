@@ -115,8 +115,14 @@ impl OperatorSessionMetadata {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum OperatorSessionTarget {
+    Raw(TargetCrd),
+    Copied(CopyTargetCrd),
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct OperatorSessionInformation {
-    target: TargetCrd,
+    target: OperatorSessionTarget,
     metadata: OperatorSessionMetadata,
 }
 
@@ -213,16 +219,12 @@ impl OperatorApi {
 
         let target_to_connect = if config.feature.copy_target {
             let mut copy_progress = progress.subtask("copying target");
-
             let copied = operator_api.copy_target(&metadata, raw_target).await?;
-            let target_name = copied.into_target_name();
-            let target = operator_api.target_api.get(&target_name).await?;
-
             copy_progress.success(None);
 
-            target
+            OperatorSessionTarget::Copied(copied)
         } else {
-            raw_target
+            OperatorSessionTarget::Raw(raw_target)
         };
 
         let session_info = OperatorSessionInformation {
@@ -253,7 +255,7 @@ impl OperatorApi {
 
     async fn new(config: &LayerConfig) -> Result<Self> {
         let target_config = config.target.clone();
-        let on_concurrent_steal = config.feature.network.incoming.on_concurrent_steal.clone();
+        let on_concurrent_steal = config.feature.network.incoming.on_concurrent_steal;
 
         let client = create_kube_api(
             config.accept_invalid_certificates,
@@ -307,27 +309,59 @@ impl OperatorApi {
 
     #[tracing::instrument(level = "debug", skip(self), ret)]
     fn connect_url(&self, session: &OperatorSessionInformation) -> String {
-        if session.metadata.proxy_feature_enabled() {
-            let dt = &();
-            let namespace = self
-                .target_namespace
-                .as_deref()
-                .unwrap_or_else(|| self.client.default_namespace());
-            let api_version = TargetCrd::api_version(dt);
-            let plural = TargetCrd::plural(dt);
+        match (session.metadata.proxy_feature_enabled(), &session.target) {
+            (true, OperatorSessionTarget::Raw(target)) => {
+                let dt = &();
+                let namespace = self
+                    .target_namespace
+                    .as_deref()
+                    .unwrap_or_else(|| self.client.default_namespace());
+                let api_version = TargetCrd::api_version(dt);
+                let plural = TargetCrd::plural(dt);
 
-            format!(
+                format!(
                     "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{}?on_concurrent_steal={}&connect=true",
-                    session.target.name(),
+                    target.name(),
                     self.on_concurrent_steal,
                 )
-        } else {
-            format!(
-                "{}/{}?on_concurrent_steal={}&connect=true",
-                self.target_api.resource_url(),
-                session.target.name(),
-                self.on_concurrent_steal,
-            )
+            }
+            (false, OperatorSessionTarget::Raw(target)) => {
+                format!(
+                    "{}/{}?on_concurrent_steal={}&connect=true",
+                    self.target_api.resource_url(),
+                    target.name(),
+                    self.on_concurrent_steal,
+                )
+            }
+            (true, OperatorSessionTarget::Copied(target)) => {
+                let dt = &();
+                let namespace = self
+                    .target_namespace
+                    .as_deref()
+                    .unwrap_or_else(|| self.client.default_namespace());
+                let api_version = TargetCrd::api_version(dt);
+                let plural = TargetCrd::plural(dt);
+
+                format!(
+                    "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{}?connect=true",
+                    target
+                        .meta()
+                        .name
+                        .as_ref()
+                        .expect("missing 'copytarget' name"),
+                )
+            }
+            (false, OperatorSessionTarget::Copied(target)) => {
+                format!(
+                    "{}/{}?connect=true",
+                    self.copy_target_api.resource_url(),
+                    target
+                        .meta()
+                        .name
+                        .as_ref()
+                        .expect("missing 'copytarget' name"),
+                )
+            }
         }
     }
 
@@ -363,8 +397,10 @@ impl OperatorApi {
         session_info: OperatorSessionInformation,
     ) -> Result<OperatorSessionConnection> {
         // why are we checking on client side..?
-        if self.on_concurrent_steal == ConcurrentSteal::Abort {
-            self.check_no_port_locks(&session_info.target).await?;
+        if let (ConcurrentSteal::Abort, OperatorSessionTarget::Raw(target)) =
+            (self.on_concurrent_steal, &session_info.target)
+        {
+            self.check_no_port_locks(target).await?;
         }
 
         let mut builder = Request::builder()
