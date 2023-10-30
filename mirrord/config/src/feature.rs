@@ -83,7 +83,7 @@ pub struct FeatureConfig {
     ///
     /// Creates a new copy of the target. This copy will be used instead of the original target.
     /// This is feature requires mirrord operator.
-    #[config(env = "MIRRORD_COPY_TARGET_ENABLED", default = false)]
+    #[config(env = "MIRRORD_COPY_TARGET_ENABLED", default = false, unstable)]
     pub copy_target: bool,
 }
 
