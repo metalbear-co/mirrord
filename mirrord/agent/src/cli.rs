@@ -72,8 +72,7 @@ pub enum Mode {
     },
     #[default]
     Targetless,
-    #[clap(hide = true)]
-    BlackboxTest,
+    Blackbox,
 }
 
 impl Mode {

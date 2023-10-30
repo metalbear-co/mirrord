@@ -120,8 +120,7 @@ impl State {
                 // If we are in an ephemeral container, we use pid 1.
                 (true, Some(container_handle), pid)
             }
-            // if not, we use the pid of the target container or fallback to self
-            cli::Mode::Targetless | cli::Mode::BlackboxTest => (false, None, "self".to_string()),
+            cli::Mode::Targetless | cli::Mode::Blackbox => (false, None, "self".to_string()),
         };
 
         let environ_path = PathBuf::from("/proc").join(pid).join("environ");
