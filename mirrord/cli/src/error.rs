@@ -231,4 +231,9 @@ pub(crate) enum CliError {
     OperatorVersionCheckError(reqwest::Error),
     #[error("Internal proxy failed: {0:#?}")]
     InternalProxyError(#[from] IntProxyError),
+    #[error("Feature `{0}` requires a mirrord operator.")]
+    #[diagnostic(help(
+        "The mirrord operator is part of mirrord for Teams. To try it out, join the waitlist at this link: https://metalbear.co/#waitlist-form.{GENERAL_HELP}"
+    ))]
+    FeatureRequiresOperatorError(String),
 }

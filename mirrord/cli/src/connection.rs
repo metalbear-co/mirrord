@@ -84,12 +84,17 @@ where
             AgentConnection { sender: session.tx, receiver: session.rx },
         ))
     } else {
+        if config.feature.copy_target {
+            return Err(CliError::FeatureRequiresOperatorError("copy pod".into()));
+        }
+
         if matches!(config.target, mirrord_config::target::TargetConfig{ path: Some(mirrord_config::target::Target::Deployment{..}), ..}) {
             // This is CLI Only because the extensions also implement this check with better messaging.
             progress.print( "When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
             progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
             progress.print("To try it out, join the waitlist with `mirrord waitlist <email address>`, or at this link: https://metalbear.co/#waitlist-form");
         }
+
         let k8s_api = KubernetesAPI::create(config)
             .await
             .map_err(CliError::KubernetesApiFailed)?;
