@@ -160,11 +160,11 @@ impl OperatorApi {
     /// Checks used config against operator specification.
     fn check_config(config: &LayerConfig, operator: &MirrordOperatorCrd) -> Result<()> {
         if config.feature.copy_target {
-            let feature_enabled = operator.spec.copy_pod_enabled.unwrap_or(false);
+            let feature_enabled = operator.spec.copy_target_enabled.unwrap_or(false);
 
             if !feature_enabled {
                 return Err(OperatorApiError::UnsupportedFeature {
-                    feature: "copy pod".into(),
+                    feature: "copy target".into(),
                     operator_version: operator.spec.operator_version.clone(),
                 });
             }
@@ -213,7 +213,7 @@ impl OperatorApi {
                 .spec
                 .protocol_version
                 .and_then(|str_version| str_version.parse().ok()),
-            operator.spec.copy_pod_enabled,
+            operator.spec.copy_target_enabled,
         );
 
         metadata.set_operator_properties(analytics);

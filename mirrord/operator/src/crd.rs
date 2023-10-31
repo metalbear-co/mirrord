@@ -88,7 +88,7 @@ pub struct MirrordOperatorSpec {
     pub features: Option<Vec<OperatorFeatures>>,
     pub license: LicenseInfoOwned,
     pub protocol_version: Option<String>,
-    pub copy_pod_enabled: Option<bool>,
+    pub copy_target_enabled: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
