@@ -455,7 +455,7 @@
       "properties": {
         "copy_target": {
           "title": "feature.copy_target {#feature-copy-target}",
-          "description": "Creates a new copy of the target. This copy will be used instead of the original target. This is feature requires mirrord operator.",
+          "description": "Creates a new copy of the target. mirrord will use this copy instead of the original target (e.g. intercept network traffic). This feature requires a [mirrord operator](https://mirrord.dev/docs/teams/introduction/).",
           "type": [
             "boolean",
             "null"
