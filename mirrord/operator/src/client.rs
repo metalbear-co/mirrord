@@ -25,8 +25,8 @@ use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 use tracing::{debug, error};
 
 use crate::crd::{
-    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, TargetCrd,
-    OPERATOR_STATUS_NAME,
+    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, MirrordOperatorCrdV2, MirrordOperatorSpecV2,
+    OperatorFeaturesV2, TargetCrd, OPERATOR_STATUS_NAME,
 };
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
@@ -53,6 +53,11 @@ pub enum OperatorApiError {
     Authentication(#[from] AuthenticationError),
     #[error("Can't start proccess because other locks exist on target")]
     ConcurrentStealAbort,
+    #[error("mirrord operator {operator_version} does not support feature {feature}")]
+    UnsupportedFeature {
+        feature: &'static str,
+        operator_version: String,
+    },
 }
 
 impl From<kube::Error> for OperatorApiError {
@@ -68,7 +73,7 @@ pub struct OperatorSessionMetadata {
     client_certificate: Option<Certificate>,
     session_id: u64,
     fingerprint: Option<String>,
-    operator_features: Vec<OperatorFeatures>,
+    operator_features: Vec<OperatorFeaturesV2>,
     protocol_version: Option<semver::Version>,
 }
 
@@ -76,7 +81,7 @@ impl OperatorSessionMetadata {
     fn new(
         client_certificate: Option<Certificate>,
         fingerprint: Option<String>,
-        operator_features: Vec<OperatorFeatures>,
+        operator_features: Vec<OperatorFeaturesV2>,
         protocol_version: Option<semver::Version>,
     ) -> Self {
         Self {
@@ -110,7 +115,8 @@ impl OperatorSessionMetadata {
     }
 
     fn proxy_feature_enabled(&self) -> bool {
-        self.operator_features.contains(&OperatorFeatures::ProxyApi)
+        self.operator_features
+            .contains(&OperatorFeaturesV2::ProxyApi)
     }
 }
 
@@ -131,7 +137,6 @@ pub struct OperatorApi {
     target_api: Api<TargetCrd>,
     copy_target_api: Api<CopyTargetCrd>,
     target_namespace: Option<String>,
-    version_api: Api<MirrordOperatorCrd>,
     target_config: TargetConfig,
     on_concurrent_steal: ConcurrentSteal,
 }
@@ -150,6 +155,25 @@ impl OperatorApi {
     /// We allow copied pods to live only for 30 seconds before the internal proxy connects.
     const COPIED_POD_IDLE_TTL: u32 = 30;
 
+    /// Checks used config against operator specification.
+    fn check_config(config: &LayerConfig, operator_spec: &MirrordOperatorSpecV2) -> Result<()> {
+        if config.feature.copy_target {
+            let feature_enabled = operator_spec
+                .features
+                .iter()
+                .flatten()
+                .any(|f| *f == OperatorFeaturesV2::CopyPod);
+            if !feature_enabled {
+                return Err(OperatorApiError::UnsupportedFeature {
+                    feature: "copy pod",
+                    operator_version: operator_spec.operator_version.clone(),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
     /// Creates new [`OperatorSessionConnection`] based on the given [`LayerConfig`].
     /// Returns [`None`] if the operator is not found.
     pub async fn create_session<P>(
@@ -162,38 +186,37 @@ impl OperatorApi {
     {
         let operator_api = OperatorApi::new(config).await?;
 
-        let Some(status) = operator_api.get_status().await.transpose()? else {
+        let Some(spec) = operator_api.get_operator_spec().await? else {
             // No operator found.
             return Ok(None);
         };
 
-        let client_certificate =
-            if let Some(credential_name) = status.spec.license.fingerprint.as_ref() {
-                CredentialStoreSync::get_client_certificate::<MirrordOperatorCrd>(
-                    &operator_api.client,
-                    credential_name.to_string(),
-                )
-                .await
-                .map_err(|err| debug!("CredentialStore error: {err}"))
-                .ok()
-            } else {
-                None
-            };
+        Self::check_config(config, &spec)?;
+
+        let client_certificate = if let Some(credential_name) = spec.license.fingerprint.as_ref() {
+            CredentialStoreSync::get_client_certificate::<MirrordOperatorCrd>(
+                &operator_api.client,
+                credential_name.to_string(),
+            )
+            .await
+            .map_err(|err| debug!("CredentialStore error: {err}"))
+            .ok()
+        } else {
+            None
+        };
 
         let metadata = OperatorSessionMetadata::new(
             client_certificate,
-            status.spec.license.fingerprint,
-            status.spec.features.unwrap_or_default(),
-            status
-                .spec
-                .protocol_version
+            spec.license.fingerprint,
+            spec.features.unwrap_or_default(),
+            spec.protocol_version
                 .and_then(|str_version| str_version.parse().ok()),
         );
 
         metadata.set_operator_properties(analytics);
 
         let mut version_progress = progress.subtask("comparing versions");
-        let operator_version = Version::parse(&status.spec.operator_version)
+        let operator_version = Version::parse(&spec.operator_version)
             .expect("failed to parse operator version from operator crd"); // TODO: Remove expect
 
         let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
@@ -276,25 +299,32 @@ impl OperatorApi {
         let copy_target_api: Api<CopyTargetCrd> =
             get_k8s_resource_api(&client, target_namespace.as_deref());
 
-        let version_api: Api<MirrordOperatorCrd> = Api::all(client.clone());
-
         Ok(OperatorApi {
             client,
             target_api,
             copy_target_api,
             target_namespace,
-            version_api,
             target_config,
             on_concurrent_steal,
         })
     }
 
-    async fn get_status(&self) -> Option<Result<MirrordOperatorCrd>> {
-        match self.version_api.get(OPERATOR_STATUS_NAME).await {
-            Ok(status) => Some(Ok(status)),
-            Err(kube::Error::Api(ErrorResponse { code: 404, .. })) => None,
-            Err(err) => Some(Err(err.into())),
-        }
+    async fn get_operator_spec(&self) -> Result<Option<MirrordOperatorSpecV2>> {
+        let v1_api: Api<MirrordOperatorCrd> = Api::all(self.client.clone());
+        match v1_api.get(OPERATOR_STATUS_NAME).await {
+            Ok(crd) => return Ok(Some(crd.spec.into())),
+            Err(kube::Error::Api(ErrorResponse { code: 404, .. })) => {}
+            Err(e) => return Err(e.into()),
+        };
+
+        let v2_api: Api<MirrordOperatorCrdV2> = Api::all(self.client.clone());
+        match v2_api.get(OPERATOR_STATUS_NAME).await {
+            Ok(crd) => return Ok(Some(crd.spec)),
+            Err(kube::Error::Api(ErrorResponse { code: 404, .. })) => {}
+            Err(e) => return Err(e.into()),
+        };
+
+        return Ok(None);
     }
 
     async fn fetch_target(&self) -> Result<Option<TargetCrd>> {

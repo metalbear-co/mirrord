@@ -90,6 +90,36 @@ pub struct MirrordOperatorSpec {
     pub protocol_version: Option<String>,
 }
 
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+    group = "operator.metalbear.co",
+    version = "v2",
+    kind = "MirrordOperator",
+    root = "MirrordOperatorCrdV2",
+    status = "MirrordOperatorStatus"
+)]
+pub struct MirrordOperatorSpecV2 {
+    pub operator_version: String,
+    pub default_namespace: String,
+    pub features: Option<Vec<OperatorFeaturesV2>>,
+    pub license: LicenseInfoOwned,
+    pub protocol_version: Option<String>,
+}
+
+impl From<MirrordOperatorSpec> for MirrordOperatorSpecV2 {
+    fn from(value: MirrordOperatorSpec) -> Self {
+        Self {
+            operator_version: value.operator_version,
+            default_namespace: value.default_namespace,
+            features: value
+                .features
+                .map(|fs| fs.into_iter().map(Into::into).collect()),
+            license: value.license,
+            protocol_version: value.protocol_version,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MirrordOperatorStatus {
     pub sessions: Vec<Session>,
@@ -118,9 +148,21 @@ pub struct LicenseInfoOwned {
     pub fingerprint: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub enum OperatorFeatures {
     ProxyApi,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub enum OperatorFeaturesV2 {
+    ProxyApi,
+    CopyPod,
+}
+
+impl From<OperatorFeatures> for OperatorFeaturesV2 {
+    fn from(_: OperatorFeatures) -> Self {
+        Self::ProxyApi
+    }
 }
 
 /// This [`Resource`](kube::Resource) represents a copy pod created from an existing [`Target`]
