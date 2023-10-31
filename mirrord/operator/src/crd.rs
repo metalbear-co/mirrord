@@ -11,7 +11,7 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
     group = "operator.metalbear.co",
     version = "v1",
     kind = "Target",
-    struct = "TargetCrd",
+    root = "TargetCrd",
     namespaced
 )]
 pub struct TargetSpec {
@@ -79,7 +79,7 @@ pub static OPERATOR_STATUS_NAME: &str = "operator";
     group = "operator.metalbear.co",
     version = "v1",
     kind = "MirrordOperator",
-    struct = "MirrordOperatorCrd",
+    root = "MirrordOperatorCrd",
     status = "MirrordOperatorStatus"
 )]
 pub struct MirrordOperatorSpec {

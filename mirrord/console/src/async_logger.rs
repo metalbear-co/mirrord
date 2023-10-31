@@ -68,9 +68,8 @@ impl log::Log for AsyncConsoleLogger {
 
     fn log(&self, record: &log::Record) {
         let msg = Record::from(record);
-
-        if self.tx.blocking_send(msg).is_err() {
-            eprintln!("Error sending log message: channel closed");
+        if let Err(e) = self.tx.try_send(msg) {
+            eprintln!("Error sending log message: {e}");
         }
     }
 }

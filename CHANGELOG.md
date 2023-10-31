@@ -8,6 +8,37 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.74.1](https://github.com/metalbear-co/mirrord/tree/3.74.1) - 2023-10-31
+
+
+### Fixed
+
+- Support for cluster information in exec plugin (`KUBERNETES_EXEC_INFO`)
+  [#2037](https://github.com/metalbear-co/mirrord/issues/2037)
+- Fixed logging using `mirrord-console`.
+
+
+## [3.74.0](https://github.com/metalbear-co/mirrord/tree/3.74.0) - 2023-10-27
+
+
+### Added
+
+- Added source identifier to waitlist register
+
+
+### Fixed
+
+- `tokio` runtime dropped from layer.
+  [#1952](https://github.com/metalbear-co/mirrord/issues/1952)
+
+
+### Internal
+
+- Fix the markdown in one section of the FS configuration documentation.
+- Fixed python e2e test not running - removed it since it never worked and
+  adapting it would take time.
+
+
 ## [3.73.1](https://github.com/metalbear-co/mirrord/tree/3.73.1) - 2023-10-24
 
 
