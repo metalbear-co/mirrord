@@ -236,4 +236,9 @@ pub(crate) enum CliError {
         "The mirrord operator is part of mirrord for Teams. To try it out, join the waitlist at this link: https://metalbear.co/#waitlist-form.{GENERAL_HELP}"
     ))]
     FeatureRequiresOperatorError(String),
+    #[error("Feature `{feature}` is not supported in mirrord operator {operator_version}.")]
+    FeatureNotSupportedInOperatorError {
+        feature: String,
+        operator_version: String,
+    }
 }

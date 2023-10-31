@@ -42,6 +42,11 @@ where
 
             Err(CliError::OperatorConcurrentSteal)
         }
+        Err(OperatorApiError::UnsupportedFeature { feature, operator_version }) => {
+            sub_progress.failure(Some("unsupported operator feature"));
+
+            Err(CliError::FeatureNotSupportedInOperatorError { feature, operator_version })
+        }
         Err(err) => {
             sub_progress.failure(Some(
                 "unable to check if operator exists, probably due to RBAC",
