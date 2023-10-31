@@ -1,7 +1,7 @@
 use std::{ops::Deref, sync::OnceLock};
 
 use serde::{Deserialize, Serialize};
-use x509_certificate::InMemorySigningKeyPair;
+use x509_certificate::{InMemorySigningKeyPair, Sign};
 
 /// Wrapps `InMemorySigningKeyPair` & the underlying pkcs8 formatted key
 #[derive(Debug, Serialize, Deserialize)]
@@ -12,6 +12,10 @@ impl KeyPair {
     /// Access the PEM encoded SigningKeyPair
     pub fn document(&self) -> &str {
         &self.0
+    }
+
+    pub fn public_key(&self) -> String {
+        String::from_utf8_lossy(&self.1.get().unwrap().public_key_data().to_vec()).into_owned()
     }
 }
 

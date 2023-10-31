@@ -1,7 +1,10 @@
 use std::{ops::Deref, str::FromStr};
 
+use chrono::Utc;
 use serde::{de, ser, Deserialize, Serialize};
 use x509_certificate::{X509Certificate, X509CertificateError};
+
+use crate::credentials::DateValidityExt;
 
 /// Serialize pem contents of `X509Certificate`
 fn x509_serialize<S>(certificate: &X509Certificate, serialzer: S) -> Result<S::Ok, S::Error>
@@ -32,6 +35,19 @@ pub struct Certificate(
     )]
     X509Certificate,
 );
+
+impl Certificate {
+    /// Checks this [`Certificate`]'s validty to see if it's expired.
+    ///
+    /// Compared with `chrono::Utc::now`.
+    pub fn not_expired(&self) -> bool {
+        self.0
+            .as_ref()
+            .tbs_certificate
+            .validity
+            .is_date_valid(Utc::now())
+    }
+}
 
 impl From<X509Certificate> for Certificate {
     fn from(certificate: X509Certificate) -> Self {

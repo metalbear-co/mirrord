@@ -102,6 +102,13 @@ pub struct Operator {
 }
 
 impl Operator {
+    /// Initializes the [`Operator`] fields.
+    ///
+    /// No kubernetes interactions are done here, we're just filling fields required to create
+    /// the operator in the cluster.
+    ///
+    /// Only called if the user provided a `license`, even though we don't check if it's a valid
+    /// one.
     pub fn new(options: SetupOptions) -> Self {
         let SetupOptions {
             license,
@@ -368,6 +375,8 @@ impl OperatorDeployment {
     }
 }
 
+// TODO(alex): operator
+/// Holds the `namespace` for the kubernetes service of the operator, plus some more metadata.
 #[derive(Debug)]
 pub struct OperatorServiceAccount(ServiceAccount);
 
@@ -498,6 +507,8 @@ impl OperatorRoleBinding {
     }
 }
 
+// TODO(alex): operator
+/// Used when [`LicenseType::Offline`].
 #[derive(Debug)]
 pub struct OperatorLicenseSecret(Secret);
 

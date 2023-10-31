@@ -234,7 +234,7 @@ pub struct AnalyticsOperatorProperties {
     pub client_hash: Option<AnalyticsHash>,
 
     /// sha256 fingerprint from operator license
-    pub license_hash: Option<AnalyticsHash>,
+    pub license_hash: AnalyticsHash,
 }
 
 #[derive(Debug, Serialize)]

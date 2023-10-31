@@ -58,7 +58,7 @@ pub struct OperatorSessionInformation {
     pub client_certificate: Option<Certificate>,
     pub session_id: u64,
     pub target: TargetCrd,
-    pub fingerprint: Option<String>,
+    pub fingerprint: String,
     pub operator_features: Vec<OperatorFeatures>,
     pub protocol_version: Option<semver::Version>,
 }
@@ -67,7 +67,7 @@ impl OperatorSessionInformation {
     pub fn new(
         client_certificate: Option<Certificate>,
         target: TargetCrd,
-        fingerprint: Option<String>,
+        fingerprint: String,
         operator_features: Vec<OperatorFeatures>,
         protocol_version: Option<semver::Version>,
     ) -> Self {
@@ -117,30 +117,23 @@ impl OperatorApi {
             }
         };
 
-        let client_certificate =
-            if let Some(credential_name) = status.spec.license.fingerprint.as_ref() {
-                CredentialStoreSync::get_client_certificate::<MirrordOperatorCrd>(
-                    &operator_api.client,
-                    credential_name.to_string(),
-                )
-                .await
-                .map_err(|err| debug!("CredentialStore error: {err}"))
-                .ok()
-            } else {
-                None
-            };
+        let client_certificate = {
+            let credential_name = &status.spec.license.fingerprint;
+            CredentialStoreSync::get_client_certificate::<MirrordOperatorCrd>(
+                &operator_api.client,
+                credential_name.to_string(),
+            )
+            .await
+            .map_err(|err| debug!("CredentialStore error: {err}"))
+            .ok()
+        };
 
         analytics.set_operator_properties(AnalyticsOperatorProperties {
             client_hash: client_certificate
                 .as_ref()
                 .and_then(|certificate| certificate.sha256_fingerprint().ok())
                 .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
-            license_hash: status
-                .spec
-                .license
-                .fingerprint
-                .as_deref()
-                .map(AnalyticsHash::from_base64),
+            license_hash: AnalyticsHash::from_base64(&status.spec.license.fingerprint),
         });
 
         let mut version_progress = progress.subtask("comparing versions");
@@ -199,10 +192,7 @@ impl OperatorApi {
                     .as_ref()
                     .and_then(|certificate| certificate.sha256_fingerprint().ok())
                     .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
-                license_hash: session_information
-                    .fingerprint
-                    .as_deref()
-                    .map(AnalyticsHash::from_base64),
+                license_hash: AnalyticsHash::from_base64(&session_information.fingerprint),
             });
             analytics
         });

@@ -42,6 +42,9 @@ async fn get_last_version() -> Result<String, reqwest::Error> {
 }
 
 /// Setup the operator into a file or to stdout, with explanation.
+///
+/// Here we read the license, which is of type [`LicenseType::Online`] if only `license_key` is
+/// present, but we don't validate/check it.
 async fn operator_setup(
     accept_tos: bool,
     file: Option<PathBuf>,
@@ -82,6 +85,7 @@ async fn operator_setup(
         }
     };
 
+    // TODO(alex): Why is this separate, from the `let license` block? Should just be merged.
     if let Some(license) = license {
         eprintln!(
             "Installing mirrord operator with namespace: {}",
