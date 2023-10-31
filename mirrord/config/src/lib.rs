@@ -420,6 +420,14 @@ impl LayerConfig {
         }
 
         if self.feature.copy_target {
+            if !self.operator {
+                return Err(ConfigError::Conflict(
+                    "The copy target feature requires a mirrord operator, \
+                   please either disable this option or use the operator."
+                        .into(),
+                ));
+            }
+
             if self.target.path.is_none() {
                 return Err(ConfigError::Conflict(
                     "The copy target feature is not compatible with a targetless agent, \
@@ -432,7 +440,7 @@ impl LayerConfig {
                 context.add_warning(
                     "Using copy target feature without steal mode \
                     may result in unreturned responses in cluster \
-                    because there underlying app instance is not copied \
+                    because the underlying app instance is not copied \
                     and therefore not running in the copied pod"
                         .into(),
                 );

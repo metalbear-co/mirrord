@@ -307,15 +307,21 @@ impl OperatorApi {
         }
     }
 
+    /// Returns a namespace of the target.
+    fn namespace(&self) -> &str {
+        self.target_namespace
+            .as_deref()
+            .unwrap_or_else(|| self.client.default_namespace())
+    }
+
+    /// Returns a connection url for the given [`OperatorSessionInformation`].
+    /// This can be used to create a websocket connection with the operator.
     #[tracing::instrument(level = "debug", skip(self), ret)]
     fn connect_url(&self, session: &OperatorSessionInformation) -> String {
         match (session.metadata.proxy_feature_enabled(), &session.target) {
             (true, OperatorSessionTarget::Raw(target)) => {
                 let dt = &();
-                let namespace = self
-                    .target_namespace
-                    .as_deref()
-                    .unwrap_or_else(|| self.client.default_namespace());
+                let namespace = self.namespace();
                 let api_version = TargetCrd::api_version(dt);
                 let plural = TargetCrd::plural(dt);
 
@@ -335,12 +341,9 @@ impl OperatorApi {
             }
             (true, OperatorSessionTarget::Copied(target)) => {
                 let dt = &();
-                let namespace = self
-                    .target_namespace
-                    .as_deref()
-                    .unwrap_or_else(|| self.client.default_namespace());
-                let api_version = TargetCrd::api_version(dt);
-                let plural = TargetCrd::plural(dt);
+                let namespace = self.namespace();
+                let api_version = CopyTargetCrd::api_version(dt);
+                let plural = CopyTargetCrd::plural(dt);
 
                 format!(
                     "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{}?connect=true",
@@ -390,7 +393,7 @@ impl OperatorApi {
         }
     }
 
-    /// Create websocket connection to operator
+    /// Create websocket connection to operator.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn connect_target(
         &self,
@@ -429,6 +432,8 @@ impl OperatorApi {
         })
     }
 
+    /// Creates a new [`CopyTargetCrd`] resource using the operator.
+    /// This should create a new dummy pod out of the given `target`.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn copy_target(
         &self,

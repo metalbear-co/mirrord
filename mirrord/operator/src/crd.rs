@@ -130,7 +130,7 @@ pub enum OperatorFeatures {
     group = "operator.metalbear.co",
     version = "v1",
     kind = "CopyTarget",
-    struct = "CopyTargetCrd",
+    root = "CopyTargetCrd",
     namespaced
 )]
 pub struct CopyTargetSpec {
