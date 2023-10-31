@@ -26,7 +26,7 @@ mod tests {
             .arg("2")
             .arg("-i")
             .arg("lo")
-            .arg("blackbox")
+            .arg("blackbox-test")
             .spawn()
             .expect("mirrord-agent failed to start");
         // Wait for agent to listen
