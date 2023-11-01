@@ -2,6 +2,7 @@ use std::{ops::Deref, str::FromStr};
 
 use chrono::Utc;
 use serde::{de, ser, Deserialize, Serialize};
+use tracing::warn;
 use x509_certificate::{X509Certificate, X509CertificateError};
 
 use crate::credentials::DateValidityExt;
@@ -37,10 +38,21 @@ pub struct Certificate(
 );
 
 impl Certificate {
-    /// Checks this [`Certificate`]'s validty to see if it's expired.
+    /// Checks this [`Certificate`]'s validty to see if it's expired, and warns if we're close to
+    /// expiring, see [`DateValidityExt`].
     ///
     /// Compared with `chrono::Utc::now`.
     pub fn not_expired(&self) -> bool {
+        let validity = &self.0.as_ref().tbs_certificate.validity;
+        validity.close_to_expiring().inspect(|expires_on| {
+            // TODO(alex): Is a warning good enough for this? Should we take a mirrord progress?
+            // Is there another way of notifying upstream that it's close, while not adding deps?
+            warn!(
+                "Operator license will be expiring soon, you have until {} to renew it!",
+                expires_on.naive_local()
+            )
+        });
+
         self.0
             .as_ref()
             .tbs_certificate

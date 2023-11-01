@@ -1,6 +1,6 @@
 use std::{fmt::Debug, ops::Deref};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Days, Utc};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
 use x509_certificate::{
@@ -72,8 +72,14 @@ impl AsRef<Certificate> for Credentials {
 
 /// Ext trait for validation of dates of `rfc5280::Validity`
 pub trait DateValidityExt {
+    /// How many days do we consider that it's close to expiring.
+    const EXPIRES_CHECK: u64 = 2;
+
     /// Check other is in between not_before and not_after
     fn is_date_valid(&self, other: DateTime<Utc>) -> bool;
+
+    /// Checks if this `Validity` is close to expiring.
+    fn close_to_expiring(&self) -> Option<DateTime<Utc>>;
 }
 
 impl DateValidityExt for rfc5280::Validity {
@@ -89,6 +95,17 @@ impl DateValidityExt for rfc5280::Validity {
         };
 
         not_before < other && other < not_after
+    }
+
+    fn close_to_expiring(&self) -> Option<DateTime<Utc>> {
+        let not_after: DateTime<Utc> = match self.not_after.clone() {
+            Time::UtcTime(time) => *time,
+            Time::GeneralTime(time) => DateTime::<Utc>::from(time),
+        };
+
+        not_after
+            .checked_sub_days(Days::new(Self::EXPIRES_CHECK))
+            .map(|_| not_after)
     }
 }
 
