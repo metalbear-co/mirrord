@@ -88,6 +88,7 @@ pub struct MirrordOperatorSpec {
     pub features: Option<Vec<OperatorFeatures>>,
     pub license: LicenseInfoOwned,
     pub protocol_version: Option<String>,
+    pub copy_target_enabled: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -118,7 +119,25 @@ pub struct LicenseInfoOwned {
     pub fingerprint: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub enum OperatorFeatures {
     ProxyApi,
+}
+
+/// This [`Resource`](kube::Resource) represents a copy pod created from an existing [`Target`]
+/// (operator's copy pod feature).
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+    group = "operator.metalbear.co",
+    version = "v1",
+    kind = "CopyTarget",
+    root = "CopyTargetCrd",
+    namespaced
+)]
+pub struct CopyTargetSpec {
+    /// Original target.
+    pub target: Target,
+    /// How long should the operator keep this pod alive after its creation.
+    /// The pod is deleted when this timout has expired and there are no connected clients.
+    pub idle_ttl: Option<u32>,
 }

@@ -74,7 +74,7 @@ impl IntProxy {
     /// [`TcpListener`].
     pub async fn new(
         config: &LayerConfig,
-        agent_connect_info: Option<&AgentConnectInfo>,
+        agent_connect_info: Option<AgentConnectInfo>,
         listener: TcpListener,
     ) -> Result<Self, IntProxyError> {
         let agent_conn = AgentConnection::new(config, agent_connect_info).await?;

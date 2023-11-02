@@ -418,6 +418,35 @@ impl LayerConfig {
                 ))?
             }
         }
+
+        if self.feature.copy_target {
+            if !self.operator {
+                return Err(ConfigError::Conflict(
+                    "The copy target feature requires a mirrord operator, \
+                   please either disable this option or use the operator."
+                        .into(),
+                ));
+            }
+
+            if self.target.path.is_none() {
+                return Err(ConfigError::Conflict(
+                    "The copy target feature is not compatible with a targetless agent, \
+                    please either disable this option or specify a target."
+                        .into(),
+                ));
+            }
+
+            if !self.feature.network.incoming.is_steal() {
+                context.add_warning(
+                    "Using copy target feature without steal mode \
+                    may result in unreturned responses in cluster \
+                    because the underlying app instance is not copied \
+                    and therefore not running in the copied pod"
+                        .into(),
+                );
+            }
+        }
+
         Ok(())
     }
 }
@@ -694,6 +723,7 @@ mod tests {
                         ..Default::default()
                     })),
                 })),
+                copy_target: None,
             }),
             connect_tcp: None,
             operator: None,
