@@ -34,7 +34,9 @@ where
 {
     let mut sub_progress = progress.subtask("checking operator");
 
-    match OperatorApi::create_session(config, progress, analytics).await {
+    let res = OperatorApi::create_session(config, progress, analytics).await;
+    sub_progress.warning(&format!("session creating result: {res:?}"));
+    match res {
         Ok(Some(connection)) => {
             sub_progress.success(Some("connected to operator"));
             Ok(Some(connection))
@@ -51,7 +53,7 @@ where
         }
         Err(err) => {
             sub_progress.failure(Some(
-                "unable to check if operator exists, probably due to RBAC",
+                "unable to check if operator exists, probably due to RBAC. Origin error: {err:?}",
             ));
 
             trace!(

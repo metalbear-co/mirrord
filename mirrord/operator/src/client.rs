@@ -107,8 +107,10 @@ impl OperatorApi {
     where
         P: Progress + Send + Sync,
     {
+        progress.warning("creating operator api");
         let operator_api = OperatorApi::new(config).await?;
 
+        progress.warning("fetching operator status");
         let status = match operator_api.get_status().await.transpose()? {
             Some(status) => status,
             None => {
@@ -164,6 +166,7 @@ impl OperatorApi {
         }
         version_progress.success(None);
 
+        progress.warning("fetching target");
         if let Some(target) = operator_api.fetch_target().await? {
             let operator_session_information = OperatorSessionInformation::new(
                 client_certificate,
@@ -176,6 +179,7 @@ impl OperatorApi {
                     .and_then(|str_version| str_version.parse().ok()),
             );
 
+            progress.warning("connecting to the target");
             let (sender, receiver) = operator_api
                 .connect_target(&operator_session_information)
                 .await?;
