@@ -433,7 +433,7 @@ impl OperatorRole {
                 PolicyRule {
                     api_groups: Some(vec!["batch".to_owned()]),
                     resources: Some(vec!["jobs".to_owned()]),
-                    verbs: vec!["create".to_owned()],
+                    verbs: vec!["create".to_owned(), "delete".to_owned()],
                     ..Default::default()
                 },
                 PolicyRule {

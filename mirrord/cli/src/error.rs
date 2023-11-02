@@ -240,5 +240,5 @@ pub(crate) enum CliError {
     FeatureNotSupportedInOperatorError {
         feature: String,
         operator_version: String,
-    }
+    },
 }

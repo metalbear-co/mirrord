@@ -42,10 +42,16 @@ where
 
             Err(CliError::OperatorConcurrentSteal)
         }
-        Err(OperatorApiError::UnsupportedFeature { feature, operator_version }) => {
+        Err(OperatorApiError::UnsupportedFeature {
+            feature,
+            operator_version,
+        }) => {
             sub_progress.failure(Some("unsupported operator feature"));
 
-            Err(CliError::FeatureNotSupportedInOperatorError { feature, operator_version })
+            Err(CliError::FeatureNotSupportedInOperatorError {
+                feature,
+                operator_version,
+            })
         }
         Err(err) => {
             sub_progress.failure(Some(
