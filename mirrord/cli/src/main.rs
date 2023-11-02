@@ -409,6 +409,13 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 fn main() -> miette::Result<()> {
     let cli = Cli::parse();
 
+    if std::env::var("MIRRORD_NO_PROXY").is_ok() {
+        std::env::remove_var("HTTP_PROXY");
+        std::env::remove_var("HTTPS_PROXY");
+        std::env::remove_var("http_proxy");
+        std::env::remove_var("https_proxy");
+    }
+
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
