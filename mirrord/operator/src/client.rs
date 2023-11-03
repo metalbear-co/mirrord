@@ -159,7 +159,7 @@ impl OperatorApi {
 
     /// Checks used config against operator specification.
     fn check_config(config: &LayerConfig, operator: &MirrordOperatorCrd) -> Result<()> {
-        if config.feature.copy_target {
+        if config.feature.copy_target.enabled {
             let feature_enabled = operator.spec.copy_target_enabled.unwrap_or(false);
 
             if !feature_enabled {
@@ -243,9 +243,11 @@ impl OperatorApi {
             .await?
             .ok_or(OperatorApiError::InvalidTarget)?;
 
-        let target_to_connect = if config.feature.copy_target {
+        let target_to_connect = if config.feature.copy_target.enabled {
             let mut copy_progress = progress.subtask("copying target");
-            let copied = operator_api.copy_target(&metadata, raw_target).await?;
+            let copied = operator_api
+                .copy_target(&metadata, raw_target, config.feature.copy_target.scale_down)
+                .await?;
             copy_progress.success(None);
 
             OperatorSessionTarget::Copied(copied)
@@ -465,6 +467,7 @@ impl OperatorApi {
         &self,
         session_metadata: &OperatorSessionMetadata,
         target: TargetCrd,
+        scale_down: bool,
     ) -> Result<CopyTargetCrd> {
         let raw_target = target
             .spec
@@ -477,6 +480,7 @@ impl OperatorApi {
             CopyTargetSpec {
                 target: raw_target,
                 idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
+                scale_down: scale_down.into(),
             },
         );
 

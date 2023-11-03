@@ -419,7 +419,7 @@ impl LayerConfig {
             }
         }
 
-        if self.feature.copy_target {
+        if self.feature.copy_target.enabled {
             if !self.operator {
                 return Err(ConfigError::Conflict(
                     "The copy target feature requires a mirrord operator, \
