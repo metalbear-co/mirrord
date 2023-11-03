@@ -837,6 +837,10 @@ pub(super) fn getaddrinfo(
 
 /// Retrieves the `hostname` from the agent's `/etc/hostname` to be used by [`gethostname`]
 fn remote_hostname_string() -> Detour<CString> {
+    if crate::setup().trace_only() {
+        return Detour::Bypass(Bypass::LocalHostname);
+    }
+
     let hostname_path = PathBuf::from("/etc/hostname");
 
     let OpenFileResponse { fd } = file::ops::RemoteFile::remote_open(

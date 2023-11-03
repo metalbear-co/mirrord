@@ -2,8 +2,11 @@ use std::{collections::HashSet, net::SocketAddr};
 
 use mirrord_config::{
     feature::{
-        fs::FsConfig,
-        network::{incoming::IncomingConfig, outgoing::OutgoingConfig},
+        fs::{FsConfig, FsModeConfig},
+        network::{
+            incoming::{self, IncomingConfig},
+            outgoing::OutgoingConfig,
+        },
     },
     util::VecOrSingle,
     LayerConfig,
@@ -29,10 +32,19 @@ pub struct LayerSetup {
     outgoing_selector: OutgoingSelector,
     proxy_address: SocketAddr,
     incoming_mode: IncomingMode,
+    trace_only: bool,
 }
 
 impl LayerSetup {
-    pub fn new(config: LayerConfig, debugger_ports: DebuggerPorts) -> Self {
+    pub fn new(mut config: LayerConfig, debugger_ports: DebuggerPorts, trace_only: bool) -> Self {
+        if trace_only {
+            config.feature.network.dns = false;
+            config.feature.network.outgoing.tcp = false;
+            config.feature.network.outgoing.udp = false;
+            config.feature.network.incoming.mode = incoming::IncomingMode::Off;
+            config.feature.fs.mode = FsModeConfig::Local;
+        }
+
         let file_filter = FileFilter::new(config.feature.fs.clone());
 
         let remote_unix_streams = config
@@ -67,6 +79,7 @@ impl LayerSetup {
             outgoing_selector,
             proxy_address,
             incoming_mode,
+            trace_only,
         }
     }
 
@@ -120,6 +133,10 @@ impl LayerSetup {
 
     pub fn incoming_mode(&self) -> &IncomingMode {
         &self.incoming_mode
+    }
+
+    pub fn trace_only(&self) -> bool {
+        self.trace_only
     }
 }
 

@@ -77,10 +77,7 @@ use libc::{c_int, pid_t};
 use load::ExecutableName;
 #[cfg(target_os = "macos")]
 use mirrord_config::feature::fs::FsConfig;
-use mirrord_config::{
-    feature::{fs::FsModeConfig, network::incoming::IncomingMode},
-    LayerConfig,
-};
+use mirrord_config::{feature::fs::FsModeConfig, LayerConfig};
 use mirrord_intproxy::protocol::NewSessionRequest;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use proxy_connection::ProxyConnection;
@@ -266,15 +263,6 @@ fn layer_start(mut config: LayerConfig) {
         .parse()
         .unwrap_or(false);
 
-    // Disable all features that require the agent
-    if trace_only {
-        config.feature.fs.mode = FsModeConfig::Local;
-        config.feature.network.dns = false;
-        config.feature.network.incoming.mode = IncomingMode::Off;
-        config.feature.network.outgoing.tcp = false;
-        config.feature.network.outgoing.udp = false;
-    }
-
     // does not need to be atomic because on the first call there are never other threads.
     // Will be false when manually called from fork hook.
     if SETUP.get().is_none() {
@@ -282,7 +270,7 @@ fn layer_start(mut config: LayerConfig) {
         init_tracing();
 
         let debugger_ports = DebuggerPorts::from_env();
-        let state = LayerSetup::new(config, debugger_ports);
+        let state = LayerSetup::new(config, debugger_ports, trace_only);
         SETUP.set(state).unwrap();
 
         let state = setup();
@@ -466,17 +454,21 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
     tracing::debug!("Process {} forking!.", std::process::id());
 
-    let parent_connection = PROXY_CONNECTION.get().expect("PROXY_CONNECTION not set");
-
-    // After fork, this new connection lives both in the parent and in the child.
-    // The child will have access to cloned file descriptor of the underlying socket.
-    // The parent will close its descriptor at the end of this scope.
-    let new_connection = ProxyConnection::new(
-        parent_connection.proxy_addr(),
-        NewSessionRequest::Forked(parent_connection.layer_id()),
-        Duration::from_secs(5),
-    )
-    .expect("failed to establish proxy connection for child");
+    let new_connection = if setup().trace_only() {
+        None
+    } else {
+        let parent_connection = PROXY_CONNECTION.get().expect("PROXY_CONNECTION not set");
+        // After fork, this new connection lives both in the parent and in the child.
+        // The child will have access to cloned file descriptor of the underlying socket.
+        // The parent will close its descriptor at the end of this scope.
+        ProxyConnection::new(
+            parent_connection.proxy_addr(),
+            NewSessionRequest::Forked(parent_connection.layer_id()),
+            Duration::from_secs(5),
+        )
+        .expect("failed to establish proxy connection for child")
+        .into()
+    };
 
     let res = FN_FORK();
 
@@ -484,10 +476,12 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
         Ordering::Equal => {
             tracing::debug!("Child process initializing layer.");
 
-            PROXY_CONNECTION.take();
-            PROXY_CONNECTION
-                .set(new_connection)
-                .expect("setting PROXY_CONNECTION");
+            if let Some(new_connection) = new_connection {
+                PROXY_CONNECTION.take();
+                PROXY_CONNECTION
+                    .set(new_connection)
+                    .expect("setting PROXY_CONNECTION");
+            }
 
             mirrord_layer_entry_point()
         }
