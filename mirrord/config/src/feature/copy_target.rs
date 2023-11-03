@@ -7,10 +7,25 @@ use crate::{
     util::MirrordToggleableConfig,
 };
 
-/// TODO json schema
+/// Allows the user to target a pod created dynamically from the orignal [`target`](#target).
+/// The new pod inherits most of the original target's specification, e.g. labels.
+///
+/// ```json
+/// {
+///   "feature": {
+///     "copy_target": {
+///       "scale_down": true
+///     }
+///   }
+/// }
+/// ```
 #[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct CopyTargetFileConfig {
+    /// ### feature.copy_target.scale_down {#feature-copy_target-scale_down}
+    ///
+    /// If this option is set and [`target`](#target) is a deployment,
+    /// mirrord will scale it down by 1 for the time the copied pod is alive.
     pub scale_down: Option<bool>,
 }
 

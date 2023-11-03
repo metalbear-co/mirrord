@@ -79,7 +79,7 @@ pub struct FeatureConfig {
     #[config(nested, toggleable)]
     pub network: NetworkConfig,
 
-    /// ## feature.copy_target {#feature-copy-target}
+    /// ## feature.copy_target {#feature-copy_target}
     ///
     /// Creates a new copy of the target. mirrord will use this copy instead of the original target
     /// (e.g. intercept network traffic). This feature requires a [mirrord operator](https://mirrord.dev/docs/teams/introduction/).

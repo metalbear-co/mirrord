@@ -143,7 +143,11 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///         "ignore_localhost": false,
 ///         "unix_streams": "bear.+"
 ///       },
-///       "dns": false
+///       "dns": false,
+///       "copy_target": {
+///         "enabled": true,
+///         "scale_down": false
+///       }
 ///     },
 ///   },
 ///   "operator": true,
