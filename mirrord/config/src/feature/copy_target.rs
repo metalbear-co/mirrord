@@ -25,7 +25,7 @@ pub struct CopyTargetFileConfig {
     /// ### feature.copy_target.scale_down {#feature-copy_target-scale_down}
     ///
     /// If this option is set and [`target`](#target) is a deployment,
-    /// mirrord will scale it down by 1 for the time the copied pod is alive.
+    /// mirrord will scale it down to 0 for the time the copied pod is alive.
     pub scale_down: Option<bool>,
 }
 
