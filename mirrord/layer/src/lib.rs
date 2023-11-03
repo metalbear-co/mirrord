@@ -328,7 +328,7 @@ fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
         not_found: None,
     };
     let debugger_ports = DebuggerPorts::from_env();
-    let setup = LayerSetup::new(config, debugger_ports);
+    let setup = LayerSetup::new(config, debugger_ports, true);
 
     SETUP.set(setup).expect("SETUP set failed");
 
