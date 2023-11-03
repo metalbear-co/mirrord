@@ -9,7 +9,9 @@ use mirrord_auth::{
     certificate::Certificate, credential_store::CredentialStoreSync, error::AuthenticationError,
 };
 use mirrord_config::{
-    feature::network::incoming::ConcurrentSteal, target::TargetConfig, LayerConfig,
+    feature::network::incoming::ConcurrentSteal,
+    target::{Target, TargetConfig},
+    LayerConfig,
 };
 use mirrord_kube::{
     api::kubernetes::{create_kube_api, get_k8s_resource_api},
@@ -245,6 +247,16 @@ impl OperatorApi {
 
         let target_to_connect = if config.feature.copy_target.enabled {
             let mut copy_progress = progress.subtask("copying target");
+
+            if config.feature.copy_target.scale_down {
+                let is_deployment = matches!(config.target.path, Some(Target::Deployment(..)));
+                if !is_deployment {
+                    progress.warning(
+                        "cannot scale down while copying target - target is not a deployment",
+                    )
+                }
+            }
+
             let copied = operator_api
                 .copy_target(&metadata, raw_target, config.feature.copy_target.scale_down)
                 .await?;
