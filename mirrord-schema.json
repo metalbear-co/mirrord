@@ -394,7 +394,7 @@
       "properties": {
         "scale_down": {
           "title": "feature.copy_target.scale_down {#feature-copy_target-scale_down}",
-          "description": "If this option is set and [`target`](#target) is a deployment, mirrord will scale it down by 1 for the time the copied pod is alive.",
+          "description": "If this option is set and [`target`](#target) is a deployment, mirrord will scale it down to 0 for the time the copied pod is alive.",
           "type": [
             "boolean",
             "null"
