@@ -22,7 +22,7 @@ use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig, Result};
 ///   }
 /// }
 /// ```
-/// 
+///
 /// ```json
 /// {
 ///   "feature": {
