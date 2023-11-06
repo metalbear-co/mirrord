@@ -135,9 +135,12 @@ pub enum OperatorFeatures {
     namespaced
 )]
 pub struct CopyTargetSpec {
-    /// Original target.
+    /// Original target. Only [`Target::Pod`] and [`Target::Deployment`] are accepted.
     pub target: Target,
     /// How long should the operator keep this pod alive after its creation.
     /// The pod is deleted when this timout has expired and there are no connected clients.
     pub idle_ttl: Option<u32>,
+    /// Should the operator scale down target deployment to 0 while this pod is alive.
+    /// Ignored if [`Target`] is not [`Target::Deployment`].
+    pub scale_down: bool,
 }

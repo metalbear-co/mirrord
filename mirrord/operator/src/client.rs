@@ -9,7 +9,9 @@ use mirrord_auth::{
     certificate::Certificate, credential_store::CredentialStoreSync, error::AuthenticationError,
 };
 use mirrord_config::{
-    feature::network::incoming::ConcurrentSteal, target::TargetConfig, LayerConfig,
+    feature::network::incoming::ConcurrentSteal,
+    target::{Target, TargetConfig},
+    LayerConfig,
 };
 use mirrord_kube::{
     api::kubernetes::{create_kube_api, get_k8s_resource_api},
@@ -33,8 +35,8 @@ static CONNECTION_CHANNEL_SIZE: usize = 1000;
 
 #[derive(Debug, Error)]
 pub enum OperatorApiError {
-    #[error("unable to create target for TargetConfig")]
-    InvalidTarget,
+    #[error("invalid target: {reason}")]
+    InvalidTarget { reason: String },
     #[error(transparent)]
     HttpError(#[from] http::Error),
     #[error(transparent)]
@@ -159,13 +161,21 @@ impl OperatorApi {
 
     /// Checks used config against operator specification.
     fn check_config(config: &LayerConfig, operator: &MirrordOperatorCrd) -> Result<()> {
-        if config.feature.copy_target {
+        if config.feature.copy_target.enabled {
             let feature_enabled = operator.spec.copy_target_enabled.unwrap_or(false);
 
             if !feature_enabled {
                 return Err(OperatorApiError::UnsupportedFeature {
                     feature: "copy target".into(),
                     operator_version: operator.spec.operator_version.clone(),
+                });
+            }
+
+            if config.feature.copy_target.scale_down
+                && !matches!(config.target.path, Some(Target::Deployment(..)))
+            {
+                return Err(OperatorApiError::InvalidTarget {
+                    reason: "scale down feature is enabled, but target is not a deployment".into(),
                 });
             }
         }
@@ -238,14 +248,29 @@ impl OperatorApi {
         }
         version_progress.success(None);
 
-        let raw_target = operator_api
-            .fetch_target()
-            .await?
-            .ok_or(OperatorApiError::InvalidTarget)?;
+        let raw_target =
+            operator_api
+                .fetch_target()
+                .await?
+                .ok_or(OperatorApiError::InvalidTarget {
+                    reason: "not found in the cluster".into(),
+                })?;
 
-        let target_to_connect = if config.feature.copy_target {
+        let target_to_connect = if config.feature.copy_target.enabled {
             let mut copy_progress = progress.subtask("copying target");
-            let copied = operator_api.copy_target(&metadata, raw_target).await?;
+
+            if config.feature.copy_target.scale_down {
+                let is_deployment = matches!(config.target.path, Some(Target::Deployment(..)));
+                if !is_deployment {
+                    progress.warning(
+                        "cannot scale down while copying target - target is not a deployment",
+                    )
+                }
+            }
+
+            let copied = operator_api
+                .copy_target(&metadata, raw_target, config.feature.copy_target.scale_down)
+                .await?;
             copy_progress.success(None);
 
             OperatorSessionTarget::Copied(copied)
@@ -465,18 +490,22 @@ impl OperatorApi {
         &self,
         session_metadata: &OperatorSessionMetadata,
         target: TargetCrd,
+        scale_down: bool,
     ) -> Result<CopyTargetCrd> {
         let raw_target = target
             .spec
             .target
             .clone()
-            .ok_or(OperatorApiError::InvalidTarget)?;
+            .ok_or(OperatorApiError::InvalidTarget {
+                reason: "copy target feature is not compatible with targetless mode".into(),
+            })?;
 
         let requested = CopyTargetCrd::new(
             &target.name(),
             CopyTargetSpec {
                 target: raw_target,
                 idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
+                scale_down,
             },
         );
 

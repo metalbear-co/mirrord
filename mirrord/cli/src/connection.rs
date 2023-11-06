@@ -95,8 +95,8 @@ where
             AgentConnection { sender: session.tx, receiver: session.rx },
         ))
     } else {
-        if config.feature.copy_target {
-            return Err(CliError::FeatureRequiresOperatorError("copy pod".into()));
+        if config.feature.copy_target.enabled {
+            return Err(CliError::FeatureRequiresOperatorError("copy target".into()));
         }
 
         if matches!(config.target, mirrord_config::target::TargetConfig{ path: Some(mirrord_config::target::Target::Deployment{..}), ..}) {
