@@ -3840,8 +3840,6 @@ name = "mirrord-intproxy"
 version = "3.74.1"
 dependencies = [
  "bytes",
- "fancy-regex",
- "futures",
  "http-body-util",
  "hyper 1.0.0-rc.4",
  "hyper-util",
