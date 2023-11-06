@@ -1,14 +1,13 @@
 use std::io;
 
+use mirrord_intproxy_protocol::{codec::CodecError, LayerToProxyMessage};
 use mirrord_protocol::DaemonMessage;
 use thiserror::Error;
 
 use crate::{
     agent_conn::{AgentChannelError, AgentConnectionError},
-    codec::CodecError,
     layer_initializer::LayerInitializerError,
     ping_pong::PingPongError,
-    protocol::LayerToProxyMessage,
     proxies::{incoming::IncomingProxyError, outgoing::OutgoingProxyError},
     request_queue::RequestQueueEmpty,
     MainTaskId,

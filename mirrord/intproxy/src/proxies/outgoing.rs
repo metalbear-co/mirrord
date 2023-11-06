@@ -2,6 +2,10 @@
 
 use std::{collections::HashMap, fmt, io};
 
+use mirrord_intproxy_protocol::{
+    LayerId, MessageId, NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse,
+    ProxyToLayerMessage,
+};
 use mirrord_protocol::{
     outgoing::{tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing, DaemonConnect, DaemonRead},
     ConnectionId, RemoteResult, ResponseError,
@@ -12,10 +16,6 @@ use self::interceptor::Interceptor;
 use crate::{
     background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
     main_tasks::ToLayer,
-    protocol::{
-        LayerId, MessageId, NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse,
-        ProxyToLayerMessage,
-    },
     proxies::outgoing::net_protocol_ext::NetProtocolExt,
     request_queue::{RequestQueue, RequestQueueEmpty},
     ProxyMessage,

@@ -1,7 +1,7 @@
 use std::io;
 
 use miette::Diagnostic;
-use mirrord_intproxy::codec::CodecError;
+use mirrord_intproxy_protocol::codec::CodecError;
 use thiserror::Error;
 
 pub type Result<T, E = ConsoleError> = std::result::Result<T, E>;

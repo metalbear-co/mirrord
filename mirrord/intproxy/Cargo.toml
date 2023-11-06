@@ -20,20 +20,16 @@ mirrord-config = { path = "../config" }
 mirrord-kube = { path = "../kube" }
 mirrord-operator = { path = "../operator", features = ["client"] }
 mirrord-protocol = { path = "../protocol" }
+mirrord-intproxy-protocol = { path = "./protocol", features = ["codec-async"] }
 
-bincode.workspace = true
-futures.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-tokio-util.workspace = true
 tokio-stream.workspace = true
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
 hyper-util.workspace = true
 http-body-util.workspace = true
-fancy-regex.workspace = true
 bytes.workspace = true
 
 rand = "0.8"

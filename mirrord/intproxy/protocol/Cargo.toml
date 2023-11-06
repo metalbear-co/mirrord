@@ -1,0 +1,27 @@
+[package]
+name = "mirrord-intproxy-protocol"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+mirrord-protocol = { path = "../../protocol" }
+
+bincode.workspace = true
+thiserror = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
+[features]
+codec = ["dep:thiserror"]
+codec-async = ["codec", "dep:tokio"]

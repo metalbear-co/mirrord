@@ -1,7 +1,7 @@
 use std::{io::BufWriter, net::TcpStream, sync::Mutex};
 
 use log::LevelFilter;
-use mirrord_intproxy::codec::SyncEncoder;
+use mirrord_intproxy_protocol::codec::SyncEncoder;
 
 use crate::{
     error::Result,

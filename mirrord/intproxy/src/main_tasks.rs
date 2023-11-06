@@ -1,9 +1,8 @@
 use std::fmt;
 
+use mirrord_intproxy_protocol::{LayerId, LayerToProxyMessage, MessageId, ProxyToLayerMessage};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::net::TcpStream;
-
-use crate::protocol::{LayerId, LayerToProxyMessage, MessageId, ProxyToLayerMessage};
 
 /// Messages sent back to the [`IntProxy`](crate::IntProxy) from the main background tasks. See
 /// [`MainTaskId`].

@@ -1,12 +1,12 @@
 //! Utilities for handling toggleable `steal` feature in [`IncomingProxy`](super::IncomingProxy).
 
+use mirrord_intproxy_protocol::PortSubscription;
 use mirrord_protocol::{
     tcp::{HttpResponseFallback, LayerTcp, LayerTcpSteal, StealType, TcpData},
     ClientMessage, ConnectionId, Port,
 };
 
 use super::InterceptorMessageOut;
-use crate::protocol::PortSubscription;
 
 /// Retrieves subscribed port from the given [`StealType`].
 fn get_port(steal_type: &StealType) -> Port {
