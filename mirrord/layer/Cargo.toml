@@ -19,7 +19,7 @@ mirrord-config = { path = "../config"}
 mirrord-protocol = { path = "../protocol"}
 mirrord-layer-macro = { path = "./macro"}
 mirrord-console = { path = "../console" }
-mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
+mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
 
 ctor = "0.2"
 libc.workspace = true
