@@ -35,8 +35,8 @@ static CONNECTION_CHANNEL_SIZE: usize = 1000;
 
 #[derive(Debug, Error)]
 pub enum OperatorApiError {
-    #[error("unable to create target for TargetConfig")]
-    InvalidTarget,
+    #[error("invalid target: {reason}")]
+    InvalidTarget { reason: String },
     #[error(transparent)]
     HttpError(#[from] http::Error),
     #[error(transparent)]
@@ -170,6 +170,14 @@ impl OperatorApi {
                     operator_version: operator.spec.operator_version.clone(),
                 });
             }
+
+            if config.feature.copy_target.scale_down
+                && !matches!(config.target.path, Some(Target::Deployment(..)))
+            {
+                return Err(OperatorApiError::InvalidTarget {
+                    reason: "scale down feature is enabled, but target is not a deployment".into(),
+                });
+            }
         }
 
         Ok(())
@@ -240,10 +248,13 @@ impl OperatorApi {
         }
         version_progress.success(None);
 
-        let raw_target = operator_api
-            .fetch_target()
-            .await?
-            .ok_or(OperatorApiError::InvalidTarget)?;
+        let raw_target =
+            operator_api
+                .fetch_target()
+                .await?
+                .ok_or(OperatorApiError::InvalidTarget {
+                    reason: "not found in the cluster".into(),
+                })?;
 
         let target_to_connect = if config.feature.copy_target.enabled {
             let mut copy_progress = progress.subtask("copying target");
@@ -485,7 +496,9 @@ impl OperatorApi {
             .spec
             .target
             .clone()
-            .ok_or(OperatorApiError::InvalidTarget)?;
+            .ok_or(OperatorApiError::InvalidTarget {
+                reason: "copy target feature is not compatible with targetless mode".into(),
+            })?;
 
         let requested = CopyTargetCrd::new(
             &target.name(),
