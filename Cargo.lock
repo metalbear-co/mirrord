@@ -3866,21 +3866,7 @@ name = "mirrord-intproxy-protocol"
 version = "3.74.1"
 dependencies = [
  "bincode",
- "bytes",
- "fancy-regex",
- "futures",
- "http-body-util",
- "hyper 1.0.0-rc.4",
- "hyper-util",
  "mirrord-protocol",
- "rand",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tracing",
 ]
 
 [[package]]
