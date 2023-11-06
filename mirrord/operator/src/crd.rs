@@ -142,5 +142,5 @@ pub struct CopyTargetSpec {
     pub idle_ttl: Option<u32>,
     /// Should the operator scale down target deployment to 0 while this pod is alive.
     /// Ignored if [`Target`] is not [`Target::Deployment`].
-    pub scale_down: Option<bool>,
+    pub scale_down: bool,
 }

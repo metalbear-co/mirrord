@@ -492,7 +492,7 @@ impl OperatorApi {
             CopyTargetSpec {
                 target: raw_target,
                 idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
-                scale_down: scale_down.into(),
+                scale_down,
             },
         );
 
