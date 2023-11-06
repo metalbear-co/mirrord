@@ -23,8 +23,6 @@ use mirrord_protocol::{
     FileRequest, FileResponse, Port, RemoteResult,
 };
 
-use crate::{bind_nested, impl_request};
-
 mod macros;
 
 /// An identifier for a message sent from the layer to the internal proxy.

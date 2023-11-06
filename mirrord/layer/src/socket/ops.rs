@@ -14,7 +14,7 @@ use std::{
 
 use libc::{c_int, c_void, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::IncomingMode;
-use mirrord_intproxy::protocol::{
+use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
     OutgoingConnectResponse, PortSubscribe,
 };

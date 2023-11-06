@@ -1,6 +1,7 @@
 //! The most basic proxying logic. Handles cases when the only job to do in the internal proxy is to
 //! pass requests and responses between the layer and the agent.
 
+use mirrord_intproxy_protocol::{LayerId, MessageId, ProxyToLayerMessage};
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     file::{CloseDirRequest, CloseFileRequest, OpenDirResponse, OpenFileResponse},
@@ -10,7 +11,6 @@ use mirrord_protocol::{
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
     main_tasks::{LayerClosed, LayerForked, ToLayer},
-    protocol::{LayerId, MessageId, ProxyToLayerMessage},
     remote_resources::RemoteResources,
     request_queue::{RequestQueue, RequestQueueEmpty},
     ProxyMessage,

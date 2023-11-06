@@ -1,5 +1,5 @@
 [package]
-name = "mirrord-intproxy"
+name = "mirrord-intproxy-protocol"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -16,11 +16,7 @@ edition.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-mirrord-config = { path = "../config" }
-mirrord-kube = { path = "../kube" }
-mirrord-operator = { path = "../operator", features = ["client"] }
-mirrord-protocol = { path = "../protocol" }
-mirrord-intproxy-protocol = { path = "./protocol" }
+mirrord-protocol = { path = "../../protocol" }
 
 bincode.workspace = true
 futures.workspace = true

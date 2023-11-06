@@ -10,9 +10,9 @@ use layer_conn::LayerConnection;
 use layer_initializer::LayerInitializer;
 use main_tasks::{FromLayer, LayerForked, MainTaskId, ProxyMessage, ToLayer};
 use mirrord_config::LayerConfig;
+use mirrord_intproxy_protocol::{LayerId, LayerToProxyMessage, LocalMessage};
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, CLIENT_READY_FOR_LOGS};
 use ping_pong::{AgentMessageNotification, PingPong};
-use protocol::LayerId;
 use proxies::{
     incoming::{IncomingProxy, IncomingProxyMessage},
     outgoing::{OutgoingProxy, OutgoingProxyMessage},
@@ -21,11 +21,8 @@ use proxies::{
 use tokio::{net::TcpListener, time};
 
 use crate::{
-    agent_conn::AgentConnectInfo,
-    background_tasks::TaskError,
-    error::IntProxyError,
+    agent_conn::AgentConnectInfo, background_tasks::TaskError, error::IntProxyError,
     main_tasks::LayerClosed,
-    protocol::{LayerToProxyMessage, LocalMessage},
 };
 
 pub mod agent_conn;
@@ -36,7 +33,6 @@ mod layer_conn;
 mod layer_initializer;
 mod main_tasks;
 mod ping_pong;
-pub mod protocol;
 mod proxies;
 mod remote_resources;
 mod request_queue;

@@ -7,6 +7,10 @@ use std::{
 };
 
 use hyper::Version;
+use mirrord_intproxy_protocol::{
+    ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
+    MessageId, PortSubscribe, PortSubscription, PortUnsubscribe, ProxyToLayerMessage,
+};
 use mirrord_protocol::{
     tcp::{DaemonTcp, HttpRequestFallback, HttpResponseFallback, NewTcpConnection},
     ConnectionId, Port,
@@ -22,10 +26,6 @@ use self::{
 use crate::{
     background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
     main_tasks::{LayerClosed, LayerForked, ToLayer},
-    protocol::{
-        ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
-        MessageId, PortSubscribe, PortSubscription, PortUnsubscribe, ProxyToLayerMessage,
-    },
     remote_resources::RemoteResources,
     request_queue::{RequestQueue, RequestQueueEmpty},
     ProxyMessage,

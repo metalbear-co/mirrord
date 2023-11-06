@@ -81,7 +81,7 @@ use mirrord_config::{
     feature::{fs::FsModeConfig, network::incoming::IncomingMode},
     LayerConfig,
 };
-use mirrord_intproxy::protocol::NewSessionRequest;
+use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use proxy_connection::ProxyConnection;
 use setup::LayerSetup;

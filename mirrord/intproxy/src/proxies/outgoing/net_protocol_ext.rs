@@ -7,6 +7,7 @@ use std::{
     path::PathBuf,
 };
 
+use mirrord_intproxy_protocol::NetProtocol;
 use mirrord_protocol::{
     outgoing::{
         tcp::LayerTcpOutgoing, udp::LayerUdpOutgoing, LayerClose, LayerConnect, LayerWrite,
@@ -20,8 +21,6 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream, UdpSocket, UnixListener, UnixStream},
 };
-
-use crate::protocol::NetProtocol;
 
 /// Trait for [`NetProtocol`] that handles differences in [`mirrord_protocol::outgoing`] between
 /// network protocols. Allows to unify logic.
