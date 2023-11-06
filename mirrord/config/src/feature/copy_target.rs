@@ -22,6 +22,14 @@ use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig, Result};
 ///   }
 /// }
 /// ```
+/// 
+/// ```json
+/// {
+///   "feature": {
+///     "copy_target": true
+///   }
+/// }
+/// ```
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[serde(untagged)]
