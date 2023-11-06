@@ -431,6 +431,7 @@ impl LayerConfig {
                 ));
             }
 
+            eprintln!("{self:?}");
             if self.target.path.is_none() {
                 return Err(ConfigError::Conflict(
                     "The copy target feature is not compatible with a targetless agent, \

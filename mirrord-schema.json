@@ -390,17 +390,24 @@
     },
     "CopyTargetFileConfig": {
       "description": "Allows the user to target a pod created dynamically from the orignal [`target`](#target). The new pod inherits most of the original target's specification, e.g. labels.\n\n```json { \"feature\": { \"copy_target\": { \"scale_down\": true } } } ```",
-      "type": "object",
-      "properties": {
-        "scale_down": {
-          "title": "feature.copy_target.scale_down {#feature-copy_target-scale_down}",
-          "description": "If this option is set and [`target`](#target) is a deployment, mirrord will scale it down to 0 for the time the copied pod is alive.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "scale_down": {
+              "title": "feature.copy_target.scale_down {#feature-copy_target-scale_down}",
+              "description": "If this option is set and [`target`](#target) is a deployment, mirrord will scale it down to 0 for the time the copied pod is alive.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          }
         }
-      }
+      ]
     },
     "DeploymentTarget": {
       "description": "<!--${internal}--> Mirror the deployment specified by [`DeploymentTarget::deployment`].",
@@ -472,7 +479,7 @@
           "description": "Creates a new copy of the target. mirrord will use this copy instead of the original target (e.g. intercept network traffic). This feature requires a [mirrord operator](https://mirrord.dev/docs/teams/introduction/).",
           "anyOf": [
             {
-              "$ref": "#/definitions/ToggleableConfig_for_CopyTargetFileConfig"
+              "$ref": "#/definitions/CopyTargetFileConfig"
             },
             {
               "type": "null"
@@ -1079,16 +1086,6 @@
               ]
             }
           }
-        }
-      ]
-    },
-    "ToggleableConfig_for_CopyTargetFileConfig": {
-      "anyOf": [
-        {
-          "type": "boolean"
-        },
-        {
-          "$ref": "#/definitions/CopyTargetFileConfig"
         }
       ]
     },
