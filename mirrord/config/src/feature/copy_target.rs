@@ -7,6 +7,15 @@ use crate::{
     util::MirrordToggleableConfig,
 };
 
+/// Default value for [`CopyTargetFileConfig::enabled`] when deserializing.
+/// This way in [`MirrordConfig::generate_config`] we can make distinction between following two
+/// cases:
+/// 1. `{ "features": {} }` - copy target is disabled
+/// 2. `{ "features": { "copy_target": {} } }` - copy target is enabled
+fn copy_target_enabled_default() -> bool {
+    true
+}
+
 /// Allows the user to target a pod created dynamically from the orignal [`target`](#target).
 /// The new pod inherits most of the original target's specification, e.g. labels.
 ///
@@ -22,6 +31,8 @@ use crate::{
 #[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct CopyTargetFileConfig {
+    #[serde(skip, default = "copy_target_enabled_default")]
+    pub enabled: bool,
     /// ### feature.copy_target.scale_down {#feature-copy_target-scale_down}
     ///
     /// If this option is set and [`target`](#target) is a deployment,
@@ -34,7 +45,7 @@ impl MirrordConfig for CopyTargetFileConfig {
 
     fn generate_config(self, _context: &mut ConfigContext) -> Result<Self::Generated> {
         Ok(Self::Generated {
-            enabled: true,
+            enabled: self.enabled,
             scale_down: self.scale_down.unwrap_or_default(),
         })
     }
@@ -44,6 +55,13 @@ impl MirrordToggleableConfig for CopyTargetFileConfig {
     fn disabled_config(_context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
         Ok(Self::Generated {
             enabled: false,
+            scale_down: false,
+        })
+    }
+
+    fn enabled_config(_context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
+        Ok(Self::Generated {
+            enabled: true,
             scale_down: false,
         })
     }

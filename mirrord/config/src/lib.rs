@@ -145,7 +145,6 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///       },
 ///       "dns": false,
 ///       "copy_target": {
-///         "enabled": true,
 ///         "scale_down": false
 ///       }
 ///     },
