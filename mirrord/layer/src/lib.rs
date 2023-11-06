@@ -466,30 +466,28 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
     tracing::debug!("Process {} forking!.", std::process::id());
 
-    let parent_connection = PROXY_CONNECTION.get().expect("PROXY_CONNECTION not set");
-
-    // After fork, this new connection lives both in the parent and in the child.
-    // The child will have access to cloned file descriptor of the underlying socket.
-    // The parent will close its descriptor at the end of this scope.
-    let new_connection = ProxyConnection::new(
-        parent_connection.proxy_addr(),
-        NewSessionRequest::Forked(parent_connection.layer_id()),
-        Duration::from_secs(5),
-    )
-    .expect("failed to establish proxy connection for child");
-
     let res = FN_FORK();
 
     match res.cmp(&0) {
         Ordering::Equal => {
             tracing::debug!("Child process initializing layer.");
+            let parent_connection = unsafe { PROXY_CONNECTION.take() }
+                .expect("parent connection doesn't exist in fork");
 
-            PROXY_CONNECTION.take();
+            let new_connection = ProxyConnection::new(
+                parent_connection.proxy_addr(),
+                NewSessionRequest::Forked(parent_connection.layer_id()),
+                Duration::from_secs(5),
+            )
+            .expect("failed to establish proxy connection for child");
             PROXY_CONNECTION
                 .set(new_connection)
-                .expect("setting PROXY_CONNECTION");
-
-            mirrord_layer_entry_point()
+                .expect("Failed setting PROXY_CONNECTION in child fork");
+            // in macOS (and tbh sounds logical) we can't just drop the old connection in the child,
+            // as it needs to access a mutex with invalid state, so we need to forget it.
+            // better implementation would be to somehow close the underlying connections
+            // but side effect should be trivial
+            std::mem::forget(parent_connection);
         }
         Ordering::Greater => tracing::debug!("Child process id is {res}."),
         Ordering::Less => tracing::debug!("fork failed"),
