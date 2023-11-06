@@ -10,8 +10,8 @@ use crate::{
 /// Default value for [`CopyTargetFileConfig::enabled`] when deserializing.
 /// This way in [`MirrordConfig::generate_config`] we can make distinction between following two
 /// cases:
-/// 1. `{ "features": {} }` - copy target is disabled
-/// 2. `{ "features": { "copy_target": {} } }` - copy target is enabled
+/// 1. `{ "features": {} }` - copy target is disabled, we get `enabled: false` from [`Default`] implemetation.
+/// 2. `{ "features": { "copy_target": {} } }` - copy target is enabled, we get `enabled: true` from this function.
 fn copy_target_enabled_default() -> bool {
     true
 }
