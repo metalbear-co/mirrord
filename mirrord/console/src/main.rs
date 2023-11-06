@@ -1,6 +1,6 @@
 use bincode::Decode;
 use mirrord_console::protocol::{Hello, Record};
-use mirrord_intproxy::codec::AsyncDecoder;
+use mirrord_intproxy_protocol::codec::AsyncDecoder;
 use tokio::{
     io::BufReader,
     net::{TcpListener, TcpStream},

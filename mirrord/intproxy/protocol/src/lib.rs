@@ -23,6 +23,8 @@ use mirrord_protocol::{
     FileRequest, FileResponse, Port, RemoteResult,
 };
 
+#[cfg(feature = "codec")]
+pub mod codec;
 mod macros;
 
 /// An identifier for a message sent from the layer to the internal proxy.

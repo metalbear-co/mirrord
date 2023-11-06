@@ -1,6 +1,7 @@
 use std::io;
 
 use mirrord_intproxy_protocol::{
+    codec::{AsyncDecoder, AsyncEncoder, CodecError},
     LayerId, LayerToProxyMessage, LocalMessage, NewSessionRequest, ProxyToLayerMessage,
 };
 use thiserror::Error;
@@ -8,7 +9,6 @@ use tokio::net::{TcpListener, TcpStream};
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    codec::{AsyncDecoder, AsyncEncoder, CodecError},
     main_tasks::NewLayer,
     ProxyMessage,
 };

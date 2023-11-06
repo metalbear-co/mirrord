@@ -27,7 +27,6 @@ use crate::{
 
 pub mod agent_conn;
 mod background_tasks;
-pub mod codec;
 pub mod error;
 mod layer_conn;
 mod layer_initializer;

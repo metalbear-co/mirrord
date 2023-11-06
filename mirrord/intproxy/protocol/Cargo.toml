@@ -19,3 +19,9 @@ edition.workspace = true
 mirrord-protocol = { path = "../../protocol" }
 
 bincode.workspace = true
+thiserror = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
+[features]
+codec = ["dep:thiserror"]
+codec-async = ["codec", "dep:tokio"]

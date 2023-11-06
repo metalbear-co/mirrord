@@ -22,7 +22,7 @@ mirrord-progress = { path = "../progress" }
 mirrord-kube = { path = "../kube" }
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
-mirrord-console = { path = "../console" }
+mirrord-console = { path = "../console", features = ["async-logger"] }
 mirrord-analytics = { path = "../analytics" }
 mirrord-intproxy = { path = "../intproxy" }
 
