@@ -202,6 +202,9 @@ pub(super) struct OperatorArgs {
 
 #[derive(Subcommand, Debug)]
 pub(super) enum OperatorCommand {
+    /// Produces the yaml spec of the operator, that can be passed to `kubectl apply -f -`
+    /// (installing the operator), or `kubectl delete -f -` (deleting the operator).
+    ///
     /// This will install the operator, which requires a seat based license to be used.
     ///
     /// NOTE: You don't need to install the operator to use open source mirrord features.

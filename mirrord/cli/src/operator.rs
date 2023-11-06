@@ -136,9 +136,32 @@ async fn operator_status(config: Option<String>) -> Result<()> {
 
     let mut status_progress = progress.subtask("fetching status");
 
+    // TODO(alex): The error for invalid license here is atrocious.
+    /*
+    KubeError(
+        SerdeError(
+          Error("invalid type: null, expected a string", line: 1, column: 291),
+        ),
+    ),
+        */
+    // Where is the error coming from though? `fetch_license`? If so we can improve the error there
+    // to report something nicer here! Maybe handle `missing x / invalid type x` as a sort of
+    // "Required license field not fullfiled!".
     let mirrord_status = match status_api
         .get(OPERATOR_STATUS_NAME)
         .await
+        .inspect_err(|fail| {
+            tracing::error!("\nstatus.get error {fail:?}\n");
+            match fail {
+                kube::Error::SerdeError(fs) => match fs.classify() {
+                    // TODO(alex): It's this type, but we should report this as a missing
+                    // license / invalid license.
+                    serde_json::error::Category::Data => tracing::error!("\ndata error {fs:#?}\n"),
+                    _ => tracing::error!("\nserde error is {fs:#?}\n"),
+                },
+                _ => todo!(),
+            }
+        })
         .map_err(KubeApiError::KubeError)
         .map_err(OperatorApiError::KubeApiError)
         .map_err(CliError::OperatorConnectionFailed)
