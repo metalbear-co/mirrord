@@ -215,10 +215,18 @@ pub(super) enum OperatorCommand {
         accept_tos: bool,
 
         /// A mirrord for Teams license key (online)
+        ///
+        /// Sets the operator to run under _online_ mode, where the license is validated against
+        /// our backend.
+        ///
+        /// The operator trial requires that this be specified.
         #[arg(long)]
         license_key: Option<String>,
 
         /// Path to a file containing a mirrord for Teams license certificate
+        ///
+        /// Sets the operator to run under _offline_ mode, where we don't perform license
+        /// validation.
         #[arg(long)]
         license_path: Option<PathBuf>,
 

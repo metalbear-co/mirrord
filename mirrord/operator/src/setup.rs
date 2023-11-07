@@ -66,8 +66,26 @@ macro_rules! writer_impl {
 pub enum SetupError {
     #[error(transparent)]
     Reader(#[from] std::io::Error),
+
     #[error(transparent)]
     YamlSerialization(#[from] serde_yaml::Error),
+
+    #[error(
+        r"mirrord operator: Setting up the operator requires the use of a valid license!
+
+        > If you're seeing this, you might've forgotten to pass either `--license-key` or `--license_path` to the `mirrord operator setup` command."
+    )]
+    MissingLicense,
+
+    #[error(transparent)]
+    Reqwest(#[from] reqwest::Error),
+
+    #[error(
+        r"mirrord operator: Setting up the operator requires the use of a valid license!
+
+        > If you're seeing this, you might've forgotten to pass either `--license-key` or `--license_path` to the `mirrord operator setup` command."
+    )]
+    InvalidLicenseKey,
 }
 
 type Result<T, E = SetupError> = std::result::Result<T, E>;

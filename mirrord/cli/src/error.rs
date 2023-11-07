@@ -170,6 +170,7 @@ pub(crate) enum CliError {
         r#"Check if you have permissions to write to the file and/or directory exists{GENERAL_HELP}"#
     ))]
     ManifestFileError(std::io::Error),
+
     #[cfg(target_os = "macos")]
     #[error("SIP Error: `{0:#?}`")]
     #[diagnostic(help(
@@ -177,13 +178,17 @@ pub(crate) enum CliError {
         {GENERAL_HELP}"#
     ))]
     SipError(#[from] mirrord_sip::SipError),
+
     #[error("Operator setup error: `{0:#?}`")]
     SetupError(#[from] mirrord_operator::setup::SetupError),
+
     #[error("Error extracting layer to `{0:#?}`: `{1:#?}`")]
     #[diagnostic(help("Please report a bug.{GENERAL_HELP}",))]
     LayerExtractFailed(PathBuf, std::io::Error),
+
     #[error("JSON Serialization error: `{0:#?}`")]
     JsonSerializeError(#[from] serde_json::Error),
+
     #[error("Failed connecting to mirrord console for logging {0:#?}")]
     ConsoleConnectError(#[from] ConsoleError),
     #[error("Couldn't get stdout of internal proxy")]

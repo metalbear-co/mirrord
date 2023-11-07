@@ -9,7 +9,7 @@ use mirrord_kube::{api::kubernetes::create_kube_api, error::KubeApiError};
 use mirrord_operator::{
     client::OperatorApiError,
     crd::{LicenseInfoOwned, MirrordOperatorCrd, MirrordOperatorSpec, OPERATOR_STATUS_NAME},
-    setup::{LicenseType, Operator, OperatorNamespace, OperatorSetup, SetupOptions},
+    setup::{LicenseType, Operator, OperatorNamespace, OperatorSetup, SetupError, SetupOptions},
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{row, Table};
@@ -41,6 +41,9 @@ async fn get_last_version() -> Result<String, reqwest::Error> {
     Ok(response.operator)
 }
 
+// TODO(alex) [high] 2023-11-07: 1st step: Perform client validation and don't even install
+// operator if Online license is invalid. Can't trust this, but it's nice to have.
+// After implementing this, need a way to disable it so I can test the operator-side validation.
 /// Setup the operator into a file or to stdout, with explanation.
 ///
 /// Here we read the license, which is of type [`LicenseType::Online`] if only `license_key` is
@@ -58,20 +61,41 @@ async fn operator_setup(
         return Ok(());
     }
 
-    let license = match (license_key, license_path) {
-        (_, Some(license_path)) => fs::read_to_string(&license_path)
-            .await
-            .inspect_err(|err| {
-                warn!(
-                    "Unable to read license at path {}: {err}",
-                    license_path.display()
-                )
-            })
-            .ok()
-            .map(LicenseType::Offline),
-        (Some(license_key), _) => Some(LicenseType::Online(license_key)),
-        (None, None) => None,
+    // TODO(alex) [low] 2023-11-07: Convenience so we can use `SetupError` and not polute
+    // `CliError`.
+    let get_license = || async move {
+        let license = match (license_key, license_path) {
+            (_, Some(license_path)) => fs::read_to_string(&license_path)
+                .await
+                .map(LicenseType::Offline)
+                .map_err(From::from),
+
+            (Some(license_key), _) => reqwest::Client::new()
+                .get("https://app.metalbear.co/api/v1/license")
+                .header("x-license-key", &license_key)
+                .send()
+                .await?
+                .error_for_status()
+                .map(|_| LicenseType::Online(license_key))
+                .map_err(|fail| {
+                    fail.status()
+                        .map(|fail_status| {
+                            if fail_status.as_u16() == 404 {
+                                SetupError::MissingLicense
+                            } else {
+                                SetupError::from(fail)
+                            }
+                        })
+                        // TODO(alex): Convert this error
+                        .unwrap_or_else(|| From::from(fail))
+                }),
+            (None, None) => Err(SetupError::MissingLicense),
+        }?;
+
+        Ok::<_, SetupError>(license)
     };
+
+    let license = get_license().await?;
 
     // if env var std::env::var("MIRRORD_OPERATOR_IMAGE") exists, use it, otherwise call async
     // function to get it
@@ -85,27 +109,23 @@ async fn operator_setup(
         }
     };
 
-    // TODO(alex): Why is this separate, from the `let license` block? Should just be merged.
-    if let Some(license) = license {
-        eprintln!(
-            "Installing mirrord operator with namespace: {}",
-            namespace.name()
-        );
+    eprintln!(
+        "Installing mirrord operator with namespace: {}",
+        namespace.name()
+    );
 
-        let operator = Operator::new(SetupOptions {
-            license,
-            namespace,
-            image,
-        });
+    let operator = Operator::new(SetupOptions {
+        license,
+        namespace,
+        image,
+    });
 
-        match file {
-            Some(path) => {
-                operator.to_writer(File::create(path).map_err(CliError::ManifestFileError)?)?
-            }
-            None => operator.to_writer(std::io::stdout()).unwrap(), /* unwrap because failing to write to std out.. well.. */
+    match file {
+        Some(path) => {
+            operator.to_writer(File::create(path).map_err(CliError::ManifestFileError)?)?
         }
-    } else {
-        eprintln!("--license-key or --license-path is required to install on cluster");
+        None => operator.to_writer(std::io::stdout()).unwrap(), /* unwrap because failing to
+                                                                 * write to std out.. well.. */
     }
 
     Ok(())
@@ -136,17 +156,6 @@ async fn operator_status(config: Option<String>) -> Result<()> {
 
     let mut status_progress = progress.subtask("fetching status");
 
-    // TODO(alex): The error for invalid license here is atrocious.
-    /*
-    KubeError(
-        SerdeError(
-          Error("invalid type: null, expected a string", line: 1, column: 291),
-        ),
-    ),
-        */
-    // Where is the error coming from though? `fetch_license`? If so we can improve the error there
-    // to report something nicer here! Maybe handle `missing x / invalid type x` as a sort of
-    // "Required license field not fullfiled!".
     let mirrord_status = match status_api
         .get(OPERATOR_STATUS_NAME)
         .await
@@ -159,7 +168,7 @@ async fn operator_status(config: Option<String>) -> Result<()> {
                     serde_json::error::Category::Data => tracing::error!("\ndata error {fs:#?}\n"),
                     _ => tracing::error!("\nserde error is {fs:#?}\n"),
                 },
-                _ => todo!(),
+                _ => tracing::error!("\nother type of fail {fail:#?}\n"),
             }
         })
         .map_err(KubeApiError::KubeError)
