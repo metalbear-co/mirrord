@@ -1,14 +1,21 @@
 use alloc::ffi::CString;
 use core::{cmp, ffi::CStr, mem};
-use std::{os::unix::io::RawFd, sync::LazyLock};
+use std::{os::unix::io::RawFd, ptr, sync::LazyLock};
 
 use dashmap::DashSet;
 use errno::{set_errno, Errno};
-use libc::{c_char, c_int, c_void, size_t, sockaddr, socklen_t, ssize_t, EINVAL};
+use libc::{
+    addrinfo, c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t, AI_CANONNAME,
+    EINVAL,
+};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 
 use super::ops::*;
-use crate::{detour::DetourGuard, hooks::HookManager, replace};
+use crate::{
+    detour::{Detour, DetourGuard},
+    hooks::HookManager,
+    replace,
+};
 
 /// Here we keep addr infos that we allocated so we'll know when to use the original
 /// freeaddrinfo function and when to use our implementation
@@ -106,6 +113,50 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
             }
         })
         .unwrap_or_bypass_with(|_| FN_GETHOSTNAME(raw_name, name_length))
+}
+
+#[hook_guard_fn]
+unsafe extern "C" fn gethostbyname_detour(name: *const c_char) -> *const hostent {
+    let rawish_name = (!name.is_null()).then(|| CStr::from_ptr(name));
+
+    // TODO(alex): Do we need ai_canonname hint?
+    // let mut hints = mem::zeroed::<addrinfo>();
+    // hints.ai_flags |= AI_CANONNAME;
+
+    let hostent_result = getaddrinfo(rawish_name, None, None).map(|c_addr_info_ptr| {
+        let mut list_of_addresses: Vec<*mut c_char> = Vec::new();
+        let mut current_addr = (*c_addr_info_ptr).ai_next;
+        while !current_addr.is_null() {
+            let raw_addr_data = (*(*current_addr).ai_addr).sa_data.as_mut_ptr();
+
+            list_of_addresses.push(raw_addr_data);
+
+            current_addr = (*current_addr).ai_next;
+        }
+
+        let (h_addr_list, _, _) = list_of_addresses.into_raw_parts();
+
+        let x = Box::new(hostent {
+            h_name: (*c_addr_info_ptr).ai_canonname,
+            h_aliases: ptr::null_mut(),
+            h_addrtype: (*c_addr_info_ptr).ai_family,
+            h_length: (*c_addr_info_ptr).ai_addrlen as i32,
+            h_addr_list,
+        });
+
+        Box::into_raw(x)
+    });
+
+    tracing::debug!("we are in the gethosbyname!");
+
+    match hostent_result {
+        Detour::Success(hostent) => {
+            tracing::debug!("we have success!");
+            hostent
+        }
+        Detour::Bypass(_) => FN_GETHOSTBYNAME(name),
+        Detour::Error(_) => core::ptr::null(),
+    }
 }
 
 #[hook_guard_fn]
@@ -501,6 +552,14 @@ pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled
         gethostname_detour,
         FnGethostname,
         FN_GETHOSTNAME
+    );
+
+    replace!(
+        hook_manager,
+        "gethostbyname",
+        gethostbyname_detour,
+        FnGethostbyname,
+        FN_GETHOSTBYNAME
     );
 
     #[cfg(target_os = "linux")]
