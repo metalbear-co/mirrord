@@ -1,13 +1,16 @@
 use alloc::ffi::CString;
 use core::{cmp, ffi::CStr, mem};
-use std::{os::unix::io::RawFd, ptr, sync::LazyLock};
+use std::{
+    cell::{SyncUnsafeCell, UnsafeCell},
+    mem::size_of,
+    os::unix::io::RawFd,
+    ptr,
+    sync::{LazyLock, Mutex},
+};
 
 use dashmap::DashSet;
 use errno::{set_errno, Errno};
-use libc::{
-    addrinfo, c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t, AI_CANONNAME,
-    EINVAL,
-};
+use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 
 use super::ops::*;
@@ -20,6 +23,9 @@ use crate::{
 /// Here we keep addr infos that we allocated so we'll know when to use the original
 /// freeaddrinfo function and when to use our implementation
 pub(crate) static MANAGED_ADDRINFO: LazyLock<DashSet<usize>> = LazyLock::new(DashSet::new);
+
+static GETHOSTBYNAME_RETURN: LazyLock<Box<Mutex<[u8; size_of::<hostent>()]>>> =
+    LazyLock::new(|| Box::default());
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn socket_detour(
@@ -136,7 +142,7 @@ unsafe extern "C" fn gethostbyname_detour(name: *const c_char) -> *const hostent
 
         let (h_addr_list, _, _) = list_of_addresses.into_raw_parts();
 
-        let x = Box::new(hostent {
+        let new_hostent = Box::new(hostent {
             h_name: (*c_addr_info_ptr).ai_canonname,
             h_aliases: ptr::null_mut(),
             h_addrtype: (*c_addr_info_ptr).ai_family,
@@ -144,7 +150,16 @@ unsafe extern "C" fn gethostbyname_detour(name: *const c_char) -> *const hostent
             h_addr_list,
         });
 
-        Box::into_raw(x)
+        {
+            let global_hostent_mut =
+                GETHOSTBYNAME_RETURN.lock().unwrap().as_mut_ptr() as *mut hostent;
+            let raw_new_hostent = Box::into_raw(new_hostent);
+            global_hostent_mut.copy_from(raw_new_hostent, 1);
+        }
+
+        let global_hostent = GETHOSTBYNAME_RETURN.lock().unwrap().as_ptr() as *const hostent;
+
+        global_hostent.clone()
     });
 
     tracing::debug!("we are in the gethosbyname!");
