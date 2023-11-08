@@ -254,11 +254,13 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
             .bypass(Bypass::LocalFdNotFound(sockfd))?
     };
 
-    if matches!(crate::setup().incoming_config().mode, IncomingMode::Off) {
+    let setup = crate::setup();
+
+    if matches!(setup.incoming_config().mode, IncomingMode::Off) {
         return Detour::Bypass(Bypass::DisabledIncoming);
     }
 
-    if crate::setup().targetless() {
+    if setup.targetless() {
         warn!(
             "Listening while running targetless. A targetless agent is not exposed by \
         any service. Therefore, letting this port bind happen locally instead of on the \
@@ -281,11 +283,16 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
                 Err(error)?
             }
 
+            let mapped_port = setup
+                .incoming_config()
+                .port_mapping
+                .get_by_left(&requested_address.port())
+                .copied()
+                .unwrap_or_else(|| requested_address.port());
+
             common::make_proxy_request_with_response(PortSubscribe {
                 listening_on: address,
-                subscription: crate::setup()
-                    .incoming_mode()
-                    .subscription(requested_address.port()),
+                subscription: setup.incoming_mode().subscription(mapped_port),
             })??;
 
             // this log message is expected by some E2E tests
