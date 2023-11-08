@@ -166,7 +166,7 @@ unsafe extern "C" fn gethostbyname_detour(name: *const c_char) -> *const hostent
         tracing::info!("ai_family {:?}", (*c_addr_info_ptr).ai_family);
 
         let addr = (*c_addr_info_ptr).ai_addr as *mut i8;
-        let list = vec![addr];
+        let list = vec![addr, ptr::null_mut()];
         let h_addr_list = list.into_raw_parts().0;
 
         let mut host_aliases: Vec<*mut i8> = Vec::new();
