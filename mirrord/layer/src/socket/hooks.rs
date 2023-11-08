@@ -177,7 +177,7 @@ unsafe extern "C" fn gethostbyname_detour(name: *const c_char) -> *const hostent
             h_name: (*c_addr_info_ptr).ai_canonname,
             h_aliases: host_aliases.into_raw_parts().0,
             h_addrtype: AF_INET,
-            h_length: (*c_addr_info_ptr).ai_addrlen as i32,
+            h_length: 4,
             h_addr_list,
         };
 
