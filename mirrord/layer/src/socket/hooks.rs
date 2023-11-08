@@ -169,9 +169,13 @@ unsafe extern "C" fn gethostbyname_detour(name: *const c_char) -> *const hostent
         let list = vec![addr];
         let h_addr_list = list.into_raw_parts().0;
 
+        let mut host_aliases: Vec<*mut i8> = Vec::new();
+        host_aliases.push(ptr::null_mut());
+        host_aliases.push(ptr::null_mut());
+
         let new_hostent = hostent {
             h_name: (*c_addr_info_ptr).ai_canonname,
-            h_aliases: ptr::null_mut(),
+            h_aliases: host_aliases.into_raw_parts().0,
             h_addrtype: (*c_addr_info_ptr).ai_family,
             h_length: (*c_addr_info_ptr).ai_addrlen as i32,
             h_addr_list,
