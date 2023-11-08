@@ -23,8 +23,13 @@ use crate::{
 /// freeaddrinfo function and when to use our implementation
 pub(crate) static MANAGED_ADDRINFO: LazyLock<DashSet<usize>> = LazyLock::new(DashSet::new);
 
-static GETHOSTBYNAME_RETURN: LazyLock<Box<Mutex<[u8; size_of::<hostent>()]>>> =
-    LazyLock::new(|| Box::default());
+static mut GLOBAL_HOSTENT: hostent = hostent {
+    h_name: ptr::null_mut(),
+    h_aliases: ptr::null_mut(),
+    h_addrtype: 0,
+    h_length: 0,
+    h_addr_list: ptr::null_mut(),
+};
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn socket_detour(
@@ -164,23 +169,17 @@ unsafe extern "C" fn gethostbyname_detour(name: *const c_char) -> *const hostent
         let list = vec![addr];
         let h_addr_list = list.into_raw_parts().0;
 
-        let new_hostent = Box::new(hostent {
+        let new_hostent = hostent {
             h_name: (*c_addr_info_ptr).ai_canonname,
             h_aliases: ptr::null_mut(),
             h_addrtype: (*c_addr_info_ptr).ai_family,
             h_length: (*c_addr_info_ptr).ai_addrlen as i32,
             h_addr_list,
-        });
+        };
 
-        match GETHOSTBYNAME_RETURN.lock().map(|mut global_hostent| {
-            let global_hostent_mut = global_hostent.as_mut_ptr() as *mut hostent;
-            let raw_new_hostent = Box::into_raw(new_hostent);
-            global_hostent_mut.copy_from(raw_new_hostent, 1);
-            global_hostent
-        }) {
-            Ok(global_hostent) => global_hostent.as_ptr().cast::<hostent>().clone(),
-            Err(_) => ptr::null(),
-        }
+        GLOBAL_HOSTENT = new_hostent;
+
+        &mut GLOBAL_HOSTENT
     });
 
     tracing::debug!("result {hostent_result:?}");
