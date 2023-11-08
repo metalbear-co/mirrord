@@ -1,1 +1,0 @@
-Local file filter now applies to directory listing [regex] and not just underlying files
