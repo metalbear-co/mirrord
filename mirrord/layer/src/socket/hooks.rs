@@ -2,6 +2,7 @@ use alloc::ffi::CString;
 use core::{cmp, ffi::CStr, mem};
 use std::{
     mem::size_of,
+    net::IpAddr,
     os::unix::io::RawFd,
     ptr,
     sync::{LazyLock, Mutex},
@@ -9,7 +10,9 @@ use std::{
 
 use dashmap::DashSet;
 use errno::{set_errno, Errno};
-use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t, AF_INET, EINVAL};
+use libc::{
+    c_char, c_int, c_void, hostent, in_addr, size_t, sockaddr, socklen_t, ssize_t, AF_INET, EINVAL,
+};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 
 use super::ops::*;
@@ -30,6 +33,16 @@ static mut GLOBAL_HOSTENT: hostent = hostent {
     h_length: 0,
     h_addr_list: ptr::null_mut(),
 };
+
+static mut GLOBAL_HOSTNAME: Option<Vec<u8>> = None;
+
+pub static mut HOST_ALIASES: Option<Vec<Vec<u8>>> = None;
+static mut _HOST_ALIASES: Option<Vec<*mut i8>> = None;
+pub static mut GLOBAL_HOST_ADDR: Option<IpAddr> = None;
+pub static mut HOST_ADDR_LIST: [*mut c_char; 2] = [ptr::null_mut(); 2];
+pub static mut _HOST_ADDR_LIST: [u8; 4] = [0u8; 4];
+static mut H_POS: usize = 0;
+pub static mut HOST_STAYOPEN: c_int = 0;
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn socket_detour(
@@ -133,69 +146,53 @@ unsafe extern "C" fn gethostbyname_detour(name: *const c_char) -> *const hostent
     // let mut hints = mem::zeroed::<addrinfo>();
     // hints.ai_flags |= AI_CANONNAME;
 
-    let hostent_result = getaddrinfo(rawish_name, None, None).map(|c_addr_info_ptr| {
-        let mut list_of_addresses: Vec<*mut c_char> = Vec::new();
+    let hostent_result = remote_getaddrinfo(rawish_name.unwrap().to_string_lossy().into_owned())
+        .map(|addr_list| {
+            let mut list_of_addresses: Vec<*mut c_char> = Vec::new();
 
-        tracing::info!("is it null? {:?}", c_addr_info_ptr.is_null());
+            let (host, ip) = addr_list.into_iter().find(|(_, ip)| ip.is_ipv4()).unwrap();
 
-        let mut current_addr = (*c_addr_info_ptr).ai_next;
-        tracing::info!("we crashed?");
-        while !current_addr.is_null() {
-            tracing::info!("current addr {:?}", (*current_addr).ai_addr);
-            let raw_addr_data = (*(*current_addr).ai_addr).sa_data.as_mut_ptr();
+            let host_name: Vec<u8> = host.into_bytes();
+            GLOBAL_HOSTNAME = Some(host_name);
 
-            list_of_addresses.push(raw_addr_data);
+            let ip_bytes = match ip {
+                IpAddr::V4(ip4) => ip4.octets(),
+                _ => panic!("kaboom"),
+            };
+            _HOST_ADDR_LIST = ip_bytes;
+            HOST_ADDR_LIST = [_HOST_ADDR_LIST.as_mut_ptr() as *mut c_char, ptr::null_mut()];
+            GLOBAL_HOST_ADDR = Some(ip);
 
-            current_addr = (*current_addr).ai_next;
-        }
+            //TODO actually get aliases
+            let mut _host_aliases: Vec<Vec<u8>> = Vec::new();
+            _host_aliases.push(vec![b'\0']);
+            let mut host_aliases: Vec<*mut i8> = Vec::new();
+            host_aliases.push(ptr::null_mut());
+            host_aliases.push(ptr::null_mut());
+            HOST_ALIASES = Some(_host_aliases);
 
-        list_of_addresses.iter().cloned().for_each(|addr| {
-            let rawish = CStr::from_ptr(addr as *const _);
-            tracing::debug!("we have addresses {rawish:?}");
+            GLOBAL_HOSTENT = hostent {
+                h_name: GLOBAL_HOSTNAME.as_mut().unwrap().as_mut_ptr() as *mut c_char,
+                h_aliases: host_aliases.as_mut_slice().as_mut_ptr() as *mut *mut i8,
+                h_addrtype: AF_INET,
+                h_length: 4,
+                h_addr_list: HOST_ADDR_LIST.as_mut_ptr(),
+            };
+
+            &mut GLOBAL_HOSTENT as *mut hostent
         });
 
-        // TODO(alex): We could clean up the previous list at the end, we get the ptr before
-        // overwritting it, then clean at the end if all went well.
-        // If we don't check for this, we put an invalid pointer with 0 addresses, which segfaults.
-        let h_addr_list = list_of_addresses.into_raw_parts().0;
-
-        tracing::info!(
-            "ai_canonname {:?}",
-            CStr::from_ptr((*c_addr_info_ptr).ai_canonname)
-        );
-        tracing::info!("ai_family {:?}", (*c_addr_info_ptr).ai_family);
-
-        let addr = (*c_addr_info_ptr).ai_addr as *mut i8;
-        let list = vec![addr, ptr::null_mut()];
-        let h_addr_list = list.into_raw_parts().0;
-
-        let mut host_aliases: Vec<*mut i8> = Vec::new();
-        host_aliases.push(ptr::null_mut());
-        host_aliases.push(ptr::null_mut());
-
-        let new_hostent = hostent {
-            h_name: (*c_addr_info_ptr).ai_canonname,
-            h_aliases: host_aliases.into_raw_parts().0,
-            h_addrtype: AF_INET,
-            h_length: 4,
-            h_addr_list,
-        };
-
-        GLOBAL_HOSTENT = new_hostent;
-
-        &mut GLOBAL_HOSTENT
-    });
-
     tracing::debug!("result {hostent_result:?}");
+    hostent_result.unwrap()
 
-    match hostent_result {
-        Detour::Success(hostent) => {
-            tracing::info!("we have success!");
-            hostent
-        }
-        Detour::Bypass(_) => FN_GETHOSTBYNAME(name),
-        Detour::Error(_) => core::ptr::null(),
-    }
+    // match hostent_result {
+    //     Detour::Success(hostent) => {
+    //         tracing::info!("we have success!");
+    //         hostent
+    //     }
+    //     Detour::Bypass(_) => FN_GETHOSTBYNAME(name),
+    //     Detour::Error(_) => core::ptr::null(),
+    // }
 }
 
 #[hook_guard_fn]
