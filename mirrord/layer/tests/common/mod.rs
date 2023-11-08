@@ -899,7 +899,8 @@ impl Application {
             | Application::NodeHTTP
             | Application::RustIssue1054
             | Application::PythonFlaskHTTP => 80,
-            Application::PythonFastApiHTTP => 1234, // mapped from 9999 in `configs/port_mapping.json`
+            // mapped from 9999 in `configs/port_mapping.json`
+            Application::PythonFastApiHTTP => 1234,
             Application::RustIssue1123 => 41222,
             Application::PythonListen => 21232,
             Application::PythonDontLoad
