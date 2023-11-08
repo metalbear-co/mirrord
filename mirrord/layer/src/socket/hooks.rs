@@ -9,7 +9,7 @@ use std::{
 
 use dashmap::DashSet;
 use errno::{set_errno, Errno};
-use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t, EINVAL};
+use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t, AF_INET, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 
 use super::ops::*;
@@ -176,7 +176,7 @@ unsafe extern "C" fn gethostbyname_detour(name: *const c_char) -> *const hostent
         let new_hostent = hostent {
             h_name: (*c_addr_info_ptr).ai_canonname,
             h_aliases: host_aliases.into_raw_parts().0,
-            h_addrtype: (*c_addr_info_ptr).ai_family,
+            h_addrtype: AF_INET,
             h_length: (*c_addr_info_ptr).ai_addrlen as i32,
             h_addr_list,
         };
