@@ -8,6 +8,33 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.75.0](https://github.com/metalbear-co/mirrord/tree/3.75.0) - 2023-11-08
+
+
+### Added
+
+- Added 'copy pod' operator feature to the CLI.
+  [#1974](https://github.com/metalbear-co/mirrord/issues/1974)
+- Added option to scale down target deployment when using `copy target`
+  feature. [#2053](https://github.com/metalbear-co/mirrord/issues/2053)
+
+
+### Fixed
+
+- Don't drop mutex in child on fork_detour, fixes bug with elixir.
+  [#2047](https://github.com/metalbear-co/mirrord/issues/2047)
+- Fixed `port_mapping` feature.
+  [#2058](https://github.com/metalbear-co/mirrord/issues/2058)
+- Local file filter now applies to directory listing [regex] and not just
+  underlying files
+
+
+### Internal
+
+- Improved crates structure around internal proxy and mirrord console.
+  [#2039](https://github.com/metalbear-co/mirrord/issues/2039)
+
+
 ## [3.74.1](https://github.com/metalbear-co/mirrord/tree/3.74.1) - 2023-10-31
 
 
