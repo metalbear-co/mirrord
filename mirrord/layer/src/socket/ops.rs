@@ -740,7 +740,7 @@ pub(super) fn remote_getaddrinfo(node: String) -> HookResult<Vec<(String, IpAddr
 ///
 /// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
 /// for the equivalent of this function).
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "debug", ret)]
 pub(super) fn getaddrinfo(
     rawish_node: Option<&CStr>,
     rawish_service: Option<&CStr>,
@@ -801,7 +801,9 @@ pub(super) fn getaddrinfo(
 
             // Must outlive this function, as it is stored as a pointer in `libc::addrinfo`.
             let ai_addr = Box::into_raw(Box::new(unsafe { *rawish_sock_addr.as_ptr() }));
+            tracing::debug!("whats the name {name:?}");
             let ai_canonname = CString::new(name).unwrap().into_raw();
+            tracing::debug!("ai_canonname {:?}", unsafe { CStr::from_ptr(ai_canonname) });
 
             libc::addrinfo {
                 ai_flags: 0,
@@ -823,6 +825,7 @@ pub(super) fn getaddrinfo(
             raw
         })
         .reduce(|current, previous| {
+            tracing::debug!("ai_next called");
             // Safety: These pointers were just allocated using `Box::new`, so they should be
             // fine regarding memory layout, and are not dangling.
             unsafe { (*previous).ai_next = current };

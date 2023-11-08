@@ -1,7 +1,6 @@
 use alloc::ffi::CString;
 use core::{cmp, ffi::CStr, mem};
 use std::{
-    cell::{SyncUnsafeCell, UnsafeCell},
     mem::size_of,
     os::unix::io::RawFd,
     ptr,
@@ -131,8 +130,13 @@ unsafe extern "C" fn gethostbyname_detour(name: *const c_char) -> *const hostent
 
     let hostent_result = getaddrinfo(rawish_name, None, None).map(|c_addr_info_ptr| {
         let mut list_of_addresses: Vec<*mut c_char> = Vec::new();
+
+        tracing::info!("is it null? {:?}", c_addr_info_ptr.is_null());
+
         let mut current_addr = (*c_addr_info_ptr).ai_next;
+        tracing::info!("we crashed?");
         while !current_addr.is_null() {
+            tracing::info!("current addr {:?}", (*current_addr).ai_addr);
             let raw_addr_data = (*(*current_addr).ai_addr).sa_data.as_mut_ptr();
 
             list_of_addresses.push(raw_addr_data);
@@ -140,7 +144,25 @@ unsafe extern "C" fn gethostbyname_detour(name: *const c_char) -> *const hostent
             current_addr = (*current_addr).ai_next;
         }
 
-        let (h_addr_list, _, _) = list_of_addresses.into_raw_parts();
+        list_of_addresses.iter().cloned().for_each(|addr| {
+            let rawish = CStr::from_ptr(addr as *const _);
+            tracing::debug!("we have addresses {rawish:?}");
+        });
+
+        // TODO(alex): We could clean up the previous list at the end, we get the ptr before
+        // overwritting it, then clean at the end if all went well.
+        // If we don't check for this, we put an invalid pointer with 0 addresses, which segfaults.
+        let h_addr_list = list_of_addresses.into_raw_parts().0;
+
+        tracing::info!(
+            "ai_canonname {:?}",
+            CStr::from_ptr((*c_addr_info_ptr).ai_canonname)
+        );
+        tracing::info!("ai_family {:?}", (*c_addr_info_ptr).ai_family);
+
+        let addr = (*c_addr_info_ptr).ai_addr as *mut i8;
+        let list = vec![addr];
+        let h_addr_list = list.into_raw_parts().0;
 
         let new_hostent = Box::new(hostent {
             h_name: (*c_addr_info_ptr).ai_canonname,
@@ -150,23 +172,22 @@ unsafe extern "C" fn gethostbyname_detour(name: *const c_char) -> *const hostent
             h_addr_list,
         });
 
-        {
-            let global_hostent_mut =
-                GETHOSTBYNAME_RETURN.lock().unwrap().as_mut_ptr() as *mut hostent;
+        match GETHOSTBYNAME_RETURN.lock().map(|mut global_hostent| {
+            let global_hostent_mut = global_hostent.as_mut_ptr() as *mut hostent;
             let raw_new_hostent = Box::into_raw(new_hostent);
             global_hostent_mut.copy_from(raw_new_hostent, 1);
+            global_hostent
+        }) {
+            Ok(global_hostent) => global_hostent.as_ptr().cast::<hostent>().clone(),
+            Err(_) => ptr::null(),
         }
-
-        let global_hostent = GETHOSTBYNAME_RETURN.lock().unwrap().as_ptr() as *const hostent;
-
-        global_hostent.clone()
     });
 
-    tracing::debug!("we are in the gethosbyname!");
+    tracing::debug!("result {hostent_result:?}");
 
     match hostent_result {
         Detour::Success(hostent) => {
-            tracing::debug!("we have success!");
+            tracing::info!("we have success!");
             hostent
         }
         Detour::Bypass(_) => FN_GETHOSTBYNAME(name),
