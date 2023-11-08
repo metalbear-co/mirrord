@@ -651,6 +651,7 @@ pub enum Application {
     RustListenPorts,
     Fork,
     OpenFile,
+    RustIssue2058,
     // For running applications with the executable and arguments determined at runtime.
     DynamicApp(String, Vec<String>),
 }
@@ -785,7 +786,8 @@ impl Application {
                 "{}/{}",
                 env!("CARGO_MANIFEST_DIR"),
                 "tests/apps/open_file/out.c_test_app",
-            ), // String::from("tests/apps/open_file/out.c_test_app"),
+            ),
+            Application::RustIssue2058 => String::from("tests/apps/issue2058/target/issue2058"),
             Application::DynamicApp(exe, _) => exe.clone(),
         }
     }
@@ -874,6 +876,7 @@ impl Application {
             | Application::Go19SelfOpen
             | Application::Go19DirBypass
             | Application::Go20DirBypass
+            | Application::RustIssue2058
             | Application::OpenFile => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
@@ -896,7 +899,8 @@ impl Application {
             | Application::NodeHTTP
             | Application::RustIssue1054
             | Application::PythonFlaskHTTP => 80,
-            Application::PythonFastApiHTTP => 9999,
+            // mapped from 9999 in `configs/port_mapping.json`
+            Application::PythonFastApiHTTP => 1234,
             Application::RustIssue1123 => 41222,
             Application::PythonListen => 21232,
             Application::PythonDontLoad
@@ -941,6 +945,7 @@ impl Application {
             | Application::OpenFile
             | Application::DynamicApp(..) => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
+            Application::RustIssue2058 => 1234,
         }
     }
 
