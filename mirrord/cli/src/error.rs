@@ -4,7 +4,7 @@ use miette::Diagnostic;
 use mirrord_console::error::ConsoleError;
 use mirrord_intproxy::error::IntProxyError;
 use mirrord_kube::error::KubeApiError;
-use mirrord_operator::client::OperatorApiError;
+use mirrord_operator::client::{HttpError, OperatorApiError};
 use thiserror::Error;
 
 pub(crate) type Result<T, E = CliError> = miette::Result<T, E>;
@@ -252,6 +252,11 @@ pub(crate) enum CliError {
     #[error("Selected mirrord target is not valid: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     InvalidTargetError(String),
+    #[error("Failed to build a websocket connect request: {0:#?}")]
+    #[diagnostic(help(
+        r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
+    ))]
+    ConnectRequestBuildError(HttpError),
 }
 
 impl From<OperatorApiError> for CliError {
@@ -267,7 +272,7 @@ impl From<OperatorApiError> for CliError {
             },
             OperatorApiError::CreateApiError(e) => Self::KubernetesApiFailed(e),
             OperatorApiError::InvalidTarget { reason } => Self::InvalidTargetError(reason),
-            OperatorApiError::HttpError(e) => Self::OperatorConnectionFailed(e.to_string()),
+            OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
             OperatorApiError::KubeError { error, operation } => {
                 Self::OperatorConnectionFailed(format!("{operation} failed: {error}"))
             }

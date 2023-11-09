@@ -31,12 +31,14 @@ use crate::crd::{
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
 
+pub use http::Error as HttpError;
+
 #[derive(Debug, Error)]
 pub enum OperatorApiError {
     #[error("invalid target: {reason}")]
     InvalidTarget { reason: String },
-    #[error(transparent)]
-    HttpError(#[from] http::Error),
+    #[error("failed to build a websocket connect request: {0}")]
+    ConnectRequestBuildError(HttpError),
     #[error("failed to create mirrord operator API: {0}")]
     CreateApiError(KubeApiError),
     #[error("{operation} failed: {error}")]
@@ -443,28 +445,34 @@ impl OperatorApi {
             self.check_no_port_locks(target).await?;
         }
 
-        let mut builder = Request::builder()
-            .uri(self.connect_url(&session_info))
-            .header("x-session-id", session_info.metadata.session_id.to_string());
+        let request = {
+            let mut builder = Request::builder()
+                .uri(self.connect_url(&session_info))
+                .header("x-session-id", session_info.metadata.session_id.to_string());
 
-        match session_info.metadata.client_credentials() {
-            Ok(Some(credentials)) => {
-                builder = builder.header("x-client-der", credentials);
+            match session_info.metadata.client_credentials() {
+                Ok(Some(credentials)) => {
+                    builder = builder.header("x-client-der", credentials);
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    debug!("CredentialStore error: {err}");
+                }
             }
-            Ok(None) => {}
-            Err(err) => {
-                debug!("CredentialStore error: {err}");
-            }
-        }
 
-        let connection = self
-            .client
-            .connect(builder.body(vec![])?)
-            .await
-            .map_err(|error| OperatorApiError::KubeError {
-                error,
-                operation: "creating a websocket connection".into(),
-            })?;
+            builder
+                .body(vec![])
+                .map_err(OperatorApiError::ConnectRequestBuildError)?
+        };
+
+        let connection =
+            self.client
+                .connect(request)
+                .await
+                .map_err(|error| OperatorApiError::KubeError {
+                    error,
+                    operation: "creating a websocket connection".into(),
+                })?;
 
         let (tx, rx) =
             ConnectionWrapper::wrap(connection, session_info.metadata.protocol_version.clone());
