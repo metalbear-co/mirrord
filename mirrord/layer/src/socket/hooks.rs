@@ -146,13 +146,18 @@ unsafe extern "C" fn gethostbyname_detour(name: *const c_char) -> *const hostent
     // let mut hints = mem::zeroed::<addrinfo>();
     // hints.ai_flags |= AI_CANONNAME;
 
+    if rawish_name.is_none() {
+        tracing::debug!("BYPASS");
+        return FN_GETHOSTBYNAME(name);
+    }
+
     let hostent_result = remote_getaddrinfo(rawish_name.unwrap().to_string_lossy().into_owned())
         .map(|addr_list| {
             let mut list_of_addresses: Vec<*mut c_char> = Vec::new();
 
             let (host, ip) = addr_list.into_iter().find(|(_, ip)| ip.is_ipv4()).unwrap();
 
-            let host_name: Vec<u8> = host.into_bytes();
+            let host_name: Vec<u8> = CString::new(host).unwrap().to_bytes().to_vec();
             GLOBAL_HOSTNAME = Some(host_name);
 
             let ip_bytes = match ip {
@@ -183,7 +188,13 @@ unsafe extern "C" fn gethostbyname_detour(name: *const c_char) -> *const hostent
         });
 
     tracing::debug!("result {hostent_result:?}");
-    hostent_result.unwrap()
+    match hostent_result {
+        Ok(r) => r,
+        Err(f) => {
+            tracing::error!("failed {f:#?}");
+            FN_GETHOSTBYNAME(name)
+        }
+    }
 
     // match hostent_result {
     //     Detour::Success(hostent) => {
