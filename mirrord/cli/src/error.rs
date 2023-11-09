@@ -43,7 +43,7 @@ pub(crate) enum InternalProxySetupError {
 
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum CliError {
-    #[error("Failed to connect to the operator. We have found the operator and were unable to connect to it: {0}")]
+    #[error("Failed to connect to the operator, probably due to RBAC: {0}")]
     #[diagnostic(help(
         r#"
     Please check the following:
