@@ -21,7 +21,7 @@ use crate::{
 /// {
 ///   "feature": {
 ///     "env": {
-///       "include": "DATABASE_USER;PUBLIC_ENV",
+///       "include": "DATABASE_USER;PUBLIC_ENV;MY_APP_*",
 ///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
 ///       "override": {
 ///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
@@ -38,8 +38,10 @@ pub struct EnvConfig {
     /// ### feature.env.include {#feature-env-include}
     ///
     /// Include only these remote environment variables in the local process.
+    /// Variable names can be matched using `*` and `?` where `?` matches exactly one occurrence of
+    /// any character and `*` matches arbitrary many (including zero) occurrences of any character.
     ///
-    /// Value is a list separated by ";".
+    /// Can be passed as a list or as a semicolon-delimited string (e.g. `"VAR;OTHER_VAR"`).
     ///
     /// Some environment variables are excluded by default (`PATH` for example), including these
     /// requires specifying them with `include`
@@ -50,11 +52,13 @@ pub struct EnvConfig {
     ///
     /// Include the remote environment variables in the local process that are **NOT** specified by
     /// this option.
+    /// Variable names can be matched using `*` and `?` where `?` matches exactly one occurrence of
+    /// any character and `*` matches arbitrary many (including zero) occurrences of any character.
     ///
     /// Some of the variables that are excluded by default:
     /// `PATH`, `HOME`, `HOMEPATH`, `CLASSPATH`, `JAVA_EXE`, `JAVA_HOME`, `PYTHONPATH`.
     ///
-    /// Value is a list separated by ";".
+    /// Can be passed as a list or as a semicolon-delimited string (e.g. `"VAR;OTHER_VAR"`).
     #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE")]
     pub exclude: Option<VecOrSingle<String>>,
 
