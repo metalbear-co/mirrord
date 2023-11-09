@@ -429,12 +429,12 @@
       }
     },
     "EnvFileConfig": {
-      "description": "Allows the user to set or override the local process' environment variables with the ones from the remote pod.\n\nWhich environment variables to load from the remote pod are controlled by setting either [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).\n\nSee the environment variables [reference](https://mirrord.dev/docs/reference/env/) for more details.\n\n```json { \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"override\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" } } } } ```",
+      "description": "Allows the user to set or override the local process' environment variables with the ones from the remote pod.\n\nWhich environment variables to load from the remote pod are controlled by setting either [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).\n\nSee the environment variables [reference](https://mirrord.dev/docs/reference/env/) for more details.\n\n```json { \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV;MY_APP_*\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"override\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" } } } } ```",
       "type": "object",
       "properties": {
         "exclude": {
           "title": "feature.env.exclude {#feature-env-exclude}",
-          "description": "Include the remote environment variables in the local process that are **NOT** specified by this option.\n\nSome of the variables that are excluded by default: `PATH`, `HOME`, `HOMEPATH`, `CLASSPATH`, `JAVA_EXE`, `JAVA_HOME`, `PYTHONPATH`.\n\nValue is a list separated by \";\".",
+          "description": "Include the remote environment variables in the local process that are **NOT** specified by this option. Variable names can be matched using `*` and `?` where `?` matches exactly one occurrence of any character and `*` matches arbitrary many (including zero) occurrences of any character.\n\nSome of the variables that are excluded by default: `PATH`, `HOME`, `HOMEPATH`, `CLASSPATH`, `JAVA_EXE`, `JAVA_HOME`, `PYTHONPATH`.\n\nCan be passed as a list or as a semicolon-delimited string (e.g. `\"VAR;OTHER_VAR\"`).",
           "anyOf": [
             {
               "$ref": "#/definitions/VecOrSingle_for_String"
@@ -446,7 +446,7 @@
         },
         "include": {
           "title": "feature.env.include {#feature-env-include}",
-          "description": "Include only these remote environment variables in the local process.\n\nValue is a list separated by \";\".\n\nSome environment variables are excluded by default (`PATH` for example), including these requires specifying them with `include`",
+          "description": "Include only these remote environment variables in the local process. Variable names can be matched using `*` and `?` where `?` matches exactly one occurrence of any character and `*` matches arbitrary many (including zero) occurrences of any character.\n\nCan be passed as a list or as a semicolon-delimited string (e.g. `\"VAR;OTHER_VAR\"`).\n\nSome environment variables are excluded by default (`PATH` for example), including these requires specifying them with `include`",
           "anyOf": [
             {
               "$ref": "#/definitions/VecOrSingle_for_String"
