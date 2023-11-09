@@ -466,7 +466,7 @@ pub(super) fn connect(
 
     let unix_streams = crate::setup().remote_unix_streams();
 
-    info!("in connect {:#?}", SOCKETS);
+    trace!("in connect {:#?}", SOCKETS);
 
     let (_, user_socket_info) = {
         SOCKETS
