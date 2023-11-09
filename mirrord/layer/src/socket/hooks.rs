@@ -140,6 +140,7 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
 
 #[hook_guard_fn]
 unsafe extern "C" fn gethostbyname_detour(name: *const c_char) -> *const hostent {
+    tracing::debug!("CALLED GETHOSBYNAME!");
     let rawish_name = (!name.is_null()).then(|| CStr::from_ptr(name));
 
     // TODO(alex): Do we need ai_canonname hint?
@@ -157,14 +158,21 @@ unsafe extern "C" fn gethostbyname_detour(name: *const c_char) -> *const hostent
 
             let (host, ip) = addr_list.into_iter().find(|(_, ip)| ip.is_ipv4()).unwrap();
 
-            let host_name: Vec<u8> = CString::new(host).unwrap().to_bytes().to_vec();
+            let host_name: Vec<u8> = CString::new(host).unwrap().as_bytes_with_nul().to_vec();
             GLOBAL_HOSTNAME = Some(host_name);
 
-            let ip_bytes = match ip {
-                IpAddr::V4(ip4) => ip4.octets(),
-                _ => panic!("kaboom"),
-            };
-            _HOST_ADDR_LIST = ip_bytes;
+            {
+                let ip_bytes = match ip {
+                    IpAddr::V4(ip4) => ip4.octets(),
+                    _ => panic!("kaboom"),
+                };
+                tracing::debug!("ip bytes {ip_bytes:#?}");
+                _HOST_ADDR_LIST = ip_bytes;
+                tracing::debug!("LIST {_HOST_ADDR_LIST:#?}");
+            }
+
+            tracing::debug!("LIST OUTLIVES {_HOST_ADDR_LIST:#?}");
+
             HOST_ADDR_LIST = [_HOST_ADDR_LIST.as_mut_ptr() as *mut c_char, ptr::null_mut()];
             GLOBAL_HOST_ADDR = Some(ip);
 
