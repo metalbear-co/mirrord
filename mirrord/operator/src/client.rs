@@ -2,7 +2,7 @@ use std::io;
 
 use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
-use http::request::Request;
+use http::{request::Request, StatusCode};
 use kube::{api::PostParams, Api, Client, Resource};
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, AnalyticsReporter};
 use mirrord_auth::{certificate::Certificate, credential_store::CredentialStoreSync};
@@ -235,13 +235,7 @@ impl OperatorApi {
         }
         version_progress.success(None);
 
-        let raw_target =
-            operator_api
-                .fetch_target()
-                .await?
-                .ok_or(OperatorApiError::InvalidTarget {
-                    reason: "not found in the cluster".into(),
-                })?;
+        let raw_target = operator_api.fetch_target().await?;
 
         let target_to_connect = if config.feature.copy_target.enabled {
             let mut copy_progress = progress.subtask("copying target");
@@ -327,18 +321,20 @@ impl OperatorApi {
 
     async fn fetch_operator(&self) -> Result<Option<MirrordOperatorCrd>> {
         let api: Api<MirrordOperatorCrd> = Api::all(self.client.clone());
-        api.get_opt(OPERATOR_STATUS_NAME)
-            .await
-            .map_err(|error| OperatorApiError::KubeError {
+        match api.get(OPERATOR_STATUS_NAME).await {
+            Ok(crd) => Ok(Some(crd)),
+            Err(kube::Error::Api(e)) if e.code == StatusCode::NOT_FOUND => Ok(None),
+            Err(error) => Err(OperatorApiError::KubeError {
                 error,
                 operation: "finding operator in the cluster".into(),
-            })
+            }),
+        }
     }
 
-    async fn fetch_target(&self) -> Result<Option<TargetCrd>> {
+    async fn fetch_target(&self) -> Result<TargetCrd> {
         let target_name = TargetCrd::target_name_by_config(&self.target_config);
         self.target_api
-            .get_opt(&target_name)
+            .get(&target_name)
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
