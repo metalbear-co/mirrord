@@ -139,79 +139,9 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
 }
 
 #[hook_guard_fn]
-unsafe extern "C" fn gethostbyname_detour(name: *const c_char) -> *const hostent {
-    tracing::debug!("CALLED GETHOSBYNAME!");
-    let rawish_name = (!name.is_null()).then(|| CStr::from_ptr(name));
-
-    // TODO(alex): Do we need ai_canonname hint?
-    // let mut hints = mem::zeroed::<addrinfo>();
-    // hints.ai_flags |= AI_CANONNAME;
-
-    if rawish_name.is_none() {
-        tracing::debug!("BYPASS");
-        return FN_GETHOSTBYNAME(name);
-    }
-
-    let hostent_result = remote_getaddrinfo(rawish_name.unwrap().to_string_lossy().into_owned())
-        .map(|addr_list| {
-            let mut list_of_addresses: Vec<*mut c_char> = Vec::new();
-
-            let (host, ip) = addr_list.into_iter().find(|(_, ip)| ip.is_ipv4()).unwrap();
-
-            let host_name: Vec<u8> = CString::new(host).unwrap().as_bytes_with_nul().to_vec();
-            GLOBAL_HOSTNAME = Some(host_name);
-
-            {
-                let ip_bytes = match ip {
-                    IpAddr::V4(ip4) => ip4.octets(),
-                    _ => panic!("kaboom"),
-                };
-                tracing::debug!("ip bytes {ip_bytes:#?}");
-                _HOST_ADDR_LIST = ip_bytes;
-                tracing::debug!("LIST {_HOST_ADDR_LIST:#?}");
-            }
-
-            tracing::debug!("LIST OUTLIVES {_HOST_ADDR_LIST:#?}");
-
-            HOST_ADDR_LIST = [_HOST_ADDR_LIST.as_mut_ptr() as *mut c_char, ptr::null_mut()];
-            GLOBAL_HOST_ADDR = Some(ip);
-
-            //TODO actually get aliases
-            let mut _host_aliases: Vec<Vec<u8>> = Vec::new();
-            _host_aliases.push(vec![b'\0']);
-            let mut host_aliases: Vec<*mut i8> = Vec::new();
-            host_aliases.push(ptr::null_mut());
-            host_aliases.push(ptr::null_mut());
-            HOST_ALIASES = Some(_host_aliases);
-
-            GLOBAL_HOSTENT = hostent {
-                h_name: GLOBAL_HOSTNAME.as_mut().unwrap().as_mut_ptr() as *mut c_char,
-                h_aliases: host_aliases.as_mut_slice().as_mut_ptr() as *mut *mut i8,
-                h_addrtype: AF_INET,
-                h_length: 4,
-                h_addr_list: HOST_ADDR_LIST.as_mut_ptr(),
-            };
-
-            &mut GLOBAL_HOSTENT as *mut hostent
-        });
-
-    tracing::debug!("result {hostent_result:?}");
-    match hostent_result {
-        Ok(r) => r,
-        Err(f) => {
-            tracing::error!("failed {f:#?}");
-            FN_GETHOSTBYNAME(name)
-        }
-    }
-
-    // match hostent_result {
-    //     Detour::Success(hostent) => {
-    //         tracing::info!("we have success!");
-    //         hostent
-    //     }
-    //     Detour::Bypass(_) => FN_GETHOSTBYNAME(name),
-    //     Detour::Error(_) => core::ptr::null(),
-    // }
+unsafe extern "C" fn gethostbyname_detour(raw_name: *const c_char) -> *mut hostent {
+    let rawish_name = (!raw_name.is_null()).then(|| CStr::from_ptr(raw_name));
+    gethostbyname(rawish_name).unwrap_or_bypass_with(|_| FN_GETHOSTBYNAME(raw_name))
 }
 
 #[hook_guard_fn]
