@@ -894,6 +894,11 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
 
     let result = remote_getaddrinfo(name.clone())?;
 
+    // maybe set herror?
+    if result.is_empty() {
+        return Detour::Success(ptr::null_mut());
+    }
+
     let res_name = CString::new(name.as_str()).map_err(|fail| {
         warn!("Failed converting `node` from `String` with {:#?}", fail);
 
