@@ -1,48 +1,18 @@
 use alloc::ffi::CString;
 use core::{cmp, ffi::CStr, mem};
-use std::{
-    mem::size_of,
-    net::IpAddr,
-    os::unix::io::RawFd,
-    ptr,
-    sync::{LazyLock, Mutex},
-};
+use std::{os::unix::io::RawFd, sync::LazyLock};
 
 use dashmap::DashSet;
 use errno::{set_errno, Errno};
-use libc::{
-    c_char, c_int, c_void, hostent, in_addr, size_t, sockaddr, socklen_t, ssize_t, AF_INET, EINVAL,
-};
+use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 
 use super::ops::*;
-use crate::{
-    detour::{Detour, DetourGuard},
-    hooks::HookManager,
-    replace,
-};
+use crate::{detour::DetourGuard, hooks::HookManager, replace};
 
 /// Here we keep addr infos that we allocated so we'll know when to use the original
 /// freeaddrinfo function and when to use our implementation
 pub(crate) static MANAGED_ADDRINFO: LazyLock<DashSet<usize>> = LazyLock::new(DashSet::new);
-
-static mut GLOBAL_HOSTENT: hostent = hostent {
-    h_name: ptr::null_mut(),
-    h_aliases: ptr::null_mut(),
-    h_addrtype: 0,
-    h_length: 0,
-    h_addr_list: ptr::null_mut(),
-};
-
-static mut GLOBAL_HOSTNAME: Option<Vec<u8>> = None;
-
-pub static mut HOST_ALIASES: Option<Vec<Vec<u8>>> = None;
-static mut _HOST_ALIASES: Option<Vec<*mut i8>> = None;
-pub static mut GLOBAL_HOST_ADDR: Option<IpAddr> = None;
-pub static mut HOST_ADDR_LIST: [*mut c_char; 2] = [ptr::null_mut(); 2];
-pub static mut _HOST_ADDR_LIST: [u8; 4] = [0u8; 4];
-static mut H_POS: usize = 0;
-pub static mut HOST_STAYOPEN: c_int = 0;
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn socket_detour(
@@ -138,6 +108,12 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
         .unwrap_or_bypass_with(|_| FN_GETHOSTNAME(raw_name, name_length))
 }
 
+/// Hook for `libc::gethostbyname` (you won't find this in rust's `libc` as it's been deprecated and
+/// removed).
+///
+/// Resolves DNS `raw_name` and allocates a `static` [`libc::hostent`] that we change the inner
+/// values whenever this function is called. The address itself of `*mut hostent` has to remain the
+/// same (thus why it's a `static`).
 #[hook_guard_fn]
 unsafe extern "C" fn gethostbyname_detour(raw_name: *const c_char) -> *mut hostent {
     let rawish_name = (!raw_name.is_null()).then(|| CStr::from_ptr(raw_name));
