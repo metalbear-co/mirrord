@@ -949,7 +949,7 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
 
     let mut aliases_ptrs = aliases
         .iter()
-        .map(|alias| alias.as_ptr())
+        .map(|alias| alias.as_ptr() as *const i8)
         .collect::<Vec<_>>();
     let mut ips_ptrs = ips.iter_mut().map(|ip| ip.as_mut_ptr()).collect::<Vec<_>>();
 
