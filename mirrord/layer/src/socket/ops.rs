@@ -902,7 +902,7 @@ fn remote_hostname_string() -> Detour<CString> {
 /// **Safety**:
 /// See the [`GETHOSTBYNAME_ALIASES_PTR`] docs. If you see this function being called and some weird
 /// issue is going on, assume that you might've triggered the UB.
-#[tracing::instrument(level = "debug", ret)]
+#[tracing::instrument(level = "trace", ret)]
 pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
     let name: String = raw_name
         .bypass(Bypass::NullNode)?
