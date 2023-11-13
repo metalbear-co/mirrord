@@ -908,7 +908,7 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
         .bypass(Bypass::NullNode)?
         .to_str()
         .map_err(|fail| {
-            warn!("Failed converting `node` from `CStr` with {:#?}", fail);
+            warn!("Failed converting `name` from `CStr` with {:#?}", fail);
 
             Bypass::CStrConversion
         })?
@@ -949,7 +949,7 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
 
     let mut aliases_ptrs: Vec<*const i8> = aliases
         .iter()
-        .map(|alias| alias.as_ptr())
+        .map(|alias| alias.as_ptr().cast())
         .collect::<Vec<_>>();
     let mut ips_ptrs = ips.iter_mut().map(|ip| ip.as_mut_ptr()).collect::<Vec<_>>();
 
