@@ -12,7 +12,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use libc::{c_int, c_void, sockaddr, socklen_t};
+use libc::{c_int, c_void, hostent, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::IncomingMode;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
@@ -42,6 +42,20 @@ pub(super) static REMOTE_DNS_REVERSE_MAPPING: LazyLock<DashMap<IpAddr, String>> 
 
 /// Hostname initialized from the agent with [`gethostname`].
 pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();
+
+/// Globals used by `gethostbyname`
+static mut GETHOSTBYNAME_HOSTNAME: Option<CString> = None;
+static mut GETHOSTBYNAME_ALIASES_STR: Option<Vec<CString>> = None;
+static mut GETHOSTBYNAME_ALIASES_PTR: Option<Vec<*const i8>> = None;
+static mut GETHOSTBYNAME_ADDRESSES_VAL: Option<Vec<[u8; 4]>> = None;
+static mut GETHOSTBYNAME_ADDRESSES_PTR: Option<Vec<*const u8>> = None;
+static mut GETHOSTBYNAME_HOSTENT: hostent = hostent {
+    h_name: ptr::null_mut(),
+    h_aliases: ptr::null_mut(),
+    h_addrtype: 0,
+    h_length: 0,
+    h_addr_list: ptr::null_mut(),
+};
 
 /// Helper struct for connect results where we want to hold the original errno
 /// when result is -1 (error) because sometimes it's not a real error (EINPROGRESS/EINTR)
@@ -747,7 +761,7 @@ pub(super) fn remote_getaddrinfo(node: String) -> HookResult<Vec<(String, IpAddr
 ///
 /// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
 /// for the equivalent of this function).
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "debug", ret)]
 pub(super) fn getaddrinfo(
     rawish_node: Option<&CStr>,
     rawish_service: Option<&CStr>,
@@ -808,7 +822,9 @@ pub(super) fn getaddrinfo(
 
             // Must outlive this function, as it is stored as a pointer in `libc::addrinfo`.
             let ai_addr = Box::into_raw(Box::new(unsafe { *rawish_sock_addr.as_ptr() }));
+            tracing::debug!("whats the name {name:?}");
             let ai_canonname = CString::new(name).unwrap().into_raw();
+            tracing::debug!("ai_canonname {:?}", unsafe { CStr::from_ptr(ai_canonname) });
 
             libc::addrinfo {
                 ai_flags: 0,
@@ -830,6 +846,7 @@ pub(super) fn getaddrinfo(
             raw
         })
         .reduce(|current, previous| {
+            tracing::debug!("ai_next called");
             // Safety: These pointers were just allocated using `Box::new`, so they should be
             // fine regarding memory layout, and are not dangling.
             unsafe { (*previous).ai_next = current };
@@ -867,6 +884,80 @@ fn remote_hostname_string() -> Detour<CString> {
             .collect::<Vec<_>>(),
     )
     .map(Detour::Success)?
+}
+
+/// Resolves a hostname and set result to static global like `gethostbyname` does.
+#[tracing::instrument(level = "trace", ret)]
+pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
+    let name: String = raw_name
+        .bypass(Bypass::NullNode)?
+        .to_str()
+        .map_err(|fail| {
+            warn!("Failed converting `node` from `CStr` with {:#?}", fail);
+
+            Bypass::CStrConversion
+        })?
+        .into();
+
+    let result = remote_getaddrinfo(name.clone())?;
+
+    // maybe set herror?
+    if result.is_empty() {
+        return Detour::Success(ptr::null_mut());
+    }
+
+    let res_name = CString::new(name.as_str()).map_err(|fail| {
+        warn!("Failed converting `node` from `String` with {:#?}", fail);
+
+        Bypass::CStrConversion
+    })?;
+
+    let mut hosts_values_hashset = HashSet::new();
+    let mut ip_values = Vec::new();
+
+    for (host, ip) in result.into_iter() {
+        hosts_values_hashset.insert(host);
+
+        match ip {
+            IpAddr::V4(ip) => ip_values.push(ip.octets()),
+            IpAddr::V6(ip) => {
+                warn!("ipv6 received - ignoring - {ip:?}")
+            }
+        };
+    }
+
+    let mut hosts_values = Vec::new();
+    let mut hosts_ptrs = Vec::new();
+
+    for host in hosts_values_hashset.into_iter() {
+        let c_host = CString::new(host.as_str()).map_err(|fail| {
+            warn!("Failed converting {host:?} from `CStr` with {:#?}", fail);
+            Bypass::CStrConversion
+        })?;
+        hosts_ptrs.push(c_host.as_ptr());
+        hosts_values.push(c_host);
+    }
+    hosts_ptrs.push(ptr::null_mut());
+
+    let mut ip_ptrs = ip_values.iter().map(|ip| ip.as_ptr()).collect::<Vec<_>>();
+
+    ip_ptrs.push(ptr::null_mut());
+
+    unsafe {
+        GETHOSTBYNAME_HOSTNAME.replace(res_name);
+        GETHOSTBYNAME_ALIASES_STR.replace(hosts_values);
+        GETHOSTBYNAME_ALIASES_PTR.replace(hosts_ptrs);
+        GETHOSTBYNAME_ADDRESSES_VAL.replace(ip_values);
+        GETHOSTBYNAME_ADDRESSES_PTR.replace(ip_ptrs);
+        GETHOSTBYNAME_HOSTENT.h_name = GETHOSTBYNAME_HOSTNAME.as_ref().unwrap().as_ptr() as _;
+        GETHOSTBYNAME_HOSTENT.h_length = 4;
+        GETHOSTBYNAME_HOSTENT.h_addrtype = libc::AF_INET;
+        GETHOSTBYNAME_HOSTENT.h_aliases = GETHOSTBYNAME_ALIASES_PTR.as_ref().unwrap().as_ptr() as _;
+        GETHOSTBYNAME_HOSTENT.h_addr_list =
+            GETHOSTBYNAME_ADDRESSES_PTR.as_ref().unwrap().as_ptr() as *mut *mut libc::c_char;
+    }
+
+    Detour::Success(unsafe { std::ptr::addr_of!(GETHOSTBYNAME_HOSTENT) as _ })
 }
 
 /// Resolve hostname from remote host with caching for the result

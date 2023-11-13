@@ -9,6 +9,8 @@
 #![feature(pointer_byte_offsets)]
 #![feature(lazy_cell)]
 #![feature(once_cell_try)]
+#![feature(vec_into_raw_parts)]
+#![feature(sync_unsafe_cell)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::indexing_slicing)]
 
