@@ -2,7 +2,7 @@ use std::{env::VarError, net::SocketAddr, ptr, str::ParseBoolError};
 
 use errno::set_errno;
 use ignore_codes::*;
-use libc::{c_char, DIR, FILE};
+use libc::{c_char, hostent, DIR, FILE};
 use mirrord_config::{config::ConfigError, feature::network::outgoing::OutgoingFilterError};
 use mirrord_protocol::{ResponseError, SerializationError};
 #[cfg(target_os = "macos")]
@@ -309,5 +309,11 @@ impl From<HookError> for *mut c_char {
 impl From<frida_gum::Error> for LayerError {
     fn from(err: frida_gum::Error) -> Self {
         LayerError::Frida(err)
+    }
+}
+
+impl From<HookError> for *mut hostent {
+    fn from(_fail: HookError) -> Self {
+        ptr::null_mut()
     }
 }

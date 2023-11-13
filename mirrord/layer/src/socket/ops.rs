@@ -12,7 +12,8 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use libc::{c_int, c_void, sockaddr, socklen_t};
+use errno::set_errno;
+use libc::{c_int, c_void, hostent, sockaddr, socklen_t};
 use mirrord_config::feature::network::incoming::IncomingMode;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
@@ -42,6 +43,31 @@ pub(super) static REMOTE_DNS_REVERSE_MAPPING: LazyLock<DashMap<IpAddr, String>> 
 
 /// Hostname initialized from the agent with [`gethostname`].
 pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();
+
+/// Globals used by `gethostbyname`.
+static mut GETHOSTBYNAME_HOSTNAME: Option<CString> = None;
+static mut GETHOSTBYNAME_ALIASES_STR: Option<Vec<CString>> = None;
+
+/// **Safety**:
+/// There is a potential UB trigger here, as [`libc::hostent`] uses this as an `*mut _`, while we
+/// have `*const _`. As this is being filled to fulfill the contract of a deprecated function, I
+/// (alex) don't think we're going to hit this issue ever.
+static mut GETHOSTBYNAME_ALIASES_PTR: Option<Vec<*const i8>> = None;
+static mut GETHOSTBYNAME_ADDRESSES_VAL: Option<Vec<[u8; 4]>> = None;
+static mut GETHOSTBYNAME_ADDRESSES_PTR: Option<Vec<*mut u8>> = None;
+
+/// Global static that the user will receive when calling [`gethostbyname`].
+///
+/// **Safety**:
+/// Even though we fill it with some `*const _` while it expects `*mut _`, it shouldn't be a problem
+/// as the user will most likely be doing a deep copy if they want to mess around with this struct.
+static mut GETHOSTBYNAME_HOSTENT: hostent = hostent {
+    h_name: ptr::null_mut(),
+    h_aliases: ptr::null_mut(),
+    h_addrtype: 0,
+    h_length: 0,
+    h_addr_list: ptr::null_mut(),
+};
 
 /// Helper struct for connect results where we want to hold the original errno
 /// when result is -1 (error) because sometimes it's not a real error (EINPROGRESS/EINTR)
@@ -867,6 +893,88 @@ fn remote_hostname_string() -> Detour<CString> {
             .collect::<Vec<_>>(),
     )
     .map(Detour::Success)?
+}
+
+/// Resolves a hostname and set result to static global like the original `gethostbyname` does.
+///
+/// Used by erlang/elixir to resolve DNS.
+///
+/// **Safety**:
+/// See the [`GETHOSTBYNAME_ALIASES_PTR`] docs. If you see this function being called and some weird
+/// issue is going on, assume that you might've triggered the UB.
+#[tracing::instrument(level = "trace", ret)]
+pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
+    let name: String = raw_name
+        .bypass(Bypass::NullNode)?
+        .to_str()
+        .map_err(|fail| {
+            warn!("Failed converting `name` from `CStr` with {:#?}", fail);
+
+            Bypass::CStrConversion
+        })?
+        .into();
+
+    let hosts_and_ips = remote_getaddrinfo(name.clone())?;
+
+    // We could `unwrap` here, as this would have failed on the previous conversion.
+    let host_name = CString::new(name)?;
+
+    if hosts_and_ips.is_empty() {
+        set_errno(errno::Errno(libc::EAI_NODATA));
+        return Detour::Success(ptr::null_mut());
+    }
+
+    // We need `*mut _` at the end, so `ips` has to be `mut`.
+    let (aliases, mut ips) = hosts_and_ips
+        .into_iter()
+        .filter_map(|(host, ip)| match ip {
+            // Only care about ipv4s and hosts that exist.
+            IpAddr::V4(ip) => {
+                let c_host = CString::new(host).ok()?;
+                Some((c_host, ip.octets()))
+            }
+            IpAddr::V6(ip) => {
+                trace!("ipv6 received - ignoring - {ip:?}");
+                None
+            }
+        })
+        .fold(
+            (Vec::default(), Vec::default()),
+            |(mut aliases, mut ips), (host, octets)| {
+                aliases.push(host);
+                ips.push(octets);
+                (aliases, ips)
+            },
+        );
+
+    let mut aliases_ptrs: Vec<*const i8> = aliases
+        .iter()
+        .map(|alias| alias.as_ptr().cast())
+        .collect::<Vec<_>>();
+    let mut ips_ptrs = ips.iter_mut().map(|ip| ip.as_mut_ptr()).collect::<Vec<_>>();
+
+    // Put a null ptr to signal end of the list.
+    aliases_ptrs.push(ptr::null());
+    ips_ptrs.push(ptr::null_mut());
+
+    // Need long-lived values so we can take pointers to them.
+    unsafe {
+        GETHOSTBYNAME_HOSTNAME.replace(host_name);
+        GETHOSTBYNAME_ALIASES_STR.replace(aliases);
+        GETHOSTBYNAME_ALIASES_PTR.replace(aliases_ptrs);
+        GETHOSTBYNAME_ADDRESSES_VAL.replace(ips);
+        GETHOSTBYNAME_ADDRESSES_PTR.replace(ips_ptrs);
+
+        // Fill the `*mut hostent` that the user will interact with.
+        GETHOSTBYNAME_HOSTENT.h_name = GETHOSTBYNAME_HOSTNAME.as_ref().unwrap().as_ptr() as _;
+        GETHOSTBYNAME_HOSTENT.h_length = 4;
+        GETHOSTBYNAME_HOSTENT.h_addrtype = libc::AF_INET;
+        GETHOSTBYNAME_HOSTENT.h_aliases = GETHOSTBYNAME_ALIASES_PTR.as_ref().unwrap().as_ptr() as _;
+        GETHOSTBYNAME_HOSTENT.h_addr_list =
+            GETHOSTBYNAME_ADDRESSES_PTR.as_ref().unwrap().as_ptr() as *mut *mut libc::c_char;
+    }
+
+    Detour::Success(unsafe { std::ptr::addr_of!(GETHOSTBYNAME_HOSTENT) as _ })
 }
 
 /// Resolve hostname from remote host with caching for the result
