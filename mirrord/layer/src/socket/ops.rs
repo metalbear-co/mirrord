@@ -886,8 +886,10 @@ fn remote_hostname_string() -> Detour<CString> {
     .map(Detour::Success)?
 }
 
-/// Resolves a hostname and set result to static global like `gethostbyname` does.
-#[tracing::instrument(level = "trace", ret)]
+/// Resolves a hostname and set result to static global like the original `gethostbyname` does.
+///
+/// Used by erlang/elixir to resolve DNS.
+#[tracing::instrument(level = "debug", ret)]
 pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
     let name: String = raw_name
         .bypass(Bypass::NullNode)?
