@@ -3,7 +3,7 @@ use std::{
     hash::Hash,
 };
 
-use crate::protocol::LayerId;
+use mirrord_intproxy_protocol::LayerId;
 
 /// For tracking remote resources allocated in the agent: open files and directories, port
 /// subscriptions. Remote resources can be shared by multiple layer instances because of forks.

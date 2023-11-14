@@ -21,7 +21,9 @@ use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics};
 use mirrord_config::LayerConfig;
 use mirrord_intproxy::{agent_conn::AgentConnectInfo, IntProxy};
 use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
-use mirrord_operator::client::{OperatorApi, OperatorSessionInformation};
+use mirrord_operator::client::{
+    OperatorApi, OperatorSessionConnection, OperatorSessionInformation,
+};
 use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonMessage};
 use nix::libc;
 use tokio::{
@@ -188,7 +190,7 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
     let first_connection_timeout = Duration::from_secs(config.internal_proxy.start_idle_timeout);
     let consecutive_connection_timeout = Duration::from_secs(config.internal_proxy.idle_timeout);
 
-    IntProxy::new(&config, agent_connect_info.as_ref(), listener)
+    IntProxy::new(&config, agent_connect_info, listener)
         .await?
         .run(first_connection_timeout, consecutive_connection_timeout)
         .await?;
@@ -288,10 +290,11 @@ async fn connect(
     Option<OperatorSessionInformation>,
 )> {
     match agent_connect_info {
-        Some(AgentConnectInfo::Operator(operator_session_information)) => Ok((
-            OperatorApi::connect(config, &operator_session_information, analytics).await?,
-            Some(operator_session_information),
-        )),
+        Some(AgentConnectInfo::Operator(operator_session_information)) => {
+            let OperatorSessionConnection { tx, rx, info } =
+                OperatorApi::connect(config, operator_session_information, analytics).await?;
+            Ok(((tx, rx), Some(info)))
+        }
         Some(AgentConnectInfo::DirectKubernetes(connect_info)) => {
             let k8s_api = KubernetesAPI::create(config).await?;
             let connection = k8s_api.create_connection(connect_info).await?;

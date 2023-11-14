@@ -69,14 +69,17 @@ impl AgentConnection {
     /// [`AgentConnectInfo`].
     pub async fn new(
         config: &LayerConfig,
-        connect_info: Option<&AgentConnectInfo>,
+        connect_info: Option<AgentConnectInfo>,
     ) -> Result<Self, AgentConnectionError> {
-        let (agent_tx, agent_rx) = match connect_info.as_ref() {
+        let (agent_tx, agent_rx) = match connect_info {
             Some(AgentConnectInfo::Operator(operator_session_information)) => {
-                OperatorApi::connect(config, operator_session_information, None)
+                let session = OperatorApi::connect(config, operator_session_information, None)
                     .await
-                    .map_err(AgentConnectionError::Operator)?
+                    .map_err(AgentConnectionError::Operator)?;
+
+                (session.tx, session.rx)
             }
+
             Some(AgentConnectInfo::DirectKubernetes(connect_info)) => {
                 let k8s_api = KubernetesAPI::create(config)
                     .await
@@ -86,14 +89,14 @@ impl AgentConnection {
                     .await
                     .map_err(AgentConnectionError::Kube)?
             }
-            None => {
-                if let Some(address) = config.connect_tcp.as_ref() {
-                    let stream = TcpStream::connect(address).await?;
 
-                    wrap_raw_connection(stream)
-                } else {
-                    return Err(AgentConnectionError::NoConnectionMethod);
-                }
+            None => {
+                let address = config
+                    .connect_tcp
+                    .as_ref()
+                    .ok_or(AgentConnectionError::NoConnectionMethod)?;
+                let stream = TcpStream::connect(address).await?;
+                wrap_raw_connection(stream)
             }
         };
 

@@ -8,7 +8,7 @@ use mirrord_config::{
     util::VecOrSingle,
     LayerConfig,
 };
-use mirrord_intproxy::protocol::PortSubscription;
+use mirrord_intproxy_protocol::PortSubscription;
 use mirrord_protocol::{
     tcp::{Filter, HttpFilter, StealType},
     Port,

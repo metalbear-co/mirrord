@@ -4,7 +4,7 @@ use mirrord_analytics::AnalyticsReporter;
 use mirrord_config::{feature::network::outgoing::OutgoingFilterConfig, LayerConfig};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
-use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorSessionInformation};
+use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorSessionConnection};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
@@ -21,23 +21,16 @@ pub(crate) async fn create_operator_session<P>(
     config: &LayerConfig,
     progress: &P,
     analytics: &mut AnalyticsReporter,
-) -> Result<
-    Option<(
-        mpsc::Sender<ClientMessage>,
-        mpsc::Receiver<DaemonMessage>,
-        OperatorSessionInformation,
-    )>,
-    CliError,
->
+) -> Result<Option<OperatorSessionConnection>, CliError>
 where
     P: Progress + Send + Sync,
 {
     let mut sub_progress = progress.subtask("checking operator");
 
     match OperatorApi::create_session(config, progress, analytics).await {
-        Ok(Some(connection)) => {
+        Ok(Some(session)) => {
             sub_progress.success(Some("connected to operator"));
-            Ok(Some(connection))
+            Ok(Some(session))
         }
         Ok(None) => {
             sub_progress.success(Some("no operator detected"));
@@ -48,6 +41,17 @@ where
             sub_progress.failure(Some("operator concurrent port steal lock"));
 
             Err(CliError::OperatorConcurrentSteal)
+        }
+        Err(OperatorApiError::UnsupportedFeature {
+            feature,
+            operator_version,
+        }) => {
+            sub_progress.failure(Some("unsupported operator feature"));
+
+            Err(CliError::FeatureNotSupportedInOperatorError {
+                feature,
+                operator_version,
+            })
         }
         Err(err) => {
             sub_progress.failure(Some(
@@ -85,18 +89,23 @@ where
         }
     }
 
-    if config.operator && let Some((sender, receiver, operator_information)) = create_operator_session(config, progress, analytics).await? {
+    if config.operator && let Some(session) = create_operator_session(config, progress, analytics).await? {
         Ok((
-            AgentConnectInfo::Operator(operator_information),
-            AgentConnection { sender, receiver },
+            AgentConnectInfo::Operator(session.info),
+            AgentConnection { sender: session.tx, receiver: session.rx },
         ))
     } else {
+        if config.feature.copy_target.enabled {
+            return Err(CliError::FeatureRequiresOperatorError("copy target".into()));
+        }
+
         if matches!(config.target, mirrord_config::target::TargetConfig{ path: Some(mirrord_config::target::Target::Deployment{..}), ..}) {
             // This is CLI Only because the extensions also implement this check with better messaging.
             progress.print( "When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
             progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
             progress.print("To try it out, join the waitlist with `mirrord waitlist <email address>`, or at this link: https://metalbear.co/#waitlist-form");
         }
+
         let k8s_api = KubernetesAPI::create(config)
             .await
             .map_err(CliError::KubernetesApiFailed)?;

@@ -19,16 +19,19 @@ required-features = ["binary"]
 
 [features]
 default = []
-binary = ["dep:tracing", "dep:tracing-subscriber"]
+binary = ["dep:tracing", "dep:tracing-subscriber", "dep:tokio", "mirrord-intproxy-protocol/codec-async"]
+async-logger = ["mirrord-intproxy-protocol/codec-async", "dep:tokio", "dep:drain", "dep:tokio-util"]
 
 [dependencies]
-mirrord-intproxy = { path = "../intproxy" }
-tokio.workspace = true
-tracing = { workspace = true, optional = true }
-tracing-subscriber = { workspace = true, optional = true }
-log = { version = "0.4", features = ["std"] }
+mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
+
 bincode.workspace = true
+log = { version = "0.4", features = ["std"] }
 miette = "5"
 thiserror.workspace = true
-drain.workspace = true
-tokio-util.workspace = true
+
+tokio = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
+drain = { workspace = true, optional = true }
+tokio-util = { workspace = true, optional = true }

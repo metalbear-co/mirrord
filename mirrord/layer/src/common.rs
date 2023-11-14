@@ -2,7 +2,7 @@
 use std::{ffi::CStr, fmt::Debug, path::PathBuf};
 
 use libc::c_char;
-use mirrord_intproxy::protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};
+use mirrord_intproxy_protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};
 use mirrord_protocol::file::OpenOptionsInternal;
 #[cfg(target_os = "macos")]
 use mirrord_sip::{MIRRORD_TEMP_BIN_DIR_CANONIC_STRING, MIRRORD_TEMP_BIN_DIR_STRING};

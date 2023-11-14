@@ -1,13 +1,17 @@
+use std::io;
+
 use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
-use kube::{error::ErrorResponse, Api, Client, Resource};
+use kube::{api::PostParams, error::ErrorResponse, Api, Client, Resource};
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, AnalyticsReporter};
 use mirrord_auth::{
     certificate::Certificate, credential_store::CredentialStoreSync, error::AuthenticationError,
 };
 use mirrord_config::{
-    feature::network::incoming::ConcurrentSteal, target::TargetConfig, LayerConfig,
+    feature::network::incoming::ConcurrentSteal,
+    target::{Target, TargetConfig},
+    LayerConfig,
 };
 use mirrord_kube::{
     api::kubernetes::{create_kube_api, get_k8s_resource_api},
@@ -22,14 +26,17 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 use tracing::{debug, error};
 
-use crate::crd::{MirrordOperatorCrd, OperatorFeatures, TargetCrd, OPERATOR_STATUS_NAME};
+use crate::crd::{
+    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, TargetCrd,
+    OPERATOR_STATUS_NAME,
+};
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
 
 #[derive(Debug, Error)]
 pub enum OperatorApiError {
-    #[error("unable to create target for TargetConfig")]
-    InvalidTarget,
+    #[error("invalid target: {reason}")]
+    InvalidTarget { reason: String },
     #[error(transparent)]
     HttpError(#[from] http::Error),
     #[error(transparent)]
@@ -48,99 +55,177 @@ pub enum OperatorApiError {
     Authentication(#[from] AuthenticationError),
     #[error("Can't start proccess because other locks exist on target")]
     ConcurrentStealAbort,
+    #[error("mirrord operator {operator_version} does not support feature {feature}")]
+    UnsupportedFeature {
+        feature: String,
+        operator_version: String,
+    },
+
+    #[error("IO error: `{0}`!")]
+    Io(#[from] std::io::Error),
+}
+
+impl From<kube::Error> for OperatorApiError {
+    fn from(value: kube::Error) -> Self {
+        Self::KubeApiError(KubeApiError::from(value))
+    }
 }
 
 type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
 
-/// Data we store into environment variables for the child processes to use.
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct OperatorSessionInformation {
-    pub client_certificate: Option<Certificate>,
-    pub session_id: u64,
-    pub target: TargetCrd,
-    pub fingerprint: String,
-    pub operator_features: Vec<OperatorFeatures>,
-    pub protocol_version: Option<semver::Version>,
+pub struct OperatorSessionMetadata {
+    client_certificate: Certificate,
+    session_id: u64,
+    fingerprint: String,
+    operator_features: Vec<OperatorFeatures>,
+    protocol_version: Option<semver::Version>,
+    copy_pod_enabled: Option<bool>,
 }
 
-impl OperatorSessionInformation {
-    pub fn new(
-        client_certificate: Option<Certificate>,
-        target: TargetCrd,
+impl OperatorSessionMetadata {
+    fn new(
+        client_certificate: Certificate,
         fingerprint: String,
         operator_features: Vec<OperatorFeatures>,
         protocol_version: Option<semver::Version>,
+        copy_pod_enabled: Option<bool>,
     ) -> Self {
         Self {
             client_certificate,
             session_id: rand::random(),
-            target,
             fingerprint,
             operator_features,
             protocol_version,
+            copy_pod_enabled,
         }
     }
+
+    fn client_credentials(&self) -> io::Result<String> {
+        self.client_certificate
+            .encode_der()
+            .map(|bytes| general_purpose::STANDARD.encode(bytes))
+    }
+
+    fn set_operator_properties(&self, analytics: &mut AnalyticsReporter) {
+        analytics.set_operator_properties(AnalyticsOperatorProperties {
+            client_hash: self
+                .client_certificate
+                .sha256_fingerprint()
+                .ok()
+                .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
+
+            license_hash: AnalyticsHash::from_base64(&self.fingerprint),
+        });
+    }
+
+    fn proxy_feature_enabled(&self) -> bool {
+        self.operator_features.contains(&OperatorFeatures::ProxyApi)
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum OperatorSessionTarget {
+    Raw(TargetCrd),
+    Copied(CopyTargetCrd),
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct OperatorSessionInformation {
+    target: OperatorSessionTarget,
+    metadata: OperatorSessionMetadata,
 }
 
 pub struct OperatorApi {
     client: Client,
     target_api: Api<TargetCrd>,
+    copy_target_api: Api<CopyTargetCrd>,
     target_namespace: Option<String>,
-    version_api: Api<MirrordOperatorCrd>,
     target_config: TargetConfig,
     on_concurrent_steal: ConcurrentSteal,
 }
 
+/// Connection to existing operator session.
+pub struct OperatorSessionConnection {
+    /// For sending messages to the operator.
+    pub tx: Sender<ClientMessage>,
+    /// For receiving messages from the operator.
+    pub rx: Receiver<DaemonMessage>,
+    /// Additional data about the session.
+    pub info: OperatorSessionInformation,
+}
+
 impl OperatorApi {
-    /// Creates a new operator session, setting the session information in environment variables.
+    /// We allow copied pods to live only for 30 seconds before the internal proxy connects.
+    const COPIED_POD_IDLE_TTL: u32 = 30;
+
+    /// Checks used config against operator specification.
+    fn check_config(config: &LayerConfig, operator: &MirrordOperatorCrd) -> Result<()> {
+        if config.feature.copy_target.enabled {
+            let feature_enabled = operator.spec.copy_target_enabled.unwrap_or(false);
+
+            if !feature_enabled {
+                return Err(OperatorApiError::UnsupportedFeature {
+                    feature: "copy target".into(),
+                    operator_version: operator.spec.operator_version.clone(),
+                });
+            }
+
+            if config.feature.copy_target.scale_down
+                && !matches!(config.target.path, Some(Target::Deployment(..)))
+            {
+                return Err(OperatorApiError::InvalidTarget {
+                    reason: "scale down feature is enabled, but target is not a deployment".into(),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Creates new [`OperatorSessionConnection`] based on the given [`LayerConfig`].
+    /// Returns [`None`] if the operator is not found.
     pub async fn create_session<P>(
         config: &LayerConfig,
         progress: &P,
         analytics: &mut AnalyticsReporter,
-    ) -> Result<
-        Option<(
-            mpsc::Sender<ClientMessage>,
-            mpsc::Receiver<DaemonMessage>,
-            OperatorSessionInformation,
-        )>,
-    >
+    ) -> Result<Option<OperatorSessionConnection>>
     where
         P: Progress + Send + Sync,
     {
         let operator_api = OperatorApi::new(config).await?;
 
-        let status = match operator_api.get_status().await.transpose()? {
-            Some(status) => status,
-            None => {
-                // No operator found
-                return Ok(None);
-            }
+        let Some(operator) = operator_api.fetch_operator().await? else {
+            // No operator found.
+            return Ok(None);
         };
 
-        let client_certificate = {
-            let credential_name = &status.spec.license.fingerprint;
-            CredentialStoreSync::get_client_certificate::<MirrordOperatorCrd>(
-                &operator_api.client,
-                credential_name.to_string(),
-            )
-            .await
-            .map_err(|err| debug!("CredentialStore error: {err}"))
-            .ok()
-        };
+        Self::check_config(config, &operator)?;
 
-        analytics.set_operator_properties(AnalyticsOperatorProperties {
-            client_hash: client_certificate
-                .as_ref()
-                .and_then(|certificate| certificate.sha256_fingerprint().ok())
-                .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
-            license_hash: AnalyticsHash::from_base64(&status.spec.license.fingerprint),
-        });
+        let client_certificate = CredentialStoreSync::get_client_certificate::<MirrordOperatorCrd>(
+            &operator_api.client,
+            &operator.spec.license.fingerprint,
+        )
+        .await
+        .inspect_err(|err| debug!("CredentialStore error: {err}"))?;
+
+        let metadata = OperatorSessionMetadata::new(
+            client_certificate,
+            operator.spec.license.fingerprint,
+            operator.spec.features.unwrap_or_default(),
+            operator
+                .spec
+                .protocol_version
+                .and_then(|str_version| str_version.parse().ok()),
+            operator.spec.copy_target_enabled,
+        );
+
+        metadata.set_operator_properties(analytics);
 
         let mut version_progress = progress.subtask("comparing versions");
-        let operator_version = Version::parse(&status.spec.operator_version).unwrap(); // TODO: Remove unwrap
+        let operator_version = Version::parse(&operator.spec.operator_version)
+            .expect("failed to parse operator version from operator crd"); // TODO: Remove expect
 
-        // This is printed multiple times when the local process forks. Can be solved by e.g.
-        // propagating an env var, don't think it's worth the extra complexity though
         let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
         if operator_version > mirrord_version {
             // we make two sub tasks since it looks best this way
@@ -157,55 +242,65 @@ impl OperatorApi {
         }
         version_progress.success(None);
 
-        if let Some(target) = operator_api.fetch_target().await? {
-            let operator_session_information = OperatorSessionInformation::new(
-                client_certificate,
-                target,
-                status.spec.license.fingerprint,
-                status.spec.features.unwrap_or_default(),
-                status
-                    .spec
-                    .protocol_version
-                    .and_then(|str_version| str_version.parse().ok()),
-            );
+        let raw_target =
+            operator_api
+                .fetch_target()
+                .await?
+                .ok_or(OperatorApiError::InvalidTarget {
+                    reason: "not found in the cluster".into(),
+                })?;
 
-            let (sender, receiver) = operator_api
-                .connect_target(&operator_session_information)
+        let target_to_connect = if config.feature.copy_target.enabled {
+            let mut copy_progress = progress.subtask("copying target");
+
+            if config.feature.copy_target.scale_down {
+                let is_deployment = matches!(config.target.path, Some(Target::Deployment(..)));
+                if !is_deployment {
+                    progress.warning(
+                        "cannot scale down while copying target - target is not a deployment",
+                    )
+                }
+            }
+
+            let copied = operator_api
+                .copy_target(&metadata, raw_target, config.feature.copy_target.scale_down)
                 .await?;
-            Ok(Some((sender, receiver, operator_session_information)))
+            copy_progress.success(None);
+
+            OperatorSessionTarget::Copied(copied)
         } else {
-            // No operator found
-            Ok(None)
-        }
+            OperatorSessionTarget::Raw(raw_target)
+        };
+
+        let session_info = OperatorSessionInformation {
+            target: target_to_connect,
+            metadata,
+        };
+        let connection = operator_api.connect_target(session_info).await?;
+
+        Ok(Some(connection))
     }
 
-    /// Connect to session using operator and session information
+    /// Connects to exisiting operator session based on the given [`LayerConfig`] and
+    /// [`OperatorSessionInformation`].
     pub async fn connect(
         config: &LayerConfig,
-        session_information: &OperatorSessionInformation,
+        session_information: OperatorSessionInformation,
         analytics: Option<&mut AnalyticsReporter>,
-    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-        analytics.map(|analytics| {
-            analytics.set_operator_properties(AnalyticsOperatorProperties {
-                client_hash: session_information
-                    .client_certificate
-                    .as_ref()
-                    .and_then(|certificate| certificate.sha256_fingerprint().ok())
-                    .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
-                license_hash: AnalyticsHash::from_base64(&session_information.fingerprint),
-            });
-            analytics
-        });
+    ) -> Result<OperatorSessionConnection> {
+        if let Some(analytics) = analytics {
+            session_information
+                .metadata
+                .set_operator_properties(analytics);
+        }
 
-        OperatorApi::new(config)
-            .await?
-            .connect_target(session_information)
-            .await
+        let operator_api = OperatorApi::new(config).await?;
+        operator_api.connect_target(session_information).await
     }
 
     async fn new(config: &LayerConfig) -> Result<Self> {
         let target_config = config.target.clone();
-        let on_concurrent_steal = config.feature.network.incoming.on_concurrent_steal.clone();
+        let on_concurrent_steal = config.feature.network.incoming.on_concurrent_steal;
 
         let client = create_kube_api(
             config.accept_invalid_certificates,
@@ -223,25 +318,28 @@ impl OperatorApi {
         };
 
         let target_api: Api<TargetCrd> = get_k8s_resource_api(&client, target_namespace.as_deref());
-
-        let version_api: Api<MirrordOperatorCrd> = Api::all(client.clone());
+        let copy_target_api: Api<CopyTargetCrd> =
+            get_k8s_resource_api(&client, target_namespace.as_deref());
 
         Ok(OperatorApi {
             client,
             target_api,
+            copy_target_api,
             target_namespace,
-            version_api,
             target_config,
             on_concurrent_steal,
         })
     }
 
-    async fn get_status(&self) -> Option<Result<MirrordOperatorCrd>> {
-        match self.version_api.get(OPERATOR_STATUS_NAME).await {
-            Ok(status) => Some(Ok(status)),
-            Err(kube::Error::Api(ErrorResponse { code: 404, .. })) => None,
-            Err(err) => Some(Err(OperatorApiError::from(KubeApiError::from(err)))),
-        }
+    async fn fetch_operator(&self) -> Result<Option<MirrordOperatorCrd>> {
+        let api: Api<MirrordOperatorCrd> = Api::all(self.client.clone());
+        match api.get(OPERATOR_STATUS_NAME).await {
+            Ok(crd) => return Ok(Some(crd)),
+            Err(kube::Error::Api(ErrorResponse { code: 404, .. })) => {}
+            Err(e) => return Err(e.into()),
+        };
+
+        Ok(None)
     }
 
     async fn fetch_target(&self) -> Result<Option<TargetCrd>> {
@@ -250,87 +348,156 @@ impl OperatorApi {
         match self.target_api.get(&target_name).await {
             Ok(target) => Ok(Some(target)),
             Err(kube::Error::Api(ErrorResponse { code: 404, .. })) => Ok(None),
-            Err(err) => Err(OperatorApiError::from(KubeApiError::from(err))),
+            Err(err) => Err(err.into()),
         }
     }
 
+    /// Returns a namespace of the target.
+    fn namespace(&self) -> &str {
+        self.target_namespace
+            .as_deref()
+            .unwrap_or_else(|| self.client.default_namespace())
+    }
+
+    /// Returns a connection url for the given [`OperatorSessionInformation`].
+    /// This can be used to create a websocket connection with the operator.
     #[tracing::instrument(level = "debug", skip(self), ret)]
-    fn connect_url(&self, session_information: &OperatorSessionInformation) -> String {
-        let OperatorApi {
-            on_concurrent_steal,
-            ..
-        } = self;
-        let target = &session_information.target;
+    fn connect_url(&self, session: &OperatorSessionInformation) -> String {
+        match (session.metadata.proxy_feature_enabled(), &session.target) {
+            (true, OperatorSessionTarget::Raw(target)) => {
+                let dt = &();
+                let namespace = self.namespace();
+                let api_version = TargetCrd::api_version(dt);
+                let plural = TargetCrd::plural(dt);
 
-        if session_information
-            .operator_features
-            .contains(&OperatorFeatures::ProxyApi)
-        {
-            let dt = &();
-            let ns = self
-                .target_namespace
-                .as_deref()
-                .unwrap_or_else(|| self.client.default_namespace());
-            let api_version = TargetCrd::api_version(dt);
-            let plural = TargetCrd::plural(dt);
+                format!(
+                    "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{}?on_concurrent_steal={}&connect=true",
+                    target.name(),
+                    self.on_concurrent_steal,
+                )
+            }
+            (false, OperatorSessionTarget::Raw(target)) => {
+                format!(
+                    "{}/{}?on_concurrent_steal={}&connect=true",
+                    self.target_api.resource_url(),
+                    target.name(),
+                    self.on_concurrent_steal,
+                )
+            }
+            (true, OperatorSessionTarget::Copied(target)) => {
+                let dt = &();
+                let namespace = self.namespace();
+                let api_version = CopyTargetCrd::api_version(dt);
+                let plural = CopyTargetCrd::plural(dt);
 
-            format!("/apis/{api_version}/proxy/namespaces/{ns}/{plural}/{}?on_concurrent_steal={on_concurrent_steal}&connect=true", target.name())
-        } else {
-            format!(
-                "{}/{}?on_concurrent_steal={on_concurrent_steal}&connect=true",
-                self.target_api.resource_url(),
-                target.name(),
-            )
+                format!(
+                    "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{}?connect=true",
+                    target
+                        .meta()
+                        .name
+                        .as_ref()
+                        .expect("missing 'copytarget' name"),
+                )
+            }
+            (false, OperatorSessionTarget::Copied(target)) => {
+                format!(
+                    "{}/{}?connect=true",
+                    self.copy_target_api.resource_url(),
+                    target
+                        .meta()
+                        .name
+                        .as_ref()
+                        .expect("missing 'copytarget' name"),
+                )
+            }
         }
     }
 
-    /// Create websocket connection to operator
+    /// Checks that there are no active port locks on the given target.
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn check_no_port_locks(&self, target: &TargetCrd) -> Result<()> {
+        let Ok(lock_target) = self
+            .target_api
+            .get_subresource("port-locks", &target.name())
+            .await
+        else {
+            return Ok(());
+        };
+
+        let no_port_locks = lock_target
+            .spec
+            .port_locks
+            .as_ref()
+            .map(Vec::is_empty)
+            .unwrap_or(true);
+
+        if no_port_locks {
+            Ok(())
+        } else {
+            Err(OperatorApiError::ConcurrentStealAbort)
+        }
+    }
+
+    /// Create websocket connection to operator.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn connect_target(
         &self,
-        session_information: &OperatorSessionInformation,
-    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+        session_info: OperatorSessionInformation,
+    ) -> Result<OperatorSessionConnection> {
         // why are we checking on client side..?
-        if self.on_concurrent_steal == ConcurrentSteal::Abort && let Ok(lock_target) = self
-                .target_api
-                .get_subresource("port-locks", &session_information.target.name())
-                .await && lock_target
-                .spec
-                .port_locks
-                .map(|locks| !locks.is_empty())
-                .unwrap_or(false) {
-            return Err(OperatorApiError::ConcurrentStealAbort);
+        if let (ConcurrentSteal::Abort, OperatorSessionTarget::Raw(target)) =
+            (self.on_concurrent_steal, &session_info.target)
+        {
+            self.check_no_port_locks(target).await?;
         }
 
-        let mut builder = Request::builder()
-            .uri(self.connect_url(session_information))
-            .header("x-session-id", session_information.session_id.to_string());
+        let builder = Request::builder()
+            .uri(self.connect_url(&session_info))
+            .header("x-session-id", session_info.metadata.session_id.to_string())
+            .header("x-client-der", session_info.metadata.client_credentials()?);
 
-        if let Some(certificate) = &session_information.client_certificate {
-            match certificate
-                .encode_der()
-                .map(|certificate_der| general_purpose::STANDARD.encode(certificate_der))
-                .map_err(AuthenticationError::Pem)
-            {
-                Ok(client_credentials) => {
-                    builder = builder.header("x-client-der", client_credentials);
-                }
-                Err(err) => {
-                    debug!("CredentialStore error: {err}");
-                }
-            }
-        }
+        let connection = self.client.connect(builder.body(vec![])?).await?;
 
-        let connection = self
-            .client
-            .connect(builder.body(vec![])?)
+        let (tx, rx) =
+            ConnectionWrapper::wrap(connection, session_info.metadata.protocol_version.clone());
+
+        Ok(OperatorSessionConnection {
+            tx,
+            rx,
+            info: session_info,
+        })
+    }
+
+    /// Creates a new [`CopyTargetCrd`] resource using the operator.
+    /// This should create a new dummy pod out of the given `target`.
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn copy_target(
+        &self,
+        session_metadata: &OperatorSessionMetadata,
+        target: TargetCrd,
+        scale_down: bool,
+    ) -> Result<CopyTargetCrd> {
+        let raw_target = target
+            .spec
+            .target
+            .clone()
+            .ok_or(OperatorApiError::InvalidTarget {
+                reason: "copy target feature is not compatible with targetless mode".into(),
+            })?;
+
+        let requested = CopyTargetCrd::new(
+            &target.name(),
+            CopyTargetSpec {
+                target: raw_target,
+                idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
+                scale_down,
+            },
+        );
+
+        self.copy_target_api
+            .create(&PostParams::default(), &requested)
             .await
-            .map_err(KubeApiError::from)?;
-
-        Ok(ConnectionWrapper::wrap(
-            connection,
-            session_information.protocol_version.clone(),
-        ))
+            .map_err(Into::into)
     }
 }
 

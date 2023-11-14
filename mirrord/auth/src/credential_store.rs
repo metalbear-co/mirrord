@@ -107,7 +107,7 @@ impl CredentialStoreSync {
     /// created
     async fn access_store_credential<R, C, V>(
         client: &Client,
-        credential_name: String,
+        credential_name: &str,
         store_file: &mut fs::File,
         callback: C,
     ) -> Result<V>
@@ -122,7 +122,11 @@ impl CredentialStoreSync {
             .inspect_err(|err| info!("CredentialStore Load Error {err:?}"))
             .unwrap_or_default();
 
-        let value = callback(store.get_or_init::<R>(client, credential_name).await?);
+        let value = callback(
+            store
+                .get_or_init::<R>(client, credential_name.to_string())
+                .await?,
+        );
 
         // Make sure the store_file's cursor is at the start of the file before sending it to save
         store_file
@@ -138,7 +142,7 @@ impl CredentialStoreSync {
     /// Get or create speific client-certificate with an exclusive lock on `CREDENTIALS_PATH`.
     pub async fn get_client_certificate<R>(
         client: &Client,
-        credential_name: String,
+        credential_name: &str,
     ) -> Result<Certificate>
     where
         R: Resource + Clone + Debug,

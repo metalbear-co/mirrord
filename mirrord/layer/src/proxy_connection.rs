@@ -10,12 +10,10 @@ use std::{
     time::Duration,
 };
 
-use mirrord_intproxy::{
+use mirrord_intproxy_protocol::{
     codec::{self, CodecError, SyncDecoder, SyncEncoder},
-    protocol::{
-        IsLayerRequest, IsLayerRequestWithResponse, LayerId, LayerToProxyMessage, LocalMessage,
-        MessageId, NewSessionRequest, ProxyToLayerMessage,
-    },
+    IsLayerRequest, IsLayerRequestWithResponse, LayerId, LayerToProxyMessage, LocalMessage,
+    MessageId, NewSessionRequest, ProxyToLayerMessage,
 };
 use thiserror::Error;
 

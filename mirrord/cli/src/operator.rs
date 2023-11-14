@@ -13,6 +13,7 @@ use mirrord_operator::{
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{row, Table};
+use reqwest::StatusCode;
 use serde::Deserialize;
 use tokio::fs;
 use tracing::warn;
@@ -77,17 +78,9 @@ async fn operator_setup(
                 .await?
                 .error_for_status()
                 .map(|_| LicenseType::Online(license_key))
-                .map_err(|fail| {
-                    fail.status()
-                        .map(|fail_status| {
-                            if fail_status.as_u16() == 404 {
-                                SetupError::MissingLicense
-                            } else {
-                                SetupError::from(fail)
-                            }
-                        })
-                        // TODO(alex): Convert this error
-                        .unwrap_or_else(|| From::from(fail))
+                .map_err(|fail| match fail.status().map(|f| f.as_u16()) {
+                    Some(404) => SetupError::MissingLicense,
+                    Some(_) | None => SetupError::from(fail),
                 }),
             (None, None) => Err(SetupError::MissingLicense),
         }?;

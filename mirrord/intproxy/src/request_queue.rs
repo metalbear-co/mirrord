@@ -13,9 +13,8 @@
 
 use std::{collections::VecDeque, fmt};
 
+use mirrord_intproxy_protocol::{LayerId, MessageId};
 use thiserror::Error;
-
-use crate::protocol::{LayerId, MessageId};
 
 /// Erorr returned when the proxy attempts to retrieve [`MessageId`] and [`LayerId`] of a request
 /// corresponding to a response received from the agent, but the [`RequestQueue`] is empty. This

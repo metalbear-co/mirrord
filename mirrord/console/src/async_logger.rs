@@ -1,6 +1,6 @@
 use drain::Watch;
 use log::LevelFilter;
-use mirrord_intproxy::codec::AsyncEncoder;
+use mirrord_intproxy_protocol::codec::AsyncEncoder;
 use tokio::{
     io::BufWriter,
     net::TcpStream,
