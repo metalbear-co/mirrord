@@ -302,7 +302,7 @@ pub struct LayerConfig {
 
     /// ## use_proxy {#root-use_proxy}
     ///
-    /// When disabled, mirrord will remove `HTTP/S_PROXY` env variables before
+    /// When disabled, mirrord will remove `HTTP[S]_PROXY` env variables before
     /// doing any network requests. This is useful when the system sets a proxy
     /// but you don't want mirrord to use it.
     /// ```
