@@ -753,6 +753,7 @@ mod tests {
             sip_binaries: None,
             kube_context: None,
             internal_proxy: None,
+            use_proxy: None
         };
 
         assert_eq!(config, expect);
