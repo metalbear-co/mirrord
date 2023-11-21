@@ -299,6 +299,15 @@ pub struct LayerConfig {
     /// # internal_proxy {#root-internal_proxy}
     #[config(nested)]
     pub internal_proxy: InternalProxyConfig,
+
+    /// ## use_proxy {#root-use_proxy}
+    ///
+    /// When disabled, mirrord will remove `HTTP/S_PROXY` env variables before
+    /// doing any network requests. This is useful when the system sets a proxy
+    /// but you don't want mirrord to use it.
+    /// ```
+    #[config(env = "MIRRORD_PROXY", default = true)]
+    pub use_proxy: bool,
 }
 
 impl LayerConfig {
