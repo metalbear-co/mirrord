@@ -30,16 +30,18 @@ where
     /// Used when the layer opens a resource, e.g. with
     /// [`OpenFileRequest`](mirrord_protocol::file::OpenFileRequest).
     pub fn add(&mut self, layer_id: LayerId, resource: T) {
-        self.by_layer
+        let added = self.by_layer
             .entry(layer_id)
             .or_default()
             .insert(resource.clone());
 
-        *self.counts.entry(resource).or_default() += 1;
+        if added {
+            *self.counts.entry(resource).or_default() += 1;
+        }
     }
 
     /// Removes the given resource from the layer instance with the given [`LayerId`].
-    /// Returns whether the resource should be closed on the agent size.
+    /// Returns whether the resource should be closed on the agent side.
     ///
     /// Can be used when the layer closes the resource, e.g. with
     /// [`CloseFileRequest`](mirrord_protocol::file::CloseFileRequest).
