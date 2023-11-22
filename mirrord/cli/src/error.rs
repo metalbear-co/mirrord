@@ -50,7 +50,7 @@ pub(crate) enum CliError {
     1. The operator is running and the logs are not showing any errors.
     2. You have sufficient permissions to port forward to the operator.
 
-    If you want to run without the operator, please set the following:
+    If you want to run without the operator, please set the following in the mirrord configuration file:
     {{
         "operator": false
     }}
