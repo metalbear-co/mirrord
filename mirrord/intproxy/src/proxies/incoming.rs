@@ -177,10 +177,7 @@ impl IncomingProxy {
     /// [`BackgroundTasks`] struct.
     const CHANNEL_SIZE: usize = 512;
 
-    /// Stores subscription request id and sends a corresponding request to the agent.
-    /// However, if a subscription for the same port already exists, this method does not make any
-    /// request to the agent. Instead, it immediately responds to the layer and starts
-    /// redirecting connections to the new listener.
+    /// Tries to register the new subscription in the [`SubscriptionsManager`].
     #[tracing::instrument(level = "trace", skip(self, message_bus))]
     async fn handle_port_subscribe(
         &mut self,
@@ -198,7 +195,7 @@ impl IncomingProxy {
         }
     }
 
-    /// Sends a request to the agent to stop sending incoming connections for the specified port.
+    /// Tries to unregister the subscription from the [`SubscriptionManager`].
     #[tracing::instrument(level = "trace", skip(self, message_bus))]
     async fn handle_port_unsubscribe(
         &mut self,

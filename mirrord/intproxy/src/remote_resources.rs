@@ -30,7 +30,8 @@ where
     /// Used when the layer opens a resource, e.g. with
     /// [`OpenFileRequest`](mirrord_protocol::file::OpenFileRequest).
     pub fn add(&mut self, layer_id: LayerId, resource: T) {
-        let added = self.by_layer
+        let added = self
+            .by_layer
             .entry(layer_id)
             .or_default()
             .insert(resource.clone());

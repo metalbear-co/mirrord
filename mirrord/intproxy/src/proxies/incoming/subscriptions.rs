@@ -14,19 +14,27 @@ use crate::{
     remote_resources::RemoteResources,
 };
 
+/// Represents a source of subscription - a `listen` call in the layer.
 struct Source {
     layer: LayerId,
     message: MessageId,
     request: PortSubscribe,
 }
 
+/// Represents a port subscription in the agent.
 struct Subscription {
+    /// Previous sources of this subscription. Each of these was at some point active, but was
+    /// later overwritten.
     queued_sources: Vec<Source>,
+    /// Latest source of this subscription.
     active_source: Source,
+    /// Whether this subscription is confirmed.
     confirmed: bool,
 }
 
 impl Subscription {
+    /// Creates a new subscription from the given [`Source`].
+    /// Additionally returns a message to be sent to the agent.
     fn new(source: Source) -> (Self, ClientMessage) {
         let message = source.request.subscription.agent_subscribe();
 
@@ -40,6 +48,9 @@ impl Subscription {
         )
     }
 
+    /// Overwrites the active subscription [`Source`].
+    /// Returns a message to be sent to the layer.
+    /// Returns [`None`] if this subscription is still waiting for confirmation.
     fn push_source(&mut self, source: Source) -> Option<ToLayer> {
         let message = if self.confirmed {
             // Agent already confirmed this subscription.
@@ -59,6 +70,8 @@ impl Subscription {
         message
     }
 
+    /// Confirms this subscription.
+    /// Returns messages to be sent to the layers.
     fn confirm(&mut self) -> Vec<ToLayer> {
         if self.confirmed {
             return vec![];
@@ -77,6 +90,9 @@ impl Subscription {
             .collect()
     }
 
+    /// Rejects this subscription with the given `reason`.
+    /// Returns messages to be sent to the layers.
+    /// Returns [`Err`] if this subscription was already confirmed.
     fn reject(self, reason: ResponseError) -> Result<Vec<ToLayer>, Self> {
         if self.confirmed {
             return Err(self);
@@ -98,24 +114,26 @@ impl Subscription {
         Ok(responses)
     }
 
-    fn remove_source(mut self, listening_on: SocketAddr) -> Result<ClientMessage, Self> {
+    /// Removed a source from this subscription.
+    /// If this source is the last one, returns [`Err`] with a message to be sent to the agent.
+    fn remove_source(mut self, listening_on: SocketAddr) -> Result<Self, ClientMessage> {
         let queue_size = self.queued_sources.len();
         self.queued_sources
             .retain(|source| source.request.listening_on != listening_on);
         if queue_size != self.queued_sources.len() {
-            return Err(self);
+            return Ok(self);
         }
 
         if self.active_source.request.listening_on != listening_on {
-            return Err(self);
+            return Ok(self);
         }
 
         match self.queued_sources.pop() {
             Some(next_in_queue) => {
                 self.active_source = next_in_queue;
-                Err(self)
+                Ok(self)
             }
-            None => Ok(self
+            None => Err(self
                 .active_source
                 .request
                 .subscription
@@ -124,6 +142,14 @@ impl Subscription {
     }
 }
 
+/// Manages port subscriptions across all connected layers.
+/// Logic of this struct is a bit complicated for several reasons:
+/// 1. Layer can subscribe to a single port multiple times (e.g. with `port_mapping`)
+/// 2. Layer can fork, thus duplicating the OS listener socket related to a subscription
+/// 3. Layer can be connected to multiple agents, each of which idependently responds to
+///    subscription requests
+/// 4. Subscription response from the agent most of the time cannot be tracked down to its
+///    subscription request
 #[derive(Default)]
 pub struct SubscriptionsManager {
     remote_ports: RemoteResources<(Port, SocketAddr)>,
@@ -131,12 +157,19 @@ pub struct SubscriptionsManager {
 }
 
 impl SubscriptionsManager {
+    /// Returns active [`PortSubscribe`] request for the given [`Port`].
     pub fn get(&self, port: Port) -> Option<&PortSubscribe> {
         self.subscriptions
             .get(&port)
             .map(|sub| &sub.active_source.request)
     }
 
+    /// Registers a new port subscription in this struct.
+    /// Optionally returns a message to be sent.
+    ///
+    /// Subsequent subscriptions of the same port will take precedence over previous ones, meaning
+    /// that new connections will be routed to the listener from the most recent [`PortSubscribe`]
+    /// request.
     pub fn layer_subscribed(
         &mut self,
         layer_id: LayerId,
@@ -165,6 +198,8 @@ impl SubscriptionsManager {
         }
     }
 
+    /// Unregisters a subscription from this struct.
+    /// Optionally returns a message to be sent to the agent.
     pub fn layer_unsubscribed(
         &mut self,
         layer_id: LayerId,
@@ -182,14 +217,16 @@ impl SubscriptionsManager {
         };
 
         match subscription.remove_source(request.listening_on) {
-            Ok(message) => Some(message),
-            Err(subscription) => {
+            Ok(subscription) => {
                 self.subscriptions.insert(request.port, subscription);
                 None
             }
+            Err(message) => Some(message),
         }
     }
 
+    /// Notifies this struct about agent's response.
+    /// Returns messages to be sent to the layers.
     pub fn agent_responded(
         &mut self,
         result: RemoteResult<Port>,
@@ -219,22 +256,25 @@ impl SubscriptionsManager {
         }
     }
 
+    /// Notifies this struct about layer closing.
+    /// Returns messages to be sent to the agent.
     pub fn layer_closed(&mut self, layer_id: LayerId) -> Vec<ClientMessage> {
         self.remote_ports
             .remove_all(layer_id)
             .filter_map(|(port, listening_on)| {
                 let subscription = self.subscriptions.remove(&port)?;
                 match subscription.remove_source(listening_on) {
-                    Ok(message) => Some(message),
-                    Err(subscription) => {
+                    Ok(subscription) => {
                         self.subscriptions.insert(port, subscription);
                         None
                     }
+                    Err(message) => Some(message),
                 }
             })
             .collect()
     }
 
+    /// Notifies this struct about layer forking.
     pub fn layer_forked(&mut self, parent: LayerId, child: LayerId) {
         self.remote_ports.clone_all(parent, child);
     }
