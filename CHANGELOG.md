@@ -8,6 +8,23 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.75.1](https://github.com/metalbear-co/mirrord/tree/3.75.1) - 2023-11-14
+
+
+### Fixed
+
+- Add a hook for
+  [gethostbyname](https://www.man7.org/linux/man-pages/man3/gethostbyname.3.html)
+  to allow erlang/elixir to resolve DNS.
+  [#2055](https://github.com/metalbear-co/mirrord/issues/2055)
+- Change spammy connect log's level from info to trace.
+
+
+### Internal
+
+- Documentation of `env` config pattern matching.
+
+
 ## [3.75.0](https://github.com/metalbear-co/mirrord/tree/3.75.0) - 2023-11-08
 
 

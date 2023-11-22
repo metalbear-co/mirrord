@@ -4,7 +4,7 @@ use std::{os::unix::io::RawFd, sync::LazyLock};
 
 use dashmap::DashSet;
 use errno::{set_errno, Errno};
-use libc::{c_char, c_int, c_void, size_t, sockaddr, socklen_t, ssize_t, EINVAL};
+use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 
 use super::ops::*;
@@ -106,6 +106,18 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
             }
         })
         .unwrap_or_bypass_with(|_| FN_GETHOSTNAME(raw_name, name_length))
+}
+
+/// Hook for `libc::gethostbyname` (you won't find this in rust's `libc` as it's been deprecated and
+/// removed).
+///
+/// Resolves DNS `raw_name` and allocates a `static` [`libc::hostent`] that we change the inner
+/// values whenever this function is called. The address itself of `*mut hostent` has to remain the
+/// same (thus why it's a `static`).
+#[hook_guard_fn]
+unsafe extern "C" fn gethostbyname_detour(raw_name: *const c_char) -> *mut hostent {
+    let rawish_name = (!raw_name.is_null()).then(|| CStr::from_ptr(raw_name));
+    gethostbyname(rawish_name).unwrap_or_bypass_with(|_| FN_GETHOSTBYNAME(raw_name))
 }
 
 #[hook_guard_fn]
@@ -501,6 +513,14 @@ pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled
         gethostname_detour,
         FnGethostname,
         FN_GETHOSTNAME
+    );
+
+    replace!(
+        hook_manager,
+        "gethostbyname",
+        gethostbyname_detour,
+        FnGethostbyname,
+        FN_GETHOSTBYNAME
     );
 
     #[cfg(target_os = "linux")]
