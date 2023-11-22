@@ -279,3 +279,203 @@ impl SubscriptionsManager {
         self.remote_ports.clone_all(parent, child);
     }
 }
+
+#[cfg(test)]
+mod test {
+    use mirrord_intproxy_protocol::PortSubscription;
+    use mirrord_protocol::tcp::LayerTcp;
+
+    use super::*;
+
+    #[test]
+    fn with_double_subscribe() {
+        let listener_1 = "127.0.0.1:1111".parse().unwrap();
+        let listener_2 = "127.0.0.1:2222".parse().unwrap();
+
+        let mut manager = SubscriptionsManager::default();
+
+        let response = manager.layer_subscribed(
+            LayerId(0),
+            0,
+            PortSubscribe {
+                listening_on: listener_1,
+                subscription: PortSubscription::Mirror(80),
+            },
+        );
+        assert!(
+            matches!(
+                response,
+                Some(ProxyMessage::ToAgent(ClientMessage::Tcp(
+                    LayerTcp::PortSubscribe(80)
+                )))
+            ),
+            "{response:?}"
+        );
+
+        let response = manager.layer_subscribed(
+            LayerId(0),
+            1,
+            PortSubscribe {
+                listening_on: listener_2,
+                subscription: PortSubscription::Mirror(80),
+            },
+        );
+        assert!(response.is_none(), "{response:?}");
+
+        let mut responses = manager.agent_responded(Ok(80)).unwrap();
+        assert_eq!(responses.len(), 2, "{responses:?}");
+        responses.sort_by_key(|r| r.message_id);
+        for i in [0, 1] {
+            let response = responses.get(i).unwrap();
+            assert!(
+                matches!(
+                    response,
+                    ToLayer {
+                        layer_id: LayerId(0),
+                        message: ProxyToLayerMessage::Incoming(IncomingResponse::PortSubscribe(
+                            Ok(())
+                        )),
+                        message_id,
+                    } if *message_id == i as u64
+                ),
+                "{i}: {response:?}"
+            );
+        }
+        assert_eq!(manager.get(80).unwrap().listening_on, listener_2);
+
+        let response = manager.layer_unsubscribed(
+            LayerId(0),
+            PortUnsubscribe {
+                port: 80,
+                listening_on: listener_2,
+            },
+        );
+        assert!(response.is_none(), "{response:?}");
+        assert_eq!(manager.get(80).unwrap().listening_on, listener_1);
+
+        let response = manager.layer_unsubscribed(
+            LayerId(0),
+            PortUnsubscribe {
+                port: 80,
+                listening_on: listener_1,
+            },
+        );
+        assert!(matches!(
+            response,
+            Some(ClientMessage::Tcp(LayerTcp::PortUnsubscribe(80)))
+        ));
+        assert!(manager.get(80).is_none());
+    }
+
+    #[test]
+    fn with_fork() {
+        let listening_on = "127.0.0.1:1111".parse().unwrap();
+
+        let mut manager = SubscriptionsManager::default();
+
+        let response = manager.layer_subscribed(
+            LayerId(0),
+            0,
+            PortSubscribe {
+                listening_on,
+                subscription: PortSubscription::Mirror(80),
+            },
+        );
+        assert!(
+            matches!(
+                response,
+                Some(ProxyMessage::ToAgent(ClientMessage::Tcp(
+                    LayerTcp::PortSubscribe(80)
+                )))
+            ),
+            "{response:?}"
+        );
+
+        let responses = manager.agent_responded(Ok(80)).unwrap();
+        assert_eq!(responses.len(), 1, "{responses:?}");
+        let response = responses.into_iter().next().unwrap();
+        assert!(
+            matches!(
+                response,
+                ToLayer {
+                    layer_id: LayerId(0),
+                    message: ProxyToLayerMessage::Incoming(IncomingResponse::PortSubscribe(Ok(()))),
+                    message_id: 0,
+                }
+            ),
+            "{response:?}"
+        );
+        assert_eq!(manager.get(80).unwrap().listening_on, listening_on);
+
+        manager.layer_forked(LayerId(0), LayerId(1));
+
+        let response = manager.layer_unsubscribed(
+            LayerId(0),
+            PortUnsubscribe {
+                port: 80,
+                listening_on,
+            },
+        );
+        assert!(response.is_none(), "{response:?}");
+        assert_eq!(manager.get(80).unwrap().listening_on, listening_on);
+
+        let response = manager.layer_unsubscribed(
+            LayerId(1),
+            PortUnsubscribe {
+                port: 80,
+                listening_on,
+            },
+        );
+        assert!(matches!(
+            response,
+            Some(ClientMessage::Tcp(LayerTcp::PortUnsubscribe(80)))
+        ));
+        assert!(manager.get(80).is_none());
+    }
+
+    #[test]
+    fn with_double_response() {
+        let listening_on = "127.0.0.1:1111".parse().unwrap();
+
+        let mut manager = SubscriptionsManager::default();
+
+        let response = manager.layer_subscribed(
+            LayerId(0),
+            0,
+            PortSubscribe {
+                listening_on,
+                subscription: PortSubscription::Mirror(80),
+            },
+        );
+        assert!(
+            matches!(
+                response,
+                Some(ProxyMessage::ToAgent(ClientMessage::Tcp(
+                    LayerTcp::PortSubscribe(80)
+                )))
+            ),
+            "{response:?}"
+        );
+
+        let responses = manager.agent_responded(Ok(80)).unwrap();
+        assert_eq!(responses.len(), 1, "{responses:?}");
+        let response = responses.into_iter().next().unwrap();
+        assert!(
+            matches!(
+                response,
+                ToLayer {
+                    layer_id: LayerId(0),
+                    message: ProxyToLayerMessage::Incoming(IncomingResponse::PortSubscribe(Ok(()))),
+                    message_id: 0,
+                }
+            ),
+            "{response:?}"
+        );
+        assert_eq!(manager.get(80).unwrap().listening_on, listening_on);
+
+        let responses = manager
+            .agent_responded(Err(ResponseError::PortAlreadyStolen(80)))
+            .unwrap();
+        assert!(responses.is_empty(), "{responses:?}");
+    }
+}
