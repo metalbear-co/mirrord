@@ -1,6 +1,6 @@
 use std::{fmt::Debug, ops::Deref};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Days, Utc};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
 use x509_certificate::{
@@ -70,6 +70,90 @@ impl AsRef<Certificate> for Credentials {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LicenseValidity {
+    Good,
+    CloseToExpiring(Days),
+    Expired(DateTime<Utc>),
+}
+
+impl LicenseValidity {
+    pub fn new(expiration_date: DateTime<Utc>, now: DateTime<Utc>) -> Self {
+        let close_to_expiring = expiration_date
+            .checked_sub_days(Days::new(2))
+            .expect("Requested a ridiculous amount of days!");
+
+        if now >= expiration_date {
+            Self::Expired(now)
+        } else if now >= close_to_expiring {
+            Self::CloseToExpiring(Days::new(
+                expiration_date.date_naive().ordinal() as u64 - now.date_naive().ordinal() as u64,
+            ))
+        } else {
+            Self::Good
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{DateTime, Days, Utc};
+
+    use crate::credentials::LicenseValidity;
+
+    const TODAY: &str = "2023-11-20 00:00:00 UTC";
+
+    #[test]
+    fn license_validity_valid() {
+        let today: DateTime<Utc> = TODAY.parse().unwrap();
+        let expiration_date = today.checked_add_days(Days::new(7)).unwrap();
+
+        assert!(matches!(
+            LicenseValidity::new(expiration_date, today),
+            LicenseValidity::Good
+        ));
+    }
+
+    #[test]
+    fn license_validity_close_to_expiring() {
+        let today: DateTime<Utc> = TODAY.parse().unwrap();
+
+        let fake_today = today.checked_add_days(Days::new(5)).unwrap();
+        let expiration_date = today.checked_add_days(Days::new(7)).unwrap();
+
+        let validity = LicenseValidity::new(expiration_date, fake_today);
+        assert!(
+            matches!(validity, LicenseValidity::CloseToExpiring(days_to_expire) if days_to_expire == Days::new(2))
+        );
+    }
+
+    #[test]
+    fn license_validity_expired() {
+        let today: DateTime<Utc> = TODAY.parse().unwrap();
+
+        let fake_today = today.checked_add_days(Days::new(7)).unwrap();
+        let expiration_date = today.checked_add_days(Days::new(7)).unwrap();
+
+        assert!(matches!(
+            LicenseValidity::new(expiration_date, fake_today),
+            LicenseValidity::Expired(_)
+        ));
+    }
+
+    #[test]
+    fn license_validity_expired_past_expiration_date() {
+        let today: DateTime<Utc> = TODAY.parse().unwrap();
+
+        let fake_today = today.checked_add_days(Days::new(8)).unwrap();
+        let expiration_date = today.checked_add_days(Days::new(7)).unwrap();
+
+        assert!(matches!(
+            LicenseValidity::new(expiration_date, fake_today),
+            LicenseValidity::Expired(_)
+        ));
+    }
+}
+
 /// Ext trait for validation of dates of `rfc5280::Validity`
 pub trait DateValidityExt {
     /// Check other is in between not_before and not_after
@@ -87,6 +171,8 @@ impl DateValidityExt for rfc5280::Validity {
             Time::UtcTime(time) => *time,
             Time::GeneralTime(time) => DateTime::<Utc>::from(time),
         };
+
+        // let exp = not_after.checked_sub_days(Days::new(Self::EXPIRES_CHECK));
 
         not_before < other && other < not_after
     }

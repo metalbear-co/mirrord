@@ -1,7 +1,10 @@
 use std::{ops::Deref, str::FromStr};
 
+use chrono::{DateTime, Utc};
 use serde::{de, ser, Deserialize, Serialize};
 use x509_certificate::{X509Certificate, X509CertificateError};
+
+use crate::credentials::LicenseValidity;
 
 /// Serialize pem contents of `X509Certificate`
 fn x509_serialize<S>(certificate: &X509Certificate, serialzer: S) -> Result<S::Ok, S::Error>
@@ -32,6 +35,18 @@ pub struct Certificate(
     )]
     X509Certificate,
 );
+
+impl Certificate {
+    pub fn validity(&self) -> LicenseValidity {
+        let validity = &self.0.as_ref().tbs_certificate.validity;
+
+        let expiration_date: DateTime<Utc> = match validity.not_after.clone() {
+            x509_certificate::asn1time::Time::UtcTime(time) => *time,
+            x509_certificate::asn1time::Time::GeneralTime(time) => From::from(time),
+        };
+        LicenseValidity::new(expiration_date, Utc::now())
+    }
+}
 
 impl From<X509Certificate> for Certificate {
     fn from(certificate: X509Certificate) -> Self {
