@@ -55,7 +55,7 @@ pub(crate) enum CliError {
         "operator": false
     }}
 
-    Please remember that some features are supported only with mirrord operator (https://mirrord.dev/docs/teams/introduction/#supported-features).
+    Please remember that some features are supported only when using mirrord operator (https://mirrord.dev/docs/teams/introduction/#supported-features).
     {GENERAL_HELP}"#
     ))]
     OperatorConnectionFailed(String),
