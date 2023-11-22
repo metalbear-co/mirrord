@@ -125,7 +125,7 @@ impl TcpConnectionStealer {
             command_rx,
             clients: HashMap::with_capacity(8),
             index_allocator: Default::default(),
-            stealer: TcpListener::bind((Ipv4Addr::UNSPECIFIED, 15555)).await?,
+            stealer: TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await?,
             iptables: None, // Initialize on first subscription.
             write_streams: HashMap::with_capacity(8),
             read_streams: StreamMap::with_capacity(8),
