@@ -185,6 +185,7 @@ impl OperatorApi {
 
     /// Creates new [`OperatorSessionConnection`] based on the given [`LayerConfig`].
     /// Returns [`None`] if the operator is not found.
+    #[tracing::instrument(level = "debug", skip(progress, analytics))]
     pub async fn create_session<P>(
         config: &LayerConfig,
         progress: &P,
@@ -337,15 +338,15 @@ impl OperatorApi {
         })
     }
 
+    #[tracing::instrument(level = "debug", skip(self), ret)]
     async fn fetch_operator(&self) -> Result<Option<MirrordOperatorCrd>> {
         let api: Api<MirrordOperatorCrd> = Api::all(self.client.clone());
-        match api.get(OPERATOR_STATUS_NAME).await {
-            Ok(crd) => return Ok(Some(crd)),
-            Err(kube::Error::Api(ErrorResponse { code: 404, .. })) => {}
-            Err(e) => return Err(e.into()),
-        };
 
-        Ok(None)
+        match api.get(OPERATOR_STATUS_NAME).await {
+            Ok(crd) => Ok(Some(crd)),
+            Err(kube::Error::Api(ErrorResponse { code: 404, .. })) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     async fn fetch_target(&self) -> Result<Option<TargetCrd>> {

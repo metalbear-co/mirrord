@@ -120,6 +120,7 @@ where
 }
 
 impl MirrordExecution {
+    #[tracing::instrument(level = "trace", skip_all)]
     pub(crate) async fn start<P>(
         config: &LayerConfig,
         // We only need the executable on macos, for SIP handling.

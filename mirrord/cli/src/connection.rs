@@ -17,6 +17,7 @@ pub(crate) struct AgentConnection {
     pub receiver: mpsc::Receiver<DaemonMessage>,
 }
 
+#[tracing::instrument(level = "debug", skip(progress, analytics))]
 pub(crate) async fn create_operator_session<P>(
     config: &LayerConfig,
     progress: &P,
@@ -69,6 +70,7 @@ where
 }
 
 /// Creates an agent if needed then connects to it.
+#[tracing::instrument(level = "debug", skip(progress, analytics))]
 pub(crate) async fn create_and_connect<P>(
     config: &LayerConfig,
     progress: &mut P,

@@ -191,6 +191,7 @@ impl AgentManagment for KubernetesAPI {
         ))
     }
 
+    #[tracing::instrument(level = "trace", skip(self, progress))]
     async fn create_agent<P>(
         &self,
         progress: &mut P,
