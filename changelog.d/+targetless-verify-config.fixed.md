@@ -1,0 +1,1 @@
+Changed the way `targetless` is printed in `mirrord verify-config` to allow the IDEs to properly show target selection dialogs.
