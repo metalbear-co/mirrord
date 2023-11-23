@@ -442,7 +442,7 @@ fn main() -> miette::Result<()> {
             }
             Commands::InternalProxy => internal_proxy::proxy(watch).await?,
             Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
-            Commands::VerifyConfig(config_path) => verify_config(config_path).await?,
+            Commands::VerifyConfig(args) => verify_config(args).await?,
             Commands::Completions(args) => {
                 let mut cmd: clap::Command = Cli::command();
                 generate(args.shell, &mut cmd, "mirrord", &mut std::io::stdout());
