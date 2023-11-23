@@ -2,12 +2,10 @@ use std::io;
 
 use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
-use http::request::Request;
-use kube::{api::PostParams, error::ErrorResponse, Api, Client, Resource};
+use http::{request::Request, StatusCode};
+use kube::{api::PostParams, Api, Client, Resource};
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, AnalyticsReporter};
-use mirrord_auth::{
-    certificate::Certificate, credential_store::CredentialStoreSync, error::AuthenticationError,
-};
+use mirrord_auth::{certificate::Certificate, credential_store::CredentialStoreSync};
 use mirrord_config::{
     feature::network::incoming::ConcurrentSteal,
     target::{Target, TargetConfig},
@@ -33,39 +31,28 @@ use crate::crd::{
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
 
+pub use http::Error as HttpError;
+
 #[derive(Debug, Error)]
 pub enum OperatorApiError {
     #[error("invalid target: {reason}")]
     InvalidTarget { reason: String },
-    #[error(transparent)]
-    HttpError(#[from] http::Error),
-    #[error(transparent)]
-    WsError(#[from] TungsteniteError),
-    #[error(transparent)]
-    KubeApiError(#[from] KubeApiError),
-    #[error(transparent)]
-    DecodeError(#[from] bincode::error::DecodeError),
-    #[error(transparent)]
-    EncodeError(#[from] bincode::error::EncodeError),
-    #[error("invalid message: {0:?}")]
-    InvalidMessage(Message),
-    #[error("Receiver<DaemonMessage> was dropped")]
-    DaemonReceiverDropped,
-    #[error(transparent)]
-    Authentication(#[from] AuthenticationError),
-    #[error("Can't start proccess because other locks exist on target")]
+    #[error("failed to build a websocket connect request: {0}")]
+    ConnectRequestBuildError(HttpError),
+    #[error("failed to create mirrord operator API: {0}")]
+    CreateApiError(KubeApiError),
+    #[error("{operation} failed: {error}")]
+    KubeError {
+        error: kube::Error,
+        operation: String,
+    },
+    #[error("can't start proccess because other locks exist on target")]
     ConcurrentStealAbort,
     #[error("mirrord operator {operator_version} does not support feature {feature}")]
     UnsupportedFeature {
         feature: String,
         operator_version: String,
     },
-}
-
-impl From<kube::Error> for OperatorApiError {
-    fn from(value: kube::Error) -> Self {
-        Self::KubeApiError(KubeApiError::from(value))
-    }
 }
 
 type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
@@ -248,13 +235,7 @@ impl OperatorApi {
         }
         version_progress.success(None);
 
-        let raw_target =
-            operator_api
-                .fetch_target()
-                .await?
-                .ok_or(OperatorApiError::InvalidTarget {
-                    reason: "not found in the cluster".into(),
-                })?;
+        let raw_target = operator_api.fetch_target().await?;
 
         let target_to_connect = if config.feature.copy_target.enabled {
             let mut copy_progress = progress.subtask("copying target");
@@ -313,7 +294,8 @@ impl OperatorApi {
             config.kubeconfig.clone(),
             config.kube_context.clone(),
         )
-        .await?;
+        .await
+        .map_err(OperatorApiError::CreateApiError)?;
 
         let target_namespace = if target_config.path.is_some() {
             target_config.namespace.clone()
@@ -340,22 +322,24 @@ impl OperatorApi {
     async fn fetch_operator(&self) -> Result<Option<MirrordOperatorCrd>> {
         let api: Api<MirrordOperatorCrd> = Api::all(self.client.clone());
         match api.get(OPERATOR_STATUS_NAME).await {
-            Ok(crd) => return Ok(Some(crd)),
-            Err(kube::Error::Api(ErrorResponse { code: 404, .. })) => {}
-            Err(e) => return Err(e.into()),
-        };
-
-        Ok(None)
+            Ok(crd) => Ok(Some(crd)),
+            Err(kube::Error::Api(e)) if e.code == StatusCode::NOT_FOUND => Ok(None),
+            Err(error) => Err(OperatorApiError::KubeError {
+                error,
+                operation: "finding operator in the cluster".into(),
+            }),
+        }
     }
 
-    async fn fetch_target(&self) -> Result<Option<TargetCrd>> {
+    async fn fetch_target(&self) -> Result<TargetCrd> {
         let target_name = TargetCrd::target_name_by_config(&self.target_config);
-
-        match self.target_api.get(&target_name).await {
-            Ok(target) => Ok(Some(target)),
-            Err(kube::Error::Api(ErrorResponse { code: 404, .. })) => Ok(None),
-            Err(err) => Err(err.into()),
-        }
+        self.target_api
+            .get(&target_name)
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: "finding target in the cluster".into(),
+            })
     }
 
     /// Returns a namespace of the target.
@@ -457,21 +441,34 @@ impl OperatorApi {
             self.check_no_port_locks(target).await?;
         }
 
-        let mut builder = Request::builder()
-            .uri(self.connect_url(&session_info))
-            .header("x-session-id", session_info.metadata.session_id.to_string());
+        let request = {
+            let mut builder = Request::builder()
+                .uri(self.connect_url(&session_info))
+                .header("x-session-id", session_info.metadata.session_id.to_string());
 
-        match session_info.metadata.client_credentials() {
-            Ok(Some(credentials)) => {
-                builder = builder.header("x-client-der", credentials);
+            match session_info.metadata.client_credentials() {
+                Ok(Some(credentials)) => {
+                    builder = builder.header("x-client-der", credentials);
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    debug!("CredentialStore error: {err}");
+                }
             }
-            Ok(None) => {}
-            Err(err) => {
-                debug!("CredentialStore error: {err}");
-            }
-        }
 
-        let connection = self.client.connect(builder.body(vec![])?).await?;
+            builder
+                .body(vec![])
+                .map_err(OperatorApiError::ConnectRequestBuildError)?
+        };
+
+        let connection =
+            self.client
+                .connect(request)
+                .await
+                .map_err(|error| OperatorApiError::KubeError {
+                    error,
+                    operation: "creating a websocket connection".into(),
+                })?;
 
         let (tx, rx) =
             ConnectionWrapper::wrap(connection, session_info.metadata.protocol_version.clone());
@@ -512,8 +509,25 @@ impl OperatorApi {
         self.copy_target_api
             .create(&PostParams::default(), &requested)
             .await
-            .map_err(Into::into)
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: "copying target".into(),
+            })
     }
+}
+
+#[derive(Error, Debug)]
+enum ConnectionWrapperError {
+    #[error(transparent)]
+    DecodeError(#[from] bincode::error::DecodeError),
+    #[error(transparent)]
+    EncodeError(#[from] bincode::error::EncodeError),
+    #[error(transparent)]
+    WsError(#[from] TungsteniteError),
+    #[error("invalid message: {0:?}")]
+    InvalidMessage(Message),
+    #[error("message channel is closed")]
+    ChannelClosed,
 }
 
 pub struct ConnectionWrapper<T> {
@@ -554,7 +568,10 @@ where
         (client_tx, daemon_rx)
     }
 
-    async fn handle_client_message(&mut self, client_message: ClientMessage) -> Result<()> {
+    async fn handle_client_message(
+        &mut self,
+        client_message: ClientMessage,
+    ) -> Result<(), ConnectionWrapperError> {
         let payload = bincode::encode_to_vec(client_message, bincode::config::standard())?;
 
         self.connection.send(payload.into()).await?;
@@ -565,7 +582,7 @@ where
     async fn handle_daemon_message(
         &mut self,
         daemon_message: Result<Message, TungsteniteError>,
-    ) -> Result<()> {
+    ) -> Result<(), ConnectionWrapperError> {
         match daemon_message? {
             Message::Binary(payload) => {
                 let (daemon_message, _) = bincode::decode_from_slice::<DaemonMessage, _>(
@@ -576,13 +593,13 @@ where
                 self.daemon_tx
                     .send(daemon_message)
                     .await
-                    .map_err(|_| OperatorApiError::DaemonReceiverDropped)
+                    .map_err(|_| ConnectionWrapperError::ChannelClosed)
             }
-            message => Err(OperatorApiError::InvalidMessage(message)),
+            message => Err(ConnectionWrapperError::InvalidMessage(message)),
         }
     }
 
-    async fn start(mut self) -> Result<()> {
+    async fn start(mut self) -> Result<(), ConnectionWrapperError> {
         loop {
             tokio::select! {
                 client_message = self.client_rx.recv() => {
@@ -596,7 +613,7 @@ where
                                         "1.2.1".parse().expect("Bad static version"),
                                     ))
                                     .await
-                                    .map_err(|_| OperatorApiError::DaemonReceiverDropped)?;
+                                    .map_err(|_| ConnectionWrapperError::ChannelClosed)?;
                             }
                         }
                         Some(client_message) => self.handle_client_message(client_message).await?,

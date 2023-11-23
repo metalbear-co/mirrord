@@ -4,68 +4,16 @@ use mirrord_analytics::AnalyticsReporter;
 use mirrord_config::{feature::network::outgoing::OutgoingFilterConfig, LayerConfig};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
-use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorSessionConnection};
+use mirrord_operator::client::OperatorApi;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
-use tracing::{debug, trace};
 
 use crate::{CliError, Result};
 
 pub(crate) struct AgentConnection {
     pub sender: mpsc::Sender<ClientMessage>,
     pub receiver: mpsc::Receiver<DaemonMessage>,
-}
-
-pub(crate) async fn create_operator_session<P>(
-    config: &LayerConfig,
-    progress: &P,
-    analytics: &mut AnalyticsReporter,
-) -> Result<Option<OperatorSessionConnection>, CliError>
-where
-    P: Progress + Send + Sync,
-{
-    let mut sub_progress = progress.subtask("checking operator");
-
-    match OperatorApi::create_session(config, progress, analytics).await {
-        Ok(Some(session)) => {
-            sub_progress.success(Some("connected to operator"));
-            Ok(Some(session))
-        }
-        Ok(None) => {
-            sub_progress.success(Some("no operator detected"));
-
-            Ok(None)
-        }
-        Err(OperatorApiError::ConcurrentStealAbort) => {
-            sub_progress.failure(Some("operator concurrent port steal lock"));
-
-            Err(CliError::OperatorConcurrentSteal)
-        }
-        Err(OperatorApiError::UnsupportedFeature {
-            feature,
-            operator_version,
-        }) => {
-            sub_progress.failure(Some("unsupported operator feature"));
-
-            Err(CliError::FeatureNotSupportedInOperatorError {
-                feature,
-                operator_version,
-            })
-        }
-        Err(err) => {
-            sub_progress.failure(Some(
-                "unable to check if operator exists, probably due to RBAC",
-            ));
-
-            trace!(
-                "{}",
-                miette::Error::from(CliError::OperatorConnectionFailed(err))
-            );
-
-            Ok(None)
-        }
-    }
 }
 
 /// Creates an agent if needed then connects to it.
@@ -89,49 +37,66 @@ where
         }
     }
 
-    if config.operator && let Some(session) = create_operator_session(config, progress, analytics).await? {
-        Ok((
-            AgentConnectInfo::Operator(session.info),
-            AgentConnection { sender: session.tx, receiver: session.rx },
-        ))
-    } else {
-        if config.feature.copy_target.enabled {
-            return Err(CliError::FeatureRequiresOperatorError("copy target".into()));
+    if config.operator {
+        let mut subtask = progress.subtask("checking operator");
+
+        match OperatorApi::create_session(config, &subtask, analytics).await? {
+            Some(session) => {
+                subtask.success(Some("connected to the operator"));
+                return Ok((
+                    AgentConnectInfo::Operator(session.info),
+                    AgentConnection {
+                        sender: session.tx,
+                        receiver: session.rx,
+                    },
+                ));
+            }
+            None => subtask.success(Some("no operator detected")),
         }
-
-        if matches!(config.target, mirrord_config::target::TargetConfig{ path: Some(mirrord_config::target::Target::Deployment{..}), ..}) {
-            // This is CLI Only because the extensions also implement this check with better messaging.
-            progress.print( "When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
-            progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
-            progress.print("To try it out, join the waitlist with `mirrord waitlist <email address>`, or at this link: https://metalbear.co/#waitlist-form");
-        }
-
-        let k8s_api = KubernetesAPI::create(config)
-            .await
-            .map_err(CliError::KubernetesApiFailed)?;
-
-        let _ = k8s_api.detect_openshift(progress).await.map_err(|err| {
-            debug!("couldn't determine OpenShift: {err}");
-        });
-
-        let agent_connect_info = tokio::time::timeout(
-            Duration::from_secs(config.agent.startup_timeout),
-            k8s_api.create_agent(progress, Some(config)),
-        )
-        .await
-        .map_err(|_| CliError::AgentReadyTimeout)?
-        .map_err(CliError::CreateAgentFailed)?;
-
-        let (sender, receiver) = k8s_api
-            .create_connection(agent_connect_info.clone())
-            .await
-            .map_err(CliError::AgentConnectionFailed)?;
-
-        Ok((
-            AgentConnectInfo::DirectKubernetes(agent_connect_info),
-            AgentConnection { sender, receiver },
-        ))
     }
+
+    if config.feature.copy_target.enabled {
+        return Err(CliError::FeatureRequiresOperatorError("copy target".into()));
+    }
+
+    if matches!(
+        config.target,
+        mirrord_config::target::TargetConfig {
+            path: Some(mirrord_config::target::Target::Deployment { .. }),
+            ..
+        }
+    ) {
+        // This is CLI Only because the extensions also implement this check with better messaging.
+        progress.print( "When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
+        progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
+        progress.print("To try it out, join the waitlist with `mirrord waitlist <email address>`, or at this link: https://metalbear.co/#waitlist-form");
+    }
+
+    let k8s_api = KubernetesAPI::create(config)
+        .await
+        .map_err(CliError::KubernetesApiFailed)?;
+
+    let _ = k8s_api.detect_openshift(progress).await.map_err(|err| {
+        tracing::debug!("couldn't determine OpenShift: {err}");
+    });
+
+    let agent_connect_info = tokio::time::timeout(
+        Duration::from_secs(config.agent.startup_timeout),
+        k8s_api.create_agent(progress, Some(config)),
+    )
+    .await
+    .map_err(|_| CliError::AgentReadyTimeout)?
+    .map_err(CliError::CreateAgentFailed)?;
+
+    let (sender, receiver) = k8s_api
+        .create_connection(agent_connect_info.clone())
+        .await
+        .map_err(CliError::AgentConnectionFailed)?;
+
+    Ok((
+        AgentConnectInfo::DirectKubernetes(agent_connect_info),
+        AgentConnection { sender, receiver },
+    ))
 }
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
