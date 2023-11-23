@@ -1,1 +1,0 @@
-Added new configuration 'use_proxy' that lets user disable usage of http/s proxy by mirrord even when env is set
