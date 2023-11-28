@@ -27,6 +27,9 @@ where
 }
 
 /// Serializable `X509Certificate`
+///
+/// You can access the members of the certificate through it's [`AsRef`] implementation, this
+/// is how we dig into the certificate's validity, for example.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Certificate(
     #[serde(
@@ -37,14 +40,22 @@ pub struct Certificate(
 );
 
 impl Certificate {
+    /// Checks if the certificate is stil valid today (`Utc::now`), returning a
+    /// [`LicenseValidity`] to indicate if it's expired or not.
     pub fn validity(&self) -> LicenseValidity {
+        let expiration_date = self.expiration_date();
+        LicenseValidity::new(expiration_date, Utc::now())
+    }
+
+    /// Extracts the expiration date (`not_after`) out of the certificate as a nice
+    /// `DateTime<Utc>`.
+    pub fn expiration_date(&self) -> DateTime<Utc> {
         let validity = &self.0.as_ref().tbs_certificate.validity;
 
-        let expiration_date: DateTime<Utc> = match validity.not_after.clone() {
+        match validity.not_after.clone() {
             x509_certificate::asn1time::Time::UtcTime(time) => *time,
             x509_certificate::asn1time::Time::GeneralTime(time) => From::from(time),
-        };
-        LicenseValidity::new(expiration_date, Utc::now())
+        }
     }
 }
 

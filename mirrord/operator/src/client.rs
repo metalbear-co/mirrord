@@ -185,7 +185,7 @@ impl OperatorApi {
 
     /// Creates new [`OperatorSessionConnection`] based on the given [`LayerConfig`].
     /// Returns [`None`] if the operator is not found.
-    #[tracing::instrument(level = "debug", skip(progress, analytics))]
+    #[tracing::instrument(level = "debug", skip_all)]
     pub async fn create_session<P>(
         config: &LayerConfig,
         progress: &P,
@@ -349,8 +349,10 @@ impl OperatorApi {
         }
     }
 
+    #[tracing::instrument(level = "debug", fields(self.target_config), skip(self))]
     async fn fetch_target(&self) -> Result<Option<TargetCrd>> {
         let target_name = TargetCrd::target_name_by_config(&self.target_config);
+        debug!("target_name {target_name}");
 
         match self.target_api.get(&target_name).await {
             Ok(target) => Ok(Some(target)),
@@ -446,7 +448,7 @@ impl OperatorApi {
     }
 
     /// Create websocket connection to operator.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn connect_target(
         &self,
         session_info: OperatorSessionInformation,
@@ -472,7 +474,9 @@ impl OperatorApi {
             }
         }
 
+        debug!("connecting to operator");
         let connection = self.client.connect(builder.body(vec![])?).await?;
+        debug!("connected to operator");
 
         let (tx, rx) =
             ConnectionWrapper::wrap(connection, session_info.metadata.protocol_version.clone());

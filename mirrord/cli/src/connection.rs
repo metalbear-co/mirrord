@@ -17,7 +17,12 @@ pub(crate) struct AgentConnection {
     pub receiver: mpsc::Receiver<DaemonMessage>,
 }
 
-#[tracing::instrument(level = "debug", skip(progress, analytics))]
+/// Called if [`config.operator`](LayerConfig) is set to `true`, meaning that we have an operator
+/// installed.
+///
+/// Some failures in this function will return `Ok(None)`, which allows mirrord to continue the
+/// startup process by creating an agent without operator interaction.
+#[tracing::instrument(level = "debug", skip_all)]
 pub(crate) async fn create_operator_session<P>(
     config: &LayerConfig,
     progress: &P,
@@ -34,8 +39,8 @@ where
             Ok(Some(session))
         }
         Ok(None) => {
+            debug!("no operator detected");
             sub_progress.success(Some("no operator detected"));
-
             Ok(None)
         }
         Err(OperatorApiError::ConcurrentStealAbort) => {
@@ -55,14 +60,13 @@ where
             })
         }
         Err(err) => {
-            sub_progress.failure(Some(
-                "unable to check if operator exists, probably due to RBAC",
-            ));
-
-            trace!(
+            debug!(
                 "{}",
                 miette::Error::from(CliError::OperatorConnectionFailed(err))
             );
+            sub_progress.failure(Some(
+                "unable to check if operator exists, probably due to RBAC",
+            ));
 
             Ok(None)
         }
@@ -70,7 +74,16 @@ where
 }
 
 /// Creates an agent if needed then connects to it.
-#[tracing::instrument(level = "debug", skip(progress, analytics))]
+///
+/// First it checks if we have an `operator` in the [`config`](LayerConfig), which we do if the
+/// user has installed the mirrord-operator in their cluster, even without a valid license. And
+/// then we create a session with the operator with [`create_operator_session`].
+///
+/// If there is no operator, or the operator session creation failed (e.g. lack of license), then
+/// we create the mirrord-agent and run mirrord by itself, without the operator.
+///
+/// Here is where we start interactions with the kubernetes API.
+#[tracing::instrument(level = "debug", skip_all)]
 pub(crate) async fn create_and_connect<P>(
     config: &LayerConfig,
     progress: &mut P,

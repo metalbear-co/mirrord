@@ -72,8 +72,13 @@ impl AsRef<Certificate> for Credentials {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LicenseValidity {
+    /// The license is still far away from expiring (see `LicenseValidity::new`).
     Good,
+
+    /// How many days left before the license expires.
     CloseToExpiring(Days),
+
+    /// Holds the expiration date of the license.
     Expired(DateTime<Utc>),
 }
 
@@ -84,7 +89,7 @@ impl LicenseValidity {
             .expect("Requested a ridiculous amount of days!");
 
         if now >= expiration_date {
-            Self::Expired(now)
+            Self::Expired(expiration_date)
         } else if now >= close_to_expiring {
             Self::CloseToExpiring(Days::new(
                 expiration_date.date_naive().ordinal() as u64 - now.date_naive().ordinal() as u64,
