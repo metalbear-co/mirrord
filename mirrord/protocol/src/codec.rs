@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     io,
+    marker::PhantomData,
     sync::LazyLock,
 };
 
@@ -142,26 +143,37 @@ pub enum DaemonMessage {
     SwitchProtocolVersionResponse(#[bincode(with_serde)] semver::Version),
 }
 
-pub struct ClientCodec {
+pub struct ProtocolCodec<I, O> {
     config: bincode::config::Configuration,
+    /// Phantom just to associate the message types with the struct.
+    /// Implementing a trait to associate the types is not good enough, because we can't blanket
+    /// implement the foreign `Encoder`/`Decoder` traits, so we have to implement them for a
+    /// struct.
+    _phantom_incoming_message: PhantomData<I>,
+    _phantom_outgoing_message: PhantomData<O>,
 }
 
-impl ClientCodec {
+pub type ClientCodec = ProtocolCodec<DaemonMessage, ClientMessage>;
+pub type DaemonCodec = ProtocolCodec<ClientMessage, DaemonMessage>;
+
+impl<I, O> ProtocolCodec<I, O> {
     pub fn new() -> Self {
-        ClientCodec {
+        Self {
             config: bincode::config::standard(),
+            _phantom_incoming_message: Default::default(),
+            _phantom_outgoing_message: Default::default(),
         }
     }
 }
 
-impl Default for ClientCodec {
+impl<I, O> Default for ProtocolCodec<I, O> {
     fn default() -> Self {
-        ClientCodec::new()
+        Self::new()
     }
 }
 
-impl Decoder for ClientCodec {
-    type Item = DaemonMessage;
+impl<I: bincode::Decode, O> Decoder for ProtocolCodec<I, O> {
+    type Item = I;
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
@@ -176,61 +188,10 @@ impl Decoder for ClientCodec {
     }
 }
 
-impl Encoder<ClientMessage> for ClientCodec {
+impl<I, O: bincode::Encode> Encoder<O> for ProtocolCodec<I, O> {
     type Error = io::Error;
 
-    fn encode(&mut self, msg: ClientMessage, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let encoded = match bincode::encode_to_vec(msg, self.config) {
-            Ok(encoded) => encoded,
-            Err(err) => {
-                return Err(io::Error::new(io::ErrorKind::Other, err.to_string()));
-            }
-        };
-        dst.reserve(encoded.len());
-        dst.put(&encoded[..]);
-
-        Ok(())
-    }
-}
-
-pub struct DaemonCodec {
-    config: bincode::config::Configuration,
-}
-
-impl DaemonCodec {
-    pub fn new() -> Self {
-        DaemonCodec {
-            config: bincode::config::standard(),
-        }
-    }
-}
-
-impl Default for DaemonCodec {
-    fn default() -> Self {
-        DaemonCodec::new()
-    }
-}
-
-impl Decoder for DaemonCodec {
-    type Item = ClientMessage;
-    type Error = io::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
-        match bincode::decode_from_slice(&src[..], self.config) {
-            Ok((message, read)) => {
-                src.advance(read);
-                Ok(Some(message))
-            }
-            Err(DecodeError::UnexpectedEnd { .. }) => Ok(None),
-            Err(err) => Err(io::Error::new(io::ErrorKind::Other, err.to_string())),
-        }
-    }
-}
-
-impl Encoder<DaemonMessage> for DaemonCodec {
-    type Error = io::Error;
-
-    fn encode(&mut self, msg: DaemonMessage, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, msg: O, dst: &mut BytesMut) -> Result<(), Self::Error> {
         let encoded = match bincode::encode_to_vec(msg, self.config) {
             Ok(encoded) => encoded,
             Err(err) => {
