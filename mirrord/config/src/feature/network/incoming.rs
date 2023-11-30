@@ -256,7 +256,10 @@ pub struct IncomingAdvancedFileConfig {
 /// [`"mode": "steal"`](#feature-network-incoming-mode);
 ///
 /// 3. Off: Disables the incoming network feature.
-/// Steals all the incoming traffic:
+///
+/// Examples:
+///
+/// Steal all the incoming traffic:
 ///
 /// ```json
 /// {
@@ -268,7 +271,7 @@ pub struct IncomingAdvancedFileConfig {
 /// }
 /// ```
 ///
-/// Steals only traffic that matches the
+/// Steal only traffic that matches the
 /// [`http_header_filter`](#feature-network-incoming-http_header_filter) (steals only HTTP traffic).
 ///
 /// ```json
