@@ -1,6 +1,6 @@
 use std::{fmt::Debug, ops::Deref};
 
-use chrono::{DateTime, Datelike, Days, Utc};
+use chrono::{DateTime, Datelike, Days, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
 use x509_certificate::{
@@ -70,33 +70,70 @@ impl AsRef<Certificate> for Credentials {
     }
 }
 
+/// Gives some more meaning to a `License`'s [`Certificate`] expiration date, so we don't have
+/// to manually check dates to see if the licese is still good or not.
+///
+/// You may use the [`From`] implementation to build a [`LicenseValidity`] from a [`NaiveDate`],
+/// which is what we store in the `LicenseInfoOwned` type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LicenseValidity {
     /// The license is still far away from expiring (see `LicenseValidity::new`).
-    Good,
+    ///
+    /// Holds the expiration date of the license.
+    Good(DateTime<Utc>),
 
-    /// How many days left before the license expires.
-    CloseToExpiring(u32),
-
+    /// License has expired.
+    ///
     /// Holds the expiration date of the license.
     Expired(DateTime<Utc>),
 }
 
 impl LicenseValidity {
+    /// Builds the [`LicenseValidity`]. You should use either this or the [`From`] implementation.
+    ///
+    /// We take `now` as a parameter here so we can have [`LicenseValidity`] with fake values.
     pub fn new(expiration_date: DateTime<Utc>, now: DateTime<Utc>) -> Self {
-        let close_to_expiring = expiration_date
-            .checked_sub_days(Days::new(2))
-            .expect("Requested a ridiculous amount of days!");
-
-        if now >= expiration_date {
+        if now > expiration_date {
             Self::Expired(expiration_date)
-        } else if now >= close_to_expiring {
-            Self::CloseToExpiring(
-                expiration_date.date_naive().ordinal() - now.date_naive().ordinal(),
-            )
         } else {
-            Self::Good
+            Self::Good(expiration_date)
         }
+    }
+
+    /// Checks if this [`LicenseValidity`] represents a date that is close to expiring.
+    ///
+    /// We consider close if the `License` is 2 days away from its `expiration_date`.
+    pub fn close_to_expiring(&self) -> Option<i64> {
+        match self {
+            LicenseValidity::Good(expiration_date) => {
+                let until_expiration = (Utc::now() - expiration_date).num_days();
+
+                if until_expiration <= 2 {
+                    Some(until_expiration)
+                } else {
+                    None
+                }
+            }
+            LicenseValidity::Expired(_) => Some(-1),
+        }
+    }
+}
+
+impl From<NaiveDate> for LicenseValidity {
+    /// Converts a [`NaiveDate`] into a [`NaiveDateTime`], so we can turn it into a
+    /// [`DateTime<UTC>`] and build a nice [`LicenseValidity`].
+    ///
+    /// I(alex) think this might cause trouble with potential mismatched timezone offsets, but
+    /// this is used only for a warning to the user.
+    fn from(value: NaiveDate) -> Self {
+        let now = Utc::now();
+        let offset = now.offset().clone();
+        let expiration_date = DateTime::<Utc>::from_naive_utc_and_offset(
+            value.and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap()),
+            offset,
+        );
+
+        Self::new(expiration_date, now)
     }
 }
 
@@ -115,21 +152,8 @@ mod tests {
 
         assert!(matches!(
             LicenseValidity::new(expiration_date, today),
-            LicenseValidity::Good
+            LicenseValidity::Good(_)
         ));
-    }
-
-    #[test]
-    fn license_validity_close_to_expiring() {
-        let today: DateTime<Utc> = TODAY.parse().unwrap();
-
-        let fake_today = today.checked_add_days(Days::new(5)).unwrap();
-        let expiration_date = today.checked_add_days(Days::new(7)).unwrap();
-
-        let validity = LicenseValidity::new(expiration_date, fake_today);
-        assert!(
-            matches!(validity, LicenseValidity::CloseToExpiring(days_to_expire) if days_to_expire == 2)
-        );
     }
 
     #[test]

@@ -40,13 +40,6 @@ pub struct Certificate(
 );
 
 impl Certificate {
-    /// Checks if the certificate is stil valid today (`Utc::now`), returning a
-    /// [`LicenseValidity`] to indicate if it's expired or not.
-    pub fn validity(&self) -> LicenseValidity {
-        let expiration_date = self.expiration_date();
-        LicenseValidity::new(expiration_date, Utc::now())
-    }
-
     /// Extracts the expiration date (`not_after`) out of the certificate as a nice
     /// `DateTime<Utc>`.
     pub fn expiration_date(&self) -> DateTime<Utc> {

@@ -1,12 +1,14 @@
 use std::io;
 
 use base64::{engine::general_purpose, Engine as _};
+use chrono::{DateTime, Datelike, NaiveTime, Utc};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
 use kube::{api::PostParams, error::ErrorResponse, Api, Client, Resource};
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, AnalyticsReporter};
 use mirrord_auth::{
-    certificate::Certificate, credential_store::CredentialStoreSync, error::AuthenticationError,
+    certificate::Certificate, credential_store::CredentialStoreSync, credentials::LicenseValidity,
+    error::AuthenticationError,
 };
 use mirrord_config::{
     feature::network::incoming::ConcurrentSteal,
@@ -24,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use crate::crd::{
     CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, TargetCrd,
@@ -200,6 +202,26 @@ impl OperatorApi {
             // No operator found.
             return Ok(None);
         };
+
+        // Warns the user if their license is close to expiring.
+        //
+        // I(alex) considered doing a check for validity also here for expired licenses,
+        // but maybe the time of the local user and of the operator are out of sync, so we
+        // could end up blocking a valid license (or even just warning on it could be
+        // confusing).
+        if let Some(expiring_soon) =
+            LicenseValidity::from(operator.spec.license.expire_at).close_to_expiring()
+        {
+            if expiring_soon >= 0 {
+                let expiring_message = format!(
+                    "Operator license will expire soon, in {} days!",
+                    expiring_soon,
+                );
+
+                progress.warning(&expiring_message);
+                warn!(expiring_message);
+            }
+        }
 
         Self::check_config(config, &operator)?;
 
