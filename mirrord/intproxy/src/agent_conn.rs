@@ -3,6 +3,7 @@
 
 use std::{io, net::SocketAddr};
 
+use mirrord_analytics::AnalyticsReporter;
 use mirrord_config::LayerConfig;
 use mirrord_kube::{
     api::{
@@ -60,8 +61,8 @@ pub enum AgentConnectInfo {
 /// [`mpsc`](tokio::sync::mpsc) channels returned from other functions and implements the
 /// [`BackgroundTask`] trait.
 pub struct AgentConnection {
-    agent_tx: Sender<ClientMessage>,
-    agent_rx: Receiver<DaemonMessage>,
+    pub agent_tx: Sender<ClientMessage>,
+    pub agent_rx: Receiver<DaemonMessage>,
 }
 
 impl AgentConnection {
@@ -70,10 +71,11 @@ impl AgentConnection {
     pub async fn new(
         config: &LayerConfig,
         connect_info: Option<AgentConnectInfo>,
+        analytics: Option<&mut AnalyticsReporter>,
     ) -> Result<Self, AgentConnectionError> {
         let (agent_tx, agent_rx) = match connect_info {
             Some(AgentConnectInfo::Operator(operator_session_information)) => {
-                let session = OperatorApi::connect(config, operator_session_information, None)
+                let session = OperatorApi::connect(config, operator_session_information, analytics)
                     .await
                     .map_err(AgentConnectionError::Operator)?;
 

@@ -19,18 +19,13 @@ use std::{
 
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics};
 use mirrord_config::LayerConfig;
-use mirrord_intproxy::{agent_conn::AgentConnectInfo, IntProxy};
-use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
-use mirrord_operator::client::{
-    OperatorApi, OperatorSessionConnection, OperatorSessionInformation,
+use mirrord_intproxy::{
+    agent_conn::{AgentConnectInfo, AgentConnection},
+    IntProxy,
 };
 use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonMessage};
 use nix::libc;
-use tokio::{
-    net::{TcpListener, TcpStream},
-    sync::mpsc,
-    task::JoinHandle,
-};
+use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, log::trace};
 
@@ -160,10 +155,9 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
     // Create a main connection, that will be held until proxy is closed.
     // This will guarantee agent staying alive and will enable us to
     // make the agent close on last connection close immediately (will help in tests)
-    let mut main_connection =
-        connect_and_ping(&config, agent_connect_info.clone(), Some(&mut analytics))
-            .await
-            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+    let mut main_connection = connect_and_ping(&config, agent_connect_info.clone(), &mut analytics)
+        .await
+        .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
     if config.pause {
         tokio::time::timeout(
@@ -215,11 +209,14 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
 async fn connect_and_ping(
     config: &LayerConfig,
     agent_connect_info: Option<AgentConnectInfo>,
-    analytics: Option<&mut AnalyticsReporter>,
+    analytics: &mut AnalyticsReporter,
 ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-    let ((sender, mut receiver), _) = connect(config, agent_connect_info, analytics).await?;
-    ping(&sender, &mut receiver).await?;
-    Ok((sender, receiver))
+    let AgentConnection {
+        agent_tx,
+        mut agent_rx,
+    } = AgentConnection::new(config, agent_connect_info, Some(analytics)).await?;
+    ping(&agent_tx, &mut agent_rx).await?;
+    Ok((agent_tx, agent_rx))
 }
 
 /// Sends a ping the connection and expects a pong.
@@ -269,46 +266,4 @@ fn create_ping_loop(
     });
 
     (cancellation_token, join_handle)
-}
-
-/// Connects to an agent pod depending on how [`LayerConfig`] is set-up:
-///
-/// - `connect_tcp`: connects directly to the `address` specified, and calls [`wrap_raw_connection`]
-///   on the [`TcpStream`];
-///
-/// - `connect_agent_name`: Connects to an agent with `connect_agent_name` on `connect_agent_port`
-///   using [`KubernetesAPI];
-///
-/// - None of the above: uses the [`OperatorApi`] to establish the connection.
-/// Returns the tx/rx and whether the operator is used.
-async fn connect(
-    config: &LayerConfig,
-    agent_connect_info: Option<AgentConnectInfo>,
-    analytics: Option<&mut AnalyticsReporter>,
-) -> Result<(
-    (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
-    Option<OperatorSessionInformation>,
-)> {
-    match agent_connect_info {
-        Some(AgentConnectInfo::Operator(operator_session_information)) => {
-            let OperatorSessionConnection { tx, rx, info } =
-                OperatorApi::connect(config, operator_session_information, analytics).await?;
-            Ok(((tx, rx), Some(info)))
-        }
-        Some(AgentConnectInfo::DirectKubernetes(connect_info)) => {
-            let k8s_api = KubernetesAPI::create(config).await?;
-            let connection = k8s_api.create_connection(connect_info).await?;
-            Ok((connection, None))
-        }
-        None => {
-            if let Some(address) = &config.connect_tcp {
-                let stream = TcpStream::connect(address)
-                    .await
-                    .map_err(InternalProxySetupError::TcpConnectError)?;
-                Ok((wrap_raw_connection(stream), None))
-            } else {
-                Err(InternalProxySetupError::NoConnectionMethod.into())
-            }
-        }
-    }
 }
