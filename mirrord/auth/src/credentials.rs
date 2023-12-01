@@ -1,6 +1,6 @@
 use std::{fmt::Debug, ops::Deref};
 
-use chrono::{DateTime, Datelike, Days, NaiveDate, NaiveTime, Utc};
+use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
 use x509_certificate::{

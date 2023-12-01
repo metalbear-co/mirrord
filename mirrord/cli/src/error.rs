@@ -4,7 +4,7 @@ use miette::Diagnostic;
 use mirrord_console::error::ConsoleError;
 use mirrord_intproxy::error::IntProxyError;
 use mirrord_kube::error::KubeApiError;
-use mirrord_operator::client::OperatorApiError;
+use mirrord_operator::client::{HttpError, OperatorApiError};
 use thiserror::Error;
 
 pub(crate) type Result<T, E = CliError> = miette::Result<T, E>;
@@ -43,19 +43,26 @@ pub(crate) enum InternalProxySetupError {
 
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum CliError {
-    #[error("Failed to connect to the operator. We have found the operator and unable to connect to it. {0:#?}")]
+    #[error("Failed to connect to the operator, probably due to RBAC: {0}")]
     #[diagnostic(help(
         r#"
     Please check the following:
     1. The operator is running and the logs are not showing any errors.
     2. You have sufficient permissions to port forward to the operator.
+
+    If you want to run without the operator, please set the following in the mirrord configuration file:
+    {{
+        "operator": false
+    }}
+
+    Please remember that some features are supported only when using mirrord operator (https://mirrord.dev/docs/teams/introduction/#supported-features).
     {GENERAL_HELP}"#
     ))]
-    OperatorConnectionFailed(#[from] OperatorApiError),
+    OperatorConnectionFailed(String),
     #[error("Failed to connect to the operator. Someone else is stealing traffic from the requested target")]
     #[diagnostic(help(
         r#"
-    If you want to run anyway please set the following:
+    If you want to run anyway, please set the following:
     
     {{
       "feature": {{
@@ -237,8 +244,38 @@ pub(crate) enum CliError {
     ))]
     FeatureRequiresOperatorError(String),
     #[error("Feature `{feature}` is not supported in mirrord operator {operator_version}.")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
     FeatureNotSupportedInOperatorError {
         feature: String,
         operator_version: String,
     },
+    #[error("Selected mirrord target is not valid: {0}")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    InvalidTargetError(String),
+    #[error("Failed to build a websocket connect request: {0:#?}")]
+    #[diagnostic(help(
+        r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
+    ))]
+    ConnectRequestBuildError(HttpError),
+}
+
+impl From<OperatorApiError> for CliError {
+    fn from(value: OperatorApiError) -> Self {
+        match value {
+            OperatorApiError::ConcurrentStealAbort => Self::OperatorConcurrentSteal,
+            OperatorApiError::UnsupportedFeature {
+                feature,
+                operator_version,
+            } => Self::FeatureNotSupportedInOperatorError {
+                feature,
+                operator_version,
+            },
+            OperatorApiError::CreateApiError(e) => Self::KubernetesApiFailed(e),
+            OperatorApiError::InvalidTarget { reason } => Self::InvalidTargetError(reason),
+            OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
+            OperatorApiError::KubeError { error, operation } => {
+                Self::OperatorConnectionFailed(format!("{operation} failed: {error}"))
+            }
+        }
+    }
 }

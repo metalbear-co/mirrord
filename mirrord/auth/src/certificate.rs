@@ -4,8 +4,6 @@ use chrono::{DateTime, Utc};
 use serde::{de, ser, Deserialize, Serialize};
 use x509_certificate::{X509Certificate, X509CertificateError};
 
-use crate::credentials::LicenseValidity;
-
 /// Serialize pem contents of `X509Certificate`
 fn x509_serialize<S>(certificate: &X509Certificate, serialzer: S) -> Result<S::Ok, S::Error>
 where

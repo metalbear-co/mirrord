@@ -188,6 +188,8 @@ pub enum PortSubscription {
 pub struct PortUnsubscribe {
     /// Port on the remote pod that layer mirrored.
     pub port: Port,
+    /// Local address on which the layer was listening.
+    pub listening_on: SocketAddr,
 }
 
 /// Messages sent by the internal proxy and handled by the layer.
@@ -210,9 +212,11 @@ pub enum ProxyToLayerMessage {
 #[derive(Encode, Decode, Debug)]
 pub enum IncomingResponse {
     /// A response to layer's [`PortSubscribe`].
+    /// As a temporary workaround to [agent protocol](mirrord_protocol) limitations, the only error
+    /// returned here is
+    /// [`ResponseError::PortAlreadyStolen`](mirrord_protocol::error::ResponseError::PortAlreadyStolen).
+    /// Other errors will make the internal proxy terminate.
     PortSubscribe(RemoteResult<()>),
-    /// A response to layer's [`PortUnsubscribe`].
-    PortUnsubscribe(RemoteResult<()>),
     /// A response to layers' [`ConnMetadataRequest`].
     ConnMetadata(ConnMetadataResponse),
 }
@@ -383,9 +387,7 @@ impl_request!(
 
 impl_request!(
     req = PortUnsubscribe,
-    res = RemoteResult<()>,
     req_path = LayerToProxyMessage::Incoming => IncomingRequest::PortUnsubscribe,
-    res_path = ProxyToLayerMessage::Incoming => IncomingResponse::PortUnsubscribe,
 );
 
 impl_request!(

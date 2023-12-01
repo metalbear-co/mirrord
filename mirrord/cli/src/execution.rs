@@ -133,6 +133,15 @@ impl MirrordExecution {
     {
         let lib_path = extract_library(None, progress, true)?;
 
+        if !config.use_proxy {
+            for (key, _val) in std::env::vars() {
+                let lower_key = key.to_lowercase();
+                if lower_key == "http_proxy" || lower_key == "https_proxy" {
+                    std::env::remove_var(key)
+                }
+            }
+        }
+
         let (connect_info, mut connection) = create_and_connect(config, progress, analytics)
             .await
             .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;

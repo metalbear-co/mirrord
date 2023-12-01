@@ -5,7 +5,7 @@ use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     LayerFileConfig,
 };
-use mirrord_kube::{api::kubernetes::create_kube_api, error::KubeApiError};
+use mirrord_kube::api::kubernetes::create_kube_api;
 use mirrord_operator::{
     client::OperatorApiError,
     crd::{LicenseInfoOwned, MirrordOperatorCrd, MirrordOperatorSpec, OPERATOR_STATUS_NAME},
@@ -136,9 +136,11 @@ async fn operator_status(config: Option<String>) -> Result<()> {
     let mirrord_status = match status_api
         .get(OPERATOR_STATUS_NAME)
         .await
-        .map_err(KubeApiError::KubeError)
-        .map_err(OperatorApiError::KubeApiError)
-        .map_err(CliError::OperatorConnectionFailed)
+        .map_err(|error| OperatorApiError::KubeError {
+            error,
+            operation: "getting operator status".into(),
+        })
+        .map_err(CliError::from)
     {
         Ok(status) => status,
         Err(err) => {

@@ -8,6 +8,30 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.75.3](https://github.com/metalbear-co/mirrord/tree/3.75.3) - 2023-11-23
+
+
+### Added
+
+- Added new configuration 'use_proxy' that lets user disable usage of http/s
+  proxy by mirrord even when env is set
+
+
+### Fixed
+
+- Changed the way `targetless` is printed in `mirrord verify-config` to allow
+  the IDEs to properly show target selection dialogs.
+
+
+## [3.75.2](https://github.com/metalbear-co/mirrord/tree/3.75.2) - 2023-11-22
+
+
+### Fixed
+
+- Fixed issues with mirroring incoming TCP connections when targeting multi-pod
+  deployments. [#2078](https://github.com/metalbear-co/mirrord/issues/2078)
+
+
 ## [3.75.1](https://github.com/metalbear-co/mirrord/tree/3.75.1) - 2023-11-14
 
 
