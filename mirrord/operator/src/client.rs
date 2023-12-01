@@ -349,6 +349,8 @@ impl OperatorApi {
         }
     }
 
+    /// Reaches the `TargetProvider::get_resource` function, which is a route handler in the
+    /// operator under the `RestfulProvider` trait.
     #[tracing::instrument(level = "debug", fields(self.target_config), skip(self))]
     async fn fetch_target(&self) -> Result<Option<TargetCrd>> {
         let target_name = TargetCrd::target_name_by_config(&self.target_config);

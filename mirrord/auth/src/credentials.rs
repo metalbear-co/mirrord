@@ -76,7 +76,7 @@ pub enum LicenseValidity {
     Good,
 
     /// How many days left before the license expires.
-    CloseToExpiring(Days),
+    CloseToExpiring(u32),
 
     /// Holds the expiration date of the license.
     Expired(DateTime<Utc>),
@@ -91,9 +91,9 @@ impl LicenseValidity {
         if now >= expiration_date {
             Self::Expired(expiration_date)
         } else if now >= close_to_expiring {
-            Self::CloseToExpiring(Days::new(
-                expiration_date.date_naive().ordinal() as u64 - now.date_naive().ordinal() as u64,
-            ))
+            Self::CloseToExpiring(
+                expiration_date.date_naive().ordinal() - now.date_naive().ordinal(),
+            )
         } else {
             Self::Good
         }
@@ -128,7 +128,7 @@ mod tests {
 
         let validity = LicenseValidity::new(expiration_date, fake_today);
         assert!(
-            matches!(validity, LicenseValidity::CloseToExpiring(days_to_expire) if days_to_expire == Days::new(2))
+            matches!(validity, LicenseValidity::CloseToExpiring(days_to_expire) if days_to_expire == 2)
         );
     }
 
