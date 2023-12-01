@@ -201,8 +201,6 @@ impl DateValidityExt for rfc5280::Validity {
             Time::GeneralTime(time) => DateTime::<Utc>::from(time),
         };
 
-        // let exp = not_after.checked_sub_days(Days::new(Self::EXPIRES_CHECK));
-
         not_before < other && other < not_after
     }
 }
