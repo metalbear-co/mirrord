@@ -163,8 +163,8 @@ impl State {
         cancellation_token: CancellationToken,
         protocol_version: semver::Version,
     ) -> Result<Option<JoinHandle<u32>>> {
-        let mut stream = Framed::new(stream, DaemonCodec::default());
-
+        let (mut stream, _version) =
+            mirrord_protover::determine_version(stream, DaemonCodec::default()).await?;
         let client_id = match self.new_client().await {
             Ok(id) => id,
             Err(err) => {

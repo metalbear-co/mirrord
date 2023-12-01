@@ -87,6 +87,28 @@ pub enum FileRequest {
 pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.3.1".parse().expect("Bad Identifier"));
 
+pub type Version = u16;
+
+/// Message sides send to each other when session starts, to determine latest common version.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy)]
+pub struct VersionSupportAnnouncement {
+    pub min: Version,
+    pub max: Version,
+}
+
+impl VersionSupportAnnouncement {
+    /// Do the sides have a shared supported version?
+    pub fn is_compatible(&self, other: &Self) -> bool {
+        self.min <= other.max && other.min <= self.max
+    }
+
+    /// Get latest shared supported version, if exists.
+    pub fn latest_common(&self, other: &Self) -> Option<Version> {
+        self.is_compatible(other)
+            .then(|| std::cmp::min(self.max, other.max))
+    }
+}
+
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
@@ -159,6 +181,7 @@ pub type ClientCodec = ProtocolCodec<DaemonMessage, ClientMessage>;
 // Codec to be used by the agent side to receive `ClientMessage`s from the client and send
 // `DaemonMessage`s to the client.
 pub type DaemonCodec = ProtocolCodec<ClientMessage, DaemonMessage>;
+pub type VersionCodec = ProtocolCodec<VersionSupportAnnouncement, VersionSupportAnnouncement>;
 
 impl<I, O> Default for ProtocolCodec<I, O> {
     fn default() -> Self {

@@ -3767,6 +3767,7 @@ dependencies = [
  "k8s-cri",
  "libc",
  "mirrord-protocol",
+ "mirrord-protover",
  "mockall",
  "nix 0.24.3",
  "num-traits",
@@ -3923,6 +3924,7 @@ dependencies = [
  "mirrord-config",
  "mirrord-progress",
  "mirrord-protocol",
+ "mirrord-protover",
  "rand",
  "regex",
  "rstest 0.17.0",
@@ -4074,6 +4076,17 @@ dependencies = [
  "thiserror",
  "tracing",
  "trust-dns-resolver",
+]
+
+[[package]]
+name = "mirrord-protover"
+version = "3.75.3"
+dependencies = [
+ "actix-codec",
+ "futures",
+ "mirrord-protocol",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]

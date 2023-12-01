@@ -21,12 +21,15 @@ const CONNECTION_CHANNEL_SIZE: usize = 1000;
 pub fn wrap_raw_connection(
     stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
 ) -> (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>) {
-    let mut codec = actix_codec::Framed::new(stream, ClientCodec::default());
-
     let (in_tx, mut in_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
     let (out_tx, out_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
 
     tokio::spawn(async move {
+        // TODO: don't unwrap.
+        let (mut codec, _version) =
+            mirrord_protover::determine_version(stream, ClientCodec::default())
+                .await
+                .unwrap();
         loop {
             tokio::select! {
                 msg = in_rx.recv() => {

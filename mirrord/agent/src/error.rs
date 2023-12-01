@@ -5,12 +5,14 @@ use mirrord_protocol::{
         LayerConnect,
     },
     tcp::{DaemonTcp, LayerTcpSteal},
-    FileRequest, FileResponse, Port,
+    FileRequest, FileResponse, Port, VersionSupportAnnouncement,
 };
+use mirrord_protover::ProtoVerError;
 use thiserror::Error;
 
 use crate::{
-    cgroup::CgroupError, namespace::NamespaceError, sniffer::SnifferCommand, steal::StealerCommand,
+    cgroup::CgroupError, error::AgentError::IncompatibleClientAndAgentVersions,
+    namespace::NamespaceError, sniffer::SnifferCommand, steal::StealerCommand,
 };
 
 #[derive(Debug, Error)]
@@ -152,6 +154,32 @@ pub(crate) enum AgentError {
 
     #[error(transparent)]
     FailedNamespaceEnter(#[from] NamespaceError),
+
+    #[error("The agent does not support any of the versions supported by the client. Agent supports versions {} to {} inclusive, client supports {} to {} inclusive.", agent_range.min, agent_range.max, client_range.min, client_range.max)]
+    IncompatibleClientAndAgentVersions {
+        agent_range: VersionSupportAnnouncement,
+        client_range: VersionSupportAnnouncement,
+    },
+
+    #[error("Encountered error during version negotiation (this is not an incompatibility error, the incompatibility check itself failed): {0}")]
+    VersionNegotiationError(ProtoVerError),
+}
+
+impl From<ProtoVerError> for AgentError {
+    fn from(value: ProtoVerError) -> Self {
+        match value {
+            err @ ProtoVerError::SendFailed(..) | err @ ProtoVerError::ReceiveFailed(..) => {
+                Self::VersionNegotiationError(err)
+            }
+            ProtoVerError::NoCommonVersion {
+                local_range,
+                peer_range,
+            } => IncompatibleClientAndAgentVersions {
+                agent_range: local_range,
+                client_range: peer_range,
+            },
+        }
+    }
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;

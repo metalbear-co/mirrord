@@ -23,6 +23,7 @@ pnet = "0.33"
 nix = { workspace  = true, features = ["mount"] }
 clap.workspace = true
 mirrord-protocol = { path = "../protocol"}
+mirrord-protover = { path = "../protover"}
 actix-codec.workspace = true
 futures.workspace = true
 tracing.workspace = true

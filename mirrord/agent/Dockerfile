@@ -17,6 +17,7 @@ FROM chef AS planner
 COPY .cargo /app/.cargo
 COPY mirrord/macros /app/mirrord/macros
 COPY mirrord/protocol /app/mirrord/protocol
+COPY mirrord/protover /app/mirrord/protover
 COPY mirrord/agent /app/mirrord/agent
 COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /app/
 
@@ -36,6 +37,7 @@ RUN cargo +nightly-2023-09-07 chef cook --release --zigbuild --target $(cat /.pl
 COPY .cargo /app/.cargo
 COPY mirrord/macros /app/mirrord/macros
 COPY mirrord/protocol /app/mirrord/protocol
+COPY mirrord/protover /app/mirrord/protover
 COPY mirrord/agent /app/mirrord/agent
 COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /app/
 
