@@ -114,7 +114,7 @@ impl LicenseValidity {
                     None
                 }
             }
-            LicenseValidity::Expired(_) => Some(-1),
+            LicenseValidity::Expired(_) => None,
         }
     }
 }
