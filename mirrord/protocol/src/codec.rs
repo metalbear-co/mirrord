@@ -156,19 +156,13 @@ pub struct ProtocolCodec<I, O> {
 pub type ClientCodec = ProtocolCodec<DaemonMessage, ClientMessage>;
 pub type DaemonCodec = ProtocolCodec<ClientMessage, DaemonMessage>;
 
-impl<I, O> ProtocolCodec<I, O> {
-    pub fn new() -> Self {
+impl<I, O> Default for ProtocolCodec<I, O> {
+    fn default() -> Self {
         Self {
             config: bincode::config::standard(),
             _phantom_incoming_message: Default::default(),
             _phantom_outgoing_message: Default::default(),
         }
-    }
-}
-
-impl<I, O> Default for ProtocolCodec<I, O> {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -214,8 +208,8 @@ mod tests {
 
     #[test]
     fn sanity_client_encode_decode() {
-        let mut client_codec = ClientCodec::new();
-        let mut daemon_codec = DaemonCodec::new();
+        let mut client_codec = ClientCodec::default();
+        let mut daemon_codec = DaemonCodec::default();
         let mut buf = BytesMut::new();
 
         let msg = ClientMessage::Tcp(LayerTcp::PortSubscribe(1));
@@ -230,8 +224,8 @@ mod tests {
 
     #[test]
     fn sanity_daemon_encode_decode() {
-        let mut client_codec = ClientCodec::new();
-        let mut daemon_codec = DaemonCodec::new();
+        let mut client_codec = ClientCodec::default();
+        let mut daemon_codec = DaemonCodec::default();
         let mut buf = BytesMut::new();
 
         let msg = DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
@@ -249,7 +243,7 @@ mod tests {
 
     #[test]
     fn decode_client_invalid_data() {
-        let mut codec = ClientCodec::new();
+        let mut codec = ClientCodec::default();
         let mut buf = BytesMut::new();
         buf.put_u8(254);
 
@@ -262,7 +256,7 @@ mod tests {
 
     #[test]
     fn decode_client_partial_data() {
-        let mut codec = ClientCodec::new();
+        let mut codec = ClientCodec::default();
         let mut buf = BytesMut::new();
         buf.put_u8(1);
 
@@ -271,7 +265,7 @@ mod tests {
 
     #[test]
     fn decode_daemon_invalid_data() {
-        let mut codec = DaemonCodec::new();
+        let mut codec = DaemonCodec::default();
         let mut buf = BytesMut::new();
         buf.put_u8(254);
 
