@@ -24,10 +24,19 @@ where
     X509Certificate::from_pem(certificate).map_err(de::Error::custom)
 }
 
-/// Serializable `X509Certificate`
+/// Serializable [`X509Certificate`]
 ///
-/// You can access the members of the certificate through it's [`AsRef`] implementation, this
-/// is how we dig into the certificate's validity, for example.
+/// Implements [`Deref`] into [`X509Certificate`], so you can take a `&Certificate` and call
+/// `.as_ref()` on it to accesses the inner members of [`X509Certificate`], for example:
+///
+/// ```text
+/// pub fn tbs(&self) {
+///     self.0
+///         .certificate
+///         .as_ref()
+///         .tbs_certificate; // accessed through the `AsRef` of `X509Certificate`
+/// }
+/// ```
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Certificate(
     #[serde(
