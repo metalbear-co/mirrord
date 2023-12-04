@@ -53,7 +53,7 @@ futures = "0.3"
 thiserror = "1"
 k8s-openapi = { version = "0.20", features = ["v1_24"] }
 reqwest = { version = "0.11", default-features = false, features = ["blocking", "rustls-tls", "json"] }
-kube = { git = "https://github.com/Razz4780/kube", branch = "http-proxy-support", default-features = false, features = ["runtime", "derive", "client", "ws", "rustls-tls", "oidc", "socks5", "http_proxy"] }
+kube = { git = "https://github.com/metalbear-co/kube", default-features = false, features = ["runtime", "derive", "client", "ws", "rustls-tls", "oidc", "socks5", "http_proxy"] }
 trust-dns-resolver = { version = "0.22", features = ["serde-config", "tokio-runtime"] }
 tokio-util = { version = "0.7", features = ["net", "codec"] }
 rand = "0.8"
