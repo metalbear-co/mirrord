@@ -2645,6 +2645,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "headers"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06683b93020a07e3dbcf5f8c0f6d40080d725bea7936fc01ad345c01b97dc270"
+dependencies = [
+ "base64 0.21.5",
+ "bytes",
+ "headers-core",
+ "http",
+ "httpdate",
+ "mime",
+ "sha1",
+]
+
+[[package]]
+name = "headers-core"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7f66481bfee273957b1f20485a4ff3362987f85b2c236580d81b4eb7a326429"
+dependencies = [
+ "http",
+]
+
+[[package]]
 name = "heck"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2830,6 +2854,21 @@ dependencies = [
  "tokio",
  "tracing",
  "want",
+]
+
+[[package]]
+name = "hyper-proxy"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca815a891b24fdfb243fa3239c86154392b0953ee584aa1a2a1f66d20cbe75cc"
+dependencies = [
+ "bytes",
+ "futures",
+ "headers",
+ "http",
+ "hyper 0.14.27",
+ "tokio",
+ "tower-service",
 ]
 
 [[package]]
@@ -3194,14 +3233,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "jsonpath_lib"
-version = "0.3.0"
+name = "jsonpath-rust"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eaa63191d68230cccb81c5aa23abd53ed64d83337cacbb25a7b8c7979523774f"
+checksum = "06cc127b7c3d270be504572364f9569761a180b981919dd0d87693a7f5fb7829"
 dependencies = [
- "log",
- "serde",
+ "pest",
+ "pest_derive",
+ "regex",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -3262,8 +3303,8 @@ checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
 
 [[package]]
 name = "kube"
-version = "0.86.0"
-source = "git+https://github.com/aviramha/kube-rs?branch=metalbear#44725f9e6df2ec93ace52a391f07da4e264758d3"
+version = "0.87.1"
+source = "git+https://github.com/Razz4780/kube?branch=http-proxy-support#112c0434a3f105a68f60433a66d113956fe7c158"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -3274,8 +3315,8 @@ dependencies = [
 
 [[package]]
 name = "kube-client"
-version = "0.86.0"
-source = "git+https://github.com/aviramha/kube-rs?branch=metalbear#44725f9e6df2ec93ace52a391f07da4e264758d3"
+version = "0.87.1"
+source = "git+https://github.com/Razz4780/kube?branch=http-proxy-support#112c0434a3f105a68f60433a66d113956fe7c158"
 dependencies = [
  "base64 0.21.5",
  "bytes",
@@ -3287,10 +3328,11 @@ dependencies = [
  "http",
  "http-body 0.4.5",
  "hyper 0.14.27",
+ "hyper-proxy",
  "hyper-rustls 0.24.2",
  "hyper-socks2",
  "hyper-timeout",
- "jsonpath_lib",
+ "jsonpath-rust",
  "k8s-openapi",
  "kube-core",
  "pem 3.0.2",
@@ -3313,8 +3355,8 @@ dependencies = [
 
 [[package]]
 name = "kube-core"
-version = "0.86.0"
-source = "git+https://github.com/aviramha/kube-rs?branch=metalbear#44725f9e6df2ec93ace52a391f07da4e264758d3"
+version = "0.87.1"
+source = "git+https://github.com/Razz4780/kube?branch=http-proxy-support#112c0434a3f105a68f60433a66d113956fe7c158"
 dependencies = [
  "chrono",
  "form_urlencoded",
@@ -3330,8 +3372,8 @@ dependencies = [
 
 [[package]]
 name = "kube-derive"
-version = "0.86.0"
-source = "git+https://github.com/aviramha/kube-rs?branch=metalbear#44725f9e6df2ec93ace52a391f07da4e264758d3"
+version = "0.87.1"
+source = "git+https://github.com/Razz4780/kube?branch=http-proxy-support#112c0434a3f105a68f60433a66d113956fe7c158"
 dependencies = [
  "darling 0.20.3",
  "proc-macro2",
@@ -3342,8 +3384,8 @@ dependencies = [
 
 [[package]]
 name = "kube-runtime"
-version = "0.86.0"
-source = "git+https://github.com/aviramha/kube-rs?branch=metalbear#44725f9e6df2ec93ace52a391f07da4e264758d3"
+version = "0.87.1"
+source = "git+https://github.com/Razz4780/kube?branch=http-proxy-support#112c0434a3f105a68f60433a66d113956fe7c158"
 dependencies = [
  "ahash",
  "async-trait",
@@ -5686,7 +5728,6 @@ version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b420ce6e3d8bd882e9b243c6eed35dbc9a6110c9769e74b584e0d68d1f20c65"
 dependencies = [
- "indexmap 2.0.2",
  "itoa",
  "ryu",
  "serde",
