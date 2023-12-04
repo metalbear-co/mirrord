@@ -8,6 +8,20 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.75.4](https://github.com/metalbear-co/mirrord/tree/3.75.4) - 2023-12-04
+
+
+### Changed
+
+- Improved incoming config docs
+
+
+### Fixed
+
+- Improved handling of operator-related errors.
+  [#2049](https://github.com/metalbear-co/mirrord/issues/2049)
+
+
 ## [3.75.3](https://github.com/metalbear-co/mirrord/tree/3.75.3) - 2023-11-23
 
 
