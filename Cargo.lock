@@ -2278,7 +2278,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "libc",
 ]
@@ -3146,7 +3146,7 @@ dependencies = [
 
 [[package]]
 name = "issue1317"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "actix-web",
  "env_logger",
@@ -3158,7 +3158,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "errno 0.3.5",
  "libc",
@@ -3167,7 +3167,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776portnot53"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "libc",
  "socket2 0.5.5",
@@ -3175,14 +3175,14 @@ dependencies = [
 
 [[package]]
 name = "issue1899"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "issue2001"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "libc",
 ]
@@ -3304,7 +3304,7 @@ checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
 [[package]]
 name = "kube"
 version = "0.87.1"
-source = "git+https://github.com/Razz4780/kube?branch=http-proxy-support#112c0434a3f105a68f60433a66d113956fe7c158"
+source = "git+https://github.com/metalbear-co/kube#823c45038d97ee020bff992c50c10deb9469ea8f"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -3316,7 +3316,7 @@ dependencies = [
 [[package]]
 name = "kube-client"
 version = "0.87.1"
-source = "git+https://github.com/Razz4780/kube?branch=http-proxy-support#112c0434a3f105a68f60433a66d113956fe7c158"
+source = "git+https://github.com/metalbear-co/kube#823c45038d97ee020bff992c50c10deb9469ea8f"
 dependencies = [
  "base64 0.21.5",
  "bytes",
@@ -3356,7 +3356,7 @@ dependencies = [
 [[package]]
 name = "kube-core"
 version = "0.87.1"
-source = "git+https://github.com/Razz4780/kube?branch=http-proxy-support#112c0434a3f105a68f60433a66d113956fe7c158"
+source = "git+https://github.com/metalbear-co/kube#823c45038d97ee020bff992c50c10deb9469ea8f"
 dependencies = [
  "chrono",
  "form_urlencoded",
@@ -3373,7 +3373,7 @@ dependencies = [
 [[package]]
 name = "kube-derive"
 version = "0.87.1"
-source = "git+https://github.com/Razz4780/kube?branch=http-proxy-support#112c0434a3f105a68f60433a66d113956fe7c158"
+source = "git+https://github.com/metalbear-co/kube#823c45038d97ee020bff992c50c10deb9469ea8f"
 dependencies = [
  "darling 0.20.3",
  "proc-macro2",
@@ -3385,7 +3385,7 @@ dependencies = [
 [[package]]
 name = "kube-runtime"
 version = "0.87.1"
-source = "git+https://github.com/Razz4780/kube?branch=http-proxy-support#112c0434a3f105a68f60433a66d113956fe7c158"
+source = "git+https://github.com/metalbear-co/kube#823c45038d97ee020bff992c50c10deb9469ea8f"
 dependencies = [
  "ahash",
  "async-trait",
@@ -3473,7 +3473,7 @@ checksum = "da2479e8c062e40bf0066ffa0bc823de0a9368974af99c9f6df941d2c231e03f"
 
 [[package]]
 name = "listen_ports"
-version = "3.75.3"
+version = "3.76.0"
 
 [[package]]
 name = "local-channel"
@@ -3699,7 +3699,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -3744,7 +3744,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -3797,7 +3797,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "assert-json-diff",
  "base64 0.21.5",
@@ -3811,7 +3811,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "chrono",
  "fs4",
@@ -3831,7 +3831,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "bimap",
  "bitflags 2.4.1",
@@ -3853,7 +3853,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -3863,7 +3863,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "bincode",
  "drain",
@@ -3879,7 +3879,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "bytes",
  "http-body-util",
@@ -3900,7 +3900,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy-protocol"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "bincode",
  "mirrord-protocol",
@@ -3910,7 +3910,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "actix-codec",
  "base64 0.21.5",
@@ -3937,7 +3937,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -3992,7 +3992,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4001,7 +4001,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -4011,7 +4011,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -4045,7 +4045,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "enum_dispatch",
  "indicatif",
@@ -4077,7 +4077,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "apple-codesign",
  "memchr",
@@ -4401,7 +4401,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.75.3"
+version = "3.76.0"
 
 [[package]]
 name = "outref"
@@ -5375,21 +5375,21 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "tokio",
 ]
