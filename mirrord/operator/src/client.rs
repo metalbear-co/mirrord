@@ -176,32 +176,10 @@ impl OperatorApi {
     ///
     /// Returns [`None`] if the operator is not found.
     ///
-    /// Creates a new [`OperatorApi`] which contains the [`Api`]s that we use to talk with the
-    /// operator. These [`Api<TypeCrd>`] objects are like a REST api that goes throuh kubernetes.
-    /// See the documentation for
-    /// [CRDs](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/)
-    /// to get a better understanding of what's going on.
-    ///
-    /// Calls on these [`Api<TypeCrd>`]s are handled in the operator by the implementors of the
-    /// `RestfulProvider` trait.
-    ///
-    /// With the [`OperatorApi`] created, we then check if the operator is there (and it's
-    /// accessible) by making a request to the [`MirrordOperatorCrd`], handled by the
-    /// `StatusProvider` in the operator (its implementation of `RestfulProvider`).
-    ///
-    /// We also perform an operator license validity check to warn the user if it's close to
-    /// expiring. The actual license validity check that would block the operator function is
-    /// performed in the operator itself, see `license_check_middleware`.
-    ///
-    /// Afterwards we retrieve this client's [`Certificate`], which is validated in the
-    /// operator.
-    ///
-    /// The last important point is that we search for the target thing (pod or whatever) that
-    /// this client wants to impersonate. This action the first that is blocked by the
-    /// `license_check_middleware` allowing us to continue or not.
-    ///
     /// Keep in mind that some failures here won't stop mirrord from hooking into the process
     /// and working, it'll just work without the operator.
+    ///
+    /// For a fuller documentation, see the docs in `operator/service/src/main.rs::listen`.
     #[tracing::instrument(level = "debug", skip_all)]
     pub async fn create_session<P>(
         config: &LayerConfig,
@@ -383,8 +361,7 @@ impl OperatorApi {
         }
     }
 
-    /// Reaches the `TargetProvider::get_resource` function, which is a route handler in the
-    /// operator under the `RestfulProvider` trait.
+    /// See `operator/controller/src/target.rs::TargetProvider::get_resource`.
     #[tracing::instrument(level = "debug", fields(self.target_config), skip(self))]
     async fn fetch_target(&self) -> Result<TargetCrd> {
         let target_name = TargetCrd::target_name_by_config(&self.target_config);
