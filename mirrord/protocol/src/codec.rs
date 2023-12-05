@@ -153,9 +153,11 @@ pub struct ProtocolCodec<I, O> {
     _phantom_outgoing_message: PhantomData<O>,
 }
 
-// Codec to be used by the client side to receive `DaemonMessage`s from the agent and send `ClientMessage`s to the agent.
+// Codec to be used by the client side to receive `DaemonMessage`s from the agent and send
+// `ClientMessage`s to the agent.
 pub type ClientCodec = ProtocolCodec<DaemonMessage, ClientMessage>;
-// Codec to be used by the agent side to receive `ClientMessage`s from the client and send `DaemonMessage`s to the client.
+// Codec to be used by the agent side to receive `ClientMessage`s from the client and send
+// `DaemonMessage`s to the client.
 pub type DaemonCodec = ProtocolCodec<ClientMessage, DaemonMessage>;
 
 impl<I, O> Default for ProtocolCodec<I, O> {
