@@ -22,7 +22,7 @@ pub(crate) struct AgentConnection {
 /// user has installed the mirrord-operator in their cluster, even without a valid license. And
 /// then we create a session with the operator with [`create_operator_session`].
 ///
-/// If there is no operator, or we the license is not good enough for starting an operator session,
+/// If there is no operator, or the license is not good enough for starting an operator session,
 /// then we create the mirrord-agent and run mirrord by itself, without the operator.
 ///
 /// Here is where we start interactions with the kubernetes API.
