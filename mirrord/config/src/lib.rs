@@ -442,7 +442,8 @@ impl LayerConfig {
                 ));
             }
 
-            if self.target.path.is_none() {
+            // Target may also be set later in the UI.
+            if self.target.path.is_none() && !context.ide {
                 return Err(ConfigError::Conflict(
                     "The copy target feature is not compatible with a targetless agent, \
                     please either disable this option or specify a target."

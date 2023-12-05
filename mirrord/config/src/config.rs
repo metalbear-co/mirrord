@@ -58,7 +58,7 @@ pub type Result<T, E = ConfigError> = std::result::Result<T, E>;
 /// Struct used for storing context during building of configuration.
 #[derive(Default)]
 pub struct ConfigContext {
-    /// Are we in a IDE context?
+    /// Are we in an IDE context?
     ///
     /// Used by `Config::verify` to change some errors into warnings.
     pub ide: bool,
