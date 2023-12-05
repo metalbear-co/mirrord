@@ -52,7 +52,7 @@ impl TestIntProxy {
         });
 
         let (stream, _buffer_size) = fake_agent_listener.accept().await.unwrap();
-        let codec = Framed::new(stream, DaemonCodec::new());
+        let codec = Framed::new(stream, DaemonCodec::default());
 
         let mut res = Self {
             codec,

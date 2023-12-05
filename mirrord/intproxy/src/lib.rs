@@ -4,7 +4,6 @@
 
 use std::{collections::HashMap, time::Duration};
 
-use agent_conn::AgentConnection;
 use background_tasks::{BackgroundTasks, TaskSender, TaskUpdate};
 use layer_conn::LayerConnection;
 use layer_initializer::LayerInitializer;
@@ -21,7 +20,9 @@ use proxies::{
 use tokio::{net::TcpListener, time};
 
 use crate::{
-    agent_conn::AgentConnectInfo, background_tasks::TaskError, error::IntProxyError,
+    agent_conn::{AgentConnectInfo, AgentConnection},
+    background_tasks::TaskError,
+    error::IntProxyError,
     main_tasks::LayerClosed,
 };
 
@@ -72,7 +73,7 @@ impl IntProxy {
         agent_connect_info: Option<AgentConnectInfo>,
         listener: TcpListener,
     ) -> Result<Self, IntProxyError> {
-        let agent_conn = AgentConnection::new(config, agent_connect_info).await?;
+        let agent_conn = AgentConnection::new(config, agent_connect_info, None).await?;
         Ok(Self::new_with_connection(agent_conn, listener))
     }
 

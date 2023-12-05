@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use miette::Diagnostic;
 use mirrord_console::error::ConsoleError;
-use mirrord_intproxy::error::IntProxyError;
+use mirrord_intproxy::{agent_conn::AgentConnectionError, error::IntProxyError};
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::{HttpError, OperatorApiError};
 use thiserror::Error;
@@ -276,6 +276,21 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::KubeError { error, operation } => {
                 Self::OperatorConnectionFailed(format!("{operation} failed: {error}"))
             }
+        }
+    }
+}
+
+impl From<AgentConnectionError> for CliError {
+    fn from(err: AgentConnectionError) -> Self {
+        match err {
+            AgentConnectionError::Io(err) => {
+                CliError::InternalProxySetupError(InternalProxySetupError::TcpConnectError(err))
+            }
+            AgentConnectionError::NoConnectionMethod => {
+                CliError::InternalProxySetupError(InternalProxySetupError::NoConnectionMethod)
+            }
+            AgentConnectionError::Operator(err) => err.into(),
+            AgentConnectionError::Kube(err) => err.into(),
         }
     }
 }
