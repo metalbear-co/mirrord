@@ -1,4 +1,3 @@
-#![feature(async_fn_in_trait)]
 #![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(try_trait_v2)]
