@@ -4,6 +4,7 @@
 use error::Result;
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
+    feature::FeatureConfig,
     target::{DeploymentTarget, PodTarget, RolloutTarget, Target, TargetConfig},
 };
 use serde::Serialize;
@@ -56,6 +57,30 @@ impl From<TargetConfig> for VerifiedTargetConfig {
     }
 }
 
+/// Corresponds to variants of [`Target`].
+#[derive(Serialize, PartialEq, Eq, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+enum TargetType {
+    Targetless,
+    Pod,
+    Deployment,
+    Rollout,
+}
+
+impl TargetType {
+    fn all() -> impl Iterator<Item = Self> {
+        [Self::Targetless, Self::Pod, Self::Deployment, Self::Rollout].into_iter()
+    }
+
+    fn compatible_with(&self, config: &FeatureConfig) -> bool {
+        match self {
+            Self::Targetless | Self::Rollout => !config.copy_target.enabled,
+            Self::Pod => !(config.copy_target.enabled && config.copy_target.scale_down),
+            Self::Deployment => true,
+        }
+    }
+}
+
 /// Produced by calling `verify_config`.
 ///
 /// It's consumed by the IDEs to check if a config is valid, or missing something, without starting
@@ -70,6 +95,8 @@ enum VerifiedConfig {
         config: VerifiedTargetConfig,
         /// Improper combination of features was requested, but mirrord can still run.
         warnings: Vec<String>,
+        /// Target types compatible with the source config.
+        compatible_target_types: Vec<TargetType>,
     },
     /// Invalid config was detected, mirrord cannot run.
     ///
@@ -126,6 +153,9 @@ pub(super) async fn verify_config(VerifyConfigArgs { ide, path }: VerifyConfigAr
         Ok(config) => VerifiedConfig::Success {
             config: config.target.into(),
             warnings: config_context.get_warnings().to_owned(),
+            compatible_target_types: TargetType::all()
+                .filter(|tt| tt.compatible_with(&config.feature))
+                .collect(),
         },
         Err(fail) => VerifiedConfig::Fail {
             errors: vec![fail.to_string()],
