@@ -96,6 +96,7 @@ enum VerifiedConfig {
         /// Improper combination of features was requested, but mirrord can still run.
         warnings: Vec<String>,
         /// Target types compatible with the source config.
+        /// Meant to be used by IDE plugins for customizing target selection.
         compatible_target_types: Vec<TargetType>,
     },
     /// Invalid config was detected, mirrord cannot run.
@@ -126,7 +127,8 @@ enum VerifiedConfig {
 ///     },
 ///     "namespace": null
 ///   },
-///   "warnings": []
+///   "warnings": [],
+///   "compatible_target_types": ["targetless", "deployment", "rollout", "pod"]
 /// }
 /// ```
 ///
