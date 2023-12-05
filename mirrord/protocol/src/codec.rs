@@ -145,10 +145,7 @@ pub enum DaemonMessage {
 
 pub struct ProtocolCodec<I, O> {
     config: bincode::config::Configuration,
-    /// Phantom just to associate the message types with the struct.
-    /// Implementing a trait to associate the types is not good enough, because we can't blanket
-    /// implement the foreign `Encoder`/`Decoder` traits, so we have to implement them for a
-    /// struct.
+    /// Phantom fields to make this struct generic over message types.
     _phantom_incoming_message: PhantomData<I>,
     _phantom_outgoing_message: PhantomData<O>,
 }
