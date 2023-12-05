@@ -165,6 +165,25 @@ pub enum DaemonMessage {
     SwitchProtocolVersionResponse(#[bincode(with_serde)] semver::Version),
 }
 
+/// `-agent` --> `-layer` messages.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[protocol_break(2)]
+pub enum DaemonMessageV2 {
+    Close(String),
+    Tcp(DaemonTcp),
+    TcpSteal(DaemonTcp),
+    TcpOutgoing(DaemonTcpOutgoing),
+    UdpOutgoing(DaemonUdpOutgoing),
+    LogMessage(LogMessage),
+    File(FileResponse),
+    Pong,
+    /// NOTE: can remove `RemoteResult` when we break protocol compatibility.
+    GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
+    GetAddrInfoResponse(GetAddrInfoResponse),
+    PauseTarget(DaemonPauseTarget),
+    SwitchProtocolVersionResponse(#[bincode(with_serde)] semver::Version),
+}
+
 pub struct ProtocolCodec<I, O> {
     config: bincode::config::Configuration,
     /// Phantom just to associate the message types with the struct.
@@ -181,6 +200,7 @@ pub type ClientCodec = ProtocolCodec<DaemonMessage, ClientMessage>;
 // Codec to be used by the agent side to receive `ClientMessage`s from the client and send
 // `DaemonMessage`s to the client.
 pub type DaemonCodec = ProtocolCodec<ClientMessage, DaemonMessage>;
+pub type DaemonCodecV2 = ProtocolCodec<ClientMessage, DaemonMessageV2>;
 pub type VersionCodec = ProtocolCodec<VersionSupportAnnouncement, VersionSupportAnnouncement>;
 
 impl<I, O> Default for ProtocolCodec<I, O> {

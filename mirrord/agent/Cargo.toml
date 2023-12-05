@@ -59,6 +59,7 @@ k8s-cri = "0.7"
 once_cell.workspace = true
 semver.workspace = true
 drain.workspace = true
+bincode = { version = "2.0.0-rc.3", features = [] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 iptables = "0.5"

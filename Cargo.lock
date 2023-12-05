@@ -3748,6 +3748,7 @@ version = "3.76.0"
 dependencies = [
  "actix-codec",
  "async-trait",
+ "bincode",
  "bollard",
  "bytes",
  "clap",
@@ -4080,7 +4081,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protover"
-version = "3.75.3"
+version = "3.76.0"
 dependencies = [
  "actix-codec",
  "futures",

@@ -21,7 +21,7 @@ use futures::{
 };
 use mirrord_protocol::{
     pause::DaemonPauseTarget, ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
-    LogMessage,
+    LogMessage, ProtocolCodec,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -251,11 +251,11 @@ struct BackgroundTasks {
     dns_api: DnsApi,
 }
 
-struct ClientConnectionHandler {
+struct ClientConnectionHandler<I: bincode::Decode, O: bincode::Encode> {
     id: ClientId,
     /// Handles mirrord's file operations, see [`FileManager`].
     file_manager: FileManager,
-    stream: Framed<TcpStream, DaemonCodec>,
+    stream: Framed<TcpStream, ProtocolCodec<I, O>>,
     tcp_sniffer_api: Option<TcpSnifferApi>,
     tcp_stealer_api: Option<TcpStealerApi>,
     tcp_outgoing_api: TcpOutgoingApi,
@@ -267,11 +267,11 @@ struct ClientConnectionHandler {
     container_handle: Option<ContainerHandle>,
 }
 
-impl ClientConnectionHandler {
+impl<I: bincode::Decode, O: bincode::Encode> ClientConnectionHandler<I, O> {
     /// Initializes [`ClientConnectionHandler`].
     pub async fn new(
         id: ClientId,
-        mut stream: Framed<TcpStream, DaemonCodec>,
+        mut stream: Framed<TcpStream, ProtocolCodec<I, O>>,
         container_handle: Option<ContainerHandle>,
         ephemeral: bool,
         bg_tasks: BackgroundTasks,
@@ -308,7 +308,7 @@ impl ClientConnectionHandler {
     async fn ceate_sniffer_api(
         id: ClientId,
         task: BackgroundTask<SnifferCommand>,
-        stream: &mut Framed<TcpStream, DaemonCodec>,
+        stream: &mut Framed<TcpStream, ProtocolCodec<I, O>>,
     ) -> Option<TcpSnifferApi> {
         if let BackgroundTask::Running(sniffer_status, sniffer_sender) = task {
             match TcpSnifferApi::new(id, sniffer_sender, sniffer_status, CHANNEL_SIZE).await {
@@ -337,7 +337,7 @@ impl ClientConnectionHandler {
         id: ClientId,
         task: BackgroundTask<StealerCommand>,
         protocol_version: semver::Version,
-        stream: &mut Framed<TcpStream, DaemonCodec>,
+        stream: &mut Framed<TcpStream, ProtocolCodec<I, O>>,
     ) -> Result<Option<TcpStealerApi>> {
         if let BackgroundTask::Running(stealer_status, stealer_sender) = task {
             match TcpStealerApi::new(
