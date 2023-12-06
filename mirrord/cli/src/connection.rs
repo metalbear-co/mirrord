@@ -73,10 +73,7 @@ where
             }
             Err(e) if config.operator == Some(true) || e.should_abort_cli() => return Err(e.into()),
             Err(e) => {
-                subtask.warning(&format!(
-                    "connecting failed, proceeding without the operator"
-                ));
-                subtask.failure(Some(&e.to_string()))
+                subtask.failure(Some(&format!("connecting to the operator failed: {e}")));
             }
         }
     }
