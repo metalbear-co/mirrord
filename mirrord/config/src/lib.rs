@@ -230,7 +230,7 @@ pub struct LayerConfig {
     /// Whether mirrord should use the operator.
     /// If not set, mirrord will first attempt to use the operator, but continue without it in case
     /// of failure.
-    #[config(env = "MIRRORD_OPERATOR_ENABLE", default = true)]
+    #[config(env = "MIRRORD_OPERATOR_ENABLE")]
     pub operator: Option<bool>,
 
     /// ## kubeconfig {#root-kubeconfig}
