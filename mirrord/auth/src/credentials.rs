@@ -103,18 +103,44 @@ impl LicenseValidity {
     /// Checks if this [`LicenseValidity`] represents a date that is close to expiring.
     ///
     /// We consider close if the `License` is 2 days away from its `expiration_date`.
-    pub fn close_to_expiring(&self) -> Option<i64> {
+    pub fn close_to_expiring(&self) -> Option<u64> {
         match self {
             LicenseValidity::Good(expiration_date) => {
                 let until_expiration = (Utc::now() - expiration_date).num_days();
 
-                if until_expiration <= 2 {
-                    Some(until_expiration)
+                if (0..=2).contains(&until_expiration) {
+                    Some(until_expiration as u64)
                 } else {
                     None
                 }
             }
             LicenseValidity::Expired(_) => None,
+        }
+    }
+}
+
+pub trait LicenseValidityV2 {
+    fn is_good(&self) -> bool;
+    fn days_until_expiration(&self) -> Option<u64>;
+}
+
+impl LicenseValidityV2 for DateTime<Utc> {
+    fn is_good(&self) -> bool {
+        let now = Utc::now();
+        now < *self
+    }
+
+    fn days_until_expiration(&self) -> Option<u64> {
+        if self.is_good() {
+            let until_expiration = (Utc::now() - self).num_days();
+
+            if (0..=2).contains(&until_expiration) {
+                Some(until_expiration as u64)
+            } else {
+                None
+            }
+        } else {
+            None
         }
     }
 }

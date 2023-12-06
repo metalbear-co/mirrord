@@ -1,12 +1,15 @@
 use std::io;
 
 use base64::{engine::general_purpose, Engine as _};
+use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use futures::{SinkExt, StreamExt};
 use http::{request::Request, StatusCode};
 use kube::{api::PostParams, Api, Client, Resource};
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, AnalyticsReporter};
 use mirrord_auth::{
-    certificate::Certificate, credential_store::CredentialStoreSync, credentials::LicenseValidity,
+    certificate::Certificate,
+    credential_store::CredentialStoreSync,
+    credentials::{LicenseValidity, LicenseValidityV2},
 };
 use mirrord_config::{
     feature::network::incoming::ConcurrentSteal,
@@ -205,7 +208,27 @@ impl OperatorApi {
         if let Some(expiring_soon) =
             LicenseValidity::from(operator.spec.license.expire_at).close_to_expiring()
         {
-            if expiring_soon >= 0 {
+            let expiring_message = format!(
+                "Operator license will expire soon, in {} days!",
+                expiring_soon,
+            );
+
+            progress.warning(&expiring_message);
+            warn!(expiring_message);
+        }
+
+        {
+            let from_naive_date = |naive: NaiveDate| {
+                let now = Utc::now();
+                let offset = now.offset().clone();
+                DateTime::<Utc>::from_naive_utc_and_offset(
+                    naive.and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap()),
+                    offset,
+                )
+            };
+            if let Some(expiring_soon) =
+                from_naive_date(operator.spec.license.expire_at).days_until_expiration()
+            {
                 let expiring_message = format!(
                     "Operator license will expire soon, in {} days!",
                     expiring_soon,
