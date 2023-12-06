@@ -2,7 +2,7 @@ use std::io;
 
 use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
-use http::{request::Request, StatusCode};
+use http::request::Request;
 use kube::{api::PostParams, Api, Client, Resource};
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, AnalyticsReporter};
 use mirrord_auth::{certificate::Certificate, credential_store::CredentialStoreSync};
@@ -171,21 +171,17 @@ impl OperatorApi {
     }
 
     /// Creates new [`OperatorSessionConnection`] based on the given [`LayerConfig`].
-    /// Returns [`None`] if the operator is not found.
     pub async fn create_session<P>(
         config: &LayerConfig,
         progress: &P,
         analytics: &mut AnalyticsReporter,
-    ) -> Result<Option<OperatorSessionConnection>>
+    ) -> Result<OperatorSessionConnection>
     where
         P: Progress + Send + Sync,
     {
         let operator_api = OperatorApi::new(config).await?;
 
-        let Some(operator) = operator_api.fetch_operator().await? else {
-            // No operator found.
-            return Ok(None);
-        };
+        let operator = operator_api.fetch_operator().await?;
 
         Self::check_config(config, &operator)?;
 
@@ -265,7 +261,7 @@ impl OperatorApi {
         };
         let connection = operator_api.connect_target(session_info).await?;
 
-        Ok(Some(connection))
+        Ok(connection)
     }
 
     /// Connects to exisiting operator session based on the given [`LayerConfig`] and
@@ -319,16 +315,14 @@ impl OperatorApi {
         })
     }
 
-    async fn fetch_operator(&self) -> Result<Option<MirrordOperatorCrd>> {
+    async fn fetch_operator(&self) -> Result<MirrordOperatorCrd> {
         let api: Api<MirrordOperatorCrd> = Api::all(self.client.clone());
-        match api.get(OPERATOR_STATUS_NAME).await {
-            Ok(crd) => Ok(Some(crd)),
-            Err(kube::Error::Api(e)) if e.code == StatusCode::NOT_FOUND => Ok(None),
-            Err(error) => Err(OperatorApiError::KubeError {
+        api.get(OPERATOR_STATUS_NAME)
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
                 error,
                 operation: "finding operator in the cluster".into(),
-            }),
-        }
+            })
     }
 
     async fn fetch_target(&self) -> Result<TargetCrd> {
