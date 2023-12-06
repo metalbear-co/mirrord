@@ -38,8 +38,10 @@ pub enum CopyTargetFileConfig {
     Advanced {
         /// ### feature.copy_target.scale_down {#feature-copy_target-scale_down}
         ///
-        /// If this option is set and [`target`](#target) is a deployment,
-        /// mirrord will scale it down to 0 for the time the copied pod is alive.
+        /// If this option is set, mirrord will scale down the target deployment to 0 for the time
+        /// the copied pod is alive.
+        ///
+        /// This option is compatible only with deployment targets.
         scale_down: Option<bool>,
     },
 }

@@ -83,6 +83,9 @@ pub struct FeatureConfig {
     ///
     /// Creates a new copy of the target. mirrord will use this copy instead of the original target
     /// (e.g. intercept network traffic). This feature requires a [mirrord operator](https://mirrord.dev/docs/teams/introduction/).
+    ///
+    /// This feature is not compatible with rollout targets and running without a target
+    /// (`targetless` mode).
     #[config(nested, unstable)]
     pub copy_target: CopyTargetConfig,
 }
