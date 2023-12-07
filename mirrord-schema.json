@@ -71,7 +71,7 @@
     },
     "operator": {
       "title": "operator {#root-operator}",
-      "description": "Allow to lookup if operator is installed on cluster and use it.\n\nDefaults to `true`.",
+      "description": "Whether mirrord should use the operator. If not set, mirrord will first attempt to use the operator, but continue without it in case of failure.",
       "type": [
         "boolean",
         "null"

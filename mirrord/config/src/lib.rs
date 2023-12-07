@@ -226,11 +226,11 @@ pub struct LayerConfig {
 
     /// ## operator {#root-operator}
     ///
-    /// Allow to lookup if operator is installed on cluster and use it.
-    ///
-    /// Defaults to `true`.
-    #[config(env = "MIRRORD_OPERATOR_ENABLE", default = true)]
-    pub operator: bool,
+    /// Whether mirrord should use the operator.
+    /// If not set, mirrord will first attempt to use the operator, but continue without it in case
+    /// of failure.
+    #[config(env = "MIRRORD_OPERATOR_ENABLE")]
+    pub operator: Option<bool>,
 
     /// ## kubeconfig {#root-kubeconfig}
     ///
@@ -433,7 +433,7 @@ impl LayerConfig {
         }
 
         if self.feature.copy_target.enabled {
-            if !self.operator {
+            if self.operator == Some(false) {
                 return Err(ConfigError::Conflict(
                     "The copy target feature requires a mirrord operator, \
                    please either disable this option or use the operator."

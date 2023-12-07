@@ -4,7 +4,7 @@ use mirrord_analytics::AnalyticsReporter;
 use mirrord_config::{feature::network::outgoing::OutgoingFilterConfig, LayerConfig};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
-use mirrord_operator::client::OperatorApi;
+use mirrord_operator::client::{OperatorApi, OperatorApiError};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
@@ -14,6 +14,27 @@ use crate::{CliError, Result};
 pub(crate) struct AgentConnection {
     pub sender: mpsc::Sender<ClientMessage>,
     pub receiver: mpsc::Receiver<DaemonMessage>,
+}
+
+trait OperatorApiErrorExt {
+    /// Whether this error should abort the execution, even if the user did not specify whether to
+    /// use the operator or not.
+    fn should_abort_cli(&self) -> bool;
+}
+
+impl OperatorApiErrorExt for OperatorApiError {
+    fn should_abort_cli(&self) -> bool {
+        match self {
+            // Various kube errors can happen due to RBAC if the operator is not installed.
+            Self::KubeError { .. } => false,
+            // These should either never happen or can happen only if the operator is installed.
+            Self::ConcurrentStealAbort
+            | Self::ConnectRequestBuildError(..)
+            | Self::CreateApiError(..)
+            | Self::InvalidTarget { .. }
+            | Self::UnsupportedFeature { .. } => true,
+        }
+    }
 }
 
 /// Creates an agent if needed then connects to it.
@@ -37,11 +58,11 @@ where
         }
     }
 
-    if config.operator {
+    if config.operator != Some(false) {
         let mut subtask = progress.subtask("checking operator");
 
-        match OperatorApi::create_session(config, &subtask, analytics).await? {
-            Some(session) => {
+        match OperatorApi::create_session(config, &subtask, analytics).await {
+            Ok(session) => {
                 subtask.success(Some("connected to the operator"));
                 return Ok((
                     AgentConnectInfo::Operator(session.info),
@@ -51,7 +72,10 @@ where
                     },
                 ));
             }
-            None => subtask.success(Some("no operator detected")),
+            Err(e) if config.operator == Some(true) || e.should_abort_cli() => return Err(e.into()),
+            Err(e) => {
+                subtask.failure(Some(&format!("connecting to the operator failed: {e}")));
+            }
         }
     }
 
