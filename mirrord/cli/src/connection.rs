@@ -25,8 +25,9 @@ trait OperatorApiErrorExt {
 impl OperatorApiErrorExt for OperatorApiError {
     fn should_abort_cli(&self) -> bool {
         match self {
-            Self::KubeError { .. } => false, /* This can happen due to RBAC if the operator is
-                                               * not installed. */
+            // Various kube errors can happen due to RBAC if the operator is not installed.
+            Self::KubeError { .. } => false,
+            // These should either never happen or can happen only if the operator is installed.
             Self::ConcurrentStealAbort
             | Self::ConnectRequestBuildError(..)
             | Self::CreateApiError(..)
