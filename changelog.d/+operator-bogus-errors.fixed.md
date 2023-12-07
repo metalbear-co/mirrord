@@ -1,1 +1,0 @@
-Changed `operator` config to be optional. If the option is set to `true`, mirrord always uses the operator and aborts in case of failure. If the option is set to `false`, mirrord does not attempt to use the operator. If the option is not set at all, mirrord attempts to use the operator, but does not abort in case it could not be found.
