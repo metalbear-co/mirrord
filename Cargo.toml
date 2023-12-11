@@ -64,10 +64,9 @@ miette = "5"
 fancy-regex = { version = "0.10" }
 enum_dispatch = "0.3"
 
-# TODO(alex): Waiting for a new RC release with the fix for #1869.
+# TODO(alex): hyper 1.0 echosystem update is 
+# blocked on https://github.com/kube-rs/kube/issues/1351
 hyper = { git = "https://github.com/meowjesty/hyper", branch = "master", features = ["full"] }
-# TODO(alex): This has a dependency on `hyper`, so we're blocked until new RC and the `hyper-util`
-# crate itself is updated to depend on newer `hyper`.
 hyper-util = { git = "https://github.com/meowjesty/hyper-util", branch = "issue/1869/update-runtime" }
 http-body = "1.0.0-rc.2"
 http-body-util = "0.1.0-rc.3"
@@ -83,10 +82,6 @@ drain = "0.1"
 [patch.crates-io]
 tracing = { git = "https://github.com/metalbear-co/tracing", package = "tracing", branch = "worker_options_non_blocking_v1" }
 tracing-subscriber = { git = "https://github.com/metalbear-co/tracing", package = "tracing-subscriber", branch = "worker_options_non_blocking_v1" }
-
-# # TODO(alex): Remove this when `apple-codesign` (used in `mirrord-sip`) updates their `rasn` version.
-# rasn = { git = "https://github.com/XAMPPRocky/rasn", package = "rasn", tag = "v0.6.1" }
-
 
 [profile.release]
 strip = "debuginfo"

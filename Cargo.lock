@@ -5046,7 +5046,8 @@ dependencies = [
 [[package]]
 name = "rasn"
 version = "0.6.1"
-source = "git+https://github.com/XAMPPRocky/rasn?tag=v0.6.1#9d5c7f537ea689580e33a19519cbb50ab4f0abcb"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "417c93c4470c2637fd27307f046653c70a957f374caae89cb5c9fb35a5fdf147"
 dependencies = [
  "bitvec",
  "bytes",
@@ -5062,7 +5063,8 @@ dependencies = [
 [[package]]
 name = "rasn-derive"
 version = "0.6.0"
-source = "git+https://github.com/XAMPPRocky/rasn?tag=v0.6.1#9d5c7f537ea689580e33a19519cbb50ab4f0abcb"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e1c39006ee96ffe7c83f656a5d20269366098a3feb35ad4a7c022e3784643cb"
 dependencies = [
  "itertools",
  "proc-macro2",
