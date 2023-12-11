@@ -177,8 +177,8 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          # TODO(alex): update this when https://github.com/rust-lang/rust/issues/109631 is fixed
           toolchain: nightly-2023-12-07
+      # TODO(alex): `no-deps` here due to an issue in `futures-util`.
       - run: cargo doc --document-private-items --no-deps
 
   test_agent:
