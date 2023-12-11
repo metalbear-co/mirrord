@@ -1,1 +1,0 @@
-Fixed config verification in IDE context when `copy_target` feature is used.
