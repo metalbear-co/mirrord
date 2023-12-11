@@ -7,7 +7,7 @@ use mirrord_protocol::{
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
         DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
     },
-    ClientMessage, DaemonMessage,
+    ClientMessage, DaemonMessageV1,
 };
 use rstest::rstest;
 
@@ -46,13 +46,13 @@ async fn test_issue1776(
     println!("connecting to address {addr:#?}");
 
     intproxy
-        .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Ok(
-            DaemonConnect {
+        .send(DaemonMessageV1::UdpOutgoing(DaemonUdpOutgoing::Connect(
+            Ok(DaemonConnect {
                 connection_id: 0,
                 remote_address: addr.into(),
                 local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
-            },
-        ))))
+            }),
+        )))
         .await;
 
     let client_msg = intproxy.recv().await;
@@ -64,7 +64,7 @@ async fn test_issue1776(
     };
 
     intproxy
-        .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
+        .send(DaemonMessageV1::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
             DaemonRead {
                 connection_id: 0,
                 bytes: vec![0; 4],
@@ -73,7 +73,7 @@ async fn test_issue1776(
         .await;
 
     intproxy
-        .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(0)))
+        .send(DaemonMessageV1::UdpOutgoing(DaemonUdpOutgoing::Close(0)))
         .await;
 
     test_process.wait_assert_success().await;

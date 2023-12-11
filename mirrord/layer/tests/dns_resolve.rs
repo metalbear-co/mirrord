@@ -9,7 +9,7 @@ mod common;
 pub use common::*;
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse, LookupRecord},
-    ClientMessage, DaemonMessage, DnsLookupError,
+    ClientMessage, DaemonMessageV1, DnsLookupError,
     ResolveErrorKindInternal::NoRecordsFound,
 };
 
@@ -30,12 +30,12 @@ async fn test_dns_resolve(
     };
 
     intproxy
-        .send(DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(Ok(
-            DnsLookup(vec![LookupRecord {
+        .send(DaemonMessageV1::GetAddrInfoResponse(GetAddrInfoResponse(
+            Ok(DnsLookup(vec![LookupRecord {
                 name: node,
                 ip: "93.184.216.34".parse::<std::net::IpAddr>().unwrap(),
-            }]),
-        ))))
+            }])),
+        )))
         .await;
 
     let msg = intproxy.recv().await;
@@ -44,7 +44,7 @@ async fn test_dns_resolve(
     };
 
     intproxy
-        .send(DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(
+        .send(DaemonMessageV1::GetAddrInfoResponse(GetAddrInfoResponse(
             Err(mirrord_protocol::ResponseError::DnsLookup(DnsLookupError {
                 kind: NoRecordsFound(3),
             })),

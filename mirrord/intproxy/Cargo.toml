@@ -20,6 +20,7 @@ mirrord-config = { path = "../config" }
 mirrord-kube = { path = "../kube" }
 mirrord-operator = { path = "../operator", features = ["client"] }
 mirrord-protocol = { path = "../protocol" }
+mirrord-protover = { path = "../protover" }
 mirrord-intproxy-protocol = { path = "./protocol", features = ["codec-async"] }
 mirrord-analytics = { path = "../analytics"}
 

@@ -23,7 +23,7 @@ use mirrord_intproxy::{
     agent_conn::{AgentConnectInfo, AgentConnection},
     IntProxy,
 };
-use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonMessage};
+use mirrord_protocol::{pause::DaemonPauseTarget, ClientCodec, ClientMessage, DaemonMessageV1};
 use nix::libc;
 use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
@@ -71,7 +71,7 @@ fn print_port(listener: &TcpListener) -> Result<()> {
 /// Request target container pause from the connected agent.
 async fn request_pause(
     sender: &mpsc::Sender<ClientMessage>,
-    receiver: &mut mpsc::Receiver<DaemonMessage>,
+    receiver: &mut mpsc::Receiver<DaemonMessageV1>,
 ) -> Result<(), InternalProxySetupError> {
     info!("Requesting target container pause from the agent");
     sender
@@ -84,7 +84,7 @@ async fn request_pause(
         })?;
 
     match receiver.recv().await {
-        Some(DaemonMessage::PauseTarget(DaemonPauseTarget::PauseResponse {
+        Some(DaemonMessageV1::PauseTarget(DaemonPauseTarget::PauseResponse {
             changed,
             container_paused: true,
         })) => {
@@ -184,6 +184,9 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
     let first_connection_timeout = Duration::from_secs(config.internal_proxy.start_idle_timeout);
     let consecutive_connection_timeout = Duration::from_secs(config.internal_proxy.idle_timeout);
 
+    // TODO: don't unwrap.
+    let (mut codec, _version) = mirrord_protover::determine_version(stream).await.unwrap();
+
     IntProxy::new(&config, agent_connect_info, listener)
         .await?
         .run(first_connection_timeout, consecutive_connection_timeout)
@@ -206,11 +209,11 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
 /// Connect and send ping - this is useful when working using k8s
 /// port forward since it only creates the connection after
 /// sending the first message
-async fn connect_and_ping(
+async fn connect_and_ping<I, O>(
     config: &LayerConfig,
     agent_connect_info: Option<AgentConnectInfo>,
     analytics: &mut AnalyticsReporter,
-) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessageV1>)> {
     let AgentConnection {
         agent_tx,
         mut agent_rx,
@@ -222,17 +225,17 @@ async fn connect_and_ping(
 /// Sends a ping the connection and expects a pong.
 async fn ping(
     sender: &mpsc::Sender<ClientMessage>,
-    receiver: &mut mpsc::Receiver<DaemonMessage>,
+    receiver: &mut mpsc::Receiver<DaemonMessageV1>,
 ) -> Result<(), InternalProxySetupError> {
     sender.send(ClientMessage::Ping).await?;
     match receiver.recv().await {
-        Some(DaemonMessage::Pong) => Ok(()),
+        Some(DaemonMessageV1::Pong) => Ok(()),
         _ => Err(InternalProxySetupError::AgentClosedConnection),
     }
 }
 
 fn create_ping_loop(
-    mut connection: (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
+    mut connection: (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessageV1>),
 ) -> (
     CancellationToken,
     JoinHandle<Result<(), InternalProxySetupError>>,

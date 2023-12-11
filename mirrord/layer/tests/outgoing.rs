@@ -9,7 +9,7 @@ use mirrord_protocol::{
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
         DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
     },
-    ClientMessage, DaemonMessage,
+    ClientMessage, DaemonMessageV1,
 };
 use rstest::rstest;
 
@@ -53,13 +53,13 @@ async fn outgoing_udp(dylib_path: &PathBuf) {
         };
         assert_eq!(addr, peer);
         intproxy
-            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(Ok(
-                DaemonConnect {
+            .send(DaemonMessageV1::UdpOutgoing(DaemonUdpOutgoing::Connect(
+                Ok(DaemonConnect {
                     connection_id: 0,
                     remote_address: addr.into(),
                     local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
-                },
-            ))))
+                }),
+            )))
             .await;
 
         let msg = intproxy.recv().await;
@@ -71,7 +71,7 @@ async fn outgoing_udp(dylib_path: &PathBuf) {
             panic!("Invalid message received from layer: {msg:?}");
         };
         intproxy
-            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
+            .send(DaemonMessageV1::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
                 DaemonRead {
                     connection_id: 0,
                     bytes,
@@ -79,7 +79,7 @@ async fn outgoing_udp(dylib_path: &PathBuf) {
             ))))
             .await;
         intproxy
-            .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(0)))
+            .send(DaemonMessageV1::UdpOutgoing(DaemonUdpOutgoing::Close(0)))
             .await;
     }
 
@@ -119,13 +119,13 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &PathBuf, con
         };
         assert_eq!(addr, peer);
         intproxy
-            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
-                DaemonConnect {
+            .send(DaemonMessageV1::TcpOutgoing(DaemonTcpOutgoing::Connect(
+                Ok(DaemonConnect {
                     connection_id: 0,
                     remote_address: addr.into(),
                     local_address: RUST_OUTGOING_LOCAL.parse::<SocketAddr>().unwrap().into(),
-                },
-            ))))
+                }),
+            )))
             .await;
 
         let msg = intproxy.recv().await;
@@ -137,7 +137,7 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &PathBuf, con
             panic!("Invalid message received from layer: {msg:?}");
         };
         intproxy
-            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
+            .send(DaemonMessageV1::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
                 DaemonRead {
                     connection_id: 0,
                     bytes,
@@ -145,7 +145,7 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &PathBuf, con
             ))))
             .await;
         intproxy
-            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(0)))
+            .send(DaemonMessageV1::TcpOutgoing(DaemonTcpOutgoing::Close(0)))
             .await;
     }
 

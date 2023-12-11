@@ -7,7 +7,7 @@ use std::{
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter};
 use mirrord_config::LayerConfig;
 use mirrord_progress::Progress;
-use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
+use mirrord_protocol::{ClientMessage, DaemonMessageV1, EnvVars, GetEnvVarsRequest};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
 use serde::Serialize;
@@ -307,7 +307,7 @@ impl MirrordExecution {
             })?;
 
         match connection.receiver.recv().await {
-            Some(DaemonMessage::GetEnvVarsResponse(Ok(remote_env))) => {
+            Some(DaemonMessageV1::GetEnvVarsResponse(Ok(remote_env))) => {
                 trace!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env.len());
                 Ok(remote_env)
             }

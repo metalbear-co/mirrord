@@ -23,16 +23,11 @@ pub(crate) type Result<T, E = ProtoVerError> = std::result::Result<T, E>;
 
 /// Take the raw tcp stream, determine the highest common version with the other side, return
 /// framed stream with given codec.
-pub async fn determine_version<
-    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-    M,
-    C: actix_codec::Encoder<M> + actix_codec::Decoder,
->(
+pub async fn determine_version<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     stream: S,
-    codec: C,
-) -> Result<(Framed<S, C>, mirrord_protocol::codec::Version)> {
+) -> Result<(Framed<S, VersionCodec>, mirrord_protocol::codec::Version)> {
     let mut stream = Framed::new(stream, VersionCodec::default());
-    let local_range = VersionSupportAnnouncement { min: 0, max: 100 }; // TODO: real version
+    let local_range = VersionSupportAnnouncement { min: 0, max: 2 }; // TODO: real version
     stream.send(local_range).await?;
 
     // TODO: timeout!
@@ -47,11 +42,7 @@ pub async fn determine_version<
         Some(Err(err)) => Err(ProtoVerError::ReceiveFailed(err))?,
     };
 
-    // Break down the framed stream that sends version messages, and build a stream of
-    // daemon/client messages.
-    let framed_parts = stream.into_parts();
-    let framed_parts = FramedParts::with_read_buf(framed_parts.io, codec, framed_parts.read_buf);
-    Ok((Framed::from_parts(framed_parts), version))
+    Ok((stream, version))
 }
 
 #[cfg(test)]

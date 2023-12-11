@@ -9,7 +9,7 @@ use std::{
 #[cfg(not(target_os = "macos"))]
 use mirrord_protocol::{
     file::{MetadataInternal, XstatRequest, XstatResponse},
-    ClientMessage, DaemonMessage, FileRequest, FileResponse,
+    ClientMessage, DaemonMessageV1, FileRequest, FileResponse,
 };
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
@@ -76,7 +76,7 @@ async fn bash_script(dylib_path: &Path, config_dir: &PathBuf) {
         };
 
         intproxy
-            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+            .send(DaemonMessageV1::File(FileResponse::Xstat(Ok(
                 XstatResponse { metadata },
             ))))
             .await;

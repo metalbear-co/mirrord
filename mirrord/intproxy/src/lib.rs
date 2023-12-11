@@ -10,7 +10,7 @@ use layer_initializer::LayerInitializer;
 use main_tasks::{FromLayer, LayerForked, MainTaskId, ProxyMessage, ToLayer};
 use mirrord_config::LayerConfig;
 use mirrord_intproxy_protocol::{LayerId, LayerToProxyMessage, LocalMessage};
-use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, CLIENT_READY_FOR_LOGS};
+use mirrord_protocol::{ClientMessage, DaemonMessageV1, LogLevel, CLIENT_READY_FOR_LOGS};
 use ping_pong::{AgentMessageNotification, PingPong};
 use proxies::{
     incoming::{IncomingProxy, IncomingProxyMessage},
@@ -272,59 +272,62 @@ impl IntProxy {
     /// Routes most messages from the agent to the correct background task.
     /// Some messages are handled here.
     #[tracing::instrument(level = "trace", skip(self), ret)]
-    async fn handle_agent_message(&mut self, message: DaemonMessage) -> Result<(), IntProxyError> {
+    async fn handle_agent_message(
+        &mut self,
+        message: DaemonMessageV1,
+    ) -> Result<(), IntProxyError> {
         self.task_txs
             .ping_pong
             .send(AgentMessageNotification {
-                pong: matches!(message, DaemonMessage::Pong),
+                pong: matches!(message, DaemonMessageV1::Pong),
             })
             .await;
 
         match message {
-            DaemonMessage::Pong => {}
-            DaemonMessage::Close(reason) => return Err(IntProxyError::AgentFailed(reason)),
-            DaemonMessage::TcpOutgoing(msg) => {
+            DaemonMessageV1::Pong => {}
+            DaemonMessageV1::Close(reason) => return Err(IntProxyError::AgentFailed(reason)),
+            DaemonMessageV1::TcpOutgoing(msg) => {
                 self.task_txs
                     .outgoing
                     .send(OutgoingProxyMessage::AgentStream(msg))
                     .await
             }
-            DaemonMessage::UdpOutgoing(msg) => {
+            DaemonMessageV1::UdpOutgoing(msg) => {
                 self.task_txs
                     .outgoing
                     .send(OutgoingProxyMessage::AgentDatagrams(msg))
                     .await
             }
-            DaemonMessage::File(msg) => {
+            DaemonMessageV1::File(msg) => {
                 self.task_txs
                     .simple
                     .send(SimpleProxyMessage::FileRes(msg))
                     .await
             }
-            DaemonMessage::GetAddrInfoResponse(msg) => {
+            DaemonMessageV1::GetAddrInfoResponse(msg) => {
                 self.task_txs
                     .simple
                     .send(SimpleProxyMessage::AddrInfoRes(msg))
                     .await
             }
-            DaemonMessage::Tcp(msg) => {
+            DaemonMessageV1::Tcp(msg) => {
                 self.task_txs
                     .incoming
                     .send(IncomingProxyMessage::AgentMirror(msg))
                     .await
             }
-            DaemonMessage::TcpSteal(msg) => {
+            DaemonMessageV1::TcpSteal(msg) => {
                 self.task_txs
                     .incoming
                     .send(IncomingProxyMessage::AgentSteal(msg))
                     .await
             }
-            DaemonMessage::SwitchProtocolVersionResponse(protocol_version) => {
+            DaemonMessageV1::SwitchProtocolVersionResponse(protocol_version) => {
                 if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
                     self.task_txs.agent.send(ClientMessage::ReadyForLogs).await;
                 }
             }
-            DaemonMessage::LogMessage(log) => match log.level {
+            DaemonMessageV1::LogMessage(log) => match log.level {
                 LogLevel::Error => tracing::error!("agent log: {}", log.message),
                 LogLevel::Warn => tracing::warn!("agent log: {}", log.message),
             },

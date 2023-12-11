@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, net::TcpStream};
 
 use base64::{engine::general_purpose, Engine as _};
 use futures::{SinkExt, StreamExt};
@@ -16,7 +16,7 @@ use mirrord_kube::{
     error::KubeApiError,
 };
 use mirrord_progress::Progress;
-use mirrord_protocol::{ClientMessage, DaemonMessage};
+use mirrord_protocol::{ClientMessage, DaemonMessageV1};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -135,9 +135,7 @@ pub struct OperatorApi {
 /// Connection to existing operator session.
 pub struct OperatorSessionConnection {
     /// For sending messages to the operator.
-    pub tx: Sender<ClientMessage>,
-    /// For receiving messages from the operator.
-    pub rx: Receiver<DaemonMessage>,
+    pub stream: TcpStream,
     /// Additional data about the session.
     pub info: OperatorSessionInformation,
 }
@@ -533,7 +531,7 @@ enum ConnectionWrapperError {
 pub struct ConnectionWrapper<T> {
     connection: T,
     client_rx: Receiver<ClientMessage>,
-    daemon_tx: Sender<DaemonMessage>,
+    daemon_tx: Sender<DaemonMessageV1>,
     protocol_version: Option<semver::Version>,
 }
 
@@ -548,7 +546,7 @@ where
     fn wrap(
         connection: T,
         protocol_version: Option<semver::Version>,
-    ) -> (Sender<ClientMessage>, Receiver<DaemonMessage>) {
+    ) -> (Sender<ClientMessage>, Receiver<DaemonMessageV1>) {
         let (client_tx, client_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
         let (daemon_tx, daemon_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
 
@@ -585,7 +583,7 @@ where
     ) -> Result<(), ConnectionWrapperError> {
         match daemon_message? {
             Message::Binary(payload) => {
-                let (daemon_message, _) = bincode::decode_from_slice::<DaemonMessage, _>(
+                let (daemon_message, _) = bincode::decode_from_slice::<DaemonMessageV1, _>(
                     &payload,
                     bincode::config::standard(),
                 )?;
@@ -609,7 +607,7 @@ where
                                 self.handle_client_message(ClientMessage::SwitchProtocolVersion(operator_protocol_version.min(&version).clone())).await?;
                             } else {
                                 self.daemon_tx
-                                    .send(DaemonMessage::SwitchProtocolVersionResponse(
+                                    .send(DaemonMessageV1::SwitchProtocolVersionResponse(
                                         "1.2.1".parse().expect("Bad static version"),
                                     ))
                                     .await

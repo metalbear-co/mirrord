@@ -49,7 +49,7 @@ async fn test_issue2001(
     );
 
     intproxy
-        .send(DaemonMessage::File(FileResponse::OpenDir(Ok(
+        .send(DaemonMessageV1::File(FileResponse::OpenDir(Ok(
             OpenDirResponse { fd: 11 },
         ))))
         .await;
@@ -62,7 +62,7 @@ async fn test_issue2001(
     );
 
     intproxy
-        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
+        .send(DaemonMessageV1::File(FileResponse::ReadDir(Ok(
             ReadDirResponse {
                 direntry: Some(DirEntryInternal {
                     inode: 1,
@@ -80,7 +80,7 @@ async fn test_issue2001(
     );
 
     intproxy
-        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
+        .send(DaemonMessageV1::File(FileResponse::ReadDir(Ok(
             ReadDirResponse {
                 direntry: Some(DirEntryInternal {
                     inode: 2,

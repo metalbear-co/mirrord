@@ -3,7 +3,7 @@ use std::{net::IpAddr, path::PathBuf, time::Duration};
 
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse, LookupRecord},
-    ClientMessage, DaemonMessage, DnsLookupError,
+    ClientMessage, DaemonMessageV1, DnsLookupError,
     ResolveErrorKindInternal::NoRecordsFound,
     ResponseError,
 };
@@ -31,12 +31,12 @@ async fn issue_2055(dylib_path: &PathBuf) {
     };
 
     intproxy
-        .send(DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(Ok(
-            DnsLookup(vec![LookupRecord {
+        .send(DaemonMessageV1::GetAddrInfoResponse(GetAddrInfoResponse(
+            Ok(DnsLookup(vec![LookupRecord {
                 name: node,
                 ip: "93.184.216.34".parse::<IpAddr>().unwrap(),
-            }]),
-        ))))
+            }])),
+        )))
         .await;
 
     let msg = intproxy.recv().await;
@@ -45,7 +45,7 @@ async fn issue_2055(dylib_path: &PathBuf) {
     };
 
     intproxy
-        .send(DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(
+        .send(DaemonMessageV1::GetAddrInfoResponse(GetAddrInfoResponse(
             Err(ResponseError::DnsLookup(DnsLookupError {
                 kind: NoRecordsFound(3),
             })),

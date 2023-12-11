@@ -15,7 +15,7 @@ use mirrord_config::{
     agent::AgentConfig, feature::network::incoming::IncomingMode, target::TargetConfig, LayerConfig,
 };
 use mirrord_progress::Progress;
-use mirrord_protocol::{ClientMessage, DaemonMessage};
+use mirrord_protocol::{ClientMessage, DaemonMessageV1};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "incluster")]
 use tokio::net::TcpStream;
@@ -136,12 +136,12 @@ impl AgentManagment for KubernetesAPI {
             agent_port,
             namespace,
         }: Self::AgentRef,
-    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+    ) -> Result<TcpStream> {
         let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, namespace.as_deref());
 
         let pod = pod_api.get(&pod_name).await?;
 
-        let conn = if let Some(pod_ip) = pod.status.and_then(|status| status.pod_ip) {
+        if let Some(pod_ip) = pod.status.and_then(|status| status.pod_ip) {
             trace!("connecting to pod_ip {pod_ip}:{}", agent_port);
 
             // When pod_ip is available we directly create it as SocketAddr to prevent tokio from
@@ -165,15 +165,13 @@ impl AgentManagment for KubernetesAPI {
             .await
         }
         .map_err(|_| KubeApiError::AgentReadyTimeout)??;
-
-        Ok(wrap_raw_connection(conn))
     }
 
     #[cfg(not(feature = "incluster"))]
     async fn create_connection(
         &self,
         connect_info: Self::AgentRef,
-    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessageV1>)> {
         let pod_api: Api<Pod> =
             get_k8s_resource_api(&self.client, connect_info.namespace.as_deref());
         let retry_strategy = ExponentialBackoff::from_millis(10).map(jitter).take(3);

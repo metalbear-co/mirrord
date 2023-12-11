@@ -2,7 +2,7 @@
 //! This mechanism exists to keep the `proxy <-> agent` connection alive when there are no requests
 //! from the layer.
 //!
-//! Realized using the [`DaemonMessage::Pong`](mirrord_protocol::codec::DaemonMessage::Pong) and
+//! Realized using the [`DaemonMessage::Pong`](mirrord_protocol::codec::DaemonMessageV1::Pong) and
 //! [`ClientMessage::Ping`] messages.
 
 use std::time::Duration;
@@ -30,7 +30,7 @@ pub enum PingPongError {
 /// Notification about a message received from the agent.
 pub struct AgentMessageNotification {
     /// Whether the message was
-    /// [`DaemonMessage::Pong`](mirrord_protocol::codec::DaemonMessage::Pong).
+    /// [`DaemonMessage::Pong`](mirrord_protocol::codec::DaemonMessageV1::Pong).
     pub pong: bool,
 }
 

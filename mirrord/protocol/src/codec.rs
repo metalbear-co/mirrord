@@ -8,7 +8,6 @@ use std::{
 use actix_codec::{Decoder, Encoder};
 use bincode::{error::DecodeError, Decode, Encode};
 use bytes::{Buf, BufMut, BytesMut};
-use mirrord_macros::protocol_break;
 use semver::VersionReq;
 
 use crate::{
@@ -148,8 +147,7 @@ pub enum FileResponse {
 
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-#[protocol_break(2)]
-pub enum DaemonMessage {
+pub enum DaemonMessageV1 {
     Close(String),
     Tcp(DaemonTcp),
     TcpSteal(DaemonTcp),
@@ -167,7 +165,6 @@ pub enum DaemonMessage {
 
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-#[protocol_break(2)]
 pub enum DaemonMessageV2 {
     Close(String),
     Tcp(DaemonTcp),
@@ -184,6 +181,150 @@ pub enum DaemonMessageV2 {
     SwitchProtocolVersionResponse(#[bincode(with_serde)] semver::Version),
 }
 
+pub trait DaemonMessage {
+    fn create_close(close_message: String) -> Self;
+
+    fn create_log_message(log_message: LogMessage) -> Self;
+
+    fn create_tcp(daemon_tcp: DaemonTcp) -> Self;
+
+    fn create_tcp_steal(daemon_tcp: DaemonTcp) -> Self;
+
+    fn create_tcp_outgoing(daemon_tcp: DaemonTcpOutgoing) -> Self;
+
+    fn create_udp_outgoing(daemon_tcp: DaemonUdpOutgoing) -> Self;
+
+    fn create_file_response(file_response: FileResponse) -> Self;
+
+    fn create_env_vars_response(env_vars_response: RemoteResult<HashMap<String, String>>) -> Self;
+
+    fn create_addr_info_response(addr_info_response: GetAddrInfoResponse) -> Self;
+
+    fn create_pong() -> Self;
+
+    fn create_protocol_switch_response(version: semver::Version) -> Self;
+
+    fn create_pause(pause_res: DaemonPauseTarget) -> Self;
+
+    fn as_log_message(&self) -> Option<LogMessage>;
+}
+
+impl DaemonMessage for DaemonMessageV1 {
+    fn create_close(close_message: String) -> Self {
+        Self::Close(close_message)
+    }
+
+    fn create_log_message(log_message: LogMessage) -> Self {
+        Self::LogMessage(log_message)
+    }
+
+    fn create_tcp(daemon_tcp: DaemonTcp) -> Self {
+        Self::Tcp(daemon_tcp)
+    }
+
+    fn create_tcp_steal(daemon_tcp: DaemonTcp) -> Self {
+        Self::TcpSteal(daemon_tcp)
+    }
+
+    fn create_tcp_outgoing(daemon_tcp_outgoing: DaemonTcpOutgoing) -> Self {
+        Self::TcpOutgoing(daemon_tcp_outgoing)
+    }
+
+    fn create_udp_outgoing(daemon_udp_outgoing: DaemonUdpOutgoing) -> Self {
+        Self::UdpOutgoing(daemon_udp_outgoing)
+    }
+
+    fn create_file_response(file_response: FileResponse) -> Self {
+        Self::File(file_response)
+    }
+
+    fn create_env_vars_response(env_vars_response: RemoteResult<HashMap<String, String>>) -> Self {
+        Self::GetEnvVarsResponse(env_vars_response)
+    }
+
+    fn create_addr_info_response(addr_info_response: GetAddrInfoResponse) -> Self {
+        Self::GetAddrInfoResponse(addr_info_response)
+    }
+
+    fn create_pong() -> Self {
+        Self::Pong
+    }
+
+    fn create_protocol_switch_response(version: semver::Version) -> Self {
+        Self::SwitchProtocolVersionResponse(version)
+    }
+
+    fn create_pause(pause_res: DaemonPauseTarget) -> Self {
+        Self::PauseTarget(pause_res)
+    }
+
+    fn as_log_message(&self) -> Option<LogMessage> {
+        if let Self::LogMessage(log_message) = self {
+            Some(log_message.clone()) // TODO: don't clone?
+        } else {
+            None
+        }
+    }
+}
+
+impl DaemonMessage for DaemonMessageV2 {
+    fn create_close(close_message: String) -> Self {
+        Self::Close(close_message)
+    }
+
+    fn create_log_message(log_message: LogMessage) -> Self {
+        Self::LogMessage(log_message)
+    }
+
+    fn create_tcp(daemon_tcp: DaemonTcp) -> Self {
+        Self::Tcp(daemon_tcp)
+    }
+
+    fn create_tcp_steal(daemon_tcp: DaemonTcp) -> Self {
+        Self::TcpSteal(daemon_tcp)
+    }
+
+    fn create_tcp_outgoing(daemon_tcp_outgoing: DaemonTcpOutgoing) -> Self {
+        Self::TcpOutgoing(daemon_tcp_outgoing)
+    }
+
+    fn create_udp_outgoing(daemon_udp_outgoing: DaemonUdpOutgoing) -> Self {
+        Self::UdpOutgoing(daemon_udp_outgoing)
+    }
+
+    fn create_file_response(file_response: FileResponse) -> Self {
+        Self::File(file_response)
+    }
+
+    fn create_env_vars_response(env_vars_response: RemoteResult<HashMap<String, String>>) -> Self {
+        Self::GetEnvVarsResponse(env_vars_response)
+    }
+
+    fn create_addr_info_response(addr_info_response: GetAddrInfoResponse) -> Self {
+        Self::GetAddrInfoResponse(addr_info_response)
+    }
+
+    fn create_pong() -> Self {
+        Self::Pong
+    }
+
+    fn create_protocol_switch_response(version: semver::Version) -> Self {
+        Self::SwitchProtocolVersionResponse(version)
+    }
+
+    fn create_pause(pause_res: DaemonPauseTarget) -> Self {
+        Self::PauseTarget(pause_res)
+    }
+
+    fn as_log_message(&self) -> Option<LogMessage> {
+        if let Self::LogMessage(log_message) = self {
+            Some(log_message.clone()) // TODO: don't clone?
+        } else {
+            None
+        }
+    }
+}
+
 pub struct ProtocolCodec<I, O> {
     config: bincode::config::Configuration,
     /// Phantom just to associate the message types with the struct.
@@ -196,10 +337,10 @@ pub struct ProtocolCodec<I, O> {
 
 // Codec to be used by the client side to receive `DaemonMessage`s from the agent and send
 // `ClientMessage`s to the agent.
-pub type ClientCodec = ProtocolCodec<DaemonMessage, ClientMessage>;
+pub type ClientCodec = ProtocolCodec<DaemonMessageV1, ClientMessage>;
 // Codec to be used by the agent side to receive `ClientMessage`s from the client and send
 // `DaemonMessage`s to the client.
-pub type DaemonCodec = ProtocolCodec<ClientMessage, DaemonMessage>;
+pub type DaemonCodec = ProtocolCodec<ClientMessage, DaemonMessageV1>;
 pub type DaemonCodecV2 = ProtocolCodec<ClientMessage, DaemonMessageV2>;
 pub type VersionCodec = ProtocolCodec<VersionSupportAnnouncement, VersionSupportAnnouncement>;
 
@@ -275,7 +416,7 @@ mod tests {
         let mut daemon_codec = DaemonCodec::default();
         let mut buf = BytesMut::new();
 
-        let msg = DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
+        let msg = DaemonMessageV1::Tcp(DaemonTcp::Data(TcpData {
             connection_id: 1,
             bytes: vec![1, 2, 3],
         }));

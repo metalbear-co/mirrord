@@ -1,7 +1,7 @@
 use std::io;
 
 use mirrord_intproxy_protocol::{codec::CodecError, LayerToProxyMessage};
-use mirrord_protocol::DaemonMessage;
+use mirrord_protocol::DaemonMessageV1;
 use thiserror::Error;
 
 use crate::{
@@ -27,7 +27,7 @@ pub enum IntProxyError {
     #[error("agent closed connection with error: {0}")]
     AgentFailed(String),
     #[error("agent sent unexpected message: {0:?}")]
-    UnexpectedAgentMessage(DaemonMessage),
+    UnexpectedAgentMessage(DaemonMessageV1),
 
     #[error("background task {0} exited unexpectedly")]
     TaskExit(MainTaskId),

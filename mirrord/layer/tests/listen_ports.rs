@@ -6,7 +6,7 @@ use std::{assert_matches::assert_matches, path::PathBuf, time::Duration};
 
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcpSteal, StealType},
-    ClientMessage, DaemonMessage,
+    ClientMessage, DaemonMessageV1,
 };
 use rstest::rstest;
 use tokio::io::AsyncWriteExt;
@@ -44,7 +44,9 @@ async fn listen_ports(
         ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(80)))
     );
     intproxy
-        .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(80))))
+        .send(DaemonMessageV1::TcpSteal(DaemonTcp::SubscribeResult(Ok(
+            80,
+        ))))
         .await;
     let mut stream = TcpStream::connect("127.0.0.1:51222").await.unwrap();
     println!("connected to listener at port 51222");
@@ -55,7 +57,7 @@ async fn listen_ports(
         ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(40000)))
     );
     intproxy
-        .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(
+        .send(DaemonMessageV1::TcpSteal(DaemonTcp::SubscribeResult(Ok(
             40000,
         ))))
         .await;

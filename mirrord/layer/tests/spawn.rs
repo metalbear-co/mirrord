@@ -7,7 +7,7 @@ use std::{collections::HashSet, path::PathBuf, time::Duration};
 use mirrord_protocol::file::XstatResponse;
 use mirrord_protocol::{
     file::{OpenFileRequest, OpenFileResponse, ReadFileRequest},
-    ClientMessage, DaemonMessage, FileRequest, FileResponse,
+    ClientMessage, DaemonMessageV1, FileRequest, FileResponse,
 };
 use rstest::rstest;
 
@@ -46,7 +46,7 @@ async fn node_spawn(dylib_path: &PathBuf) {
             FileRequest::Open(OpenFileRequest { path, .. }) => {
                 opened_paths.insert(path.to_str().unwrap().to_string());
                 intproxy
-                    .send(DaemonMessage::File(FileResponse::Open(Ok(
+                    .send(DaemonMessageV1::File(FileResponse::Open(Ok(
                         OpenFileResponse { fd: next_remote_fd },
                     ))))
                     .await;
@@ -65,7 +65,7 @@ async fn node_spawn(dylib_path: &PathBuf) {
             #[cfg(not(target_os = "macos"))]
             FileRequest::Xstat(..) => {
                 intproxy
-                    .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                    .send(DaemonMessageV1::File(FileResponse::Xstat(Ok(
                         XstatResponse {
                             metadata: Default::default(),
                         },

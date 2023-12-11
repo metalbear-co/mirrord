@@ -6,7 +6,7 @@ mod tests {
     use futures::SinkExt;
     use mirrord_protocol::{
         tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
-        ClientCodec, ClientMessage, DaemonMessage,
+        ClientCodec, ClientMessage, DaemonMessageV1,
     };
     use test_bin::get_test_bin;
     use tokio::{
@@ -78,7 +78,7 @@ mod tests {
                 .await
                 .expect("couldn't get next message")
                 .expect("got invalid message"),
-            DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(_)))
+            DaemonMessageV1::Tcp(DaemonTcp::SubscribeResult(Ok(_)))
         ));
         let mut test_conn = TcpStream::connect("127.0.0.1:1337")
             .await
@@ -107,7 +107,7 @@ mod tests {
             .expect("got invalid message");
         assert_eq!(
             new_conn_msg,
-            DaemonMessage::Tcp(DaemonTcp::NewConnection(NewTcpConnection {
+            DaemonMessageV1::Tcp(DaemonTcp::NewConnection(NewTcpConnection {
                 connection_id: 0,
                 remote_address: IpAddr::V4("127.0.0.1".parse().unwrap()),
                 local_address: IpAddr::V4("127.0.0.1".parse().unwrap()),
@@ -118,7 +118,7 @@ mod tests {
 
         assert_eq!(
             data_msg,
-            DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
+            DaemonMessageV1::Tcp(DaemonTcp::Data(TcpData {
                 connection_id: 0,
                 bytes: test_data.to_vec()
             }))
@@ -126,7 +126,7 @@ mod tests {
 
         assert_eq!(
             close_msg,
-            DaemonMessage::Tcp(DaemonTcp::Close(TcpClose { connection_id: 0 }))
+            DaemonMessageV1::Tcp(DaemonTcp::Close(TcpClose { connection_id: 0 }))
         );
 
         drop(codec);

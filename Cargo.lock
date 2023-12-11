@@ -3893,6 +3893,7 @@ dependencies = [
  "mirrord-kube",
  "mirrord-operator",
  "mirrord-protocol",
+ "mirrord-protover",
  "rand",
  "serde",
  "thiserror",
@@ -4059,7 +4060,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "actix-codec",
  "bincode",

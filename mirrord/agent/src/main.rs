@@ -14,14 +14,14 @@ use std::{
     path::PathBuf,
 };
 
-use actix_codec::Framed;
+use actix_codec::{Framed, FramedParts};
 use futures::{
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
 };
 use mirrord_protocol::{
-    pause::DaemonPauseTarget, ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
-    LogMessage, ProtocolCodec,
+    pause::DaemonPauseTarget, ClientMessage, DaemonMessage, DaemonMessageV1, DaemonMessageV2,
+    GetEnvVarsRequest, LogMessage, ProtocolCodec, VersionCodec,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -156,19 +156,25 @@ impl State {
         Ok(new_id)
     }
 
-    pub async fn new_connection(
+    pub async fn new_connection<I: bincode::Decode, O: bincode::Encode + DaemonMessage>(
         &mut self,
-        stream: TcpStream,
+        stream: Framed<TcpStream, VersionCodec>,
         tasks: BackgroundTasks,
         cancellation_token: CancellationToken,
         protocol_version: semver::Version,
     ) -> Result<Option<JoinHandle<u32>>> {
-        let (mut stream, _version) =
-            mirrord_protover::determine_version(stream, DaemonCodec::default()).await?;
+        // TODO: extract this code, prevent repeating.
+        let framed_parts = stream.into_parts();
+        let framed_parts = FramedParts::with_read_buf(
+            framed_parts.io,
+            ProtocolCodec::<I, O>::default(),
+            framed_parts.read_buf,
+        );
+        let mut stream = Framed::from_parts(framed_parts);
         let client_id = match self.new_client().await {
             Ok(id) => id,
             Err(err) => {
-                let _ = stream.send(DaemonMessage::Close(err.to_string())).await; // Ignore message send error.
+                let _ = stream.send(O::create_close(err.to_string())).await; // Ignore message send error.
 
                 if let AgentError::ConnectionLimitReached = err {
                     error!("{err}");
@@ -251,7 +257,7 @@ struct BackgroundTasks {
     dns_api: DnsApi,
 }
 
-struct ClientConnectionHandler<I: bincode::Decode, O: bincode::Encode> {
+struct ClientConnectionHandler<I: bincode::Decode, O: bincode::Encode + DaemonMessage> {
     id: ClientId,
     /// Handles mirrord's file operations, see [`FileManager`].
     file_manager: FileManager,
@@ -267,7 +273,7 @@ struct ClientConnectionHandler<I: bincode::Decode, O: bincode::Encode> {
     container_handle: Option<ContainerHandle>,
 }
 
-impl<I: bincode::Decode, O: bincode::Encode> ClientConnectionHandler<I, O> {
+impl<I: bincode::Decode, O: bincode::Encode + DaemonMessage> ClientConnectionHandler<I, O> {
     /// Initializes [`ClientConnectionHandler`].
     pub async fn new(
         id: ClientId,
@@ -282,9 +288,9 @@ impl<I: bincode::Decode, O: bincode::Encode> ClientConnectionHandler<I, O> {
 
         let file_manager = FileManager::new(pid.or_else(|| ephemeral.then_some(1)));
 
-        let tcp_sniffer_api = Self::ceate_sniffer_api(id, bg_tasks.sniffer, &mut stream).await;
+        let tcp_sniffer_api = Self::create_sniffer_api(id, bg_tasks.sniffer, &mut stream).await;
         let tcp_stealer_api =
-            Self::ceate_stealer_api(id, bg_tasks.stealer, protocol_version, &mut stream).await?;
+            Self::create_stealer_api(id, bg_tasks.stealer, protocol_version, &mut stream).await?;
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
         let udp_outgoing_api = UdpOutgoingApi::new(pid);
@@ -305,7 +311,7 @@ impl<I: bincode::Decode, O: bincode::Encode> ClientConnectionHandler<I, O> {
         Ok(client_handler)
     }
 
-    async fn ceate_sniffer_api(
+    async fn create_sniffer_api(
         id: ClientId,
         task: BackgroundTask<SnifferCommand>,
         stream: &mut Framed<TcpStream, ProtocolCodec<I, O>>,
@@ -322,7 +328,7 @@ impl<I: bincode::Decode, O: bincode::Encode> ClientConnectionHandler<I, O> {
 
                     // Ignore message send error.
                     let _ = stream
-                        .send(DaemonMessage::LogMessage(LogMessage::warn(message)))
+                        .send(O::create_log_message(LogMessage::warn(message)))
                         .await;
 
                     None
@@ -333,7 +339,7 @@ impl<I: bincode::Decode, O: bincode::Encode> ClientConnectionHandler<I, O> {
         }
     }
 
-    async fn ceate_stealer_api(
+    async fn create_stealer_api(
         id: ClientId,
         task: BackgroundTask<StealerCommand>,
         protocol_version: semver::Version,
@@ -352,7 +358,7 @@ impl<I: bincode::Decode, O: bincode::Encode> ClientConnectionHandler<I, O> {
                 Ok(api) => Ok(Some(api)),
                 Err(e) => {
                     let _ = stream
-                        .send(DaemonMessage::Close(format!(
+                        .send(O::create_close(format!(
                             "Failed to create TcpStealerApi: {e}."
                         )))
                         .await; // Ignore message send error.
@@ -397,7 +403,7 @@ impl<I: bincode::Decode, O: bincode::Encode> ClientConnectionHandler<I, O> {
                         unreachable!()
                     }
                 }, if self.tcp_sniffer_api.is_some() => match message {
-                    Ok(message) => self.respond(DaemonMessage::Tcp(message)).await?,
+                    Ok(message) => self.respond(O::create_tcp(message)).await?,
                     Err(e) => break e,
                 },
                 message = async {
@@ -407,31 +413,31 @@ impl<I: bincode::Decode, O: bincode::Encode> ClientConnectionHandler<I, O> {
                         unreachable!()
                     }
                 }, if self.tcp_stealer_api.is_some() => match message {
-                    Ok(message) => self.respond(DaemonMessage::TcpSteal(message)).await?,
+                    Ok(message) => self.respond(O::create_tcp_steal(message)).await?,
                     Err(e) => break e,
                 },
                 message = self.tcp_outgoing_api.daemon_message() => match message {
-                    Ok(message) => self.respond(DaemonMessage::TcpOutgoing(message)).await?,
+                    Ok(message) => self.respond(O::create_tcp_outgoing(message)).await?,
                     Err(e) => break e,
                 },
                 message = self.udp_outgoing_api.daemon_message() => match message {
-                    Ok(message) => self.respond(DaemonMessage::UdpOutgoing(message)).await?,
+                    Ok(message) => self.respond(O::create_udp_outgoing(message)).await?,
                     Err(e) => break e,
                 },
                 _ = cancellation_token.cancelled() => return Ok(()),
             }
         };
 
-        if let Err(e) = self.respond(DaemonMessage::Close(error.to_string())).await {
+        if let Err(e) = self.respond(O::create_close(error.to_string())).await {
             error!("Failed to send error to client: {e:?}");
         }
 
         Err(error)
     }
 
-    /// Sends a [`DaemonMessage`] response to the connected client (`mirrord-layer`).
+    /// Sends an [`O`] response to the connected client (`mirrord-layer`).
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn respond(&mut self, response: DaemonMessage) -> Result<()> {
+    async fn respond(&mut self, response: O) -> Result<()> {
         self.stream.send(response).await.map_err(Into::into)
     }
 
@@ -439,11 +445,11 @@ impl<I: bincode::Decode, O: bincode::Encode> ClientConnectionHandler<I, O> {
     ///
     /// Returns `false` if the client disconnected.
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn handle_client_message(&mut self, message: ClientMessage) -> Result<bool> {
+    async fn handle_client_message(&mut self, message: I) -> Result<bool> {
         match message {
             ClientMessage::FileRequest(req) => {
                 if let Some(response) = self.file_manager.handle_message(req)? {
-                    self.respond(DaemonMessage::File(response))
+                    self.respond(O::create_file_response(response))
                         .await
                         .inspect_err(|fail| {
                             error!(
@@ -471,17 +477,16 @@ impl<I: bincode::Decode, O: bincode::Encode> ClientConnectionHandler<I, O> {
                 let env_vars_result =
                     env::select_env_vars(&self.env, env_vars_filter, env_vars_select);
 
-                self.respond(DaemonMessage::GetEnvVarsResponse(env_vars_result))
+                self.respond(O::create_env_vars_response(env_vars_result))
                     .await?
             }
             ClientMessage::GetAddrInfoRequest(request) => {
                 let response = self.dns_api.make_request(request).await?;
                 trace!("GetAddrInfoRequest -> response {:#?}", response);
 
-                self.respond(DaemonMessage::GetAddrInfoResponse(response))
-                    .await?
+                self.respond(O::create_addr_info_response(response)).await?
             }
-            ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
+            ClientMessage::Ping => self.respond(O::create_pong()).await?,
             ClientMessage::Tcp(message) => {
                 if let Some(sniffer_api) = &mut self.tcp_sniffer_api {
                     sniffer_api.handle_client_message(message).await?
@@ -510,16 +515,14 @@ impl<I: bincode::Decode, O: bincode::Encode> ClientConnectionHandler<I, O> {
                     .await
                 {
                     Ok(changed) => {
-                        self.respond(DaemonMessage::PauseTarget(
-                            DaemonPauseTarget::PauseResponse {
-                                changed,
-                                container_paused: pause,
-                            },
-                        ))
+                        self.respond(O::create_pause(DaemonPauseTarget::PauseResponse {
+                            changed,
+                            container_paused: pause,
+                        }))
                         .await?;
                     }
                     Err(e) => {
-                        self.respond(DaemonMessage::LogMessage(LogMessage::error(format!(
+                        self.respond(O::create_log_message(LogMessage::error(format!(
                             "Failed to pause target container: {e:?}"
                         ))))
                         .await?;
@@ -533,7 +536,7 @@ impl<I: bincode::Decode, O: bincode::Encode> ClientConnectionHandler<I, O> {
                         .await?;
                 }
 
-                self.respond(DaemonMessage::SwitchProtocolVersionResponse(version))
+                self.respond(O::create_protocol_switch_response(version))
                     .await?;
             }
             ClientMessage::ReadyForLogs => {}
@@ -647,15 +650,32 @@ async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
     {
         Ok(Ok((stream, addr))) => {
             trace!("start -> Connection accepted from {:?}", addr);
-            if let Some(client) = state
-                .new_connection(
-                    stream,
-                    bg_tasks.clone(),
-                    cancellation_token.clone(),
-                    args.base_protocol_version.clone(),
-                )
-                .await?
-            {
+            let (stream, version) = mirrord_protover::determine_version(stream).await?;
+            // Break down the framed stream that sends version messages, and build a stream of
+            // daemon/client messages.
+            if let Some(client) = match version {
+                // This match should be automated with a `version_dispatch` macro
+                1 => {
+                    state
+                        .new_connection::<ClientMessage, DaemonMessageV1>(
+                            stream,
+                            bg_tasks.clone(),
+                            cancellation_token.clone(),
+                            args.base_protocol_version.clone(),
+                        )
+                        .await?
+                }
+                _ => {
+                    state
+                        .new_connection::<ClientMessage, DaemonMessageV2>(
+                            stream,
+                            bg_tasks.clone(),
+                            cancellation_token.clone(),
+                            args.base_protocol_version.clone(),
+                        )
+                        .await?
+                }
+            } {
                 clients.push(client)
             };
         }
@@ -676,13 +696,25 @@ async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
     loop {
         select! {
             Ok((stream, addr)) = listener.accept() => {
+                let (stream, version) = mirrord_protover::determine_version(stream).await?;
                 trace!("start -> Connection accepted from {:?}", addr);
-                if let Some(client) = state.new_connection(
-                    stream,
-                    bg_tasks.clone(),
-                    cancellation_token.clone(),
-                    args.base_protocol_version.clone(),
-                ).await? {clients.push(client) };
+                if let Some(client) = match version {
+                    // To be automated by a `version_dispatch` macro.
+                    1 => state.new_connection::<ClientMessage, DaemonMessageV1>(
+                            stream,
+                            bg_tasks.clone(),
+                            cancellation_token.clone(),
+                            args.base_protocol_version.clone(),
+                        ).await?,
+                    _ => state.new_connection::<ClientMessage, DaemonMessageV2>(
+                            stream,
+                            bg_tasks.clone(),
+                            cancellation_token.clone(),
+                            args.base_protocol_version.clone(),
+                        ).await?,
+                } {
+                    clients.push(client)
+                };
             },
             client = clients.next() => {
                 match client {

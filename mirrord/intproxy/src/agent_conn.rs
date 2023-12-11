@@ -13,7 +13,7 @@ use mirrord_kube::{
     error::KubeApiError,
 };
 use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorSessionInformation};
-use mirrord_protocol::{ClientMessage, DaemonMessage};
+use mirrord_protocol::{ClientMessage, DaemonMessageV1, DaemonMessageV2};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{
@@ -60,12 +60,12 @@ pub enum AgentConnectInfo {
 /// but this logic was already implemented elsewhere. This struct simply wraps the
 /// [`mpsc`](tokio::sync::mpsc) channels returned from other functions and implements the
 /// [`BackgroundTask`] trait.
-pub struct AgentConnection {
-    pub agent_tx: Sender<ClientMessage>,
-    pub agent_rx: Receiver<DaemonMessage>,
+pub struct AgentConnection<I, O> {
+    pub agent_tx: Sender<O>,
+    pub agent_rx: Receiver<I>,
 }
 
-impl AgentConnection {
+impl<I, O> AgentConnection<I, O> {
     /// Creates a new agent connection based on the provided [`LayerConfig`] and optional
     /// [`AgentConnectInfo`].
     pub async fn new(
@@ -98,7 +98,11 @@ impl AgentConnection {
                     .as_ref()
                     .ok_or(AgentConnectionError::NoConnectionMethod)?;
                 let stream = TcpStream::connect(address).await?;
-                wrap_raw_connection(stream)
+                let (stream, version) = mirrord_protover::determine_version(stream).await?;
+                match version {
+                    1 => wrap_raw_connection::<ClientMessage, DaemonMessageV1>(stream),
+                    _ => wrap_raw_connection::<ClientMessage, DaemonMessageV2>(stream),
+                }
             }
         };
 

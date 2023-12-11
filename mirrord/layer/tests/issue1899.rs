@@ -50,7 +50,7 @@ async fn test_issue1899(
     );
 
     intproxy
-        .send(DaemonMessage::File(FileResponse::OpenDir(Ok(
+        .send(DaemonMessageV1::File(FileResponse::OpenDir(Ok(
             OpenDirResponse { fd: 2 },
         ))))
         .await;

@@ -12,7 +12,7 @@ use mirrord_protocol::{
         ReadFileRequest, SeekFromInternal, XstatRequest, XstatResponse,
     },
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
-    ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse,
+    ClientMessage, DaemonCodec, DaemonMessageV1, FileRequest, FileResponse,
 };
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
@@ -64,7 +64,7 @@ impl TestIntProxy {
             panic!("unexpected message: {msg:?}");
         };
 
-        res.send(DaemonMessage::SwitchProtocolVersionResponse(version))
+        res.send(DaemonMessageV1::SwitchProtocolVersionResponse(version))
             .await;
 
         let msg = res.recv().await;
@@ -86,7 +86,7 @@ impl TestIntProxy {
             match msg {
                 ClientMessage::Ping => {
                     self.codec
-                        .send(DaemonMessage::Pong)
+                        .send(DaemonMessageV1::Pong)
                         .await
                         .expect("inproxy connection failed");
                 }
@@ -95,7 +95,7 @@ impl TestIntProxy {
         }
     }
 
-    pub async fn send(&mut self, msg: DaemonMessage) {
+    pub async fn send(&mut self, msg: DaemonMessageV1) {
         self.codec
             .send(msg)
             .await
@@ -111,7 +111,7 @@ impl TestIntProxy {
         match msg {
             ClientMessage::Tcp(LayerTcp::PortSubscribe(port)) => {
                 assert_eq!(app_port, port);
-                res.send(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(port))))
+                res.send(DaemonMessageV1::Tcp(DaemonTcp::SubscribeResult(Ok(port))))
                     .await;
                 res
             }
@@ -223,7 +223,7 @@ impl TestIntProxy {
         );
 
         self.codec
-            .send(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(port))))
+            .send(DaemonMessageV1::Tcp(DaemonTcp::SubscribeResult(Ok(port))))
             .await
             .expect("failed to send PortSubscribe result");
 
@@ -237,7 +237,7 @@ impl TestIntProxy {
     pub async fn send_new_connection(&mut self, port: u16) -> u64 {
         let new_connection_id = self.num_connections;
         self.codec
-            .send(DaemonMessage::Tcp(DaemonTcp::NewConnection(
+            .send(DaemonMessageV1::Tcp(DaemonTcp::NewConnection(
                 NewTcpConnection {
                     connection_id: new_connection_id,
                     remote_address: "127.0.0.1".parse().unwrap(),
@@ -254,7 +254,7 @@ impl TestIntProxy {
 
     async fn send_tcp_data(&mut self, message_data: &str, connection_id: u64) {
         self.codec
-            .send(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
+            .send(DaemonMessageV1::Tcp(DaemonTcp::Data(TcpData {
                 connection_id,
                 bytes: Vec::from(message_data),
             })))
@@ -268,7 +268,7 @@ impl TestIntProxy {
     /// Return the id of the new connection.
     pub async fn send_close(&mut self, connection_id: u64) {
         self.codec
-            .send(DaemonMessage::Tcp(DaemonTcp::Close(TcpClose {
+            .send(DaemonMessageV1::Tcp(DaemonTcp::Close(TcpClose {
                 connection_id,
             })))
             .await
@@ -316,7 +316,7 @@ impl TestIntProxy {
 
         // Answer open.
         self.codec
-            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Open(
+            .send(DaemonMessageV1::File(mirrord_protocol::FileResponse::Open(
                 Ok(mirrord_protocol::file::OpenFileResponse { fd }),
             )))
             .await
@@ -362,7 +362,7 @@ impl TestIntProxy {
 
         // Answer open.
         self.codec
-            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Open(
+            .send(DaemonMessageV1::File(mirrord_protocol::FileResponse::Open(
                 Ok(mirrord_protocol::file::OpenFileResponse { fd }),
             )))
             .await
@@ -384,7 +384,7 @@ impl TestIntProxy {
 
         // Answer open.
         self.codec
-            .send(DaemonMessage::File(mirrord_protocol::FileResponse::Open(
+            .send(DaemonMessageV1::File(mirrord_protocol::FileResponse::Open(
                 Ok(mirrord_protocol::file::OpenFileResponse { fd }),
             )))
             .await
@@ -416,7 +416,7 @@ impl TestIntProxy {
 
     pub async fn answer_file_open(&mut self) {
         self.codec
-            .send(DaemonMessage::File(FileResponse::Open(Ok(
+            .send(DaemonMessageV1::File(FileResponse::Open(Ok(
                 mirrord_protocol::file::OpenFileResponse { fd: 0xb16 },
             ))))
             .await
@@ -427,7 +427,7 @@ impl TestIntProxy {
     pub async fn answer_file_read(&mut self, contents: Vec<u8>) {
         let read_amount = contents.len();
         self.codec
-            .send(DaemonMessage::File(FileResponse::Read(Ok(
+            .send(DaemonMessageV1::File(FileResponse::Read(Ok(
                 mirrord_protocol::file::ReadFileResponse {
                     bytes: contents,
                     read_amount: read_amount as u64,
@@ -492,7 +492,7 @@ impl TestIntProxy {
 
         let written_amount = contents.len() as u64;
         self.codec
-            .send(DaemonMessage::File(FileResponse::Write(Ok(
+            .send(DaemonMessageV1::File(FileResponse::Write(Ok(
                 mirrord_protocol::file::WriteFileResponse { written_amount },
             ))))
             .await
@@ -515,7 +515,7 @@ impl TestIntProxy {
         );
 
         self.codec
-            .send(DaemonMessage::File(FileResponse::Seek(Ok(
+            .send(DaemonMessageV1::File(FileResponse::Seek(Ok(
                 mirrord_protocol::file::SeekFileResponse { result_offset: 0 },
             ))))
             .await
@@ -541,7 +541,7 @@ impl TestIntProxy {
         );
 
         self.codec
-            .send(DaemonMessage::File(FileResponse::Access(Ok(
+            .send(DaemonMessageV1::File(FileResponse::Access(Ok(
                 AccessFileResponse {},
             ))))
             .await
@@ -560,7 +560,7 @@ impl TestIntProxy {
         );
 
         self.codec
-            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+            .send(DaemonMessageV1::File(FileResponse::Xstat(Ok(
                 XstatResponse {
                     metadata: Default::default(),
                 },
@@ -575,7 +575,7 @@ impl TestIntProxy {
         while let ClientMessage::FileRequest(FileRequest::Xstat(_xstat_request)) = message {
             // Answer xstat.
             self.codec
-                .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                .send(DaemonMessageV1::File(FileResponse::Xstat(Ok(
                     XstatResponse {
                         metadata: Default::default(),
                     },

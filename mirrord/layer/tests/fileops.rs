@@ -138,7 +138,7 @@ async fn pwrite(
 
     // reply to pwrite
     intproxy
-        .send(DaemonMessage::File(FileResponse::WriteLimited(Ok(
+        .send(DaemonMessageV1::File(FileResponse::WriteLimited(Ok(
             WriteFileResponse { written_amount: 37 },
         ))))
         .await;
@@ -166,7 +166,7 @@ async fn pwrite(
             ..Default::default()
         };
         intproxy
-            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+            .send(DaemonMessageV1::File(FileResponse::Xstat(Ok(
                 XstatResponse { metadata },
             ))))
             .await;
@@ -189,7 +189,7 @@ async fn pwrite(
             ..Default::default()
         };
         intproxy
-            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+            .send(DaemonMessageV1::File(FileResponse::Xstat(Ok(
                 XstatResponse { metadata },
             ))))
             .await;
@@ -252,7 +252,7 @@ async fn node_close(
             ..Default::default()
         };
         intproxy
-            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+            .send(DaemonMessageV1::File(FileResponse::Xstat(Ok(
                 XstatResponse { metadata },
             ))))
             .await;
@@ -318,7 +318,7 @@ async fn go_stat(
         ..Default::default()
     };
     intproxy
-        .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+        .send(DaemonMessageV1::File(FileResponse::Xstat(Ok(
             XstatResponse { metadata },
         ))))
         .await;
@@ -364,7 +364,7 @@ async fn go_dir(
     };
 
     intproxy
-        .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+        .send(DaemonMessageV1::File(FileResponse::Xstat(Ok(
             XstatResponse { metadata },
         ))))
         .await;
@@ -375,7 +375,7 @@ async fn go_dir(
     );
 
     intproxy
-        .send(DaemonMessage::File(FileResponse::OpenDir(Ok(
+        .send(DaemonMessageV1::File(FileResponse::OpenDir(Ok(
             OpenDirResponse { fd: 2 },
         ))))
         .await;
@@ -386,7 +386,7 @@ async fn go_dir(
     );
 
     intproxy
-        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
+        .send(DaemonMessageV1::File(FileResponse::ReadDir(Ok(
             ReadDirResponse {
                 direntry: Some(DirEntryInternal {
                     name: "a".to_string(),
@@ -404,7 +404,7 @@ async fn go_dir(
     );
 
     intproxy
-        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
+        .send(DaemonMessageV1::File(FileResponse::ReadDir(Ok(
             ReadDirResponse {
                 direntry: Some(DirEntryInternal {
                     name: "b".to_string(),
@@ -422,7 +422,7 @@ async fn go_dir(
     );
 
     intproxy
-        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
+        .send(DaemonMessageV1::File(FileResponse::ReadDir(Ok(
             ReadDirResponse { direntry: None },
         ))))
         .await;
@@ -489,7 +489,7 @@ async fn go_dir_on_linux(
         .sum::<u16>() as u64;
 
     intproxy
-        .send(DaemonMessage::File(FileResponse::GetDEnts64(Ok(
+        .send(DaemonMessageV1::File(FileResponse::GetDEnts64(Ok(
             GetDEnts64Response {
                 fd: 1,
                 entries,
@@ -509,7 +509,7 @@ async fn go_dir_on_linux(
 
     // "Empty" result: no entries, total size of 0.
     intproxy
-        .send(DaemonMessage::File(FileResponse::GetDEnts64(Ok(
+        .send(DaemonMessageV1::File(FileResponse::GetDEnts64(Ok(
             GetDEnts64Response {
                 fd: 1,
                 entries: vec![],
