@@ -179,7 +179,7 @@ jobs:
         with:
           # TODO(alex): update this when https://github.com/rust-lang/rust/issues/109631 is fixed
           toolchain: nightly-2023-12-07
-      - run: cargo doc --document-private-items
+      - run: cargo doc --document-private-items --no-deps
 
   test_agent:
     runs-on: ubuntu-latest
