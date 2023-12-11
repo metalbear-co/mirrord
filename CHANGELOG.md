@@ -8,6 +8,15 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.77.1](https://github.com/metalbear-co/mirrord/tree/3.77.1) - 2023-12-11
+
+
+### Fixed
+
+- Fix asdf compatability by adjusting local files read defaults
+  [#2051](https://github.com/metalbear-co/mirrord/issues/2051)
+
+
 ## [3.77.0](https://github.com/metalbear-co/mirrord/tree/3.77.0) - 2023-12-07
 
 
