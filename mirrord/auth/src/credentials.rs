@@ -109,13 +109,13 @@ impl LicenseValidity for DateTime<Utc> {
 
     fn days_until_expiration(&self) -> Option<u64> {
         if self.is_good() {
-            let until_expiration = (Utc::now() - self).num_days();
+            let until_expiration = (*self - Utc::now()).num_days();
 
             // We only want to return `Some(>= 0)`, never any negative numbers.
             if (0..=2).contains(&until_expiration) {
                 Some(until_expiration as u64)
             } else {
-                None
+                Some(until_expiration as u64)
             }
         } else {
             None
@@ -129,11 +129,9 @@ mod tests {
 
     use crate::credentials::LicenseValidity;
 
-    const TODAY: &str = "2023-11-20 00:00:00 UTC";
-
     #[test]
     fn license_validity_valid() {
-        let today: DateTime<Utc> = TODAY.parse().unwrap();
+        let today: DateTime<Utc> = Utc::now();
         let expiration_date = today.checked_add_days(Days::new(7)).unwrap();
 
         assert!(expiration_date.is_good());
@@ -141,18 +139,18 @@ mod tests {
 
     #[test]
     fn license_validity_expired() {
-        let today: DateTime<Utc> = TODAY.parse().unwrap();
+        let today: DateTime<Utc> = Utc::now();
         let expiration_date = today.checked_sub_days(Days::new(7)).unwrap();
 
         assert!(!expiration_date.is_good());
     }
 
     #[test]
-    fn license_validity_expired_past_expiration_date() {
-        let today: DateTime<Utc> = TODAY.parse().unwrap();
-        let expiration_date = today.checked_add_days(Days::new(7)).unwrap();
+    fn license_validity_close_to_expiring() {
+        let today: DateTime<Utc> = Utc::now();
+        let expiration_date = today.checked_add_days(Days::new(3)).unwrap();
 
-        assert_eq!(expiration_date.days_until_expiration(), Some(7));
+        assert_eq!(expiration_date.days_until_expiration(), Some(2));
     }
 }
 
