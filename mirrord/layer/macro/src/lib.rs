@@ -77,10 +77,13 @@ pub fn hook_fn(
         };
 
         let output = quote! {
+
             #type_alias;
 
+            #[allow(non_upper_case_globals)]
             #original_fn;
 
+            #[allow(non_upper_case_globals)]
             #proper_function
 
         };

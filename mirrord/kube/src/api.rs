@@ -85,6 +85,7 @@ pub trait AgentManagment {
     type AgentRef: Hash + Eq;
     type Err;
 
+    #[allow(async_fn_in_trait)]
     async fn connect<P>(
         &self,
         progress: &mut P,
@@ -98,11 +99,13 @@ pub trait AgentManagment {
             .await
     }
 
+    #[allow(async_fn_in_trait)]
     async fn create_connection(
         &self,
         agent_ref: Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), Self::Err>;
 
+    #[allow(async_fn_in_trait)]
     async fn create_agent<P>(
         &self,
         progress: &mut P,

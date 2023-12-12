@@ -1,6 +1,5 @@
 #![feature(let_chains)]
 #![feature(lazy_cell)]
-#![feature(result_option_inspect)]
 #![warn(clippy::indexing_slicing)]
 
 use std::{collections::HashMap, time::Duration};

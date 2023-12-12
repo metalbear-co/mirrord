@@ -138,7 +138,7 @@ jobs:
       - run: rm rust-toolchain.toml
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: nightly-2023-09-07
+          toolchain: nightly-2023-12-07
           components: rustfmt, clippy
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
       - run: python3 -m pip install cargo-zigbuild
@@ -177,9 +177,9 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          # TODO(alex): update this when https://github.com/rust-lang/rust/issues/109631 is fixed
-          toolchain: nightly-2023-09-07
-      - run: cargo doc --document-private-items
+          toolchain: nightly-2023-12-07
+      # TODO(alex): `no-deps` here due to an issue in `futures-util`.
+      - run: cargo doc --document-private-items --no-deps
 
   test_agent:
     runs-on: ubuntu-latest
@@ -329,7 +329,7 @@ jobs:
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
-          toolchain: nightly-2023-09-07
+          toolchain: nightly-2023-12-07
       - name: Install Protoc
         uses: arduino/setup-protoc@v2
         with:

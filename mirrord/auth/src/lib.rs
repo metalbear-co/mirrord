@@ -1,5 +1,4 @@
 #![doc = include_str!("../README.md")]
-#![feature(result_option_inspect)]
 #![feature(lazy_cell)]
 
 pub use pem;
