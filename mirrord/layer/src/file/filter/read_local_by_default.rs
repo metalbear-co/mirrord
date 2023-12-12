@@ -49,7 +49,7 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         r"/\.yarnrc$",
         r"/\.yarnrc.yml$",
         r"/\.yarnrc.json$",
-        r"/node_modules$",
+        r"/node_modules",
         // asdf
         r".*/\.tool-versions$",
         // macOS
