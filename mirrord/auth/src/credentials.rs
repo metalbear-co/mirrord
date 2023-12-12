@@ -82,11 +82,12 @@ pub trait LicenseValidity {
     /// This date's validity is good.
     fn is_good(&self) -> bool;
 
-    /// How many days until expiration from this date.
+    /// How many days until expiration from this date counting from _now_, which means that an
+    /// expiration date of `today + 3` means we have 2 days left until expiry.
     fn days_until_expiration(&self) -> Option<u64>;
 
     /// Converts a [`NaiveDate`] into a [`NaiveDateTime`], so we can turn it into a
-    /// [`DateTime<UTC>`] and build a nice [`LicenseValidity`].
+    /// [`DateTime<UTC>`] to check a license's validity.
     ///
     /// I(alex) think this might cause trouble with potential mismatched timezone offsets, but
     /// this is used only for a warning to the user.
