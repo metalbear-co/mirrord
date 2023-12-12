@@ -521,6 +521,29 @@ pub(crate) unsafe extern "C" fn _pread_nocancel_detour(
         .unwrap_or_bypass_with(|_| FN__PREAD_NOCANCEL(fd, out_buffer, amount_to_read, offset))
 }
 
+/// Common code between the `pwrite` detours.
+///
+/// Handle the `.unwrap_or_bypass` in their respective functions though.
+unsafe fn pwrite_logic(
+    fd: RawFd,
+    in_buffer: *const c_void,
+    amount_to_write: size_t,
+    offset: off_t,
+) -> Detour<ssize_t> {
+    // Convert the given buffer into a u8 slice, upto the amount to write.
+    let casted_in_buffer: &[u8] = slice::from_raw_parts(in_buffer.cast(), amount_to_write);
+
+    pwrite(fd, casted_in_buffer, offset as u64).map(|write_response| {
+        let WriteFileResponse { written_amount } = write_response;
+        written_amount as ssize_t
+    })
+}
+
+/// ## Note on go hook for this
+///
+/// On linux, this is `pwrite64`, but if you try to hook it and call as `FN_PWRITE64`, you won't
+/// find it, resulting in an `unwrap on None` error when the detour is called. So, even though
+/// golang receives a syscall of [`libc::SYS_pwrite64`], hooking it like this is what works.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn pwrite_detour(
     fd: RawFd,
@@ -528,14 +551,7 @@ pub(crate) unsafe extern "C" fn pwrite_detour(
     amount_to_write: size_t,
     offset: off_t,
 ) -> ssize_t {
-    // Convert the given buffer into a u8 slice, upto the amount to write.
-    let casted_in_buffer: &[u8] = slice::from_raw_parts(in_buffer.cast(), amount_to_write);
-
-    pwrite(fd, casted_in_buffer, offset as u64)
-        .map(|write_response| {
-            let WriteFileResponse { written_amount } = write_response;
-            written_amount as ssize_t
-        })
+    pwrite_logic(fd, in_buffer, amount_to_write, offset)
         .unwrap_or_bypass_with(|_| FN_PWRITE(fd, in_buffer, amount_to_write, offset))
 }
 
@@ -546,14 +562,7 @@ pub(crate) unsafe extern "C" fn _pwrite_nocancel_detour(
     amount_to_write: size_t,
     offset: off_t,
 ) -> ssize_t {
-    // Convert the given buffer into a u8 slice, upto the amount to write.
-    let casted_in_buffer: &[u8] = slice::from_raw_parts(in_buffer.cast(), amount_to_write);
-
-    pwrite(fd, casted_in_buffer, offset as u64)
-        .map(|write_response| {
-            let WriteFileResponse { written_amount } = write_response;
-            written_amount as ssize_t
-        })
+    pwrite_logic(fd, in_buffer, amount_to_write, offset)
         .unwrap_or_bypass_with(|_| FN__PWRITE_NOCANCEL(fd, in_buffer, amount_to_write, offset))
 }
 
@@ -635,6 +644,18 @@ pub(crate) unsafe extern "C" fn faccessat_detour(
     } else {
         FN_FACCESSAT(dirfd, pathname, mode, flags)
     }
+}
+
+/// Hook for `libc::fsync`.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn fsync_detour(fd: RawFd) -> c_int {
+    fsync(fd).unwrap_or_bypass_with(|_| FN_FSYNC(fd))
+}
+
+/// Hook for `libc::fdatasync`.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn fdatasync_detour(fd: RawFd) -> c_int {
+    fsync(fd).unwrap_or_bypass_with(|_| FN_FDATASYNC(fd))
 }
 
 /// Tries to convert input to type O, if it fails it returns the max value of O.
@@ -974,6 +995,16 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         FnFaccessat,
         FN_FACCESSAT
     );
+
+    replace!(hook_manager, "fsync", fsync_detour, FnFsync, FN_FSYNC);
+    replace!(
+        hook_manager,
+        "fdatasync",
+        fdatasync_detour,
+        FnFdatasync,
+        FN_FDATASYNC
+    );
+
     // this requires newer libc which we don't link with to support old libc..
     // leaving this in code so we can enable it when libc is updated.
     // #[cfg(target_os = "linux")]

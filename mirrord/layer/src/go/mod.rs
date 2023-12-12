@@ -47,7 +47,13 @@ unsafe extern "C" fn c_abi_syscall6_handler(
         _ if crate::setup().fs_config().is_active() => {
             match syscall {
                 libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
+                libc::SYS_pread64 => {
+                    pread_detour(param1 as _, param2 as _, param3 as _, param4 as _) as i64
+                }
                 libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
+                libc::SYS_pwrite64 => {
+                    pwrite_detour(param1 as _, param2 as _, param3 as _, param4 as _) as i64
+                }
                 libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _),
                 // Note(syscall_linux.go)
                 // if flags == 0 {
@@ -94,6 +100,9 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                         })
                         .into()
                 }
+                libc::SYS_fstat => fstat_detour(param1 as _, param2 as _) as i64,
+                libc::SYS_fsync => fsync_detour(param1 as _) as i64,
+                libc::SYS_fdatasync => fsync_detour(param1 as _) as i64,
                 libc::SYS_openat => openat_detour(param1 as _, param2 as _, param3 as _) as i64,
                 libc::SYS_getdents64 => {
                     getdents64_detour(param1 as _, param2 as _, param3 as _) as i64
