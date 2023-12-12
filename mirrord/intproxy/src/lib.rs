@@ -1,5 +1,3 @@
-#![feature(async_fn_in_trait)]
-#![feature(return_position_impl_trait_in_trait)]
 #![warn(clippy::indexing_slicing)]
 
 use std::{collections::HashMap, time::Duration};

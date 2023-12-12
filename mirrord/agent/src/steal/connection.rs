@@ -501,7 +501,8 @@ impl TcpConnectionStealer {
 
         if first_subscriber && let Ok(port) = steal_port {
             self.iptables()?
-                .add_redirect(port, self.stealer.local_addr()?.port()).await?;
+                .add_redirect(port, self.stealer.local_addr()?.port())
+                .await?;
         }
 
         self.send_message_to_single_client(&client_id, DaemonTcp::SubscribeResult(steal_port))
