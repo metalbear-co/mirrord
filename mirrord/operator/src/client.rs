@@ -1,15 +1,13 @@
 use std::io;
 
 use base64::{engine::general_purpose, Engine as _};
-use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
+use chrono::{DateTime, Utc};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
 use kube::{api::PostParams, Api, Client, Resource};
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, AnalyticsReporter};
 use mirrord_auth::{
-    certificate::Certificate,
-    credential_store::CredentialStoreSync,
-    credentials::{LicenseValidity, LicenseValidityV2},
+    certificate::Certificate, credential_store::CredentialStoreSync, credentials::LicenseValidity,
 };
 use mirrord_config::{
     feature::network::incoming::ConcurrentSteal,
@@ -200,7 +198,8 @@ impl OperatorApi {
         // could end up blocking a valid license (or even just warning on it could be
         // confusing).
         if let Some(expiring_soon) =
-            LicenseValidity::from(operator.spec.license.expire_at).close_to_expiring()
+            DateTime::from_naive_date(operator.spec.license.expire_at).days_until_expiration()
+        && (expiring_soon <= <DateTime<Utc> as LicenseValidity>::CLOSE_TO_EXPIRATION_DAYS)
         {
             let expiring_message = format!(
                 "Operator license will expire soon, in {} days!",
@@ -209,28 +208,6 @@ impl OperatorApi {
 
             progress.warning(&expiring_message);
             warn!(expiring_message);
-        }
-
-        {
-            let from_naive_date = |naive: NaiveDate| {
-                let now = Utc::now();
-                let offset = now.offset().clone();
-                DateTime::<Utc>::from_naive_utc_and_offset(
-                    naive.and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap()),
-                    offset,
-                )
-            };
-            if let Some(expiring_soon) =
-                from_naive_date(operator.spec.license.expire_at).days_until_expiration()
-            {
-                let expiring_message = format!(
-                    "Operator license will expire soon, in {} days!",
-                    expiring_soon,
-                );
-
-                progress.warning(&expiring_message);
-                warn!(expiring_message);
-            }
         }
 
         Self::check_config(config, &operator)?;

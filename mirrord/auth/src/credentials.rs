@@ -70,61 +70,38 @@ impl AsRef<Certificate> for Credentials {
     }
 }
 
-/// Gives some more meaning to a `License`'s [`Certificate`] expiration date, so we don't have
-/// to manually check dates to see if the licese is still good or not.
-///
-/// You may use the [`From`] implementation to build a [`LicenseValidity`] from a [`NaiveDate`],
-/// which is what we store in the `LicenseInfoOwned` type.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LicenseValidity {
-    /// The license is still far away from expiring (see `LicenseValidity::new`).
+/// Extends a date type ([`DateTime<Utc>`]) to help us when checking for a license's
+/// certificate validity.
+pub trait LicenseValidity {
+    /// How many days we consider a license is close to expiring.
     ///
-    /// Holds the expiration date of the license.
-    Good(DateTime<Utc>),
+    /// You can access this constant as
+    /// `<DateTime<Utc> as LicenseValidity>::CLOSE_TO_EXPIRATION_DAYS`.
+    const CLOSE_TO_EXPIRATION_DAYS: u64 = 2;
 
-    /// License has expired.
-    ///
-    /// Holds the expiration date of the license.
-    Expired(DateTime<Utc>),
-}
-
-impl LicenseValidity {
-    /// Builds the [`LicenseValidity`]. You should use either this or the [`From`] implementation.
-    ///
-    /// We take `now` as a parameter here so we can have [`LicenseValidity`] with fake values.
-    pub fn new(expiration_date: DateTime<Utc>, now: DateTime<Utc>) -> Self {
-        if now > expiration_date {
-            Self::Expired(expiration_date)
-        } else {
-            Self::Good(expiration_date)
-        }
-    }
-
-    /// Checks if this [`LicenseValidity`] represents a date that is close to expiring.
-    ///
-    /// We consider close if the `License` is 2 days away from its `expiration_date`.
-    pub fn close_to_expiring(&self) -> Option<u64> {
-        match self {
-            LicenseValidity::Good(expiration_date) => {
-                let until_expiration = (Utc::now() - expiration_date).num_days();
-
-                if (0..=2).contains(&until_expiration) {
-                    Some(until_expiration as u64)
-                } else {
-                    None
-                }
-            }
-            LicenseValidity::Expired(_) => None,
-        }
-    }
-}
-
-pub trait LicenseValidityV2 {
+    /// This date's validity is good.
     fn is_good(&self) -> bool;
+
+    /// How many days until expiration from this date.
     fn days_until_expiration(&self) -> Option<u64>;
+
+    /// Converts a [`NaiveDate`] into a [`NaiveDateTime`], so we can turn it into a
+    /// [`DateTime<UTC>`] and build a nice [`LicenseValidity`].
+    ///
+    /// I(alex) think this might cause trouble with potential mismatched timezone offsets, but
+    /// this is used only for a warning to the user.
+    fn from_naive_date(naive_date: NaiveDate) -> DateTime<Utc> {
+        let now = Utc::now();
+        let offset = *now.offset();
+        DateTime::<Utc>::from_naive_utc_and_offset(
+            naive_date
+                .and_time(NaiveTime::from_hms_opt(0, 0, 0).expect("Manually building valid date!")),
+            offset,
+        )
+    }
 }
 
-impl LicenseValidityV2 for DateTime<Utc> {
+impl LicenseValidity for DateTime<Utc> {
     fn is_good(&self) -> bool {
         let now = Utc::now();
         now < *self
@@ -134,6 +111,7 @@ impl LicenseValidityV2 for DateTime<Utc> {
         if self.is_good() {
             let until_expiration = (Utc::now() - self).num_days();
 
+            // We only want to return `Some(>= 0)`, never any negative numbers.
             if (0..=2).contains(&until_expiration) {
                 Some(until_expiration as u64)
             } else {
@@ -142,24 +120,6 @@ impl LicenseValidityV2 for DateTime<Utc> {
         } else {
             None
         }
-    }
-}
-
-impl From<NaiveDate> for LicenseValidity {
-    /// Converts a [`NaiveDate`] into a [`NaiveDateTime`], so we can turn it into a
-    /// [`DateTime<UTC>`] and build a nice [`LicenseValidity`].
-    ///
-    /// I(alex) think this might cause trouble with potential mismatched timezone offsets, but
-    /// this is used only for a warning to the user.
-    fn from(value: NaiveDate) -> Self {
-        let now = Utc::now();
-        let offset = now.offset().clone();
-        let expiration_date = DateTime::<Utc>::from_naive_utc_and_offset(
-            value.and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap()),
-            offset,
-        );
-
-        Self::new(expiration_date, now)
     }
 }
 
@@ -176,36 +136,23 @@ mod tests {
         let today: DateTime<Utc> = TODAY.parse().unwrap();
         let expiration_date = today.checked_add_days(Days::new(7)).unwrap();
 
-        assert!(matches!(
-            LicenseValidity::new(expiration_date, today),
-            LicenseValidity::Good(_)
-        ));
+        assert!(expiration_date.is_good());
     }
 
     #[test]
     fn license_validity_expired() {
         let today: DateTime<Utc> = TODAY.parse().unwrap();
+        let expiration_date = today.checked_sub_days(Days::new(7)).unwrap();
 
-        let fake_today = today.checked_add_days(Days::new(7)).unwrap();
-        let expiration_date = today.checked_add_days(Days::new(7)).unwrap();
-
-        assert!(matches!(
-            LicenseValidity::new(expiration_date, fake_today),
-            LicenseValidity::Expired(_)
-        ));
+        assert!(!expiration_date.is_good());
     }
 
     #[test]
     fn license_validity_expired_past_expiration_date() {
         let today: DateTime<Utc> = TODAY.parse().unwrap();
-
-        let fake_today = today.checked_add_days(Days::new(8)).unwrap();
         let expiration_date = today.checked_add_days(Days::new(7)).unwrap();
 
-        assert!(matches!(
-            LicenseValidity::new(expiration_date, fake_today),
-            LicenseValidity::Expired(_)
-        ));
+        assert_eq!(expiration_date.days_until_expiration(), Some(7));
     }
 }
 
