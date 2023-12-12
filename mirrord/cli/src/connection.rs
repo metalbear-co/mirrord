@@ -47,7 +47,7 @@ impl OperatorApiErrorExt for OperatorApiError {
 /// then we create the mirrord-agent and run mirrord by itself, without the operator.
 ///
 /// Here is where we start interactions with the kubernetes API.
-#[tracing::instrument(level = "debug", skip_all)]
+#[tracing::instrument(level = "trace", skip_all)]
 pub(crate) async fn create_and_connect<P>(
     config: &LayerConfig,
     progress: &mut P,

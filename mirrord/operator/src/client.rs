@@ -178,7 +178,7 @@ impl OperatorApi {
     /// and working, it'll just work without the operator.
     ///
     /// For a fuller documentation, see the docs in `operator/service/src/main.rs::listen`.
-    #[tracing::instrument(level = "debug", skip_all)]
+    #[tracing::instrument(level = "trace", skip_all)]
     pub async fn create_session<P>(
         config: &LayerConfig,
         progress: &P,
@@ -354,7 +354,7 @@ impl OperatorApi {
     }
 
     /// See `operator/controller/src/target.rs::TargetProvider::get_resource`.
-    #[tracing::instrument(level = "debug", fields(self.target_config), skip(self))]
+    #[tracing::instrument(level = "trace", fields(self.target_config), skip(self))]
     async fn fetch_target(&self) -> Result<TargetCrd> {
         let target_name = TargetCrd::target_name_by_config(&self.target_config);
         self.target_api
