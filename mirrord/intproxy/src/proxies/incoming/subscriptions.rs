@@ -6,7 +6,7 @@ use std::{
 use mirrord_intproxy_protocol::{
     IncomingResponse, LayerId, MessageId, PortSubscribe, PortUnsubscribe, ProxyToLayerMessage,
 };
-use mirrord_protocol::{ClientMessage, Port, RemoteResult, ResponseError};
+use mirrord_protocol::{BlockedAction, ClientMessage, Port, RemoteResult, ResponseError};
 
 use super::{port_subscription_ext::PortSubscriptionExt, IncomingProxyError};
 use crate::{
@@ -15,6 +15,7 @@ use crate::{
 };
 
 /// Represents a source of subscription - a `listen` call in the layer.
+#[derive(Debug)]
 struct Source {
     layer: LayerId,
     message: MessageId,
@@ -22,6 +23,7 @@ struct Source {
 }
 
 /// Represents a port subscription in the agent.
+#[derive(Debug)]
 struct Subscription {
     /// Previous sources of this subscription. Each of these was at some point active, but was
     /// later overwritten.
@@ -227,6 +229,7 @@ impl SubscriptionsManager {
 
     /// Notifies this struct about agent's response.
     /// Returns messages to be sent to the layers.
+    #[tracing::instrument(level = "trace", ret, skip(self))]
     pub fn agent_responded(
         &mut self,
         result: RemoteResult<Port>,
@@ -251,6 +254,23 @@ impl SubscriptionsManager {
                         Ok(vec![])
                     }
                 }
+            }
+            Err(
+                ref response_err @ ResponseError::Forbidden {
+                    blocked_action: BlockedAction::Steal(ref steal_type),
+                    ..
+                },
+            ) => {
+                tracing::warn!("Port subscribe blocked by policy: {response_err}");
+                let Some(subscription) = self.subscriptions.remove(&steal_type.get_port()) else {
+                    return Ok(vec![]);
+                };
+                subscription
+                    .reject(response_err.clone())
+                    .map_err(|sub|{
+                        tracing::error!("Subscription {sub:?} was confirmed before, then requested again and blocked by a policy.");
+                        IncomingProxyError::SubscriptionFailed(response_err.clone())
+                    })
             }
             Err(err) => Err(IncomingProxyError::SubscriptionFailed(err)),
         }

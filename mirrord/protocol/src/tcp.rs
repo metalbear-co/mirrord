@@ -115,6 +115,15 @@ pub enum HttpFilter {
     Path(Filter),
 }
 
+impl Display for HttpFilter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HttpFilter::Header(filter) => write!(f, "header={filter}"),
+            HttpFilter::Path(filter) => write!(f, "path={filter}"),
+        }
+    }
+}
+
 /// Describes the stealing subscription to a port:
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 #[protocol_break(2)]
@@ -126,6 +135,15 @@ pub enum StealType {
     FilteredHttp(Port, Filter),
     /// Steal HTTP traffic matching a given filter - supporting more than once kind of filter
     FilteredHttpEx(Port, HttpFilter),
+}
+
+impl StealType {
+    pub fn get_port(&self) -> Port {
+        let (StealType::All(port)
+        | StealType::FilteredHttpEx(port, ..)
+        | StealType::FilteredHttp(port, ..)) = self;
+        *port
+    }
 }
 
 /// Messages related to Steal Tcp handler from client.
