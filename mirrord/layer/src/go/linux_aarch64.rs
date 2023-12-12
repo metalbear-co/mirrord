@@ -7,31 +7,6 @@ use crate::{go::c_abi_syscall6_handler, macros::hook_symbol, HookManager};
 type VoidFn = unsafe extern "C" fn() -> ();
 static mut FN_ASMCGOCALL: Option<VoidFn> = None;
 
-/// [Naked function] 6 param version, used by Rawsyscall & Syscall
-#[naked]
-pub(crate) unsafe extern "C" fn syscall_6(
-    syscall: i64,
-    param1: i64,
-    param2: i64,
-    param3: i64,
-    param4: i64,
-    param5: i64,
-    param6: i64,
-) -> i64 {
-    asm!(
-        "mov    x8, x0",
-        "mov    x0, x1",
-        "mov    x1, x2",
-        "mov    x2, x3",
-        "mov    x3, x4",
-        "mov    x4, x5",
-        "mov    x5, x6",
-        "svc 0x0",
-        "ret",
-        options(noreturn)
-    )
-}
-
 /// asmcgocall can only pass a pointer argument, so it sends us the SP
 /// which layouts to this struct.
 #[repr(C)]

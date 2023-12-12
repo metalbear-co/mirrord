@@ -3980,6 +3980,7 @@ dependencies = [
  "serde_json",
  "socket2 0.5.5",
  "streammap-ext",
+ "syscalls",
  "test-cdylib",
  "tests",
  "thiserror",
@@ -6096,6 +6097,16 @@ dependencies = [
  "quote",
  "syn 1.0.109",
  "unicode-xid",
+]
+
+[[package]]
+name = "syscalls"
+version = "0.6.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56b389b38331a454883a34fd19f25cbd1510b3510ff7aa28cb8d6de85d888439"
+dependencies = [
+ "serde",
+ "serde_repr",
 ]
 
 [[package]]

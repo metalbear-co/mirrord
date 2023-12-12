@@ -52,6 +52,7 @@ bimap.workspace = true
 dashmap = "5.4"
 hashbrown = "0.14"
 exec.workspace = true
+syscalls = { version = "0.6", features = ["full"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
