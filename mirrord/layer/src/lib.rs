@@ -65,7 +65,7 @@
 extern crate alloc;
 extern crate core;
 
-use std::{cmp::Ordering, ffi::OsString, panic, sync::OnceLock, time::Duration};
+use std::{cmp::Ordering, ffi::OsString, net::SocketAddr, panic, sync::OnceLock, time::Duration};
 
 use ctor::ctor;
 use error::{LayerError, Result};
@@ -184,14 +184,37 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         }
     }
 
-    match given_process.load_type(config) {
-        LoadType::Full(config) => layer_start(*config),
+    match given_process.load_type(&config) {
+        LoadType::Full => layer_start(config),
         #[cfg(target_os = "macos")]
-        LoadType::SIPOnly(config) => sip_only_layer_start(*config, patch_binaries),
-        LoadType::Skip => {}
+        LoadType::SIPOnly => sip_only_layer_start(config, patch_binaries),
+        LoadType::Skip => load_only_layer_start(&config),
     }
 
     Ok(())
+}
+
+/// Initialize a new session with the internal proxy.
+/// Sets [`PROXY_CONNECTION`].
+fn load_only_layer_start(config: &LayerConfig) {
+    let address: SocketAddr = config
+        .connect_tcp
+        .as_ref()
+        .expect("missing internal proxy address")
+        .parse()
+        .expect("failed to parse internal proxy address");
+
+    let new_connection =
+        ProxyConnection::new(address, NewSessionRequest::New, Duration::from_secs(5))
+            .expect("failed to initialize proxy connection");
+
+    unsafe {
+        // SAFETY
+        // Called only from library constructor.
+        PROXY_CONNECTION
+            .set(new_connection)
+            .expect("setting PROXY_CONNECTION singleton")
+    }
 }
 
 /// The one true start of mirrord-layer.
@@ -325,6 +348,8 @@ fn layer_start(mut config: LayerConfig) {
 /// mirrord-layer on a process where specified to skip with MIRRORD_SKIP_PROCESSES
 #[cfg(target_os = "macos")]
 fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
+    load_only_layer_start(&config);
+
     let mut hook_manager = HookManager::default();
 
     unsafe { exec_utils::enable_execve_hook(&mut hook_manager, patch_binaries) };

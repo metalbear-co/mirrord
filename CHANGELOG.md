@@ -8,6 +8,26 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.78.0](https://github.com/metalbear-co/mirrord/tree/3.78.0) - 2023-12-12
+
+
+### Fixed
+
+- Fix create react apps by adding node related files to default local
+  [#2074](https://github.com/metalbear-co/mirrord/issues/2074)
+- Fixed an issue with internal proxy timing out when the user application
+  spawns lengthy build processes.
+  [#2101](https://github.com/metalbear-co/mirrord/issues/2101)
+
+
+### Internal
+
+- Adds a new trait `LicenseValidity` implemented for `DateTime` to help us when
+  checking a license's validity. Relevant for
+  [#346](https://github.com/metalbear-co/operator/issues/346).
+- Update rust to nightly-2023-12-07.
+
+
 ## [3.77.1](https://github.com/metalbear-co/mirrord/tree/3.77.1) - 2023-12-11
 
 

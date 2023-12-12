@@ -97,7 +97,7 @@ impl ExecutableName {
     }
 
     /// Determine the [`LoadType`] for this process.
-    pub fn load_type(&self, config: LayerConfig) -> LoadType {
+    pub fn load_type(&self, config: &LayerConfig) -> LoadType {
         let skip_processes = config
             .skip_processes
             .as_ref()
@@ -106,12 +106,12 @@ impl ExecutableName {
 
         if self.should_load(skip_processes, config.skip_build_tools) {
             trace!("Loading into process: {self}.");
-            LoadType::Full(Box::new(config))
+            LoadType::Full
         } else {
             #[cfg(target_os = "macos")]
             if sip::is_sip_only(self) {
                 trace!("Loading into process: {self}, but only hooking exec/spawn.");
-                return LoadType::SIPOnly(Box::new(config));
+                return LoadType::SIPOnly;
             }
 
             trace!("Not loading into process: {self}.");
@@ -146,12 +146,14 @@ mod sip {
 /// Load Type of mirrord-layer
 pub enum LoadType {
     /// Mirrord is loaded fully and layer should connect to agent
-    Full(Box<LayerConfig>),
+    Full,
+
     /// Only load sip patch required hooks
     #[cfg(target_os = "macos")]
-    SIPOnly(Box<LayerConfig>),
+    SIPOnly,
 
-    /// Skip on current process
+    /// Skip on current process, make only a dummy connection to the internal proxy (to prevent
+    /// timeouts)
     Skip,
 }
 
