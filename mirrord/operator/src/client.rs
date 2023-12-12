@@ -199,7 +199,7 @@ impl OperatorApi {
         // confusing).
         if let Some(expiring_soon) =
             DateTime::from_naive_date(operator.spec.license.expire_at).days_until_expiration()
-        && (expiring_soon <= <DateTime<Utc> as LicenseValidity>::CLOSE_TO_EXPIRATION_DAYS)
+            && (expiring_soon <= <DateTime<Utc> as LicenseValidity>::CLOSE_TO_EXPIRATION_DAYS)
         {
             let expiring_message = format!(
                 "Operator license will expire soon, in {} days!",
@@ -342,7 +342,7 @@ impl OperatorApi {
         })
     }
 
-    #[tracing::instrument(level = "debug", skip(self), ret)]
+    #[tracing::instrument(level = "trace", skip(self), ret)]
     async fn fetch_operator(&self) -> Result<MirrordOperatorCrd> {
         let api: Api<MirrordOperatorCrd> = Api::all(self.client.clone());
         api.get(OPERATOR_STATUS_NAME)
@@ -453,7 +453,7 @@ impl OperatorApi {
     }
 
     /// Create websocket connection to operator.
-    #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn connect_target(
         &self,
         session_info: OperatorSessionInformation,
