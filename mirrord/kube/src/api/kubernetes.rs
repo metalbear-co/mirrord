@@ -199,7 +199,9 @@ impl AgentManagment for KubernetesAPI {
     where
         P: Progress + Send + Sync,
     {
-        let runtime_data = if let Some(ref path) = self.target.path && !matches!(path, mirrord_config::target::Target::Targetless) {
+        let runtime_data = if let Some(ref path) = self.target.path
+            && !matches!(path, mirrord_config::target::Target::Targetless)
+        {
             let runtime_data = path
                 .runtime_data(&self.client, self.target.namespace.as_deref())
                 .await?;

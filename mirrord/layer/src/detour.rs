@@ -65,12 +65,14 @@ impl DetourGuard {
     /// Create a new DetourGuard if it's not already enabled.
     pub(crate) fn new() -> Option<Self> {
         DETOUR_BYPASS.with(|enabled| {
-            if let Ok(bypass) = enabled.try_borrow() && *bypass {
+            if let Ok(bypass) = enabled.try_borrow()
+                && *bypass
+            {
                 None
-            } else if let Ok(mut bypass) = enabled.try_borrow_mut(){
+            } else if let Ok(mut bypass) = enabled.try_borrow_mut() {
                 *bypass = true;
                 Some(Self)
-             } else {
+            } else {
                 None
             }
         })

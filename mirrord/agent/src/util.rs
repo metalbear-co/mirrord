@@ -106,7 +106,9 @@ where
 {
     /// Returns the next available index, returns None if not available (reached max)
     pub fn next_index(&mut self) -> Option<T> {
-        if self.vacant_indices.len() > N && let Some(i) = self.vacant_indices.pop_front() {
+        if self.vacant_indices.len() > N
+            && let Some(i) = self.vacant_indices.pop_front()
+        {
             return Some(i);
         }
         match self.index.checked_add(&T::one()) {
