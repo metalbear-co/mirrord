@@ -152,7 +152,8 @@ pub enum LoadType {
     #[cfg(target_os = "macos")]
     SIPOnly,
 
-    /// Skip on current process, make only a dummy connection to the internal proxy (to prevent timeouts)
+    /// Skip on current process, make only a dummy connection to the internal proxy (to prevent
+    /// timeouts)
     Skip,
 }
 
