@@ -71,7 +71,7 @@
     },
     "operator": {
       "title": "operator {#root-operator}",
-      "description": "Allow to lookup if operator is installed on cluster and use it.\n\nDefaults to `true`.",
+      "description": "Whether mirrord should use the operator. If not set, mirrord will first attempt to use the operator, but continue without it in case of failure.",
       "type": [
         "boolean",
         "null"
@@ -407,7 +407,7 @@
           "properties": {
             "scale_down": {
               "title": "feature.copy_target.scale_down {#feature-copy_target-scale_down}",
-              "description": "If this option is set and [`target`](#target) is a deployment, mirrord will scale it down to 0 for the time the copied pod is alive.",
+              "description": "If this option is set, mirrord will scale down the target deployment to 0 for the time the copied pod is alive.\n\nThis option is compatible only with deployment targets.",
               "type": [
                 "boolean",
                 "null"
@@ -484,7 +484,7 @@
       "properties": {
         "copy_target": {
           "title": "feature.copy_target {#feature-copy_target}",
-          "description": "Creates a new copy of the target. mirrord will use this copy instead of the original target (e.g. intercept network traffic). This feature requires a [mirrord operator](https://mirrord.dev/docs/teams/introduction/).",
+          "description": "Creates a new copy of the target. mirrord will use this copy instead of the original target (e.g. intercept network traffic). This feature requires a [mirrord operator](https://mirrord.dev/docs/teams/introduction/).\n\nThis feature is not compatible with rollout targets and running without a target (`targetless` mode).",
           "anyOf": [
             {
               "$ref": "#/definitions/CopyTargetFileConfig"

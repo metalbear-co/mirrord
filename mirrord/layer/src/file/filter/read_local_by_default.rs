@@ -28,6 +28,7 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         r"^/dev(/|$)",
         r"^/opt(/|$)",
         r"^/tmp(/|$)",
+        r"^/var/tmp(/|$)",
         r"^/snap(/|$)",
         // support for nixOS.
         r"^/nix(/|$)",

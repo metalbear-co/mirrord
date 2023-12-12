@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     io,
+    marker::PhantomData,
     sync::LazyLock,
 };
 
@@ -142,26 +143,32 @@ pub enum DaemonMessage {
     SwitchProtocolVersionResponse(#[bincode(with_serde)] semver::Version),
 }
 
-pub struct ClientCodec {
+pub struct ProtocolCodec<I, O> {
     config: bincode::config::Configuration,
+    /// Phantom fields to make this struct generic over message types.
+    _phantom_incoming_message: PhantomData<I>,
+    _phantom_outgoing_message: PhantomData<O>,
 }
 
-impl ClientCodec {
-    pub fn new() -> Self {
-        ClientCodec {
+// Codec to be used by the client side to receive `DaemonMessage`s from the agent and send
+// `ClientMessage`s to the agent.
+pub type ClientCodec = ProtocolCodec<DaemonMessage, ClientMessage>;
+// Codec to be used by the agent side to receive `ClientMessage`s from the client and send
+// `DaemonMessage`s to the client.
+pub type DaemonCodec = ProtocolCodec<ClientMessage, DaemonMessage>;
+
+impl<I, O> Default for ProtocolCodec<I, O> {
+    fn default() -> Self {
+        Self {
             config: bincode::config::standard(),
+            _phantom_incoming_message: Default::default(),
+            _phantom_outgoing_message: Default::default(),
         }
     }
 }
 
-impl Default for ClientCodec {
-    fn default() -> Self {
-        ClientCodec::new()
-    }
-}
-
-impl Decoder for ClientCodec {
-    type Item = DaemonMessage;
+impl<I: bincode::Decode, O> Decoder for ProtocolCodec<I, O> {
+    type Item = I;
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
@@ -176,61 +183,10 @@ impl Decoder for ClientCodec {
     }
 }
 
-impl Encoder<ClientMessage> for ClientCodec {
+impl<I, O: bincode::Encode> Encoder<O> for ProtocolCodec<I, O> {
     type Error = io::Error;
 
-    fn encode(&mut self, msg: ClientMessage, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let encoded = match bincode::encode_to_vec(msg, self.config) {
-            Ok(encoded) => encoded,
-            Err(err) => {
-                return Err(io::Error::new(io::ErrorKind::Other, err.to_string()));
-            }
-        };
-        dst.reserve(encoded.len());
-        dst.put(&encoded[..]);
-
-        Ok(())
-    }
-}
-
-pub struct DaemonCodec {
-    config: bincode::config::Configuration,
-}
-
-impl DaemonCodec {
-    pub fn new() -> Self {
-        DaemonCodec {
-            config: bincode::config::standard(),
-        }
-    }
-}
-
-impl Default for DaemonCodec {
-    fn default() -> Self {
-        DaemonCodec::new()
-    }
-}
-
-impl Decoder for DaemonCodec {
-    type Item = ClientMessage;
-    type Error = io::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
-        match bincode::decode_from_slice(&src[..], self.config) {
-            Ok((message, read)) => {
-                src.advance(read);
-                Ok(Some(message))
-            }
-            Err(DecodeError::UnexpectedEnd { .. }) => Ok(None),
-            Err(err) => Err(io::Error::new(io::ErrorKind::Other, err.to_string())),
-        }
-    }
-}
-
-impl Encoder<DaemonMessage> for DaemonCodec {
-    type Error = io::Error;
-
-    fn encode(&mut self, msg: DaemonMessage, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, msg: O, dst: &mut BytesMut) -> Result<(), Self::Error> {
         let encoded = match bincode::encode_to_vec(msg, self.config) {
             Ok(encoded) => encoded,
             Err(err) => {
@@ -253,8 +209,8 @@ mod tests {
 
     #[test]
     fn sanity_client_encode_decode() {
-        let mut client_codec = ClientCodec::new();
-        let mut daemon_codec = DaemonCodec::new();
+        let mut client_codec = ClientCodec::default();
+        let mut daemon_codec = DaemonCodec::default();
         let mut buf = BytesMut::new();
 
         let msg = ClientMessage::Tcp(LayerTcp::PortSubscribe(1));
@@ -269,8 +225,8 @@ mod tests {
 
     #[test]
     fn sanity_daemon_encode_decode() {
-        let mut client_codec = ClientCodec::new();
-        let mut daemon_codec = DaemonCodec::new();
+        let mut client_codec = ClientCodec::default();
+        let mut daemon_codec = DaemonCodec::default();
         let mut buf = BytesMut::new();
 
         let msg = DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
@@ -288,7 +244,7 @@ mod tests {
 
     #[test]
     fn decode_client_invalid_data() {
-        let mut codec = ClientCodec::new();
+        let mut codec = ClientCodec::default();
         let mut buf = BytesMut::new();
         buf.put_u8(254);
 
@@ -301,7 +257,7 @@ mod tests {
 
     #[test]
     fn decode_client_partial_data() {
-        let mut codec = ClientCodec::new();
+        let mut codec = ClientCodec::default();
         let mut buf = BytesMut::new();
         buf.put_u8(1);
 
@@ -310,7 +266,7 @@ mod tests {
 
     #[test]
     fn decode_daemon_invalid_data() {
-        let mut codec = DaemonCodec::new();
+        let mut codec = DaemonCodec::default();
         let mut buf = BytesMut::new();
         buf.put_u8(254);
 

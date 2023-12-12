@@ -164,6 +164,7 @@ mod traffic {
             since_seconds: None,
             tail_lines: None,
             timestamps: false,
+            since_time: None,
         };
 
         let node_command = vec![
@@ -249,6 +250,7 @@ mod traffic {
             since_seconds: None,
             tail_lines: None,
             timestamps: false,
+            since_time: None,
         };
 
         let node_command = vec![

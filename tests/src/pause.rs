@@ -67,6 +67,7 @@ mod pause {
             since_seconds: None,
             tail_lines: None,
             timestamps: false,
+            since_time: None,
         };
 
         println!("getting log stream.");
@@ -210,6 +211,7 @@ mod pause {
             since_seconds: None,
             tail_lines: None,
             timestamps: false,
+            since_time: None,
         };
 
         println!("getting log stream.");

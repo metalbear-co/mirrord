@@ -63,7 +63,7 @@ mod tests {
             }
         });
 
-        let mut codec = Framed::new(stream, ClientCodec::new());
+        let mut codec = Framed::new(stream, ClientCodec::default());
         let subscription_port = 1337;
 
         codec

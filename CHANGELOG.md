@@ -8,6 +8,59 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.77.1](https://github.com/metalbear-co/mirrord/tree/3.77.1) - 2023-12-11
+
+
+### Fixed
+
+- Fix asdf compatability by adjusting local files read defaults
+  [#2051](https://github.com/metalbear-co/mirrord/issues/2051)
+
+
+## [3.77.0](https://github.com/metalbear-co/mirrord/tree/3.77.0) - 2023-12-07
+
+
+### Added
+
+- `mirrord verify-config` now outputs a list of available target types.
+  [#2096](https://github.com/metalbear-co/mirrord/issues/2096)
+
+
+### Fixed
+
+- Changed `operator` config to be optional. If the option is set to `true`,
+  mirrord always uses the operator and aborts in case of failure. If the option
+  is set to `false`, mirrord does not attempt to use the operator. If the
+  option is not set at all, mirrord attempts to use the operator, but does not
+  abort in case it could not be found.
+- Fixed config verification in IDE context when `copy_target` feature is used.
+
+
+### Internal
+
+- Reduce some code duplication around protocol and agent connection.
+
+
+## [3.76.0](https://github.com/metalbear-co/mirrord/tree/3.76.0) - 2023-12-04
+
+
+### Added
+
+- Added support for connecting to the cluster with an HTTP proxy.
+  [#2087](https://github.com/metalbear-co/mirrord/issues/2087)
+
+
+### Changed
+
+- Improved incoming config docs
+
+
+### Fixed
+
+- Improved handling of operator-related errors.
+  [#2049](https://github.com/metalbear-co/mirrord/issues/2049)
+
+
 ## [3.75.3](https://github.com/metalbear-co/mirrord/tree/3.75.3) - 2023-11-23
 
 

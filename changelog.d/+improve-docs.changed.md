@@ -1,1 +1,0 @@
-Improved incoming config docs
