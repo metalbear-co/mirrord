@@ -125,6 +125,7 @@ async fn get_status_api(config: Option<String>) -> Result<Api<MirrordOperatorCrd
     Ok(Api::all(kube_api))
 }
 
+#[tracing::instrument(level = "trace", ret)]
 async fn operator_status(config: Option<String>) -> Result<()> {
     let mut progress = ProgressTracker::from_env("Operator Status");
 

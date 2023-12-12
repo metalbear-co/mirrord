@@ -1,5 +1,6 @@
 use std::{ops::Deref, str::FromStr};
 
+use chrono::{DateTime, Utc};
 use serde::{de, ser, Deserialize, Serialize};
 use x509_certificate::{X509Certificate, X509CertificateError};
 
@@ -23,7 +24,19 @@ where
     X509Certificate::from_pem(certificate).map_err(de::Error::custom)
 }
 
-/// Serializable `X509Certificate`
+/// Serializable [`X509Certificate`]
+///
+/// Implements [`Deref`] into [`X509Certificate`], so you can take a `&Certificate` and call
+/// `.as_ref()` on it to accesses the inner members of [`X509Certificate`], for example:
+///
+/// ```text
+/// pub fn tbs(&self) {
+///     self.0
+///         .certificate
+///         .as_ref()
+///         .tbs_certificate; // accessed through the `AsRef` of `X509Certificate`
+/// }
+/// ```
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Certificate(
     #[serde(
@@ -32,6 +45,19 @@ pub struct Certificate(
     )]
     X509Certificate,
 );
+
+impl Certificate {
+    /// Extracts the expiration date (`not_after`) out of the certificate as a nice
+    /// `DateTime<Utc>`.
+    pub fn expiration_date(&self) -> DateTime<Utc> {
+        let validity = &self.0.as_ref().tbs_certificate.validity;
+
+        match validity.not_after.clone() {
+            x509_certificate::asn1time::Time::UtcTime(time) => *time,
+            x509_certificate::asn1time::Time::GeneralTime(time) => From::from(time),
+        }
+    }
+}
 
 impl From<X509Certificate> for Certificate {
     fn from(certificate: X509Certificate) -> Self {

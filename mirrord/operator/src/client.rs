@@ -1,11 +1,14 @@
 use std::io;
 
 use base64::{engine::general_purpose, Engine as _};
+use chrono::{DateTime, Utc};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
 use kube::{api::PostParams, Api, Client, Resource};
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, AnalyticsReporter};
-use mirrord_auth::{certificate::Certificate, credential_store::CredentialStoreSync};
+use mirrord_auth::{
+    certificate::Certificate, credential_store::CredentialStoreSync, credentials::LicenseValidity,
+};
 use mirrord_config::{
     feature::network::incoming::ConcurrentSteal,
     target::{Target, TargetConfig},
@@ -22,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use crate::crd::{
     CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, TargetCrd,
@@ -171,6 +174,11 @@ impl OperatorApi {
     }
 
     /// Creates new [`OperatorSessionConnection`] based on the given [`LayerConfig`].
+    /// Keep in mind that some failures here won't stop mirrord from hooking into the process
+    /// and working, it'll just work without the operator.
+    ///
+    /// For a fuller documentation, see the docs in `operator/service/src/main.rs::listen`.
+    #[tracing::instrument(level = "trace", skip_all)]
     pub async fn create_session<P>(
         config: &LayerConfig,
         progress: &P,
@@ -182,6 +190,25 @@ impl OperatorApi {
         let operator_api = OperatorApi::new(config).await?;
 
         let operator = operator_api.fetch_operator().await?;
+
+        // Warns the user if their license is close to expiring.
+        //
+        // I(alex) considered doing a check for validity also here for expired licenses,
+        // but maybe the time of the local user and of the operator are out of sync, so we
+        // could end up blocking a valid license (or even just warning on it could be
+        // confusing).
+        if let Some(expiring_soon) =
+            DateTime::from_naive_date(operator.spec.license.expire_at).days_until_expiration()
+            && (expiring_soon <= <DateTime<Utc> as LicenseValidity>::CLOSE_TO_EXPIRATION_DAYS)
+        {
+            let expiring_message = format!(
+                "Operator license will expire soon, in {} days!",
+                expiring_soon,
+            );
+
+            progress.warning(&expiring_message);
+            warn!(expiring_message);
+        }
 
         Self::check_config(config, &operator)?;
 
@@ -315,6 +342,7 @@ impl OperatorApi {
         })
     }
 
+    #[tracing::instrument(level = "trace", skip(self), ret)]
     async fn fetch_operator(&self) -> Result<MirrordOperatorCrd> {
         let api: Api<MirrordOperatorCrd> = Api::all(self.client.clone());
         api.get(OPERATOR_STATUS_NAME)
@@ -325,6 +353,8 @@ impl OperatorApi {
             })
     }
 
+    /// See `operator/controller/src/target.rs::TargetProvider::get_resource`.
+    #[tracing::instrument(level = "trace", fields(self.target_config), skip(self))]
     async fn fetch_target(&self) -> Result<TargetCrd> {
         let target_name = TargetCrd::target_name_by_config(&self.target_config);
         self.target_api

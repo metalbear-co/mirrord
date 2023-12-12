@@ -38,6 +38,16 @@ impl OperatorApiErrorExt for OperatorApiError {
 }
 
 /// Creates an agent if needed then connects to it.
+///
+/// First it checks if we have an `operator` in the [`config`](LayerConfig), which we do if the
+/// user has installed the mirrord-operator in their cluster, even without a valid license. And
+/// then we create a session with the operator with [`create_operator_session`].
+///
+/// If there is no operator, or the license is not good enough for starting an operator session,
+/// then we create the mirrord-agent and run mirrord by itself, without the operator.
+///
+/// Here is where we start interactions with the kubernetes API.
+#[tracing::instrument(level = "trace", skip_all)]
 pub(crate) async fn create_and_connect<P>(
     config: &LayerConfig,
     progress: &mut P,

@@ -1,6 +1,6 @@
 use std::{fmt::Debug, ops::Deref};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
 use x509_certificate::{
@@ -67,6 +67,89 @@ impl Credentials {
 impl AsRef<Certificate> for Credentials {
     fn as_ref(&self) -> &Certificate {
         self.certificate.as_ref().expect("Certificate not ready")
+    }
+}
+
+/// Extends a date type ([`DateTime<Utc>`]) to help us when checking for a license's
+/// certificate validity.
+pub trait LicenseValidity {
+    /// How many days we consider a license is close to expiring.
+    ///
+    /// You can access this constant as
+    /// `<DateTime<Utc> as LicenseValidity>::CLOSE_TO_EXPIRATION_DAYS`.
+    const CLOSE_TO_EXPIRATION_DAYS: u64 = 2;
+
+    /// This date's validity is good.
+    fn is_good(&self) -> bool;
+
+    /// How many days until expiration from this date counting from _now_, which means that an
+    /// expiration date of `today + 3` means we have 2 days left until expiry.
+    fn days_until_expiration(&self) -> Option<u64>;
+
+    /// Converts a [`NaiveDate`] into a [`NaiveDateTime`], so we can turn it into a
+    /// [`DateTime<UTC>`] to check a license's validity.
+    ///
+    /// I(alex) think this might cause trouble with potential mismatched timezone offsets, but
+    /// this is used only for a warning to the user.
+    fn from_naive_date(naive_date: NaiveDate) -> DateTime<Utc> {
+        let now = Utc::now();
+        let offset = *now.offset();
+        DateTime::<Utc>::from_naive_utc_and_offset(
+            naive_date
+                .and_time(NaiveTime::from_hms_opt(0, 0, 0).expect("Manually building valid date!")),
+            offset,
+        )
+    }
+}
+
+impl LicenseValidity for DateTime<Utc> {
+    fn is_good(&self) -> bool {
+        let now = Utc::now();
+        now < *self
+    }
+
+    fn days_until_expiration(&self) -> Option<u64> {
+        if self.is_good() {
+            let until_expiration = (*self - Utc::now()).num_days();
+
+            // We only want to return `Some(>= 0)`, never any negative numbers.
+            (0..=2)
+                .contains(&until_expiration)
+                .then_some(until_expiration as u64)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{DateTime, Days, Utc};
+
+    use crate::credentials::LicenseValidity;
+
+    #[test]
+    fn license_validity_valid() {
+        let today: DateTime<Utc> = Utc::now();
+        let expiration_date = today.checked_add_days(Days::new(7)).unwrap();
+
+        assert!(expiration_date.is_good());
+    }
+
+    #[test]
+    fn license_validity_expired() {
+        let today: DateTime<Utc> = Utc::now();
+        let expiration_date = today.checked_sub_days(Days::new(7)).unwrap();
+
+        assert!(!expiration_date.is_good());
+    }
+
+    #[test]
+    fn license_validity_close_to_expiring() {
+        let today: DateTime<Utc> = Utc::now();
+        let expiration_date = today.checked_add_days(Days::new(3)).unwrap();
+
+        assert_eq!(expiration_date.days_until_expiration(), Some(2));
     }
 }
 
