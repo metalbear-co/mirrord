@@ -1,4 +1,7 @@
-use std::io;
+use std::{
+    fmt::{self, Display},
+    io,
+};
 
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
@@ -36,6 +39,30 @@ static CONNECTION_CHANNEL_SIZE: usize = 1000;
 
 pub use http::Error as HttpError;
 
+/// Operations performed on the operator via [`kube`] API.
+#[derive(Debug)]
+pub enum OperatorOperation {
+    FindingOperator,
+    FindingTarget,
+    WebsocketConnection,
+    CopyingTarget,
+    GettingStatus,
+}
+
+impl Display for OperatorOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let as_str = match self {
+            Self::FindingOperator => "finding operator",
+            Self::FindingTarget => "finding target",
+            Self::WebsocketConnection => "creating a websocket connection",
+            Self::CopyingTarget => "copying target",
+            Self::GettingStatus => "getting status",
+        };
+
+        f.write_str(as_str)
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum OperatorApiError {
     #[error("invalid target: {reason}")]
@@ -47,7 +74,7 @@ pub enum OperatorApiError {
     #[error("{operation} failed: {error}")]
     KubeError {
         error: kube::Error,
-        operation: String,
+        operation: OperatorOperation,
     },
     #[error("can't start proccess because other locks exist on target")]
     ConcurrentStealAbort,
@@ -349,7 +376,7 @@ impl OperatorApi {
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
-                operation: "finding operator in the cluster".into(),
+                operation: OperatorOperation::FindingOperator,
             })
     }
 
@@ -362,7 +389,7 @@ impl OperatorApi {
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
-                operation: "finding target in the cluster".into(),
+                operation: OperatorOperation::FindingTarget,
             })
     }
 
@@ -491,7 +518,7 @@ impl OperatorApi {
                 .await
                 .map_err(|error| OperatorApiError::KubeError {
                     error,
-                    operation: "creating a websocket connection".into(),
+                    operation: OperatorOperation::WebsocketConnection,
                 })?;
 
         let (tx, rx) =
@@ -535,7 +562,7 @@ impl OperatorApi {
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
-                operation: "copying target".into(),
+                operation: OperatorOperation::CopyingTarget,
             })
     }
 }
