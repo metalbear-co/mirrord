@@ -822,6 +822,7 @@ pub(super) fn getaddrinfo(
     // Some apps (gRPC on Python) use `::` to listen on all interfaces, and usually that just means
     // resolve on unspecified. So we just return that in IpV4 because we don't support ipv6.
     let resolved_addr = if node == "::" {
+        // name is "" because that's what happens in real flow.
         vec![("".to_string(), IpAddr::V4(Ipv4Addr::UNSPECIFIED))]
     } else {
         remote_getaddrinfo(node.clone())?
