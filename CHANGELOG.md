@@ -8,6 +8,18 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.78.1](https://github.com/metalbear-co/mirrord/tree/3.78.1) - 2023-12-13
+
+
+### Fixed
+
+- Removed confusing error from `mirrord exec` progress.
+  [#2115](https://github.com/metalbear-co/mirrord/issues/2115)
+- Support binding [::] by resolving to ipv4 unspecified. Fix gRPC Python
+  running in Docker
+  [#2117](https://github.com/metalbear-co/mirrord/issues/2117)
+
+
 ## [3.78.0](https://github.com/metalbear-co/mirrord/tree/3.78.0) - 2023-12-12
 
 
