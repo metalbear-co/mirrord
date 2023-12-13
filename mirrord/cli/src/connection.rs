@@ -4,7 +4,7 @@ use mirrord_analytics::AnalyticsReporter;
 use mirrord_config::{feature::network::outgoing::OutgoingFilterConfig, LayerConfig};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
-use mirrord_operator::client::{OperatorApi, OperatorApiError};
+use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorOperation};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
@@ -26,13 +26,17 @@ impl OperatorApiErrorExt for OperatorApiError {
     fn should_abort_cli(&self) -> bool {
         match self {
             // Various kube errors can happen due to RBAC if the operator is not installed.
-            Self::KubeError { .. } => false,
+            Self::KubeError {
+                operation: OperatorOperation::FindingOperator,
+                ..
+            } => false,
             // These should either never happen or can happen only if the operator is installed.
             Self::ConcurrentStealAbort
             | Self::ConnectRequestBuildError(..)
             | Self::CreateApiError(..)
             | Self::InvalidTarget { .. }
-            | Self::UnsupportedFeature { .. } => true,
+            | Self::UnsupportedFeature { .. }
+            | Self::KubeError { .. } => true,
         }
     }
 }
@@ -84,7 +88,8 @@ where
             }
             Err(e) if config.operator == Some(true) || e.should_abort_cli() => return Err(e.into()),
             Err(e) => {
-                subtask.failure(Some(&format!("connecting to the operator failed: {e}")));
+                tracing::trace!("{}", CliError::from(e));
+                subtask.success(Some("operator not found"));
             }
         }
     }
