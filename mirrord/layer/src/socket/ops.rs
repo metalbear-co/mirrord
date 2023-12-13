@@ -819,8 +819,16 @@ pub(super) fn getaddrinfo(
     // Convert `service` into a port.
     let service = service.map_or(0, |s| s.parse().unwrap_or_default());
 
+    // Some apps (gRPC on Python) use `::` to listen on all interfaces, and usually that just means
+    // resolve on unspecified. So we just return that in IpV4 because we don't support ipv6.
+    let resolved_addr = if node == "::" {
+        vec![("::1".to_string(), IpAddr::V4(Ipv4Addr::UNSPECIFIED))]
+    } else {
+        remote_getaddrinfo(node.clone())?
+    };
+
     // Only care about: `ai_family`, `ai_socktype`, `ai_protocol`.
-    let result = remote_getaddrinfo(node.clone())?
+    let result = resolved_addr
         .into_iter()
         .map(|(name, address)| {
             // Cache the resolved hosts to use in the outgoing traffic filter.
