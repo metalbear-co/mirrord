@@ -39,6 +39,7 @@ static CONNECTION_CHANNEL_SIZE: usize = 1000;
 
 pub use http::Error as HttpError;
 
+/// Operations performed on the operator via [`kube`] API.
 #[derive(Debug)]
 pub enum OperatorOperation {
     FindingOperator,
