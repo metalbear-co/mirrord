@@ -116,7 +116,7 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<u64> {
 }
 
 /// Create temporary local file to get a valid local fd.
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "trace", ret)]
 fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
     let random_string = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
     let file_name = format!("{remote_fd}-{random_string}");
@@ -135,7 +135,7 @@ fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
 }
 
 /// Close the remote file if the call to [`libc::shm_open`] failed and we have an invalid local fd.
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "trace", ret)]
 fn close_remote_file_on_failure(fd: u64) -> Result<()> {
     error!("Creating a temporary local file resulted in an error, closing the file remotely!");
     RemoteFile::remote_close(fd)
@@ -152,7 +152,7 @@ fn close_remote_file_on_failure(fd: u64) -> Result<()> {
 /// [`open`] is also used by other _open-ish_ functions, and it takes care of **creating** the
 /// _local_ and _remote_ file association, plus **inserting** it into the storage for
 /// [`OPEN_FILES`].
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "trace", ret)]
 pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
     let path = path?;
 
@@ -208,7 +208,7 @@ pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE>
 }
 
 /// creates a directory stream for the `remote_fd` in the agent
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "trace", ret)]
 pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
     // usize == ptr size
     // we don't return a pointer to an address that contains DIR
@@ -231,7 +231,7 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
     Detour::Success(local_dir_fd as usize)
 }
 
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "trace", ret)]
 pub(crate) fn openat(
     fd: RawFd,
     path: Detour<PathBuf>,
@@ -294,6 +294,7 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<Re
 
 pub(crate) fn pwrite(local_fd: RawFd, buffer: &[u8], offset: u64) -> Detour<WriteFileResponse> {
     let remote_fd = get_remote_fd(local_fd)?;
+    trace!("pwrite: local_fd {local_fd}");
 
     let writing_file = WriteLimitedFileRequest {
         remote_fd,
@@ -366,6 +367,14 @@ pub(crate) fn access(path: Detour<PathBuf>, mode: u8) -> Detour<c_int> {
 
     let _ = common::make_proxy_request_with_response(access)??;
 
+    Detour::Success(0)
+}
+
+/// Original function _flushes_ data from `fd` to disk, but we don't really do any of this
+/// for our managed fds, so we just return `0` which means success.
+#[tracing::instrument(level = "trace", ret)]
+pub(crate) fn fsync(fd: RawFd) -> Detour<c_int> {
+    get_remote_fd(fd)?;
     Detour::Success(0)
 }
 

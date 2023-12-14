@@ -319,7 +319,7 @@ unsafe extern "C" fn c_abi_syscall_handler(
         param2,
         param3
     );
-    let res = match syscall {
+    let syscall_result = match syscall {
         libc::SYS_socket => socket_detour(param1 as _, param2 as _, param3 as _) as i64,
         libc::SYS_bind => bind_detour(param1 as _, param2 as _, param3 as _) as i64,
         libc::SYS_listen => listen_detour(param1 as _, param2 as _) as i64,
@@ -346,90 +346,46 @@ unsafe extern "C" fn c_abi_syscall_handler(
             libc::SYS_fstat => fstat_detour(param1 as _, param2 as _) as i64,
             libc::SYS_getdents64 => getdents64_detour(param1 as _, param2 as _, param3 as _) as i64,
             _ => {
-                let syscall_res = syscall_3(syscall, param1, param2, param3);
-                return syscall_res;
+                let (Ok(result) | Err(result)) = syscalls::syscall!(
+                    syscalls::Sysno::from(syscall as i32),
+                    param1,
+                    param2,
+                    param3
+                )
+                .map(|success| success as i64)
+                .map_err(|fail| {
+                    let raw_errno = fail.into_raw();
+                    errno::set_errno(errno::Errno(raw_errno));
+
+                    -(raw_errno as i64)
+                });
+                result
             }
         },
         _ => {
-            let syscall_res = syscall_3(syscall, param1, param2, param3);
-            return syscall_res;
+            let (Ok(result) | Err(result)) = syscalls::syscall!(
+                syscalls::Sysno::from(syscall as i32),
+                param1,
+                param2,
+                param3
+            )
+            .map(|success| success as i64)
+            .map_err(|fail| {
+                let raw_errno = fail.into_raw();
+                errno::set_errno(errno::Errno(raw_errno));
+
+                -(raw_errno as i64)
+            });
+            result
         }
     };
-    match res {
-        -1 => -errno().0 as i64,
-        _ => res,
+
+    if syscall_result.is_negative() {
+        // Might not be an exact mapping, but it should be good enough.
+        -errno().0 as i64
+    } else {
+        syscall_result
     }
-}
-
-/// [Naked function] 3 param version (Syscall6) for making the syscall, libc's syscall is not
-/// used here as it doesn't return the value that go expects (it does translation)
-#[naked]
-unsafe extern "C" fn syscall_3(syscall: i64, param1: i64, param2: i64, param3: i64) -> i64 {
-    asm!(
-        "mov    rax, rdi",
-        "mov    rdi, rsi",
-        "mov    rsi, rdx",
-        "mov    rdx, rcx",
-        "syscall",
-        "ret",
-        options(noreturn)
-    )
-}
-
-/// [Naked function] 6 param version, used by Rawsyscall & Syscall
-#[naked]
-pub(crate) unsafe extern "C" fn syscall_6(
-    syscall: i64,
-    param1: i64,
-    param2: i64,
-    param3: i64,
-    param4: i64,
-    param5: i64,
-    param6: i64,
-) -> i64 {
-    asm!(
-        "mov    rax, rdi",
-        "mov    rdi, rsi",
-        "mov    rsi, rdx",
-        "mov    rdx, rcx",
-        "mov    r10, r8",
-        "mov    r8, r9",
-        "mov    r9, QWORD PTR[rsp]",
-        "syscall",
-        "ret",
-        options(noreturn)
-    )
-}
-
-/// Clobbers rax, rcx
-#[no_mangle]
-#[naked]
-unsafe extern "C" fn enter_syscall() {
-    asm!(
-        "mov rax, qword ptr [r14 + 0x30]", // get mp
-        "inc qword ptr [ rax + 0x130 ]",   // inc cgocall
-        "inc qword ptr [ rax + 0x138 ]",   // inc cgo
-        "mov rcx, qword ptr [ rax + 0x140 ]",
-        "mov qword ptr [rcx], 0x0",         // reset traceback
-        "mov byte ptr [ RAX + 0x118], 0x1", // incgo = true
-        "ret",
-        options(noreturn)
-    );
-}
-
-/// clobbers xmm15, r14, rax
-#[no_mangle]
-#[naked]
-unsafe extern "C" fn exit_syscall() {
-    asm!(
-        "xorps xmm15, xmm15",
-        "mov r14, qword ptr FS:[0xfffffff8]",
-        "mov rax, qword ptr [r14 + 0x30]",
-        "dec qword ptr [ rax + 0x138 ]",    // dec cgo
-        "mov byte ptr [ RAX + 0x118], 0x0", // incgo = false
-        "ret",
-        options(noreturn)
-    );
 }
 
 /// Detour for Go >= 1.19

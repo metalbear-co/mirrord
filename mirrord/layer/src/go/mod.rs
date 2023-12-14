@@ -17,7 +17,6 @@ use crate::{close_detour, file::hooks::*, socket::hooks::*};
 )]
 pub(crate) mod go_hooks;
 
-use go_hooks::syscall_6;
 /// Syscall & Syscall6 handler - supports upto 6 params, mainly used for
 /// accept4 Note: Depending on success/failure Syscall may or may not call this handler
 #[no_mangle]
@@ -34,7 +33,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
         "c_abi_syscall6_handler: syscall={} param1={} param2={} param3={} param4={} param5={} param6={}",
         syscall, param1, param2, param3, param4, param5, param6
     );
-    let res = match syscall {
+    let syscall_result = match syscall {
         libc::SYS_accept4 => {
             accept4_detour(param1 as _, param2 as _, param3 as _, param4 as _) as i64
         }
@@ -48,7 +47,13 @@ unsafe extern "C" fn c_abi_syscall6_handler(
         _ if crate::setup().fs_config().is_active() => {
             match syscall {
                 libc::SYS_read => read_detour(param1 as _, param2 as _, param3 as _) as i64,
+                libc::SYS_pread64 => {
+                    pread_detour(param1 as _, param2 as _, param3 as _, param4 as _) as i64
+                }
                 libc::SYS_write => write_detour(param1 as _, param2 as _, param3 as _) as i64,
+                libc::SYS_pwrite64 => {
+                    pwrite_detour(param1 as _, param2 as _, param3 as _, param4 as _) as i64
+                }
                 libc::SYS_lseek => lseek_detour(param1 as _, param2 as _, param3 as _),
                 // Note(syscall_linux.go)
                 // if flags == 0 {
@@ -75,23 +80,79 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                 libc::SYS_newfstatat => {
                     fstatat_logic(param1 as _, param2 as _, param3 as _, param4 as _)
                         .unwrap_or_bypass_with(|_| {
-                            syscall_6(syscall, param1, param2, param3, param4, param5, param6)
-                                .try_into()
-                                .unwrap()
+                            let (Ok(result) | Err(result)) = syscalls::syscall!(
+                                syscalls::Sysno::from(syscall as i32),
+                                param1,
+                                param2,
+                                param3,
+                                param4,
+                                param5,
+                                param6
+                            )
+                            .map(|success| success as i64)
+                            .map_err(|fail| {
+                                let raw_errno = fail.into_raw();
+                                errno::set_errno(errno::Errno(raw_errno));
+
+                                -(raw_errno as i64)
+                            });
+                            result as i32
                         })
                         .into()
                 }
+                libc::SYS_fstat => fstat_detour(param1 as _, param2 as _) as i64,
+                libc::SYS_fsync => fsync_detour(param1 as _) as i64,
+                libc::SYS_fdatasync => fsync_detour(param1 as _) as i64,
                 libc::SYS_openat => openat_detour(param1 as _, param2 as _, param3 as _) as i64,
                 libc::SYS_getdents64 => {
                     getdents64_detour(param1 as _, param2 as _, param3 as _) as i64
                 }
-                _ => syscall_6(syscall, param1, param2, param3, param4, param5, param6),
+                _ => {
+                    let (Ok(result) | Err(result)) = syscalls::syscall!(
+                        syscalls::Sysno::from(syscall as i32),
+                        param1,
+                        param2,
+                        param3,
+                        param4,
+                        param5,
+                        param6
+                    )
+                    .map(|success| success as i64)
+                    .map_err(|fail| {
+                        let raw_errno = fail.into_raw();
+                        errno::set_errno(errno::Errno(raw_errno));
+
+                        -(raw_errno as i64)
+                    });
+                    result
+                }
             }
         }
-        _ => syscall_6(syscall, param1, param2, param3, param4, param5, param6),
+        _ => {
+            let (Ok(result) | Err(result)) = syscalls::syscall!(
+                syscalls::Sysno::from(syscall as i32),
+                param1,
+                param2,
+                param3,
+                param4,
+                param5,
+                param6
+            )
+            .map(|success| success as i64)
+            .map_err(|fail| {
+                let raw_errno = fail.into_raw();
+                errno::set_errno(errno::Errno(raw_errno));
+
+                -(raw_errno as i64)
+            });
+            result
+        }
     };
-    match res {
-        -1 => -errno().0 as i64,
-        _ => res,
+
+    if syscall_result.is_negative() {
+        // Might not be an exact mapping, but it should be good enough.
+        -errno().0 as i64
+    } else {
+        syscall_result
     }
 }
