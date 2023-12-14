@@ -1,0 +1,1 @@
+Fixed config verification in IDE context when the config does not specify the target but uses the `scale_down` feature.
