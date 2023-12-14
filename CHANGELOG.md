@@ -8,6 +8,15 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.78.2](https://github.com/metalbear-co/mirrord/tree/3.78.2) - 2023-12-14
+
+
+### Fixed
+
+- Fixed config verification in IDE context when the config does not specify the
+  target but uses the `scale_down` feature.
+
+
 ## [3.78.1](https://github.com/metalbear-co/mirrord/tree/3.78.1) - 2023-12-13
 
 
