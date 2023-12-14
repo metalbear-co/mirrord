@@ -461,6 +461,7 @@ impl LayerConfig {
             }
 
             if self.feature.copy_target.scale_down
+                && !context.ide
                 && !matches!(self.target.path, Some(Target::Deployment(..)))
             {
                 return Err(ConfigError::Conflict(
