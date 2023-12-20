@@ -395,6 +395,22 @@ To use mirrord console, run it:
 Then run mirrord with the environment variable:
 `MIRRORD_CONSOLE_ADDR=127.0.0.1:11233`
 
+## Debugging the Internal Proxy (`intproxy`)
+
+To see logs from the internal proxy, use the [mirrord console](#mirrord-console).
+
+To debug it with a debugger:
+
+1. Add
+   ```Rust
+       tokio::time::sleep(Duration::from_secs(20)).await;
+   ```
+   to [somewhere](https://github.com/metalbear-co/mirrord/blob/fa2af7f1e77a9254fb0908be40b0dae5da53d298/mirrord/cli/src/internal_proxy.rs#L145) in the start of the intproxy code.
+2. Set breakpoints in vscode in the relevant lines of the intproxy code.
+3. Build mirrord.
+4. Run mirrord.
+5. Attach a debugger in vscode to the inproxy process. On macOS you can do that with `Cmd` + `Shift` + `P` -> `LLDB: Attach to Process...` -> type `intproxy` and choose the `mirrord intproxy` process. The sleep you added at the start of the intproxy is time for you to attach the debugger.
+
 ## Retrieving Agent Logs
 
 By default, the agent's pod will complete and disappear shortly after the agent exits. In order to be able to retrieve 
