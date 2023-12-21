@@ -21,7 +21,6 @@ pub async fn navigate_to_intro() {
         Ok(output) if output.status.success() => {}
         other => {
             tracing::trace!("failed to open browser, command result: {other:?}");
-            println!("mirrord failed to use a default browser");
             println!("To try mirrord for Teams, visit {MIRRORD_FOR_TEAMS_URL}");
         }
     }
