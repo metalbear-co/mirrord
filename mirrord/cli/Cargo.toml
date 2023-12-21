@@ -49,7 +49,6 @@ thiserror.workspace = true
 prettytable-rs = "0.10"
 humantime = "2"
 nix.workspace = true
-email_address = "0.2"
 tokio-util.workspace = true
 socket2.workspace = true
 drain.workspace = true
