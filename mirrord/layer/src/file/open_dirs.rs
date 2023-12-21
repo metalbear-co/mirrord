@@ -9,7 +9,7 @@ use std::{
 use dashmap::DashMap;
 use mirrord_protocol::file::{CloseDirRequest, DirEntryInternal, ReadDirRequest, ReadDirResponse};
 
-use super::{DirStreamFd, RemoteFd};
+use super::{DirStreamFd, LocalFd, RemoteFd, OPEN_FILES};
 use crate::{
     common,
     detour::{Bypass, Detour},
@@ -38,10 +38,10 @@ impl OpenDirs {
     ///
     /// * `local_dir_fd` - opaque identifier
     /// * `remote_fd` - descriptor of the remote directory (received from the agent)
-    pub fn insert(&self, local_dir_fd: DirStreamFd, remote_fd: RemoteFd) {
+    pub fn insert(&self, local_dir_fd: DirStreamFd, remote_fd: RemoteFd, base_fd: LocalFd) {
         self.inner.insert(
             local_dir_fd,
-            Mutex::new(OpenDir::new(local_dir_fd, remote_fd)).into(),
+            Mutex::new(OpenDir::new(local_dir_fd, remote_fd, base_fd)).into(),
         );
     }
 
@@ -56,6 +56,19 @@ impl OpenDirs {
         let guard = dir.lock().expect("lock poisoned");
 
         guard.read_r()
+    }
+
+    /// Gets fd used to open dir [`DirStreamFd`].
+    pub fn get_fd(&self, local_dir_fd: DirStreamFd) -> Detour<LocalFd> {
+        let dir = self
+            .inner
+            .get(&local_dir_fd)
+            .ok_or(Bypass::LocalDirStreamNotFound(local_dir_fd))?
+            .clone();
+
+        let guard = dir.lock().expect("lock poisoned");
+
+        Detour::Success(guard.get_base_fd())
     }
 
     /// Reads next entry from the open directory with the given [`DirStreamFd`] and copies the data
@@ -128,7 +141,7 @@ impl OpenDirs {
 
         let mut guard = dir.lock().expect("lock poisoned");
         guard.closed = true;
-
+        OPEN_FILES.remove(&guard.base_fd);
         common::make_proxy_request_no_response(CloseDirRequest {
             remote_fd: guard.remote_fd,
         })?;
@@ -141,13 +154,15 @@ struct OpenDir {
     closed: bool,
     local_fd: DirStreamFd,
     remote_fd: RemoteFd,
+    // fd used for opening the dir originally
+    base_fd: LocalFd,
     dirent: libc::dirent,
     #[cfg(target_os = "linux")]
     dirent64: libc::dirent64,
 }
 
 impl OpenDir {
-    fn new(local_fd: DirStreamFd, remote_fd: RemoteFd) -> Self {
+    fn new(local_fd: DirStreamFd, remote_fd: RemoteFd, base_fd: LocalFd) -> Self {
         #[cfg(not(target_os = "macos"))]
         let dirent = libc::dirent {
             d_ino: 0,
@@ -171,6 +186,7 @@ impl OpenDir {
             closed: false,
             local_fd,
             remote_fd,
+            base_fd,
             dirent,
             #[cfg(target_os = "linux")]
             dirent64: libc::dirent64 {
@@ -194,6 +210,10 @@ impl OpenDir {
                 remote_fd: self.remote_fd,
             })??;
         Detour::Success(direntry)
+    }
+
+    fn get_base_fd(&self) -> LocalFd {
+        self.base_fd
     }
 }
 

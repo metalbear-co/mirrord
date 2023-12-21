@@ -260,6 +260,13 @@ pub(crate) unsafe extern "C" fn closedir_detour(dirp: *mut DIR) -> c_int {
         .unwrap_or_bypass_with(|_| FN_CLOSEDIR(dirp))
 }
 
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn dirfd_detour(dirp: *mut DIR) -> c_int {
+    OPEN_DIRS
+        .get_fd(dirp as usize)
+        .unwrap_or_bypass_with(|_| FN_DIRFD(dirp))
+}
+
 /// Equivalent to `open_detour`, **except** when `raw_path` specifies a relative path.
 ///
 /// If `fd == AT_FDCWD`, the current working directory is used, and the behavior is the same as
@@ -957,6 +964,8 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         FnClosedir,
         FN_CLOSEDIR
     );
+
+    replace!(hook_manager, "dirfd", dirfd_detour, FnDirfd, FN_DIRFD);
 
     replace!(hook_manager, "pread", pread_detour, FnPread, FN_PREAD);
     replace!(

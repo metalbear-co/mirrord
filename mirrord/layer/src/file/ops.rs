@@ -223,10 +223,9 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
         common::make_proxy_request_with_response(open_dir_request)??;
 
     let local_dir_fd = create_local_fake_file(remote_dir_fd)?;
-    OPEN_DIRS.insert(local_dir_fd as usize, remote_dir_fd);
+    OPEN_DIRS.insert(local_dir_fd as usize, remote_dir_fd, fd);
 
-    // According to docs, when using fdopendir, the fd is now managed by OS - i.e closed
-    OPEN_FILES.remove(&fd);
+    // Let it stay in OPEN_FILES, as some functions might use it in comibination with dirfd
 
     Detour::Success(local_dir_fd as usize)
 }
