@@ -51,7 +51,7 @@ pub(super) enum Commands {
     #[command(hide = true)]
     VerifyConfig(VerifyConfigArgs),
 
-    /// Navigate to mirrord for Teams introduction.
+    /// Try out mirrord for Teams.
     Teams,
 }
 
