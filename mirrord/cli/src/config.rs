@@ -50,6 +50,9 @@ pub(super) enum Commands {
     /// Verify config file without starting mirrord.
     #[command(hide = true)]
     VerifyConfig(VerifyConfigArgs),
+
+    /// Navigate to mirrord for Teams introduction.
+    Teams,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]

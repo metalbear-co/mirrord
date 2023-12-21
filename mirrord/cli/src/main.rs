@@ -46,6 +46,7 @@ mod extension;
 mod extract;
 mod internal_proxy;
 mod operator;
+mod teams;
 mod verify_config;
 
 pub(crate) use error::{CliError, Result};
@@ -425,6 +426,7 @@ fn main() -> miette::Result<()> {
                 let mut cmd: clap::Command = Cli::command();
                 generate(args.shell, &mut cmd, "mirrord", &mut std::io::stdout());
             }
+            Commands::Teams => teams::navigate_to_intro().await,
         };
         Ok(())
     });
