@@ -1,1 +1,0 @@
-Added new `teams` command to the CLI.
