@@ -220,9 +220,6 @@ pub(crate) enum CliError {
     InternalProxyPortParseError(std::num::ParseIntError),
     #[error("Internal proxy wait error: {0:#?}")]
     InternalProxyWaitError(std::io::Error),
-    #[error("Waitlist registration failed.")]
-    #[diagnostic(help("Please check the email provided and internet connection.{GENERAL_HELP}"))]
-    WaitlistError(reqwest::Error),
     #[error("Connection info deserialization failed: please report it. value: `{0}` err: `{1}`")]
     #[diagnostic(help(
         r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
@@ -240,7 +237,7 @@ pub(crate) enum CliError {
     InternalProxyError(#[from] IntProxyError),
     #[error("Feature `{0}` requires a mirrord operator.")]
     #[diagnostic(help(
-        "The mirrord operator is part of mirrord for Teams. To try it out, join the waitlist at this link: https://metalbear.co/#waitlist-form.{GENERAL_HELP}"
+        "The mirrord operator is part of mirrord for Teams. You can get started with mirrord for Teams at this link: http://mirrord.dev/docs/teams/introduction/"
     ))]
     FeatureRequiresOperatorError(String),
     #[error("Feature `{feature}` is not supported in mirrord operator {operator_version}.")]

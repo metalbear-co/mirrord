@@ -108,7 +108,7 @@ where
         // This is CLI Only because the extensions also implement this check with better messaging.
         progress.print( "When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
         progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
-        progress.print("To try it out, join the waitlist with `mirrord waitlist <email address>`, or at this link: https://metalbear.co/#waitlist-form");
+        progress.print("You can get started with mirrord for Teams at this link: http://mirrord.dev/docs/teams/introduction/");
     }
 
     let k8s_api = KubernetesAPI::create(config)

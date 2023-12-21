@@ -4,7 +4,6 @@ use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
-use email_address::EmailAddress;
 use mirrord_operator::setup::OperatorNamespace;
 
 #[derive(Parser)]
@@ -26,19 +25,6 @@ pub(super) enum Commands {
     /// Execute a binary using mirrord, mirror remote traffic to it, provide it access to remote
     /// resources (network, files) and environment variables.
     Exec(Box<ExecArgs>),
-
-    /// Register an email address to the waitlist for mirrord for Teams (`mirrord waitlist
-    /// myemail@gmail.com`)
-    ///
-    /// mirrord for Teams is currently invite-only, and features include:
-    ///
-    /// 1. Traffic stealing/mirroring from multi-pod deployments.
-    ///
-    /// 2. Concurrent mirrord sessions on the same resource (e.g. multiple users using the same
-    /// pod/deployment).
-    ///
-    /// 3. No privileged permissions required for end users.
-    Waitlist(WaitlistArgs),
 
     /// Generates shell completions for the provided shell.
     /// Supported shells: bash, elvish, fish, powershell, zsh
@@ -273,19 +259,6 @@ pub(super) struct ExtensionExecArgs {
     /// User executable - the executable the layer is going to be injected to.
     #[arg(short = 'e')]
     pub executable: Option<String>,
-}
-
-#[derive(Args, Debug)]
-pub(super) struct WaitlistArgs {
-    /// Email to register
-    #[arg(value_parser = email_parse)]
-    pub email: EmailAddress,
-}
-
-fn email_parse(email: &str) -> Result<EmailAddress, String> {
-    email
-        .parse()
-        .map_err(|e: email_address::Error| format!("invalid email address provided: {e:?}"))
 }
 
 /// Args for the [`super::verify_config`] mirrord-cli command.
