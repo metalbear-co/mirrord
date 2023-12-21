@@ -41,6 +41,9 @@ impl LoggerTask {
                             eprintln!("Error sending log message: {e:?}");
                             break;
                         }
+                        // Crucial for getting as many of the most interesting logs as possible right before
+                        // the process exits.
+                        let _ = self.encoder.flush().await;
                     }
                 }
             }
@@ -87,6 +90,7 @@ async fn send_hello(stream: &mut TcpStream) -> Result<()> {
 /// Initializes the [`AsyncConsoleLogger`] and sets the global logger to use it.
 pub async fn init_async_logger(address: &str, watch: Watch, channel_size: usize) -> Result<()> {
     let mut stream = TcpStream::connect(address).await?;
+    stream.set_nodelay(true)?;
     send_hello(&mut stream).await?;
 
     let (tx, rx) = mpsc::channel(channel_size);

@@ -40,6 +40,9 @@ impl log::Log for ConsoleLogger {
             if let Err(e) = guard.send(&msg) {
                 eprintln!("Error sending log message: {e:?}");
             }
+            // Crucial for getting as many of the most interesting logs as possible right before
+            // the process exits.
+            let _ = guard.flush();
         }
     }
 
@@ -71,6 +74,7 @@ fn send_hello(stream: &mut TcpStream) -> Result<()> {
 /// Initializes the [`ConsoleLogger`] and sets the global logger to use it.
 pub fn init_logger(address: &str) -> Result<()> {
     let mut stream = TcpStream::connect(address)?;
+    stream.set_nodelay(true)?;
 
     send_hello(&mut stream)?;
 
