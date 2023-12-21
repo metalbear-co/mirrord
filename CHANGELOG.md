@@ -8,6 +8,34 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.79.0](https://github.com/metalbear-co/mirrord/tree/3.79.0) - 2023-12-21
+
+
+### Removed
+
+- Remove waitlist signup from CLI
+
+
+### Added
+
+- Added new `teams` command to the CLI.
+- Remove support for old cri-o, use new CRI API (v1)
+
+
+### Fixed
+
+- Uses the `syscalls` crate to handle calling the syscalls for go. And adds
+  `pwrite64`, `pread64`, `fsync` and `fdatasync` hooks for go.
+  [#2099](https://github.com/metalbear-co/mirrord/issues/2099)
+
+
+### Internal
+
+- Debug instructions for intproxy in contributer guide.
+- Flush outgoing the console loggers after each logs so that we can see more
+  logs before the layer or the intproxy exit when debugging.
+
+
 ## [3.78.2](https://github.com/metalbear-co/mirrord/tree/3.78.2) - 2023-12-14
 
 

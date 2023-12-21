@@ -1,1 +1,0 @@
-Remove support for old cri-o, use new CRI API (v1)
