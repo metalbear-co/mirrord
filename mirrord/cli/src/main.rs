@@ -7,7 +7,6 @@ use std::{collections::HashMap, time::Duration};
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use config::*;
-use email_address::EmailAddress;
 use exec::execvp;
 use execution::MirrordExecution;
 use extension::extension_exec;
@@ -384,25 +383,6 @@ async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
     Ok(())
 }
 
-/// Register the email to the waitlist.
-async fn register_to_waitlist(email: EmailAddress) -> Result<()> {
-    const WAITLIST_API: &str = "https://waitlist.metalbear.co/v1/waitlist?source=cli";
-    let mut params = HashMap::new();
-    params.insert("email", email.to_string());
-    reqwest::Client::new()
-        .post(WAITLIST_API)
-        .form(&params)
-        .send()
-        .await
-        .map_err(CliError::WaitlistError)?;
-
-    println!(
-        "Email {:?} successfully registered to the mirrord for Teams waitlist. We'll be in touch soon!",
-        email.as_str()
-    );
-
-    Ok(())
-}
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> miette::Result<()> {
@@ -440,7 +420,6 @@ fn main() -> miette::Result<()> {
                 extension_exec(*args, watch).await?;
             }
             Commands::InternalProxy => internal_proxy::proxy(watch).await?,
-            Commands::Waitlist(args) => register_to_waitlist(args.email).await?,
             Commands::VerifyConfig(args) => verify_config(args).await?,
             Commands::Completions(args) => {
                 let mut cmd: clap::Command = Cli::command();
