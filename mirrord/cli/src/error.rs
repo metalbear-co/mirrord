@@ -237,7 +237,7 @@ pub(crate) enum CliError {
     InternalProxyError(#[from] IntProxyError),
     #[error("Feature `{0}` requires a mirrord operator.")]
     #[diagnostic(help(
-        "The mirrord operator is part of mirrord for Teams. You can get started with mirrord for Teams at this link: http://mirrord.dev/docs/teams/introduction/"
+        "The mirrord operator is part of mirrord for Teams. You can get started with mirrord for Teams at this link: https://mirrord.dev/docs/teams/introduction/"
     ))]
     FeatureRequiresOperatorError(String),
     #[error("Feature `{feature}` is not supported in mirrord operator {operator_version}.")]
