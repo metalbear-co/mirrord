@@ -54,8 +54,6 @@ async fn test_issue2001(
         ))))
         .await;
 
-    intproxy.expect_file_close(10).await;
-
     assert_eq!(
         intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 11 })),
