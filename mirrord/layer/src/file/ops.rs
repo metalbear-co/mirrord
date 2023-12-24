@@ -483,26 +483,20 @@ fn absolute_path(path: PathBuf) -> PathBuf {
 
 #[tracing::instrument(level = "trace")]
 pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
-    trace!("aaa");
     let path = path?;
 
-    trace!("aaadddd {path:?}");
     if path.is_relative() {
         // Calls with non absolute paths are sent to libc::open.
         Detour::Bypass(Bypass::RelativePath(path.clone()))?
     };
 
-    trace!("aaadddddadsdasasdsad");
     let realpath = absolute_path(path);
 
-    trace!("aaadddddadsdas {realpath:?}");
     ensure_not_ignored!(realpath, false);
 
-    trace!("aaadddddadsdasasdsad {realpath:?}");
     // check that file exists
     xstat(Some(Detour::Success(realpath.clone())), None, true)?;
 
-    trace!("aaadddddadsdasasdsadasdasd {realpath:?}");
     Detour::Success(realpath)
 }
 
