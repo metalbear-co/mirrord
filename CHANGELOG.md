@@ -8,6 +8,14 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.79.2](https://github.com/metalbear-co/mirrord/tree/3.79.2) - 2023-12-24
+
+
+### Fixed
+
+- Added hook for realpath function, fixing issues on files not found in Java
+
+
 ## [3.79.1](https://github.com/metalbear-co/mirrord/tree/3.79.1) - 2023-12-23
 
 
