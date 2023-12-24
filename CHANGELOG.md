@@ -8,6 +8,14 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.79.1](https://github.com/metalbear-co/mirrord/tree/3.79.1) - 2023-12-23
+
+
+### Fixed
+
+- Fix dirfd crashing on macOS
+
+
 ## [3.79.0](https://github.com/metalbear-co/mirrord/tree/3.79.0) - 2023-12-21
 
 
