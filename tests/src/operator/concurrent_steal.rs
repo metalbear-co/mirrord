@@ -1,4 +1,6 @@
 #![cfg(test)]
+#![cfg(feature = "operator")]
+//! Test concurrent stealing features with an operator.
 
 use std::time::Duration;
 
@@ -6,14 +8,12 @@ use k8s_openapi::api::apps::v1::Deployment;
 use kube::Client;
 use reqwest::header::HeaderMap;
 use rstest::*;
-use tokio::io::AsyncWriteExt;
 
 use crate::utils::{
     config_dir, get_instance_name, get_service_url, kube_client, send_request, service,
     Application, KubeService,
 };
 
-#[cfg_attr(not(feature = "operator"), ignore)]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub async fn two_clients_steal_same_target(
@@ -122,7 +122,6 @@ pub async fn two_clients_steal_same_target_pod_deployment(
     assert!(!res.success());
 }
 
-#[cfg_attr(not(feature = "operator"), ignore)]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub async fn two_clients_steal_with_http_filter(
