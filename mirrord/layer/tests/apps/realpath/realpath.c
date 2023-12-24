@@ -53,6 +53,7 @@ void absolute_remotely_doesnt_exist() {
     const char path[] = "/etc/../etc/hosts";
     char *resolved_path = realpath(path, NULL);
     assert(resolved_path == NULL);
+    printf("%d ernno", errno);
     assert(errno == ENOENT);
 }
 

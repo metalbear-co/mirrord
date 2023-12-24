@@ -382,7 +382,7 @@ pub(crate) fn fsync(fd: RawFd) -> Detour<c_int> {
 /// that.
 /// rawish_path is Option<Option<&CStr>> because we need to differentiate between null pointer
 /// and non existing argument (For error handling)
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "trace", ret)]
 pub(crate) fn xstat(
     rawish_path: Option<Detour<PathBuf>>,
     fd: Option<RawFd>,
@@ -462,21 +462,68 @@ pub(crate) fn getdents64(fd: RawFd, buffer_size: u64) -> Detour<GetDEnts64Respon
     Detour::Success(response)
 }
 
+/// Resolves ./ and ../ in the path, and returns an absolute path.
+fn absolute_path(path: PathBuf) -> PathBuf {
+    use std::path::Component;
+    let mut temp_path = PathBuf::new();
+    temp_path.push("/");
+    for c in path.components() {
+        match c {
+            Component::RootDir => {}
+            Component::CurDir => {}
+            Component::Normal(p) => temp_path.push(p),
+            Component::ParentDir => {
+                temp_path.pop();
+            }
+            Component::Prefix(_) => {}
+        }
+    }
+    temp_path
+}
+
 #[tracing::instrument(level = "trace")]
 pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
+    trace!("aaa");
     let path = path?;
 
+    trace!("aaadddd {path:?}");
     if path.is_relative() {
         // Calls with non absolute paths are sent to libc::open.
         Detour::Bypass(Bypass::RelativePath(path.clone()))?
     };
 
-    ensure_not_ignored!(path, false);
+    trace!("aaadddddadsdasasdsad");
+    let realpath = absolute_path(path);
 
-    let realpath = std::path::absolute(path)?;
+    trace!("aaadddddadsdas {realpath:?}");
+    ensure_not_ignored!(realpath, false);
 
+    trace!("aaadddddadsdasasdsad {realpath:?}");
     // check that file exists
-    xstat(Some(Detour::Success(realpath.clone())), None, false)?;
+    xstat(Some(Detour::Success(realpath.clone())), None, true)?;
 
+    trace!("aaadddddadsdasasdsadasdasd {realpath:?}");
     Detour::Success(realpath)
+}
+
+#[cfg(test)]
+mod test {
+    use std::path::PathBuf;
+
+    use super::absolute_path;
+    #[test]
+    fn test_absolute_normal() {
+        assert_eq!(
+            absolute_path(PathBuf::from("/a/b/c")),
+            PathBuf::from("/a/b/c")
+        );
+        assert_eq!(
+            absolute_path(PathBuf::from("/a/b/../c")),
+            PathBuf::from("/a/c")
+        );
+        assert_eq!(
+            absolute_path(PathBuf::from("/a/b/./c")),
+            PathBuf::from("/a/b/c")
+        )
+    }
 }
