@@ -461,3 +461,22 @@ pub(crate) fn getdents64(fd: RawFd, buffer_size: u64) -> Detour<GetDEnts64Respon
 
     Detour::Success(response)
 }
+
+#[tracing::instrument(level = "trace")]
+pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
+    let path = path?;
+
+    if path.is_relative() {
+        // Calls with non absolute paths are sent to libc::open.
+        Detour::Bypass(Bypass::RelativePath(path.clone()))?
+    };
+
+    ensure_not_ignored!(path, false);
+
+    let realpath = std::path::absolute(path)?;
+
+    // check that file exists
+    xstat(Some(Detour::Success(realpath.clone())), None, false)?;
+
+    Detour::Success(realpath)
+}

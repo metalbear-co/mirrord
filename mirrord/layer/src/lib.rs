@@ -7,6 +7,7 @@
 #![feature(c_size_t)]
 #![feature(lazy_cell)]
 #![feature(once_cell_try)]
+#![feature(absolute_path)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::indexing_slicing)]
 
