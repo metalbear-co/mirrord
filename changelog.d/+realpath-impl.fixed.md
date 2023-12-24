@@ -1,0 +1,1 @@
+Added hook for realpath function, fixing issues on files not found in Java
