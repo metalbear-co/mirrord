@@ -201,7 +201,7 @@ pub(super) enum OperatorCommand {
         accept_tos: bool,
 
         /// A mirrord for Teams license key (online)
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values(true))]
         license_key: Option<String>,
 
         /// Path to a file containing a mirrord for Teams license certificate
