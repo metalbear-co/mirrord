@@ -653,6 +653,7 @@ pub enum Application {
     OpenFile,
     CIssue2055,
     RustIssue2058,
+    Realpath,
     // For running applications with the executable and arguments determined at runtime.
     DynamicApp(String, Vec<String>),
 }
@@ -686,6 +687,7 @@ impl Application {
             | Application::PythonListen => Self::get_python3_executable().await,
             Application::PythonFastApiHTTP => String::from("uvicorn"),
             Application::Fork => String::from("tests/apps/fork/out.c_test_app"),
+            Application::Realpath => String::from("tests/apps/realpath/out.c_test_app"),
             Application::NodeHTTP => String::from("node"),
             Application::JavaTemurinSip => format!(
                 "{}/.sdkman/candidates/java/17.0.6-tem/bin/java",
@@ -865,6 +867,7 @@ impl Application {
             | Application::Go19FAccessAt
             | Application::Go18FAccessAt
             | Application::Fork
+            | Application::Realpath
             | Application::RustFileOps
             | Application::RustIssue1123
             | Application::RustIssue1054
@@ -919,6 +922,7 @@ impl Application {
             | Application::NodeSpawn
             | Application::BashShebang
             | Application::Fork
+            | Application::Realpath
             | Application::Go20Issue834
             | Application::Go19Issue834
             | Application::Go18Issue834

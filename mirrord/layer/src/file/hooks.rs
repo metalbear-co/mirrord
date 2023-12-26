@@ -5,7 +5,7 @@ use core::ffi::{c_size_t, c_ssize_t};
 ///
 /// NOTICE: If a file operation fails, it might be because it depends on some `libc` function
 /// that is not being hooked (`strace` the program to check).
-use std::{os::unix::io::RawFd, ptr, slice, time::Duration};
+use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
 
 use errno::{set_errno, Errno};
 use libc::{
@@ -875,6 +875,51 @@ unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs) -> c_int {
         .unwrap_or_bypass_with(|_| FN_FSTATFS(fd, out_stat))
 }
 
+unsafe fn realpath_logic(
+    source_path: *const c_char,
+    output_path: *mut c_char,
+) -> Detour<*mut c_char> {
+    let path = source_path.checked_into();
+
+    realpath(path).map(|res| {
+        let path = CString::new(res.to_string_lossy().to_string()).unwrap();
+        let path_len = path.as_bytes_with_nul().len();
+        let output = if output_path.is_null() {
+            let res = libc::malloc(path_len) as *mut c_char;
+            if res.is_null() {
+                return std::ptr::null_mut();
+            }
+            res
+        } else {
+            output_path
+        };
+
+        output
+            .copy_from_nonoverlapping(path.as_ptr(), usize::min(libc::PATH_MAX as usize, path_len));
+        output
+    })
+}
+
+/// When path is handled by us, just make it absolute and return, since resolving it remotely
+/// doesn't really matter for our case atm (might be in the future)
+#[hook_guard_fn]
+unsafe extern "C" fn realpath_detour(
+    source_path: *const c_char,
+    output_path: *mut c_char,
+) -> *mut c_char {
+    realpath_logic(source_path, output_path)
+        .unwrap_or_bypass_with(|_| FN_REALPATH(source_path, output_path))
+}
+
+#[hook_guard_fn]
+unsafe extern "C" fn realpath_darwin_extsn_detour(
+    source_path: *const c_char,
+    output_path: *mut c_char,
+) -> *mut c_char {
+    realpath_logic(source_path, output_path)
+        .unwrap_or_bypass_with(|_| FN_REALPATH_DARWIN_EXTSN(source_path, output_path))
+}
+
 // this requires newer libc which we don't link with to support old libc..
 // leaving this in code so we can enable it when libc is updated.
 // #[cfg(target_os = "linux")]
@@ -1012,6 +1057,22 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         fdatasync_detour,
         FnFdatasync,
         FN_FDATASYNC
+    );
+
+    replace!(
+        hook_manager,
+        "realpath",
+        realpath_detour,
+        FnRealpath,
+        FN_REALPATH
+    );
+
+    replace!(
+        hook_manager,
+        "realpath$DARWIN_EXTSN",
+        realpath_darwin_extsn_detour,
+        FnRealpath_darwin_extsn,
+        FN_REALPATH_DARWIN_EXTSN
     );
 
     // this requires newer libc which we don't link with to support old libc..
