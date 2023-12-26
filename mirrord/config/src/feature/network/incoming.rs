@@ -130,9 +130,6 @@ impl MirrordConfig for IncomingFileConfig {
                     .unwrap_or_default(),
                 ignore_localhost: advanced
                     .ignore_localhost
-                    .layer(|layer| Unstable::new("IncomingFileConfig", "ignore_localhost", layer))
-                    .source_value(context)
-                    .transpose()?
                     .unwrap_or_default(),
                 listen_ports: advanced
                     .listen_ports
