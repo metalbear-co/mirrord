@@ -110,7 +110,7 @@ pub struct OutgoingConfig {
     ///
     /// Defaults to `false`.
     // Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702
-    #[config(unstable, default = false)]
+    #[config(default = false)]
     pub ignore_localhost: bool,
 
     /// #### feature.network.outgoing.filter {#feature.network.outgoing.filter}
