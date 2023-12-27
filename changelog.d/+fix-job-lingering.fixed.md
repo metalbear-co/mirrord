@@ -1,0 +1,1 @@
+Fix job lingering by exiting always successfuly on agent
