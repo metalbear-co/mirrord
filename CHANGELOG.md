@@ -8,6 +8,21 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.80.0](https://github.com/metalbear-co/mirrord/tree/3.80.0) - 2023-12-27
+
+
+### Changed
+
+- Remove unstable from ignore localhost
+
+
+### Fixed
+
+- Allow license key that starts with -
+  [#2140](https://github.com/metalbear-co/mirrord/issues/2140)
+- Fix job lingering by exiting always successfuly on agent
+
+
 ## [3.79.2](https://github.com/metalbear-co/mirrord/tree/3.79.2) - 2023-12-24
 
 
