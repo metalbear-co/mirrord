@@ -26,6 +26,7 @@ libc.workspace = true
 nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+# can't change to upstream since it brings openssl dependency.
 frida-gum = { git = "https://github.com/metalbear-co/frida-rust", version = "0.13", features = ["auto-download"], branch="capstone_remove" }
 
 serde.workspace = true
