@@ -26,8 +26,7 @@ libc.workspace = true
 nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-# change to upstream once https://github.com/frida/frida-rust/pull/99 is merged
-frida-gum = { git = "https://github.com/metalbear-co/frida-rust", version = "0.13", features = ["auto-download"], branch="capstone_remove" }
+frida-gum = "0.13"
 
 serde.workspace = true
 serde_json.workspace = true
