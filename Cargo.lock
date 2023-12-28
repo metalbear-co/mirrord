@@ -6214,6 +6214,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "mirrord",
+ "mirrord-operator",
  "rand",
  "regex",
  "reqwest",

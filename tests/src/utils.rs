@@ -68,7 +68,7 @@ pub async fn watch_resource_exists<K: Debug + Clone + DeserializeOwned>(api: &Ap
 }
 
 /// Creates a random string of 7 alphanumeric lowercase characters.
-fn random_string() -> String {
+pub(crate) fn random_string() -> String {
     rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(7)
@@ -156,6 +156,11 @@ impl TestProcess {
     pub async fn wait_assert_success(&mut self) {
         let output = self.wait().await;
         assert!(output.success());
+    }
+
+    pub async fn wait_assert_fail(&mut self) {
+        let output = self.wait().await;
+        assert!(!output.success());
     }
 
     pub async fn assert_stdout_contains(&self, string: &str) {
@@ -537,7 +542,7 @@ pub async fn kube_client() -> Client {
 /// RAII-style guard for deleting kube resources after tests.
 /// This guard deletes the kube resource when dropped.
 /// This guard can be configured not to delete the resource if dropped during a panic.
-struct ResourceGuard {
+pub(crate) struct ResourceGuard {
     /// Whether the resource should be deleted if the test has panicked.
     delete_on_fail: bool,
     /// This future will delete the resource once awaited.
