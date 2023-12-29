@@ -1,0 +1,1 @@
+Fix opendir not being hooked on macOS arm64
