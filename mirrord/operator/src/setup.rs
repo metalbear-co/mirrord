@@ -231,9 +231,9 @@ impl OperatorDeployment {
             },
             EnvVar {
                 name: "OPERATOR_SERVICE_NAME".to_owned(),
-                value: Some(OPERATOR_SERVICE_NAME.to_owned())
-                value_from:None
-            }
+                value: Some(OPERATOR_SERVICE_NAME.to_owned()),
+                value_from: None,
+            },
         ];
 
         let mut volumes = Vec::new();
