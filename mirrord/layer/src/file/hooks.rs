@@ -10,12 +10,10 @@ use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
 use errno::{set_errno, Errno};
 use libc::{
     self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
-    AT_FDCWD, DIR, EINVAL,
+    AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY,
 };
 #[cfg(target_os = "linux")]
 use libc::{dirent64, stat64, EBADF, ENOENT, ENOTDIR};
-#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-use libc::{O_DIRECTORY, O_RDONLY};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
     FsMetadataInternal, MetadataInternal, ReadFileResponse, WriteFileResponse,
@@ -28,13 +26,12 @@ use tracing::trace;
 use tracing::{error, info, warn};
 
 use super::{open_dirs, ops::*, OpenOptionsInternalExt};
-#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-use crate::close_layer_fd;
 #[cfg(target_os = "macos")]
 use crate::detour::Bypass;
 #[cfg(target_os = "linux")]
 use crate::error::HookError::ResponseError;
 use crate::{
+    close_layer_fd,
     common::CheckedInto,
     detour::{Detour, DetourGuard},
     error::HookError,
@@ -147,7 +144,6 @@ pub(super) unsafe extern "C" fn open_nocancel_detour(
 ///
 /// Opens the directory with `read` permission using the [`open_logic`] flow, then calls
 /// [`fdopendir`] to convert the [`RawFd`] into a `*DIR` stream (which we treat as `usize`).
-#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> usize {
     open_logic(raw_filename, O_RDONLY, O_DIRECTORY)
@@ -159,7 +155,39 @@ pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> u
                 Detour::Error(fail)
             }
         })
-        .unwrap_or_bypass_with(|_| FN_OPENDIR(raw_filename))
+        .unwrap_or_bypass_with(|_| opendir_bypass(raw_filename))
+}
+
+/// see below, to have nice code we also implement it for other archs.
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+unsafe fn opendir_bypass(raw_filename: *const c_char) -> usize {
+    FN_OPENDIR(raw_filename)
+}
+
+/// on macOS aarch, for some reason when hooking it it crashes with illegal instruction on bypass
+/// so we implement our own bypass
+/// inspired by https://github.com/apple-oss-distributions/Libc/blob/c5a3293354e22262702a3add5b2dfc9bb0b93b85/gen/FreeBSD/opendir.c#L118
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+unsafe fn opendir_bypass(raw_filename: *const c_char) -> usize {
+    use libc::{O_CLOEXEC, O_NONBLOCK};
+    let fd = libc::open(
+        raw_filename,
+        O_RDONLY | O_DIRECTORY | O_NONBLOCK | O_CLOEXEC,
+        0,
+    );
+    if fd == -1 {
+        // null
+        return 0;
+    }
+
+    let dir = libc::fdopendir(fd);
+    if dir.is_null() {
+        let errno = errno::errno();
+        libc::close(fd);
+        set_errno(errno);
+        return 0;
+    }
+    dir as usize
 }
 
 #[hook_guard_fn]
@@ -1171,7 +1199,6 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         // and we don't compile to arm64e yet, so it breaks.
         // but it seems we'll be able to compile to arm64e soon.
         // https://github.com/rust-lang/rust/pull/115526
-        #[cfg(target_os = "linux")]
         replace!(
             hook_manager,
             "opendir",
