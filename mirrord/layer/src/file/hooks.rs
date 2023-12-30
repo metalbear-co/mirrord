@@ -187,7 +187,7 @@ unsafe fn opendir_bypass(raw_filename: *const c_char) -> usize {
         set_errno(errno);
         return 0;
     }
-    return dir as usize;
+    dir as usize
 }
 
 #[hook_guard_fn]
