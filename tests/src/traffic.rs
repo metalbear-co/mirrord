@@ -529,4 +529,43 @@ mod traffic {
         // and get the same data back. So if it exits with success everything worked.
         assert!(res.success());
     }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_outgoing_traffic_many_requests_enabled(#[future] service: KubeService) {
+        let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
+        ];
+        let mut process =
+            run_exec_with_target(node_command, &service.target, None, None, None).await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_no_error_in_stderr().await;
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_outgoing_traffic_many_requests_disabled(#[future] service: KubeService) {
+        let service = service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
+        ];
+        let mirrord_args = vec!["--no-outgoing"];
+        let mut process = run_exec_with_target(
+            node_command,
+            &service.target,
+            None,
+            Some(mirrord_args),
+            None,
+        )
+        .await;
+
+        let res = process.child.wait().await.unwrap();
+        assert!(res.success());
+        process.assert_no_error_in_stderr().await;
+    }
 }
