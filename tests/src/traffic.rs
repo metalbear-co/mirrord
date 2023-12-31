@@ -12,9 +12,10 @@ mod traffic {
     use tokio::{fs::File, io::AsyncWriteExt};
 
     use crate::utils::{
-        config_dir, hostname_service, kube_client, run_exec, run_exec_with_target, service,
+        config_dir, hostname_service, kube_client, run_exec_with_target, service,
         udp_logger_service, KubeService, CONTAINER_NAME,
     };
+    
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
@@ -538,7 +539,7 @@ mod traffic {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
         ];
-        let mut process = run_exec(node_command, &service.target, None, None, None).await;
+        let mut process = run_exec_with_target(node_command, &service.target, None, None, None).await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -554,7 +555,7 @@ mod traffic {
             "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
         ];
         let mirrord_args = vec!["--no-outgoing"];
-        let mut process = run_exec(
+        let mut process = run_exec_with_target(
             node_command,
             &service.target,
             None,
