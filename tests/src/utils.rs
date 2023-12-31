@@ -90,9 +90,9 @@ pub enum Application {
     PythonFastApiHTTP,
     NodeHTTP,
     NodeHTTP2,
-    Go18HTTP,
     Go19HTTP,
     Go20HTTP,
+    Go21HTTP,
     CurlToKubeApi,
     PythonCloseSocket,
     PythonCloseSocketKeepConnection,
@@ -320,9 +320,9 @@ impl Application {
             Application::NodeHTTP2 => {
                 vec!["node", "node-e2e/http2/test_http2_traffic_steal.mjs"]
             }
-            Application::Go18HTTP => vec!["go-e2e/18.go_test_app"],
             Application::Go19HTTP => vec!["go-e2e/19.go_test_app"],
             Application::Go20HTTP => vec!["go-e2e/20.go_test_app"],
+            Application::Go21HTTP => vec!["go-e2e/21.go_test_app"],
             Application::CurlToKubeApi => {
                 vec!["curl", "https://kubernetes/api", "--insecure"]
             }

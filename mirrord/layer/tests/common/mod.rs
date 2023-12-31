@@ -619,20 +619,20 @@ pub enum Application {
     Go20Dir,
     Go19DirBypass,
     Go20DirBypass,
+    Go21Issue834,
     Go20Issue834,
     Go19Issue834,
-    Go18Issue834,
     BashShebang,
-    Go18Read,
     Go19Read,
     Go20Read,
-    Go18Write,
+    Go21Read,
     Go19Write,
     Go20Write,
-    Go18LSeek,
+    Go21Write,
     Go19LSeek,
     Go20LSeek,
-    Go18FAccessAt,
+    Go21LSeek,
+    Go21FAccessAt,
     Go19FAccessAt,
     Go20FAccessAt,
     Go19SelfOpen,
@@ -710,20 +710,20 @@ impl Application {
             Application::Go20Dir => String::from("tests/apps/dir_go/20.go_test_app"),
             Application::Go20Issue834 => String::from("tests/apps/issue834/20.go_test_app"),
             Application::Go19Issue834 => String::from("tests/apps/issue834/19.go_test_app"),
-            Application::Go18Issue834 => String::from("tests/apps/issue834/18.go_test_app"),
+            Application::Go21Issue834 => String::from("tests/apps/issue834/21.go_test_app"),
             Application::Go19DirBypass => String::from("tests/apps/dir_go_bypass/19.go_test_app"),
             Application::Go20DirBypass => String::from("tests/apps/dir_go_bypass/20.go_test_app"),
             Application::BashShebang => String::from("tests/apps/nothing.sh"),
-            Application::Go18Read => String::from("tests/apps/read_go/18.go_test_app"),
+            Application::Go21Read => String::from("tests/apps/read_go/21.go_test_app"),
             Application::Go19Read => String::from("tests/apps/read_go/19.go_test_app"),
             Application::Go20Read => String::from("tests/apps/read_go/20.go_test_app"),
-            Application::Go18Write => String::from("tests/apps/write_go/18.go_test_app"),
+            Application::Go21Write => String::from("tests/apps/write_go/21.go_test_app"),
             Application::Go19Write => String::from("tests/apps/write_go/19.go_test_app"),
             Application::Go20Write => String::from("tests/apps/write_go/20.go_test_app"),
-            Application::Go18LSeek => String::from("tests/apps/lseek_go/18.go_test_app"),
+            Application::Go21LSeek => String::from("tests/apps/lseek_go/21.go_test_app"),
             Application::Go19LSeek => String::from("tests/apps/lseek_go/19.go_test_app"),
             Application::Go20LSeek => String::from("tests/apps/lseek_go/20.go_test_app"),
-            Application::Go18FAccessAt => String::from("tests/apps/faccessat_go/18.go_test_app"),
+            Application::Go21FAccessAt => String::from("tests/apps/faccessat_go/21.go_test_app"),
             Application::Go19FAccessAt => String::from("tests/apps/faccessat_go/19.go_test_app"),
             Application::Go20FAccessAt => String::from("tests/apps/faccessat_go/20.go_test_app"),
             Application::Go19SelfOpen => String::from("tests/apps/self_open/19.go_test_app"),
@@ -851,21 +851,21 @@ impl Application {
             | Application::Go20Dir
             | Application::Go19FileOps
             | Application::Go20FileOps
+            | Application::Go21Issue834
             | Application::Go20Issue834
             | Application::Go19Issue834
-            | Application::Go18Issue834
             | Application::Go20Read
             | Application::Go19Read
-            | Application::Go18Read
+            | Application::Go21Read
             | Application::Go20Write
             | Application::Go19Write
-            | Application::Go18Write
+            | Application::Go21Write
             | Application::Go20LSeek
             | Application::Go19LSeek
-            | Application::Go18LSeek
+            | Application::Go21LSeek
             | Application::Go20FAccessAt
             | Application::Go19FAccessAt
-            | Application::Go18FAccessAt
+            | Application::Go21FAccessAt
             | Application::Fork
             | Application::Realpath
             | Application::RustFileOps
@@ -925,19 +925,19 @@ impl Application {
             | Application::Realpath
             | Application::Go20Issue834
             | Application::Go19Issue834
-            | Application::Go18Issue834
+            | Application::Go21Issue834
             | Application::Go20Read
             | Application::Go19Read
-            | Application::Go18Read
+            | Application::Go21Read
             | Application::Go20Write
             | Application::Go19Write
-            | Application::Go18Write
+            | Application::Go21Write
             | Application::Go20LSeek
             | Application::Go19LSeek
-            | Application::Go18LSeek
+            | Application::Go21LSeek
             | Application::Go20FAccessAt
             | Application::Go19FAccessAt
-            | Application::Go18FAccessAt
+            | Application::Go21FAccessAt
             | Application::Go19DirBypass
             | Application::Go20DirBypass
             | Application::Go19SelfOpen
