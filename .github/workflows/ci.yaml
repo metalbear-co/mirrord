@@ -253,20 +253,12 @@ jobs:
           node-version: 14
       - run: npm install express # For http mirroring test with node.
       - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
-      - run: pip3 install flask fastapi uvicorn[standard] # For http mirroring test with Flask.
-      - uses: actions/setup-go@v4
-        with:
-          go-version: "1.18"
-          cache-dependency-path: tests/go-e2e/go.sum
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 18
+      - run: pip3 install flask fastapi uvicorn[standard] # For http mirroring test with Flask.      
       # don't use "cache" for other Gos since it will try to overwrite and have bad results.
       - uses: actions/setup-go@v4
         with:
           go-version: "1.19"
-          cache: false
+          cache-dependency-path: tests/go-e2e/go.sum
       - run: |
           go version
       - run: | # Build Go test apps.
@@ -279,6 +271,14 @@ jobs:
           go version
       - run: | # Build Go test apps.
           ./scripts/build_go_apps.sh 20
+      - uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+          cache: false
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 21 
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
@@ -358,19 +358,11 @@ jobs:
           rustc issue2058.rs --out-dir target
       - uses: actions/setup-go@v4
         with:
-          go-version: "1.18"
+          go-version: "1.19"
           cache-dependency-path: tests/go-e2e/go.sum
       - run: |
           go version
       # don't use "cache" for other Gos since it will try to overwrite and have bad results.
-      - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 18
-      - uses: actions/setup-go@v4
-        with:
-          go-version: "1.19"
-          cache: false
-      - run: |
-          go version
       - run: | # Build Go test apps.
           ./scripts/build_go_apps.sh 19
       - uses: actions/setup-go@v4
@@ -381,6 +373,14 @@ jobs:
           go version
       - run: | # Build Go test apps.
           ./scripts/build_go_apps.sh 20
+      - uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+          cache: false
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 21
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build

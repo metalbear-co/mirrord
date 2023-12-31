@@ -571,7 +571,7 @@ async fn go_dir_bypass(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn read_go(
-    #[values(Application::Go18Read, Application::Go19Read, Application::Go20Read)]
+    #[values(Application::Go19Read, Application::Go20Read, Application::Go21Read)]
     application: Application,
     dylib_path: &PathBuf,
 ) {
@@ -611,7 +611,7 @@ async fn read_go(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn write_go(
-    #[values(Application::Go18Write, Application::Go19Write, Application::Go20Write)]
+    #[values(Application::Go19Write, Application::Go20Write, Application::Go21Write)]
     application: Application,
     dylib_path: &PathBuf,
 ) {
@@ -638,7 +638,7 @@ async fn write_go(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn lseek_go(
-    #[values(Application::Go18LSeek, Application::Go19LSeek, Application::Go20LSeek)]
+    #[values(Application::Go19LSeek, Application::Go20LSeek, Application::Go21LSeek)]
     application: Application,
     dylib_path: &PathBuf,
 ) {
@@ -668,9 +668,9 @@ async fn lseek_go(
 #[timeout(Duration::from_secs(10))]
 async fn faccessat_go(
     #[values(
-        Application::Go18FAccessAt,
         Application::Go19FAccessAt,
-        Application::Go20FAccessAt
+        Application::Go20FAccessAt,
+        Application::Go21FAccessAt
     )]
     application: Application,
     dylib_path: &PathBuf,

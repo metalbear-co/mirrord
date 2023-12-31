@@ -16,9 +16,9 @@ pub use common::*;
 #[timeout(Duration::from_secs(60))]
 async fn test_issue834(
     #[values(
-        Application::Go18Issue834,
         Application::Go19Issue834,
-        Application::Go20Issue834
+        Application::Go20Issue834,
+        Application::Go21Issue834
     )]
     application: Application,
     dylib_path: &PathBuf,
