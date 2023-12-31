@@ -12,7 +12,7 @@ mod traffic {
     use tokio::{fs::File, io::AsyncWriteExt};
 
     use crate::utils::{
-        config_dir, hostname_service, kube_client, run_exec_with_target, service,
+        config_dir, hostname_service, kube_client, run_exec, run_exec_with_target, service,
         udp_logger_service, KubeService, CONTAINER_NAME,
     };
 
