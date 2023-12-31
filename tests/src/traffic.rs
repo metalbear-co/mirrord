@@ -543,7 +543,7 @@ mod traffic {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
+        process.assert_no_error_in_stderr();
     }
 
     #[rstest]
@@ -566,6 +566,6 @@ mod traffic {
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
-        process.assert_stderr();
+        process.assert_no_error_in_stderr();
     }
 }
