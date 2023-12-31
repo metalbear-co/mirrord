@@ -103,14 +103,14 @@ pub enum FileOps {
     #[cfg(target_os = "linux")]
     Python,
     #[cfg(target_os = "linux")]
-    Rust,    
+    Rust,
     GoDir19,
     GoDir20,
     GoDir21,
 }
 
 #[derive(Debug)]
-pub enum EnvApp {    
+pub enum EnvApp {
     Go19,
     Go20,
     Go21,
@@ -367,9 +367,9 @@ impl FileOps {
             }
             #[cfg(target_os = "linux")]
             FileOps::Rust => vec!["../target/debug/rust-e2e-fileops"],
-            FileOps::GoDir18 => vec!["go-e2e-dir/18.go_test_app"],
             FileOps::GoDir19 => vec!["go-e2e-dir/19.go_test_app"],
             FileOps::GoDir20 => vec!["go-e2e-dir/20.go_test_app"],
+            FileOps::GoDir21 => vec!["go-e2e-dir/21.go_test_app"],
         }
     }
 
@@ -383,7 +383,7 @@ impl FileOps {
 
 impl EnvApp {
     pub fn command(&self) -> Vec<&str> {
-        match self {            
+        match self {
             Self::Go19 => vec!["go-e2e-env/19.go_test_app"],
             Self::Go20 => vec!["go-e2e-env/20.go_test_app"],
             Self::Go21 => vec!["go-e2e-env/21.go_test_app"],
