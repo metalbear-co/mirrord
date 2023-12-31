@@ -103,17 +103,17 @@ pub enum FileOps {
     #[cfg(target_os = "linux")]
     Python,
     #[cfg(target_os = "linux")]
-    Rust,
-    GoDir18,
+    Rust,    
     GoDir19,
     GoDir20,
+    GoDir21,
 }
 
 #[derive(Debug)]
-pub enum EnvApp {
-    Go18,
+pub enum EnvApp {    
     Go19,
     Go20,
+    Go21,
     Bash,
     BashInclude,
     BashExclude,
@@ -383,10 +383,10 @@ impl FileOps {
 
 impl EnvApp {
     pub fn command(&self) -> Vec<&str> {
-        match self {
-            Self::Go18 => vec!["go-e2e-env/18.go_test_app"],
+        match self {            
             Self::Go19 => vec!["go-e2e-env/19.go_test_app"],
             Self::Go20 => vec!["go-e2e-env/20.go_test_app"],
+            Self::Go21 => vec!["go-e2e-env/21.go_test_app"],
             Self::Bash => vec!["bash", "bash-e2e/env.sh"],
             Self::BashInclude => vec!["bash", "bash-e2e/env.sh", "include"],
             Self::BashExclude => vec!["bash", "bash-e2e/env.sh", "exclude"],
@@ -405,7 +405,7 @@ impl EnvApp {
         match self {
             Self::BashInclude | Self::NodeInclude => Some(vec!["-s", "MIRRORD_FAKE_VAR_FIRST"]),
             Self::BashExclude | Self::NodeExclude => Some(vec!["-x", "MIRRORD_FAKE_VAR_FIRST"]),
-            Self::Go18 | Self::Go19 | Self::Go20 | Self::Bash => None,
+            Self::Go19 | Self::Go20 | Self::Go21 | Self::Bash => None,
         }
     }
 }
