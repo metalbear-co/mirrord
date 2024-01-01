@@ -1,1 +1,0 @@
-Changed setup to not create self signed, letting operator fallback to it automatically on runtime
