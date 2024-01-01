@@ -8,6 +8,28 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.81.0](https://github.com/metalbear-co/mirrord/tree/3.81.0) - 2024-01-01
+
+
+### Changed
+
+- Changed setup to not create self signed, letting operator fallback to it
+  automatically on runtime
+- Update dependencies
+
+
+### Fixed
+
+- Fix opendir not being hooked on macOS arm64
+
+
+### Internal
+
+- Deprecate go 18, enable go 21
+- Fix some test labels, separate tests by flags, update contributing guide
+- Re-add outgoing traffic with many requests tests
+
+
 ## [3.80.0](https://github.com/metalbear-co/mirrord/tree/3.80.0) - 2023-12-27
 
 
