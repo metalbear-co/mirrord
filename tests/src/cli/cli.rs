@@ -22,7 +22,7 @@ mod cli {
     /// ```
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(30))]    
+    #[timeout(Duration::from_secs(30))]
     pub async fn path_ide_verify_config(config_dir: &std::path::PathBuf) {
         let mut config_path = config_dir.clone();
         config_path.push("default_ide.json");
@@ -65,7 +65,7 @@ mod cli {
     /// ```
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(30))]    
+    #[timeout(Duration::from_secs(30))]
     pub async fn no_path_verify_config(config_dir: &std::path::PathBuf) {
         let mut config_path = config_dir.clone();
         config_path.push("default_ide.json");
@@ -84,7 +84,7 @@ mod cli {
     /// ```
     #[rstest]
     #[tokio::test]
-    #[timeout(Duration::from_secs(30))]    
+    #[timeout(Duration::from_secs(30))]
     pub async fn no_path_no_ide_verify_config(config_dir: &std::path::PathBuf) {
         let mut config_path = config_dir.clone();
         config_path.push("default_ide.json");
@@ -95,7 +95,7 @@ mod cli {
     }
 
     /// Tests for the `mirrord ls` command
-    #[rstest]    
+    #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn mirrord_ls(#[future] service: KubeService) {
         let service = service.await;
