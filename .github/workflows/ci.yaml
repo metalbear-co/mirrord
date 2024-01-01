@@ -446,16 +446,26 @@ jobs:
         with:
           name: test
           path: /tmp
-      - run: minikube image load /tmp/test.tar
-      # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
-      - name: Run targetless E2E test.
-        run: cargo test --target=x86_64-unknown-linux-gnu -p tests targetless --no-default-features --features job
-      - name: Run all E2E test - docker
+      - run: minikube image load /tmp/test.tar      
+      # run the cli tests only once, i.e. docker runtime only
+      - name: Run cli E2E tests
         if: ${{ matrix.container-runtime == 'docker' }}
-        run: cargo test --target=x86_64-unknown-linux-gnu -p tests --features docker -- --test-threads=6
-      - name: Run all E2E test - containerd
+        run: |
+          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features cli -- --test-threads=6      
+      # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
+      - name: Run targetless E2E test
+        run: |
+          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features targetless -- --test-threads=6             
+      - name: Run all E2E tests - docker
+        if: ${{ matrix.container-runtime == 'docker' }}
+        run: |
+          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features docker,job -- --test-threads=6
+          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features docker,ephemeral -- --test-threads=6
+      - name: Run all E2E tests - containerd
         if: ${{ matrix.container-runtime == 'containerd' }}
-        run: cargo test --target=x86_64-unknown-linux-gnu -p tests -- --test-threads=6
+        run: |
+          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features job -- --test-threads=6
+          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features ephemeral -- --test-threads=6
       - name: Collect logs
         if: ${{ failure() }}
         run: |
