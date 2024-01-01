@@ -197,9 +197,14 @@ mod operator {
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
 
+        let target =
+            get_instance_name::<Deployment>(client.clone(), &service.name, &service.namespace)
+                .await
+                .unwrap();
+
         let mut client_b = application
             .run(
-                &format!("deployment/{service.name}"),
+                &format!("deployment/{target}"),
                 Some(&service.namespace),
                 Some(flags.clone()),
                 None,

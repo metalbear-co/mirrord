@@ -32,9 +32,9 @@ http-body-util.workspace = true
 const_format = "0.2"
 
 [features]
-default = ["ephemeral", "job", "mirror-cli"]
+default = ["ephemeral", "job", "cli"]
 ephemeral = []
 job = []
 operator = []
 docker = []
-mirrord-cli = []
+cli = []
