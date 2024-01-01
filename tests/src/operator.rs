@@ -167,7 +167,6 @@ mod operator {
     }
 
     #[ignore]
-    #[cfg_attr(not(feature = "operator"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn two_clients_steal_same_target_pod_deployment(
