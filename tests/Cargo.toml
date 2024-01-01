@@ -32,9 +32,10 @@ http-body-util.workspace = true
 const_format = "0.2"
 
 [features]
-default = ["ephemeral", "job", "cli"]
+default = ["ephemeral", "job", "cli", "targetless"]
 ephemeral = []
 job = []
 operator = []
 docker = []
 cli = []
+targetless = []
