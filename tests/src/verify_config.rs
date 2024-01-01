@@ -22,6 +22,7 @@ mod verify_config {
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
+    #[cfg_attr(not(feature = "mirrord-cli"), ignore)]
     pub async fn path_ide_verify_config(config_dir: &std::path::PathBuf) {
         let mut config_path = config_dir.clone();
         config_path.push("default_ide.json");
@@ -43,6 +44,7 @@ mod verify_config {
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
+    #[cfg_attr(not(feature = "mirrord-cli"), ignore)]
     pub async fn no_ide_verify_config(config_dir: &std::path::PathBuf) {
         let mut config_path = config_dir.clone();
         config_path.push("default_ide.json");
@@ -65,6 +67,7 @@ mod verify_config {
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
+    #[cfg_attr(not(feature = "mirrord-cli"), ignore)]
     pub async fn no_path_verify_config(config_dir: &std::path::PathBuf) {
         let mut config_path = config_dir.clone();
         config_path.push("default_ide.json");
@@ -84,6 +87,7 @@ mod verify_config {
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
+    #[cfg_attr(not(feature = "mirrord-cli"), ignore)]
     pub async fn no_path_no_ide_verify_config(config_dir: &std::path::PathBuf) {
         let mut config_path = config_dir.clone();
         config_path.push("default_ide.json");

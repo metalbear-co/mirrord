@@ -532,6 +532,7 @@ mod traffic {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     pub async fn test_outgoing_traffic_many_requests_enabled(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec![
@@ -548,6 +549,7 @@ mod traffic {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     pub async fn test_outgoing_traffic_many_requests_disabled(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec![

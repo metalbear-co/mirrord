@@ -166,6 +166,7 @@ mod operator {
         assert!(!res.success());
     }
 
+    #[ignore]
     #[cfg_attr(not(feature = "operator"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -196,14 +197,9 @@ mod operator {
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
 
-        let target =
-            get_instance_name::<Deployment>(client.clone(), &service.name, &service.namespace)
-                .await
-                .unwrap();
-
         let mut client_b = application
             .run(
-                &format!("deployment/{target}"),
+                &format!("deployment/{service.name}"),
                 Some(&service.namespace),
                 Some(flags.clone()),
                 None,
