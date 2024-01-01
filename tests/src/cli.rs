@@ -1,1 +1,1 @@
-mod cli;
+mod sanity;
