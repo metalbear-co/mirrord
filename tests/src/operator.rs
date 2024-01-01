@@ -168,6 +168,8 @@ mod operator {
         assert!(!res.success());
     }
 
+    /// with operator installed steal works on pod/*/container/* and deployment/*
+    /// ignored, till bug is fixed upstream
     #[ignore]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
