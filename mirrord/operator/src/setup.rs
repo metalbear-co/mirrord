@@ -32,10 +32,6 @@ static OPERATOR_CLUSTER_USER_ROLE_NAME: &str = "mirrord-operator-user";
 static OPERATOR_LICENSE_SECRET_NAME: &str = "mirrord-operator-license";
 static OPERATOR_LICENSE_SECRET_FILE_NAME: &str = "license.pem";
 static OPERATOR_LICENSE_SECRET_VOLUME_NAME: &str = "license-volume";
-static OPERATOR_TLS_SECRET_NAME: &str = "mirrord-operator-tls";
-static OPERATOR_TLS_VOLUME_NAME: &str = "tls-volume";
-static OPERATOR_TLS_KEY_FILE_NAME: &str = "tls.key";
-static OPERATOR_TLS_CERT_FILE_NAME: &str = "tls.pem";
 static OPERATOR_SERVICE_ACCOUNT_NAME: &str = "mirrord-operator";
 static OPERATOR_SERVICE_NAME: &str = "mirrord-operator";
 
@@ -98,7 +94,6 @@ pub struct Operator {
     service: OperatorService,
     service_account: OperatorServiceAccount,
     user_cluster_role: OperatorClusterUserRole,
-    tls_secret: OperatorTlsSecret,
 }
 
 impl Operator {
@@ -118,8 +113,6 @@ impl Operator {
 
         let service_account = OperatorServiceAccount::new(&namespace);
 
-        let tls_secret = OperatorTlsSecret::new(&namespace);
-
         let role = OperatorRole::new();
         let role_binding = OperatorRoleBinding::new(&role, &service_account);
         let user_cluster_role = OperatorClusterUserRole::new();
@@ -129,7 +122,6 @@ impl Operator {
             &service_account,
             license_secret.as_ref(),
             license_key,
-            &tls_secret,
             image,
         );
 
@@ -147,7 +139,6 @@ impl Operator {
             service,
             service_account,
             user_cluster_role,
-            tls_secret,
         }
     }
 }
@@ -178,9 +169,6 @@ impl OperatorSetup for Operator {
 
         writer.write_all(b"---\n")?;
         self.service.to_writer(&mut writer)?;
-
-        writer.write_all(b"---\n")?;
-        self.tls_secret.to_writer(&mut writer)?;
 
         writer.write_all(b"---\n")?;
         self.api_service.to_writer(&mut writer)?;
@@ -223,7 +211,6 @@ impl OperatorDeployment {
         sa: &OperatorServiceAccount,
         license_secret: Option<&OperatorLicenseSecret>,
         license_key: Option<String>,
-        tls_secret: &OperatorTlsSecret,
         image: String,
     ) -> Self {
         let mut envs = vec![
@@ -238,31 +225,20 @@ impl OperatorDeployment {
                 value_from: None,
             },
             EnvVar {
-                name: "OPERATOR_TLS_CERT_PATH".to_owned(),
-                value: Some(format!("/tls/{OPERATOR_TLS_CERT_FILE_NAME}")),
+                name: "OPERATOR_NAMESPACE".to_owned(),
+                value: Some(namespace.name().to_owned()),
                 value_from: None,
             },
             EnvVar {
-                name: "OPERATOR_TLS_KEY_PATH".to_owned(),
-                value: Some(format!("/tls/{OPERATOR_TLS_KEY_FILE_NAME}")),
+                name: "OPERATOR_SERVICE_NAME".to_owned(),
+                value: Some(OPERATOR_SERVICE_NAME.to_owned()),
                 value_from: None,
             },
         ];
 
-        let mut volumes = vec![Volume {
-            name: OPERATOR_TLS_VOLUME_NAME.to_owned(),
-            secret: Some(SecretVolumeSource {
-                secret_name: Some(tls_secret.name().to_owned()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        }];
+        let mut volumes = Vec::new();
 
-        let mut volume_mounts = vec![VolumeMount {
-            name: OPERATOR_TLS_VOLUME_NAME.to_owned(),
-            mount_path: "/tls".to_owned(),
-            ..Default::default()
-        }];
+        let mut volume_mounts = Vec::new();
 
         if let Some(license_secret) = license_secret {
             envs.push(EnvVar {
@@ -563,48 +539,6 @@ impl OperatorService {
 }
 
 #[derive(Debug)]
-pub struct OperatorTlsSecret(Secret);
-
-impl OperatorTlsSecret {
-    pub fn new(namespace: &OperatorNamespace) -> Self {
-        let cert = rcgen::generate_simple_self_signed(vec![
-            OPERATOR_SERVICE_NAME.to_owned(),
-            format!("{OPERATOR_SERVICE_NAME}.svc.cluster.local"),
-            format!(
-                "{OPERATOR_SERVICE_NAME}.{}.svc.cluster.local",
-                namespace.name()
-            ),
-        ])
-        .expect("unable to create self signed certificate");
-
-        let secret = Secret {
-            metadata: ObjectMeta {
-                name: Some(OPERATOR_TLS_SECRET_NAME.to_owned()),
-                namespace: Some(namespace.name().to_owned()),
-                ..Default::default()
-            },
-            string_data: Some(BTreeMap::from([
-                (
-                    OPERATOR_TLS_KEY_FILE_NAME.to_owned(),
-                    cert.get_key_pair().serialize_pem(),
-                ),
-                (
-                    OPERATOR_TLS_CERT_FILE_NAME.to_owned(),
-                    cert.serialize_pem().unwrap(),
-                ),
-            ])),
-            ..Default::default()
-        };
-
-        OperatorTlsSecret(secret)
-    }
-
-    fn name(&self) -> &str {
-        self.0.metadata.name.as_deref().unwrap_or_default()
-    }
-}
-
-#[derive(Debug)]
 pub struct OperatorApiService(APIService);
 
 impl OperatorApiService {
@@ -692,7 +626,6 @@ writer_impl![
     OperatorRoleBinding,
     OperatorLicenseSecret,
     OperatorService,
-    OperatorTlsSecret,
     OperatorApiService,
     OperatorClusterUserRole
 ];
