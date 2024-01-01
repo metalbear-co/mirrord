@@ -38,9 +38,8 @@ pub mod network;
 ///     "network": {
 ///       "incoming": {
 ///         "mode": "steal",
-///         "http_header_filter": {
-///           "filter": "host: api\..+",
-///           "ports": [80, 8080]
+///         "http_filter": {
+///           "header_filter": "host: api\..+"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,

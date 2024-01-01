@@ -126,9 +126,8 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///     "network": {
 ///       "incoming": {
 ///         "mode": "steal",
-///         "http_header_filter": {
-///           "filter": "host: api\..+",
-///           "ports": [80, 8080]
+///         "http_filter": {
+///           "header_filter": "host: api\..+"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
@@ -376,32 +375,7 @@ impl LayerConfig {
                 "Cannot use both HTTP header filter and path filter at the same time".to_string(),
             ))?
         }
-
-        if self
-            .feature
-            .network
-            .incoming
-            .http_header_filter
-            .filter
-            .is_some()
-            && (self
-                .feature
-                .network
-                .incoming
-                .http_filter
-                .path_filter
-                .is_some()
-                || self
-                    .feature
-                    .network
-                    .incoming
-                    .http_filter
-                    .header_filter
-                    .is_some())
-        {
-            Err(ConfigError::Conflict("Cannot use old http filter and new http filter at the same time. Use only `http_filter` instead of `http_header_filter`".to_string()))?
-        }
-
+        
         if self.target.path.is_none() && !context.ide {
             // In the IDE, a target may be selected after `mirrord verify-config` is run, so we
             // for this case we treat these as warnings. They'll become errors once mirrord proper
@@ -735,8 +709,7 @@ mod tests {
                     dns: Some(false),
                     incoming: Some(ToggleableConfig::Config(IncomingFileConfig::Advanced(
                         Box::new(IncomingAdvancedFileConfig {
-                            mode: Some(IncomingMode::Mirror),
-                            http_header_filter: None,
+                            mode: Some(IncomingMode::Mirror),                            
                             http_filter: None,
                             port_mapping: None,
                             ignore_localhost: None,
