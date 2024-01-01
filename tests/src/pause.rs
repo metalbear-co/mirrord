@@ -285,6 +285,7 @@ mod pause {
     /// 4. Verify the target pod is unpaused.
     /// pause ephemeral doesn't work on docker + systemd which is what we have in CI
     #[cfg(not(feature = "docker"))]
+    #[cfg_attr(not(feature = "ephemeral"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]

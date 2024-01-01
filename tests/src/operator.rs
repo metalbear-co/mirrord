@@ -82,6 +82,7 @@ mod operator {
         assert!(!stdout.is_empty());
     }
 
+    #[cfg_attr(not(feature = "operator"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
@@ -99,6 +100,7 @@ mod operator {
         check_install_result(stdout).await;
     }
 
+    #[cfg_attr(not(feature = "operator"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
