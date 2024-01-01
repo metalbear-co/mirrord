@@ -375,7 +375,7 @@ impl LayerConfig {
                 "Cannot use both HTTP header filter and path filter at the same time".to_string(),
             ))?
         }
-        
+
         if self.target.path.is_none() && !context.ide {
             // In the IDE, a target may be selected after `mirrord verify-config` is run, so we
             // for this case we treat these as warnings. They'll become errors once mirrord proper
@@ -709,7 +709,7 @@ mod tests {
                     dns: Some(false),
                     incoming: Some(ToggleableConfig::Config(IncomingFileConfig::Advanced(
                         Box::new(IncomingAdvancedFileConfig {
-                            mode: Some(IncomingMode::Mirror),                            
+                            mode: Some(IncomingMode::Mirror),
                             http_filter: None,
                             port_mapping: None,
                             ignore_localhost: None,

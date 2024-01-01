@@ -44,9 +44,7 @@ pub struct HttpFilterConfig {
     ///
     /// The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
     /// case-insensitive.
-    #[config(
-        env = "MIRRORD_HTTP_HEADER_FILTER",        
-    )]
+    #[config(env = "MIRRORD_HTTP_HEADER_FILTER")]
     pub header_filter: Option<String>,
 
     /// ##### feature.network.incoming.http_filter.path_filter {#feature-network-incoming-http-path-filter}
@@ -56,9 +54,7 @@ pub struct HttpFilterConfig {
     /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
     ///
     /// Case insensitive.
-    #[config(
-        env = "MIRRORD_HTTP_PATH_FILTER",        
-    )]
+    #[config(env = "MIRRORD_HTTP_PATH_FILTER")]
     pub path_filter: Option<String>,
 
     /// ##### feature.network.incoming.http_filter.ports {#feature-network-incoming-http_filter-ports}
@@ -96,10 +92,13 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
             .transpose()?
             .unwrap_or_default();
 
-        Ok(Self::Generated { header_filter, path_filter, ports })
+        Ok(Self::Generated {
+            header_filter,
+            path_filter,
+            ports,
+        })
     }
 }
-
 
 impl Default for PortList {
     fn default() -> Self {

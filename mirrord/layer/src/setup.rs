@@ -161,25 +161,25 @@ impl IncomingMode {
 
         let http_filter_config = &config.http_filter;
 
-        let ports = {            
-                http_filter_config
-                    .ports
-                    .as_slice()
-                    .iter()
-                    .copied()
-                    .collect()            
+        let ports = {
+            http_filter_config
+                .ports
+                .as_slice()
+                .iter()
+                .copied()
+                .collect()
         };
 
         let filter = match (
             &http_filter_config.path_filter,
-            &http_filter_config.header_filter,            
+            &http_filter_config.header_filter,
         ) {
             (Some(path), None) => StealHttpFilter::Filter(HttpFilter::Path(
                 Filter::new(path.into()).expect("invalid filter expression"),
             )),
             (None, Some(header)) => StealHttpFilter::Filter(HttpFilter::Header(
                 Filter::new(header.into()).expect("invalid filter expression"),
-            )),            
+            )),
             (None, None) => StealHttpFilter::None,
             _ => panic!("multiple HTTP filters specified"),
         };
@@ -195,7 +195,7 @@ impl IncomingMode {
 
         let steal_type = match &steal.filter {
             _ if !steal.ports.contains(&port) => StealType::All(port),
-            StealHttpFilter::None => StealType::All(port),            
+            StealHttpFilter::None => StealType::All(port),
             StealHttpFilter::Filter(filter) => StealType::FilteredHttpEx(port, filter.clone()),
         };
 

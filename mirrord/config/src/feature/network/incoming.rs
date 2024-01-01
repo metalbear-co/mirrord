@@ -94,8 +94,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
-                http_filter: HttpFilterFileConfig::default()
-                    .generate_config(context)?,
+                http_filter: HttpFilterFileConfig::default().generate_config(context)?,
                 on_concurrent_steal: FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
                     .layer(|layer| {
                         Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer)
@@ -110,7 +109,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .or(advanced.mode)
                     .source_value(context)
                     .transpose()?
-                    .unwrap_or_default(),                
+                    .unwrap_or_default(),
                 http_filter: advanced
                     .http_filter
                     .unwrap_or_default()
@@ -175,7 +174,7 @@ pub struct IncomingAdvancedFileConfig {
     ///
     /// See [`mode`](##mode (incoming)) for details.
     pub mode: Option<IncomingMode>,
-    
+
     /// ### HTTP Filter
     ///
     /// Sets up the HTTP traffic filter (currently, only useful when `incoming: steal`).
