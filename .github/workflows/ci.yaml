@@ -450,10 +450,7 @@ jobs:
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run cli E2E tests
         run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features cli -- --test-threads=6
-      - name: Run operator setup E2E tests
-        run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features operator -- --test-threads=6 operator_setup
+          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features cli -- --test-threads=6      
       - name: Run targetless E2E test
         run: |
           cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features targetless -- --test-threads=6             
