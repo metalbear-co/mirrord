@@ -453,7 +453,7 @@ jobs:
           cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features cli -- --test-threads=6
       - name: Run operator setup E2E tests
         run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features operator -- --test-threads=6 operator_*
+          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features operator -- --test-threads=6 operator_setup
       - name: Run targetless E2E test
         run: |
           cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features targetless -- --test-threads=6             
