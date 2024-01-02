@@ -430,6 +430,7 @@ impl OperatorRole {
                         "userextras/iam.gke.io/user-assertion".to_owned(),
                         "userextras/user-assertion.cloud.google.com".to_owned(),
                         "userextras/principalid".to_owned(),
+                        "userextras/oid".to_owned(),
                     ]),
                     verbs: vec!["impersonate".to_owned()],
                     ..Default::default()
