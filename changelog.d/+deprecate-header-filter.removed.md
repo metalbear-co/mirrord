@@ -1,1 +1,1 @@
-Deprecate http_header_filter
+Remove http_header_filter
