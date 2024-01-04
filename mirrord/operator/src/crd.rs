@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use self::label_selector::LabelSelector;
 
-mod label_selector;
+pub mod label_selector;
 
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 

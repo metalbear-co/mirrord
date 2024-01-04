@@ -719,6 +719,7 @@ pub async fn service(
             "labels": {
                 "app": &name,
                 TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+                "test-label-for-deployments": format!("deployment-{name}")
             }
         },
         "spec": {
@@ -731,7 +732,9 @@ pub async fn service(
             "template": {
                 "metadata": {
                     "labels": {
-                        "app": &name
+                        "app": &name,
+                        "test-label-for-pods": format!("pod-{name}"),
+                        format!("test-label-for-pods-{name}"): &name
                     }
                 },
                 "spec": {
