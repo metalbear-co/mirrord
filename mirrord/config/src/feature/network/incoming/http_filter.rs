@@ -10,51 +10,6 @@ use crate::{
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
-// TODO(alex) [high] 2023-05-18: Wrong example (incomplete) here and in the oficial docs.
-/// Filter configuration for the HTTP traffic stealer feature.
-///
-/// DEPRECATED - USE http_filter instead, unless using old operator/agent version (pre 3.46.0)
-/// Allows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic
-/// feature only captures HTTP requests that match the specified filter, forwarding unmatched
-/// requests to their original destinations.
-///
-/// Only does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is
-/// set as `"steal"`, ignored otherwise.
-///
-/// ```json
-/// {
-///   "filter": "host: api\..+",
-///   "ports": [80, 8080]
-/// }
-/// ```
-#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
-#[config(map_to = "HttpHeaderFilterFileConfig", derive = "JsonSchema")]
-#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
-pub struct HttpHeaderFilterConfig {
-    /// ##### feature.network.incoming.http_header_filter.filter {#feature-network-incoming-http_header_filter-filter}
-    ///
-    ///
-    /// Supports regexes validated by the
-    /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
-    ///
-    /// The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
-    /// case-insensitive.
-    #[config(
-        env = "MIRRORD_HTTP_HEADER_FILTER",
-        deprecated = "use http_filter instead"
-    )]
-    pub filter: Option<String>,
-
-    /// ##### feature.network.incoming.http_header_filter.ports {#feature-network-incoming-http_header_filter-ports}
-    ///
-    /// Activate the HTTP traffic filter only for these ports.
-    ///
-    /// Other ports will still be stolen (when `"steal`" is being used), they're just not checked
-    /// for HTTP filtering.
-    #[config(env = "MIRRORD_HTTP_HEADER_FILTER_PORTS", default)]
-    pub ports: PortList,
-}
-
 /// Filter configuration for the HTTP traffic stealer feature.
 ///
 /// Allows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic
@@ -89,6 +44,7 @@ pub struct HttpFilterConfig {
     ///
     /// The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
     /// case-insensitive.
+    #[config(env = "MIRRORD_HTTP_HEADER_FILTER")]
     pub header_filter: Option<String>,
 
     /// ##### feature.network.incoming.http_filter.path_filter {#feature-network-incoming-http-path-filter}
@@ -98,15 +54,16 @@ pub struct HttpFilterConfig {
     /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
     ///
     /// Case insensitive.
+    #[config(env = "MIRRORD_HTTP_PATH_FILTER")]
     pub path_filter: Option<String>,
 
-    /// ##### feature.network.incoming.http_header_filter.ports {#feature-network-incoming-http_header_filter-ports}
+    /// ##### feature.network.incoming.http_filter.ports {#feature-network-incoming-http_filter-ports}
     ///
     /// Activate the HTTP traffic filter only for these ports.
     ///
     /// Other ports will still be stolen (when `"steal`" is being used), they're just not checked
     /// for HTTP filtering.
-    #[config(default)]
+    #[config(env = "MIRRORD_HTTP_FILTER_PORTS", default)]
     pub ports: PortList,
 }
 
@@ -120,24 +77,26 @@ pub struct HttpFilterConfig {
 #[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
 pub struct PortList(VecOrSingle<u16>);
 
-impl MirrordToggleableConfig for HttpHeaderFilterFileConfig {
+impl MirrordToggleableConfig for HttpFilterFileConfig {
     fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
-        let filter = FromEnv::new("MIRRORD_HTTP_HEADER_FILTER")
+        let header_filter = FromEnv::new("MIRRORD_HTTP_HEADER_FILTER")
             .source_value(context)
             .transpose()?;
 
-        let ports = FromEnv::new("MIRRORD_HTTP_HEADER_FILTER_PORTS")
+        let path_filter = FromEnv::new("MIRRORD_HTTP_PATH_FILTER")
+            .source_value(context)
+            .transpose()?;
+
+        let ports = FromEnv::new("MIRRORD_HTTP_FILTER_PORTS")
             .source_value(context)
             .transpose()?
             .unwrap_or_default();
 
-        Ok(Self::Generated { filter, ports })
-    }
-}
-
-impl MirrordToggleableConfig for HttpFilterFileConfig {
-    fn disabled_config(_context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
-        Ok(HttpFilterConfig::default())
+        Ok(Self::Generated {
+            header_filter,
+            path_filter,
+            ports,
+        })
     }
 }
 

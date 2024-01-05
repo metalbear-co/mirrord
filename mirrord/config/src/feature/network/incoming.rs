@@ -53,9 +53,8 @@ use http_filter::*;
 ///     "network": {
 ///       "incoming": {
 ///         "mode": "steal",
-///         "http_header_filter": {
-///           "filter": "host: api\..+",
-///           "ports": [80, 8080]
+///         "http_filter": {
+///           "header_filter": "host: api\..+"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
@@ -95,8 +94,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
-                http_header_filter: HttpHeaderFilterFileConfig::default()
-                    .generate_config(context)?,
+                http_filter: HttpFilterFileConfig::default().generate_config(context)?,
                 on_concurrent_steal: FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
                     .layer(|layer| {
                         Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer)
@@ -112,10 +110,6 @@ impl MirrordConfig for IncomingFileConfig {
                     .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
-                http_header_filter: advanced
-                    .http_header_filter
-                    .unwrap_or_default()
-                    .generate_config(context)?,
                 http_filter: advanced
                     .http_filter
                     .unwrap_or_default()
@@ -162,7 +156,7 @@ impl MirrordToggleableConfig for IncomingFileConfig {
         Ok(IncomingConfig {
             mode,
             on_concurrent_steal,
-            http_header_filter: HttpHeaderFilterFileConfig::disabled_config(context)?,
+            http_filter: HttpFilterFileConfig::disabled_config(context)?,
             ..Default::default()
         })
     }
@@ -180,13 +174,6 @@ pub struct IncomingAdvancedFileConfig {
     ///
     /// See [`mode`](##mode (incoming)) for details.
     pub mode: Option<IncomingMode>,
-
-    /// ### filter
-    ///
-    /// Sets up the HTTP traffic filter (currently, only useful when `incoming: steal`).
-    ///
-    /// See [`filter`](##filter) for details.
-    pub http_header_filter: Option<ToggleableConfig<http_filter::HttpHeaderFilterFileConfig>>,
 
     /// ### HTTP Filter
     ///
@@ -267,7 +254,7 @@ pub struct IncomingAdvancedFileConfig {
 /// ```
 ///
 /// Steal only traffic that matches the
-/// [`http_header_filter`](#feature-network-incoming-http_header_filter) (steals only HTTP traffic).
+/// [`http_filter`](#feature-network-incoming-http_filter) (steals only HTTP traffic).
 ///
 /// ```json
 /// {
@@ -275,9 +262,8 @@ pub struct IncomingAdvancedFileConfig {
 ///     "network": {
 ///       "incoming": {
 ///         "mode": "steal",
-///         "http_header_filter": {
-///           "filter": "host: api\..+",
-///           "ports": [80, 8080]
+///         "http_filter": {
+///           "header_filter": "host: api\..+"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
@@ -314,9 +300,6 @@ pub struct IncomingConfig {
 
     /// #### feature.network.incoming.mode {#feature-network-incoming-mode}
     pub mode: IncomingMode,
-
-    /// #### feature.network.incoming.filter {#feature-network-incoming-filter}
-    pub http_header_filter: HttpHeaderFilterConfig,
 
     /// #### feature.network.incoming.filter {#feature-network-incoming-http-filter}
     pub http_filter: HttpFilterConfig,

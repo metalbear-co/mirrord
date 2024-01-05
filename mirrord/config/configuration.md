@@ -4,6 +4,10 @@ enable, and how they should function.
 All of the configuration fields have a default value, so a minimal configuration would be no
 configuration at all.
 
+The configuration supports templating using the [Tera](https://keats.github.io/tera/docs/) template engine.
+Currently we don't provide additional values to the context, if you have anything you want us to
+provide please let us know.
+
 To help you get started, here are examples of a basic configuration file, and a complete
 configuration file containing all fields.
 
@@ -20,10 +24,23 @@ configuration file containing all fields.
 }
 ```
 
+### Basic `config.json` with templating {#root-basic-templating}
+
+```json
+{
+  "target": "{{ get_env(name="TARGET", default="pod/fallback") }}",
+  "feature": {
+    "env": true,
+    "fs": "read",
+    "network": true
+  }
+}
+```
+
 ### Complete `config.json` {#root-complete}
 
  Don't use this example as a starting point, it's just here to show you all the available
-options.
+ options.
 ```json
 {
   "accept_invalid_certificates": false,
@@ -65,9 +82,8 @@ options.
     "network": {
       "incoming": {
         "mode": "steal",
-        "http_header_filter": {
-          "filter": "host: api\..+",
-          "ports": [80, 8080]
+        "http_filter": {
+          "header_filter": "host: api\..+"
         },
         "port_mapping": [[ 7777, 8888 ]],
         "ignore_localhost": false,
@@ -82,7 +98,10 @@ options.
         "ignore_localhost": false,
         "unix_streams": "bear.+"
       },
-      "dns": false
+      "dns": false,
+      "copy_target": {
+        "scale_down": false
+      }
     },
   },
   "operator": true,
@@ -104,9 +123,9 @@ Defaults to `false`.
 
 ## operator {#root-operator}
 
-Allow to lookup if operator is installed on cluster and use it.
-
-Defaults to `true`.
+Whether mirrord should use the operator.
+If not set, mirrord will first attempt to use the operator, but continue without it in case
+of failure.
 
 ## pause {#root-pause}
 Controls target pause feature. Unstable.
@@ -114,7 +133,9 @@ Controls target pause feature. Unstable.
 With this feature enabled, the remote container is paused while this layer is connected to
 the agent.
 
-Defaults to `false`.
+Note: It requires agent configuration to be set to privileged when running with the
+ephemeral agent option. Defaults to `false`.
+Note2: Pause + ephemeral might not work on Docker runtimes.
 
 ## skip_build_tools {#root-skip_build_tools}
 
@@ -132,6 +153,14 @@ Controls whether or not mirrord sends telemetry data to MetalBear cloud.
 Telemetry sent doesn't contain personal identifiers or any data that
 should be considered sensitive. It is used to improve the product.
 [For more information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md)
+
+## use_proxy {#root-use_proxy}
+
+When disabled, mirrord will remove `HTTP[S]_PROXY` env variables before
+doing any network requests. This is useful when the system sets a proxy
+but you don't want mirrord to use it.
+This also applies to the mirrord process (as it just removes the env).
+If the remote pod sets this env, the mirrord process will still use it.
 
 ## connect_tcp {#root-connect_tpc}
 
@@ -365,6 +394,25 @@ Disables specified Linux capabilities for the agent container.
 If nothing is disabled here, agent uses `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE` and
 `SYS_ADMIN`.
 
+### agent.resources {#agent-resources}
+
+Set pod resource reqirements. (not with ephemeral agents)
+Default is
+```json
+{
+  "requests":
+  {
+    "cpu": "1m",
+    "memory": "1Mi"
+  },
+  "limits":
+  {
+    "cpu": "100m",
+      "memory": "100Mi"
+  }
+}
+```
+
 ## target {#root-target}
 Specifies the target and namespace to mirror, see [`path`](#target-path) for a list of
 accepted values for the `target` option.
@@ -446,9 +494,8 @@ have support for a shortened version, that you can see [here](#root-shortened).
     "network": {
       "incoming": {
         "mode": "steal",
-        "http_header_filter": {
-          "filter": "host: api\..+",
-          "ports": [80, 8080]
+        "http_filter": {
+          "header_filter": "host: api\..+"
         },
         "port_mapping": [[ 7777, 8888 ]],
         "ignore_localhost": false,
@@ -465,6 +512,7 @@ have support for a shortened version, that you can see [here](#root-shortened).
       },
       "dns": false
     },
+    "copy_target": false
   }
 }
 ```
@@ -475,7 +523,11 @@ Allows the user to specify the default behavior for file operations:
 1. `"read"` - Read from the remote file system (default)
 2. `"write"` - Read/Write from the remote file system.
 3. `"local"` - Read from the local file system.
-5. `"disable"` - Disable file operations.
+4. `"localwithoverrides"` - perform fs operation locally, unless the path matches a pre-defined
+   or user-specified exception.
+
+> Note: by default, some paths are read locally or remotely, regardless of the selected FS mode.
+> This is described in further detail below.
 
 Besides the default behavior, the user can specify behavior for specific regex patterns.
 Case insensitive.
@@ -492,11 +544,22 @@ The logic for choosing the behavior is as follows:
 no specified order if two lists match the same path, we will use the first one (and we
 do not guarantee what is first).
 
-**Warning**: Specifying the same path in two lists is unsupported and can lead to undefined
-behaviour.
+    **Warning**: Specifying the same path in two lists is unsupported and can lead to undefined
+    behaviour.
 
-2. Check our "special list" - we have an internal at compile time list
-for different behavior based on patterns to provide better UX.
+2. There are pre-defined exceptions to the set FS mode.
+    1. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs)
+       are read locally by default.
+    2. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_remote_by_default.rs)
+       are read remotely by default when the mode is `localwithoverrides`.
+    3. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/not_found_by_default.rs)
+       under the running user's home directory will not be found by the application when the
+       mode is not `local`.
+
+    In order to override that default setting for a path, or a pattern, include it the
+    appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even
+    though it is covered by [the set of patterns that are read locally by default](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs),
+    add `"^/etc/."` to the `read_only` set.
 
 3. If none of the above match, use the default behavior (mode).
 
@@ -558,7 +621,7 @@ See the environment variables [reference](https://mirrord.dev/docs/reference/env
 {
   "feature": {
     "env": {
-      "include": "DATABASE_USER;PUBLIC_ENV",
+      "include": "DATABASE_USER;PUBLIC_ENV;MY_APP_*",
       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
       "override": {
         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
@@ -573,17 +636,21 @@ See the environment variables [reference](https://mirrord.dev/docs/reference/env
 
 Include the remote environment variables in the local process that are **NOT** specified by
 this option.
+Variable names can be matched using `*` and `?` where `?` matches exactly one occurrence of
+any character and `*` matches arbitrary many (including zero) occurrences of any character.
 
 Some of the variables that are excluded by default:
 `PATH`, `HOME`, `HOMEPATH`, `CLASSPATH`, `JAVA_EXE`, `JAVA_HOME`, `PYTHONPATH`.
 
-Value is a list separated by ";".
+Can be passed as a list or as a semicolon-delimited string (e.g. `"VAR;OTHER_VAR"`).
 
 ### feature.env.include {#feature-env-include}
 
 Include only these remote environment variables in the local process.
+Variable names can be matched using `*` and `?` where `?` matches exactly one occurrence of
+any character and `*` matches arbitrary many (including zero) occurrences of any character.
 
-Value is a list separated by ";".
+Can be passed as a list or as a semicolon-delimited string (e.g. `"VAR;OTHER_VAR"`).
 
 Some environment variables are excluded by default (`PATH` for example), including these
 requires specifying them with `include`
@@ -607,9 +674,8 @@ for more details.
     "network": {
       "incoming": {
         "mode": "steal",
-        "http_header_filter": {
-          "filter": "host: api\..+",
-          "ports": [80, 8080]
+        "http_filter": {
+          "header_filter": "host: api\..+"
         },
         "port_mapping": [[ 7777, 8888 ]],
         "ignore_localhost": false,
@@ -651,7 +717,10 @@ listeners;
 [`"mode": "steal"`](#feature-network-incoming-mode);
 
 3. Off: Disables the incoming network feature.
-Steals all the incoming traffic:
+
+Examples:
+
+Steal all the incoming traffic:
 
 ```json
 {
@@ -663,8 +732,8 @@ Steals all the incoming traffic:
 }
 ```
 
-Steals only traffic that matches the
-[`http_header_filter`](#feature-network-incoming-http_header_filter) (steals only HTTP traffic).
+Steal only traffic that matches the
+[`http_filter`](#feature-network-incoming-http_filter) (steals only HTTP traffic).
 
 ```json
 {
@@ -672,9 +741,8 @@ Steals only traffic that matches the
     "network": {
       "incoming": {
         "mode": "steal",
-        "http_header_filter": {
-          "filter": "host: api\..+",
-          "ports": [80, 8080]
+        "http_filter": {
+          "header_filter": "host: api\..+"
         },
         "port_mapping": [[ 7777, 8888 ]],
         "ignore_localhost": false,
@@ -788,41 +856,7 @@ Supports regexes validated by the
 
 Case insensitive.
 
-##### feature.network.incoming.http_header_filter.ports {#feature-network-incoming-http_header_filter-ports}
-
-Activate the HTTP traffic filter only for these ports.
-
-Other ports will still be stolen (when `"steal`" is being used), they're just not checked
-for HTTP filtering.
-
-#### feature.network.incoming.filter {#feature-network-incoming-filter}
-Filter configuration for the HTTP traffic stealer feature.
-
-DEPRECATED - USE http_filter instead, unless using old operator/agent version (pre 3.46.0)
-Allows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic
-feature only captures HTTP requests that match the specified filter, forwarding unmatched
-requests to their original destinations.
-
-Only does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is
-set as `"steal"`, ignored otherwise.
-
-```json
-{
-  "filter": "host: api\..+",
-  "ports": [80, 8080]
-}
-```
-
-##### feature.network.incoming.http_header_filter.filter {#feature-network-incoming-http_header_filter-filter}
-
-
-Supports regexes validated by the
-[`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
-
-The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
-case-insensitive.
-
-##### feature.network.incoming.http_header_filter.ports {#feature-network-incoming-http_header_filter-ports}
+##### feature.network.incoming.http_filter.ports {#feature-network-incoming-http_filter-ports}
 
 Activate the HTTP traffic filter only for these ports.
 
@@ -926,6 +960,14 @@ will go through the remote pod.
 ```
 
 Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
+
+## feature.copy_target {#feature-copy_target}
+
+Creates a new copy of the target. mirrord will use this copy instead of the original target
+(e.g. intercept network traffic). This feature requires a [mirrord operator](https://mirrord.dev/docs/teams/introduction/).
+
+This feature is not compatible with rollout targets and running without a target
+(`targetless` mode).
 
 # internal_proxy {#root-internal_proxy}
 Configuration for the internal proxy mirrord spawns for each local mirrord session

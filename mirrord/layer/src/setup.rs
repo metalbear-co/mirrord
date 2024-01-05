@@ -128,8 +128,6 @@ impl LayerSetup {
 pub enum StealHttpFilter {
     /// No filter.
     None,
-    /// Header filter, deprecated.
-    HeaderDeprecated(Filter),
     /// More recent filter (header or path).
     Filter(HttpFilter),
 }
@@ -161,42 +159,28 @@ impl IncomingMode {
             return Self::Mirror;
         }
 
-        let http_header_filter_config = &config.http_header_filter;
         let http_filter_config = &config.http_filter;
 
         let ports = {
-            if http_header_filter_config.filter.is_some() {
-                http_header_filter_config
-                    .ports
-                    .as_slice()
-                    .iter()
-                    .copied()
-                    .collect()
-            } else {
-                http_filter_config
-                    .ports
-                    .as_slice()
-                    .iter()
-                    .copied()
-                    .collect()
-            }
+            http_filter_config
+                .ports
+                .as_slice()
+                .iter()
+                .copied()
+                .collect()
         };
 
         let filter = match (
             &http_filter_config.path_filter,
             &http_filter_config.header_filter,
-            &http_header_filter_config.filter,
         ) {
-            (Some(path), None, None) => StealHttpFilter::Filter(HttpFilter::Path(
+            (Some(path), None) => StealHttpFilter::Filter(HttpFilter::Path(
                 Filter::new(path.into()).expect("invalid filter expression"),
             )),
-            (None, Some(header), None) => StealHttpFilter::Filter(HttpFilter::Header(
+            (None, Some(header)) => StealHttpFilter::Filter(HttpFilter::Header(
                 Filter::new(header.into()).expect("invalid filter expression"),
             )),
-            (None, None, Some(header)) => StealHttpFilter::HeaderDeprecated(
-                Filter::new(header.into()).expect("invalid filter expression"),
-            ),
-            (None, None, None) => StealHttpFilter::None,
+            (None, None) => StealHttpFilter::None,
             _ => panic!("multiple HTTP filters specified"),
         };
 
@@ -212,9 +196,6 @@ impl IncomingMode {
         let steal_type = match &steal.filter {
             _ if !steal.ports.contains(&port) => StealType::All(port),
             StealHttpFilter::None => StealType::All(port),
-            StealHttpFilter::HeaderDeprecated(filter) => {
-                StealType::FilteredHttp(port, filter.clone())
-            }
             StealHttpFilter::Filter(filter) => StealType::FilteredHttpEx(port, filter.clone()),
         };
 
