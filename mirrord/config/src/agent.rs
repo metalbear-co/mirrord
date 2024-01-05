@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 use k8s_openapi::api::core::v1::{ResourceRequirements, Toleration};
 use mirrord_analytics::CollectAnalytics;
@@ -6,7 +6,7 @@ use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::config::source::MirrordConfigSource;
+use crate::config::{source::MirrordConfigSource, ConfigError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -264,6 +264,22 @@ pub struct AgentConfig {
 impl CollectAnalytics for &AgentConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("ephemeral", self.ephemeral);
+    }
+}
+
+impl AgentFileConfig {
+    pub fn from_path<P>(path: P) -> Result<Self, ConfigError>
+    where
+        P: AsRef<Path>,
+    {
+        let config = std::fs::read_to_string(path.as_ref())?;
+
+        match path.as_ref().extension().and_then(|os_val| os_val.to_str()) {
+            Some("json") => Ok(serde_json::from_str::<Self>(&config)?),
+            Some("toml") => Ok(toml::from_str::<Self>(&config)?),
+            Some("yaml" | "yml") => Ok(serde_yaml::from_str::<Self>(&config)?),
+            _ => Err(ConfigError::UnsupportedFormat),
+        }
     }
 }
 
