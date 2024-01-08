@@ -1,1 +1,0 @@
-`mirrord operator setup` defines a `MirrordPolicy` CRD so that admins can block certain features by creating policies. When recieving a forbidden error from the operator for trying to steal traffic, mirrord shows an error and exits.
