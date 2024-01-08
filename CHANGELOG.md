@@ -8,6 +8,34 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.82.0](https://github.com/metalbear-co/mirrord/tree/3.82.0) - 2024-01-08
+
+
+### Removed
+
+- Removed `http_header_filter`. Please use `http_filter` with key
+  `header_filter` instead.
+
+
+### Added
+
+- `mirrord operator setup` defines a `MirrordPolicy` CRD so that admins can
+  block certain features by creating policies. When recieving a forbidden error
+  from the operator for trying to steal traffic, mirrord shows an error and
+  exits.
+
+
+### Fixed
+
+- Added userextras/oid to mirrord operator role to solve issues in some AKS
+  clusters [#2152](https://github.com/metalbear-co/mirrord/issues/2152)
+
+
+### Internal
+
+- Add function to load agentfileconfig from path
+
+
 ## [3.81.0](https://github.com/metalbear-co/mirrord/tree/3.81.0) - 2024-01-01
 
 
