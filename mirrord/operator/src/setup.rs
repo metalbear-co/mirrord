@@ -10,6 +10,7 @@ use k8s_openapi::{
         },
         rbac::v1::{ClusterRole, ClusterRoleBinding, PolicyRule, RoleRef, Subject},
     },
+    apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition,
     apimachinery::pkg::{
         api::resource::Quantity,
         apis::meta::v1::{LabelSelector, ObjectMeta},
@@ -19,10 +20,10 @@ use k8s_openapi::{
         APIService, APIServiceSpec, ServiceReference,
     },
 };
-use kube::Resource;
+use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
-use crate::crd::TargetCrd;
+use crate::crd::{MirrordPolicy, TargetCrd};
 
 static OPERATOR_NAME: &str = "mirrord-operator";
 static OPERATOR_PORT: i32 = 3000;
@@ -172,6 +173,9 @@ impl OperatorSetup for Operator {
 
         writer.write_all(b"---\n")?;
         self.api_service.to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        MirrordPolicy::crd().to_writer(&mut writer)?;
 
         Ok(())
     }
@@ -435,6 +439,13 @@ impl OperatorRole {
                     verbs: vec!["impersonate".to_owned()],
                     ..Default::default()
                 },
+                // Allow the operator to list mirrord policies.
+                PolicyRule {
+                    api_groups: Some(vec!["policies.mirrord.metalbear.co".to_owned()]),
+                    resources: Some(vec![MirrordPolicy::plural(&()).to_string()]),
+                    verbs: vec!["list".to_owned(), "get".to_owned()],
+                    ..Default::default()
+                },
             ]),
             ..Default::default()
         };
@@ -616,6 +627,12 @@ impl OperatorClusterUserRole {
 impl Default for OperatorClusterUserRole {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl OperatorSetup for CustomResourceDefinition {
+    fn to_writer<W: Write>(&self, writer: W) -> Result<()> {
+        serde_yaml::to_writer(writer, &self).map_err(SetupError::from)
     }
 }
 

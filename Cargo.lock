@@ -3999,6 +3999,7 @@ dependencies = [
  "mirrord-protocol",
  "rand",
  "reqwest",
+ "rstest 0.18.2",
  "schemars",
  "semver 1.0.20",
  "serde",
@@ -4022,7 +4023,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.3.4"
+version = "1.4.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -6213,6 +6214,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "mirrord",
+ "mirrord-operator",
  "rand",
  "regex",
  "reqwest",

@@ -70,3 +70,6 @@ semver.workspace = true
 tokio = { workspace = true, optional = true }
 tokio-tungstenite = { version = "0.20.1", optional = true }
 tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+rstest = "0.18"

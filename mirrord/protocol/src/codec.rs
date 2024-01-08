@@ -128,6 +128,8 @@ pub enum FileResponse {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 #[protocol_break(2)]
 pub enum DaemonMessage {
+    /// Kills the intproxy, no guarantee that messages that were sent before a `Close` will be
+    /// handled by the intproxy and forwarded to the layer before the intproxy exits.
     Close(String),
     Tcp(DaemonTcp),
     TcpSteal(DaemonTcp),

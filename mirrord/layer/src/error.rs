@@ -10,7 +10,7 @@ use mirrord_sip::SipError;
 use thiserror::Error;
 use tracing::{error, info};
 
-use crate::proxy_connection::ProxyError;
+use crate::{graceful_exit, proxy_connection::ProxyError};
 
 /// Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
 mod ignore_codes {
@@ -242,6 +242,11 @@ impl From<HookError> for i64 {
                 // this could be changed by waiting for the Subscribed response from agent.
                 ResponseError::PortAlreadyStolen(_port) => libc::EINVAL,
                 ResponseError::NotImplemented => libc::EINVAL,
+                err @ ResponseError::Forbidden { .. } => {
+                    graceful_exit!(
+                        "Stopping mirrord run. Please adjust your mirrord configuration.\n{err}"
+                    )
+                }
             },
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,

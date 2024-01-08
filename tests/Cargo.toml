@@ -14,6 +14,7 @@ regex.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "macros", "process"] }
 serde_json.workspace = true
 mirrord = { artifact = "bin", path = "../mirrord/cli" }
+mirrord-operator = { path = "../mirrord/operator" }
 serde = "1"
 futures.workspace = true
 rstest = "0.18"

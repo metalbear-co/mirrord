@@ -1,4 +1,4 @@
-use std::{io, net::AddrParseError};
+use std::{fmt, fmt::Formatter, io, net::AddrParseError};
 
 use bincode::{Decode, Encode};
 use thiserror::Error;
@@ -7,7 +7,7 @@ use trust_dns_resolver::error::{ResolveError, ResolveErrorKind};
 
 use crate::{
     outgoing::SocketAddress,
-    tcp::{Filter, HttpFilter},
+    tcp::{Filter, HttpFilter, StealType},
     Port,
 };
 
@@ -50,6 +50,51 @@ pub enum ResponseError {
 
     #[error("Operation is not yet supported by mirrord.")]
     NotImplemented,
+
+    #[error("{blocked_action} is forbidden by {} for this target (your organization does not allow you to use this mirrord feature with the chosen target).", policy_name_string(.policy_name.clone()))]
+    Forbidden {
+        blocked_action: BlockedAction,
+        policy_name: Option<String>,
+    },
+}
+
+/// If some then the name with a trailing space, else empty string.
+fn policy_name_string(policy_name: Option<String>) -> String {
+    if let Some(name) = policy_name {
+        format!("the mirrord policy \"{name}\"")
+    } else {
+        "a mirrord policy".to_string()
+    }
+}
+
+/// All the actions that can be blocked by the operator, to identify the blocked feature in a
+/// [`ResponseError::Forbidden`] message.
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
+pub enum BlockedAction {
+    Steal(StealType),
+}
+
+/// Determines how a blocked action will be displayed to the user in an error.
+impl fmt::Display for BlockedAction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            BlockedAction::Steal(StealType::All(port)) => {
+                write!(f, "Stealing traffic from port {port}")
+            }
+            BlockedAction::Steal(StealType::FilteredHttp(port, filter)) => {
+                write!(
+                    f,
+                    "Stealing traffic from port {port} with http request filter: {filter}"
+                )
+            }
+            BlockedAction::Steal(StealType::FilteredHttpEx(port, filter)) => {
+                write!(
+                    f,
+                    "Stealing traffic from port {port} with http request filter: {filter}"
+                )
+            }
+        }
+    }
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
