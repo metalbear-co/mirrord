@@ -143,8 +143,8 @@ impl FileFilter {
                     Detour::Success(())
                 }
             }
-            _ if self.default_not_found.is_match(text) => Detour::Error(HookError::FileNotFound),
             _ if self.local.is_match(text) => Detour::Bypass(op()),
+            _ if self.default_not_found.is_match(text) => Detour::Error(HookError::FileNotFound),
             _ if self.default_remote_ro.is_match(text) && !write => Detour::Success(()),
             _ if self.default_local.is_match(text) => Detour::Bypass(op()),
             FsModeConfig::LocalWithOverrides => Detour::Bypass(op()),
