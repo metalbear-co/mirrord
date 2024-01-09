@@ -194,9 +194,18 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
     Ok(())
 }
 
-/// Initialize a new session with the internal proxy.
-/// Sets [`PROXY_CONNECTION`].
+/// Initialize a new session with the internal proxy and set [`PROXY_CONNECTION`]
+/// if not in trace only mode.
 fn load_only_layer_start(config: &LayerConfig) {
+    // Check if we're in trace only mode (no agent)
+    let trace_only = std::env::var(TRACE_ONLY_ENV)
+        .unwrap_or_default()
+        .parse()
+        .unwrap_or(false);
+    if trace_only {
+        return;
+    }
+
     let address: SocketAddr = config
         .connect_tcp
         .as_ref()
@@ -296,23 +305,18 @@ fn layer_start(mut config: LayerConfig) {
         config.feature.network.outgoing.udp = false;
     }
 
-    // does not need to be atomic because on the first call there are never other threads.
-    // Will be false when manually called from fork hook.
-    if SETUP.get().is_none() {
-        // If we're here it's not a fork, we're in the ctor.
-        init_tracing();
+    init_tracing();
 
-        let debugger_ports = DebuggerPorts::from_env();
-        let state = LayerSetup::new(config, debugger_ports);
-        SETUP.set(state).unwrap();
+    let debugger_ports = DebuggerPorts::from_env();
+    let state = LayerSetup::new(config, debugger_ports, trace_only);
+    SETUP.set(state).unwrap();
 
-        let state = setup();
-        enable_hooks(
-            state.fs_config().is_active(),
-            state.remote_dns_enabled(),
-            state.sip_binaries(),
-        );
-    }
+    let state = setup();
+    enable_hooks(
+        state.fs_config().is_active(),
+        state.remote_dns_enabled(),
+        state.sip_binaries(),
+    );
 
     let _detour_guard = DetourGuard::new();
     tracing::info!("Initializing mirrord-layer!");
@@ -328,19 +332,18 @@ fn layer_start(mut config: LayerConfig) {
     );
 
     if trace_only {
+        tracing::debug!("Skipping new intproxy connection (trace only)");
         return;
     }
 
     unsafe {
-        if PROXY_CONNECTION.get().is_none() {
-            let address = setup().proxy_address();
-            let new_connection =
-                ProxyConnection::new(address, NewSessionRequest::New, Duration::from_secs(5))
-                    .expect("failed to initialize proxy connection");
-            PROXY_CONNECTION
-                .set(new_connection)
-                .expect("setting PROXY_CONNECTION singleton")
-        }
+        let address = setup().proxy_address();
+        let new_connection =
+            ProxyConnection::new(address, NewSessionRequest::New, Duration::from_secs(5))
+                .expect("failed to initialize proxy connection");
+        PROXY_CONNECTION
+            .set(new_connection)
+            .expect("setting PROXY_CONNECTION singleton")
     }
 }
 
@@ -363,7 +366,7 @@ fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
         not_found: None,
     };
     let debugger_ports = DebuggerPorts::from_env();
-    let setup = LayerSetup::new(config, debugger_ports);
+    let setup = LayerSetup::new(config, debugger_ports, true);
 
     SETUP.set(setup).expect("SETUP set failed");
 
@@ -495,8 +498,13 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
     match res.cmp(&0) {
         Ordering::Equal => {
             tracing::debug!("Child process initializing layer.");
-            let parent_connection = unsafe { PROXY_CONNECTION.take() }
-                .expect("parent connection doesn't exist in fork");
+            let parent_connection = match unsafe { PROXY_CONNECTION.take() } {
+                Some(conn) => conn,
+                None => {
+                    tracing::debug!("Skipping new inptroxy connection (trace only)");
+                    return res;
+                }
+            };
 
             let new_connection = ProxyConnection::new(
                 parent_connection.proxy_addr(),

@@ -203,6 +203,10 @@ pub(crate) enum Bypass {
 
     /// Incoming traffic is disabled, bypass.
     DisabledIncoming,
+
+    /// Hostname should be resolved locally.
+    /// Currently this is the case only when the layer operates in the `trace only` mode.
+    LocalHostname,
 }
 
 /// [`ControlFlow`](std::ops::ControlFlow)-like enum to be used by hooks.
