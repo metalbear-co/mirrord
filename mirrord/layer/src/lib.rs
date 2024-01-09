@@ -194,8 +194,8 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
     Ok(())
 }
 
-/// Initialize a new session with the internal proxy.
-/// Sets [`PROXY_CONNECTION`] if not in trace only mode.
+/// Initialize a new session with the internal proxy and set [`PROXY_CONNECTION`]
+/// if not in trace only mode.
 fn load_only_layer_start(config: &LayerConfig) {
     // Check if we're in trace only mode (no agent)
     let trace_only = std::env::var(TRACE_ONLY_ENV)
