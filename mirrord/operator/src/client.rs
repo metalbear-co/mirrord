@@ -553,6 +553,7 @@ impl OperatorApi {
             CopyTargetSpec {
                 target: raw_target,
                 idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
+                post_connection_ttl: None,
                 scale_down,
             },
         );
