@@ -1,0 +1,1 @@
+Extended `CopyTargetCrd`, allowing to specify different timeouts pre and post connection.
