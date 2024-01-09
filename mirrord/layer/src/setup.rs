@@ -29,10 +29,11 @@ pub struct LayerSetup {
     outgoing_selector: OutgoingSelector,
     proxy_address: SocketAddr,
     incoming_mode: IncomingMode,
+    local_hostname: bool,
 }
 
 impl LayerSetup {
-    pub fn new(config: LayerConfig, debugger_ports: DebuggerPorts) -> Self {
+    pub fn new(config: LayerConfig, debugger_ports: DebuggerPorts, local_hostname: bool) -> Self {
         let file_filter = FileFilter::new(config.feature.fs.clone());
 
         let remote_unix_streams = config
@@ -67,6 +68,7 @@ impl LayerSetup {
             outgoing_selector,
             proxy_address,
             incoming_mode,
+            local_hostname,
         }
     }
 
@@ -120,6 +122,10 @@ impl LayerSetup {
 
     pub fn incoming_mode(&self) -> &IncomingMode {
         &self.incoming_mode
+    }
+
+    pub fn local_hostname(&self) -> bool {
+        self.local_hostname
     }
 }
 
