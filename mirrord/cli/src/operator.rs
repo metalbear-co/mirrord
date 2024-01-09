@@ -184,6 +184,38 @@ Operator License
         return Ok(());
     };
 
+    if let Some(copy_targets) = status.copy_targets {
+        if copy_targets.is_empty() {
+            println!("No active copy targets.");
+        } else {
+            println!("Active Copy Targets:");
+            let mut copy_targets_table = Table::new();
+
+            copy_targets_table.add_row(row![
+                "Original Target",
+                "Namespace",
+                "Copy Pod Name",
+                "Scale Down?"
+            ]);
+
+            for (pod_name, copy_target_resource) in copy_targets {
+                copy_targets_table.add_row(row![
+                    copy_target_resource.spec.target.to_string(),
+                    copy_target_resource.metadata.namespace.unwrap_or_default(),
+                    pod_name,
+                    if copy_target_resource.spec.scale_down {
+                        "*"
+                    } else {
+                        ""
+                    },
+                ]);
+            }
+
+            copy_targets_table.printstd();
+        }
+        println!();
+    }
+
     if let Some(statistics) = status.statistics {
         println!("Operator Daily Users: {}", statistics.dau);
         println!("Operator Monthly Users: {}", statistics.mau);

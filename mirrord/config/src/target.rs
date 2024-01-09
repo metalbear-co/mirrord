@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
 use mirrord_analytics::CollectAnalytics;
 use schemars::JsonSchema;
@@ -221,6 +221,59 @@ impl Target {
             Target::Targetless => {
                 unreachable!("this shouldn't happen - called from operator on a flow where it's not targetless.")
             }
+        }
+    }
+}
+
+trait TargetDisplay {
+    fn target_type(&self) -> &str;
+
+    fn target_name(&self) -> &str;
+
+    fn container_name(&self) -> Option<&String>;
+
+    fn fmt_display(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}/{}{}",
+            self.target_type(),
+            self.target_name(),
+            self.container_name()
+                .map(|name| format!("/container/{name}"))
+                .unwrap_or_default()
+        )
+    }
+}
+
+macro_rules! impl_target_display {
+    ($struct_name:ident, $target_type:ident) => {
+        impl TargetDisplay for $struct_name {
+            fn target_type(&self) -> &str {
+                stringify!($target_type)
+            }
+
+            fn target_name(&self) -> &str {
+                self.$target_type.as_str()
+            }
+
+            fn container_name(&self) -> Option<&String> {
+                self.container.as_ref()
+            }
+        }
+    };
+}
+
+impl_target_display!(PodTarget, pod);
+impl_target_display!(DeploymentTarget, deployment);
+impl_target_display!(RolloutTarget, rollout);
+
+impl fmt::Display for Target {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Target::Targetless => write!(f, "targetless"),
+            Target::Pod(pod) => pod.fmt_display(f),
+            Target::Deployment(dep) => dep.fmt_display(f),
+            Target::Rollout(roll) => roll.fmt_display(f),
         }
     }
 }
