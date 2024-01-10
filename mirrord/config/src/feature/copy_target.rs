@@ -10,40 +10,12 @@ use serde::Deserialize;
 
 use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig, Result};
 
-/// Allows the user to target a pod created dynamically from the orignal [`target`](#target).
-/// The new pod inherits most of the original target's specification, e.g. labels.
-///
-/// ```json
-/// {
-///   "feature": {
-///     "copy_target": {
-///       "scale_down": true
-///     }
-///   }
-/// }
-/// ```
-///
-/// ```json
-/// {
-///   "feature": {
-///     "copy_target": true
-///   }
-/// }
-/// ```
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[serde(untagged)]
 pub enum CopyTargetFileConfig {
     Simple(bool),
-    Advanced {
-        /// ### feature.copy_target.scale_down {#feature-copy_target-scale_down}
-        ///
-        /// If this option is set, mirrord will scale down the target deployment to 0 for the time
-        /// the copied pod is alive.
-        ///
-        /// This option is compatible only with deployment targets.
-        scale_down: Option<bool>,
-    },
+    Advanced { scale_down: Option<bool> },
 }
 
 impl Default for CopyTargetFileConfig {
@@ -75,9 +47,41 @@ impl FromMirrordConfig for CopyTargetConfig {
     type Generator = CopyTargetFileConfig;
 }
 
+/// Allows the user to target a pod created dynamically from the orignal [`target`](#target).
+/// The new pod inherits most of the original target's specification, e.g. labels.
+///
+/// ```json
+/// {
+///   "feature": {
+///     "copy_target": {
+///       "scale_down": true
+///     }
+///   }
+/// }
+/// ```
+///
+/// ```json
+/// {
+///   "feature": {
+///     "copy_target": true
+///   }
+/// }
+/// ```
 #[derive(Clone, Debug)]
 pub struct CopyTargetConfig {
     pub enabled: bool,
+
+    /// ### feature.copy_target.scale_down {#feature-copy_target-scale_down}
+    ///
+    /// If this option is set, mirrord will scale down the target deployment to 0 for the time
+    /// the copied pod is alive.
+    ///
+    /// This option is compatible only with deployment targets.
+    /// ```json
+    ///     {
+    ///       "scale_down": true
+    ///     }
+    /// ```
     pub scale_down: bool,
 }
 

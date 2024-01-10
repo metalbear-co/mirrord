@@ -968,6 +968,39 @@ Creates a new copy of the target. mirrord will use this copy instead of the orig
 
 This feature is not compatible with rollout targets and running without a target
 (`targetless` mode).
+Allows the user to target a pod created dynamically from the orignal [`target`](#target).
+The new pod inherits most of the original target's specification, e.g. labels.
+
+```json
+{
+  "feature": {
+    "copy_target": {
+      "scale_down": true
+    }
+  }
+}
+```
+
+```json
+{
+  "feature": {
+    "copy_target": true
+  }
+}
+```
+
+
+### feature.copy_target.scale_down {#feature-copy_target-scale_down}
+
+If this option is set, mirrord will scale down the target deployment to 0 for the time
+the copied pod is alive.
+
+This option is compatible only with deployment targets.
+```json
+    {
+      "scale_down": true
+    }
+```
 
 # internal_proxy {#root-internal_proxy}
 Configuration for the internal proxy mirrord spawns for each local mirrord session
