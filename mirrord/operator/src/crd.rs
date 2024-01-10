@@ -99,6 +99,10 @@ pub struct MirrordOperatorSpec {
 pub struct MirrordOperatorStatus {
     pub sessions: Vec<Session>,
     pub statistics: Option<MirrordOperatorStatusStatistics>,
+
+    /// Option because added later.
+    /// (copy-target pod name, copy-target resource)
+    pub copy_targets: Option<Vec<(String, CopyTargetCrd)>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
