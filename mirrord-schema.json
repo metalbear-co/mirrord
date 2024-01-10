@@ -397,7 +397,6 @@
       ]
     },
     "CopyTargetFileConfig": {
-      "description": "Allows the user to target a pod created dynamically from the orignal [`target`](#target). The new pod inherits most of the original target's specification, e.g. labels.\n\n```json { \"feature\": { \"copy_target\": { \"scale_down\": true } } } ```\n\n```json { \"feature\": { \"copy_target\": true } } ```",
       "anyOf": [
         {
           "type": "boolean"
@@ -406,8 +405,6 @@
           "type": "object",
           "properties": {
             "scale_down": {
-              "title": "feature.copy_target.scale_down {#feature-copy_target-scale_down}",
-              "description": "If this option is set, mirrord will scale down the target deployment to 0 for the time the copied pod is alive.\n\nThis option is compatible only with deployment targets.",
               "type": [
                 "boolean",
                 "null"
