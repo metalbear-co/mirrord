@@ -10,7 +10,7 @@ use std::{
 };
 
 use libc::{c_char, c_int, pid_t};
-use mirrord_layer_macro::hook_guard_fn;
+use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_sip::{
     sip_patch, SipError, MIRRORD_TEMP_BIN_DIR_CANONIC_STRING, MIRRORD_TEMP_BIN_DIR_STRING,
 };
@@ -294,7 +294,8 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
 }
 
 /// Just strip the sip patch dir out of the path if there.
-#[hook_guard_fn]
+/// Don't use guard since we want the original function to be able to call back to our detours.
+#[hook_fn]
 pub(crate) unsafe extern "C" fn dlopen_detour(
     raw_path: *const c_char,
     mode: c_int,
