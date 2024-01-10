@@ -85,7 +85,7 @@ pub struct FeatureConfig {
     ///
     /// This feature is not compatible with rollout targets and running without a target
     /// (`targetless` mode).
-    #[config(nested, unstable)]
+    #[config(nested)]
     pub copy_target: CopyTargetConfig,
 }
 
