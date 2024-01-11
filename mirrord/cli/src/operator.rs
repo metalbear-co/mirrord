@@ -237,7 +237,6 @@ Operator License
             &session.target,
             session.namespace.as_deref().unwrap_or(""),
             &session.user,
-            &session.namespace,
             humantime::format_duration(Duration::from_secs(session.duration_secs)),
         ]);
     }
