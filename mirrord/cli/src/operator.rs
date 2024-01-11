@@ -223,13 +223,21 @@ Operator License
 
     let mut sessions = Table::new();
 
-    sessions.add_row(row!["Session ID", "Target", "User", "Session Duration"]);
+    sessions.add_row(row![
+        "Session ID",
+        "Target",
+        "Namespace",
+        "User",
+        "Session Duration"
+    ]);
 
     for session in &status.sessions {
         sessions.add_row(row![
             session.id.as_deref().unwrap_or(""),
             &session.target,
+            session.namespace.as_deref().unwrap_or(""),
             &session.user,
+            &session.namespace,
             humantime::format_duration(Duration::from_secs(session.duration_secs)),
         ]);
     }
