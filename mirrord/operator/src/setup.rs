@@ -23,7 +23,7 @@ use k8s_openapi::{
 use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
-use crate::crd::{MirrordPolicy, TargetCrd};
+use crate::crd::{MirrordPolicy, MirrordQueueSplitter, MirrordSqsSession, TargetCrd};
 
 static OPERATOR_NAME: &str = "mirrord-operator";
 static OPERATOR_PORT: i32 = 3000;
@@ -176,6 +176,12 @@ impl OperatorSetup for Operator {
 
         writer.write_all(b"---\n")?;
         MirrordPolicy::crd().to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        MirrordQueueSplitter::crd().to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        MirrordSqsSession::crd().to_writer(&mut writer)?;
 
         Ok(())
     }
@@ -412,6 +418,28 @@ impl OperatorRole {
                     verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
                     ..Default::default()
                 },
+                // For SQS controller to temporarily change deployments to use changed queues.
+                PolicyRule {
+                    api_groups: Some(vec![
+                        "apps".to_owned(),
+                    ]),
+                    resources: Some(vec![
+                        "deployments".to_owned(),
+                    ]),
+                    verbs: vec!["patch".to_owned()],
+                    ..Default::default()
+                },
+                // For SQS controller to temporarily change Argo Rollouts to use changed queues.
+                PolicyRule {
+                    api_groups: Some(vec![
+                        "argoproj.io".to_owned(),
+                    ]),
+                    resources: Some(vec![
+                        "rollouts".to_owned(),
+                    ]),
+                    verbs: vec!["patch".to_owned()],
+                    ..Default::default()
+                },
                 PolicyRule {
                     api_groups: Some(vec!["apps".to_owned(), "argoproj.io".to_owned()]),
                     resources: Some(vec![
@@ -452,11 +480,54 @@ impl OperatorRole {
                     verbs: vec!["impersonate".to_owned()],
                     ..Default::default()
                 },
-                // Allow the operator to list mirrord policies.
+                // Allow the operator to list+get mirrord policies.
                 PolicyRule {
                     api_groups: Some(vec!["policies.mirrord.metalbear.co".to_owned()]),
                     resources: Some(vec![MirrordPolicy::plural(&()).to_string()]),
                     verbs: vec!["list".to_owned(), "get".to_owned()],
+                    ..Default::default()
+                },
+                // Allow the operator to list mirrord queue splitters.
+                PolicyRule {
+                    api_groups: Some(vec!["splitters.mirrord.metalbear.co".to_owned()]),
+                    resources: Some(vec![MirrordQueueSplitter::plural(&()).to_string()]),
+                    verbs: vec![
+                        "list".to_owned(),
+                    ],
+                    ..Default::default()
+                },
+                // Allow the SQS controller to update queue splitter status.
+                PolicyRule {
+                    api_groups: Some(vec!["splitters.mirrord.metalbear.co".to_owned()]),
+                    resources: Some(vec!["mirrordqueuesplitters/status".to_string()]),
+                    verbs: vec![
+                        // For setting the status in the SQS controller.
+                        "update".to_owned(),
+                    ],
+                    ..Default::default()
+                },
+                // Allow the operator to control mirrord queue filters.
+                PolicyRule {
+                    api_groups: Some(vec!["splitters.mirrord.metalbear.co".to_owned()]),
+                    resources: Some(vec![MirrordSqsSession::plural(&()).to_string()]),
+                    verbs: vec![
+                        "create".to_owned(),
+                        "watch".to_owned(),
+                        "list".to_owned(),
+                        "get".to_owned(),
+                        "delete".to_owned(),
+                        "patch".to_owned(),
+                    ],
+                    ..Default::default()
+                },
+                // Allow the SQS controller to update queue splitter status.
+                PolicyRule {
+                    api_groups: Some(vec!["splitters.mirrord.metalbear.co".to_owned()]),
+                    resources: Some(vec!["mirrordsqssessions/status".to_string()]),
+                    verbs: vec![
+                        // For setting the status in the SQS controller.
+                        "update".to_owned(),
+                    ],
                     ..Default::default()
                 },
             ]),

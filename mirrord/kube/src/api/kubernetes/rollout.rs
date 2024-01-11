@@ -4,9 +4,9 @@ use k8s_openapi::{
     apimachinery::pkg::apis::meta::v1::ObjectMeta, ListableResource, Metadata,
     NamespaceResourceScope, Resource,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Rollout {
     metadata: ObjectMeta,
     pub spec: serde_json::Value,

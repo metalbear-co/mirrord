@@ -739,6 +739,7 @@ mod tests {
                 })),
                 copy_target: None,
                 hostname: None,
+                split_queues: None,
             }),
             connect_tcp: None,
             operator: None,
