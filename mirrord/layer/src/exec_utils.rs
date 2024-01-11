@@ -300,6 +300,8 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
     raw_path: *const c_char,
     mode: c_int,
 ) -> *const c_void {
+    // we hold the guard manually for tracing/internal code
+    let guard = crate::detour::DetourGuard::new();
     let detour: Detour<PathBuf> = raw_path.checked_into();
     let raw_path = if let Bypass(FileOperationInMirrordBinTempDir(ptr)) = detour {
         trace!("dlopen called with a path inside our patch dir, switching with fixed pointer.");
@@ -308,5 +310,7 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
         trace!("dlopen called on path {detour:?}.");
         raw_path
     };
+    drop(guard);
+    // call dlopen guardless
     FN_DLOPEN(raw_path, mode)
 }
