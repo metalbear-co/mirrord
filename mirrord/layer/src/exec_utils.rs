@@ -10,7 +10,7 @@ use std::{
 };
 
 use libc::{c_char, c_int, pid_t};
-use mirrord_layer_macro::hook_guard_fn;
+use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_sip::{
     sip_patch, SipError, MIRRORD_TEMP_BIN_DIR_CANONIC_STRING, MIRRORD_TEMP_BIN_DIR_STRING,
 };
@@ -294,11 +294,17 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
 }
 
 /// Just strip the sip patch dir out of the path if there.
-#[hook_guard_fn]
+/// Don't use guard since we want the original function to be able to call back to our detours.
+/// For example, `dlopen` loads library `funlibrary.dylib` which then calls `dlopen` as part
+/// of it's initialization sequence, causing the second dlopen to fail since we don't patch
+/// the path for the second call.
+#[hook_fn]
 pub(crate) unsafe extern "C" fn dlopen_detour(
     raw_path: *const c_char,
     mode: c_int,
 ) -> *const c_void {
+    // we hold the guard manually for tracing/internal code
+    let guard = crate::detour::DetourGuard::new();
     let detour: Detour<PathBuf> = raw_path.checked_into();
     let raw_path = if let Bypass(FileOperationInMirrordBinTempDir(ptr)) = detour {
         trace!("dlopen called with a path inside our patch dir, switching with fixed pointer.");
@@ -307,5 +313,7 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
         trace!("dlopen called on path {detour:?}.");
         raw_path
     };
+    drop(guard);
+    // call dlopen guardless
     FN_DLOPEN(raw_path, mode)
 }

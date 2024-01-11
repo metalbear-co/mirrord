@@ -1,0 +1,1 @@
+Remove guard from dlopen, making calls from within dlopen hookable, potentially fixing issues
