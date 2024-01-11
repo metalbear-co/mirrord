@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::NaiveDate;
 use kube::CustomResource;
 use mirrord_config::target::{Target, TargetConfig};
@@ -193,4 +195,72 @@ pub struct MirrordPolicySpec {
     // TODO: make the k8s list type be set/map to prevent duplicates.
     /// List of features and operations blocked by this policy.
     pub block: Vec<BlockedFeature>,
+}
+
+/// Set where the application reads the name of the queue from, so that mirrord can find that queue,
+/// split it, and temporarily change the name there to the name of the branch queue when splitting.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")] // ConfigMap -> configMap in yaml.
+pub enum QueueNameSource {
+    #[serde(rename_all = "camelCase")] // queue_name_key -> queueNameKey in yaml.
+    ConfigMap {
+        /// The name of the config map that holds the name of the queue we want to split.
+        name: String,
+
+        /// The name of the key in the config map that holds the name of the queue we want to
+        /// split.
+        queue_name_key: String,
+
+        /// For when the queue name is inside a complex property - a file in a ConfigMap.
+        sub_key: Option<String>,
+    },
+    EnvVar(String),
+}
+
+/// The details of a queue that should be split.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub enum SplitQueue {
+    /// Amazon SQS
+    #[serde(rename_all = "camelCase")] // config_map -> configMap in yaml.
+    SQS {
+        /// AWS region to use.
+        region: String,
+
+        /// Where to find the name of the queue.
+        queue_name_source: QueueNameSource,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")] // Deployment -> deployment in yaml.
+pub enum QueueConsumer {
+    Deployment(String),
+    Rollout(String),
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct QueueSplitterStatus {
+    // TODO: this is just for now. later it will be something like a set of filters.
+    pub active: bool,
+}
+
+/// Defines a Custom Resource that holds a central configuration for splitting a queue. mirrord
+/// users specify a splitter by name in their configuration. mirrord then starts splitting according
+/// to the spec and the user's filter.
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+    group = "splitters.mirrord.metalbear.co",
+    version = "v1alpha",
+    kind = "MirrordQueueSplitter",
+    shortname = "qs",
+    status = "QueueSplitterStatus",
+    namespaced
+)]
+pub struct MirrordQueueSplitterSpec {
+    /// A map of the queues that should be split.
+    /// The key is used by users to associate filters to the right queues.
+    pub queues: HashMap<String, SplitQueue>,
+
+    /// The resource (deployment or Argo rollout) that reads from the queues.
+    pub consumer: QueueConsumer,
 }

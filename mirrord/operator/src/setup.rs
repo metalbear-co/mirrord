@@ -23,7 +23,7 @@ use k8s_openapi::{
 use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
-use crate::crd::{MirrordPolicy, TargetCrd};
+use crate::crd::{MirrordPolicy, MirrordQueueSplitter, TargetCrd};
 
 static OPERATOR_NAME: &str = "mirrord-operator";
 static OPERATOR_PORT: i32 = 3000;
@@ -176,6 +176,9 @@ impl OperatorSetup for Operator {
 
         writer.write_all(b"---\n")?;
         MirrordPolicy::crd().to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        MirrordQueueSplitter::crd().to_writer(&mut writer)?;
 
         Ok(())
     }
@@ -450,10 +453,17 @@ impl OperatorRole {
                     verbs: vec!["impersonate".to_owned()],
                     ..Default::default()
                 },
-                // Allow the operator to list mirrord policies.
+                // Allow the operator to list+get mirrord policies.
                 PolicyRule {
                     api_groups: Some(vec!["policies.mirrord.metalbear.co".to_owned()]),
                     resources: Some(vec![MirrordPolicy::plural(&()).to_string()]),
+                    verbs: vec!["list".to_owned(), "get".to_owned()],
+                    ..Default::default()
+                },
+                // Allow the operator to list mirrord queue splitters.
+                PolicyRule {
+                    api_groups: Some(vec!["splitters.mirrord.metalbear.co".to_owned()]),
+                    resources: Some(vec![MirrordQueueSplitter::plural(&()).to_string()]),
                     verbs: vec!["list".to_owned(), "get".to_owned()],
                     ..Default::default()
                 },
