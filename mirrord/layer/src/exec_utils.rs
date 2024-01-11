@@ -295,6 +295,9 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
 
 /// Just strip the sip patch dir out of the path if there.
 /// Don't use guard since we want the original function to be able to call back to our detours.
+/// For example, `dlopen` loads library `funlibrary.dylib` which then calls `dlopen` as part
+/// of it's initialization sequence, cuasing the second dlopen to fail since we don't patch
+/// the path for the second call.
 #[hook_fn]
 pub(crate) unsafe extern "C" fn dlopen_detour(
     raw_path: *const c_char,
