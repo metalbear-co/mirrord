@@ -235,7 +235,7 @@ Operator License
         sessions.add_row(row![
             session.id.as_deref().unwrap_or(""),
             &session.target,
-            session.namespace.as_deref().unwrap_or(""),
+            session.namespace.as_deref().unwrap_or("N/A"),
             &session.user,
             humantime::format_duration(Duration::from_secs(session.duration_secs)),
         ]);
