@@ -1,1 +1,0 @@
-Fixed layer panics in trace only mode.

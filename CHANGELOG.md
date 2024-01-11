@@ -8,6 +8,30 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.83.0](https://github.com/metalbear-co/mirrord/tree/3.83.0) - 2024-01-11
+
+
+### Changed
+
+- Filesystem: File not found default filter happens after checking local filter
+- The `copy_target` feature is now officialy stable.
+- `mirrord operator status` reports active copy targets.
+
+
+### Fixed
+
+- Remove guard from dlopen, making calls from within dlopen hookable,
+  potentially fixing issues
+
+
+### Internal
+
+- Moved the docs from `CopyTargetFileConfig` to `CopyTargetConfig` so that
+  medschool reads them.
+  [#2164](https://github.com/metalbear-co/mirrord/issues/2164)
+- Fixed layer panics in trace only mode.
+
+
 ## [3.82.0](https://github.com/metalbear-co/mirrord/tree/3.82.0) - 2024-01-08
 
 
