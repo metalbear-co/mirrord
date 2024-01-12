@@ -117,6 +117,7 @@ pub struct Session {
     pub duration_secs: u64,
     pub user: String,
     pub target: String,
+    pub namespace: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
