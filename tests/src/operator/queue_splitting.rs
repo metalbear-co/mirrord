@@ -2,82 +2,20 @@
 #![cfg(feature = "operator")]
 //! Test queue splitting features with an operator.
 
-use std::{collections::BTreeMap, time::Duration};
+use std::time::Duration;
 
-use aws_sdk_sqs::types::{
-    QueueAttributeName,
-    QueueAttributeName::{FifoQueue, MessageRetentionPeriod},
-};
-use k8s_openapi::{
-    api::{
-        apps::v1::{Deployment, DeploymentSpec},
-        core::v1::{PodSpec, PodTemplateSpec},
-    },
-    apimachinery::pkg::apis::meta::v1::ObjectMeta,
-};
+use aws_sdk_sqs::types::QueueAttributeName::{FifoQueue, MessageRetentionPeriod};
 use k8s_openapi::api::core::v1::ConfigMap;
 use kube::{Api, Client};
-use mirrord_operator::crd::QueueConsumer::Deployment;
 use reqwest::header::HeaderMap;
 use rstest::*;
-use tokio_tungstenite::tungstenite::client;
-use mirrord_operator::crd::MirrordPolicy;
 
-use crate::utils::{config_dir, kube_client, microservice_from_deployment, send_request, service, Application, KubeService, TEST_RESOURCE_LABEL, ResourceGuard};
+use crate::utils::{
+    config_dir, kube_client, send_request, service, Application, KubeService, ResourceGuard,
+    TEST_RESOURCE_LABEL,
+};
 
 const SQS_CONFIG_MAP_NAME: &str = "mirrord-e2e-test-sqs-splitting";
-
-fn test_resource_label() -> (String, String) {
-    (
-        TEST_RESOURCE_LABEL.0.to_string(),
-        TEST_RESOURCE_LABEL.1.to_string(),
-    )
-}
-
-fn metadata_with_app_label(name: String) -> ObjectMeta {
-    ObjectMeta {
-        labels: Some(BTreeMap::from([
-            test_resource_label(),
-            ("app".to_string(), name.clone()),
-        ])),
-        ..Default::default()
-    }
-}
-
-fn metadata_with_name(name: String) -> ObjectMeta {
-    ObjectMeta {
-        labels: Some(BTreeMap::from([
-            test_resource_label(),
-            ("app".to_string(), name.clone()),
-        ])),
-        name: Some(name.clone()),
-        ..Default::default()
-    }
-}
-
-async fn deploy_test_microservice(
-    kube_client: Client,
-    name: String,
-    queue_name: String,
-    queue_url: String,
-) -> KubeService {
-    let dep = Deployment {
-        metadata: metadata_with_name(name.clone()),
-        spec: Some(DeploymentSpec {
-            replicas: Some(2),
-            selector: Default::default(),
-            template: PodTemplateSpec {
-                metadata: Some(metadata_with_app_label(name.clone())),
-                spec: Some(PodSpec {
-                    ..Default::default()
-                }),
-            },
-            ..Default::default()
-        }),
-        status: None,
-    };
-    microservice_from_deployment(kube_client, dep, None, None).await
-}
 
 #[fixture]
 fn sqs_queue_name() -> String {
@@ -103,7 +41,11 @@ async fn sqs_queue(sqs_queue_name: String) -> (String, String) {
     (sqs_queue_name, queue.queue_url.unwrap())
 }
 
-pub async fn create_config_map(kube_client: Client, namespace: &str, sqs_queue_name: String) -> ResourceGuard {
+pub async fn create_config_map(
+    kube_client: Client,
+    namespace: &str,
+    sqs_queue_name: String,
+) -> ResourceGuard {
     let config_map_api: Api<ConfigMap> = Api::namespaced(kube_client.clone(), namespace);
     let config_map = ConfigMap {
         binary_data: None,
@@ -117,8 +59,8 @@ pub async fn create_config_map(kube_client: Client, namespace: &str, sqs_queue_n
         &config_map,
         true,
     )
-        .await
-        .expect("Could not create policy in E2E test."),
+    .await
+    .expect("Could not create policy in E2E test.")
 }
 
 #[fixture]
@@ -155,10 +97,12 @@ pub async fn two_users_one_queue(
 
     let deployed = sqs_consumer_service.await;
 
-    let _config_map_guard = create_config_map(kube_client.clone(), &deployed.namespace, sqs_queue_name);
+    // Create the config map that the remote deployment uses as the source of the queue's name.
+    let _config_map_guard =
+        create_config_map(kube_client.clone(), &deployed.namespace, sqs_queue_name);
 
     let mut config_path = config_dir.clone();
-    config_path.push("sqs_queue_splitting.toml");
+    config_path.push("sqs_queue_splitting_a.json");
 
     let mut client_a = application
         .run(
@@ -169,53 +113,23 @@ pub async fn two_users_one_queue(
         )
         .await;
 
-    client_a
-        .wait_for_line(Duration::from_secs(40), "daemon subscribed")
-        .await;
-
     let mut config_path = config_dir.clone();
-    config_path.push("http_filter_header_no.json");
+    config_path.push("sqs_queue_splitting_b.json");
 
     let mut client_b = application
         .run(
-            &service.target,
-            Some(&service.namespace),
-            Some(flags),
+            &deployed.target, // TODO: target the deployment maybe?
+            Some(&deployed.namespace),
+            None,
             Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
         )
         .await;
 
-    client_b
-        .wait_for_line(Duration::from_secs(40), "daemon subscribed")
-        .await;
+    // TODO: send messages to the original queue.
 
-    let client = reqwest::Client::new();
-    let req_builder = client.delete(&url);
-    let mut headers = HeaderMap::default();
-    headers.insert("x-filter", "yes".parse().unwrap());
+    // TODO: wait here for both clients to exit and assert exit status 0 in each of them.
+    //   the test application consumes messages and verifies exact expected messages.
 
-    send_request(req_builder, Some("DELETE"), headers.clone()).await;
-
-    tokio::time::timeout(Duration::from_secs(10), client_a.wait())
-        .await
-        .unwrap();
-
-    client_a
-        .assert_stdout_contains("DELETE: Request completed")
-        .await;
-
-    let client = reqwest::Client::new();
-    let req_builder = client.delete(&url);
-    let mut headers = HeaderMap::default();
-    headers.insert("x-filter", "no".parse().unwrap());
-
-    send_request(req_builder, Some("DELETE"), headers.clone()).await;
-
-    tokio::time::timeout(Duration::from_secs(10), client_b.wait())
-        .await
-        .unwrap();
-
-    client_b
-        .assert_stdout_contains("DELETE: Request completed")
-        .await;
+    // TODO: read the deployed application's logs and verify exactly expected messages were
+    // consumed.
 }

@@ -1,0 +1,21 @@
+{
+  "feature": {
+    "split_queues": {
+      "whatever-q-splitter": {
+        "first-queue": {
+          "SQS": {
+            "wows": {
+              "number_attribute": [
+                { "greater_than_int": 2 },
+                { "lesser_than_int": 6 }
+              ]
+            },
+            "coolz": {
+              "string_attribute": "^very .*"
+            }
+          }
+        }
+      }
+    }
+  }
+}
