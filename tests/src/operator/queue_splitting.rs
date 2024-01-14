@@ -89,11 +89,11 @@ pub async fn two_users_one_queue(
     config_dir: &std::path::PathBuf,
     #[future] kube_client: Client,
     #[future] sqs_consumer_service: KubeService,
-    sqs_queue: (String, String),
+    #[future] sqs_queue: (String, String),
 ) {
     let application = Application::Go21HTTP;
     let kube_client = kube_client.await;
-    let (sqs_queue_name, sqs_queue_url) = sqs_queue;
+    let (sqs_queue_name, sqs_queue_url) = sqs_queue.await;
 
     let deployed = sqs_consumer_service.await;
 
@@ -130,6 +130,6 @@ pub async fn two_users_one_queue(
     // TODO: wait here for both clients to exit and assert exit status 0 in each of them.
     //   the test application consumes messages and verifies exact expected messages.
 
-    // TODO: read the deployed application's logs and verify exactly expected messages were
-    // consumed.
+    // TODO: read output queue and verify that exactly the expected messages were
+    //   consumed forwarded.
 }
