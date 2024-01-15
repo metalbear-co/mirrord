@@ -118,6 +118,7 @@ pub struct Session {
     pub user: String,
     pub target: String,
     pub namespace: Option<String>,
+    pub locked_ports: Option<Vec<(u16, String, Option<String>)>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
