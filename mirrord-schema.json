@@ -370,6 +370,101 @@
       },
       "additionalProperties": false
     },
+    "BinaryAttributeRule": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "LongerThan"
+          ],
+          "properties": {
+            "LongerThan": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "ShorterThan"
+          ],
+          "properties": {
+            "ShorterThan": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "StartsWith"
+          ],
+          "properties": {
+            "StartsWith": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "EndsWith"
+          ],
+          "properties": {
+            "EndsWith": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "Equals"
+          ],
+          "properties": {
+            "Equals": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "Substring"
+          ],
+          "properties": {
+            "Substring": {
+              "type": "array",
+              "items": [
+                {
+                  "type": "integer",
+                  "format": "uint",
+                  "minimum": 0.0
+                },
+                {
+                  "type": "integer",
+                  "format": "uint",
+                  "minimum": 0.0
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "maxItems": 3,
+              "minItems": 3
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "ConcurrentSteal": {
       "description": "(Operator Only): Allows overriding port locks\n\nCan be set to either `\"continue\"` or `\"override\"`.\n\n- `\"continue\"`: Continue with normal execution - `\"override\"`: If port lock detected then override it with new lock and force close the original locking connection.",
       "oneOf": [
@@ -532,6 +627,41 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "split_queues": {
+          "title": "feature.split_queues {#feature-split_queues}",
+          "description": "Define filters to split queues by, and make your local application consume only messages that match those filters.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FileSplitQueuesConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "FileSplitQueuesConfig": {
+      "description": "Maps name of a `MirrordQueueSplitter` resource to a mapping from a fork name to a filter definition. ```json { \"feature\": { \"split_queues\": { \"splitter\": \"whatever-q-splitter\" \"queues\": { \"first-queue\": { \"SQS\": { \"wows\": { \"number_attribute\": [ { \"greater_than_int\": 2 }, { \"lesser_than_int\": 6 } ] }, \"coolz\": { \"string_attribute\": \"^very .*\" } } } } } } } ```",
+      "type": "object",
+      "properties": {
+        "queues": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/QueueMessageFilter"
+          }
+        },
+        "splitter": {
+          "description": "The name of the `MirrordQueueSplitter` resource to get queue details from.",
+          "type": [
+            "string",
+            "null"
           ]
         }
       },
@@ -864,6 +994,75 @@
       },
       "additionalProperties": false
     },
+    "NumberRule": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "GreaterThanInt"
+          ],
+          "properties": {
+            "GreaterThanInt": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "LesserThanInt"
+          ],
+          "properties": {
+            "LesserThanInt": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "EqualsInt"
+          ],
+          "properties": {
+            "EqualsInt": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "EqualsFloat"
+          ],
+          "properties": {
+            "EqualsFloat": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "DivisibleBy"
+          ],
+          "properties": {
+            "DivisibleBy": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "OutgoingFileConfig": {
       "description": "Tunnel outgoing network operations through mirrord.\n\nSee the outgoing [reference](https://mirrord.dev/docs/reference/traffic/#outgoing) for more details.\n\nThe `remote` and `local` config for this feature are **mutually** exclusive.\n\n```json { \"feature\": { \"network\": { \"outgoing\": { \"tcp\": true, \"udp\": true, \"ignore_localhost\": false, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"unix_streams\": \"bear.+\" } } } } ```",
       "type": "object",
@@ -978,6 +1177,24 @@
         }
       ]
     },
+    "QueueMessageFilter": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "queue_type"
+          ],
+          "properties": {
+            "queue_type": {
+              "type": "string",
+              "enum": [
+                "SQS"
+              ]
+            }
+          }
+        }
+      ]
+    },
     "RolloutTarget": {
       "description": "<!--${internal}--> Mirror the rollout specified by [`RolloutTarget::rollout`].",
       "type": "object",
@@ -997,6 +1214,54 @@
         }
       },
       "additionalProperties": false
+    },
+    "SQSAttributeRuleSet": {
+      "description": "Set of rules to filter that are required to apply to a single field",
+      "oneOf": [
+        {
+          "description": "A single regex is enough for complex rules for a string.",
+          "type": "object",
+          "required": [
+            "StringAttribute"
+          ],
+          "properties": {
+            "StringAttribute": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "NumberAttribute"
+          ],
+          "properties": {
+            "NumberAttribute": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/NumberRule"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "BinaryAttribute"
+          ],
+          "properties": {
+            "BinaryAttribute": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/BinaryAttributeRule"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     },
     "Target": {
       "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `podname/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`.",

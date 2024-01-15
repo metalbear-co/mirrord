@@ -710,6 +710,7 @@ mod tests {
                     })),
                 })),
                 copy_target: None,
+                split_queues: None,
             }),
             connect_tcp: None,
             operator: None,

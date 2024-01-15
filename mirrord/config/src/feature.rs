@@ -3,6 +3,7 @@ use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
 use self::{copy_target::CopyTargetConfig, env::EnvConfig, fs::FsConfig, network::NetworkConfig};
+use crate::feature::split_queues::SplitQueuesConfig;
 
 pub mod copy_target;
 pub mod env;
