@@ -238,13 +238,17 @@ Operator License
             &session.target,
             session.namespace.as_deref().unwrap_or("N/A"),
             &session.user,
-            session.locked_ports.as_deref().map(|ports| {
-                ports
-                    .iter()
-                    .map(|(port, _, _)| port.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            }).unwrap_or_default(),
+            session
+                .locked_ports
+                .as_deref()
+                .map(|ports| {
+                    ports
+                        .iter()
+                        .map(|(_, port, _)| port.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default(),
             humantime::format_duration(Duration::from_secs(session.duration_secs)),
         ]);
     }
