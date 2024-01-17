@@ -1000,6 +1000,7 @@ unsafe fn vec_to_iovec(bytes: &[u8], iovecs: &[iovec]) {
         iov_index += 1;
     }
 }
+
 /// Hook for `libc::readv`.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn readv_detour(
@@ -1010,11 +1011,12 @@ pub(crate) unsafe extern "C" fn readv_detour(
     if iovec_count < 0 {
         return FN_READV(fd, iovecs, iovec_count);
     }
-    let iovs = slice::from_raw_parts(iovecs, iovec_count as usize);
-    let read_size: u64 = iovs.iter().map(|iov| iov.iov_len as u64).sum();
 
-    read(fd, read_size)
-        .map(|read_file| {
+    let iovs = (!iovecs.is_null()).then(|| slice::from_raw_parts(iovecs, iovec_count as usize));
+
+    readv(iovs)
+        .and_then(|(iovs, read_size)| Detour::Success((read(fd, read_size)?, iovs)))
+        .map(|(read_file, iovs)| {
             let ReadFileResponse { bytes, .. } = read_file;
 
             vec_to_iovec(&bytes, iovs);
@@ -1036,11 +1038,12 @@ pub(crate) unsafe extern "C" fn preadv_detour(
     if iovec_count < 0 {
         return FN_PREADV(fd, iovecs, iovec_count, offset);
     }
-    let iovs = slice::from_raw_parts(iovecs, iovec_count as usize);
-    let read_size: u64 = iovs.iter().map(|iov| iov.iov_len as u64).sum();
 
-    pread(fd, read_size, offset as u64)
-        .map(|read_file| {
+    let iovs = (!iovecs.is_null()).then(|| slice::from_raw_parts(iovecs, iovec_count as usize));
+
+    readv(iovs)
+        .and_then(|(iovs, read_size)| Detour::Success((pread(fd, read_size, offset as u64)?, iovs)))
+        .map(|(read_file, iovs)| {
             let ReadFileResponse { bytes, .. } = read_file;
 
             vec_to_iovec(&bytes, iovs);
