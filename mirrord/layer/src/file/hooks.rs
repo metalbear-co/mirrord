@@ -985,7 +985,7 @@ unsafe extern "C" fn realpath_darwin_extsn_detour(
 //     result
 // }
 
-unsafe fn vec_to_iovec(bytes: &Vec<u8>, iovecs: &[iovec]) {
+unsafe fn vec_to_iovec(bytes: &[u8], iovecs: &[iovec]) {
     let mut copied = 0;
     let mut iov_index = 0;
 
