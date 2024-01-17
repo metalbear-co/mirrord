@@ -985,6 +985,21 @@ unsafe extern "C" fn realpath_darwin_extsn_detour(
 //     result
 // }
 
+unsafe fn vec_to_iovec(bytes: &Vec<u8>, iovecs: &[iovec]) {
+    let mut copied = 0;
+    let mut iov_index = 0;
+
+    while copied < bytes.len() {
+        let iov = &iovecs.get(iov_index).expect("ioevec out of bounds");
+        let read_ptr = bytes.as_ptr();
+        let copy_amount = std::cmp::min(bytes.len(), iov.iov_len);
+        let out_buffer = iov.iov_base.cast();
+        ptr::copy(read_ptr, out_buffer, copy_amount);
+        copied += copy_amount;
+        // we trust iov_index to be in correct size since we checked it before
+        iov_index += 1;
+    }
+}
 /// Hook for `libc::readv`.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn readv_detour(
@@ -1000,25 +1015,12 @@ pub(crate) unsafe extern "C" fn readv_detour(
 
     read(fd, read_size)
         .map(|read_file| {
-            let ReadFileResponse { bytes, read_amount } = read_file;
+            let ReadFileResponse { bytes, .. } = read_file;
 
-            let mut copied = 0;
-            let mut iov_index = 0;
-
-            while copied < read_amount {
-                let iov = &iovs.get(iov_index).expect("ioevec out of bounds");
-                let read_ptr = bytes.as_ptr();
-                let copy_amount = std::cmp::min(read_amount as usize, iov.iov_len);
-                let out_buffer = iov.iov_base.cast();
-                ptr::copy(read_ptr, out_buffer, copy_amount);
-                copied += copy_amount as u64;
-                // we trust iov_index to be in correct size since we checked it before
-                iov_index += 1;
-            }
-
+            vec_to_iovec(&bytes, iovs);
             // WARN: Must be careful when it comes to `EOF`, incorrect handling may appear as the
             // `read` call being repeated.
-            ssize_t::try_from(read_amount).unwrap()
+            ssize_t::try_from(bytes.len()).unwrap()
         })
         .unwrap_or_bypass_with(|_| FN_READV(fd, iovecs, iovec_count))
 }
@@ -1039,26 +1041,13 @@ pub(crate) unsafe extern "C" fn preadv_detour(
 
     pread(fd, read_size, offset as u64)
         .map(|read_file| {
-            let ReadFileResponse { bytes, read_amount } = read_file;
-            let fixed_read = read_size.min(read_amount);
+            let ReadFileResponse { bytes, .. } = read_file;
 
-            let mut copied = 0;
-            let mut iov_index = 0;
-
-            while copied < fixed_read {
-                let iov = &iovs.get(iov_index).expect("iovec out of bounds");
-                let read_ptr = bytes.as_ptr();
-                let copy_amount = std::cmp::min(fixed_read as usize, iov.iov_len);
-                let out_buffer = iov.iov_base.cast();
-                ptr::copy(read_ptr, out_buffer, copy_amount);
-                copied += copy_amount as u64;
-                // we trust iov_index to be in correct size since we checked it before
-                iov_index += 1;
-            }
+            vec_to_iovec(&bytes, iovs);
 
             // WARN: Must be careful when it comes to `EOF`, incorrect handling may appear as the
             // `read` call being repeated.
-            ssize_t::try_from(fixed_read).unwrap()
+            ssize_t::try_from(bytes.len()).unwrap()
         })
         .unwrap_or_bypass_with(|_| FN_PREADV(fd, iovecs, iovec_count, offset))
 }
