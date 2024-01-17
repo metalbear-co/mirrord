@@ -652,6 +652,7 @@ pub enum Application {
     Fork,
     OpenFile,
     CIssue2055,
+    CIssue2178,
     RustIssue2058,
     Realpath,
     // For running applications with the executable and arguments determined at runtime.
@@ -795,6 +796,11 @@ impl Application {
                 env!("CARGO_MANIFEST_DIR"),
                 "tests/apps/gethostbyname/out.c_test_app",
             ),
+            Application::CIssue2178 => format!(
+                "{}/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                "tests/apps/issue2178/out.c_test_app",
+            ),
             Application::RustIssue2058 => String::from("tests/apps/issue2058/target/issue2058"),
             Application::DynamicApp(exe, _) => exe.clone(),
         }
@@ -887,7 +893,8 @@ impl Application {
             | Application::Go20DirBypass
             | Application::RustIssue2058
             | Application::OpenFile
-            | Application::CIssue2055 => vec![],
+            | Application::CIssue2055
+            | Application::CIssue2178 => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
@@ -955,6 +962,7 @@ impl Application {
             | Application::RustRecvFrom
             | Application::OpenFile
             | Application::CIssue2055
+            | Application::CIssue2178
             | Application::DynamicApp(..) => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,
