@@ -16,16 +16,15 @@ use crate::config::source::MirrordConfigSource;
 ///       "splitter": "whatever-q-splitter"
 ///       "queues": {
 ///         "first-queue": {
-///           "SQS": {
-///             "wows": {
-///               "number_attribute": [
-///                 { "greater_than_int": 2 },
-///                 { "lesser_than_int": 6 }
-///               ]
-///             },
-///             "coolz": {
-///               "string_attribute": "^very .*"
-///             }
+///           "queue_type": "SQS",
+///           "wows": {
+///             "number_attribute": [
+///               { "greater_than_int": 2 },
+///               { "lesser_than_int": 6 }
+///             ]
+///           },
+///           "coolz": {
+///             "string_attribute": "^very .*"
 ///           }
 ///         }
 ///       }
