@@ -5,7 +5,6 @@
 mod codesign;
 mod error;
 mod rpath;
-mod whitespace;
 
 mod main {
     use std::{
@@ -334,28 +333,20 @@ mod main {
     /// Extract shebang from file contents.
     /// "#!/usr/bin/env bash\n..." -> Some("#!/usr/bin/env")
     fn get_shebang_from_string(file_contents: &str) -> Option<String> {
-        const BOM: &str = "\u{feff}";
-        let content = file_contents.strip_prefix(BOM).unwrap_or(file_contents);
-        let rest = content.strip_prefix("#!")?;
+        let rest = file_contents.strip_prefix("#!")?;
 
-        if whitespace::skip(rest).starts_with('[') {
-            None
+        let mut char_iter = rest
+            .char_indices()
+            .skip_while(|(_, c)| c.is_whitespace()) // any whitespace directly after #!
+            .skip_while(|(_, c)| !c.is_whitespace()); // Any non-whitespace characters after that (path)
+
+        let shebang = if let Some((path_len, _next_char)) = char_iter.next() {
+            file_contents.get(..path_len + 2)? // +2 for #! because the index is in `rest`
         } else {
-            let mut iterator = content
-                .split_once('\n')
-                .map(|(line, _)| line)
-                .unwrap_or(content)
-                .split_whitespace();
-
-            let first_token = iterator.next()?;
-            // if first_token is just #!, keep going
-            if first_token == "#!" {
-                let executable = iterator.find(|s| !s.is_empty())?;
-                Some(format!("{first_token}{executable}"))
-            } else {
-                Some(first_token.to_string())
-            }
-        }
+            // There is no next character after the shebang, so the whole file is just shebang.
+            file_contents
+        };
+        Some(shebang.to_string())
     }
 
     /// Including '#!', just until whitespace, no arguments.
@@ -696,19 +687,38 @@ mod main {
             assert_eq!(cpu_type, macho::CPU_TYPE_X86_64);
         }
 
-        #[test]
-        fn patch_script_with_shebang() {
+        fn test_patch_script_with_shebang(
+            file_contents: &str,
+            patched_binary_path: &str,
+            new_file_contents: &str,
+        ) {
             let mut original_file = tempfile::NamedTempFile::new().unwrap();
             let patched_path =
                 env::temp_dir().join(original_file.path().strip_prefix("/").unwrap());
-            original_file
-                .write_all("#!/usr/bin/env bash\n".as_ref())
-                .unwrap();
+            original_file.write_all(file_contents.as_ref()).unwrap();
             original_file.flush().unwrap();
             std::fs::create_dir_all(patched_path.parent().unwrap()).unwrap();
-            patch_script(original_file.path(), &patched_path, "/test/shebang").unwrap();
+            patch_script(original_file.path(), &patched_path, patched_binary_path).unwrap();
             let new_contents = std::fs::read(&patched_path).unwrap();
-            assert_eq!(new_contents, "#!/test/shebang bash\n".as_bytes())
+            assert_eq!(new_contents, new_file_contents.as_bytes())
+        }
+
+        #[test]
+        fn patch_script_with_shebang() {
+            test_patch_script_with_shebang(
+                "#!/usr/bin/env bash\n",
+                "/test/shebang",
+                "#!/test/shebang bash\n",
+            );
+        }
+
+        #[test]
+        fn patch_script_with_shebang_with_space() {
+            test_patch_script_with_shebang(
+                "#!    /usr/bin/env bash\n",
+                "/test/shebang",
+                "#!/test/shebang bash\n",
+            );
         }
 
         #[test]
@@ -725,12 +735,12 @@ mod main {
             let contents = "#! /usr/bin/env bash\n".to_string();
             assert_eq!(
                 get_shebang_from_string(&contents).unwrap(),
-                "#!/usr/bin/env"
+                "#! /usr/bin/env"
             );
             let contents = "#!     /usr/bin/env bash\n".to_string();
             assert_eq!(
                 get_shebang_from_string(&contents).unwrap(),
-                "#!/usr/bin/env"
+                "#!     /usr/bin/env"
             )
         }
 
