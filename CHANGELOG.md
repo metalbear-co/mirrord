@@ -8,6 +8,20 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.84.0](https://github.com/metalbear-co/mirrord/tree/3.84.0) - 2024-01-18
+
+
+### Added
+
+- Report namespace for operator sessions
+
+
+### Fixed
+
+- add preadv and readv to fix erlang file reading
+  [#2178](https://github.com/metalbear-co/mirrord/issues/2178)
+
+
 ## [3.83.0](https://github.com/metalbear-co/mirrord/tree/3.83.0) - 2024-01-11
 
 
