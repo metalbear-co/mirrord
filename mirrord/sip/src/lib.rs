@@ -341,13 +341,20 @@ mod main {
         if whitespace::skip(rest).starts_with('[') {
             None
         } else {
-            content
+            let mut iterator = content
                 .split_once('\n')
                 .map(|(line, _)| line)
                 .unwrap_or(content)
-                .split_whitespace()
-                .next()
-                .map(ToString::to_string)
+                .split_whitespace();
+
+            let first_token = iterator.next()?;
+            // if first_token is just #!, keep going
+            if first_token == "#!" {
+                let executable = iterator.skip_while(|s| s.is_empty()).next()?;
+                Some(format!("{first_token}{executable}"))
+            } else {
+                Some(first_token.to_string())
+            }
         }
     }
 
@@ -707,6 +714,20 @@ mod main {
         #[test]
         fn shebang_from_string() {
             let contents = "#!/usr/bin/env bash\n".to_string();
+            assert_eq!(
+                get_shebang_from_string(&contents).unwrap(),
+                "#!/usr/bin/env"
+            )
+        }
+
+        #[test]
+        fn shebang_from_string_with_space() {
+            let contents = "#! /usr/bin/env bash\n".to_string();
+            assert_eq!(
+                get_shebang_from_string(&contents).unwrap(),
+                "#!/usr/bin/env"
+            );
+            let contents = "#!     /usr/bin/env bash\n".to_string();
             assert_eq!(
                 get_shebang_from_string(&contents).unwrap(),
                 "#!/usr/bin/env"
