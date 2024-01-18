@@ -221,7 +221,7 @@ pub enum QueueNameSource {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub enum SplitQueue {
     /// Amazon SQS
-    #[serde(rename_all = "camelCase")] // config_map -> configMap in yaml.
+    #[serde(rename_all = "camelCase")] // queue_name_source -> queueNameSource in yaml.
     SQS {
         /// AWS region to use.
         region: String,
