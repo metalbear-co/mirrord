@@ -985,16 +985,16 @@ unsafe extern "C" fn realpath_darwin_extsn_detour(
 //     result
 // }
 
-unsafe fn vec_to_iovec(bytes: &[u8], iovecs: &[iovec]) {
+fn vec_to_iovec(bytes: &[u8], iovecs: &[iovec]) {
     let mut copied = 0;
     let mut iov_index = 0;
 
     while copied < bytes.len() {
         let iov = &iovecs.get(iov_index).expect("ioevec out of bounds");
-        let read_ptr = bytes.as_ptr().add(copied);
+        let read_ptr = unsafe { bytes.as_ptr().add(copied) };
         let copy_amount = std::cmp::min(bytes.len(), iov.iov_len);
         let out_buffer = iov.iov_base.cast();
-        ptr::copy(read_ptr, out_buffer, copy_amount);
+        unsafe { ptr::copy(read_ptr, out_buffer, copy_amount) };
         copied += copy_amount;
         // we trust iov_index to be in correct size since we checked it before
         iov_index += 1;
