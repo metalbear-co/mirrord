@@ -1,7 +1,7 @@
 use core::ffi::CStr;
 use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
-use libc::{c_int, unlink, AT_FDCWD, FILE};
+use libc::{c_int, iovec, unlink, AT_FDCWD, FILE};
 use mirrord_protocol::file::{
     OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
     WriteFileResponse, XstatFsResponse, XstatResponse,
@@ -273,6 +273,15 @@ pub(crate) fn openat(
 /// `open`.
 pub(crate) fn read(local_fd: RawFd, read_amount: u64) -> Detour<ReadFileResponse> {
     get_remote_fd(local_fd).and_then(|remote_fd| RemoteFile::remote_read(remote_fd, read_amount))
+}
+
+/// Helper for dealing with a potential null pointer being passed to `*const iovec` from
+/// `readv_detour` and `preadv_detour`.
+pub(crate) fn readv(iovs: Option<&[iovec]>) -> Detour<(&[iovec], u64)> {
+    let iovs = iovs?;
+    let read_size: u64 = iovs.iter().fold(0, |sum, iov| sum + iov.iov_len as u64);
+
+    Detour::Success((iovs, read_size))
 }
 
 #[tracing::instrument(level = "trace")]
