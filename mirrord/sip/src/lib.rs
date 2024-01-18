@@ -350,7 +350,7 @@ mod main {
             let first_token = iterator.next()?;
             // if first_token is just #!, keep going
             if first_token == "#!" {
-                let executable = iterator.skip_while(|s| s.is_empty()).next()?;
+                let executable = iterator.find(|s| !s.is_empty())?;
                 Some(format!("{first_token}{executable}"))
             } else {
                 Some(first_token.to_string())
