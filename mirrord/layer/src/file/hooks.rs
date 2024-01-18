@@ -991,7 +991,7 @@ unsafe fn vec_to_iovec(bytes: &[u8], iovecs: &[iovec]) {
 
     while copied < bytes.len() {
         let iov = &iovecs.get(iov_index).expect("ioevec out of bounds");
-        let read_ptr = bytes.as_ptr();
+        let read_ptr = bytes.as_ptr().add(copied);
         let copy_amount = std::cmp::min(bytes.len(), iov.iov_len);
         let out_buffer = iov.iov_base.cast();
         ptr::copy(read_ptr, out_buffer, copy_amount);
