@@ -8,6 +8,15 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.84.1](https://github.com/metalbear-co/mirrord/tree/3.84.1) - 2024-01-19
+
+
+### Fixed
+
+- Add support for shebang containing spaces like asdf's node does
+  [#2181](https://github.com/metalbear-co/mirrord/issues/2181)
+
+
 ## [3.84.0](https://github.com/metalbear-co/mirrord/tree/3.84.0) - 2024-01-18
 
 
