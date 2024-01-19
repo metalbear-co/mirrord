@@ -32,7 +32,7 @@ use tracing::{debug, error, warn};
 
 use crate::crd::{
     CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, TargetCrd,
-    OPERATOR_STATUS_NAME,
+    OPERATOR_STATUS_NAME, TARGETLESS_TARGET_NAME,
 };
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
@@ -285,9 +285,15 @@ impl OperatorApi {
         }
         version_progress.success(None);
 
-        let raw_target = operator_api.fetch_target().await?;
-
         let target_to_connect = if config.feature.copy_target.enabled {
+            let target_name = TargetCrd::target_name_by_config(&operator_api.target_config);
+            let target =
+                target_name
+                    .parse::<Target>()
+                    .map_err(|err| OperatorApiError::InvalidTarget {
+                        reason: format!("invalid target name: {}", err),
+                    })?;
+
             let mut copy_progress = progress.subtask("copying target");
 
             if config.feature.copy_target.scale_down {
@@ -300,12 +306,13 @@ impl OperatorApi {
             }
 
             let copied = operator_api
-                .copy_target(&metadata, raw_target, config.feature.copy_target.scale_down)
+                .copy_target(&metadata, target, config.feature.copy_target.scale_down)
                 .await?;
             copy_progress.success(None);
 
             OperatorSessionTarget::Copied(copied)
         } else {
+            let raw_target = operator_api.fetch_target().await?;
             OperatorSessionTarget::Raw(raw_target)
         };
 
@@ -537,21 +544,13 @@ impl OperatorApi {
     async fn copy_target(
         &self,
         session_metadata: &OperatorSessionMetadata,
-        target: TargetCrd,
+        target: Target,
         scale_down: bool,
     ) -> Result<CopyTargetCrd> {
-        let raw_target = target
-            .spec
-            .target
-            .clone()
-            .ok_or(OperatorApiError::InvalidTarget {
-                reason: "copy target feature is not compatible with targetless mode".into(),
-            })?;
-
         let requested = CopyTargetCrd::new(
-            &target.name(),
+            &TargetCrd::target_name(&target),
             CopyTargetSpec {
-                target: raw_target,
+                target: target,
                 idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
                 scale_down,
             },
