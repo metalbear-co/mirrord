@@ -9,7 +9,7 @@ use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
 
 use errno::{set_errno, Errno};
 use libc::{
-    self, c_char, c_int, c_void, dirent, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
+    self, c_char, c_int, c_void, dirent, iovec, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
     AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY,
 };
 #[cfg(target_os = "linux")]
@@ -985,6 +985,76 @@ unsafe extern "C" fn realpath_darwin_extsn_detour(
 //     result
 // }
 
+fn vec_to_iovec(bytes: &[u8], iovecs: &[iovec]) {
+    let mut copied = 0;
+    let mut iov_index = 0;
+
+    while copied < bytes.len() {
+        let iov = &iovecs.get(iov_index).expect("ioevec out of bounds");
+        let read_ptr = unsafe { bytes.as_ptr().add(copied) };
+        let copy_amount = std::cmp::min(bytes.len(), iov.iov_len);
+        let out_buffer = iov.iov_base.cast();
+        unsafe { ptr::copy(read_ptr, out_buffer, copy_amount) };
+        copied += copy_amount;
+        // we trust iov_index to be in correct size since we checked it before
+        iov_index += 1;
+    }
+}
+
+/// Hook for `libc::readv`.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn readv_detour(
+    fd: RawFd,
+    iovecs: *const iovec,
+    iovec_count: c_int,
+) -> ssize_t {
+    if iovec_count < 0 {
+        return FN_READV(fd, iovecs, iovec_count);
+    }
+
+    let iovs = (!iovecs.is_null()).then(|| slice::from_raw_parts(iovecs, iovec_count as usize));
+
+    readv(iovs)
+        .and_then(|(iovs, read_size)| Detour::Success((read(fd, read_size)?, iovs)))
+        .map(|(read_file, iovs)| {
+            let ReadFileResponse { bytes, .. } = read_file;
+
+            vec_to_iovec(&bytes, iovs);
+            // WARN: Must be careful when it comes to `EOF`, incorrect handling may appear as the
+            // `read` call being repeated.
+            ssize_t::try_from(bytes.len()).unwrap()
+        })
+        .unwrap_or_bypass_with(|_| FN_READV(fd, iovecs, iovec_count))
+}
+
+/// Hook for `libc::readv`.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn preadv_detour(
+    fd: RawFd,
+    iovecs: *const iovec,
+    iovec_count: c_int,
+    offset: off_t,
+) -> ssize_t {
+    if iovec_count < 0 {
+        return FN_PREADV(fd, iovecs, iovec_count, offset);
+    }
+
+    let iovs = (!iovecs.is_null()).then(|| slice::from_raw_parts(iovecs, iovec_count as usize));
+
+    readv(iovs)
+        .and_then(|(iovs, read_size)| Detour::Success((pread(fd, read_size, offset as u64)?, iovs)))
+        .map(|(read_file, iovs)| {
+            let ReadFileResponse { bytes, .. } = read_file;
+
+            vec_to_iovec(&bytes, iovs);
+
+            // WARN: Must be careful when it comes to `EOF`, incorrect handling may appear as the
+            // `read` call being repeated.
+            ssize_t::try_from(bytes.len()).unwrap()
+        })
+        .unwrap_or_bypass_with(|_| FN_PREADV(fd, iovecs, iovec_count, offset))
+}
+
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
@@ -1041,6 +1111,8 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "dirfd", dirfd_detour, FnDirfd, FN_DIRFD);
 
     replace!(hook_manager, "pread", pread_detour, FnPread, FN_PREAD);
+    replace!(hook_manager, "readv", readv_detour, FnReadv, FN_READV);
+    replace!(hook_manager, "preadv", preadv_detour, FnPreadv, FN_PREADV);
     replace!(
         hook_manager,
         "_pread$NOCANCEL",
