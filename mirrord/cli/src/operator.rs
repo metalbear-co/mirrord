@@ -228,15 +228,37 @@ Operator License
         "Target",
         "Namespace",
         "User",
+        "Ports",
         "Session Duration"
     ]);
 
     for session in &status.sessions {
+        let locked_ports = session
+            .locked_ports
+            .as_deref()
+            .map(|ports| {
+                ports
+                    .iter()
+                    .map(|(port, type_, filter)| {
+                        format!(
+                            "Port: {port}, Type: {type_}{}",
+                            filter
+                                .as_ref()
+                                .map(|f| format!(", Filter: {}", f))
+                                .unwrap_or_default()
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default();
+
         sessions.add_row(row![
             session.id.as_deref().unwrap_or(""),
             &session.target,
             session.namespace.as_deref().unwrap_or("N/A"),
             &session.user,
+            locked_ports,
             humantime::format_duration(Duration::from_secs(session.duration_secs)),
         ]);
     }
