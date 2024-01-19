@@ -32,7 +32,7 @@ use tracing::{debug, error, warn};
 
 use crate::crd::{
     CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, TargetCrd,
-    OPERATOR_STATUS_NAME, TARGETLESS_TARGET_NAME,
+    OPERATOR_STATUS_NAME,
 };
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
@@ -286,13 +286,12 @@ impl OperatorApi {
         version_progress.success(None);
 
         let target_to_connect = if config.feature.copy_target.enabled {
-            let target_name = TargetCrd::target_name_by_config(&operator_api.target_config);
-            let target =
-                target_name
-                    .parse::<Target>()
-                    .map_err(|err| OperatorApiError::InvalidTarget {
-                        reason: format!("invalid target name: {}", err),
-                    })?;
+            let target_name = &operator_api.target_config.path;
+            let target = target_name
+                .as_ref()
+                .ok_or_else(|| OperatorApiError::InvalidTarget {
+                    reason: "copy target feature is enabled, but target is not set".into(),
+                })?;
 
             let mut copy_progress = progress.subtask("copying target");
 
@@ -306,7 +305,11 @@ impl OperatorApi {
             }
 
             let copied = operator_api
-                .copy_target(&metadata, target, config.feature.copy_target.scale_down)
+                .copy_target(
+                    &metadata,
+                    target.clone(),
+                    config.feature.copy_target.scale_down,
+                )
                 .await?;
             copy_progress.success(None);
 
