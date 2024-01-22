@@ -71,7 +71,6 @@ mod main {
 
     /// Check if a cpu subtype (already parsed with the correct endianness) is arm64e, given its
     /// main cpu type is arm64. We only consider the lowest byte in the check.
-    #[cfg(target_arch = "aarch64")]
     fn is_cpu_subtype_arm64e(subtype: u32) -> bool {
         // We only compare the lowest 8 bit since the higher bits may contain "capability bits".
         // For example, usually arm64e would be
@@ -109,22 +108,13 @@ mod main {
         /// returns either an Ok BinaryInfo (which points to the whole file, as it is not
         /// part of a fat file) if it is of a supported CPU architecture, or a
         /// `SipError::NoSupportedArchitecture` otherwise.
-        fn from_thin_mach_o(
-            cpu_type: u32,
-            #[cfg(target_arch = "aarch64")] cpu_subtype: u32,
-            bytes: &[u8],
-        ) -> Result<Self> {
-            // When running with apple chips both arm64 and x64 can run.
-            #[cfg(target_arch = "aarch64")]
-            let is_supported = (cpu_type == macho::CPU_TYPE_X86_64
-                || cpu_type == macho::CPU_TYPE_ARM64)
-                && !is_cpu_subtype_arm64e(cpu_subtype);
-
-            // When running with intel chips, only x86_64 can run.
-            #[cfg(target_arch = "x86_64")]
-            let is_supported = cpu_type == macho::CPU_TYPE_X86_64;
-
-            if is_supported {
+        fn from_thin_mach_o(cpu_type: u32, cpu_subtype: u32, bytes: &[u8]) -> Result<Self> {
+            if cpu_type == macho::CPU_TYPE_X86_64
+                || (cpu_type == macho::CPU_TYPE_ARM64 && !is_cpu_subtype_arm64e(cpu_subtype))
+            {
+                // The binary has an architecture we know how to patch, so proceed.
+                // We don't check if this is a thin arm binary on an intel chip because that would
+                // not run regardless of SIP.
                 Ok(Self::new(0, bytes.len()))
             } else {
                 Err(SipError::NoSupportedArchitecture)
@@ -155,7 +145,6 @@ mod main {
                         })?;
                     Self::from_thin_mach_o(
                         header.cputype(Endianness::default()),
-                        #[cfg(target_arch = "aarch64")]
                         header.cpusubtype(Endianness::default()),
                         bytes,
                     )
