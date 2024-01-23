@@ -40,7 +40,10 @@ async fn dns_lookup(root_path: &Path, host: String) -> RemoteResult<DnsLookup> {
     let resolv_conf = fs::read(resolv_conf_path)?;
     let hosts_file = File::open(hosts_path)?;
 
-    let (config, options) = parse_resolv_conf(resolv_conf)?;
+    let (config, mut options) = parse_resolv_conf(resolv_conf)?;
+    options.server_ordering_strategy =
+        trust_dns_resolver::config::ServerOrderingStrategy::UserProvidedOrder;
+
     let mut resolver = AsyncResolver::tokio(config, options)?;
 
     let hosts = Hosts::default().read_hosts_conf(hosts_file)?;
