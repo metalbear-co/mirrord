@@ -153,6 +153,11 @@ impl CredentialStoreSync {
     }
 
     /// Get or create specific client certificate with an exclusive lock on the file.
+    ///
+    /// # Params
+    /// * `client` - used to send certificate request to the operator
+    /// * `credential_name` - name identifying this specific client certificate (used to maintain
+    ///   separate client certificates for different operator installations)
     pub async fn get_client_certificate<R>(
         &mut self,
         client: &Client,
