@@ -206,21 +206,15 @@ impl OperatorApi {
         api: &OperatorApi,
         operator: &MirrordOperatorCrd,
     ) -> Result<Option<Certificate>, AuthenticationError> {
-        let credential_name = operator
-            .spec
-            .license
-            .subscription_id
-            .as_ref()
-            .or(operator.spec.license.fingerprint.as_ref())
-            .map(ToString::to_string);
-
-        let Some(credential_name) = credential_name else {
+        let Some(fingerprint) = operator.spec.license.fingerprint.clone() else {
             return Ok(None);
         };
 
+        let subscription_id = operator.spec.license.subscription_id.clone();
+
         let mut credential_store = CredentialStoreSync::open().await?;
         credential_store
-            .get_client_certificate::<MirrordOperatorCrd>(&api.client, credential_name)
+            .get_client_certificate::<MirrordOperatorCrd>(&api.client, fingerprint, subscription_id)
             .await
             .map(Some)
     }

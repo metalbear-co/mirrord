@@ -18,6 +18,7 @@ use crate::{
     certificate::Certificate,
     credentials::Credentials,
     error::{AuthenticationError, CertificateStoreError, Result},
+    key_pair::KeyPair,
 };
 
 /// "~/.mirrord"
@@ -35,7 +36,10 @@ static CREDENTIALS_PATH: LazyLock<PathBuf> = LazyLock::new(|| CREDENTIALS_DIR.jo
 pub struct CredentialStore {
     /// Credentials for operator
     /// Can be linked to several different operator licenses via different keys.
+    #[serde(default)]
     credentials: HashMap<String, Credentials>,
+    #[serde(default)]
+    signing_keys: HashMap<String, KeyPair>,
 }
 
 impl CredentialStore {
@@ -64,32 +68,53 @@ impl CredentialStore {
             .map_err(AuthenticationError::from)
     }
 
-    /// Get or create and ready up a certificate for the given `credential_name`.
+    /// Get hostname to be used as common name in a certification request.
+    fn certificate_common_name() -> String {
+        gethostname::gethostname().into_string().unwrap_or_default()
+    }
+
+    /// Get or create and ready up a certificate for specific operator installation.
+    /// Assign the key pair used to sign the certificate with the given `operator_subscription_id`.
+    ///
+    /// If an expired certificate for the given `operator_fingerprint` is found, new certificate
+    /// request will be signed by the same key pair. If a key pair assigned to the given
+    /// `operator_subscription_id` is found, new certificate request will be signed by the same key
+    /// pair.
     #[tracing::instrument(level = "trace", skip(self, client))]
     pub async fn get_or_init<R>(
         &mut self,
         client: &Client,
-        credential_name: String,
+        operator_fingerprint: String,
+        operator_subscription_id: Option<String>,
     ) -> Result<&mut Credentials>
     where
         R: Resource + Clone + Debug,
         R: for<'de> Deserialize<'de>,
         R::DynamicType: Default,
     {
-        let credentials = match self.credentials.entry(credential_name) {
-            Entry::Vacant(entry) => entry.insert(Credentials::init()?),
-            Entry::Occupied(entry) => entry.into_mut(),
+        let credentials = match self.credentials.entry(operator_fingerprint) {
+            Entry::Vacant(entry) => {
+                let credentials =
+                    Credentials::init::<R>(client.clone(), &Self::certificate_common_name())
+                        .await?;
+                entry.insert(credentials)
+            }
+            Entry::Occupied(entry) => {
+                let credentials = entry.into_mut();
+
+                if !credentials.is_valid() {
+                    credentials
+                        .refresh::<R>(client.clone(), &Self::certificate_common_name())
+                        .await?;
+                }
+
+                credentials
+            }
         };
 
-        if !credentials.is_ready() {
-            let common_name = gethostname::gethostname()
-                .into_string()
-                .ok()
-                .unwrap_or_default();
-
-            credentials
-                .get_client_certificate::<R>(client.clone(), &common_name)
-                .await?;
+        if let Some(sub_id) = operator_subscription_id {
+            self.signing_keys
+                .insert(sub_id, credentials.key_pair().clone());
         }
 
         Ok(credentials)
@@ -125,7 +150,8 @@ impl CredentialStoreSync {
     async fn access_credential<R, C, V>(
         &mut self,
         client: &Client,
-        credential_name: String,
+        operator_fingerprint: String,
+        operator_subscription_id: Option<String>,
         callback: C,
     ) -> Result<V>
     where
@@ -139,7 +165,11 @@ impl CredentialStoreSync {
             .inspect_err(|err| info!("CredentialStore Load Error {err:?}"))
             .unwrap_or_default();
 
-        let value = callback(store.get_or_init::<R>(client, credential_name).await?);
+        let value = callback(
+            store
+                .get_or_init::<R>(client, operator_fingerprint, operator_subscription_id)
+                .await?,
+        );
 
         // Make sure the store_file's cursor is at the start of the file before sending it to save
         self.store_file
@@ -153,15 +183,11 @@ impl CredentialStoreSync {
     }
 
     /// Get or create specific client certificate with an exclusive lock on the file.
-    ///
-    /// # Params
-    /// * `client` - used to send certificate request to the operator
-    /// * `credential_name` - name identifying this specific client certificate (used to maintain
-    ///   separate client certificates for different operator installations)
     pub async fn get_client_certificate<R>(
         &mut self,
         client: &Client,
-        credential_name: String,
+        operator_fingerprint: String,
+        operator_subscription_id: Option<String>,
     ) -> Result<Certificate>
     where
         R: Resource + Clone + Debug,
@@ -173,9 +199,12 @@ impl CredentialStoreSync {
             .map_err(CertificateStoreError::Lockfile)?;
 
         let result = self
-            .access_credential::<R, _, Certificate>(client, credential_name, |credentials| {
-                credentials.as_ref().clone()
-            })
+            .access_credential::<R, _, Certificate>(
+                client,
+                operator_fingerprint,
+                operator_subscription_id,
+                |credentials| credentials.as_ref().clone(),
+            )
             .await;
 
         self.store_file

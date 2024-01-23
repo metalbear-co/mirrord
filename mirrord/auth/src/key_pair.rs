@@ -8,6 +8,12 @@ use x509_certificate::InMemorySigningKeyPair;
 #[serde(transparent)]
 pub struct KeyPair(String, #[serde(skip)] OnceLock<InMemorySigningKeyPair>);
 
+impl Clone for KeyPair {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), Default::default())
+    }
+}
+
 impl KeyPair {
     /// Access the PEM encoded SigningKeyPair
     pub fn document(&self) -> &str {
