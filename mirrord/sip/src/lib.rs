@@ -279,7 +279,7 @@ mod main {
             path,
             output
         );
-        let data = std::fs::read(&path)?;
+        let data = std::fs::read(path)?;
 
         // Propagate Err if the binary does not contain any supported architecture (x64/arm64).
         let binary_info = BinaryInfo::from_object_bytes(&data)?;
@@ -292,15 +292,15 @@ mod main {
 
         std::fs::write(&output, binary)?;
 
-        if let Err(err) = get_rpath_entries(binary).and_then(|rpath_entries| {
-            add_rpath_entries(&rpath_entries, path.as_ref(), output.as_ref())
-        }) {
+        if let Err(err) = get_rpath_entries(binary)
+            .and_then(|rpath_entries| add_rpath_entries(&rpath_entries, path, output.as_ref()))
+        {
             warn!("Adding Rpath loader commands to SIP-patched binary failed with {err:?}.")
             // Not stopping the SIP-patching as most binaries don't need the rpath fix.
         }
 
         // Give the new file the same permissions as the old file.
-        std::fs::set_permissions(&output, std::fs::metadata(&path)?.permissions())?;
+        std::fs::set_permissions(&output, std::fs::metadata(path)?.permissions())?;
         codesign::sign(&output)?;
         Ok(output)
     }
@@ -336,7 +336,7 @@ mod main {
         // script, but allowing the user to write, so that in the next run, when we are here
         // again, we have permission to overwrite the patched script (we rewrite the script
         // every run, in case it is a user script that was changed).
-        let mut permissions = std::fs::metadata(&original_path)?.permissions();
+        let mut permissions = std::fs::metadata(original_path)?.permissions();
         let mode = permissions.mode() | 0o200; // user can write.
         permissions.set_mode(mode);
         std::fs::set_permissions(&patched_path, permissions)?;
@@ -433,12 +433,12 @@ mod main {
     }
 
     /// SIP check for binaries.
-    fn is_binary_sip(path: &Path, patch_binaries: &Vec<String>) -> Result<bool> {
+    fn is_binary_sip(path: &Path, patch_binaries: &[String]) -> Result<bool> {
         // Patch binary if it is in the list of binaries to patch.
         // See `ends_with` docs for understanding better when it returns true.
         Ok(patch_binaries.iter().any(|x| path.ends_with(x))
             || is_code_signed(path)
-            || (std::fs::metadata(&path)?.st_flags() & SF_RESTRICTED) > 0)
+            || (std::fs::metadata(path)?.st_flags() & SF_RESTRICTED) > 0)
     }
 
     fn get_complete_path<P: AsRef<OsStr> + std::marker::Copy>(path: P) -> Result<PathBuf> {
@@ -559,7 +559,7 @@ mod main {
                 let patched_script = patch_script(
                     &path,
                     shebang,
-                    &patched_interpreter.to_string_lossy().to_string(),
+                    patched_interpreter.to_string_lossy().as_ref(),
                 )
                 .map(|path| path.to_string_lossy().to_string());
                 Some(patched_script).transpose()
