@@ -75,6 +75,7 @@ pub struct HttpFilterConfig {
 /// We use this to allow implementing a custom [`Default`] initialization, as the [`MirrordConfig`]
 /// macro (currently) doesn't support more intricate expressions.
 #[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PortList(VecOrSingle<u16>);
 
 impl MirrordToggleableConfig for HttpFilterFileConfig {

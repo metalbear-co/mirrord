@@ -410,7 +410,8 @@
                 "null"
               ]
             }
-          }
+          },
+          "additionalProperties": false
         }
       ]
     },
@@ -431,7 +432,8 @@
           "description": "<!--${internal}--> Deployment to mirror.",
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "EnvFileConfig": {
       "description": "Allows the user to set or override the local process' environment variables with the ones from the remote pod.\n\nWhich environment variables to load from the remote pod are controlled by setting either [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).\n\nSee the environment variables [reference](https://mirrord.dev/docs/reference/env/) for more details.\n\n```json { \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV;MY_APP_*\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"override\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" } } } } ```",
@@ -733,7 +735,8 @@
             "minItems": 2
           }
         }
-      }
+      },
+      "additionalProperties": false
     },
     "IncomingFileConfig": {
       "title": "incoming (network)",
@@ -956,7 +959,8 @@
           "description": "<!--${internal}--> Pod to mirror.",
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "PortList": {
       "description": "<!--${internal}--> Helper struct for setting up ports configuration (part of the HTTP traffic stealer feature).\n\nDefaults to a list of ports `[80, 8080]`.\n\nWe use this to allow implementing a custom [`Default`] initialization, as the [`MirrordConfig`] macro (currently) doesn't support more intricate expressions.",
@@ -983,7 +987,8 @@
           "description": "<!--${internal}--> Rollout to mirror.",
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "Target": {
       "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `podname/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`.",
@@ -1051,7 +1056,8 @@
                 }
               ]
             }
-          }
+          },
+          "additionalProperties": false
         }
       ]
     },
