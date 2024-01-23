@@ -315,10 +315,6 @@ mod main {
         let patched_path = get_output_path(original_path)?;
 
         trace!(
-            "{:?} is a script with a shebang that leads to a SIP protected binary.",
-            original_path
-        );
-        trace!(
             "Shebang points to: {:?}. Patching the interpreter and making a version of {:?} with an altered shebang at: {:?}",
             shebang.interpreter_path,
             original_path,
