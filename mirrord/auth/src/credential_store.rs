@@ -94,9 +94,17 @@ impl CredentialStore {
     {
         let credentials = match self.credentials.entry(operator_fingerprint) {
             Entry::Vacant(entry) => {
-                let credentials =
-                    Credentials::init::<R>(client.clone(), &Self::certificate_common_name())
-                        .await?;
+                let key_pair = operator_subscription_id
+                    .as_ref()
+                    .and_then(|id| self.signing_keys.get(id))
+                    .cloned();
+
+                let credentials = Credentials::init::<R>(
+                    client.clone(),
+                    &Self::certificate_common_name(),
+                    key_pair,
+                )
+                .await?;
                 entry.insert(credentials)
             }
             Entry::Occupied(entry) => {

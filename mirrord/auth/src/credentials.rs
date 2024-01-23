@@ -177,16 +177,26 @@ pub mod client {
 
     impl Credentials {
         /// Create a [`rfc2986::CertificationRequest`] and send it to the operator.
-        /// New signing key pair is generated randomly.
-        pub async fn init<R>(client: Client, common_name: &str) -> Result<Self>
+        /// If the `key_pair` is not given, the request is signed with a randomly generated one.
+        pub async fn init<R>(
+            client: Client,
+            common_name: &str,
+            key_pair: Option<KeyPair>,
+        ) -> Result<Self>
         where
             R: Resource + Clone + Debug,
             R: for<'de> Deserialize<'de>,
             R::DynamicType: Default,
         {
-            let key_algorithm = KeyAlgorithm::Ed25519;
-            let (key_pair, document) = InMemorySigningKeyPair::generate_random(key_algorithm)?;
-            let pem_key = pem::Pem::new("PRIVATE KEY", document.as_ref());
+            let key_pair = match key_pair {
+                Some(key_pair) => key_pair,
+                None => {
+                    let key_algorithm = KeyAlgorithm::Ed25519;
+                    let (_, document) = InMemorySigningKeyPair::generate_random(key_algorithm)?;
+                    let pem_key = pem::Pem::new("PRIVATE KEY", document.as_ref());
+                    pem::encode(&pem_key).into()
+                }
+            };
 
             let certificate_request = Self::certificate_request(common_name, &key_pair)?
                 .encode_pem()
@@ -205,7 +215,7 @@ pub mod client {
 
             Ok(Credentials {
                 certificate,
-                key_pair: pem::encode(&pem_key).into(),
+                key_pair,
             })
         }
 
