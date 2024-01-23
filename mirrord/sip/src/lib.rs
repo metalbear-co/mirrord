@@ -463,7 +463,7 @@ mod main {
     /// suggest)
     /// If file is a script with shebang, the SipStatus is derived from the the SipStatus of the
     /// file the shebang points to.
-    fn get_sip_status(path: &str, patch_binaries: &Vec<String>) -> Result<SipStatus> {
+    fn get_sip_status(path: &str, patch_binaries: &[String]) -> Result<SipStatus> {
         let complete_path = get_complete_path(path)?;
         // If the binary is in our temp bin dir, it's not SIP protected.
         if is_in_mirrord_tmp_dir(&complete_path)? {
@@ -552,7 +552,7 @@ mod main {
     /// If it is, create a non-protected version of the file and return `Ok(Some(patched_path)`.
     /// If it is not, `Ok(None)`.
     /// Propagate errors.
-    pub fn sip_patch(binary_path: &str, patch_binaries: &Vec<String>) -> Result<Option<String>> {
+    pub fn sip_patch(binary_path: &str, patch_binaries: &[String]) -> Result<Option<String>> {
         match get_sip_status(binary_path, patch_binaries) {
             Ok(SipScript { path, shebang }) => {
                 let patched_interpreter = patch_binary(&shebang.interpreter_path)?;
