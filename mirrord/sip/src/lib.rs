@@ -755,9 +755,8 @@ mod main {
                 .unwrap()
                 .unwrap();
             let new_interpreter_path = new_shebang.interpreter_path.to_str().unwrap();
-            let patched_env_binary_path = &new_interpreter_path[2..];
             // Check DYLD_* features work on it:
-            let output = std::process::Command::new(patched_env_binary_path)
+            let output = std::process::Command::new(new_interpreter_path)
                 .env("DYLD_PRINT_LIBRARIES", "1")
                 .output()
                 .unwrap();
