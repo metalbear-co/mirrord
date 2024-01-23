@@ -127,6 +127,7 @@ pub struct LicenseInfoOwned {
     pub organization: String,
     pub expire_at: NaiveDate,
     pub fingerprint: Option<String>,
+    pub subscription_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
