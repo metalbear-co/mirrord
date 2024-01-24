@@ -108,7 +108,7 @@ impl CredentialStore {
             let common_name = self
                 .common_name
                 .clone()
-                .unwrap_or_else(|| whoami::hostname());
+                .unwrap_or_else(whoami::hostname);
 
             credentials
                 .get_client_certificate::<R>(client.clone(), &common_name)
