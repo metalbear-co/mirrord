@@ -8,6 +8,39 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.85.0](https://github.com/metalbear-co/mirrord/tree/3.85.0) - 2024-01-24
+
+
+### Added
+
+- Added license subscription id to operator status CRD. Adjusted
+  `CredentialStore` to preserve signing key pair for the same operator license
+  subscription id. [#2190](https://github.com/metalbear-co/mirrord/issues/2190)
+- CLI now sends machine host + username to show in mirrord operator status
+  (not sent to our cloud!)
+- Report port locks and filters in operator status
+
+
+### Changed
+
+- Change configuration parsing to be strict unallowing unknown fields
+- Cluster DNS resolving now happens by nameserver order rather by statistics
+
+
+### Fixed
+
+- Running R on macOS.
+  [#2186](https://github.com/metalbear-co/mirrord/issues/2186)
+- Running scripts with whitespaces in the shebang.
+  [#2193](https://github.com/metalbear-co/mirrord/issues/2193)
+
+
+### Internal
+
+- Allow both `x86_64` and `arm64` when patching thin binaries.
+  [#2186](https://github.com/metalbear-co/mirrord/issues/2186)
+
+
 ## [3.84.1](https://github.com/metalbear-co/mirrord/tree/3.84.1) - 2024-01-19
 
 
