@@ -13,6 +13,7 @@ use mirrord_auth::{
     certificate::Certificate,
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::LicenseValidity,
+    error::AuthenticationError,
 };
 use mirrord_config::{
     feature::network::incoming::ConcurrentSteal,
@@ -202,6 +203,24 @@ impl OperatorApi {
         Ok(())
     }
 
+    #[tracing::instrument(level = "debug", skip(api))]
+    pub async fn get_client_certificate(
+        api: &OperatorApi,
+        operator: &MirrordOperatorCrd,
+    ) -> Result<Option<Certificate>, AuthenticationError> {
+        let Some(fingerprint) = operator.spec.license.fingerprint.clone() else {
+            return Ok(None);
+        };
+
+        let subscription_id = operator.spec.license.subscription_id.clone();
+
+        let mut credential_store = CredentialStoreSync::open().await?;
+        credential_store
+            .get_client_certificate::<MirrordOperatorCrd>(&api.client, fingerprint, subscription_id)
+            .await
+            .map(Some)
+    }
+
     /// Creates new [`OperatorSessionConnection`] based on the given [`LayerConfig`].
     /// Keep in mind that some failures here won't stop mirrord from hooking into the process
     /// and working, it'll just work without the operator.
@@ -241,19 +260,10 @@ impl OperatorApi {
 
         Self::check_config(config, &operator)?;
 
-        let client_certificate =
-            if let Some(credential_name) = operator.spec.license.fingerprint.as_ref() {
-                CredentialStoreSync::get_client_certificate::<MirrordOperatorCrd>(
-                    &operator_api.client,
-                    credential_name.to_string(),
-                )
-                .await
-                .map_err(|err| debug!("CredentialStore error: {err}"))
-                .ok()
-            } else {
-                None
-            };
-
+        let client_certificate = Self::get_client_certificate(&operator_api, &operator)
+            .await
+            .ok()
+            .flatten();
         let metadata = OperatorSessionMetadata::new(
             client_certificate,
             operator.spec.license.fingerprint,
