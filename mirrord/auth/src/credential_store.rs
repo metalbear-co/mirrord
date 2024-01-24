@@ -101,6 +101,16 @@ impl CredentialStore {
     /// request will be signed by the same key pair. If a key pair assigned to the given
     /// `operator_subscription_id` is found, new certificate request will be signed by the same key
     /// pair.
+    ///
+    /// # Note
+    ///
+    /// Whenever we create/retrieve user's [`Credentials`], we associate the found key pair with
+    /// operator's subscription id. Then, the operator's license is renewed - its fingerprint
+    /// changes and we don't have any matching [`Credentials`]. But the subscription id does not
+    /// change, so we look up the mapping inside [`CredentialStore`] to find the key pair we used
+    /// previously for the same subscription id.
+    ///
+    /// Also, subscription id is accepted as an [`Option`] to make the CLI backwards compatible.
     #[tracing::instrument(level = "trace", skip(self, client))]
     pub async fn get_or_init<R>(
         &mut self,
