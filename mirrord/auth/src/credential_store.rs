@@ -40,6 +40,27 @@ pub struct CredentialStore {
     credentials: HashMap<String, Credentials>,
 }
 
+/// Information about user gathered from the local system to be shared with the operator
+/// for better status reporting.
+#[derive(Default, Debug)]
+pub struct UserIdentity {
+    /// User's name
+    pub name: Option<String>,
+    /// User's hostname
+    pub hostname: Option<String>,
+}
+
+impl UserIdentity {
+    pub fn load() -> Self {
+        Self {
+            // next release of whoami (v2) will have fallible types
+            // so keep this Option for then :)
+            name: Some(whoami::realname()),
+            hostname: Some(whoami::hostname()),
+        }
+    }
+}
+
 impl CredentialStore {
     /// Load contents of store from file
     async fn load<R: AsyncRead + Unpin>(source: &mut R) -> Result<Self> {
@@ -84,11 +105,7 @@ impl CredentialStore {
         };
 
         if !credentials.is_ready() {
-            let common_name = self
-                .common_name
-                .clone()
-                .or_else(|| gethostname::gethostname().into_string().ok())
-                .unwrap_or_default();
+            let common_name = self.common_name.clone().unwrap_or_else(whoami::hostname);
 
             credentials
                 .get_client_certificate::<R>(client.clone(), &common_name)
