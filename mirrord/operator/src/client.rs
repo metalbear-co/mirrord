@@ -10,7 +10,9 @@ use http::request::Request;
 use kube::{api::PostParams, Api, Client, Resource};
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, AnalyticsReporter};
 use mirrord_auth::{
-    certificate::Certificate, credential_store::CredentialStoreSync, credentials::LicenseValidity,
+    certificate::Certificate,
+    credential_store::{CredentialStoreSync, UserIdentity},
+    credentials::LicenseValidity,
     error::AuthenticationError,
 };
 use mirrord_config::{
@@ -502,10 +504,20 @@ impl OperatorApi {
             self.check_no_port_locks(target).await?;
         }
 
+        let UserIdentity { name, hostname } = UserIdentity::load();
+
         let request = {
             let mut builder = Request::builder()
                 .uri(self.connect_url(&session_info))
                 .header("x-session-id", session_info.metadata.session_id.to_string());
+
+            if let Some(name) = name {
+                builder = builder.header("x-client-name", name);
+            };
+
+            if let Some(hostname) = hostname {
+                builder = builder.header("x-client-hostname", hostname);
+            };
 
             match session_info.metadata.client_credentials() {
                 Ok(Some(credentials)) => {

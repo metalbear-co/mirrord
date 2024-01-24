@@ -42,6 +42,27 @@ pub struct CredentialStore {
     signing_keys: HashMap<String, KeyPair>,
 }
 
+/// Information about user gathered from the local system to be shared with the operator
+/// for better status reporting.
+#[derive(Default, Debug)]
+pub struct UserIdentity {
+    /// User's name
+    pub name: Option<String>,
+    /// User's hostname
+    pub hostname: Option<String>,
+}
+
+impl UserIdentity {
+    pub fn load() -> Self {
+        Self {
+            // next release of whoami (v2) will have fallible types
+            // so keep this Option for then :)
+            name: Some(whoami::realname()),
+            hostname: Some(whoami::hostname()),
+        }
+    }
+}
+
 impl CredentialStore {
     /// Load contents of store from file
     async fn load<R: AsyncRead + Unpin>(source: &mut R) -> Result<Self> {
@@ -70,7 +91,7 @@ impl CredentialStore {
 
     /// Get hostname to be used as common name in a certification request.
     fn certificate_common_name() -> String {
-        gethostname::gethostname().into_string().unwrap_or_default()
+        whoami::hostname()
     }
 
     /// Get or create and ready up a certificate for specific operator installation.

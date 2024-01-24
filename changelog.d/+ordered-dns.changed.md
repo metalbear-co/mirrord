@@ -1,0 +1,1 @@
+Cluster DNS resolving now happens by nameserver order rather by statistics
