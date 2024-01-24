@@ -38,6 +38,9 @@ pub struct CredentialStore {
     /// Can be linked to several different operator licenses via different keys.
     #[serde(default)]
     credentials: HashMap<String, Credentials>,
+    /// Associates previously seen operator subscription ids with the [`KeyPair`]s used to generate
+    /// a certification request. Enables using the same [`KeyPair`] when the operator license
+    /// changes, but it belongs to the same subscription.
     #[serde(default)]
     signing_keys: HashMap<String, KeyPair>,
 }
