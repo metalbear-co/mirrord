@@ -948,42 +948,94 @@ unsafe extern "C" fn realpath_darwin_extsn_detour(
         .unwrap_or_bypass_with(|_| FN_REALPATH_DARWIN_EXTSN(source_path, output_path))
 }
 
+#[cfg(target_os = "linux")]
+// copy from libc crate
+#[allow(clippy::all)]
+#[allow(non_camel_case_types)]
+pub struct statx {
+    pub stx_mask: u32,
+    pub stx_blksize: u32,
+    pub stx_attributes: u64,
+    pub stx_nlink: u32,
+    pub stx_uid: u32,
+    pub stx_gid: u32,
+    pub stx_mode: u16,
+    __statx_pad1: [u16; 1],
+    pub stx_ino: u64,
+    pub stx_size: u64,
+    pub stx_blocks: u64,
+    pub stx_attributes_mask: u64,
+    pub stx_atime: statx_timestamp,
+    pub stx_btime: statx_timestamp,
+    pub stx_ctime: statx_timestamp,
+    pub stx_mtime: statx_timestamp,
+    pub stx_rdev_major: u32,
+    pub stx_rdev_minor: u32,
+    pub stx_dev_major: u32,
+    pub stx_dev_minor: u32,
+    pub stx_mnt_id: u64,
+    pub stx_dio_mem_align: u32,
+    pub stx_dio_offset_align: u32,
+    __statx_pad3: [u64; 12],
+}
+
+#[cfg(target_os = "linux")]
+#[allow(clippy::all)]
+#[allow(non_camel_case_types)]
+pub struct statx_timestamp {
+    pub tv_sec: i64,
+    pub tv_nsec: u32,
+    pub __statx_timestamp_pad1: [i32; 1],
+}
+
 // this requires newer libc which we don't link with to support old libc..
 // leaving this in code so we can enable it when libc is updated.
-// #[cfg(target_os = "linux")]
-// /// Hook for `libc::statx`. This is only available on Linux.
-// #[hook_guard_fn]
-// unsafe extern "C" fn statx_detour(
-//     fd: RawFd,
-//     raw_path: *const c_char,
-//     flag: c_int,
-//     out_stat: *mut statx,
-// ) -> c_int { let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0; let path = if flags &
-//   libc::AT_EMPTYPATH != 0 { None } else { Some((!raw_path.is_null()).then(||
-//   CStr::from_ptr(raw_path))) }; let (Ok(result) | Err(result)) = xstat(path, Some(fd),
-//   follow_symlink) .map(|res| { let res = res.metadata; out_stat.write_bytes(0, 1); let out = &mut
-//   *out_stat; // Set mask for available fields out.stx_mask = libc::STATX_BASIC_STATS;
-//   out.stx_mode = best_effort_cast(metadata.mode); out.stx_size = best_effort_cast(metadata.size);
-//   out.stx_atime.tv_nsec = metadata.access_time; out.stx_mtime.tv_nsec =
-//   metadata.modification_time; out.stx_ctime.tv_nsec = metadata.creation_time;
-//   out.stx_atime.tv_sec = nano_to_secs(metadata.access_time); out.stx_mtime.tv_sec =
-//   nano_to_secs(metadata.modification_time); out.stx_ctime.tv_sec =
-//   nano_to_secs(metadata.creation_time); out.stx_nlink = best_effort_cast(metadata.hard_links);
-//   out.stx_uid = metadata.user_id; out.stx_gid = metadata.group_id; out.stx_ino =
-//   best_effort_cast(metadata.inode); out.stx_blksize = best_effort_cast(metadata.block_size);
-//   out.stx_blocks = best_effort_cast(metadata.blocks);
+#[cfg(target_os = "linux")]
+/// Hook for `libc::statx`. This is only available on Linux.
+#[hook_guard_fn]
+unsafe extern "C" fn statx_detour(
+    fd: RawFd,
+    raw_path: *const c_char,
+    flag: c_int,
+    out_stat: *mut statx,
+) -> c_int {
+    let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
+    let path = if flags & libc::AT_EMPTYPATH != 0 {
+        None
+    } else {
+        Some((!raw_path.is_null()).then(|| CStr::from_ptr(raw_path)))
+    };
+    let (Ok(result) | Err(result)) = xstat(path, Some(fd), follow_symlink)
+        .map(|res| {
+            let res = res.metadata;
+            out_stat.write_bytes(0, 1);
+            let out = &mut *out_stat; // Set mask for available fields out.stx_mask = libc::STATX_BASIC_STATS;
+            out.stx_mode = best_effort_cast(metadata.mode);
+            out.stx_size = best_effort_cast(metadata.size);
+            out.stx_atime.tv_nsec = metadata.access_time;
+            out.stx_mtime.tv_nsec = metadata.modification_time;
+            out.stx_ctime.tv_nsec = metadata.creation_time;
+            out.stx_atime.tv_sec = nano_to_secs(metadata.access_time);
+            out.stx_mtime.tv_sec = nano_to_secs(metadata.modification_time);
+            out.stx_ctime.tv_sec = nano_to_secs(metadata.creation_time);
+            out.stx_nlink = best_effort_cast(metadata.hard_links);
+            out.stx_uid = metadata.user_id;
+            out.stx_gid = metadata.group_id;
+            out.stx_ino = best_effort_cast(metadata.inode);
+            out.stx_blksize = best_effort_cast(metadata.block_size);
+            out.stx_blocks = best_effort_cast(metadata.blocks);
 
-//             out.stx_dev_major = libc::major(metadata.device_id);
-//             out.stx_dev_minor = libc::minor(metadata.device_id);
-//             out.stx_rdev_major = libc::major(metadata.rdevice_id);
-//             out.stx_rdev_minor = libc::minor(metadata.rdevice_id);
-//             0
-//         })
-//         .unwrap_or_bypass_with(|_| FN_STATX(fd, raw_path, flag, out_stat))
-//         .map_err(From::from);
+            out.stx_dev_major = libc::major(metadata.device_id);
+            out.stx_dev_minor = libc::minor(metadata.device_id);
+            out.stx_rdev_major = libc::major(metadata.rdevice_id);
+            out.stx_rdev_minor = libc::minor(metadata.rdevice_id);
+            0
+        })
+        .unwrap_or_bypass_with(|_| FN_STATX(fd, raw_path, flag, out_stat))
+        .map_err(From::from);
 
-//     result
-// }
+    result
+}
 
 fn vec_to_iovec(bytes: &[u8], iovecs: &[iovec]) {
     let mut copied = 0;
@@ -1177,10 +1229,10 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
 
     // this requires newer libc which we don't link with to support old libc..
     // leaving this in code so we can enable it when libc is updated.
-    // #[cfg(target_os = "linux")]
-    // {
-    //     replace!(hook_manager, "statx", statx_detour, FnStatx, FN_STATX);
-    // }
+    #[cfg(target_os = "linux")]
+    {
+        replace!(hook_manager, "statx", statx_detour, FnStatx, FN_STATX);
+    }
     #[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
     {
         replace!(
