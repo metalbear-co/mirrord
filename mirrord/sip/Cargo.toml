@@ -14,9 +14,10 @@ publish.workspace = true
 edition.workspace = true
 
 [dependencies]
-object = "0.29"
+apple-codesign = { version = "0.27", default-features = false}
 memchr = "2"
-apple-codesign = { version = "0.22", default-features = false}
+object = "0.32"
+tempfile = "3"
 
 once_cell.workspace = true
 tracing.workspace = true

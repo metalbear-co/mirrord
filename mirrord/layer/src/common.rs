@@ -82,6 +82,12 @@ impl CheckedInto<String> for *const c_char {
     }
 }
 
+pub fn strip_mirrord_path(path_str: &str) -> Option<&str> {
+    path_str
+        .strip_prefix(MIRRORD_TEMP_BIN_DIR_STRING.as_str())
+        .or_else(|| path_str.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()))
+}
+
 impl CheckedInto<PathBuf> for *const c_char {
     /// Do the checked conversion to str, bypass if the str starts with temp dir's path, construct
     /// a `PathBuf` out of the str.
@@ -89,9 +95,7 @@ impl CheckedInto<PathBuf> for *const c_char {
         let str_det = CheckedInto::<&str>::checked_into(self);
         #[cfg(target_os = "macos")]
         let str_det = str_det.and_then(|path_str| {
-            let optional_stripped_path = path_str
-                .strip_prefix(MIRRORD_TEMP_BIN_DIR_STRING.as_str())
-                .or_else(|| path_str.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()));
+            let optional_stripped_path = strip_mirrord_path(path_str);
             if let Some(stripped_path) = optional_stripped_path {
                 // actually stripped, so bypass and provide a pointer to after the temp dir.
                 // `stripped_path` is a reference to a later character in the same string as

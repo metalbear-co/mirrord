@@ -35,4 +35,7 @@ pub enum SipError {
 
     #[error("Got invalid string.")]
     NonUtf8Str(#[from] std::str::Utf8Error),
+
+    #[error("Could not move temporary SIP-patched binary into temp dir. IO error: `{0}`.")]
+    BinaryMoveFailed(std::io::Error),
 }
