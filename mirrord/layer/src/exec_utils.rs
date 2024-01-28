@@ -18,7 +18,7 @@ use null_terminated::Nul;
 use tracing::{trace, warn};
 
 use crate::{
-    common::CheckedInto,
+    common::{strip_mirrord_path, CheckedInto},
     detour::{
         Bypass::{
             ExecOnNonExistingFile, FileOperationInMirrordBinTempDir, NoSipDetected, TooManyArgs,
@@ -185,6 +185,11 @@ unsafe fn patch_sip_for_new_process(
     trace!("Executable {} called execve/posix_spawn", calling_exe);
 
     let path_str = path.checked_into()?;
+    // If an application is trying to run an executable from our tmp dir, strip our tmp dir from the
+    // path. The file might not even exist in our tmp dir, and the application is expecting it there
+    // only because it somehow found out about its own patched location in our tmp dir.
+    // If original path is SIP, and actually exists in our dir that patched executable will be used.
+    let path_str = strip_mirrord_path(path_str).unwrap_or(path_str);
     let path_c_string = patch_if_sip(path_str)
         .and_then(|new_path| Success(CString::new(new_path)?))
         // Continue also on error, use original path, don't bypass yet, try cleaning argv.

@@ -10,7 +10,7 @@ mod main {
     use std::{
         env,
         ffi::OsStr,
-        io::{self, Read},
+        io::{self, ErrorKind::AlreadyExists, Read},
         os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
         path::{Path, PathBuf},
         str::from_utf8,
@@ -274,6 +274,10 @@ mod main {
             return Ok(output);
         }
 
+        // If the same file is executed in parallel, parallel signing could fail. So do the work on
+        // a temp file, and then move it to its final destination once ready and signed.
+        let temp_binary = tempfile::NamedTempFile::new()?;
+
         trace!(
             "{:?} is a SIP protected binary, making non protected version at: {:?}",
             path,
@@ -290,18 +294,27 @@ mod main {
             .get(binary_info.offset..binary_info.offset + binary_info.size)
             .expect("invalid SIP binary");
 
-        std::fs::write(&output, binary)?;
+        std::fs::write(&temp_binary, binary)?;
 
         if let Err(err) = get_rpath_entries(binary)
-            .and_then(|rpath_entries| add_rpath_entries(&rpath_entries, path, output.as_ref()))
+            .and_then(|rpath_entries| add_rpath_entries(&rpath_entries, path, temp_binary.as_ref()))
         {
             warn!("Adding Rpath loader commands to SIP-patched binary failed with {err:?}.")
             // Not stopping the SIP-patching as most binaries don't need the rpath fix.
         }
 
         // Give the new file the same permissions as the old file.
-        std::fs::set_permissions(&output, std::fs::metadata(path)?.permissions())?;
-        codesign::sign(&output)?;
+        trace!("Setting permissions for {temp_binary:?}");
+        std::fs::set_permissions(&temp_binary, std::fs::metadata(path)?.permissions())?;
+        trace!("Signing {temp_binary:?}");
+        codesign::sign(&temp_binary)?;
+
+        // Move the temp binary into its final location if no other process/thread already did.
+        if let Err(err) = temp_binary.persist_noclobber(&output) {
+            if err.error.kind() != AlreadyExists {
+                return Err(SipError::BinaryMoveFailed(err.error));
+            }
+        }
         Ok(output)
     }
 
