@@ -297,7 +297,7 @@ mod main {
         std::fs::write(&temp_binary, binary)?;
 
         if let Err(err) = get_rpath_entries(binary)
-            .and_then(|rpath_entries| add_rpath_entries(&rpath_entries, path, output.as_ref()))
+            .and_then(|rpath_entries| add_rpath_entries(&rpath_entries, path, temp_binary.as_ref()))
         {
             warn!("Adding Rpath loader commands to SIP-patched binary failed with {err:?}.")
             // Not stopping the SIP-patching as most binaries don't need the rpath fix.
