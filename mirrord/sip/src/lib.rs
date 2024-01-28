@@ -274,6 +274,8 @@ mod main {
             return Ok(output);
         }
 
+        // If the same file is executed in parallel, parallel signing could fail. So do the work on
+        // a temp file, and then move it to its final destination once ready and signed.
         let temp_binary = tempfile::NamedTempFile::new()?;
 
         trace!(
