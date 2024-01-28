@@ -82,6 +82,7 @@ impl CheckedInto<String> for *const c_char {
     }
 }
 
+#[cfg(target_os = "macos")]
 pub fn strip_mirrord_path(path_str: &str) -> Option<&str> {
     path_str
         .strip_prefix(MIRRORD_TEMP_BIN_DIR_STRING.as_str())
