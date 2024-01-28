@@ -1,0 +1,1 @@
+Fixed a compilation bug in `mirrord-operator` crate tests.
