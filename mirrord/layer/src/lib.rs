@@ -79,7 +79,6 @@ use mirrord_config::{
     feature::{fs::FsModeConfig, network::incoming::IncomingMode},
     LayerConfig,
 };
-use mirrord_console::error::ConsoleError;
 use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use proxy_connection::ProxyConnection;
@@ -185,7 +184,6 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         }
     }
 
-    init_tracing();
     match given_process.load_type(&config) {
         LoadType::Full => layer_start(config),
         #[cfg(target_os = "macos")]
@@ -252,27 +250,12 @@ fn mirrord_layer_entry_point() {
     }
 }
 
-/// Init tracing only if with console, return whether configured or not.
-fn init_tracing_with_console() -> bool {
-    std::env::var("MIRRORD_CONSOLE_ADDR")
-        .map(|console_addr| {
-            match mirrord_console::init_logger(&console_addr) {
-                Ok(()) => {}
-                Err(ConsoleError::SetLogger(..)) => {} // logger already set, no problem.
-                err => {
-                    println!("Can't init console logger: {err:?}");
-                    panic!();
-                }
-            }
-            console_addr
-        })
-        .is_ok()
-}
-
 /// Initialize logger. Set the logs to go according to the layer's config either to a trace file, to
 /// mirrord-console or to stderr.
 fn init_tracing() {
-    if !init_tracing_with_console() {
+    if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
+        mirrord_console::init_logger(&console_addr).expect("logger initialization failed");
+    } else {
         tracing_subscriber::registry()
             .with(
                 tracing_subscriber::fmt::layer()
@@ -283,7 +266,7 @@ fn init_tracing() {
             )
             .with(tracing_subscriber::EnvFilter::from_default_env())
             .init();
-    }
+    };
 }
 
 /// Occurs after [`layer_pre_initialization`] has succeeded.
@@ -321,6 +304,8 @@ fn layer_start(mut config: LayerConfig) {
         config.feature.network.outgoing.tcp = false;
         config.feature.network.outgoing.udp = false;
     }
+
+    init_tracing();
 
     let debugger_ports = DebuggerPorts::from_env();
     let state = LayerSetup::new(config, debugger_ports, trace_only);
