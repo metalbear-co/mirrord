@@ -8,6 +8,16 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.85.1](https://github.com/metalbear-co/mirrord/tree/3.85.1) - 2024-01-29
+
+
+### Fixed
+
+- Running `mirrod exec go run EXECUTABLE` on macOS with go1.21.
+  [#2202](https://github.com/metalbear-co/mirrord/issues/2202)
+- Fixed a compilation bug in `mirrord-operator` crate tests.
+
+
 ## [3.85.0](https://github.com/metalbear-co/mirrord/tree/3.85.0) - 2024-01-24
 
 
