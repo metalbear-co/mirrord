@@ -8,6 +8,20 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.86.0](https://github.com/metalbear-co/mirrord/tree/3.86.0) - 2024-01-29
+
+
+### Changed
+
+- `JAVA_TOOL_OPTIONS` is excluded by default from the environment variables
+  that are fetched from the target.
+
+
+### Internal
+
+- Update links to new docs
+
+
 ## [3.85.1](https://github.com/metalbear-co/mirrord/tree/3.85.1) - 2024-01-29
 
 
