@@ -55,7 +55,7 @@ pub(crate) enum CliError {
         "operator": false
     }}
 
-    Please remember that some features are supported only when using mirrord operator (https://mirrord.dev/docs/teams/introduction/#supported-features).
+    Please remember that some features are supported only when using mirrord operator (https://mirrord.dev/docs/overview/teams/#supported-features).
     {GENERAL_HELP}"#
     ))]
     OperatorConnectionFailed(String),
@@ -75,7 +75,7 @@ pub(crate) enum CliError {
       }}
     }}
 
-    More info (https://mirrord.dev/docs/overview/configuration/#feature-network-incoming-on_concurrent_steal)
+    More info (https://mirrord.dev/docs/reference/configuration/#feature-network-incoming-on_concurrent_steal)
 
     {GENERAL_HELP}"#
     ))]
@@ -237,7 +237,7 @@ pub(crate) enum CliError {
     InternalProxyError(#[from] IntProxyError),
     #[error("Feature `{0}` requires a mirrord operator.")]
     #[diagnostic(help(
-        "The mirrord operator is part of mirrord for Teams. You can get started with mirrord for Teams at this link: https://mirrord.dev/docs/teams/introduction/"
+        "The mirrord operator is part of mirrord for Teams. You can get started with mirrord for Teams at this link: https://mirrord.dev/docs/overview/teams/"
     ))]
     FeatureRequiresOperatorError(String),
     #[error("Feature `{feature}` is not supported in mirrord operator {operator_version}.")]

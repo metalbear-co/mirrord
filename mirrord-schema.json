@@ -483,7 +483,7 @@
       "properties": {
         "copy_target": {
           "title": "feature.copy_target {#feature-copy_target}",
-          "description": "Creates a new copy of the target. mirrord will use this copy instead of the original target (e.g. intercept network traffic). This feature requires a [mirrord operator](https://mirrord.dev/docs/teams/introduction/).\n\nThis feature is not compatible with rollout targets and running without a target (`targetless` mode).",
+          "description": "Creates a new copy of the target. mirrord will use this copy instead of the original target (e.g. intercept network traffic). This feature requires a [mirrord operator](https://mirrord.dev/docs/overview/teams/).\n\nThis feature is not compatible with rollout targets and running without a target (`targetless` mode).",
           "anyOf": [
             {
               "$ref": "#/definitions/CopyTargetFileConfig"
