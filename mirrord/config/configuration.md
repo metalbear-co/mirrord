@@ -964,7 +964,7 @@ Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port
 ## feature.copy_target {#feature-copy_target}
 
 Creates a new copy of the target. mirrord will use this copy instead of the original target
-(e.g. intercept network traffic). This feature requires a [mirrord operator](https://mirrord.dev/docs/teams/introduction/).
+(e.g. intercept network traffic). This feature requires a [mirrord operator](https://mirrord.dev/docs/overview/teams/).
 
 This feature is not compatible with rollout targets and running without a target
 (`targetless` mode).

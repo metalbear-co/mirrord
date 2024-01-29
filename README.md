@@ -132,7 +132,7 @@ Container run inside the pod launched by mirrord requires additional [Linux capa
 - `CAP_SYS_PTRACE` - for reading target pod environment
 - `CAP_SYS_ADMIN` - for joining target pod network namespace
 
-However, you can disable any subset of those in the [configuration](https://mirrord.dev/docs/overview/configuration/).
+However, you can disable any subset of those in the [configuration](https://mirrord.dev/docs/reference/configuration/).
 This will possibly limit mirrord functionalities or even make it unusable in some setups.
 
 ```bash
@@ -145,7 +145,7 @@ MIRRORD_AGENT_DISABLED_CAPABILITIES=CAP_NET_RAW,CAP_SYS_PTRACE mirrord exec node
 
 ## FAQ
 
-Our FAQ is available [here](https://mirrord.dev/docs/overview/faq/).
+Our FAQ is available [here](https://mirrord.dev/docs/faq/general/).
 If you have a question that's not on there, feel free to ask in our [Discussions](https://github.com/metalbear-co/mirrord/discussions)
 or on [Discord](https://discord.gg/metalbear).
 
