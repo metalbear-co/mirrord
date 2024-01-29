@@ -3,7 +3,7 @@
 #![warn(clippy::indexing_slicing)]
 //! <!--${internal}-->
 //! To generate the `mirrord-schema.json` file see
-//! [`tests::schema_file_is_up_to_date`].
+//! [`tests::check_schema_file_exists_and_is_valid_or_create_it`].
 //!
 //! Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
 //! including if you only made documentation changes.
