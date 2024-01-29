@@ -51,6 +51,7 @@ impl EnvFilter {
                 WildMatch::new("HOMEPATH"),
                 WildMatch::new("JAVA_EXE"),
                 WildMatch::new("JAVA_HOME"),
+                WildMatch::new("JAVA_TOOL_OPTIONS"),
                 WildMatch::new("PATH"),
                 WildMatch::new("PWD"),
                 WildMatch::new("PYTHONPATH"),
