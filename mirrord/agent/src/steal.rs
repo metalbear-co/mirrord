@@ -17,7 +17,6 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-use self::ip_tables::SafeIpTables;
 use crate::{
     error::{AgentError, Result},
     steal::http::Response,
