@@ -12,24 +12,50 @@ use super::{
 };
 use crate::{error::AgentError, util::ClientId};
 
+/// For stealing incoming TCP connections.
 #[async_trait::async_trait]
 pub trait PortRedirector {
     type Error;
 
+    /// Start stealing connections from the given port.
+    ///
+    /// # Note
+    ///
+    /// If a redirection from the given port already exists, implementations are free to do nothing
+    /// or return an [`Err`].
     async fn add_redirection(&mut self, from: Port) -> Result<(), Self::Error>;
 
+    /// Stop stealing connections from the given port.
+    ///
+    /// # Note
+    ///
+    /// If the redirection does no exist, implementations are free to do nothing or return an
+    /// [`Err`].
     async fn remove_redirection(&mut self, from: Port) -> Result<(), Self::Error>;
 
+    /// Clean any external state.
     async fn cleanup(&mut self) -> Result<(), Self::Error>;
 }
 
+/// Implementation of [`PortRedirector`] that manipulates iptables to steal connections.
 pub(crate) struct IpTablesRedirector {
+    /// For altering iptables rules.
     iptables: Option<SafeIpTables<IPTablesWrapper>>,
+    /// Whether exisiting connections should be flushed when adding new redirects.
     flush_connections: bool,
+    /// Port to which redirect all connections.
     redirect_to: Port,
 }
 
 impl IpTablesRedirector {
+    /// Create a new instance of this struct.
+    /// Does not alter iptables.
+    ///
+    /// # Params
+    ///
+    /// * `redirect_to` - all connections will be redirected to this port
+    /// * `flush_connections` - whether exisitng connections should be flushed when adding new
+    ///   redirects
     pub(crate) fn new(redirect_to: Port, flush_connections: bool) -> Self {
         Self {
             iptables: None,
@@ -73,12 +99,22 @@ impl PortRedirector for IpTablesRedirector {
     }
 }
 
+/// Set of active port subscriptions.
 pub struct PortSubscriptions<R: PortRedirector> {
+    /// Used to implement stealing connections.
     redirector: R,
+    /// Maps ports to active subscriptions.
     subscriptions: HashMap<Port, PortSubscription>,
 }
 
 impl<R: PortRedirector> PortSubscriptions<R> {
+    /// Create an empty instance of this struct.
+    ///
+    /// # Params
+    ///
+    /// * `redirector` - will be used to enforce connection stealing according to the state of this
+    ///   set
+    /// * `initial_capacity` - initial capacity for the inner (port -> subscription) mapping
     pub fn new(redirector: R, initial_capacity: usize) -> Self {
         Self {
             redirector,
@@ -86,6 +122,24 @@ impl<R: PortRedirector> PortSubscriptions<R> {
         }
     }
 
+    /// Try adding a new subscription to this set.
+    ///
+    /// # Subscription clash rules
+    ///
+    /// * A single client may have only one subscription for the given port
+    /// * A single port may have only one unfiltered subscription
+    ///
+    /// # Params
+    ///
+    /// * `client_id` - identifier of the client that issued the subscription
+    /// * `port` - number of the port to steal from
+    /// * `filter` - optional [`HttpFilter`]
+    ///
+    /// # Warning
+    ///
+    /// If this method returns an [`Err`], it means that this set is out of sync with the inner
+    /// [`PortRedirector`] and it is no longer usable. It is a caller's responsibility to clean
+    /// up any external state.
     pub async fn add(
         &mut self,
         client_id: ClientId,
@@ -118,6 +172,18 @@ impl<R: PortRedirector> PortSubscriptions<R> {
         }
     }
 
+    /// Remove a subscription from this set, if it exists.
+    ///
+    /// # Params
+    ///
+    /// * `client_id` - identifier of the client that issued the subscription
+    /// * `port` - number of the subscription port
+    ///
+    /// # Warning
+    ///
+    /// If this method returns an [`Err`], it means that this set is out of sync with the inner
+    /// [`PortRedirector`] and it is no longer usable. It is a caller's responsibility to clean
+    /// up any external state.
     pub async fn remove(&mut self, client_id: ClientId, port: Port) -> Result<(), R::Error> {
         let Entry::Occupied(mut e) = self.subscriptions.entry(port) else {
             return Ok(());
@@ -152,6 +218,17 @@ impl<R: PortRedirector> PortSubscriptions<R> {
         Ok(())
     }
 
+    /// Remove all client subscriptions from this set.
+    ///
+    /// # Params
+    ///
+    /// * `client_id` - identifier of the client that issued the subscriptions
+    ///
+    /// # Warning
+    ///
+    /// If this method returns an [`Err`], it means that this set is out of sync with the inner
+    /// [`PortRedirector`] and it is no longer usable. It is a caller's responsibility to clean
+    /// up any external state.
     pub async fn remove_all(&mut self, client_id: ClientId) -> Result<(), R::Error> {
         let ports = self
             .subscriptions
@@ -166,18 +243,28 @@ impl<R: PortRedirector> PortSubscriptions<R> {
         Ok(())
     }
 
+    /// Return a subscription for the given `port`.
     pub fn get(&self, port: Port) -> Option<&PortSubscription> {
         self.subscriptions.get(&port)
     }
 }
 
+/// Steal subscription for a port.
 #[derive(Debug)]
 pub enum PortSubscription {
+    /// No filter, incoming connections are stolen whole on behalf of the client.
+    ///
+    /// Belongs to a single client.
     Unfiltered(ClientId),
+    /// Only HTTP requests matching one of the [`HttpFilter`]s should be stolen (on behalf of the
+    /// filter owner).
+    ///
+    /// Can be shared by multiple clients.
     Filtered(Arc<DashMap<ClientId, HttpFilter>>),
 }
 
 impl PortSubscription {
+    /// Create a new instance. Variant is picked based on the optional `filter`.
     fn new(client_id: ClientId, filter: Option<HttpFilter>) -> Self {
         match filter {
             Some(filter) => Self::Filtered(Arc::new([(client_id, filter)].into_iter().collect())),
@@ -185,6 +272,8 @@ impl PortSubscription {
         }
     }
 
+    /// Try extending this subscription with a new subscription request.
+    /// Return whether extension was successful.
     fn try_extend(&mut self, client_id: ClientId, filter: Option<HttpFilter>) -> bool {
         match (self, filter) {
             (_, None) => false,
@@ -201,6 +290,7 @@ impl PortSubscription {
         }
     }
 
+    /// Return whether this subscription belongs (possibly partially) to the given client.
     fn has_client(&self, client_id: ClientId) -> bool {
         match self {
             Self::Filtered(filters) => filters.contains_key(&client_id),
@@ -215,12 +305,24 @@ mod test {
 
     use super::*;
 
+    /// Implementation of [`PortRedirector`] that stores redirections in memory.
+    /// Disallows duplicate redirections or removing a non-existent redirection.
     #[derive(Default)]
     struct DummyRedirector {
         redirections: HashSet<Port>,
         dirty: bool,
     }
 
+    /// Checks the redirections in the given [`DummyRedirector`] against a sequence of ports.
+    ///
+    /// # Usage
+    ///
+    /// * To assert exact set of redirections: `check_redirector!(redirector, 80, 81, 3000)`
+    /// * To assert no redirections: `check_redirector!(redirector)`
+    ///
+    /// # Note
+    ///
+    /// It's implemented as a macro only to preserve the original line number should the test fail.
     macro_rules! check_redirector {
         ( $redirector: expr $(, $x:expr )* ) => {
             {
