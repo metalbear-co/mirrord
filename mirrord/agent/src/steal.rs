@@ -29,6 +29,7 @@ pub(super) mod connection;
 pub(super) mod http;
 pub(super) mod ip_tables;
 mod orig_dst;
+mod subscriptions;
 
 /// Commands from the agent that are passed down to the stealer worker, through [`TcpStealerApi`].
 ///
