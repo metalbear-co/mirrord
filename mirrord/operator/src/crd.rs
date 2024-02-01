@@ -219,16 +219,11 @@ pub enum QueueNameSource {
 
 /// The details of a queue that should be split.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(tag = "queueType")]
 pub enum SplitQueue {
     /// Amazon SQS
-    #[serde(rename_all = "camelCase")] // queue_name_source -> queueNameSource in yaml.
-    SQS {
-        /// AWS region to use.
-        region: String,
-
-        /// Where to find the name of the queue.
-        queue_name_source: QueueNameSource,
-    },
+    #[serde(rename = "SQS")]
+    Sqs(QueueNameSource),
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
