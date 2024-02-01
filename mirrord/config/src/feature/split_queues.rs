@@ -1,85 +1,61 @@
 use std::collections::HashMap;
 
-use mirrord_analytics::CollectAnalytics;
-use mirrord_config_derive::MirrordConfig;
+use mirrord_analytics::{Analytics, CollectAnalytics};
 use schemars::JsonSchema;
-use serde::{self, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
-use crate::config::source::MirrordConfigSource;
+use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig};
 
-/// Maps name of a `MirrordQueueSplitter` resource to a mapping from a fork name to a filter
-/// definition.
 /// ```json
 /// {
 ///   "feature": {
 ///     "split_queues": {
-///       "splitter": "whatever-q-splitter"
-///       "queues": {
-///         "first-queue": {
-///           "queue_type": "SQS",
-///           "wows": {
-///             "number_attribute": [
-///               { "greater_than_int": 2 },
-///               { "lesser_than_int": 6 }
-///             ]
-///           },
-///           "coolz": {
-///             "string_attribute": "^very .*"
-///           }
+///       "first-queue": {
+///         "queue_type": "SQS",
+///         "message_filter": {
+///           "wows": "so wows",
+///           "coolz": "^very .*"
 ///         }
-///       }
+///       },
+///       "second-queue": {
+///         "queue_type": "SomeFutureQueueType",
+///         "message_filter": {
+///           "wows": "so wows",
+///           "coolz": "^very .*"
+///         }
+///       },
 ///     }
 ///   }
 /// }
 /// ```
-#[derive(MirrordConfig, Clone, Debug)]
-#[config(derive = "JsonSchema,Eq,PartialEq")]
-pub struct SplitQueuesConfig {
-    /// The name of the `MirrordQueueSplitter` resource to get queue details from.
-    splitter: String,
-    queues: HashMap<String, QueueMessageFilter>,
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Default)]
+pub struct SplitQueuesConfig(HashMap<String, QueueFilter>);
+
+impl MirrordConfig for SplitQueuesConfig {
+    type Generated = Self;
+
+    fn generate_config(
+        self,
+        _context: &mut ConfigContext,
+    ) -> crate::config::Result<Self::Generated> {
+        Ok(self)
+    }
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, PartialEq, Eq)]
-#[serde(tag = "queue_type")]
-enum QueueMessageFilter {
-    SQS(HashMap<String, SQSAttributeRuleSet>),
+impl FromMirrordConfig for SplitQueuesConfig {
+    type Generator = Self;
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, PartialEq, Eq)]
-/// Set of rules to filter that are required to apply to a single field
-enum SQSAttributeRuleSet {
-    /// A single regex is enough for complex rules for a string.
-    StringAttribute(String),
-
-    NumberAttribute(Vec<NumberRule>),
-
-    BinaryAttribute(Vec<BinaryAttributeRule>),
-}
-
-#[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, PartialEq, Eq)]
-enum NumberRule {
-    GreaterThanInt(i64),
-    LesserThanInt(i64),
-    // GreaterThanFloat(f64),
-    // LesserThanFloat(f64),
-    EqualsInt(i64),
-    EqualsFloat(i64),
-    DivisibleBy(i64),
-}
-
-#[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, PartialEq, Eq)]
-enum BinaryAttributeRule {
-    LongerThan(i64),
-    ShorterThan(i64),
-    StartsWith(String),
-    EndsWith(String),
-    Equals(String),
-    Substring(usize, usize, String),
+/// More queue types might be added in the future.
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
+#[serde(tag = "queue_type", content = "message_filter")]
+enum QueueFilter {
+    #[serde(rename = "SQS")]
+    Sqs(HashMap<String, String>),
 }
 
 impl CollectAnalytics for &SplitQueuesConfig {
-    fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
-        // TODO
+    fn collect_analytics(&self, analytics: &mut Analytics) {
+        analytics.add("queue_count", self.0.len())
     }
 }
