@@ -1,7 +1,7 @@
 {
   "feature": {
     "split_queues": {
-      "first-queue": {
+      "e2e-test-queue": {
         "queue_type": "SQS",
         "message_filter": {
           "wows": "so wows",
