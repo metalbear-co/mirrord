@@ -1,1 +1,0 @@
-Disabled unix sockets being wrongfully sent to the agent when socket isn't connected
