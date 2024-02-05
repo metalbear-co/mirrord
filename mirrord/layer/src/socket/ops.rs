@@ -13,7 +13,7 @@ use std::{
 };
 
 use errno::set_errno;
-use libc::{c_int, c_void, hostent, sockaddr, socklen_t};
+use libc::{c_int, c_void, hostent, sockaddr, socklen_t, AF_UNIX};
 use mirrord_config::feature::network::incoming::IncomingMode;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
@@ -1135,6 +1135,13 @@ pub(super) fn send_to(
         .remove(&sockfd)
         .ok_or(Bypass::LocalFdNotFound(sockfd))?;
 
+    // we don't support unix sockets which don't use `connect`
+    if (destination.is_unix() || user_socket_info.domain == AF_UNIX)
+        && !matches!(user_socket_info.state, SocketState::Connected(_))
+    {
+        return Detour::Bypass(Bypass::Domain(AF_UNIX));
+    }
+
     // Currently this flow only handles DNS resolution.
     // So here we have to check for 2 things:
     //
@@ -1213,6 +1220,13 @@ pub(super) fn sendmsg(
     let (_, user_socket_info) = SOCKETS
         .remove(&sockfd)
         .ok_or(Bypass::LocalFdNotFound(sockfd))?;
+
+    // we don't support unix sockets which don't use `connect`
+    if (destination.is_unix() || user_socket_info.domain == AF_UNIX)
+        && !matches!(user_socket_info.state, SocketState::Connected(_))
+    {
+        return Detour::Bypass(Bypass::Domain(AF_UNIX));
+    }
 
     // Currently this flow only handles DNS resolution.
     // So here we have to check for 2 things:
