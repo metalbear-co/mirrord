@@ -33,9 +33,9 @@ pub enum SipError {
     #[error("Can't perform SIP check - executable file not found at `{0}`")]
     FileNotFound(String),
 
-    #[error("Can't perform SIP check - there is a cycle in the shebang graph, found at `{0}`")]
-    CyclicShebangs(String),
-
     #[error("Got invalid string.")]
     NonUtf8Str(#[from] std::str::Utf8Error),
+
+    #[error("Could not move temporary SIP-patched binary into temp dir. IO error: `{0}`.")]
+    BinaryMoveFailed(std::io::Error),
 }

@@ -157,12 +157,12 @@ mod tests {
     /// and can just use string slices because they are shorter to write.
     fn label_selector_req_with_values(
         key: &str,
-        operator: &str,
+        operator: MatchExpressionOperator,
         values: &[&str],
     ) -> LabelSelectorRequirement {
         LabelSelectorRequirement {
             key: key.into(),
-            operator: operator.into(),
+            operator,
             values: Some(
                 values
                     .into_iter()
@@ -175,52 +175,55 @@ mod tests {
 
     /// Convenient function so that we don't have to write `String::from` 1000 times in the tests
     /// and can just use string slices because they are shorter to write.
-    fn label_selector_req_without_values(key: &str, operator: &str) -> LabelSelectorRequirement {
+    fn label_selector_req_without_values(
+        key: &str,
+        operator: MatchExpressionOperator,
+    ) -> LabelSelectorRequirement {
         LabelSelectorRequirement {
             key: key.into(),
-            operator: operator.into(),
+            operator,
             values: None,
         }
     }
 
     #[fixture]
     fn answer_in_set() -> LabelSelectorRequirement {
-        label_selector_req_with_values("answer", "In", &["42", "idk", "very-much"])
+        label_selector_req_with_values("answer", In, &["42", "idk", "very-much"])
     }
 
     #[fixture]
     fn answer_not_in_set() -> LabelSelectorRequirement {
-        label_selector_req_with_values("answer", "NotIn", &["42", "idk", "very-much"])
+        label_selector_req_with_values("answer", NotIn, &["42", "idk", "very-much"])
     }
 
     #[fixture]
     fn answer_exists() -> LabelSelectorRequirement {
-        label_selector_req_without_values("answer", "Exists")
+        label_selector_req_without_values("answer", Exists)
     }
 
     #[fixture]
     fn answer_does_not_exist() -> LabelSelectorRequirement {
-        label_selector_req_without_values("answer", "DoesNotExist")
+        label_selector_req_without_values("answer", DoesNotExist)
     }
 
     #[fixture]
     fn question_in_set() -> LabelSelectorRequirement {
-        label_selector_req_with_values("question", "In", &["why", "how", "when"])
+        label_selector_req_with_values("question", In, &["why", "how", "when"])
     }
 
     #[fixture]
     fn question_not_in_set() -> LabelSelectorRequirement {
-        label_selector_req_with_values("question", "NotIn", &["why", "how", "when"])
+        label_selector_req_with_values("question", NotIn, &["why", "how", "when"])
     }
 
     #[fixture]
     fn question_exists() -> LabelSelectorRequirement {
-        label_selector_req_without_values("question", "Exists")
+        label_selector_req_without_values("question", Exists)
     }
 
     #[fixture]
     fn question_does_not_exists() -> LabelSelectorRequirement {
-        label_selector_req_without_values("question", "DoesNotExist")
+        label_selector_req_without_values("question", DoesNotExist)
     }
 
     #[rstest]

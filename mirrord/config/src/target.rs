@@ -14,7 +14,7 @@ use crate::{
 };
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
-#[serde(untagged, rename_all = "lowercase")]
+#[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
 pub enum TargetFileConfig {
     // Generated when the value of the `target` field is a string, or when there is no target.
     // we need default else target value will be required in some scenarios.
@@ -67,6 +67,7 @@ pub enum TargetFileConfig {
 /// ```
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
 pub struct TargetConfig {
     /// ### target.path {#target-path}
     ///
@@ -171,7 +172,7 @@ mirrord-layer failed to parse the provided target!
 /// - `container/{sample-container}`;
 /// - `containername/{sample-container}`.
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub enum Target {
     /// <!--${internal}-->
     /// Mirror a deployment.
@@ -281,6 +282,7 @@ impl fmt::Display for Target {
 /// <!--${internal}-->
 /// Mirror the pod specified by [`PodTarget::pod`].
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PodTarget {
     /// <!--${internal}-->
     /// Pod to mirror.
@@ -312,6 +314,7 @@ impl FromSplit for PodTarget {
 /// <!--${internal}-->
 /// Mirror the deployment specified by [`DeploymentTarget::deployment`].
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct DeploymentTarget {
     /// <!--${internal}-->
     /// Deployment to mirror.
@@ -343,6 +346,7 @@ impl FromSplit for DeploymentTarget {
 /// <!--${internal}-->
 /// Mirror the rollout specified by [`RolloutTarget::rollout`].
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RolloutTarget {
     /// <!--${internal}-->
     /// Rollout to mirror.

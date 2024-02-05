@@ -8,6 +8,83 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.86.1](https://github.com/metalbear-co/mirrord/tree/3.86.1) - 2024-02-05
+
+
+### Fixed
+
+- Added `runAsNonRoot: false` and `runAsUser: 0` to the security context of an
+  epheremal agent when running privileged (to prevent overriding these values
+  with values from the pod spec).
+- Disabled unix sockets being wrongfully sent to the agent when socket isn't
+  connected
+
+## [3.86.0](https://github.com/metalbear-co/mirrord/tree/3.86.0) - 2024-01-29
+
+
+### Changed
+
+- `JAVA_TOOL_OPTIONS` is excluded by default from the environment variables
+  that are fetched from the target.
+
+
+### Internal
+
+- Update links to new docs
+
+
+## [3.85.1](https://github.com/metalbear-co/mirrord/tree/3.85.1) - 2024-01-29
+
+
+### Fixed
+
+- Running `mirrod exec go run EXECUTABLE` on macOS with go1.21.
+  [#2202](https://github.com/metalbear-co/mirrord/issues/2202)
+- Fixed a compilation bug in `mirrord-operator` crate tests.
+
+
+## [3.85.0](https://github.com/metalbear-co/mirrord/tree/3.85.0) - 2024-01-24
+
+
+### Added
+
+- Added license subscription id to operator status CRD. Adjusted
+  `CredentialStore` to preserve signing key pair for the same operator license
+  subscription id. [#2190](https://github.com/metalbear-co/mirrord/issues/2190)
+- CLI now sends machine host + username to show in mirrord operator status
+  (not sent to our cloud!)
+- Report port locks and filters in operator status
+
+
+### Changed
+
+- Change configuration parsing to be strict unallowing unknown fields
+- Cluster DNS resolving now happens by nameserver order rather by statistics
+
+
+### Fixed
+
+- Running R on macOS.
+  [#2186](https://github.com/metalbear-co/mirrord/issues/2186)
+- Running scripts with whitespaces in the shebang.
+  [#2193](https://github.com/metalbear-co/mirrord/issues/2193)
+
+
+### Internal
+
+- Allow both `x86_64` and `arm64` when patching thin binaries.
+  [#2186](https://github.com/metalbear-co/mirrord/issues/2186)
+
+
+## [3.84.1](https://github.com/metalbear-co/mirrord/tree/3.84.1) - 2024-01-19
+
+
+### Fixed
+
+- Add support for shebang containing spaces like asdf's node does
+  [#2181](https://github.com/metalbear-co/mirrord/issues/2181)
+
+
 ## [3.84.0](https://github.com/metalbear-co/mirrord/tree/3.84.0) - 2024-01-18
 
 

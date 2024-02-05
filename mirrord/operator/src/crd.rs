@@ -118,6 +118,7 @@ pub struct Session {
     pub user: String,
     pub target: String,
     pub namespace: Option<String>,
+    pub locked_ports: Option<Vec<(u16, String, Option<String>)>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -125,7 +126,10 @@ pub struct LicenseInfoOwned {
     pub name: String,
     pub organization: String,
     pub expire_at: NaiveDate,
+    /// Fingerprint of the operator license.
     pub fingerprint: Option<String>,
+    /// Subscription id encoded in the operator license extension.
+    pub subscription_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]

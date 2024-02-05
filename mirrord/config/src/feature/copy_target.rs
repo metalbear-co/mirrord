@@ -12,7 +12,7 @@ use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig, Result};
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub enum CopyTargetFileConfig {
     Simple(bool),
     Advanced { scale_down: Option<bool> },

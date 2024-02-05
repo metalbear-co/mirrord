@@ -54,7 +54,7 @@ pub mod mode;
 /// }
 /// ```
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
-#[serde(untagged, rename_all = "lowercase")]
+#[serde(untagged, deny_unknown_fields, rename_all = "lowercase")]
 pub enum FsUserConfig {
     /// <!--${internal}-->
     /// Basic configuration that controls the env vars `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`

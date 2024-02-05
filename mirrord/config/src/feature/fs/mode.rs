@@ -21,7 +21,7 @@ use crate::{
 ///
 /// The accepted values are: `"local"`, `"localwithoverrides`, `"read"`, or `"write`.
 #[derive(Serialize, Deserialize, Default, PartialEq, Eq, Clone, Debug, Copy, JsonSchema)]
-#[serde(rename_all = "lowercase")]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum FsModeConfig {
     /// #### feature.fs.mode.local {#feature-fs-mode-local}
     ///

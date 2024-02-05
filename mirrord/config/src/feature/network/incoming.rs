@@ -67,7 +67,7 @@ use http_filter::*;
 /// ```
 #[derive(Deserialize, Clone, Debug, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-#[serde(untagged, rename_all = "lowercase")]
+#[serde(untagged, deny_unknown_fields, rename_all = "lowercase")]
 pub enum IncomingFileConfig {
     Simple(Option<IncomingMode>),
     Advanced(Box<IncomingAdvancedFileConfig>),
@@ -167,6 +167,7 @@ impl MirrordToggleableConfig for IncomingFileConfig {
 /// Advanced user configuration for network incoming traffic.
 #[derive(Deserialize, Clone, Debug, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
+#[serde(deny_unknown_fields)]
 pub struct IncomingAdvancedFileConfig {
     /// ### mode
     ///
@@ -350,7 +351,7 @@ impl IncomingConfig {
 /// data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and
 /// steals the traffic on the port if it is HTTP;
 #[derive(Deserialize, PartialEq, Eq, Clone, Copy, Debug, JsonSchema, Default)]
-#[serde(rename_all = "lowercase")]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum IncomingMode {
     /// <!--${internal}-->
     /// ### mirror
@@ -409,7 +410,7 @@ impl FromStr for IncomingMode {
 /// - `"override"`: If port lock detected then override it with new lock and force close the
 ///   original locking connection.
 #[derive(Default, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, JsonSchema)]
-#[serde(rename_all = "lowercase")]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum ConcurrentSteal {
     /// <!--${internal}-->
     /// ### override

@@ -60,7 +60,7 @@
 //!
 //! The functions we intercept are controlled via the `mirrord-config` crate, check its
 //! documentation for more details, or
-//! [Configuration](https://mirrord.dev/docs/overview/configuration/) for usage information.
+//! [Configuration](https://mirrord.dev/docs/reference/configuration/) for usage information.
 
 extern crate alloc;
 extern crate core;
