@@ -8,6 +8,17 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.86.1](https://github.com/metalbear-co/mirrord/tree/3.86.1) - 2024-02-05
+
+
+### Fixed
+
+- Added `runAsNonRoot: false` and `runAsUser: 0` to the security context of an
+  epheremal agent when running privileged (to prevent overriding these values
+  with values from the pod spec).
+- Disabled unix sockets being wrongfully sent to the agent when socket isn't
+  connected
+
 ## [3.86.0](https://github.com/metalbear-co/mirrord/tree/3.86.0) - 2024-01-29
 
 
