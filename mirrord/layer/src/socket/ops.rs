@@ -1137,9 +1137,9 @@ pub(super) fn send_to(
 
     // we don't support unix sockets which don't use `connect`
     if (destination.is_unix() || user_socket_info.domain == AF_UNIX)
-        && user_socket_info.user_socket_info.state != SocketState::Connected
+        && !matches!(user_socket_info.state, SocketState::Connected(_))
     {
-        return Bypass::UnixSocket(destination);
+        return Detour::Bypass(Bypass::Domain(AF_UNIX));
     }
 
     // Currently this flow only handles DNS resolution.
@@ -1223,9 +1223,9 @@ pub(super) fn sendmsg(
 
     // we don't support unix sockets which don't use `connect`
     if (destination.is_unix() || user_socket_info.domain == AF_UNIX)
-        && user_socket_info.user_socket_info.state != SocketState::Connected
+        && !matches!(user_socket_info.state, SocketState::Connected(_))
     {
-        return Bypass::UnixSocket(destination);
+        return Detour::Bypass(Bypass::Domain(AF_UNIX));
     }
 
     // Currently this flow only handles DNS resolution.
