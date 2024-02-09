@@ -56,10 +56,10 @@ impl From<Vec<u8>> for MessageIn {
 pub enum Error {
     /// IO failed.
     #[error("io failed: {0}")]
-    IoError(#[from] io::Error),
+    Io(#[from] io::Error),
     /// Hyper failed.
     #[error("hyper failed: {0}")]
-    HyperError(#[from] hyper::Error),
+    Hyper(#[from] hyper::Error),
     /// The layer closed connection too soon to send a request.
     #[error("connection closed too soon")]
     ConnectionClosedTooSoon(HttpRequestFallback),
@@ -153,7 +153,7 @@ impl HttpConnection {
         response: Result<hyper::Response<hyper::body::Incoming>>,
     ) -> Result<HttpResponseFallback> {
         match response {
-                Err(Error::HyperError(e)) if e.is_closed() => {
+                Err(Error::Hyper(e)) if e.is_closed() => {
                     tracing::warn!(
                         "Sending request to local application failed with: {e:?}. \
                         Seems like the local application closed the connection too early, so \
@@ -164,7 +164,7 @@ impl HttpConnection {
                     Err(Error::ConnectionClosedTooSoon(request))
                 }
 
-                Err(Error::HyperError(e)) if e.is_parse() => {
+                Err(Error::Hyper(e)) if e.is_parse() => {
                     tracing::warn!("Could not parse HTTP response to filtered HTTP request, got error: {e:?}.");
                     let body_message = format!("mirrord: could not parse HTTP response from local application - {e:?}");
                     Ok(HttpResponseFallback::response_from_request(
