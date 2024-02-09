@@ -34,8 +34,8 @@ use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 use tracing::{debug, error, warn};
 
 use crate::crd::{
-    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, TargetCrd,
-    OPERATOR_STATUS_NAME,
+    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, SessionManagementCrd,
+    TargetCrd, OPERATOR_STATUS_NAME,
 };
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
@@ -160,6 +160,7 @@ pub struct OperatorApi {
     client: Client,
     target_api: Api<TargetCrd>,
     copy_target_api: Api<CopyTargetCrd>,
+    session_management_api: Api<SessionManagementCrd>,
     target_namespace: Option<String>,
     target_config: TargetConfig,
     on_concurrent_steal: ConcurrentSteal,
@@ -371,10 +372,14 @@ impl OperatorApi {
         let copy_target_api: Api<CopyTargetCrd> =
             get_k8s_resource_api(&client, target_namespace.as_deref());
 
+        let session_management_api: Api<SessionManagementCrd> =
+            get_k8s_resource_api(&client, target_namespace.as_deref());
+
         Ok(OperatorApi {
             client,
             target_api,
             copy_target_api,
+            session_management_api,
             target_namespace,
             target_config,
             on_concurrent_steal,

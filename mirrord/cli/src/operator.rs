@@ -1,6 +1,6 @@
 use std::{fs::File, path::PathBuf, time::Duration};
 
-use kube::Api;
+use kube::{api::DeleteParams, Api, Client};
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     LayerFileConfig,
@@ -8,7 +8,10 @@ use mirrord_config::{
 use mirrord_kube::api::kubernetes::create_kube_api;
 use mirrord_operator::{
     client::{OperatorApiError, OperatorOperation},
-    crd::{LicenseInfoOwned, MirrordOperatorCrd, MirrordOperatorSpec, OPERATOR_STATUS_NAME},
+    crd::{
+        LicenseInfoOwned, MirrordOperatorCrd, MirrordOperatorSpec, SessionManagementCrd,
+        OPERATOR_STATUS_NAME,
+    },
     setup::{LicenseType, Operator, OperatorNamespace, OperatorSetup, SetupOptions},
 };
 use mirrord_progress::{Progress, ProgressTracker};
@@ -121,6 +124,14 @@ async fn get_status_api(config: Option<String>) -> Result<Api<MirrordOperatorCrd
     }
     .await
     .map_err(CliError::KubernetesApiFailed)?;
+
+    Ok(Api::all(kube_api))
+}
+
+async fn session_api(config: Option<String>) -> Result<Api<SessionManagementCrd>> {
+    let kube_api: Client = create_kube_api(false, config, None)
+        .await
+        .map_err(CliError::KubernetesApiFailed)?;
 
     Ok(Api::all(kube_api))
 }
@@ -268,6 +279,65 @@ Operator License
     Ok(())
 }
 
+#[tracing::instrument(level = "trace", ret)]
+async fn operator_session(kill: Option<u32>, kill_all: bool) -> Result<()> {
+    let mut progress = ProgressTracker::from_env("Operator Status");
+
+    let session_api = session_api(None).await?;
+
+    let mut status_progress = progress.subtask("fetching status");
+
+    if let Some(session_id) = kill {
+        // TODO(alex) [high]: How do I specify the id?
+        let mirrord_session = match session_api
+            // TODO(alex) [high]: What should the `path` be?
+            .delete(&format!("sessions/{session_id}"), &DeleteParams::default())
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::GettingStatus,
+            })
+            .map_err(CliError::from)
+        {
+            Ok(session) => session,
+            Err(err) => {
+                status_progress.failure(Some("unable to get status"));
+
+                return Err(err);
+            }
+        };
+
+        let crd = mirrord_session.right().unwrap();
+    } else if kill_all {
+        // TODO(alex) [high]: How do I specify the id?
+        let mirrord_session = match session_api
+            // TODO(alex) [high]: What should the `path` be?
+            .delete(&format!("sessions"), &DeleteParams::default())
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::GettingStatus,
+            })
+            .map_err(CliError::from)
+        {
+            Ok(session) => session,
+            Err(err) => {
+                status_progress.failure(Some("unable to get status"));
+
+                return Err(err);
+            }
+        };
+
+        let crd = mirrord_session.right().unwrap();
+    }
+
+    status_progress.success(Some("fetched status"));
+
+    progress.success(Some("Done with session stuff!"));
+
+    Ok(())
+}
+
 /// Handle commands related to the operator `mirrord operator ...`
 pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
     match args.command {
@@ -279,5 +349,6 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             license_path,
         } => operator_setup(accept_tos, file, namespace, license_key, license_path).await,
         OperatorCommand::Status { config_file } => operator_status(config_file).await,
+        OperatorCommand::Session { kill, kill_all } => operator_session(kill, kill_all).await,
     }
 }

@@ -223,6 +223,13 @@ pub(super) enum OperatorCommand {
         #[arg(short = 'f')]
         config_file: Option<String>,
     },
+    Session {
+        #[arg(long, conflicts_with = "kill_all")]
+        kill: Option<u32>,
+
+        #[arg(long, conflicts_with = "kill")]
+        kill_all: bool,
+    },
 }
 
 #[derive(ValueEnum, Clone, Debug)]

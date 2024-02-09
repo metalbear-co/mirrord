@@ -121,6 +121,18 @@ pub struct Session {
     pub locked_ports: Option<Vec<(u16, String, Option<String>)>>,
 }
 
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+    group = "operator.metalbear.co",
+    version = "v1",
+    kind = "SessionManagement",
+    root = "SessionManagementCrd",
+    namespaced
+)]
+pub struct SessionManagementSpec {
+    pub sessions: Vec<Session>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LicenseInfoOwned {
     pub name: String,
