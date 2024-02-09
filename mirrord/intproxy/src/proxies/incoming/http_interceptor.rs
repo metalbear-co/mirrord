@@ -61,10 +61,6 @@ pub enum HttpInterceptorError {
     UpgradeNotSupported(Version),
     #[error("task for keeping http connection alive panicked")]
     HttpConnectionTaskPanicked,
-    #[error(
-        "attempted to send an http request through the already upgraded connection, req: {0:?}"
-    )]
-    CannotDowngradeConnection(HttpRequestFallback),
 }
 
 pub type Result<T, E = HttpInterceptorError> = core::result::Result<T, E>;
@@ -75,16 +71,14 @@ pub type Result<T, E = HttpInterceptorError> = core::result::Result<T, E>;
 pub struct HttpInterceptor {
     socket: TcpSocket,
     local_destination: SocketAddr,
-    start_raw: bool,
 }
 
 impl HttpInterceptor {
     /// Crates a new instance. This instance will send requests to the given `local_destination`.
-    pub fn new(socket: TcpSocket, local_destination: SocketAddr, start_raw: bool) -> Self {
+    pub fn new(socket: TcpSocket, local_destination: SocketAddr) -> Self {
         Self {
             socket,
             local_destination,
-            start_raw,
         }
     }
 }
@@ -95,35 +89,32 @@ impl BackgroundTask for HttpInterceptor {
     type MessageOut = InterceptorMessageOut;
 
     async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-        if self.start_raw {
-            return RawConnection::new(self.socket, self.local_destination, None)
-                .await?
-                .run(message_bus)
-                .await;
-        }
+        let stream = self.socket.connect(self.local_destination).await?;
+        let mut conn = GenericConnection::Raw(RawConnection { stream });
 
-        match message_bus.recv().await {
-            Some(HttpInterceptorMessageIn::RawData(data)) => {
-                let raw_connection =
-                    RawConnection::new(self.socket, self.local_destination, Some(data)).await?;
+        loop {
+            let new_conn = match conn {
+                GenericConnection::Raw(raw_conn) => raw_conn
+                    .run(message_bus)
+                    .await?
+                    .map(GenericConnection::Http),
+                GenericConnection::Http(http_conn) => http_conn
+                    .run(message_bus)
+                    .await?
+                    .map(GenericConnection::Raw),
+            };
 
-                raw_connection.run(message_bus).await
+            match new_conn {
+                Some(new_conn) => conn = new_conn,
+                None => break Ok(()),
             }
-
-            Some(HttpInterceptorMessageIn::HttpRequest(req)) => {
-                let (http_connection, res) =
-                    HttpConnection::new(self.socket, self.local_destination, req).await?;
-                message_bus.send(InterceptorMessageOut::Http(res)).await;
-
-                match http_connection.run(message_bus).await? {
-                    Some(raw_connection) => raw_connection.run(message_bus).await,
-                    None => Ok(()),
-                }
-            }
-
-            None => Ok(()),
         }
     }
+}
+
+enum GenericConnection {
+    Raw(RawConnection),
+    Http(HttpConnection),
 }
 
 struct HttpConnection {
@@ -133,25 +124,6 @@ struct HttpConnection {
 }
 
 impl HttpConnection {
-    async fn new(
-        socket: TcpSocket,
-        peer: SocketAddr,
-        req: HttpRequestFallback,
-    ) -> Result<(Self, HttpResponseFallback)> {
-        let stream = socket.connect(peer).await?;
-        let (sender, upgrade_rx) = super::http::handshake(req.version(), stream).await?;
-
-        let mut conn = Self {
-            peer,
-            sender,
-            upgrade_rx,
-        };
-
-        let res = conn.send(req).await?;
-
-        Ok((conn, res))
-    }
-
     /// Handles the result of sending an HTTP request.
     /// Returns a new request to be sent or an error.
     async fn handle_response(
@@ -300,17 +272,10 @@ struct RawConnection {
 }
 
 impl RawConnection {
-    async fn new(socket: TcpSocket, peer: SocketAddr, data: Option<Vec<u8>>) -> Result<Self> {
-        let mut stream = socket.connect(peer).await?;
-
-        if let Some(data) = data {
-            stream.write_all(&data).await?;
-        }
-
-        Ok(Self { stream })
-    }
-
-    async fn run(mut self, message_bus: &mut MessageBus<HttpInterceptor>) -> Result<()> {
+    async fn run(
+        mut self,
+        message_bus: &mut MessageBus<HttpInterceptor>,
+    ) -> Result<Option<HttpConnection>> {
         let mut buffer = vec![0; 1024];
         let mut remote_closed = false;
         let mut reading_closed = false;
@@ -339,14 +304,25 @@ impl RawConnection {
                         self.stream.write_all(&data).await?;
                     }
                     Some(HttpInterceptorMessageIn::HttpRequest(req)) => {
-                        break Err(HttpInterceptorError::CannotDowngradeConnection(req));
+                        let mut conn = {
+                            let peer = self.stream.peer_addr()?;
+                            let (sender, upgrade_rx) = super::http::handshake(req.version(), self.stream).await?;
+
+                            HttpConnection { peer, sender, upgrade_rx }
+                        };
+
+                        let res = conn.send(req).await?;
+
+                        message_bus.send(InterceptorMessageOut::Http(res)).await;
+
+                        break Ok(Some(conn))
                     }
                 },
 
                 _ = time::sleep(Duration::from_secs(1)), if remote_closed => {
                     tracing::trace!("layer silent for 1 second and message bus is closed, exiting");
 
-                    break Ok(());
+                    break Ok(None);
                 },
             }
         }
@@ -476,11 +452,7 @@ mod test {
         let interceptor = {
             let socket = TcpSocket::new_v4().unwrap();
             socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
-            tasks.register(
-                HttpInterceptor::new(socket, local_destination, false),
-                (),
-                8,
-            )
+            tasks.register(HttpInterceptor::new(socket, local_destination), (), 8)
         };
 
         interceptor

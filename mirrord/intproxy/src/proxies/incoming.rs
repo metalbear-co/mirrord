@@ -21,7 +21,6 @@ use tokio::net::TcpSocket;
 use self::{
     http_interceptor::{HttpInterceptor, HttpInterceptorError},
     port_subscription_ext::PortSubscriptionExt,
-    raw_interceptor::RawInterceptor,
     subscriptions::SubscriptionsManager,
 };
 use crate::{
@@ -33,7 +32,6 @@ use crate::{
 mod http;
 mod http_interceptor;
 mod port_subscription_ext;
-mod raw_interceptor;
 mod subscriptions;
 
 /// Common type for errors of the [`RawInterceptor`] and the [`HttpInterceptor`].
@@ -164,7 +162,7 @@ pub struct IncomingProxy {
     /// Active port subscriptions for all layers.
     subscriptions: SubscriptionsManager,
     /// [`TaskSender`]s for active [`RawInterceptor`]s.
-    interceptors_raw: HashMap<InterceptorId, InterceptorHandle<RawInterceptor>>,
+    interceptors_raw: HashMap<InterceptorId, InterceptorHandle<HttpInterceptor>>,
     /// [`TaskSender`]s for active [`HttpInterceptor`]s.
     interceptors_http: HashMap<InterceptorId, InterceptorHandle<HttpInterceptor>>,
     /// For receiving updates from both [`RawInterceptor`]s and [`HttpInterceptor`]s.
@@ -246,7 +244,7 @@ impl IncomingProxy {
                     }
                 };
                 let interceptor = self.background_tasks.register(
-                    HttpInterceptor::new(interceptor_socket, sub.listening_on, false),
+                    HttpInterceptor::new(interceptor_socket, sub.listening_on),
                     InterceptorId(request.connection_id()),
                     Self::CHANNEL_SIZE,
                 );
@@ -342,7 +340,7 @@ impl IncomingProxy {
                 );
 
                 let interceptor = self.background_tasks.register(
-                    RawInterceptor::new(sub.listening_on, interceptor_socket),
+                    HttpInterceptor::new(interceptor_socket, sub.listening_on),
                     id,
                     Self::CHANNEL_SIZE,
                 );
