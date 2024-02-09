@@ -6,7 +6,7 @@ use mirrord_protocol::{
     ClientMessage, ConnectionId, Port,
 };
 
-use super::InterceptorMessageOut;
+use super::interceptor::MessageOut;
 
 /// Retrieves subscribed port from the given [`StealType`].
 fn get_port(steal_type: &StealType) -> Port {
@@ -34,11 +34,7 @@ pub trait PortSubscriptionExt {
 
     /// Returns a message to be sent to the agent in response to data coming from an interceptor.
     /// [`None`] means that the data should be discarded.
-    fn wrap_response(
-        &self,
-        res: InterceptorMessageOut,
-        connection_id: ConnectionId,
-    ) -> Option<ClientMessage>;
+    fn wrap_response(&self, res: MessageOut, connection_id: ConnectionId) -> Option<ClientMessage>;
 }
 
 impl PortSubscriptionExt for PortSubscription {
@@ -81,24 +77,20 @@ impl PortSubscriptionExt for PortSubscription {
 
     /// Always [`None`] for the `mirror` mode - data coming from the layer is discarded.
     /// Corrent [`LayerTcpSteal`] variant for the `steal` mode.
-    fn wrap_response(
-        &self,
-        res: InterceptorMessageOut,
-        connection_id: ConnectionId,
-    ) -> Option<ClientMessage> {
+    fn wrap_response(&self, res: MessageOut, connection_id: ConnectionId) -> Option<ClientMessage> {
         match self {
             Self::Mirror(..) => None,
             Self::Steal(..) => match res {
-                InterceptorMessageOut::Bytes(bytes) => {
+                MessageOut::Bytes(bytes) => {
                     Some(ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
                         connection_id,
                         bytes,
                     })))
                 }
-                InterceptorMessageOut::Http(HttpResponseFallback::Fallback(res)) => {
+                MessageOut::Http(HttpResponseFallback::Fallback(res)) => {
                     Some(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(res)))
                 }
-                InterceptorMessageOut::Http(HttpResponseFallback::Framed(res)) => Some(
+                MessageOut::Http(HttpResponseFallback::Framed(res)) => Some(
                     ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(res)),
                 ),
             },

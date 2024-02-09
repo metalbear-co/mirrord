@@ -19,32 +19,36 @@ use tokio::{
     time,
 };
 
-use super::{
-    http::{HttpSender, UpgradedConnection},
-    InterceptorMessageOut,
-};
+use super::http::{HttpSender, UpgradedConnection};
 use crate::background_tasks::{BackgroundTask, MessageBus};
 
-pub enum HttpInterceptorMessageIn {
-    HttpRequest(HttpRequestFallback),
-    RawData(Vec<u8>),
+pub enum MessageIn {
+    Http(HttpRequestFallback),
+    Raw(Vec<u8>),
 }
 
-impl From<HttpRequestFallback> for HttpInterceptorMessageIn {
+/// Common type for messages produced by the [`RawInterceptor`] and the [`HttpInterceptor`].
+#[derive(Debug)]
+pub enum MessageOut {
+    Bytes(Vec<u8>),
+    Http(HttpResponseFallback),
+}
+
+impl From<HttpRequestFallback> for MessageIn {
     fn from(value: HttpRequestFallback) -> Self {
-        Self::HttpRequest(value)
+        Self::Http(value)
     }
 }
 
-impl From<Vec<u8>> for HttpInterceptorMessageIn {
+impl From<Vec<u8>> for MessageIn {
     fn from(value: Vec<u8>) -> Self {
-        Self::RawData(value)
+        Self::Raw(value)
     }
 }
 
 /// Errors that can occur when executing [`HttpInterceptor`] as a [`BackgroundTask`].
 #[derive(Error, Debug)]
-pub enum HttpInterceptorError {
+pub enum Error {
     /// IO failed.
     #[error("io failed: {0}")]
     IoError(#[from] io::Error),
@@ -63,33 +67,30 @@ pub enum HttpInterceptorError {
     HttpConnectionTaskPanicked,
 }
 
-pub type Result<T, E = HttpInterceptorError> = core::result::Result<T, E>;
+pub type Result<T, E = Error> = core::result::Result<T, E>;
 
-/// Manages a single intercepted HTTP connection.
+/// Manages a single intercepted connection.
 /// Multiple instances are run as [`BackgroundTask`]s by one [`IncomingProxy`](super::IncomingProxy)
 /// to manage individual connections.
-pub struct HttpInterceptor {
+pub struct Interceptor {
     socket: TcpSocket,
-    local_destination: SocketAddr,
+    peer: SocketAddr,
 }
 
-impl HttpInterceptor {
-    /// Crates a new instance. This instance will send requests to the given `local_destination`.
-    pub fn new(socket: TcpSocket, local_destination: SocketAddr) -> Self {
-        Self {
-            socket,
-            local_destination,
-        }
+impl Interceptor {
+    /// Crates a new instance. This instance will communicate with the given `peer`.
+    pub fn new(socket: TcpSocket, peer: SocketAddr) -> Self {
+        Self { socket, peer }
     }
 }
 
-impl BackgroundTask for HttpInterceptor {
-    type Error = HttpInterceptorError;
-    type MessageIn = HttpInterceptorMessageIn;
-    type MessageOut = InterceptorMessageOut;
+impl BackgroundTask for Interceptor {
+    type Error = Error;
+    type MessageIn = MessageIn;
+    type MessageOut = MessageOut;
 
     async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-        let stream = self.socket.connect(self.local_destination).await?;
+        let stream = self.socket.connect(self.peer).await?;
         let mut conn = GenericConnection::Raw(RawConnection { stream });
 
         loop {
@@ -129,10 +130,10 @@ impl HttpConnection {
     async fn handle_response(
         &self,
         request: HttpRequestFallback,
-        response: Result<hyper::Response<hyper::body::Incoming>, HttpInterceptorError>,
-    ) -> Result<HttpResponseFallback, HttpInterceptorError> {
+        response: Result<hyper::Response<hyper::body::Incoming>, Error>,
+    ) -> Result<HttpResponseFallback, Error> {
         match response {
-                Err(HttpInterceptorError::HyperError(e)) if e.is_closed() => {
+                Err(Error::HyperError(e)) if e.is_closed() => {
                     tracing::warn!(
                         "Sending request to local application failed with: {e:?}. \
                         Seems like the local application closed the connection too early, so \
@@ -140,10 +141,10 @@ impl HttpConnection {
                     );
                     tracing::trace!("The request to be retried: {request:?}.");
 
-                    Err(HttpInterceptorError::ConnectionClosedTooSoon(request))
+                    Err(Error::ConnectionClosedTooSoon(request))
                 }
 
-                Err(HttpInterceptorError::HyperError(e)) if e.is_parse() => {
+                Err(Error::HyperError(e)) if e.is_parse() => {
                     tracing::warn!("Could not parse HTTP response to filtered HTTP request, got error: {e:?}.");
                     let body_message = format!("mirrord: could not parse HTTP response from local application - {e:?}");
                     Ok(HttpResponseFallback::response_from_request(
@@ -214,7 +215,7 @@ impl HttpConnection {
         let res = self.sender.send(req.clone()).await;
         let res = self.handle_response(req, res).await;
 
-        let Err(HttpInterceptorError::ConnectionClosedTooSoon(req)) = res else {
+        let Err(Error::ConnectionClosedTooSoon(req)) = res else {
             return res;
         };
 
@@ -232,22 +233,22 @@ impl HttpConnection {
 
     async fn run(
         mut self,
-        message_bus: &mut MessageBus<HttpInterceptor>,
+        message_bus: &mut MessageBus<Interceptor>,
     ) -> Result<Option<RawConnection>> {
         while let Some(msg) = message_bus.recv().await {
             match msg {
-                HttpInterceptorMessageIn::RawData(data) => {
+                MessageIn::Raw(data) => {
                     let UpgradedConnection {
                         mut stream,
                         unprocessed_bytes,
                     } = self
                         .upgrade_rx
                         .await
-                        .map_err(|_| HttpInterceptorError::HttpConnectionTaskPanicked)??;
+                        .map_err(|_| Error::HttpConnectionTaskPanicked)??;
 
                     if !unprocessed_bytes.is_empty() {
                         message_bus
-                            .send(InterceptorMessageOut::Bytes(unprocessed_bytes.to_vec()))
+                            .send(MessageOut::Bytes(unprocessed_bytes.to_vec()))
                             .await;
                     }
 
@@ -256,9 +257,9 @@ impl HttpConnection {
                     return Ok(Some(RawConnection { stream }));
                 }
 
-                HttpInterceptorMessageIn::HttpRequest(req) => {
+                MessageIn::Http(req) => {
                     let res = self.send(req).await?;
-                    message_bus.send(InterceptorMessageOut::Http(res)).await;
+                    message_bus.send(MessageOut::Http(res)).await;
                 }
             }
         }
@@ -274,7 +275,7 @@ struct RawConnection {
 impl RawConnection {
     async fn run(
         mut self,
-        message_bus: &mut MessageBus<HttpInterceptor>,
+        message_bus: &mut MessageBus<Interceptor>,
     ) -> Result<Option<HttpConnection>> {
         let mut buffer = vec![0; 1024];
         let mut remote_closed = false;
@@ -291,7 +292,7 @@ impl RawConnection {
                         reading_closed = true;
                     }
                     Ok(read) => {
-                        message_bus.send(InterceptorMessageOut::Bytes(buffer.get(..read).unwrap().to_vec())).await;
+                        message_bus.send(MessageOut::Bytes(buffer.get(..read).unwrap().to_vec())).await;
                     }
                 },
 
@@ -300,10 +301,10 @@ impl RawConnection {
                         tracing::trace!("message bus closed, waiting 1 second before exiting");
                         remote_closed = true;
                     },
-                    Some(HttpInterceptorMessageIn::RawData(data)) => {
+                    Some(MessageIn::Raw(data)) => {
                         self.stream.write_all(&data).await?;
                     }
-                    Some(HttpInterceptorMessageIn::HttpRequest(req)) => {
+                    Some(MessageIn::Http(req)) => {
                         let mut conn = {
                             let peer = self.stream.peer_addr()?;
                             let (sender, upgrade_rx) = super::http::handshake(req.version(), self.stream).await?;
@@ -313,7 +314,7 @@ impl RawConnection {
 
                         let res = conn.send(req).await?;
 
-                        message_bus.send(InterceptorMessageOut::Http(res)).await;
+                        message_bus.send(MessageOut::Http(res)).await;
 
                         break Ok(Some(conn))
                     }
@@ -447,12 +448,11 @@ mod test {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let server_task = task::spawn(dummy_echo_server(listener, shutdown_rx));
 
-        let mut tasks: BackgroundTasks<(), InterceptorMessageOut, HttpInterceptorError> =
-            Default::default();
+        let mut tasks: BackgroundTasks<(), MessageOut, Error> = Default::default();
         let interceptor = {
             let socket = TcpSocket::new_v4().unwrap();
             socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
-            tasks.register(HttpInterceptor::new(socket, local_destination), (), 8)
+            tasks.register(Interceptor::new(socket, local_destination), (), 8)
         };
 
         interceptor
@@ -479,7 +479,7 @@ mod test {
 
         let (_, update) = tasks.next().await.expect("no task result");
         match update {
-            TaskUpdate::Message(InterceptorMessageOut::Http(res)) => {
+            TaskUpdate::Message(MessageOut::Http(res)) => {
                 let res = res
                     .into_hyper::<Infallible>()
                     .expect("failed to convert into hyper response");
@@ -501,7 +501,7 @@ mod test {
 
         let (_, update) = tasks.next().await.expect("no task result");
         match update {
-            TaskUpdate::Message(InterceptorMessageOut::Bytes(bytes)) => {
+            TaskUpdate::Message(MessageOut::Bytes(bytes)) => {
                 assert_eq!(bytes, b"hello");
             }
             _ => panic!("unexpected task update: {update:?}"),
@@ -509,7 +509,7 @@ mod test {
 
         let (_, update) = tasks.next().await.expect("no task result");
         match update {
-            TaskUpdate::Message(InterceptorMessageOut::Bytes(bytes)) => {
+            TaskUpdate::Message(MessageOut::Bytes(bytes)) => {
                 assert_eq!(bytes, b"test test test");
             }
             _ => panic!("unexpected task update: {update:?}"),

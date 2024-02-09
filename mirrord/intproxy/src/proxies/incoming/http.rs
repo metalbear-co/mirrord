@@ -17,7 +17,7 @@ use tokio::{
     sync::oneshot::{self, Receiver},
 };
 
-use super::http_interceptor::{HttpInterceptorError, Result};
+use super::interceptor::{Error, Result};
 
 pub struct UpgradedConnection {
     pub stream: TcpStream,
@@ -41,12 +41,12 @@ pub async fn handshake(
             tokio::spawn(connection);
 
             let (upgrade_tx, upgrade_rx) = oneshot::channel();
-            let _ = upgrade_tx.send(Err(HttpInterceptorError::UpgradeNotSupported(version)));
+            let _ = upgrade_tx.send(Err(Error::UpgradeNotSupported(version)));
 
             Ok((HttpSender::V2(sender), upgrade_rx))
         }
 
-        Version::HTTP_3 => Err(HttpInterceptorError::UnsupportedHttpVersion(version)),
+        Version::HTTP_3 => Err(Error::UnsupportedHttpVersion(version)),
 
         _http_v1 => {
             let (sender, mut connection) = http1::handshake(TokioIo::new(target_stream)).await?;
@@ -72,10 +72,7 @@ pub async fn handshake(
 }
 
 impl HttpSender {
-    pub async fn send(
-        &mut self,
-        req: HttpRequestFallback,
-    ) -> Result<Response<Incoming>, HttpInterceptorError> {
+    pub async fn send(&mut self, req: HttpRequestFallback) -> Result<Response<Incoming>, Error> {
         match self {
             Self::V1(sender) => {
                 // Solves a "connection was not ready" client error.
