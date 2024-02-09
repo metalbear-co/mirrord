@@ -19,8 +19,11 @@ use tokio::{
 
 use super::interceptor::{Error, Result};
 
+/// HTTP connection deconstructed after an `UPGRADE`.
 pub struct UpgradedConnection {
+    /// Raw TCP stream that was used to send HTTP requests.
     pub stream: TcpStream,
+    /// Bytes that were read by [`hyper`] from the server, but were not processed as HTTP.
     pub unprocessed_bytes: Bytes,
 }
 
@@ -30,6 +33,14 @@ pub enum HttpSender {
     V2(http2::SendRequest<BoxBody<Bytes, Infallible>>),
 }
 
+/// Consumes the given [`TcpStream`] and performs an HTTP handshake, turning it into an HTTP
+/// connection.
+///
+/// # Returns
+///
+/// * [`HttpSender`] that can be used to send HTTP requests to the peer.
+/// * [`Receiver`] that can be used to reclaim the [`TcpStream`] after the HTTP connection ends with
+///   an `UPGRADE`.
 pub async fn handshake(
     version: Version,
     target_stream: TcpStream,

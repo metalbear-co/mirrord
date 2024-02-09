@@ -6,7 +6,6 @@ use std::{
     net::{IpAddr, SocketAddr},
 };
 
-use hyper::Version;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
     MessageId, PortSubscribe, PortSubscription, PortUnsubscribe, ProxyToLayerMessage,
@@ -34,6 +33,8 @@ mod interceptor;
 mod port_subscription_ext;
 mod subscriptions;
 
+/// Creates and binds a new [`TcpSocket`].
+/// The socket has the same IP version and address as the given `addr`.
 fn bind_similar(addr: SocketAddr) -> io::Result<TcpSocket> {
     match addr.ip() {
         addr @ IpAddr::V4(..) => {
@@ -49,8 +50,8 @@ fn bind_similar(addr: SocketAddr) -> io::Result<TcpSocket> {
     }
 }
 
-/// Id of a single interceptor task. Used to manage interceptor tasks with the [`BackgroundTasks`]
-/// struct.
+/// Id of a single [`Interceptor`] task. Used to manage interceptor tasks with the
+/// [`BackgroundTasks`] struct.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct InterceptorId(pub ConnectionId);
 
@@ -63,19 +64,7 @@ impl fmt::Display for InterceptorId {
 /// Errors that can occur when handling the `incoming` feature.
 #[derive(Error, Debug)]
 pub enum IncomingProxyError {
-    /// The proxy received from the agent a message incompatible with the `steal` feature, but it
-    /// operates in the `steal` mode. This should never happen.
-    #[error("received TCP mirror message while in steal mode: {0:?}")]
-    ReceivedMirrorMessage(DaemonTcp),
-    /// The proxy received from the agent a message related to the `steal` feature, but it does not
-    /// operate in the `steal` mode. This should never happen.
-    #[error("received TCP steal message while in mirror mode: {0:?}")]
-    ReceivedStealMessage(DaemonTcp),
-    /// The agent sent an HTTP request with unsupported [`Version`].
-    /// [`Version::HTTP_3`] is currently not supported.
-    #[error("{0:?} is not supported")]
-    UnsupportedHttpVersion(Version),
-    #[error("{0}")]
+    #[error(transparent)]
     Io(#[from] io::Error),
     #[error("subscribing port failed: {0}")]
     SubscriptionFailed(ResponseError),
@@ -90,11 +79,15 @@ pub enum IncomingProxyMessage {
     AgentSteal(DaemonTcp),
 }
 
+/// Handle for an [`Interceptor`].
 struct InterceptorHandle {
+    /// A channel for sending messages to the [`Interceptor`] task.
     tx: TaskSender<Interceptor>,
+    /// Port subscription that the intercepted connection belongs to.
     subscription: PortSubscription,
 }
 
+/// Store for mapping [`Interceptor`] socket addresses to addresses of the original peers.
 #[derive(Default)]
 struct MetadataStore {
     prepared_responses: HashMap<ConnMetadataRequest, ConnMetadataResponse>,
@@ -127,9 +120,13 @@ impl MetadataStore {
 /// Handles logic and state of the `incoming` feature.
 /// Run as a [`BackgroundTask`].
 ///
-/// Handles two types of communication: raw TCP and HTTP.
+/// Handles port subscriptions state of the connected layers. Utilizes multiple background tasks
+/// ([`Interceptor`]s) to handle incoming connections. Each connection is managed by a single
+/// [`Interceptor`], that establishes a TCP connection with the user application's port and proxies
+/// data.
 ///
-/// TODO doc
+/// Incoming connections are created by the agent either explicitly ([`NewTcpConnection`] message)
+/// or implicitly ([`HttpRequest`](mirrord_protocol::tcp::HttpRequest)).
 #[derive(Default)]
 pub struct IncomingProxy {
     /// Active port subscriptions for all layers.
@@ -371,7 +368,7 @@ impl BackgroundTask for IncomingProxy {
 
                         let msg = self.get_subscription(id).map(|s| s.wrap_agent_unsubscribe_connection(id.0));
                         if let Some(msg) = msg {
-                            message_bus.send(ProxyMessage::ToAgent(msg)).await;
+                            message_bus.send(msg).await;
                         }
                     },
 

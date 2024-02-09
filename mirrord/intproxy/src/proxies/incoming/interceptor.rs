@@ -1,5 +1,5 @@
 //! [`BackgroundTask`] used by [`Incoming`](super::IncomingProxy) to manage a single
-//! intercepted HTTP connection.
+//! intercepted connection.
 
 use std::{
     io::{self, ErrorKind},
@@ -22,16 +22,21 @@ use tokio::{
 use super::http::{HttpSender, UpgradedConnection};
 use crate::background_tasks::{BackgroundTask, MessageBus};
 
+/// Messages consumed by the [`Interceptor`] when it runs as a [`BackgroundTask`].
 pub enum MessageIn {
+    /// Request to be sent to the user application.
     Http(HttpRequestFallback),
+    /// Data to be sent to the user application.
     Raw(Vec<u8>),
 }
 
-/// Common type for messages produced by the [`RawInterceptor`] and the [`HttpInterceptor`].
+/// Messages produced by the [`Interceptor`] when it runs as a [`BackgroundTask`].
 #[derive(Debug)]
 pub enum MessageOut {
-    Bytes(Vec<u8>),
+    /// Response received from the user application.
     Http(HttpResponseFallback),
+    /// Data received from the user application.
+    Bytes(Vec<u8>),
 }
 
 impl From<HttpRequestFallback> for MessageIn {
@@ -46,7 +51,7 @@ impl From<Vec<u8>> for MessageIn {
     }
 }
 
-/// Errors that can occur when executing [`HttpInterceptor`] as a [`BackgroundTask`].
+/// Errors that can occur when [`Interceptor`] runs as a [`BackgroundTask`].
 #[derive(Error, Debug)]
 pub enum Error {
     /// IO failed.
@@ -58,11 +63,15 @@ pub enum Error {
     /// The layer closed connection too soon to send a request.
     #[error("connection closed too soon")]
     ConnectionClosedTooSoon(HttpRequestFallback),
-    /// Received a request with unsupported HTTP version.
+    /// Received a request with an unsupported HTTP version.
     #[error("{0:?} is not supported")]
     UnsupportedHttpVersion(Version),
+    /// Occurs when the [`Interceptor`] is acting as an HTTP gateway and receives
+    /// [`MessageIn::Raw`], but the HTTP version used does not support upgrading connections.
     #[error("upgrading connections not supported in {0:?}")]
     UpgradeNotSupported(Version),
+    /// Occurs when reclaiming [`TcpStream`] from the HTTP connection is not possible, because a
+    /// background [`tokio::task`] panicked.
     #[error("task for keeping http connection alive panicked")]
     HttpConnectionTaskPanicked,
 }
@@ -72,13 +81,22 @@ pub type Result<T, E = Error> = core::result::Result<T, E>;
 /// Manages a single intercepted connection.
 /// Multiple instances are run as [`BackgroundTask`]s by one [`IncomingProxy`](super::IncomingProxy)
 /// to manage individual connections.
+///
+/// This interceptor can proxy both raw TCP data and HTTP messages in the same TCP connection.
+/// When it receives [`MessageIn::Raw`], it starts acting as a simple proxy.
+/// When it received [`MessageIn::Http`], it starts acting as an HTTP gateway.
 pub struct Interceptor {
     socket: TcpSocket,
     peer: SocketAddr,
 }
 
 impl Interceptor {
-    /// Crates a new instance. This instance will communicate with the given `peer`.
+    /// Creates a new instance. When run, this instance will use the given `socket` (must be already
+    /// bound) to communicate with the given `peer`.
+    ///
+    /// # Note
+    ///
+    /// The socket can be replaced when retrying HTTP requests.
     pub fn new(socket: TcpSocket, peer: SocketAddr) -> Self {
         Self { socket, peer }
     }
@@ -90,6 +108,12 @@ impl BackgroundTask for Interceptor {
     type MessageOut = MessageOut;
 
     async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+        /// Just to allow having one variable in the loop.
+        enum GenericConnection {
+            Raw(RawConnection),
+            Http(HttpConnection),
+        }
+
         let stream = self.socket.connect(self.peer).await?;
         let mut conn = GenericConnection::Raw(RawConnection { stream });
 
@@ -113,11 +137,7 @@ impl BackgroundTask for Interceptor {
     }
 }
 
-enum GenericConnection {
-    Raw(RawConnection),
-    Http(HttpConnection),
-}
-
+/// Utilized by the [`Interceptor`] when it acts as an HTTP gateway.
 struct HttpConnection {
     peer: SocketAddr,
     sender: HttpSender,
@@ -130,8 +150,8 @@ impl HttpConnection {
     async fn handle_response(
         &self,
         request: HttpRequestFallback,
-        response: Result<hyper::Response<hyper::body::Incoming>, Error>,
-    ) -> Result<HttpResponseFallback, Error> {
+        response: Result<hyper::Response<hyper::body::Incoming>>,
+    ) -> Result<HttpResponseFallback> {
         match response {
                 Err(Error::HyperError(e)) if e.is_closed() => {
                     tracing::warn!(
@@ -222,7 +242,8 @@ impl HttpConnection {
         tracing::trace!("Request {req:?} connection was closed too soon, retrying once");
 
         // Create a new connection for this second attempt.
-        let stream = TcpStream::connect(self.peer).await?;
+        let socket = super::bind_similar(self.peer)?;
+        let stream = socket.connect(self.peer).await?;
         let (new_sender, new_upgrade_rx) = super::http::handshake(req.version(), stream).await?;
         self.sender = new_sender;
         self.upgrade_rx = new_upgrade_rx;
@@ -231,6 +252,10 @@ impl HttpConnection {
         self.handle_response(req, res).await
     }
 
+    /// Proxies HTTP messages until [`MessageIn::Raw`] is encountered or the [`MessageBus`] closes.
+    ///
+    /// When [`MessageIn::Raw`] is encountered, the underlying [`TcpStream`] is reclaimed, wrapped
+    /// in a [`RawConnection`] and returned. When [`MessageBus`] closes, [`None`] is returned.
     async fn run(
         mut self,
         message_bus: &mut MessageBus<Interceptor>,
@@ -273,6 +298,11 @@ struct RawConnection {
 }
 
 impl RawConnection {
+    /// Proxies raw TCP data until [`MessageIn::Http`] is encountered or the [`MessageBus`] closes.
+    ///
+    /// When [`MessageIn::Http`] is encountered, the underlying [`TcpStream`] is converted into an
+    /// HTTP connection, wrapped in a [`HttpConnection`] and returned. When [`MessageBus`]
+    /// closes, [`None`] is returned.
     async fn run(
         mut self,
         message_bus: &mut MessageBus<Interceptor>,
@@ -356,8 +386,13 @@ mod test {
     use super::*;
     use crate::background_tasks::{BackgroundTasks, TaskUpdate};
 
-    const TEST_PROTO_NAME: &str = "dummyecho";
+    /// Binary protocol over TCP.
+    /// Server first sends bytes [`INITIAL_MESSAGE`], then echoes back all received data.
+    const TEST_PROTO: &str = "dummyecho";
 
+    const INITIAL_MESSAGE: &[u8] = &[0x4a, 0x50, 0x32, 0x47, 0x4d, 0x44];
+
+    /// Handles requests upgrading to the [`TEST_PROTO`] protocol.
     async fn upgrade_req_handler(
         mut req: Request<Incoming>,
     ) -> hyper::Result<Response<Empty<Bytes>>> {
@@ -365,7 +400,7 @@ mod test {
             let mut upgraded = TokioIo::new(upgraded);
             let mut buf = [0_u8; 64];
 
-            upgraded.write_all(b"hello").await?;
+            upgraded.write_all(INITIAL_MESSAGE).await?;
 
             loop {
                 let bytes_read = upgraded.read(&mut buf[..]).await?;
@@ -384,7 +419,7 @@ mod test {
         let contains_expected_upgrade = req
             .headers()
             .get(UPGRADE)
-            .filter(|proto| *proto == TEST_PROTO_NAME)
+            .filter(|proto| *proto == TEST_PROTO)
             .is_some();
         if !contains_expected_upgrade {
             *res.status_mut() = StatusCode::BAD_REQUEST;
@@ -404,12 +439,13 @@ mod test {
 
         *res.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
         res.headers_mut()
-            .insert(UPGRADE, HeaderValue::from_static(TEST_PROTO_NAME));
+            .insert(UPGRADE, HeaderValue::from_static(TEST_PROTO));
         res.headers_mut()
             .insert(CONNECTION, HeaderValue::from_static("upgrade"));
         Ok(res)
     }
 
+    /// Runs a [`hyper`] server that accepts only requests upgrading to the [`TEST_PROTO`] protocol.
     async fn dummy_echo_server(listener: TcpListener, mut shutdown: watch::Receiver<bool>) {
         loop {
             tokio::select! {
@@ -465,7 +501,7 @@ mod test {
                     uri: "dummyecho://www.mirrord.dev/".parse().unwrap(),
                     headers: [
                         (CONNECTION, HeaderValue::from_static("upgrade")),
-                        (UPGRADE, HeaderValue::from_static(TEST_PROTO_NAME)),
+                        (UPGRADE, HeaderValue::from_static(TEST_PROTO)),
                     ]
                     .into_iter()
                     .collect(),
@@ -493,7 +529,7 @@ mod test {
                 assert!(res
                     .headers()
                     .get(UPGRADE)
-                    .filter(|v| *v == TEST_PROTO_NAME)
+                    .filter(|v| *v == TEST_PROTO)
                     .is_some());
             }
             _ => panic!("unexpected task update: {update:?}"),
@@ -502,7 +538,7 @@ mod test {
         let (_, update) = tasks.next().await.expect("no task result");
         match update {
             TaskUpdate::Message(MessageOut::Bytes(bytes)) => {
-                assert_eq!(bytes, b"hello");
+                assert_eq!(bytes, INITIAL_MESSAGE);
             }
             _ => panic!("unexpected task update: {update:?}"),
         }
