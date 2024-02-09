@@ -46,6 +46,7 @@ enum InterceptorError {
 }
 
 /// Common type for messages produced by the [`RawInterceptor`] and the [`HttpInterceptor`].
+#[derive(Debug)]
 pub enum InterceptorMessageOut {
     Bytes(Vec<u8>),
     Http(HttpResponseFallback),
@@ -232,9 +233,20 @@ impl IncomingProxy {
                     return Ok(None);
                 };
 
-                let version = request.version();
+                let interceptor_socket = match sub.listening_on.ip() {
+                    addr @ IpAddr::V4(..) => {
+                        let socket = TcpSocket::new_v4()?;
+                        socket.bind(SocketAddr::new(addr, 0))?;
+                        socket
+                    }
+                    addr @ IpAddr::V6(..) => {
+                        let socket = TcpSocket::new_v6()?;
+                        socket.bind(SocketAddr::new(addr, 0))?;
+                        socket
+                    }
+                };
                 let interceptor = self.background_tasks.register(
-                    HttpInterceptor::new(sub.listening_on, version),
+                    HttpInterceptor::new(interceptor_socket, sub.listening_on, false),
                     InterceptorId(request.connection_id()),
                     Self::CHANNEL_SIZE,
                 );
