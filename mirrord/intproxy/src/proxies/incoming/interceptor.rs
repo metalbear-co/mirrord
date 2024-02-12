@@ -36,7 +36,7 @@ pub enum MessageOut {
     /// Response received from the user application.
     Http(HttpResponseFallback),
     /// Data received from the user application.
-    Bytes(Vec<u8>),
+    Raw(Vec<u8>),
 }
 
 impl From<HttpRequestFallback> for MessageIn {
@@ -273,7 +273,7 @@ impl HttpConnection {
 
                     if !unprocessed_bytes.is_empty() {
                         message_bus
-                            .send(MessageOut::Bytes(unprocessed_bytes.to_vec()))
+                            .send(MessageOut::Raw(unprocessed_bytes.to_vec()))
                             .await;
                     }
 
@@ -322,7 +322,7 @@ impl RawConnection {
                         reading_closed = true;
                     }
                     Ok(read) => {
-                        message_bus.send(MessageOut::Bytes(buffer.get(..read).unwrap().to_vec())).await;
+                        message_bus.send(MessageOut::Raw(buffer.get(..read).unwrap().to_vec())).await;
                     }
                 },
 
@@ -537,7 +537,7 @@ mod test {
 
         let (_, update) = tasks.next().await.expect("no task result");
         match update {
-            TaskUpdate::Message(MessageOut::Bytes(bytes)) => {
+            TaskUpdate::Message(MessageOut::Raw(bytes)) => {
                 assert_eq!(bytes, INITIAL_MESSAGE);
             }
             _ => panic!("unexpected task update: {update:?}"),
@@ -545,7 +545,7 @@ mod test {
 
         let (_, update) = tasks.next().await.expect("no task result");
         match update {
-            TaskUpdate::Message(MessageOut::Bytes(bytes)) => {
+            TaskUpdate::Message(MessageOut::Raw(bytes)) => {
                 assert_eq!(bytes, b"test test test");
             }
             _ => panic!("unexpected task update: {update:?}"),

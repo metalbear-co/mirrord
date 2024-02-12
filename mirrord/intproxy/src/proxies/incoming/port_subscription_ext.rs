@@ -81,7 +81,7 @@ impl PortSubscriptionExt for PortSubscription {
         match self {
             Self::Mirror(..) => None,
             Self::Steal(..) => match res {
-                MessageOut::Bytes(bytes) => {
+                MessageOut::Raw(bytes) => {
                     Some(ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
                         connection_id,
                         bytes,
