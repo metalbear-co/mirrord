@@ -136,7 +136,7 @@ async fn session_api(config: Option<String>) -> Result<Api<SessionManagementCrd>
     Ok(Api::all(kube_api))
 }
 
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "debug", ret)]
 async fn operator_status(config: Option<String>) -> Result<()> {
     let mut progress = ProgressTracker::from_env("Operator Status");
 
@@ -329,6 +329,26 @@ async fn operator_session(kill: Option<u32>, kill_all: bool) -> Result<()> {
         };
 
         let crd = mirrord_session.right().unwrap();
+    } else {
+        let mirrord_session = match session_api
+            // TODO(alex) [high]: What should the `path` be?
+            .get(&format!("sessions"))
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::GettingStatus,
+            })
+            .map_err(CliError::from)
+        {
+            Ok(session) => session,
+            Err(err) => {
+                status_progress.failure(Some("unable to get status"));
+
+                return Err(err);
+            }
+        };
+
+        tracing::info!("{mirrord_session:?}");
     }
 
     status_progress.success(Some("fetched status"));

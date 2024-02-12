@@ -290,6 +290,19 @@ pub struct PodTarget {
     pub container: Option<String>,
 }
 
+impl ToString for PodTarget {
+    fn to_string(&self) -> String {
+        format!(
+            "{}{}",
+            self.container
+                .clone()
+                .map(|c| format!("{c}/"))
+                .unwrap_or_default(),
+            self.pod.clone()
+        )
+    }
+}
+
 impl FromSplit for PodTarget {
     fn from_split(split: &mut std::str::Split<char>) -> Result<Self> {
         let pod = split
