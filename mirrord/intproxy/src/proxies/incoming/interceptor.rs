@@ -52,7 +52,7 @@ impl From<Vec<u8>> for MessageIn {
 
 /// Errors that can occur when [`Interceptor`] runs as a [`BackgroundTask`].
 #[derive(Error, Debug)]
-pub enum Error {
+pub enum InterceptorError {
     /// IO failed.
     #[error("io failed: {0}")]
     Io(#[from] io::Error),
@@ -75,7 +75,7 @@ pub enum Error {
     HttpConnectionTaskPanicked,
 }
 
-pub type Result<T, E = Error> = core::result::Result<T, E>;
+pub type InterceptorResult<T, E = InterceptorError> = core::result::Result<T, E>;
 
 /// Manages a single intercepted connection.
 /// Multiple instances are run as [`BackgroundTask`]s by one [`IncomingProxy`](super::IncomingProxy)
@@ -102,11 +102,11 @@ impl Interceptor {
 }
 
 impl BackgroundTask for Interceptor {
-    type Error = Error;
+    type Error = InterceptorError;
     type MessageIn = MessageIn;
     type MessageOut = MessageOut;
 
-    async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+    async fn run(self, message_bus: &mut MessageBus<Self>) -> InterceptorResult<(), Self::Error> {
         /// Just to allow having one variable in the loop.
         enum GenericConnection {
             Raw(RawConnection),
@@ -149,10 +149,10 @@ impl HttpConnection {
     async fn handle_response(
         &self,
         request: HttpRequestFallback,
-        response: Result<hyper::Response<hyper::body::Incoming>>,
-    ) -> Result<HttpResponseFallback> {
+        response: InterceptorResult<hyper::Response<hyper::body::Incoming>>,
+    ) -> InterceptorResult<HttpResponseFallback> {
         match response {
-                Err(Error::Hyper(e)) if e.is_closed() => {
+                Err(InterceptorError::Hyper(e)) if e.is_closed() => {
                     tracing::warn!(
                         "Sending request to local application failed with: {e:?}. \
                         Seems like the local application closed the connection too early, so \
@@ -160,10 +160,10 @@ impl HttpConnection {
                     );
                     tracing::trace!("The request to be retried: {request:?}.");
 
-                    Err(Error::ConnectionClosedTooSoon(request))
+                    Err(InterceptorError::ConnectionClosedTooSoon(request))
                 }
 
-                Err(Error::Hyper(e)) if e.is_parse() => {
+                Err(InterceptorError::Hyper(e)) if e.is_parse() => {
                     tracing::warn!("Could not parse HTTP response to filtered HTTP request, got error: {e:?}.");
                     let body_message = format!("mirrord: could not parse HTTP response from local application - {e:?}");
                     Ok(HttpResponseFallback::response_from_request(
@@ -230,11 +230,11 @@ impl HttpConnection {
             }
     }
 
-    async fn send(&mut self, req: HttpRequestFallback) -> Result<HttpResponseFallback> {
+    async fn send(&mut self, req: HttpRequestFallback) -> InterceptorResult<HttpResponseFallback> {
         let res = self.sender.send(req.clone()).await;
         let res = self.handle_response(req, res).await;
 
-        let Err(Error::ConnectionClosedTooSoon(req)) = res else {
+        let Err(InterceptorError::ConnectionClosedTooSoon(req)) = res else {
             return res;
         };
 
@@ -258,7 +258,7 @@ impl HttpConnection {
     async fn run(
         mut self,
         message_bus: &mut MessageBus<Interceptor>,
-    ) -> Result<Option<RawConnection>> {
+    ) -> InterceptorResult<Option<RawConnection>> {
         while let Some(msg) = message_bus.recv().await {
             match msg {
                 MessageIn::Raw(data) => {
@@ -266,7 +266,7 @@ impl HttpConnection {
                         .transport
                         .reclaim()
                         .await
-                        .map_err(|_| Error::HttpConnectionTaskPanicked)?;
+                        .map_err(|_| InterceptorError::HttpConnectionTaskPanicked)?;
 
                     if !unprocessed_bytes.is_empty() {
                         message_bus
@@ -303,7 +303,7 @@ impl RawConnection {
     async fn run(
         mut self,
         message_bus: &mut MessageBus<Interceptor>,
-    ) -> Result<Option<HttpConnection>> {
+    ) -> InterceptorResult<Option<HttpConnection>> {
         let mut buffer = vec![0; 1024];
         let mut remote_closed = false;
         let mut reading_closed = false;
@@ -481,7 +481,7 @@ mod test {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let server_task = task::spawn(dummy_echo_server(listener, shutdown_rx));
 
-        let mut tasks: BackgroundTasks<(), MessageOut, Error> = Default::default();
+        let mut tasks: BackgroundTasks<(), MessageOut, InterceptorError> = Default::default();
         let interceptor = {
             let socket = TcpSocket::new_v4().unwrap();
             socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();

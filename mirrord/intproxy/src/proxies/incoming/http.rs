@@ -17,20 +17,20 @@ use tokio::{
     sync::oneshot::{self, Receiver},
 };
 
-use super::interceptor::{Error, Result};
+use super::interceptor::{InterceptorError, InterceptorResult};
 
 /// HTTP connection deconstructed after an `UPGRADE`.
 pub struct TransportHandle {
-    receiver: Option<Receiver<Result<(TcpStream, Bytes)>>>,
+    receiver: Option<Receiver<InterceptorResult<(TcpStream, Bytes)>>>,
     version: Version,
 }
 
 impl TransportHandle {
-    pub async fn reclaim(self) -> Result<(TcpStream, Bytes)> {
+    pub async fn reclaim(self) -> InterceptorResult<(TcpStream, Bytes)> {
         self.receiver
-            .ok_or(Error::UpgradeNotSupported(self.version))?
+            .ok_or(InterceptorError::UpgradeNotSupported(self.version))?
             .await
-            .map_err(|_| Error::HttpConnectionTaskPanicked)?
+            .map_err(|_| InterceptorError::HttpConnectionTaskPanicked)?
     }
 }
 
@@ -51,7 +51,7 @@ pub enum HttpSender {
 pub async fn handshake(
     version: Version,
     target_stream: TcpStream,
-) -> Result<(HttpSender, TransportHandle)> {
+) -> InterceptorResult<(HttpSender, TransportHandle)> {
     match version {
         Version::HTTP_2 => {
             let (sender, connection) =
@@ -67,12 +67,13 @@ pub async fn handshake(
             ))
         }
 
-        Version::HTTP_3 => Err(Error::UnsupportedHttpVersion(version)),
+        Version::HTTP_3 => Err(InterceptorError::UnsupportedHttpVersion(version)),
 
         _http_v1 => {
             let (sender, mut connection) = http1::handshake(TokioIo::new(target_stream)).await?;
 
-            let (upgrade_tx, upgrade_rx) = oneshot::channel::<Result<(TcpStream, Bytes)>>();
+            let (upgrade_tx, upgrade_rx) =
+                oneshot::channel::<InterceptorResult<(TcpStream, Bytes)>>();
 
             tokio::spawn(async move {
                 let res = future::poll_fn(|ctx| connection.poll_without_shutdown(ctx))
@@ -96,7 +97,10 @@ pub async fn handshake(
 }
 
 impl HttpSender {
-    pub async fn send(&mut self, req: HttpRequestFallback) -> Result<Response<Incoming>, Error> {
+    pub async fn send(
+        &mut self,
+        req: HttpRequestFallback,
+    ) -> InterceptorResult<Response<Incoming>, InterceptorError> {
         match self {
             Self::V1(sender) => {
                 // Solves a "connection was not ready" client error.

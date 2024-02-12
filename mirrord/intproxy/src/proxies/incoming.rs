@@ -18,7 +18,7 @@ use thiserror::Error;
 use tokio::net::TcpSocket;
 
 use self::{
-    interceptor::{Error as InterceptorError, Interceptor, MessageOut},
+    interceptor::{Interceptor, InterceptorError, MessageOut},
     port_subscription_ext::PortSubscriptionExt,
     subscriptions::SubscriptionsManager,
 };
