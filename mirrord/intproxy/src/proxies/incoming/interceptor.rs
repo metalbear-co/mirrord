@@ -15,11 +15,10 @@ use thiserror::Error;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpSocket, TcpStream},
-    sync::oneshot::Receiver,
     time,
 };
 
-use super::http::{HttpSender, UpgradedConnection};
+use super::http::{HttpSender, TransportHandle};
 use crate::background_tasks::{BackgroundTask, MessageBus};
 
 /// Messages consumed by the [`Interceptor`] when it runs as a [`BackgroundTask`].
@@ -141,7 +140,7 @@ impl BackgroundTask for Interceptor {
 struct HttpConnection {
     peer: SocketAddr,
     sender: HttpSender,
-    upgrade_rx: Receiver<Result<UpgradedConnection>>,
+    transport: TransportHandle,
 }
 
 impl HttpConnection {
@@ -244,9 +243,9 @@ impl HttpConnection {
         // Create a new connection for this second attempt.
         let socket = super::bind_similar(self.peer)?;
         let stream = socket.connect(self.peer).await?;
-        let (new_sender, new_upgrade_rx) = super::http::handshake(req.version(), stream).await?;
+        let (new_sender, new_transport) = super::http::handshake(req.version(), stream).await?;
         self.sender = new_sender;
-        self.upgrade_rx = new_upgrade_rx;
+        self.transport = new_transport;
 
         let res = self.sender.send(req.clone()).await;
         self.handle_response(req, res).await
@@ -263,13 +262,11 @@ impl HttpConnection {
         while let Some(msg) = message_bus.recv().await {
             match msg {
                 MessageIn::Raw(data) => {
-                    let UpgradedConnection {
-                        mut stream,
-                        unprocessed_bytes,
-                    } = self
-                        .upgrade_rx
+                    let (mut stream, unprocessed_bytes) = self
+                        .transport
+                        .reclaim()
                         .await
-                        .map_err(|_| Error::HttpConnectionTaskPanicked)??;
+                        .map_err(|_| Error::HttpConnectionTaskPanicked)?;
 
                     if !unprocessed_bytes.is_empty() {
                         message_bus
@@ -337,9 +334,9 @@ impl RawConnection {
                     Some(MessageIn::Http(req)) => {
                         let mut conn = {
                             let peer = self.stream.peer_addr()?;
-                            let (sender, upgrade_rx) = super::http::handshake(req.version(), self.stream).await?;
+                            let (sender, transport) = super::http::handshake(req.version(), self.stream).await?;
 
-                            HttpConnection { peer, sender, upgrade_rx }
+                            HttpConnection { peer, sender, transport }
                         };
 
                         let res = conn.send(req).await?;

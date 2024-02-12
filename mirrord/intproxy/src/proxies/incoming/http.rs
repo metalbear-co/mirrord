@@ -20,11 +20,18 @@ use tokio::{
 use super::interceptor::{Error, Result};
 
 /// HTTP connection deconstructed after an `UPGRADE`.
-pub struct UpgradedConnection {
-    /// Raw TCP stream that was used to send HTTP requests.
-    pub stream: TcpStream,
-    /// Bytes that were read by [`hyper`] from the server, but were not processed as HTTP.
-    pub unprocessed_bytes: Bytes,
+pub struct TransportHandle {
+    receiver: Option<Receiver<Result<(TcpStream, Bytes)>>>,
+    version: Version,
+}
+
+impl TransportHandle {
+    pub async fn reclaim(self) -> Result<(TcpStream, Bytes)> {
+        self.receiver
+            .ok_or(Error::UpgradeNotSupported(self.version))?
+            .await
+            .map_err(|_| Error::HttpConnectionTaskPanicked)?
+    }
 }
 
 /// Handles the differences between hyper's HTTP/1 and HTTP/2 connections.
@@ -44,17 +51,20 @@ pub enum HttpSender {
 pub async fn handshake(
     version: Version,
     target_stream: TcpStream,
-) -> Result<(HttpSender, Receiver<Result<UpgradedConnection>>)> {
+) -> Result<(HttpSender, TransportHandle)> {
     match version {
         Version::HTTP_2 => {
             let (sender, connection) =
                 http2::handshake(TokioExecutor::default(), TokioIo::new(target_stream)).await?;
             tokio::spawn(connection);
 
-            let (upgrade_tx, upgrade_rx) = oneshot::channel();
-            let _ = upgrade_tx.send(Err(Error::UpgradeNotSupported(version)));
-
-            Ok((HttpSender::V2(sender), upgrade_rx))
+            Ok((
+                HttpSender::V2(sender),
+                TransportHandle {
+                    version,
+                    receiver: None,
+                },
+            ))
         }
 
         Version::HTTP_3 => Err(Error::UnsupportedHttpVersion(version)),
@@ -62,22 +72,25 @@ pub async fn handshake(
         _http_v1 => {
             let (sender, mut connection) = http1::handshake(TokioIo::new(target_stream)).await?;
 
-            let (upgrade_tx, upgrade_rx) = oneshot::channel::<Result<UpgradedConnection>>();
+            let (upgrade_tx, upgrade_rx) = oneshot::channel::<Result<(TcpStream, Bytes)>>();
 
             tokio::spawn(async move {
                 let res = future::poll_fn(|ctx| connection.poll_without_shutdown(ctx))
                     .await
                     .map_err(Into::into)
                     .map(|_| connection.into_parts())
-                    .map(|Parts { io, read_buf, .. }: Parts<_>| UpgradedConnection {
-                        stream: io.into_inner(),
-                        unprocessed_bytes: read_buf,
-                    });
+                    .map(|Parts { io, read_buf, .. }: Parts<_>| (io.into_inner(), read_buf));
 
                 let _ = upgrade_tx.send(res);
             });
 
-            Ok((HttpSender::V1(sender), upgrade_rx))
+            Ok((
+                HttpSender::V1(sender),
+                TransportHandle {
+                    version,
+                    receiver: Some(upgrade_rx),
+                },
+            ))
         }
     }
 }
