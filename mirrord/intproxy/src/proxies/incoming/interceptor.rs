@@ -137,15 +137,20 @@ impl BackgroundTask for Interceptor {
 }
 
 /// Utilized by the [`Interceptor`] when it acts as an HTTP gateway.
+/// See [`HttpConnection::run`] for usage.
 struct HttpConnection {
+    /// Server address saved to allow for reconnecting in case a retry is required.
     peer: SocketAddr,
+    /// Handle to the HTTP connection between the [`Interceptor`] the server.
     sender: HttpSender,
+    /// Allows for reclaiming the TCP connection when the HTTP connection ends (and HTTP version
+    /// supports upgrades).
     transport: TransportHandle,
 }
 
 impl HttpConnection {
     /// Handles the result of sending an HTTP request.
-    /// Returns a new request to be sent or an error.
+    /// Returns an [`HttpResponseFallback`] to be returned to the client or an [`InterceptorError`].
     async fn handle_response(
         &self,
         request: HttpRequestFallback,
@@ -230,28 +235,35 @@ impl HttpConnection {
             }
     }
 
-    async fn send(&mut self, req: HttpRequestFallback) -> InterceptorResult<HttpResponseFallback> {
-        let res = self.sender.send(req.clone()).await;
-        let res = self.handle_response(req, res).await;
+    /// Sends the given [`HttpRequestFallback`] to the server.
+    /// If the HTTP connection with server is closed too soon, starts a new connection and retries
+    /// once. Returns [`HttpResponseFallback`] from the server.
+    async fn send(
+        &mut self,
+        request: HttpRequestFallback,
+    ) -> InterceptorResult<HttpResponseFallback> {
+        let response = self.sender.send(request.clone()).await;
+        let response = self.handle_response(request, response).await;
 
-        let Err(InterceptorError::ConnectionClosedTooSoon(req)) = res else {
-            return res;
+        let Err(InterceptorError::ConnectionClosedTooSoon(request)) = response else {
+            return response;
         };
 
-        tracing::trace!("Request {req:?} connection was closed too soon, retrying once");
+        tracing::trace!("Request {request:?} connection was closed too soon, retrying once");
 
         // Create a new connection for this second attempt.
         let socket = super::bind_similar(self.peer)?;
         let stream = socket.connect(self.peer).await?;
-        let (new_sender, new_transport) = super::http::handshake(req.version(), stream).await?;
+        let (new_sender, new_transport) = super::http::handshake(request.version(), stream).await?;
         self.sender = new_sender;
         self.transport = new_transport;
 
-        let res = self.sender.send(req.clone()).await;
-        self.handle_response(req, res).await
+        let response = self.sender.send(request.clone()).await;
+        self.handle_response(request, response).await
     }
 
     /// Proxies HTTP messages until [`MessageIn::Raw`] is encountered or the [`MessageBus`] closes.
+    /// Support retries (with reconnecting to the HTTP server).
     ///
     /// When [`MessageIn::Raw`] is encountered, the underlying [`TcpStream`] is reclaimed, wrapped
     /// in a [`RawConnection`] and returned. When [`MessageBus`] closes, [`None`] is returned.
@@ -290,7 +302,10 @@ impl HttpConnection {
     }
 }
 
+/// Utilized by the [`Interceptor`] when it acts as a TCP proxy.
+/// See [`RawConnection::run`] for usage.
 struct RawConnection {
+    /// Connection between the [`Interceptor`] and the server.
     stream: TcpStream,
 }
 

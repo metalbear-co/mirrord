@@ -19,13 +19,28 @@ use tokio::{
 
 use super::interceptor::{InterceptorError, InterceptorResult};
 
-/// HTTP connection deconstructed after an `UPGRADE`.
+/// Handle to the TCP connection acting as a transport for the [`HttpSender`] created with
+/// [`handshake`].
 pub struct TransportHandle {
+    /// Receiving end of the [`oneshot::channel`] created in [`handshake`] for HTTP 1.
+    /// Sender belongs to the background [`tokio::task`] that polls the
+    /// [`Connection`](hyper::client::conn::http1::Connection). [`None`] for other HTTP
+    /// versions.
     receiver: Option<Receiver<InterceptorResult<(TcpStream, Bytes)>>>,
+
+    /// Version of the HTTP connection.
     version: Version,
 }
 
 impl TransportHandle {
+    /// Allows for reclaiming the TCP connection when the HTTP connection has ended.
+    /// This is possible only when the HTTP connection uses HTTP version 1.
+    ///
+    /// # Returns
+    ///
+    /// * [`TcpStream`] - the TCP connection that acted as a transport for the HTTP connection.
+    /// * [`Bytes`] - bytes received from the server that were not processed by [`hyper`] as HTTP.
+    ///   You will want to send these to the client through the [`TcpStream`].
     pub async fn reclaim(self) -> InterceptorResult<(TcpStream, Bytes)> {
         self.receiver
             .ok_or(InterceptorError::UpgradeNotSupported(self.version))?
