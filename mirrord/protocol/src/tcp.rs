@@ -267,10 +267,15 @@ impl HttpRequestFallback {
     }
 }
 
-/// Minimal mirrord-protocol version that allows `DaemonTcp::HttpRequestFramed` instead of
-/// `DaemonTcp::HttpRequest`.
+/// Minimal mirrord-protocol version that allows [`DaemonTcp::HttpRequestFramed`] instead of
+/// [`DaemonTcp::HttpRequest`].
 pub static HTTP_FRAMED_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.3.0".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that allows [`DaemonTcp::Data`] to be sent in the same
+/// connection as [`DaemonTcp::HttpRequestFramed`] and [`DaemonTcp::HttpRequest`].
+pub static HTTP_FILTERED_UPGRADE_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.5.0".parse().expect("Bad Identifier"));
 
 /// Protocol break - on version 2, please add source port, dest/src IP to the message
 /// so we can avoid losing this information.
