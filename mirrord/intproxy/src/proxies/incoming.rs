@@ -183,34 +183,34 @@ impl IncomingProxy {
     #[tracing::instrument(level = "trace", skip(self))]
     fn get_interceptor_for_http_request(
         &mut self,
-        req: &HttpRequestFallback,
+        request: &HttpRequestFallback,
     ) -> Result<Option<&TaskSender<Interceptor>>, IncomingProxyError> {
-        let id: InterceptorId = InterceptorId(req.connection_id());
+        let id: InterceptorId = InterceptorId(request.connection_id());
 
         let interceptor = match self.interceptors.entry(id) {
             Entry::Occupied(e) => e.into_mut(),
 
             Entry::Vacant(e) => {
-                let Some(sub) = self.subscriptions.get(req.port()) else {
+                let Some(subscription) = self.subscriptions.get(request.port()) else {
                     tracing::trace!(
                         "received a new connection for port {} that is no longer mirrored",
-                        req.port(),
+                        request.port(),
                     );
 
                     return Ok(None);
                 };
 
-                let interceptor_socket = bind_similar(sub.listening_on)?;
+                let interceptor_socket = bind_similar(subscription.listening_on)?;
 
                 let interceptor = self.background_tasks.register(
-                    Interceptor::new(interceptor_socket, sub.listening_on),
+                    Interceptor::new(interceptor_socket, subscription.listening_on),
                     id,
                     Self::CHANNEL_SIZE,
                 );
 
                 e.insert(InterceptorHandle {
                     tx: interceptor,
-                    subscription: sub.subscription.clone(),
+                    subscription: subscription.subscription.clone(),
                 })
             }
         };
@@ -262,18 +262,18 @@ impl IncomingProxy {
                 source_port,
                 local_address,
             }) => {
-                let Some(sub) = self.subscriptions.get(destination_port) else {
+                let Some(subscription) = self.subscriptions.get(destination_port) else {
                     tracing::trace!("received a new connection for port {destination_port} that is no longer mirrored");
                     return Ok(());
                 };
 
-                let interceptor_socket = bind_similar(sub.listening_on)?;
+                let interceptor_socket = bind_similar(subscription.listening_on)?;
 
                 let id = InterceptorId(connection_id);
 
                 self.metadata_store.expect(
                     ConnMetadataRequest {
-                        listener_address: sub.listening_on,
+                        listener_address: subscription.listening_on,
                         peer_address: interceptor_socket.local_addr()?,
                     },
                     id,
@@ -284,7 +284,7 @@ impl IncomingProxy {
                 );
 
                 let interceptor = self.background_tasks.register(
-                    Interceptor::new(interceptor_socket, sub.listening_on),
+                    Interceptor::new(interceptor_socket, subscription.listening_on),
                     id,
                     Self::CHANNEL_SIZE,
                 );
@@ -293,7 +293,7 @@ impl IncomingProxy {
                     id,
                     InterceptorHandle {
                         tx: interceptor,
-                        subscription: sub.subscription.clone(),
+                        subscription: subscription.subscription.clone(),
                     },
                 );
             }
@@ -325,7 +325,7 @@ impl IncomingProxy {
     fn get_subscription(&self, interceptor_id: InterceptorId) -> Option<&PortSubscription> {
         self.interceptors
             .get(&interceptor_id)
-            .map(|h| &h.subscription)
+            .map(|handle| &handle.subscription)
     }
 }
 
