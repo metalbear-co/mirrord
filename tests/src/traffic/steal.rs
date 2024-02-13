@@ -571,7 +571,7 @@ mod steal {
 
         let addr = SocketAddr::new(host.trim().parse().unwrap(), port as u16);
         let mut stream = TcpStream::connect(addr).await.unwrap();
-        stream.write(tcp_data.as_bytes()).await.unwrap();
+        stream.write_all(tcp_data.as_bytes()).await.unwrap();
         let mut reader = BufReader::new(stream);
         let mut buf = String::new();
         reader.read_line(&mut buf).await.unwrap();
