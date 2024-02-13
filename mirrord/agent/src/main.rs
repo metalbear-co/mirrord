@@ -3,7 +3,6 @@
 #![feature(type_alias_impl_trait)]
 #![feature(tcp_quickack)]
 #![feature(lazy_cell)]
-#![allow(incomplete_features)]
 #![warn(clippy::indexing_slicing)]
 
 use std::{
