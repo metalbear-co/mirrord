@@ -326,6 +326,12 @@ impl IntProxy {
                 LogLevel::Error => tracing::error!("agent log: {}", log.message),
                 LogLevel::Warn => tracing::warn!("agent log: {}", log.message),
             },
+            DaemonMessage::GetEnvVarsResponse(res) => {
+                self.task_txs
+                    .simple
+                    .send(SimpleProxyMessage::GetEnvRes(res))
+                    .await
+            }
             other => {
                 return Err(IntProxyError::UnexpectedAgentMessage(other));
             }
@@ -370,6 +376,12 @@ impl IntProxy {
                     .send(IncomingProxyMessage::LayerRequest(
                         message_id, layer_id, req,
                     ))
+                    .await
+            }
+            LayerToProxyMessage::GetEnv(req) => {
+                self.task_txs
+                    .simple
+                    .send(SimpleProxyMessage::GetEnvReq(message_id, layer_id, req))
                     .await
             }
             other => return Err(IntProxyError::UnexpectedLayerMessage(other)),
