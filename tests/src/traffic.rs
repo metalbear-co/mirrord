@@ -18,7 +18,7 @@ mod traffic {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     pub async fn remote_dns_enabled_works(#[future] service: KubeService) {
         let service = service.await;
@@ -35,7 +35,7 @@ mod traffic {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     pub async fn remote_dns_lookup_google(#[future] service: KubeService) {
         let service = service.await;
@@ -55,7 +55,7 @@ mod traffic {
     //       directly sent out from the local application).
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     pub async fn outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec![
@@ -71,7 +71,7 @@ mod traffic {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[should_panic]
     pub async fn outgoing_traffic_single_request_ipv6(#[future] service: KubeService) {
         let service = service.await;
@@ -88,7 +88,7 @@ mod traffic {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     pub async fn outgoing_traffic_single_request_disabled(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec![
@@ -111,7 +111,7 @@ mod traffic {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     pub async fn outgoing_traffic_make_request_after_listen(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec![
@@ -126,7 +126,7 @@ mod traffic {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     pub async fn outgoing_traffic_make_request_localhost(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec![
@@ -144,7 +144,7 @@ mod traffic {
     /// that and verifies that mirrord intercepts and forwards the outgoing udp message.
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     pub async fn outgoing_traffic_udp_with_connect(
         #[future] udp_logger_service: KubeService,
@@ -229,7 +229,7 @@ mod traffic {
     /// filter to resolve the remote host names.
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     pub async fn outgoing_traffic_filter_udp_with_connect(
         config_dir: &std::path::PathBuf,
@@ -347,7 +347,7 @@ mod traffic {
     /// application calls `connect` on a UDP socket with outgoing traffic disabled on mirrord.
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(30))]
     pub async fn outgoing_disabled_udp(#[future] service: KubeService) {
         let service = service.await;
@@ -390,7 +390,7 @@ mod traffic {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     pub async fn go19_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
         let command = vec!["go-e2e-outgoing/19.go_test_app"];
         test_go(service, command).await;
@@ -398,7 +398,7 @@ mod traffic {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(60))]
     pub async fn go20_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
         let command = vec!["go-e2e-outgoing/20.go_test_app"];
@@ -407,7 +407,7 @@ mod traffic {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     pub async fn go21_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
         let command = vec!["go-e2e-outgoing/21.go_test_app"];
         test_go(service, command).await;
@@ -415,7 +415,7 @@ mod traffic {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(60))]
     pub async fn go19_dns_lookup(#[future] service: KubeService) {
         let command = vec!["go-e2e-dns/19.go_test_app"];
@@ -424,7 +424,7 @@ mod traffic {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(60))]
     pub async fn go20_dns_lookup(#[future] service: KubeService) {
         let command = vec!["go-e2e-dns/20.go_test_app"];
@@ -433,7 +433,7 @@ mod traffic {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(60))]
     pub async fn go21_dns_lookup(#[future] service: KubeService) {
         let command = vec!["go-e2e-dns/21.go_test_app"];
@@ -442,7 +442,7 @@ mod traffic {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     pub async fn listen_localhost(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec!["node", "node-e2e/listen/test_listen_localhost.mjs"];
@@ -454,7 +454,7 @@ mod traffic {
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(120))]
     pub async fn gethostname_remote_result(#[future] hostname_service: KubeService) {
         let service = hostname_service.await;
@@ -475,7 +475,7 @@ mod traffic {
     /// 3. Verify the client app did not panic.
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(60))]
     pub async fn outgoing_unix_stream_pathname(
         #[future]
@@ -512,7 +512,7 @@ mod traffic {
     /// case of connections to unix sockets).
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[timeout(Duration::from_secs(240))]
     pub async fn outgoing_bypassed_unix_stream_pathname(#[future] service: KubeService) {
         let service = service.await;
@@ -531,7 +531,7 @@ mod traffic {
     }
 
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     pub async fn test_outgoing_traffic_many_requests_enabled(#[future] service: KubeService) {
         let service = service.await;
@@ -548,7 +548,7 @@ mod traffic {
     }
 
     #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     pub async fn test_outgoing_traffic_many_requests_disabled(#[future] service: KubeService) {
         let service = service.await;
