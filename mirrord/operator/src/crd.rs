@@ -121,11 +121,13 @@ pub struct Session {
     pub locked_ports: Option<Vec<(u16, String, Option<String>)>>,
 }
 
+// TODO(alex) [high]: `kind` controls the name of the route!
+// We have: `v1/sessionkinds/kill_all` if `kind = SessionKind` here!!!
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
     version = "v1",
-    kind = "SessionKind",
+    kind = "Session",
     root = "SessionCrd"
 )]
 pub struct SessioSpec {}

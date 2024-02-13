@@ -34,7 +34,7 @@ use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 use tracing::{debug, error, warn};
 
 use crate::crd::{
-    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, SessionsCrd, TargetCrd,
+    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, SessionCrd, TargetCrd,
     OPERATOR_STATUS_NAME,
 };
 
@@ -160,7 +160,7 @@ pub struct OperatorApi {
     client: Client,
     target_api: Api<TargetCrd>,
     copy_target_api: Api<CopyTargetCrd>,
-    sessions_api: Api<SessionsCrd>,
+    sessions_api: Api<SessionCrd>,
     target_namespace: Option<String>,
     target_config: TargetConfig,
     on_concurrent_steal: ConcurrentSteal,
@@ -176,7 +176,7 @@ pub struct OperatorSessionConnection {
     pub info: OperatorSessionInformation,
 }
 
-pub async fn session_api(config: Option<String>) -> Result<Api<SessionsCrd>> {
+pub async fn session_api(config: Option<String>) -> Result<Api<SessionCrd>> {
     let kube_api: Client = create_kube_api(false, config, None).await.unwrap();
 
     Ok(Api::all(kube_api))
