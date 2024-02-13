@@ -34,7 +34,7 @@ use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 use tracing::{debug, error, warn};
 
 use crate::crd::{
-    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, TargetCrd,
+    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, NewOperatorFeature, TargetCrd,
     OPERATOR_STATUS_NAME,
 };
 
@@ -83,7 +83,7 @@ pub enum OperatorApiError {
     ConcurrentStealAbort,
     #[error("mirrord operator {operator_version} does not support feature {feature}")]
     UnsupportedFeature {
-        feature: String,
+        feature: NewOperatorFeature,
         operator_version: String,
     },
 }
@@ -95,18 +95,16 @@ pub struct OperatorSessionMetadata {
     client_certificate: Option<Certificate>,
     session_id: u64,
     fingerprint: Option<String>,
-    operator_features: Vec<OperatorFeatures>,
+    operator_features: Vec<NewOperatorFeature>,
     protocol_version: Option<semver::Version>,
-    copy_pod_enabled: Option<bool>,
 }
 
 impl OperatorSessionMetadata {
     fn new(
         client_certificate: Option<Certificate>,
         fingerprint: Option<String>,
-        operator_features: Vec<OperatorFeatures>,
+        operator_features: Vec<NewOperatorFeature>,
         protocol_version: Option<semver::Version>,
-        copy_pod_enabled: Option<bool>,
     ) -> Self {
         Self {
             client_certificate,
@@ -114,7 +112,6 @@ impl OperatorSessionMetadata {
             fingerprint,
             operator_features,
             protocol_version,
-            copy_pod_enabled,
         }
     }
 
@@ -140,7 +137,8 @@ impl OperatorSessionMetadata {
     }
 
     fn proxy_feature_enabled(&self) -> bool {
-        self.operator_features.contains(&OperatorFeatures::ProxyApi)
+        self.operator_features
+            .contains(&NewOperatorFeature::ProxyApi)
     }
 }
 
@@ -181,12 +179,10 @@ impl OperatorApi {
 
     /// Checks used config against operator specification.
     fn check_config(config: &LayerConfig, operator: &MirrordOperatorCrd) -> Result<()> {
-        if config.feature.copy_target.enabled && !operator.spec.copy_target_enabled.unwrap_or(false)
-        {
-            return Err(OperatorApiError::UnsupportedFeature {
-                feature: "copy target".into(),
-                operator_version: operator.spec.operator_version.clone(),
-            });
+        if config.feature.copy_target.enabled {
+            operator
+                .spec
+                .require_feature(NewOperatorFeature::CopyTarget)?;
         }
 
         Ok(())
@@ -253,15 +249,15 @@ impl OperatorApi {
             .await
             .ok()
             .flatten();
+        let features = operator.spec.supported_features();
         let metadata = OperatorSessionMetadata::new(
             client_certificate,
             operator.spec.license.fingerprint,
-            operator.spec.features.unwrap_or_default(),
+            features,
             operator
                 .spec
                 .protocol_version
                 .and_then(|str_version| str_version.parse().ok()),
-            operator.spec.copy_target_enabled,
         );
 
         metadata.set_operator_properties(analytics);
