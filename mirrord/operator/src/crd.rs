@@ -125,12 +125,10 @@ pub struct Session {
 #[kube(
     group = "operator.metalbear.co",
     version = "v1",
-    kind = "Sessions",
-    root = "SessionsCrd"
+    kind = "SessionKind",
+    root = "SessionCrd"
 )]
-pub struct SessionSpec {
-    pub sessions: Vec<Session>,
-}
+pub struct SessioSpec {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LicenseInfoOwned {
