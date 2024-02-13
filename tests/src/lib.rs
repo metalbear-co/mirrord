@@ -9,7 +9,6 @@ mod file_ops;
 mod http;
 mod issue1317;
 mod operator;
-mod pause;
 mod targetless;
 mod traffic;
 
