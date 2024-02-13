@@ -562,7 +562,11 @@ impl ResourceGuard {
 
         let deleter = async move {
             println!("Deleting resource `{name}`");
-            let res = api.delete(&name, &DeleteParams::default()).await;
+            let delete_params = DeleteParams {
+                grace_period_seconds: Some(0),
+                ..Default::default()
+            };
+            let res = api.delete(&name, &delete_params).await;
             if let Err(e) = res {
                 println!("Failed to delete resource `{name}`: {e:?}");
             }
@@ -672,12 +676,14 @@ pub async fn service(
     } else {
         // If using a non-random name, delete existing resources first.
         // Just continue if they don't exist.
-        let _ = service_api
-            .delete(service_name, &DeleteParams::default())
-            .await;
-        let _ = deployment_api
-            .delete(service_name, &DeleteParams::default())
-            .await;
+        // Force delete
+        let delete_params = DeleteParams {
+            grace_period_seconds: Some(0),
+            ..Default::default()
+        };
+
+        let _ = service_api.delete(service_name, &delete_params).await;
+        let _ = deployment_api.delete(service_name, &delete_params).await;
 
         service_name.to_string()
     };
