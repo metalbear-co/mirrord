@@ -10,7 +10,6 @@ use mirrord_protocol::{
     ConnectionId, Port, RequestId,
 };
 use tokio::{
-    net::TcpListener,
     select,
     sync::{mpsc::Sender, oneshot},
 };

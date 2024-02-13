@@ -1,10 +1,12 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
+    net::{Ipv4Addr, SocketAddr},
     sync::Arc,
 };
 
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use mirrord_protocol::{Port, RemoteResult, ResponseError};
+use tokio::net::{TcpListener, TcpStream};
 
 use super::{
     http::HttpFilter,
@@ -35,33 +37,52 @@ pub trait PortRedirector {
 
     /// Clean any external state.
     async fn cleanup(&mut self) -> Result<(), Self::Error>;
+
+    /// Accept an incoming redirected connection.
+    ///
+    /// # Returns
+    ///
+    /// * [`TcpStream`] - redirected connection
+    /// * [`SocketAddr`] - peer address
+    async fn next_connection(&mut self) -> Result<(TcpStream, SocketAddr), Self::Error>;
 }
 
-/// Implementation of [`PortRedirector`] that manipulates iptables to steal connections.
+/// Implementation of [`PortRedirector`] that manipulates iptables to steal connections by
+/// redirecting TCP packets to inner [`TcpListener`].
 pub(crate) struct IpTablesRedirector {
     /// For altering iptables rules.
     iptables: Option<SafeIpTables<IPTablesWrapper>>,
     /// Whether exisiting connections should be flushed when adding new redirects.
     flush_connections: bool,
-    /// Port to which redirect all connections.
+    /// Port of [`IpTablesRedirector::listener`].
     redirect_to: Port,
+    /// Listener to which redirect all connections.
+    listener: TcpListener,
 }
 
 impl IpTablesRedirector {
-    /// Create a new instance of this struct.
-    /// Does not alter iptables.
+    /// Create a new instance of this struct. Open an IPv4 TCP listener on an
+    /// [`Ipv4Addr::UNSPECIFIED`] address and a random port. This listener will be used to accept
+    /// redirected connections.
+    ///
+    /// # Note
+    ///
+    /// Does not yet alter iptables.
     ///
     /// # Params
     ///
-    /// * `redirect_to` - all connections will be redirected to this port
     /// * `flush_connections` - whether exisitng connections should be flushed when adding new
     ///   redirects
-    pub(crate) fn new(redirect_to: Port, flush_connections: bool) -> Self {
-        Self {
+    pub(crate) async fn new(flush_connections: bool) -> Result<Self, AgentError> {
+        let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await?;
+        let redirect_to = listener.local_addr()?.port();
+
+        Ok(Self {
             iptables: None,
             flush_connections,
             redirect_to,
-        }
+            listener,
+        })
     }
 }
 
@@ -96,6 +117,10 @@ impl PortRedirector for IpTablesRedirector {
         }
 
         Ok(())
+    }
+
+    async fn next_connection(&mut self) -> Result<(TcpStream, SocketAddr), Self::Error> {
+        self.listener.accept().await.map_err(Into::into)
     }
 }
 
@@ -247,6 +272,11 @@ impl<R: PortRedirector> PortSubscriptions<R> {
     pub fn get(&self, port: Port) -> Option<&PortSubscription> {
         self.subscriptions.get(&port)
     }
+
+    /// Call [`PortRedirector::next_connection`] on the inner [`PortRedirector`].
+    pub async fn next_connection(&mut self) -> Result<(TcpStream, SocketAddr), R::Error> {
+        self.redirector.next_connection().await
+    }
 }
 
 /// Steal subscription for a port.
@@ -367,6 +397,10 @@ mod test {
             self.dirty = false;
 
             Ok(())
+        }
+
+        async fn next_connection(&mut self) -> Result<(TcpStream, SocketAddr), Self::Error> {
+            unimplemented!()
         }
     }
 

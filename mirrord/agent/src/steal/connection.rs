@@ -49,10 +49,6 @@ pub(crate) struct TcpConnectionStealer {
 
     index_allocator: IndexAllocator<ConnectionId, 100>,
 
-    /// Intercepts the connections, instead of letting them go through their normal pathways, this
-    /// is used to steal the traffic.
-    stealer: TcpListener,
-
     /// Used to send data back to the original remote connection.
     write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
 
@@ -103,15 +99,12 @@ impl TcpConnectionStealer {
         let (http_request_sender, http_request_receiver) = channel(1024);
         let (connection_close_sender, connection_close_receiver) = channel(1024);
 
-        let stealer = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await?;
-
         let port_subscriptions = {
-            let redirect_to = stealer.local_addr()?.port();
             let flush_connections = std::env::var("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS")
                 .ok()
                 .and_then(|var| var.parse::<bool>().ok())
                 .unwrap_or_default();
-            let redirector = IpTablesRedirector::new(redirect_to, flush_connections);
+            let redirector = IpTablesRedirector::new(flush_connections).await?;
 
             PortSubscriptions::new(redirector, 4)
         };
@@ -121,7 +114,6 @@ impl TcpConnectionStealer {
             command_rx,
             clients: HashMap::with_capacity(8),
             index_allocator: Default::default(),
-            stealer,
             write_streams: HashMap::with_capacity(8),
             read_streams: StreamMap::with_capacity(8),
             connection_clients: HashMap::with_capacity(8),
@@ -170,7 +162,7 @@ impl TcpConnectionStealer {
                     } else { break; }
                 },
                 // Accepts a connection that we're going to be stealing traffic from.
-                accept = self.stealer.accept() => {
+                accept = self.port_subscriptions.next_connection() => {
                     match accept {
                         Ok(accept) => {
                             self.incoming_connection(accept).await?;
