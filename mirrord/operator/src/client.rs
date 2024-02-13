@@ -176,6 +176,12 @@ pub struct OperatorSessionConnection {
     pub info: OperatorSessionInformation,
 }
 
+pub async fn session_api(config: Option<String>) -> Result<Api<SessionManagementCrd>> {
+    let kube_api: Client = create_kube_api(false, config, None).await.unwrap();
+
+    Ok(Api::all(kube_api))
+}
+
 impl OperatorApi {
     /// We allow copied pods to live only for 30 seconds before the internal proxy connects.
     const COPIED_POD_IDLE_TTL: u32 = 30;
@@ -372,8 +378,7 @@ impl OperatorApi {
         let copy_target_api: Api<CopyTargetCrd> =
             get_k8s_resource_api(&client, target_namespace.as_deref());
 
-        let session_management_api: Api<SessionManagementCrd> =
-            get_k8s_resource_api(&client, target_namespace.as_deref());
+        let session_management_api: Api<SessionManagementCrd> = session_api(None).await?;
 
         Ok(OperatorApi {
             client,

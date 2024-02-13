@@ -128,8 +128,7 @@ pub struct Session {
     group = "operator.metalbear.co",
     version = "v1",
     kind = "SessionManagement",
-    root = "SessionManagementCrd",
-    namespaced
+    root = "SessionManagementCrd"
 )]
 pub struct SessionManagementSpec {
     pub sessions: Vec<Session>,

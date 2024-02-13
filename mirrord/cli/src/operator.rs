@@ -7,7 +7,7 @@ use mirrord_config::{
 };
 use mirrord_kube::api::kubernetes::create_kube_api;
 use mirrord_operator::{
-    client::{OperatorApiError, OperatorOperation},
+    client::{session_api, OperatorApiError, OperatorOperation},
     crd::{
         LicenseInfoOwned, MirrordOperatorCrd, MirrordOperatorSpec, SessionManagementCrd,
         OPERATOR_STATUS_NAME,
@@ -124,14 +124,6 @@ async fn get_status_api(config: Option<String>) -> Result<Api<MirrordOperatorCrd
     }
     .await
     .map_err(CliError::KubernetesApiFailed)?;
-
-    Ok(Api::all(kube_api))
-}
-
-async fn session_api(config: Option<String>) -> Result<Api<SessionManagementCrd>> {
-    let kube_api: Client = create_kube_api(false, config, None)
-        .await
-        .map_err(CliError::KubernetesApiFailed)?;
 
     Ok(Api::all(kube_api))
 }
@@ -279,15 +271,19 @@ Operator License
     Ok(())
 }
 
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "debug", ret)]
 async fn operator_session(kill: Option<u32>, kill_all: bool) -> Result<()> {
     let mut progress = ProgressTracker::from_env("Operator Status");
 
-    let session_api = session_api(None).await?;
+    let session_api = session_api(None)
+        .await
+        .inspect_err(|fail| error!("Failed to even get sessio_api {fail:?}!"))?;
 
     let mut status_progress = progress.subtask("fetching status");
 
-    if let Some(session_id) = kill {
+    if let Some(session_id) = kill
+        && false
+    {
         // TODO(alex) [high]: How do I specify the id?
         let mirrord_session = match session_api
             // TODO(alex) [high]: What should the `path` be?
@@ -308,7 +304,7 @@ async fn operator_session(kill: Option<u32>, kill_all: bool) -> Result<()> {
         };
 
         let crd = mirrord_session.right().unwrap();
-    } else if kill_all {
+    } else if kill_all && false {
         // TODO(alex) [high]: How do I specify the id?
         let mirrord_session = match session_api
             // TODO(alex) [high]: What should the `path` be?
