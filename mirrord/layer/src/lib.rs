@@ -65,7 +65,15 @@
 extern crate alloc;
 extern crate core;
 
-use std::{cmp::Ordering, ffi::OsString, net::SocketAddr, panic, sync::OnceLock, time::Duration};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+    ffi::OsString,
+    net::SocketAddr,
+    panic,
+    sync::OnceLock,
+    time::Duration,
+};
 
 use ctor::ctor;
 use error::{LayerError, Result};
@@ -76,17 +84,21 @@ use load::ExecutableName;
 #[cfg(target_os = "macos")]
 use mirrord_config::feature::fs::FsConfig;
 use mirrord_config::{
-    feature::{fs::FsModeConfig, network::incoming::IncomingMode},
+    feature::{env::LOAD_ENV_FROM_PROCESS_FLAG, fs::FsModeConfig, network::incoming::IncomingMode},
     LayerConfig,
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
+use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use proxy_connection::ProxyConnection;
 use setup::LayerSetup;
 use socket::SOCKETS;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
-use crate::{debugger_ports::DebuggerPorts, detour::DetourGuard, load::LoadType};
+use crate::{
+    common::make_proxy_request_with_response, debugger_ports::DebuggerPorts, detour::DetourGuard,
+    load::LoadType,
+};
 
 mod common;
 mod debugger_ports;
@@ -344,6 +356,58 @@ fn layer_start(mut config: LayerConfig) {
         PROXY_CONNECTION
             .set(new_connection)
             .expect("setting PROXY_CONNECTION singleton")
+    }
+
+    let load_env = std::env::var(LOAD_ENV_FROM_PROCESS_FLAG)
+        .unwrap_or_default()
+        .parse()
+        .unwrap_or(false);
+    if load_env {
+        let env = fetch_env_vars();
+        for (key, value) in env {
+            std::env::set_var(key, value);
+        }
+
+        std::env::remove_var(LOAD_ENV_FROM_PROCESS_FLAG);
+    }
+}
+
+fn fetch_env_vars() -> HashMap<String, String> {
+    let (env_vars_exclude, env_vars_include) = match (
+        setup()
+            .env_config()
+            .exclude
+            .clone()
+            .map(|exclude| exclude.join(";")),
+        setup()
+            .env_config()
+            .include
+            .clone()
+            .map(|include| include.join(";")),
+    ) {
+        (Some(..), Some(..)) => {
+            panic!("invalid env config");
+        }
+        (Some(exclude), None) => (HashSet::from(EnvVars(exclude)), HashSet::new()),
+        (None, Some(include)) => (HashSet::new(), HashSet::from(EnvVars(include))),
+        (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
+    };
+
+    if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
+        let mut remote_env = make_proxy_request_with_response(GetEnvVarsRequest {
+            env_vars_filter: env_vars_exclude,
+            env_vars_select: env_vars_include,
+        })
+        .expect("failed to make request to proxy")
+        .expect("failed to fetch remote env");
+
+        if let Some(overrides) = setup().env_config().r#override.as_ref() {
+            remote_env.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
+        }
+
+        remote_env
+    } else {
+        Default::default()
     }
 }
 

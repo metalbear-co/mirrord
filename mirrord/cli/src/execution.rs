@@ -5,7 +5,7 @@ use std::{
 };
 
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter};
-use mirrord_config::LayerConfig;
+use mirrord_config::{feature::env::LOAD_ENV_FROM_PROCESS_FLAG, LayerConfig};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
 #[cfg(target_os = "macos")]
@@ -146,9 +146,13 @@ impl MirrordExecution {
             .await
             .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
-        let mut env_vars = Self::fetch_env_vars(config, &mut connection)
-            .await
-            .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?;
+        let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
+            HashMap::from([(LOAD_ENV_FROM_PROCESS_FLAG.to_string(), "true".to_string())])
+        } else {
+            Self::fetch_env_vars(config, &mut connection)
+                .await
+                .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
+        };
 
         let lib_path: String = lib_path.to_string_lossy().into();
         // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES

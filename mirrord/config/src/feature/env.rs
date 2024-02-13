@@ -69,7 +69,12 @@ pub struct EnvConfig {
     /// For example, if the remote pod has an environment variable `REGION=1`, but this is an
     /// undesirable value, it's possible to use `override` to set `REGION=2` (locally) instead.
     pub r#override: Option<HashMap<String, String>>, // `r#`: `override` is a Rust keyword.
+
+    /// Remote environment will be applied during layer setup instead of CLI launch.
+    pub load_from_process: Option<bool>,
 }
+
+pub const LOAD_ENV_FROM_PROCESS_FLAG: &str = "MIRRORD_LOAD_ENV_FROM_PROCESS";
 
 impl MirrordToggleableConfig for EnvFileConfig {
     fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated> {
@@ -81,6 +86,7 @@ impl MirrordToggleableConfig for EnvFileConfig {
                 .source_value(context)
                 .transpose()?
                 .or_else(|| Some(VecOrSingle::Single("*".to_owned()))),
+            load_from_process: None,
             r#override: None,
         })
     }
