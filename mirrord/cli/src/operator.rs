@@ -18,7 +18,7 @@ use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{row, Table};
 use serde::Deserialize;
 use tokio::fs;
-use tracing::warn;
+use tracing::{error, warn};
 
 use crate::{
     config::{OperatorArgs, OperatorCommand},
@@ -330,10 +330,17 @@ async fn operator_session(kill: Option<u32>, kill_all: bool) -> Result<()> {
 
         let crd = mirrord_session.right().unwrap();
     } else {
+        /*
+        WARN operator_session{kill=None kill_all=false}: kube_client::client: {"paths":["/apis/operator.metalbear.co/v1","/apis/operator.metalbear.co/v1/mirrordoperators","/apis/operator.metalbear.co/v1/mirrordoperators/{name}","/apis/operator.metalbear.co/v1/mirrordoperators/{name}/certificate","/apis/operator.metalbear.co/v1/namespaces/{namespace}/targets","/apis/operator.metalbear.co/v1/namespaces/{namespace}/targets/{name}","/apis/operator.metalbear.co/v1/proxy/namespaces/{namespace}/targets/{name}","/apis/operator.metalbear.co/v1/namespaces/{namespace}/copytargets","/apis/operator.metalbear.co/v1/namespaces/{namespace}/copytargets/{name}","/apis/operator.metalbear.co/v1/proxy/namespaces/{namespace}/copytargets/{name}","/openapi/v3","/openapi/v3/apis/operator.metalbear.co/v1"]},
+
+        -->> Error("missing field `metadata`", line: 1, column: 714)
+
+                */
         let mirrord_session = match session_api
             // TODO(alex) [high]: What should the `path` be?
             .get(&format!("sessions"))
             .await
+            .inspect_err(|fail| error!("Welp, we failed `get` {fail:?}"))
             .map_err(|error| OperatorApiError::KubeError {
                 error,
                 operation: OperatorOperation::GettingStatus,
