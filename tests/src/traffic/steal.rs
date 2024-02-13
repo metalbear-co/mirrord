@@ -10,7 +10,11 @@ mod steal {
     use kube::Client;
     use reqwest::{header::HeaderMap, Url};
     use rstest::*;
-    use tokio::{io::{BufReader, AsyncWriteExt, AsyncBufReadExt, AsyncReadExt}, net::TcpStream, time::sleep};
+    use tokio::{
+        io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+        net::TcpStream,
+        time::sleep,
+    };
     use tokio_tungstenite::connect_async;
 
     use crate::utils::{
