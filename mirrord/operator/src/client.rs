@@ -34,8 +34,8 @@ use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 use tracing::{debug, error, warn};
 
 use crate::crd::{
-    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, SessionManagementCrd,
-    TargetCrd, OPERATOR_STATUS_NAME,
+    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, SessionsCrd, TargetCrd,
+    OPERATOR_STATUS_NAME,
 };
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
@@ -160,7 +160,7 @@ pub struct OperatorApi {
     client: Client,
     target_api: Api<TargetCrd>,
     copy_target_api: Api<CopyTargetCrd>,
-    session_management_api: Api<SessionManagementCrd>,
+    sessions_api: Api<SessionsCrd>,
     target_namespace: Option<String>,
     target_config: TargetConfig,
     on_concurrent_steal: ConcurrentSteal,
@@ -176,7 +176,7 @@ pub struct OperatorSessionConnection {
     pub info: OperatorSessionInformation,
 }
 
-pub async fn session_api(config: Option<String>) -> Result<Api<SessionManagementCrd>> {
+pub async fn session_api(config: Option<String>) -> Result<Api<SessionsCrd>> {
     let kube_api: Client = create_kube_api(false, config, None).await.unwrap();
 
     Ok(Api::all(kube_api))
@@ -378,13 +378,13 @@ impl OperatorApi {
         let copy_target_api: Api<CopyTargetCrd> =
             get_k8s_resource_api(&client, target_namespace.as_deref());
 
-        let session_management_api: Api<SessionManagementCrd> = session_api(None).await?;
+        let sessions_api = session_api(None).await?;
 
         Ok(OperatorApi {
             client,
             target_api,
             copy_target_api,
-            session_management_api,
+            sessions_api,
             target_namespace,
             target_config,
             on_concurrent_steal,

@@ -1,5 +1,3 @@
-use std::time::{Duration, Instant};
-
 use chrono::NaiveDate;
 use kube::CustomResource;
 use mirrord_config::target::{Target, TargetConfig};
@@ -127,10 +125,10 @@ pub struct Session {
 #[kube(
     group = "operator.metalbear.co",
     version = "v1",
-    kind = "SessionManagement",
-    root = "SessionManagementCrd"
+    kind = "Sessions",
+    root = "SessionsCrd"
 )]
-pub struct SessionManagementSpec {
+pub struct SessionSpec {
     pub sessions: Vec<Session>,
 }
 

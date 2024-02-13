@@ -1,6 +1,6 @@
 use std::{fs::File, path::PathBuf, time::Duration};
 
-use kube::{api::DeleteParams, Api, Client};
+use kube::{api::DeleteParams, Api};
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     LayerFileConfig,
@@ -8,10 +8,7 @@ use mirrord_config::{
 use mirrord_kube::api::kubernetes::create_kube_api;
 use mirrord_operator::{
     client::{session_api, OperatorApiError, OperatorOperation},
-    crd::{
-        LicenseInfoOwned, MirrordOperatorCrd, MirrordOperatorSpec, SessionManagementCrd,
-        OPERATOR_STATUS_NAME,
-    },
+    crd::{LicenseInfoOwned, MirrordOperatorCrd, MirrordOperatorSpec, OPERATOR_STATUS_NAME},
     setup::{LicenseType, Operator, OperatorNamespace, OperatorSetup, SetupOptions},
 };
 use mirrord_progress::{Progress, ProgressTracker};
@@ -272,7 +269,7 @@ Operator License
 }
 
 #[tracing::instrument(level = "debug", ret)]
-async fn operator_session(kill: Option<u32>, kill_all: bool) -> Result<()> {
+async fn operator_session(kill_one: Option<u32>, kill_all: bool) -> Result<()> {
     let mut progress = ProgressTracker::from_env("Operator Status");
 
     let session_api = session_api(None)
@@ -281,13 +278,11 @@ async fn operator_session(kill: Option<u32>, kill_all: bool) -> Result<()> {
 
     let mut status_progress = progress.subtask("fetching status");
 
-    if let Some(session_id) = kill
-        && false
-    {
+    if let Some(session_id) = kill_one {
         // TODO(alex) [high]: How do I specify the id?
         let mirrord_session = match session_api
             // TODO(alex) [high]: What should the `path` be?
-            .delete(&format!("sessions/{session_id}"), &DeleteParams::default())
+            .delete(&format!("kill_one/{session_id}"), &DeleteParams::default())
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
@@ -304,11 +299,11 @@ async fn operator_session(kill: Option<u32>, kill_all: bool) -> Result<()> {
         };
 
         let crd = mirrord_session.right().unwrap();
-    } else if kill_all && false {
+    } else if kill_all {
         // TODO(alex) [high]: How do I specify the id?
         let mirrord_session = match session_api
             // TODO(alex) [high]: What should the `path` be?
-            .delete(&format!("sessions"), &DeleteParams::default())
+            .delete(&format!("kill_all"), &DeleteParams::default())
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
