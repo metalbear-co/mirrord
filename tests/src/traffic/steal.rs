@@ -10,7 +10,7 @@ mod steal {
     use kube::Client;
     use reqwest::{header::HeaderMap, Url};
     use rstest::*;
-    use tokio::{io::BufReader, net::TcpStream, time::sleep};
+    use tokio::{io::{BufReader, AsyncWriteExt, AsyncBufReadExt, AsyncReadExt}, net::TcpStream, time::sleep};
     use tokio_tungstenite::connect_async;
 
     use crate::utils::{
@@ -221,7 +221,7 @@ mod steal {
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
 
-        let mut tcp_stream = TcpStream::connect((addr, port as u16)).unwrap();
+        let mut tcp_stream = TcpStream::connect((addr, port as u16)).await.unwrap();
 
         // Wait for the test app to close the socket and tell us about it.
         process
@@ -230,10 +230,10 @@ mod steal {
 
         const DATA: &[u8; 16] = b"upper me please\n";
 
-        tcp_stream.write_all(DATA).unwrap();
+        tcp_stream.write_all(DATA).await.unwrap();
 
         let mut response = [0u8; DATA.len()];
-        tcp_stream.read_exact(&mut response).unwrap();
+        tcp_stream.read_exact(&mut response).await.unwrap();
 
         process
             .write_to_stdin(b"Hey test app, please stop running and just exit successfuly.\n")
@@ -567,7 +567,7 @@ mod steal {
 
         let addr = SocketAddr::new(host.trim().parse().unwrap(), port as u16);
         let mut stream = TcpStream::connect(addr).await.unwrap();
-        stream.write(tcp_data.as_bytes()).unwrap();
+        stream.write(tcp_data.as_bytes()).await.unwrap();
         let mut reader = BufReader::new(stream);
         let mut buf = String::new();
         reader.read_line(&mut buf).await.unwrap();
