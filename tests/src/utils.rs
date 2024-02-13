@@ -592,24 +592,6 @@ impl ResourceGuard {
     }
 }
 
-impl Drop for ResourceGuard {
-    fn drop(&mut self) {
-        let Some(deleter) = self.deleter.take() else {
-            return;
-        };
-
-        if !std::thread::panicking() || self.delete_on_fail {
-            let _ = std::thread::spawn(move || {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("failed to create tokio runtime")
-                    .block_on(deleter);
-            })
-            .join();
-        }
-    }
-}
 
 /// A service deployed to the kubernetes cluster.
 /// Service is meant as in "Microservice", not as in the Kubernetes resource called Service.
@@ -623,33 +605,6 @@ pub struct KubeService {
     namespace_guard: Option<ResourceGuard>,
 }
 
-impl Drop for KubeService {
-    fn drop(&mut self) {
-        let deleters = [
-            self.pod_guard.take_deleter(),
-            self.service_guard.take_deleter(),
-            self.namespace_guard
-                .as_mut()
-                .and_then(ResourceGuard::take_deleter),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-
-        if deleters.is_empty() {
-            return;
-        }
-
-        let _ = std::thread::spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("failed to create tokio runtime")
-                .block_on(futures::future::join_all(deleters));
-        })
-        .join();
-    }
-}
 
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
