@@ -334,9 +334,11 @@ async fn operator_session(kill: Option<u32>, kill_all: bool) -> Result<()> {
                 */
         let mirrord_session = match session_api
             // TODO(alex) [high]: What should the `path` be?
-            .get(&format!("sessions"))
+            .get(&format!("session"))
             .await
-            .inspect_err(|fail| error!("Welp, we failed `get` {fail:?}"))
+            .inspect_err(|fail| {
+                error!("Welp, we failed `get` {fail:#?}");
+            })
             .map_err(|error| OperatorApiError::KubeError {
                 error,
                 operation: OperatorOperation::GettingStatus,
