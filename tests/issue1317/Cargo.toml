@@ -16,7 +16,7 @@ edition.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "1", features = ["rt", "net", "macros", "process"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros", "process"] }
 hyper = { git = "https://github.com/meowjesty/hyper", branch = "master", features = ["full"] }
 tracing = { git = "https://github.com/metalbear-co/tracing", package = "tracing", branch = "worker_options_non_blocking_v1" }
 actix-web = "4"
