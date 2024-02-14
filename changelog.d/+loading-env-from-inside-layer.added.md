@@ -1,1 +1,1 @@
-POC
+Added configuration option `feature.env.load_from_process`, which allows for changing the way mirrord loads environment variables from the remote target.
