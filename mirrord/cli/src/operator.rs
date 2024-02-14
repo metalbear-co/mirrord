@@ -268,24 +268,23 @@ Operator License
     Ok(())
 }
 
+// TODO(alex) [low]: Docs.
 #[tracing::instrument(level = "debug", ret)]
 async fn operator_session(
     kill_one: Option<u32>,
     kill_all: bool,
     retain_active: bool,
 ) -> Result<()> {
-    let mut progress = ProgressTracker::from_env("Operator Status");
+    let mut progress = ProgressTracker::from_env("Operator session action");
 
     let session_api = session_api(None)
         .await
         .inspect_err(|fail| error!("Failed to even get sessio_api {fail:?}!"))?;
 
-    let mut status_progress = progress.subtask("fetching status");
+    let mut operation_progress = progress.subtask("preparing to execute session operation...");
 
     if let Some(session_id) = kill_one {
-        // TODO(alex) [high]: How do I specify the id?
         let session = match session_api
-            // TODO(alex) [high]: What should the `path` be?
             .delete(&format!("kill_one/{session_id}"), &DeleteParams::default())
             .await
             .map_err(|error| OperatorApiError::KubeError {
@@ -296,19 +295,17 @@ async fn operator_session(
         {
             Ok(session) => session,
             Err(err) => {
-                status_progress.failure(Some("unable to get status"));
+                operation_progress.failure(Some("Failed kill_one session operation!"));
 
                 return Err(err);
             }
         };
 
         if let Some(status) = session.right() {
-            status_progress.success(Some(&format!("Session operation {status:?}")));
+            operation_progress.success(Some(&format!("Session operation {status:?}")));
         }
     } else if kill_all {
-        // TODO(alex) [high]: How do I specify the id?
         let session = match session_api
-            // TODO(alex) [high]: What should the `path` be?
             .delete(&format!("kill_all"), &DeleteParams::default())
             .await
             .map_err(|error| OperatorApiError::KubeError {
@@ -319,14 +316,14 @@ async fn operator_session(
         {
             Ok(session) => session,
             Err(err) => {
-                status_progress.failure(Some("unable to get status"));
+                operation_progress.failure(Some("Failed kill_all session operation!"));
 
                 return Err(err);
             }
         };
 
         if let Some(status) = session.right() {
-            status_progress.success(Some(&format!("Session operation {status:?}")));
+            operation_progress.success(Some(&format!("Session operation {status:?}")));
         }
     } else if retain_active {
         let session = match session_api
@@ -340,21 +337,20 @@ async fn operator_session(
         {
             Ok(session) => session,
             Err(err) => {
-                status_progress.failure(Some("unable to get status"));
+                operation_progress.failure(Some("Failed retain_active session operation!"));
 
                 return Err(err);
             }
         };
 
         if let Some(status) = session.right() {
-            status_progress.success(Some(&format!("Session operation {status:?}")));
+            operation_progress.success(Some(&format!("Session operation {status:?}")));
         }
     } else {
         panic!("You must select one of the session options, there is no default!");
     }
 
-    status_progress.success(Some("fetched status"));
-
+    operation_progress.success(Some("session operation finished"));
     progress.success(Some("Done with session stuff!"));
 
     Ok(())
