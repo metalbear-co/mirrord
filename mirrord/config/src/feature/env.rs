@@ -70,11 +70,15 @@ pub struct EnvConfig {
     /// undesirable value, it's possible to use `override` to set `REGION=2` (locally) instead.
     pub r#override: Option<HashMap<String, String>>, // `r#`: `override` is a Rust keyword.
 
-    /// Remote environment will be applied during layer setup instead of CLI launch.
+    /// ### feature.env.load_from_process {#feature-env-load_from_process}
+    ///
+    /// Allows for changing the way mirrord loads remote environment variables.
+    /// If set, the variables are fetched after the user application is started.
+    ///
+    /// This setting is meant to resolve issues when using mirrord via the IntelliJ plugin on WSL
+    /// and the remote environment contains a lot of variables.
     pub load_from_process: Option<bool>,
 }
-
-pub const LOAD_ENV_FROM_PROCESS_FLAG: &str = "MIRRORD_LOAD_ENV_FROM_PROCESS";
 
 impl MirrordToggleableConfig for EnvFileConfig {
     fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated> {

@@ -84,7 +84,7 @@ use load::ExecutableName;
 #[cfg(target_os = "macos")]
 use mirrord_config::feature::fs::FsConfig;
 use mirrord_config::{
-    feature::{env::LOAD_ENV_FROM_PROCESS_FLAG, fs::FsModeConfig, network::incoming::IncomingMode},
+    feature::{fs::FsModeConfig, network::incoming::IncomingMode},
     LayerConfig,
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
@@ -291,11 +291,14 @@ fn init_tracing() {
 ///
 /// 1. [`tracing_subscriber`] or [`mirrord_console`];
 ///
-/// 2. Global [`STATE`];
+/// 2. Global [`SETUP`];
 ///
 /// 3. Global [`PROXY_CONNECTION`];
 ///
 /// 4. Replaces the [`libc`] calls with our hooks with [`enable_hooks`];
+///
+/// 5. Fetches remote environment from the agent (if enabled with
+/// [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
 fn layer_start(mut config: LayerConfig) {
     if config.target.path.is_none() {
         // Use localwithoverrides on targetless regardless of user config.
@@ -358,20 +361,26 @@ fn layer_start(mut config: LayerConfig) {
             .expect("setting PROXY_CONNECTION singleton")
     }
 
-    let load_env = std::env::var(LOAD_ENV_FROM_PROCESS_FLAG)
-        .unwrap_or_default()
-        .parse()
-        .unwrap_or(false);
-    if load_env {
+    let fetch_env = setup().env_config().load_from_process.unwrap_or(false)
+        && !std::env::var(REMOTE_ENV_FETCHED)
+            .unwrap_or_default()
+            .parse::<bool>()
+            .unwrap_or(false);
+    if fetch_env {
         let env = fetch_env_vars();
         for (key, value) in env {
             std::env::set_var(key, value);
         }
 
-        std::env::remove_var(LOAD_ENV_FROM_PROCESS_FLAG);
+        std::env::set_var(REMOTE_ENV_FETCHED, "true");
     }
 }
 
+/// Name of environment variable used to mark whether remote environment has already been fetched.
+const REMOTE_ENV_FETCHED: &str = "MIRRORD_REMOTE_ENV_FETCHED";
+
+/// Fetches remote environment from the agent.
+/// Uses [`SETUP`] and [`PROXY_CONNECTION`] globals.
 fn fetch_env_vars() -> HashMap<String, String> {
     let (env_vars_exclude, env_vars_include) = match (
         setup()
