@@ -224,11 +224,14 @@ pub(super) enum OperatorCommand {
         config_file: Option<String>,
     },
     Session {
-        #[arg(long, conflicts_with = "kill_all")]
+        #[arg(long, conflicts_with = "kill_all", conflicts_with = "retain_active")]
         kill: Option<u32>,
 
-        #[arg(long, conflicts_with = "kill")]
+        #[arg(long, conflicts_with = "kill", conflicts_with = "retain_active")]
         kill_all: bool,
+
+        #[arg(long, conflicts_with = "kill_all", conflicts_with = "kill")]
+        retain_active: bool,
     },
 }
 

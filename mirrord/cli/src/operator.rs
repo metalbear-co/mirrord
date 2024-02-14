@@ -269,7 +269,11 @@ Operator License
 }
 
 #[tracing::instrument(level = "debug", ret)]
-async fn operator_session(kill_one: Option<u32>, kill_all: bool) -> Result<()> {
+async fn operator_session(
+    kill_one: Option<u32>,
+    kill_all: bool,
+    retain_active: bool,
+) -> Result<()> {
     let mut progress = ProgressTracker::from_env("Operator Status");
 
     let session_api = session_api(None)
@@ -280,7 +284,7 @@ async fn operator_session(kill_one: Option<u32>, kill_all: bool) -> Result<()> {
 
     if let Some(session_id) = kill_one {
         // TODO(alex) [high]: How do I specify the id?
-        let mirrord_session = match session_api
+        let session = match session_api
             // TODO(alex) [high]: What should the `path` be?
             .delete(&format!("kill_one/{session_id}"), &DeleteParams::default())
             .await
@@ -298,10 +302,12 @@ async fn operator_session(kill_one: Option<u32>, kill_all: bool) -> Result<()> {
             }
         };
 
-        let crd = mirrord_session.right().unwrap();
+        if let Some(status) = session.right() {
+            status_progress.success(Some(&format!("Session operation {status:?}")));
+        }
     } else if kill_all {
         // TODO(alex) [high]: How do I specify the id?
-        let mirrord_session = match session_api
+        let session = match session_api
             // TODO(alex) [high]: What should the `path` be?
             .delete(&format!("kill_all"), &DeleteParams::default())
             .await
@@ -319,21 +325,13 @@ async fn operator_session(kill_one: Option<u32>, kill_all: bool) -> Result<()> {
             }
         };
 
-        let crd = mirrord_session.right().unwrap();
-    } else {
-        /*
-        WARN operator_session{kill=None kill_all=false}: kube_client::client: {"paths":["/apis/operator.metalbear.co/v1","/apis/operator.metalbear.co/v1/mirrordoperators","/apis/operator.metalbear.co/v1/mirrordoperators/{name}","/apis/operator.metalbear.co/v1/mirrordoperators/{name}/certificate","/apis/operator.metalbear.co/v1/namespaces/{namespace}/targets","/apis/operator.metalbear.co/v1/namespaces/{namespace}/targets/{name}","/apis/operator.metalbear.co/v1/proxy/namespaces/{namespace}/targets/{name}","/apis/operator.metalbear.co/v1/namespaces/{namespace}/copytargets","/apis/operator.metalbear.co/v1/namespaces/{namespace}/copytargets/{name}","/apis/operator.metalbear.co/v1/proxy/namespaces/{namespace}/copytargets/{name}","/openapi/v3","/openapi/v3/apis/operator.metalbear.co/v1"]},
-
-        -->> Error("missing field `metadata`", line: 1, column: 714)
-
-                */
-        let mirrord_session = match session_api
-            // TODO(alex) [high]: What should the `path` be?
-            .get(&format!("session"))
+        if let Some(status) = session.right() {
+            status_progress.success(Some(&format!("Session operation {status:?}")));
+        }
+    } else if retain_active {
+        let session = match session_api
+            .delete(&format!("retain_active"), &DeleteParams::default())
             .await
-            .inspect_err(|fail| {
-                error!("Welp, we failed `get` {fail:#?}");
-            })
             .map_err(|error| OperatorApiError::KubeError {
                 error,
                 operation: OperatorOperation::GettingStatus,
@@ -348,7 +346,11 @@ async fn operator_session(kill_one: Option<u32>, kill_all: bool) -> Result<()> {
             }
         };
 
-        tracing::info!("{mirrord_session:?}");
+        if let Some(status) = session.right() {
+            status_progress.success(Some(&format!("Session operation {status:?}")));
+        }
+    } else {
+        panic!("You must select one of the session options, there is no default!");
     }
 
     status_progress.success(Some("fetched status"));
@@ -369,6 +371,10 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             license_path,
         } => operator_setup(accept_tos, file, namespace, license_key, license_path).await,
         OperatorCommand::Status { config_file } => operator_status(config_file).await,
-        OperatorCommand::Session { kill, kill_all } => operator_session(kill, kill_all).await,
+        OperatorCommand::Session {
+            kill,
+            kill_all,
+            retain_active,
+        } => operator_session(kill, kill_all, retain_active).await,
     }
 }
