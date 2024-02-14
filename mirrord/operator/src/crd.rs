@@ -130,7 +130,7 @@ pub struct Session {
     kind = "Session",
     root = "SessionCrd"
 )]
-pub struct SessionSpec {}
+pub struct SessionSpec;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LicenseInfoOwned {
