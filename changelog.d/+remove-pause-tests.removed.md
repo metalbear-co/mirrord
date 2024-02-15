@@ -1,1 +1,0 @@
-Remove pause tests as part of deprecation
