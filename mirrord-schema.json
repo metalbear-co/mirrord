@@ -463,6 +463,14 @@
             }
           ]
         },
+        "load_from_process": {
+          "title": "feature.env.load_from_process {#feature-env-load_from_process}",
+          "description": "Allows for changing the way mirrord loads remote environment variables. If set, the variables are fetched after the user application is started.\n\nThis setting is meant to resolve issues when using mirrord via the IntelliJ plugin on WSL and the remote environment contains a lot of variables.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "override": {
           "title": "feature.env.override {#feature-env-override}",
           "description": "Allows setting or overriding environment variables (locally) with a custom value.\n\nFor example, if the remote pod has an environment variable `REGION=1`, but this is an undesirable value, it's possible to use `override` to set `REGION=2` (locally) instead.",
