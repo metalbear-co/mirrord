@@ -404,10 +404,17 @@ impl OperatorRole {
                         "pods/log".to_owned(),
                         "pods/ephemeralcontainers".to_owned(),
                         "deployments".to_owned(),
+                        "deployments/scale".to_owned(),
                         "jobs".to_owned(),
                         "rollouts".to_owned(),
                     ]),
                     verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
+                    ..Default::default()
+                },
+                PolicyRule {
+                    api_groups: Some(vec!["apps".to_owned()]),
+                    resources: Some(vec!["deployments/scale".to_owned()]),
+                    verbs: vec!["patch".to_owned()],
                     ..Default::default()
                 },
                 PolicyRule {

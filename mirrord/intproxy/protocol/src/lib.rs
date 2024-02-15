@@ -3,6 +3,7 @@
 //! internal proxy and the layer are shipped together in a single binary.
 
 use std::{
+    collections::HashMap,
     fmt,
     net::{IpAddr, SocketAddr},
 };
@@ -20,7 +21,7 @@ use mirrord_protocol::{
     },
     outgoing::SocketAddress,
     tcp::StealType,
-    FileRequest, FileResponse, Port, RemoteResult,
+    FileRequest, FileResponse, GetEnvVarsRequest, Port, RemoteResult,
 };
 
 #[cfg(feature = "codec")]
@@ -55,6 +56,8 @@ pub enum LayerToProxyMessage {
     OutgoingConnect(OutgoingConnectRequest),
     /// Requests related to incoming connections.
     Incoming(IncomingRequest),
+    /// Fetch environment variables from the target.
+    GetEnv(GetEnvVarsRequest),
 }
 
 /// Unique `layer <-> proxy` session identifier.
@@ -206,6 +209,8 @@ pub enum ProxyToLayerMessage {
     OutgoingConnect(RemoteResult<OutgoingConnectResponse>),
     /// A response to layer's [`IncomingRequest`].
     Incoming(IncomingResponse),
+    /// A response to layer's [`LayerToProxyMessage::GetEnv`].
+    GetEnv(RemoteResult<HashMap<String, String>>),
 }
 
 /// A response to layer's [`IncomingRequest`].
@@ -395,4 +400,11 @@ impl_request!(
     res = ConnMetadataResponse,
     req_path = LayerToProxyMessage::Incoming => IncomingRequest::ConnMetadata,
     res_path = ProxyToLayerMessage::Incoming => IncomingResponse::ConnMetadata,
+);
+
+impl_request!(
+    req = GetEnvVarsRequest,
+    res = RemoteResult<HashMap<String, String>>,
+    req_path = LayerToProxyMessage::GetEnv,
+    res_path = ProxyToLayerMessage::GetEnv,
 );

@@ -173,6 +173,7 @@ pub enum TaskError<Err> {
 }
 
 /// An update received from a [`BackgroundTask`] registered in the [`BackgroundTasks`] struct.
+#[derive(Debug)]
 pub enum TaskUpdate<MOut, Err> {
     /// The task produced a message.
     Message(MOut),

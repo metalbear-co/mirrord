@@ -69,6 +69,15 @@ pub struct EnvConfig {
     /// For example, if the remote pod has an environment variable `REGION=1`, but this is an
     /// undesirable value, it's possible to use `override` to set `REGION=2` (locally) instead.
     pub r#override: Option<HashMap<String, String>>, // `r#`: `override` is a Rust keyword.
+
+    /// ### feature.env.load_from_process {#feature-env-load_from_process}
+    ///
+    /// Allows for changing the way mirrord loads remote environment variables.
+    /// If set, the variables are fetched after the user application is started.
+    ///
+    /// This setting is meant to resolve issues when using mirrord via the IntelliJ plugin on WSL
+    /// and the remote environment contains a lot of variables.
+    pub load_from_process: Option<bool>,
 }
 
 impl MirrordToggleableConfig for EnvFileConfig {
@@ -81,6 +90,7 @@ impl MirrordToggleableConfig for EnvFileConfig {
                 .source_value(context)
                 .transpose()?
                 .or_else(|| Some(VecOrSingle::Single("*".to_owned()))),
+            load_from_process: None,
             r#override: None,
         })
     }

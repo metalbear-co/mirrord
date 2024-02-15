@@ -1,11 +1,13 @@
 //! The most basic proxying logic. Handles cases when the only job to do in the internal proxy is to
 //! pass requests and responses between the layer and the agent.
 
+use std::collections::HashMap;
+
 use mirrord_intproxy_protocol::{LayerId, MessageId, ProxyToLayerMessage};
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     file::{CloseDirRequest, CloseFileRequest, OpenDirResponse, OpenFileResponse},
-    ClientMessage, FileRequest, FileResponse,
+    ClientMessage, FileRequest, FileResponse, GetEnvVarsRequest, RemoteResult,
 };
 
 use crate::{
@@ -23,6 +25,8 @@ pub enum SimpleProxyMessage {
     AddrInfoRes(GetAddrInfoResponse),
     LayerForked(LayerForked),
     LayerClosed(LayerClosed),
+    GetEnvReq(MessageId, LayerId, GetEnvVarsRequest),
+    GetEnvRes(RemoteResult<HashMap<String, String>>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -41,6 +45,8 @@ pub struct SimpleProxy {
     file_reqs: RequestQueue,
     /// For [`GetAddrInfoRequest`]s.
     addr_info_reqs: RequestQueue,
+    /// For [`GetEnvVarsRequest`]s.
+    get_env_reqs: RequestQueue,
 }
 
 impl BackgroundTask for SimpleProxy {
@@ -157,6 +163,22 @@ impl BackgroundTask for SimpleProxy {
                 }
                 SimpleProxyMessage::LayerForked(LayerForked { child, parent }) => {
                     self.remote_fds.clone_all(parent, child);
+                }
+                SimpleProxyMessage::GetEnvReq(message_id, layer_id, req) => {
+                    self.get_env_reqs.insert(message_id, layer_id);
+                    message_bus
+                        .send(ProxyMessage::ToAgent(ClientMessage::GetEnvVarsRequest(req)))
+                        .await;
+                }
+                SimpleProxyMessage::GetEnvRes(res) => {
+                    let (message_id, layer_id) = self.get_env_reqs.get()?;
+                    message_bus
+                        .send(ToLayer {
+                            message_id,
+                            message: ProxyToLayerMessage::GetEnv(res),
+                            layer_id,
+                        })
+                        .await
                 }
             }
         }
