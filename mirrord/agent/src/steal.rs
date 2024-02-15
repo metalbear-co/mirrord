@@ -10,14 +10,12 @@ use mirrord_protocol::{
     ConnectionId, Port, RequestId,
 };
 use tokio::{
-    net::TcpListener,
     select,
     sync::{mpsc::Sender, oneshot},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-use self::ip_tables::SafeIpTables;
 use crate::{
     error::{AgentError, Result},
     steal::http::Response,
@@ -29,6 +27,7 @@ pub(super) mod connection;
 pub(super) mod http;
 pub(super) mod ip_tables;
 mod orig_dst;
+mod subscriptions;
 
 /// Commands from the agent that are passed down to the stealer worker, through [`TcpStealerApi`].
 ///

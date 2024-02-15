@@ -1,7 +1,0 @@
-{
-    "pause": true,
-    "agent": {
-        "ephemeral": true,
-        "privileged": true
-    }
-}

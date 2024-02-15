@@ -27,10 +27,7 @@ use self::{
     hyper_handler::RawHyperConnection,
     reversible_stream::ReversibleStream,
 };
-use crate::{
-    steal::{http::filter::filter_task, HandlerHttpRequest},
-    util::ClientId,
-};
+use crate::{steal::HandlerHttpRequest, util::ClientId};
 
 pub(crate) mod error;
 mod filter;
@@ -39,7 +36,7 @@ mod reversible_stream;
 mod v1;
 mod v2;
 
-pub(crate) use filter::HttpFilter;
+pub(crate) use filter::{filter_task, HttpFilter};
 
 pub(crate) type Response<B = BoxBody<Bytes, HttpTrafficError>> = hyper::Response<B>;
 
@@ -137,90 +134,5 @@ impl HttpVersion {
         } else {
             Self::NotHttp
         }
-    }
-}
-
-/// Created for every new port we want to filter HTTP traffic on.
-#[derive(Debug)]
-pub(super) struct HttpFilterManager {
-    /// Filters that we're going to be matching against (specified by the user).
-    client_filters: Arc<DashMap<ClientId, HttpFilter>>,
-
-    /// We clone this to pass them down to the hyper tasks.
-    matched_tx: Sender<HandlerHttpRequest>,
-}
-
-impl HttpFilterManager {
-    /// Creates a new [`HttpFilterManager`] per port.
-    ///
-    /// You can't create just an empty [`HttpFilterManager`], as we don't steal traffic on ports
-    /// that no client has registered interest in.
-    #[tracing::instrument(level = "trace", skip(matched_tx))]
-    pub(super) fn new(
-        client_id: ClientId,
-        filter: HttpFilter,
-        matched_tx: Sender<HandlerHttpRequest>,
-    ) -> Self {
-        let client_filters = Arc::new(DashMap::new());
-        client_filters.insert(client_id, filter);
-
-        Self {
-            client_filters,
-            matched_tx,
-        }
-    }
-
-    /// Inserts a new client (layer) and its filter.
-    ///
-    /// [`HttpFilterManager::client_filters`] are shared between hyper tasks, so adding a new one
-    /// here will impact the tasks as well.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) fn add_client(
-        &mut self,
-        client_id: ClientId,
-        filter: HttpFilter,
-    ) -> Option<HttpFilter> {
-        self.client_filters.insert(client_id, filter)
-    }
-
-    /// Removes a client (layer) from [`HttpFilterManager::client_filters`].
-    ///
-    /// [`HttpFilterManager::client_filters`] are shared between hyper tasks, so removing a client
-    /// here will impact the tasks as well.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) fn remove_client(&mut self, client_id: &ClientId) -> Option<(ClientId, HttpFilter)> {
-        self.client_filters.remove(client_id)
-    }
-
-    /// Checks if we have a filter for this `client_id`.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) fn contains_client(&self, client_id: &ClientId) -> bool {
-        self.client_filters.contains_key(client_id)
-    }
-
-    /// Start a [`filter_task`] to handle this new connection.
-    #[tracing::instrument(level = "trace", skip(self, original_stream, connection_close_sender))]
-    pub(super) async fn new_connection(
-        &self,
-        original_stream: TcpStream,
-        original_address: SocketAddr,
-        connection_id: ConnectionId,
-        connection_close_sender: Sender<ConnectionId>,
-    ) {
-        tokio::spawn(filter_task(
-            original_stream,
-            original_address,
-            connection_id,
-            self.client_filters.clone(),
-            self.matched_tx.clone(),
-            connection_close_sender,
-        ));
-    }
-
-    /// Used by [`TcpConnectionStealer::port_unsubscribe`] to check if we have remaining subscribers
-    /// or not.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) fn is_empty(&self) -> bool {
-        self.client_filters.is_empty()
     }
 }

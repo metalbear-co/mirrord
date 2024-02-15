@@ -208,6 +208,8 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
                     "add": get_capabilities(agent),
                 },
                 "privileged": agent.privileged,
+                "runAsNonRoot": agent.privileged.then_some(false),
+                "runAsUser": agent.privileged.then_some(0),
             },
             "imagePullPolicy": agent.image_pull_policy,
             "targetContainerName": runtime_data.container_name,

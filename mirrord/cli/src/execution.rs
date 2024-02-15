@@ -146,9 +146,13 @@ impl MirrordExecution {
             .await
             .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
-        let mut env_vars = Self::fetch_env_vars(config, &mut connection)
-            .await
-            .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?;
+        let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
+            Default::default()
+        } else {
+            Self::fetch_env_vars(config, &mut connection)
+                .await
+                .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
+        };
 
         let lib_path: String = lib_path.to_string_lossy().into();
         // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES

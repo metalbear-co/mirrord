@@ -65,7 +65,15 @@
 extern crate alloc;
 extern crate core;
 
-use std::{cmp::Ordering, ffi::OsString, net::SocketAddr, panic, sync::OnceLock, time::Duration};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+    ffi::OsString,
+    net::SocketAddr,
+    panic,
+    sync::OnceLock,
+    time::Duration,
+};
 
 use ctor::ctor;
 use error::{LayerError, Result};
@@ -81,12 +89,16 @@ use mirrord_config::{
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
+use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use proxy_connection::ProxyConnection;
 use setup::LayerSetup;
 use socket::SOCKETS;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
-use crate::{debugger_ports::DebuggerPorts, detour::DetourGuard, load::LoadType};
+use crate::{
+    common::make_proxy_request_with_response, debugger_ports::DebuggerPorts, detour::DetourGuard,
+    load::LoadType,
+};
 
 mod common;
 mod debugger_ports;
@@ -279,11 +291,14 @@ fn init_tracing() {
 ///
 /// 1. [`tracing_subscriber`] or [`mirrord_console`];
 ///
-/// 2. Global [`STATE`];
+/// 2. Global [`SETUP`];
 ///
 /// 3. Global [`PROXY_CONNECTION`];
 ///
 /// 4. Replaces the [`libc`] calls with our hooks with [`enable_hooks`];
+///
+/// 5. Fetches remote environment from the agent (if enabled with
+/// [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
 fn layer_start(mut config: LayerConfig) {
     if config.target.path.is_none() {
         // Use localwithoverrides on targetless regardless of user config.
@@ -344,6 +359,64 @@ fn layer_start(mut config: LayerConfig) {
         PROXY_CONNECTION
             .set(new_connection)
             .expect("setting PROXY_CONNECTION singleton")
+    }
+
+    let fetch_env = setup().env_config().load_from_process.unwrap_or(false)
+        && !std::env::var(REMOTE_ENV_FETCHED)
+            .unwrap_or_default()
+            .parse::<bool>()
+            .unwrap_or(false);
+    if fetch_env {
+        let env = fetch_env_vars();
+        for (key, value) in env {
+            std::env::set_var(key, value);
+        }
+
+        std::env::set_var(REMOTE_ENV_FETCHED, "true");
+    }
+}
+
+/// Name of environment variable used to mark whether remote environment has already been fetched.
+const REMOTE_ENV_FETCHED: &str = "MIRRORD_REMOTE_ENV_FETCHED";
+
+/// Fetches remote environment from the agent.
+/// Uses [`SETUP`] and [`PROXY_CONNECTION`] globals.
+fn fetch_env_vars() -> HashMap<String, String> {
+    let (env_vars_exclude, env_vars_include) = match (
+        setup()
+            .env_config()
+            .exclude
+            .clone()
+            .map(|exclude| exclude.join(";")),
+        setup()
+            .env_config()
+            .include
+            .clone()
+            .map(|include| include.join(";")),
+    ) {
+        (Some(..), Some(..)) => {
+            panic!("invalid env config");
+        }
+        (Some(exclude), None) => (HashSet::from(EnvVars(exclude)), HashSet::new()),
+        (None, Some(include)) => (HashSet::new(), HashSet::from(EnvVars(include))),
+        (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
+    };
+
+    if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
+        let mut remote_env = make_proxy_request_with_response(GetEnvVarsRequest {
+            env_vars_filter: env_vars_exclude,
+            env_vars_select: env_vars_include,
+        })
+        .expect("failed to make request to proxy")
+        .expect("failed to fetch remote env");
+
+        if let Some(overrides) = setup().env_config().r#override.as_ref() {
+            remote_env.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
+        }
+
+        remote_env
+    } else {
+        Default::default()
     }
 }
 

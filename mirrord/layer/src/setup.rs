@@ -2,6 +2,7 @@ use std::{collections::HashSet, net::SocketAddr};
 
 use mirrord_config::{
     feature::{
+        env::EnvConfig,
         fs::FsConfig,
         network::{incoming::IncomingConfig, outgoing::OutgoingConfig},
     },
@@ -70,6 +71,10 @@ impl LayerSetup {
             incoming_mode,
             local_hostname,
         }
+    }
+
+    pub fn env_config(&self) -> &EnvConfig {
+        &self.config.feature.env
     }
 
     pub fn fs_config(&self) -> &FsConfig {

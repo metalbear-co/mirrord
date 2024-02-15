@@ -203,7 +203,7 @@ pub(super) const MINIMAL_HEADER_SIZE: usize = 10;
     level = "trace",
     skip(stolen_stream, matched_tx, connection_close_sender)
 )]
-pub(super) async fn filter_task(
+pub async fn filter_task(
     stolen_stream: TcpStream,
     original_destination: SocketAddr,
     connection_id: ConnectionId,

@@ -8,6 +8,64 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.87.0](https://github.com/metalbear-co/mirrord/tree/3.87.0) - 2024-02-15
+
+
+### Removed
+
+- Remove pause tests as part of deprecation
+
+
+### Added
+
+- Changed internal proxy to allow for HTTP upgrades with filtered HTTP steal.
+  [#2224](https://github.com/metalbear-co/mirrord/issues/2224)
+- Added support for selecting malfunctioning targets with `copy_target`
+  feature. [#2239](https://github.com/metalbear-co/mirrord/issues/2239)
+- Added configuration option `feature.env.load_from_process`, which allows for
+  changing the way mirrord loads environment variables from the remote target.
+
+
+### Fixed
+
+- Add missing permissions needed by operator for copy and scaledown
+
+
+### Internal
+
+- Add IDE release e2e to the ci-success job
+  [#2184](https://github.com/metalbear-co/mirrord/issues/2184)
+- Change cleanup to delete without grace
+- Removed `#![allow(incomplete_features)]` from the code - no longer needed.
+- Reorganized `TcpSubscriptionStealer` code - extracted port subscriptions into
+  a separate struct.
+
+
+## [3.86.1](https://github.com/metalbear-co/mirrord/tree/3.86.1) - 2024-02-05
+
+
+### Fixed
+
+- Added `runAsNonRoot: false` and `runAsUser: 0` to the security context of an
+  epheremal agent when running privileged (to prevent overriding these values
+  with values from the pod spec).
+- Disabled unix sockets being wrongfully sent to the agent when socket isn't
+  connected
+
+## [3.86.0](https://github.com/metalbear-co/mirrord/tree/3.86.0) - 2024-01-29
+
+
+### Changed
+
+- `JAVA_TOOL_OPTIONS` is excluded by default from the environment variables
+  that are fetched from the target.
+
+
+### Internal
+
+- Update links to new docs
+
+
 ## [3.85.1](https://github.com/metalbear-co/mirrord/tree/3.85.1) - 2024-01-29
 
 
