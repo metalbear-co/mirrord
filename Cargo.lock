@@ -2880,7 +2880,7 @@ dependencies = [
 [[package]]
 name = "kube"
 version = "0.87.1"
-source = "git+https://github.com/metalbear-co/kube#823c45038d97ee020bff992c50c10deb9469ea8f"
+source = "git+https://github.com/metalbear-co/kube?branch=issue/217/clearing-routes#afbdbed13c2313fb5d8c1b95703ec0636d251a6a"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -2892,7 +2892,7 @@ dependencies = [
 [[package]]
 name = "kube-client"
 version = "0.87.1"
-source = "git+https://github.com/metalbear-co/kube#823c45038d97ee020bff992c50c10deb9469ea8f"
+source = "git+https://github.com/metalbear-co/kube?branch=issue/217/clearing-routes#afbdbed13c2313fb5d8c1b95703ec0636d251a6a"
 dependencies = [
  "base64 0.21.7",
  "bytes",
@@ -2932,7 +2932,7 @@ dependencies = [
 [[package]]
 name = "kube-core"
 version = "0.87.1"
-source = "git+https://github.com/metalbear-co/kube#823c45038d97ee020bff992c50c10deb9469ea8f"
+source = "git+https://github.com/metalbear-co/kube?branch=issue/217/clearing-routes#afbdbed13c2313fb5d8c1b95703ec0636d251a6a"
 dependencies = [
  "chrono",
  "form_urlencoded",
@@ -2949,7 +2949,7 @@ dependencies = [
 [[package]]
 name = "kube-derive"
 version = "0.87.1"
-source = "git+https://github.com/metalbear-co/kube#823c45038d97ee020bff992c50c10deb9469ea8f"
+source = "git+https://github.com/metalbear-co/kube?branch=issue/217/clearing-routes#afbdbed13c2313fb5d8c1b95703ec0636d251a6a"
 dependencies = [
  "darling 0.20.3",
  "proc-macro2",
@@ -2961,7 +2961,7 @@ dependencies = [
 [[package]]
 name = "kube-runtime"
 version = "0.87.1"
-source = "git+https://github.com/metalbear-co/kube#823c45038d97ee020bff992c50c10deb9469ea8f"
+source = "git+https://github.com/metalbear-co/kube?branch=issue/217/clearing-routes#afbdbed13c2313fb5d8c1b95703ec0636d251a6a"
 dependencies = [
  "ahash",
  "async-trait",

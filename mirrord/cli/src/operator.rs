@@ -129,7 +129,9 @@ async fn get_status_api(config: Option<String>) -> Result<Api<MirrordOperatorCrd
 async fn operator_status(config: Option<String>) -> Result<()> {
     let mut progress = ProgressTracker::from_env("Operator Status");
 
+    tracing::info!("GET_STATUS_API");
     let status_api = get_status_api(config).await?;
+    tracing::info!("HAVE STATUS API");
 
     let mut status_progress = progress.subtask("fetching status");
 
@@ -268,7 +270,10 @@ Operator License
     Ok(())
 }
 
-// TODO(alex) [low]: Docs.
+/// Handles the `mirrord operator session` family of commands:
+/// - `--kill-one {session_id}`: kills the operator session specified by `session_id`;
+/// - `--kill-all`: kills every operator session, this is basically a `.clear()`;
+/// - `--retain-active`: performs a clean-up for operator sessions that are still stored;
 #[tracing::instrument(level = "debug", ret)]
 async fn operator_session(
     kill_one: Option<u32>,
@@ -283,8 +288,10 @@ async fn operator_session(
 
     let mut operation_progress = progress.subtask("preparing to execute session operation...");
 
-    if let Some(session_id) = kill_one {
-        let session = match session_api
+    let result = if let Some(session_id) = kill_one {
+        operation_progress.print("killing session with id {session_id}");
+
+        session_api
             .delete(&format!("kill_one/{session_id}"), &DeleteParams::default())
             .await
             .map_err(|error| OperatorApiError::KubeError {
@@ -292,20 +299,10 @@ async fn operator_session(
                 operation: OperatorOperation::GettingStatus,
             })
             .map_err(CliError::from)
-        {
-            Ok(session) => session,
-            Err(err) => {
-                operation_progress.failure(Some("Failed kill_one session operation!"));
-
-                return Err(err);
-            }
-        };
-
-        if let Some(status) = session.right() {
-            operation_progress.success(Some(&format!("Session operation {status:?}")));
-        }
     } else if kill_all {
-        let session = match session_api
+        operation_progress.print("killing all sessions");
+
+        session_api
             .delete(&format!("kill_all"), &DeleteParams::default())
             .await
             .map_err(|error| OperatorApiError::KubeError {
@@ -313,20 +310,10 @@ async fn operator_session(
                 operation: OperatorOperation::GettingStatus,
             })
             .map_err(CliError::from)
-        {
-            Ok(session) => session,
-            Err(err) => {
-                operation_progress.failure(Some("Failed kill_all session operation!"));
-
-                return Err(err);
-            }
-        };
-
-        if let Some(status) = session.right() {
-            operation_progress.success(Some(&format!("Session operation {status:?}")));
-        }
     } else if retain_active {
-        let session = match session_api
+        operation_progress.print("retaining only active sessions");
+
+        session_api
             .delete(&format!("retain_active"), &DeleteParams::default())
             .await
             .map_err(|error| OperatorApiError::KubeError {
@@ -334,20 +321,17 @@ async fn operator_session(
                 operation: OperatorOperation::GettingStatus,
             })
             .map_err(CliError::from)
-        {
-            Ok(session) => session,
-            Err(err) => {
-                operation_progress.failure(Some("Failed retain_active session operation!"));
-
-                return Err(err);
-            }
-        };
-
-        if let Some(status) = session.right() {
-            operation_progress.success(Some(&format!("Session operation {status:?}")));
-        }
     } else {
         panic!("You must select one of the session options, there is no default!");
+    }
+    .inspect_err(|_| {
+        operation_progress.failure(Some("Failed to execute session operation!"));
+    })?;
+
+    if let Some(status) = result.right() {
+        operation_progress.success(Some(&format!(
+            "session operation completed with {status:?}"
+        )));
     }
 
     operation_progress.success(Some("session operation finished"));

@@ -123,6 +123,13 @@ pub struct Session {
 
 // TODO(alex) [low]: Docs. `kind` controls the name of the route!
 // We have: `v1/sessionkinds/kill_all` if `kind = SessionKind` here!!!
+/// Resource used to access the operator's session management routes.
+///
+/// - `kind = Session` controls the how kube generates the route, in this case it becomes
+///   `/sessions`;
+/// - `root = "SessionCrd"` is the json return value we get from this resource's API;
+/// - `SessionSpec` itself contains the custom data we want to pass in the the response, which in
+///   this case is nothing;
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
