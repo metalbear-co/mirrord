@@ -297,8 +297,6 @@ impl OperatorApi {
         }
         version_progress.success(None);
 
-        let raw_target = operator_api.fetch_target().await?;
-
         let target_to_connect = if config.feature.copy_target.enabled {
             let mut copy_progress = progress.subtask("copying target");
 
@@ -312,12 +310,17 @@ impl OperatorApi {
             }
 
             let copied = operator_api
-                .copy_target(&metadata, raw_target, config.feature.copy_target.scale_down)
+                .copy_target(
+                    &metadata,
+                    config.target.path.clone().unwrap_or(Target::Targetless),
+                    config.feature.copy_target.scale_down,
+                )
                 .await?;
             copy_progress.success(None);
 
             OperatorSessionTarget::Copied(copied)
         } else {
+            let raw_target = operator_api.fetch_target().await?;
             OperatorSessionTarget::Raw(raw_target)
         };
 
@@ -554,26 +557,25 @@ impl OperatorApi {
     }
 
     /// Creates a new [`CopyTargetCrd`] resource using the operator.
-    /// This should create a new dummy pod out of the given `target`.
+    /// This should create a new dummy pod out of the given [`Target`].
+    ///
+    /// # Note
+    ///
+    /// `copy_target` feature is not available for all target types.
+    /// Target type compatibility is checked by the operator.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn copy_target(
         &self,
         session_metadata: &OperatorSessionMetadata,
-        target: TargetCrd,
+        target: Target,
         scale_down: bool,
     ) -> Result<CopyTargetCrd> {
-        let raw_target = target
-            .spec
-            .target
-            .clone()
-            .ok_or(OperatorApiError::InvalidTarget {
-                reason: "copy target feature is not compatible with targetless mode".into(),
-            })?;
+        let name = TargetCrd::target_name(&target);
 
         let requested = CopyTargetCrd::new(
-            &target.name(),
+            &name,
             CopyTargetSpec {
-                target: raw_target,
+                target,
                 idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
                 scale_down,
             },
