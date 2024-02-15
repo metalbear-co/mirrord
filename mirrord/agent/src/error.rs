@@ -5,7 +5,7 @@ use mirrord_protocol::{
         LayerConnect,
     },
     tcp::{DaemonTcp, LayerTcpSteal},
-    FileRequest, FileResponse, Port,
+    FileRequest, FileResponse,
 };
 use thiserror::Error;
 
@@ -81,9 +81,6 @@ pub(crate) enum AgentError {
     #[error("Bollard failed with `{0}`")]
     Bollard(#[from] bollard::errors::Error),
 
-    #[error("Connection received from unexepcted port `{0}`")]
-    UnexpectedConnection(Port),
-
     #[error("LayerTcpSteal sender failed with `{0}`")]
     SendLayerTcpSteal(#[from] tokio::sync::mpsc::error::SendError<LayerTcpSteal>),
 
@@ -104,9 +101,6 @@ pub(crate) enum AgentError {
 
     #[error("Ran out of connections, dropping new connection")]
     ConnectionLimitReached,
-
-    #[error("An internal invariant of the agent was violated, this should not happen.")]
-    AgentInvariantViolated,
 
     #[error(r#"Failed to set socket flag PACKET_IGNORE_OUTGOING, this might be due to kernel version before 4.20.
     Original error `{0}`"#)]

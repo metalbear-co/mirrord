@@ -9,7 +9,6 @@ use fancy_regex::Regex;
 use mirrord_protocol::{
     tcp::{HttpResponseFallback, NewTcpConnection, TcpClose, HTTP_FRAMED_VERSION},
     RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
-    ResponseError::PortAlreadyStolen,
 };
 use streammap_ext::StreamMap;
 use tokio::{
@@ -21,25 +20,12 @@ use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
 use tracing::error;
 
-use super::*;
-use crate::{
-    error::Result,
-    steal::{
-        connection::StealSubscription::{HttpFiltered, Unfiltered},
-        http::{HttpFilter, HttpFilterManager},
-        ip_tables::IPTablesWrapper,
-    },
-    AgentError::{AgentInvariantViolated, HttpRequestReceiverClosed},
+use self::{
+    http::filter_task,
+    subscriptions::{IpTablesRedirector, PortSubscription, PortSubscriptions},
 };
-
-/// The subscriptions to steal traffic from a specific port.
-#[derive(Debug)]
-enum StealSubscription {
-    /// All of the port's traffic goes to this single client.
-    Unfiltered(ClientId),
-    /// This port's traffic is filtered and distributed to clients using a manager.
-    HttpFiltered(HttpFilterManager),
-}
+use super::*;
+use crate::{error::Result, steal::http::HttpFilter, AgentError::HttpRequestReceiverClosed};
 
 /// Created once per agent during initialization.
 ///
@@ -49,8 +35,9 @@ enum StealSubscription {
 /// - (stealer -> agent) communication is handled by [`client_senders`], and the [`Sender`] channels
 ///   come inside [`StealerCommand`]s through  [`command_rx`];
 pub(crate) struct TcpConnectionStealer {
-    /// Maps a port to its active subscription.
-    port_subscriptions: HashMap<Port, StealSubscription>,
+    /// For managing active subscriptions and port redirections.
+    port_subscriptions: PortSubscriptions<IpTablesRedirector>,
+
     /// Communication between (agent -> stealer) task.
     ///
     /// The agent controls the stealer task through [`TcpStealerAPI::command_tx`].
@@ -59,16 +46,8 @@ pub(crate) struct TcpConnectionStealer {
     /// Connected clients (layer instances) and the channels which the stealer task uses to send
     /// back messages (stealer -> agent -> layer).
     clients: HashMap<ClientId, (Sender<DaemonTcp>, semver::Version)>,
+
     index_allocator: IndexAllocator<ConnectionId, 100>,
-
-    /// Intercepts the connections, instead of letting them go through their normal pathways, this
-    /// is used to steal the traffic.
-    stealer: TcpListener,
-
-    /// Set of rules the agent uses to steal traffic from through the
-    /// [`TcpConnectionStealer::stealer`] listener.
-    /// None when there are no subscribers.
-    iptables: Option<SafeIpTables<IPTablesWrapper>>,
 
     /// Used to send data back to the original remote connection.
     write_streams: HashMap<ConnectionId, WriteHalf<TcpStream>>,
@@ -120,13 +99,21 @@ impl TcpConnectionStealer {
         let (http_request_sender, http_request_receiver) = channel(1024);
         let (connection_close_sender, connection_close_receiver) = channel(1024);
 
+        let port_subscriptions = {
+            let flush_connections = std::env::var("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS")
+                .ok()
+                .and_then(|var| var.parse::<bool>().ok())
+                .unwrap_or_default();
+            let redirector = IpTablesRedirector::new(flush_connections).await?;
+
+            PortSubscriptions::new(redirector, 4)
+        };
+
         Ok(Self {
-            port_subscriptions: HashMap::with_capacity(4),
+            port_subscriptions,
             command_rx,
             clients: HashMap::with_capacity(8),
             index_allocator: Default::default(),
-            stealer: TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await?,
-            iptables: None, // Initialize on first subscription.
             write_streams: HashMap::with_capacity(8),
             read_streams: StreamMap::with_capacity(8),
             connection_clients: HashMap::with_capacity(8),
@@ -138,13 +125,6 @@ impl TcpConnectionStealer {
             http_connection_clients: HashMap::with_capacity(8),
             http_response_senders: HashMap::with_capacity(8),
         })
-    }
-
-    /// Get a result with a reference to the iptables.
-    /// Should only be called while there are subscribers (otherwise self.iptables is None).
-    fn iptables(&self) -> Result<&SafeIpTables<IPTablesWrapper>> {
-        debug_assert!(self.iptables.is_some()); // is_some as long as there are subs
-        self.iptables.as_ref().ok_or(AgentInvariantViolated)
     }
 
     /// Runs the tcp traffic stealer loop.
@@ -182,7 +162,7 @@ impl TcpConnectionStealer {
                     } else { break; }
                 },
                 // Accepts a connection that we're going to be stealing traffic from.
-                accept = self.stealer.accept() => {
+                accept = self.port_subscriptions.next_connection() => {
                     match accept {
                         Ok(accept) => {
                             self.incoming_connection(accept).await?;
@@ -366,34 +346,39 @@ impl TcpConnectionStealer {
         // If we use the original IP we would go through prerouting and hit a loop.
         // localhost should always work.
         real_address.set_ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
-        match self.port_subscriptions.get(&real_address.port()) {
+
+        match self.port_subscriptions.get(real_address.port()) {
             // We got an incoming connection in a port that is being stolen in its whole by a single
             // client.
-            Some(Unfiltered(client_id)) => {
+            Some(PortSubscription::Unfiltered(client_id)) => {
                 self.steal_connection(*client_id, address, real_address.port(), stream)
                     .await
             }
 
             // We got an incoming connection in a port that is being http filtered by one or more
             // clients.
-            Some(HttpFiltered(manager)) => {
+            Some(PortSubscription::Filtered(filters)) => {
                 let connection_id = self.index_allocator.next_index().unwrap();
 
-                manager
-                    .new_connection(
-                        stream,
-                        real_address,
-                        connection_id,
-                        self.http_connection_close_sender.clone(),
-                    )
-                    .await;
+                tokio::spawn(filter_task(
+                    stream,
+                    real_address,
+                    connection_id,
+                    filters.clone(),
+                    self.http_request_sender.clone(),
+                    self.http_connection_close_sender.clone(),
+                ));
 
                 Ok(())
             }
 
-            // Got connection to port without subscribers. This would be a bug, as we are supposed
-            // to set the iptables rules such that we only redirect ports with subscribers.
-            None => Err(AgentError::UnexpectedConnection(real_address.port())),
+            // Got connection to port without subscribers.
+            // This *can* happen due to race conditions
+            // (e.g. we just processed an `unsubscribe` command, but our stealer socket already had
+            // a connection queued)
+            // Here we just drop the TcpStream between our stealer socket and the remote peer (one
+            // that attempted to connect with our target) and the connection is closed.
+            None => Ok(()),
         }
     }
 
@@ -408,172 +393,48 @@ impl TcpConnectionStealer {
         self.clients.insert(client_id, (sender, protocol_version));
     }
 
-    /// Initialize iptables member, which creates an iptables chain for our rules.
-    async fn init_iptables(&mut self) -> Result<()> {
-        let flush_connections = std::env::var("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS")
-            .ok()
-            .and_then(|var| var.parse::<bool>().ok())
-            .unwrap_or_default();
-        let iptables = iptables::new(false).unwrap();
-
-        self.iptables = Some(SafeIpTables::create(iptables.into(), flush_connections).await?);
-        Ok(())
-    }
-
     /// Helper function to handle [`Command::PortSubscribe`] messages.
     ///
-    /// Inserts `port` into [`TcpConnectionStealer::iptables`] rules, and subscribes the layer with
-    /// `client_id` to steal traffic from it.
+    /// Inserts subscription into [`Self::port_subscriptions`].
     #[tracing::instrument(level = "trace", skip(self))]
     async fn port_subscribe(&mut self, client_id: ClientId, port_steal: StealType) -> Result<()> {
-        if self.iptables.is_none() {
-            // TODO: make the initialization internal to SafeIpTables.
-            self.init_iptables().await?;
-        }
-        let mut first_subscriber = false;
-
-        let steal_port = match port_steal {
-            StealType::All(port) => match self.port_subscriptions.get(&port) {
-                Some(sub) => {
-                    error!("Can't steal port {port:?} as it is already being stolen: {sub:?}.");
-                    Err(PortAlreadyStolen(port))
-                }
-                None => {
-                    first_subscriber = true;
-                    self.port_subscriptions.insert(port, Unfiltered(client_id));
-                    Ok(port)
-                }
-            },
-            StealType::FilteredHttp(port, filter) => {
-                // Make the regex case-insensitive.
-                match Regex::new(&format!("(?i){filter}")) {
-                    Ok(regex) => match self.port_subscriptions.get_mut(&port) {
-                        Some(Unfiltered(earlier_client)) => {
-                            error!("Can't steal port {port:?} as it is already being stolen with no filters by client {earlier_client:?}.");
-                            Err(PortAlreadyStolen(port))
-                        }
-                        Some(HttpFiltered(manager)) => {
-                            manager.add_client(client_id, HttpFilter::new_header_filter(regex));
-                            Ok(port)
-                        }
-                        None => {
-                            first_subscriber = true;
-
-                            let manager = HttpFiltered(HttpFilterManager::new(
-                                client_id,
-                                HttpFilter::new_header_filter(regex),
-                                self.http_request_sender.clone(),
-                            ));
-
-                            self.port_subscriptions.insert(port, manager);
-                            Ok(port)
-                        }
-                    },
-                    Err(fail) => Err(From::from(BadHttpFilterRegex(filter, fail.to_string()))),
-                }
-            }
-            StealType::FilteredHttpEx(port, filter) => match HttpFilter::try_from(&filter) {
-                Err(fail) => Err(From::from(BadHttpFilterExRegex(filter, fail.to_string()))),
-                Ok(filter) => match self.port_subscriptions.get_mut(&port) {
-                    Some(Unfiltered(earlier_client)) => {
-                        error!("Can't steal port {port:?} as it is already being stolen with no filters by client {earlier_client:?}.");
-                        Err(PortAlreadyStolen(port))
-                    }
-                    Some(HttpFiltered(manager)) => {
-                        manager.add_client(client_id, filter);
-                        Ok(port)
-                    }
-                    None => {
-                        first_subscriber = true;
-
-                        let manager = HttpFiltered(HttpFilterManager::new(
-                            client_id,
-                            filter,
-                            self.http_request_sender.clone(),
-                        ));
-
-                        self.port_subscriptions.insert(port, manager);
-                        Ok(port)
-                    }
-                },
-            },
+        let spec = match port_steal {
+            StealType::All(port) => Ok((port, None)),
+            StealType::FilteredHttp(port, filter) => Regex::new(&format!("(?i){filter}"))
+                .map(|regex| (port, Some(HttpFilter::new_header_filter(regex))))
+                .map_err(|err| BadHttpFilterRegex(filter, err.to_string())),
+            StealType::FilteredHttpEx(port, filter) => HttpFilter::try_from(&filter)
+                .map(|filter| (port, Some(filter)))
+                .map_err(|err| BadHttpFilterExRegex(filter, err.to_string())),
         };
 
-        if first_subscriber && let Ok(port) = steal_port {
-            self.iptables()?
-                .add_redirect(port, self.stealer.local_addr()?.port())
-                .await?;
-        }
+        let res = match spec {
+            Ok((port, filter)) => self.port_subscriptions.add(client_id, port, filter).await?,
+            Err(e) => Err(e.into()),
+        };
 
-        self.send_message_to_single_client(&client_id, DaemonTcp::SubscribeResult(steal_port))
+        self.send_message_to_single_client(&client_id, DaemonTcp::SubscribeResult(res))
             .await
     }
 
     /// Helper function to handle [`Command::PortUnsubscribe`] messages.
     ///
-    /// Removes `port` from [`TcpConnectionStealer::iptables`] rules, and unsubscribes the layer
-    /// with `client_id`.
+    /// Removes subscription from [`Self::port_subscriptions`].
     #[tracing::instrument(level = "trace", skip(self))]
     async fn port_unsubscribe(
         &mut self,
         client_id: ClientId,
         port: Port,
     ) -> Result<(), AgentError> {
-        let port_unsubscribed = match self.port_subscriptions.get_mut(&port) {
-            Some(HttpFiltered(manager)) => {
-                manager.remove_client(&client_id);
-                manager.is_empty()
-            }
-            Some(Unfiltered(subscribed_client)) if *subscribed_client == client_id => true,
-            Some(Unfiltered(_)) | None => {
-                warn!("A client tried to unsubscribe from a port it was not subscribed to.");
-                false
-            }
-        };
-        if port_unsubscribed {
-            // No remaining subscribers on this port.
-
-            // If there are ongoing connections, this will interrupt them. This is a known issue
-            // https://github.com/metalbear-co/mirrord/issues/1575
-            self.iptables()?
-                .remove_redirect(port, self.stealer.local_addr()?.port())
-                .await?;
-
-            self.port_subscriptions.remove(&port);
-
-            // Cleanup iptables if not stealing any ports anymore.
-            if self.port_subscriptions.is_empty() {
-                if let Some(safe_iptables) = self.iptables.as_ref() {
-                    if let Err(e) = safe_iptables.cleanup().await {
-                        error!("Error in iptables cleanup: {e}");
-                    }
-                }
-                self.iptables = None;
-            }
-        }
-        Ok(())
-    }
-
-    fn get_client_ports(&self, client_id: ClientId) -> Vec<Port> {
-        self.port_subscriptions
-            .iter()
-            .filter(|(_port, sub)| match sub {
-                Unfiltered(port_client) => *port_client == client_id,
-                HttpFiltered(manager) => manager.contains_client(&client_id),
-            })
-            .map(|(port, _sub)| *port)
-            .collect()
+        self.port_subscriptions.remove(client_id, port).await
     }
 
     /// Removes the client with `client_id` from our list of clients (layers), and also removes
-    /// their redirection rules from [`TcpConnectionStealer::iptables`] and all their open
+    /// their subscriptions from [`Self::port_subscriptions`] and all their open
     /// connections.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn close_client(&mut self, client_id: ClientId) -> Result<(), AgentError> {
-        let ports = self.get_client_ports(client_id);
-        for port in ports.iter() {
-            self.port_unsubscribe(client_id, *port).await?
-        }
+        self.port_subscriptions.remove_all(client_id).await?;
 
         // Close and remove all remaining connections of the closed client.
         if let Some(remaining_connections) = self.client_connections.remove(&client_id) {
