@@ -1,1 +1,0 @@
-Add missing permissions needed by operator for copy and scaledown
