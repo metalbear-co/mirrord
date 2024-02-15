@@ -1,4 +1,7 @@
-use std::{fmt, str::FromStr};
+use std::{
+    fmt::{self, Display},
+    str::FromStr,
+};
 
 use mirrord_analytics::CollectAnalytics;
 use schemars::JsonSchema;
@@ -290,16 +293,16 @@ pub struct PodTarget {
     pub container: Option<String>,
 }
 
-impl ToString for PodTarget {
-    fn to_string(&self) -> String {
-        format!(
+impl Display for PodTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!(
             "{}{}",
             self.container
                 .clone()
                 .map(|c| format!("{c}/"))
                 .unwrap_or_default(),
             self.pod.clone()
-        )
+        ))
     }
 }
 

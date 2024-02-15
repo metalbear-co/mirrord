@@ -303,7 +303,7 @@ async fn operator_session(
         operation_progress.print("killing all sessions");
 
         session_api
-            .delete(&format!("kill_all"), &DeleteParams::default())
+            .delete("kill_all", &DeleteParams::default())
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
@@ -314,7 +314,7 @@ async fn operator_session(
         operation_progress.print("retaining only active sessions");
 
         session_api
-            .delete(&format!("retain_active"), &DeleteParams::default())
+            .delete("retain_active", &DeleteParams::default())
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
