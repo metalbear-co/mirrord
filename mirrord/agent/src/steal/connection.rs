@@ -376,6 +376,8 @@ impl TcpConnectionStealer {
             // This *can* happen due to race conditions
             // (e.g. we just processed an `unsubscribe` command, but our stealer socket already had
             // a connection queued)
+            // Here we just drop the TcpStream between our stealer socket and the remote peer (one
+            // that attempted to connect with our target) and the connection is closed.
             None => Ok(()),
         }
     }
