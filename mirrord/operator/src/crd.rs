@@ -288,6 +288,9 @@ pub struct CopyTargetSpec {
     /// Should the operator scale down target deployment to 0 while this pod is alive.
     /// Ignored if [`Target`] is not [`Target::Deployment`].
     pub scale_down: bool,
+    // TODO: docs
+    /// queue id -> (attribute name -> regex)
+    pub sqs_filter: Option<HashMap<String, HashMap<String, String>>>,
 }
 
 /// Features and operations that can be blocked by a `MirrordPolicy`.

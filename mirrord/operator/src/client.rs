@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fmt::{self, Display},
     io,
 };
@@ -282,13 +283,17 @@ impl OperatorApi {
         }
         version_progress.success(None);
 
-        let target_to_connect = if config.feature.copy_target.enabled {
+        let target_to_connect = if config.feature.copy_target.enabled
+            // use copy_target for splitting queues
+            || config.feature.split_queues.is_set()
+        {
             let mut copy_progress = progress.subtask("copying target");
             let copied = operator_api
                 .copy_target(
                     &metadata,
                     config.target.path.clone().unwrap_or(Target::Targetless),
                     config.feature.copy_target.scale_down,
+                    config.feature.split_queues.get_sqs_filter(),
                 )
                 .await?;
             copy_progress.success(None);
@@ -544,6 +549,7 @@ impl OperatorApi {
         session_metadata: &OperatorSessionMetadata,
         target: Target,
         scale_down: bool,
+        sqs_filter: Option<HashMap<String, HashMap<String, String>>>,
     ) -> Result<CopyTargetCrd> {
         let name = TargetCrd::target_name(&target);
 
@@ -553,6 +559,7 @@ impl OperatorApi {
                 target,
                 idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
                 scale_down,
+                sqs_filter,
             },
         );
 

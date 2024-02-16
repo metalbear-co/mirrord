@@ -29,7 +29,27 @@ use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig};
 /// }
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Default)]
-pub struct SplitQueuesConfig(HashMap<String, QueueFilter>);
+pub struct SplitQueuesConfig(Option<HashMap<String, QueueFilter>>);
+
+impl SplitQueuesConfig {
+    pub fn is_set(&self) -> bool {
+        self.0.is_some()
+    }
+
+    /// Out of the whole queue splitting config, get only the sqs queues.
+    pub fn get_sqs_filter(&self) -> Option<HashMap<String, HashMap<String, String>>> {
+        self.0.as_ref().map(|queue_id2queue_filter| {
+            queue_id2queue_filter
+                .iter()
+                .filter_map(|(queue_id, queue_filter)| match queue_filter {
+                    QueueFilter::Sqs(filter_mapping) => {
+                        Some((queue_id.clone(), filter_mapping.clone()))
+                    }
+                })
+                .collect()
+        })
+    }
+}
 
 impl MirrordConfig for SplitQueuesConfig {
     type Generated = Self;
@@ -56,6 +76,12 @@ enum QueueFilter {
 
 impl CollectAnalytics for &SplitQueuesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
-        analytics.add("queue_count", self.0.len())
+        analytics.add(
+            "queue_count",
+            self.0
+                .as_ref()
+                .map(|mapping| mapping.len())
+                .unwrap_or_default(),
+        )
     }
 }
