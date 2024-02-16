@@ -20,7 +20,6 @@ use config::{ConfigContext, ConfigError, MirrordConfig};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
-use target::Target;
 use tera::Tera;
 use tracing::warn;
 
@@ -432,20 +431,6 @@ impl LayerConfig {
                     and therefore not running in the copied pod"
                         .into(),
                 );
-            }
-
-            if self.feature.copy_target.scale_down {
-                match (context.ide, self.target.path.as_ref()) {
-                    (_, Some(Target::Deployment(..))) => {}
-                    (true, None) => {}
-                    _ => {
-                        return Err(ConfigError::Conflict(
-                            "The scale down feature is compatible only with deployment targets, \
-                            please either disable this option or specify a deployment target."
-                                .into(),
-                        ));
-                    }
-                }
             }
         }
 
