@@ -451,6 +451,7 @@ fn init_ext_error_handler(commands: &Commands) -> bool {
             let _ = miette::set_hook(Box::new(|_| Box::new(JSONReportHandler::new())));
             true
         }
+        Commands::InternalProxy => true,
         _ => false,
     }
 }
