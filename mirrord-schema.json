@@ -796,7 +796,7 @@
       "type": "object",
       "properties": {
         "idle_timeout": {
-          "title": "internal_proxy.idle_timeout {#agent-idle_timeout}",
+          "title": "internal_proxy.idle_timeout {#internal_proxy-idle_timeout}",
           "description": "How much time to wait while we don't have any active connections before exiting.\n\nCommon cases would be running a chain of processes that skip using the layer and don't connect to the proxy.\n\n```json { \"internal_proxy\": { \"idle_timeout\": 30 } } ```",
           "type": [
             "integer",
@@ -805,8 +805,24 @@
           "format": "uint64",
           "minimum": 0.0
         },
+        "log_destination": {
+          "title": "internal_proxy.log_destination {#internal_proxy-log_destination}",
+          "description": "Set the log file destination for the internal proxy.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "log_level": {
+          "title": "internal_proxy.log_level {#internal_proxy-log_level}",
+          "description": "Set the log level for the internal proxy. RUST_LOG convention (i.e `mirrord=trace`) will only beu sed if log_destination is set",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "start_idle_timeout": {
-          "title": "internal_proxy.start_idle_timeout {#agent-start_idle_timeout}",
+          "title": "internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}",
           "description": "How much time to wait for the first connection to the proxy in seconds.\n\nCommon cases would be running with dlv or any other debugger, which sets a breakpoint on process execution, delaying the layer startup and connection to proxy.\n\n```json { \"internal_proxy\": { \"start_idle_timeout\": 60 } } ```",
           "type": [
             "integer",
