@@ -246,6 +246,7 @@ pub(crate) enum SessionCommand {
 
     /// Kills _inactive_ sessions, might be useful if an undead session is still being stored in
     /// the session storage.
+    #[clap(hide(true))]
     RetainActive,
 }
 
