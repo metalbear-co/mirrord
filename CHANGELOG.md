@@ -8,6 +8,28 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.88.0](https://github.com/metalbear-co/mirrord/tree/3.88.0) - 2024-02-18
+
+
+### Added
+
+- Add log level and log destination for int proxy
+  [#2246](https://github.com/metalbear-co/mirrord/issues/2246)
+
+
+### Changed
+
+- 1. mirrord CLI now does not check target type when the `copy_target` feature
+  is enabled. The check is now done only in the operator.
+  2. `mirrord operator setup` not includes permissions to read and change
+  rollouts scale.
+
+
+### Fixed
+
+- Incoming traffic was being mirrord when set to `false`.
+
+
 ## [3.87.0](https://github.com/metalbear-co/mirrord/tree/3.87.0) - 2024-02-15
 
 

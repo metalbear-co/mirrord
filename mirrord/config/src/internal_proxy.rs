@@ -21,7 +21,7 @@ use crate::config::source::MirrordConfigSource;
 #[config(map_to = "InternalProxyFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct InternalProxyConfig {
-    /// ### internal_proxy.start_idle_timeout {#agent-start_idle_timeout}
+    /// ### internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}
     ///
     /// How much time to wait for the first connection to the proxy in seconds.
     ///
@@ -38,7 +38,7 @@ pub struct InternalProxyConfig {
     #[config(default = 60)]
     pub start_idle_timeout: u64,
 
-    /// ### internal_proxy.idle_timeout {#agent-idle_timeout}
+    /// ### internal_proxy.idle_timeout {#internal_proxy-idle_timeout}
     ///
     /// How much time to wait while we don't have any active connections before exiting.
     ///
@@ -54,4 +54,14 @@ pub struct InternalProxyConfig {
     /// ```
     #[config(default = 5)]
     pub idle_timeout: u64,
+
+    /// ### internal_proxy.log_level {#internal_proxy-log_level}
+    /// Set the log level for the internal proxy.
+    /// RUST_LOG convention (i.e `mirrord=trace`)
+    /// will only beu sed if log_destination is set
+    pub log_level: Option<String>,
+
+    /// ### internal_proxy.log_destination {#internal_proxy-log_destination}
+    /// Set the log file destination for the internal proxy.
+    pub log_destination: Option<String>,
 }
