@@ -1,13 +1,13 @@
 use std::{fs::File, path::PathBuf, time::Duration};
 
-use kube::{api::DeleteParams, Api};
+use kube::Api;
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     LayerFileConfig,
 };
 use mirrord_kube::api::kubernetes::create_kube_api;
 use mirrord_operator::{
-    client::{session_api, OperatorApiError, OperatorOperation},
+    client::{OperatorApiError, OperatorOperation},
     crd::{LicenseInfoOwned, MirrordOperatorCrd, MirrordOperatorSpec, OPERATOR_STATUS_NAME},
     setup::{LicenseType, Operator, OperatorNamespace, OperatorSetup, SetupOptions},
 };
@@ -15,13 +15,18 @@ use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{row, Table};
 use serde::Deserialize;
 use tokio::fs;
-use tracing::{error, warn};
+use tracing::warn;
 
+use self::session::{
+    operator_session_kill_all, operator_session_kill_one, operator_session_retain_active,
+};
 use crate::{
     config::{OperatorArgs, OperatorCommand},
     error::CliError,
-    Result,
+    Result, SessionCommand,
 };
+
+mod session;
 
 #[derive(Deserialize)]
 struct OperatorVersionResponse {
@@ -270,77 +275,6 @@ Operator License
     Ok(())
 }
 
-/// Handles the `mirrord operator session` family of commands:
-///
-/// - `--kill-one {session_id}`: kills the operator session specified by `session_id`;
-/// - `--kill-all`: kills every operator session, this is basically a `.clear()`;
-/// - `--retain-active`: performs a clean-up for operator sessions that are still stored;
-#[tracing::instrument(level = "trace", ret)]
-async fn operator_session(
-    kill_one: Option<u32>,
-    kill_all: bool,
-    retain_active: bool,
-) -> Result<()> {
-    let mut progress = ProgressTracker::from_env("Operator session action");
-
-    let session_api = session_api(None)
-        .await
-        .inspect_err(|fail| error!("Failed to even get sessio_api {fail:?}!"))?;
-
-    let mut operation_progress = progress.subtask("preparing to execute session operation...");
-
-    let result = if let Some(session_id) = kill_one {
-        operation_progress.print("killing session with id {session_id}");
-
-        session_api
-            .delete(&format!("kill_one/{session_id}"), &DeleteParams::default())
-            .await
-            .map_err(|error| OperatorApiError::KubeError {
-                error,
-                operation: OperatorOperation::GettingStatus,
-            })
-            .map_err(CliError::from)
-    } else if kill_all {
-        operation_progress.print("killing all sessions");
-
-        session_api
-            .delete("kill_all", &DeleteParams::default())
-            .await
-            .map_err(|error| OperatorApiError::KubeError {
-                error,
-                operation: OperatorOperation::GettingStatus,
-            })
-            .map_err(CliError::from)
-    } else if retain_active {
-        operation_progress.print("retaining only active sessions");
-
-        session_api
-            .delete("retain_active", &DeleteParams::default())
-            .await
-            .map_err(|error| OperatorApiError::KubeError {
-                error,
-                operation: OperatorOperation::GettingStatus,
-            })
-            .map_err(CliError::from)
-    } else {
-        panic!("You must select one of the session options, there is no default!");
-    }
-    .inspect_err(|_| {
-        operation_progress.failure(Some("Failed to execute session operation!"));
-    })?;
-
-    if let Some(status) = result.right() {
-        operation_progress.success(Some(&format!(
-            "session operation completed with {status:?}"
-        )));
-    }
-
-    operation_progress.success(Some("session operation finished"));
-    progress.success(Some("Done with session stuff!"));
-
-    Ok(())
-}
-
 /// Handle commands related to the operator `mirrord operator ...`
 pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
     match args.command {
@@ -352,10 +286,12 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             license_path,
         } => operator_setup(accept_tos, file, namespace, license_key, license_path).await,
         OperatorCommand::Status { config_file } => operator_status(config_file).await,
-        OperatorCommand::Session {
-            kill,
-            kill_all,
-            retain_active,
-        } => operator_session(kill, kill_all, retain_active).await,
+        OperatorCommand::Session(SessionCommand::Kill { id }) => {
+            operator_session_kill_one(id).await
+        }
+        OperatorCommand::Session(SessionCommand::KillAll) => operator_session_kill_all().await,
+        OperatorCommand::Session(SessionCommand::RetainActive) => {
+            operator_session_retain_active().await
+        }
     }
 }

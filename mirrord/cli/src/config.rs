@@ -223,16 +223,30 @@ pub(super) enum OperatorCommand {
         #[arg(short = 'f')]
         config_file: Option<String>,
     },
-    Session {
-        #[arg(long, conflicts_with = "kill_all", conflicts_with = "retain_active")]
-        kill: Option<u32>,
+    /// Operator session management commands.
+    ///
+    /// Allows the user to forcefully kill living sessions.
+    #[command(subcommand)]
+    Session(SessionCommand),
+}
 
-        #[arg(long, conflicts_with = "kill", conflicts_with = "retain_active")]
-        kill_all: bool,
-
-        #[arg(long, conflicts_with = "kill_all", conflicts_with = "kill")]
-        retain_active: bool,
+/// `mirrord operator session` family of commands.
+///
+/// Allows the user to forcefully kill operator sessions, use with care!
+#[derive(Debug, Subcommand, Clone, Copy)]
+pub(crate) enum SessionCommand {
+    /// Kills the session specified by `id`.
+    Kill {
+        /// Id of the session.
+        #[arg(short, long)]
+        id: u32,
     },
+    /// Kills all operator sessions.
+    KillAll,
+
+    /// Kills _inactive_ sessions, might be useful if an undead session is still being stored in
+    /// the session storage.
+    RetainActive,
 }
 
 #[derive(ValueEnum, Clone, Debug)]
