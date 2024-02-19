@@ -191,23 +191,12 @@ impl OperatorApi {
 
     /// Checks used config against operator specification.
     fn check_config(config: &LayerConfig, operator: &MirrordOperatorCrd) -> Result<()> {
-        if config.feature.copy_target.enabled {
-            let feature_enabled = operator.spec.copy_target_enabled.unwrap_or(false);
-
-            if !feature_enabled {
-                return Err(OperatorApiError::UnsupportedFeature {
-                    feature: "copy target".into(),
-                    operator_version: operator.spec.operator_version.clone(),
-                });
-            }
-
-            if config.feature.copy_target.scale_down
-                && !matches!(config.target.path, Some(Target::Deployment(..)))
-            {
-                return Err(OperatorApiError::InvalidTarget {
-                    reason: "scale down feature is enabled, but target is not a deployment".into(),
-                });
-            }
+        if config.feature.copy_target.enabled && !operator.spec.copy_target_enabled.unwrap_or(false)
+        {
+            return Err(OperatorApiError::UnsupportedFeature {
+                feature: "copy target".into(),
+                operator_version: operator.spec.operator_version.clone(),
+            });
         }
 
         Ok(())
@@ -309,16 +298,6 @@ impl OperatorApi {
 
         let target_to_connect = if config.feature.copy_target.enabled {
             let mut copy_progress = progress.subtask("copying target");
-
-            if config.feature.copy_target.scale_down {
-                let is_deployment = matches!(config.target.path, Some(Target::Deployment(..)));
-                if !is_deployment {
-                    progress.warning(
-                        "cannot scale down while copying target - target is not a deployment",
-                    )
-                }
-            }
-
             let copied = operator_api
                 .copy_target(
                     &metadata,
