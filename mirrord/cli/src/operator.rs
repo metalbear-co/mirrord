@@ -125,7 +125,7 @@ async fn get_status_api(config: Option<String>) -> Result<Api<MirrordOperatorCrd
     Ok(Api::all(kube_api))
 }
 
-#[tracing::instrument(level = "debug", ret)]
+#[tracing::instrument(level = "trace", ret)]
 async fn operator_status(config: Option<String>) -> Result<()> {
     let mut progress = ProgressTracker::from_env("Operator Status");
 
@@ -271,10 +271,11 @@ Operator License
 }
 
 /// Handles the `mirrord operator session` family of commands:
+///
 /// - `--kill-one {session_id}`: kills the operator session specified by `session_id`;
 /// - `--kill-all`: kills every operator session, this is basically a `.clear()`;
 /// - `--retain-active`: performs a clean-up for operator sessions that are still stored;
-#[tracing::instrument(level = "debug", ret)]
+#[tracing::instrument(level = "trace", ret)]
 async fn operator_session(
     kill_one: Option<u32>,
     kill_all: bool,
