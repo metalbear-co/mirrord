@@ -238,8 +238,8 @@ pub(crate) enum SessionCommand {
     /// Kills the session specified by `id`.
     Kill {
         /// Id of the session.
-        #[arg(short, long)]
-        id: u32,
+        #[arg(short, long, value_parser=hex_id)]
+        id: u64,
     },
     /// Kills all operator sessions.
     KillAll,
@@ -247,6 +247,14 @@ pub(crate) enum SessionCommand {
     /// Kills _inactive_ sessions, might be useful if an undead session is still being stored in
     /// the session storage.
     RetainActive,
+}
+
+/// Parses the operator session id from hex (without `0x` prefix) into `u64`. It also accepts the
+/// non-hex version of the id.
+fn hex_id(raw: &str) -> Result<u64, String> {
+    raw.parse::<u64>()
+        .or_else(|_| u64::from_str_radix(raw, 16))
+        .map_err(|fail| format!("Failed parsing hex id value with {fail}!"))
 }
 
 #[derive(ValueEnum, Clone, Debug)]

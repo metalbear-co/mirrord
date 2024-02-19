@@ -64,7 +64,7 @@ pub(super) async fn operator_session_kill_all() -> Result<()> {
 
 /// `mirrord operator session kill {id}`: kills the operator session specified by `id`.
 #[tracing::instrument(level = "trace", ret)]
-pub(super) async fn operator_session_kill_one(id: u32) -> Result<()> {
+pub(super) async fn operator_session_kill_one(id: u64) -> Result<()> {
     let (progress, api, sub_progress) = operator_session_prepare().await?;
 
     sub_progress.print("killing session with id {session_id}");
