@@ -23,6 +23,9 @@ pub trait Progress: Sized {
     /// When you want to issue a warning on current task
     fn warning(&self, msg: &str);
 
+    /// When you want to print a message, IDE support.
+    fn info(&self, msg: &str);
+
     /// When you want to print a message, cli only.
     fn print(&self, msg: &str);
 
@@ -60,6 +63,8 @@ impl Progress for NullProgress {
     fn failure(&mut self, _: Option<&str>) {}
 
     fn warning(&self, _: &str) {}
+
+    fn info(&self, _: &str) {}
 
     fn print(&self, _: &str) {}
 }
@@ -116,12 +121,20 @@ impl Progress for JsonProgress {
 
     fn print(&self, _: &str) {}
 
+    fn info(&self, msg: &str) {
+        let message = ProgressMessage::Info {
+            message: msg.to_string(),
+        };
+        message.print();
+    }
+
     fn warning(&self, msg: &str) {
         let message = ProgressMessage::Warning(WarningMessage {
             message: msg.to_string(),
         });
         message.print();
     }
+
     fn failure(&mut self, msg: Option<&str>) {
         self.done = true;
         self.print_finished_task(false, msg)
@@ -172,6 +185,11 @@ impl Progress for SimpleProgress {
     fn warning(&self, msg: &str) {
         println!("{msg}");
     }
+
+    fn info(&self, msg: &str) {
+        println!("{msg}");
+    }
+
     fn failure(&mut self, msg: Option<&str>) {
         println!("{msg:?}");
     }
@@ -244,6 +262,12 @@ impl Progress for SpinnerProgress {
 
     fn warning(&self, msg: &str) {
         let formatted_message = format!("! {msg}");
+        self.print(&formatted_message);
+        self.progress.set_message(formatted_message);
+    }
+
+    fn info(&self, msg: &str) {
+        let formatted_message = format!("* {msg}");
         self.print(&formatted_message);
         self.progress.set_message(formatted_message);
     }
@@ -338,6 +362,7 @@ enum ProgressMessage {
     NewTask(NewTaskMessage),
     Warning(WarningMessage),
     FinishedTask(FinishedTaskMessage),
+    Info { message: String },
 }
 
 impl ProgressMessage {

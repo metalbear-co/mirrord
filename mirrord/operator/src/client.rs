@@ -234,17 +234,27 @@ impl OperatorApi {
         // but maybe the time of the local user and of the operator are out of sync, so we
         // could end up blocking a valid license (or even just warning on it could be
         // confusing).
-        if let Some(expiring_soon) =
+        if let Some(days_until_expiration) =
             DateTime::from_naive_date(operator.spec.license.expire_at).days_until_expiration()
-            && (expiring_soon <= <DateTime<Utc> as LicenseValidity>::CLOSE_TO_EXPIRATION_DAYS)
         {
-            let expiring_message = format!(
-                "Operator license will expire soon, in {} days!",
-                expiring_soon,
-            );
+            if days_until_expiration <= <DateTime<Utc> as LicenseValidity>::CLOSE_TO_EXPIRATION_DAYS
+            {
+                let expiring_soon = (days_until_expiration > 0)
+                    .then(|| format!(", in {days_until_expiration} days"))
+                    .unwrap_or_else(|| ", today".to_string());
 
-            progress.warning(&expiring_message);
-            warn!(expiring_message);
+                let expiring_message =
+                    format!("Operator license will expire soon{expiring_soon}!",);
+
+                progress.warning(&expiring_message);
+                warn!(expiring_message);
+            } else {
+                let good_validity_message =
+                    format!("License is valid for {days_until_expiration} days.");
+
+                progress.info(&good_validity_message);
+                tracing::info!(good_validity_message);
+            }
         }
 
         Self::check_config(config, &operator)?;
