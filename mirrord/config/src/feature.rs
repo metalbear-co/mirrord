@@ -9,7 +9,7 @@ pub mod copy_target;
 pub mod env;
 pub mod fs;
 pub mod network;
-mod split_queues;
+pub mod split_queues;
 
 /// Controls mirrord features.
 ///

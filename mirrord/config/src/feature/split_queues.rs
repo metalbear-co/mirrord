@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig};
 
+pub type QueueId = String;
+
 /// ```json
 /// {
 ///   "feature": {
@@ -29,7 +31,7 @@ use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig};
 /// }
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Default)]
-pub struct SplitQueuesConfig(Option<HashMap<String, QueueFilter>>);
+pub struct SplitQueuesConfig(Option<HashMap<QueueId, QueueFilter>>);
 
 impl SplitQueuesConfig {
     pub fn is_set(&self) -> bool {
@@ -66,12 +68,17 @@ impl FromMirrordConfig for SplitQueuesConfig {
     type Generator = Self;
 }
 
+pub type MessageAttributeName = String;
+pub type AttributeValuePattern = String;
+
+pub type SqsMessageFilter = HashMap<MessageAttributeName, AttributeValuePattern>;
+
 /// More queue types might be added in the future.
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
 #[serde(tag = "queue_type", content = "message_filter")]
-enum QueueFilter {
+pub enum QueueFilter {
     #[serde(rename = "SQS")]
-    Sqs(HashMap<String, String>),
+    Sqs(SqsMessageFilter),
 }
 
 impl CollectAnalytics for &SplitQueuesConfig {

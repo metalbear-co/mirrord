@@ -5,7 +5,11 @@ use std::{
 
 use chrono::NaiveDate;
 use kube::CustomResource;
-use mirrord_config::target::{Target, TargetConfig};
+pub use mirrord_config::feature::split_queues::QueueId;
+use mirrord_config::{
+    feature::split_queues::SqsMessageFilter,
+    target::{Target, TargetConfig},
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -350,11 +354,17 @@ pub enum QueueNameSource {
     EnvVar(String),
 }
 
+pub type OutputQueueName = String;
+
 /// The details of a queue that should be split.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "queueType")]
 pub enum SplitQueue {
     /// Amazon SQS
+    ///
+    /// Where the application gets the queue name from. Will be used to read messages from that
+    /// queue and distribute them to the output queues. When running with mirrord and splitting
+    /// this queue, applications will get a modified name from that source.
     #[serde(rename = "SQS")]
     Sqs(QueueNameSource),
 }
@@ -368,11 +378,9 @@ pub enum QueueConsumer {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct QueueSplitterStatus {
-    // TODO: this is just for now. later it will be something like a set of filters.
+    // TODO: ?
     pub active: bool,
 }
-
-pub type QueueId = String;
 
 /// Defines a Custom Resource that holds a central configuration for splitting a queue. mirrord
 /// users specify a splitter by name in their configuration. mirrord then starts splitting according
@@ -393,4 +401,35 @@ pub struct MirrordQueueSplitterSpec {
 
     /// The resource (deployment or Argo rollout) that reads from the queues.
     pub consumer: QueueConsumer,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename(SQSFilterStatus))]
+pub struct SqsFilterStatus {
+    // TODO: ?
+    pub active: bool,
+}
+
+// TODO: docs
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+    group = "splitters.mirrord.metalbear.co",
+    version = "v1alpha",
+    kind = "MirrordSQSFilter",
+    root = "MirrordSqsFilter", // for Rust naming conventions (Sqs, not SQS)
+    shortname = "qs",
+    status = "SqsFilterStatus",
+    namespaced
+)]
+#[serde(rename_all = "camelCase")] // queue_name -> queueName in yaml.
+pub struct MirrordSqsFilterSpec {
+    pub queue_id: QueueId,
+
+    pub queue_name: String,
+
+    // TODO: docs
+    pub output_queue_name: OutputQueueName,
+
+    // TODO: docs
+    pub filter: SqsMessageFilter,
 }

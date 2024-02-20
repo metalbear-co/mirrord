@@ -23,7 +23,7 @@ use k8s_openapi::{
 use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
-use crate::crd::{MirrordPolicy, MirrordQueueSplitter, TargetCrd};
+use crate::crd::{MirrordPolicy, MirrordQueueSplitter, MirrordSqsFilter, TargetCrd};
 
 static OPERATOR_NAME: &str = "mirrord-operator";
 static OPERATOR_PORT: i32 = 3000;
@@ -179,6 +179,9 @@ impl OperatorSetup for Operator {
 
         writer.write_all(b"---\n")?;
         MirrordQueueSplitter::crd().to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        MirrordSqsFilter::crd().to_writer(&mut writer)?;
 
         Ok(())
     }
@@ -464,7 +467,20 @@ impl OperatorRole {
                 PolicyRule {
                     api_groups: Some(vec!["splitters.mirrord.metalbear.co".to_owned()]),
                     resources: Some(vec![MirrordQueueSplitter::plural(&()).to_string()]),
-                    verbs: vec!["list".to_owned(), "get".to_owned()],
+                    verbs: vec!["list".to_owned()],
+                    ..Default::default()
+                },
+                // Allow the operator to control mirrord queue filters.
+                PolicyRule {
+                    api_groups: Some(vec!["splitters.mirrord.metalbear.co".to_owned()]),
+                    resources: Some(vec![MirrordSqsFilter::plural(&()).to_string()]),
+                    verbs: vec![
+                        "create".to_owned(),
+                        "watch".to_owned(),
+                        "list".to_owned(),
+                        "get".to_owned(),
+                        "delete".to_owned(),
+                    ],
                     ..Default::default()
                 },
             ]),
