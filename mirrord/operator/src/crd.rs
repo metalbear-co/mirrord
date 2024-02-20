@@ -372,6 +372,8 @@ pub struct QueueSplitterStatus {
     pub active: bool,
 }
 
+pub type QueueId = String;
+
 /// Defines a Custom Resource that holds a central configuration for splitting a queue. mirrord
 /// users specify a splitter by name in their configuration. mirrord then starts splitting according
 /// to the spec and the user's filter.
@@ -387,7 +389,7 @@ pub struct QueueSplitterStatus {
 pub struct MirrordQueueSplitterSpec {
     /// A map of the queues that should be split.
     /// The key is used by users to associate filters to the right queues.
-    pub queues: HashMap<String, SplitQueue>,
+    pub queues: HashMap<QueueId, SplitQueue>,
 
     /// The resource (deployment or Argo rollout) that reads from the queues.
     pub consumer: QueueConsumer,
