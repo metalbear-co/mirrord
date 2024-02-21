@@ -16,7 +16,7 @@ async fn operator_session_prepare() -> Result<(
 
     let session_api = session_api(None)
         .await
-        .inspect_err(|fail| error!("Failed to even get sessio_api {fail:?}!"))?;
+        .inspect_err(|fail| error!(error = ?fail, "Failed to create session API"))?;
 
     let sub_progress = progress.subtask("preparing...");
 
