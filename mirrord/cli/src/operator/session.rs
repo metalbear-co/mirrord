@@ -18,7 +18,7 @@ async fn operator_session_prepare() -> Result<(
         .await
         .inspect_err(|fail| error!("Failed to even get sessio_api {fail:?}!"))?;
 
-    let sub_progress = progress.subtask("preparing to execute session operation...");
+    let sub_progress = progress.subtask("preparing...");
 
     Ok((progress, session_api, sub_progress))
 }
