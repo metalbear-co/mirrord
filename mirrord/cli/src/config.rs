@@ -250,12 +250,10 @@ pub(crate) enum SessionCommand {
     RetainActive,
 }
 
-/// Parses the operator session id from hex (without `0x` prefix) into `u64`. It also accepts the
-/// non-hex version of the id.
+/// Parses the operator session id from hex (without `0x` prefix) into `u64`.
 fn hex_id(raw: &str) -> Result<u64, String> {
-    raw.parse::<u64>()
-        .or_else(|_| u64::from_str_radix(raw, 16))
-        .map_err(|fail| format!("Failed parsing hex id value with {fail}!"))
+    u64::from_str_radix(raw, 16)
+        .map_err(|fail| format!("Failed parsing hex session id value with {fail}!"))
 }
 
 #[derive(ValueEnum, Clone, Debug)]
