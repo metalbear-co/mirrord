@@ -112,6 +112,7 @@ async fn operator_setup(
     Ok(())
 }
 
+#[tracing::instrument(level = "trace", ret)]
 async fn get_status_api(config: Option<String>) -> Result<Api<MirrordOperatorCrd>> {
     let kube_api = if let Some(config_path) = config {
         let mut cfg_context = ConfigContext::default();
@@ -134,9 +135,7 @@ async fn get_status_api(config: Option<String>) -> Result<Api<MirrordOperatorCrd
 async fn operator_status(config: Option<String>) -> Result<()> {
     let mut progress = ProgressTracker::from_env("Operator Status");
 
-    tracing::info!("GET_STATUS_API");
     let status_api = get_status_api(config).await?;
-    tracing::info!("HAVE STATUS API");
 
     let mut status_progress = progress.subtask("fetching status");
 
