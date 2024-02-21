@@ -298,7 +298,7 @@ impl Display for PodTarget {
         f.write_fmt(format_args!(
             "{}{}",
             self.container
-                .clone()
+                .as_ref()
                 .map(|c| format!("{c}/"))
                 .unwrap_or_default(),
             self.pod.clone()
