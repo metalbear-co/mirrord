@@ -295,7 +295,7 @@ pub struct PodTarget {
 
 impl Display for PodTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!(
+        write!(f, "{}{}", ...)
             "{}{}",
             self.container
                 .as_ref()
