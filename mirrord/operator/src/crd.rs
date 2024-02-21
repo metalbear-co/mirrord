@@ -123,7 +123,7 @@ pub struct Session {
 
 /// Resource used to access the operator's session management routes.
 ///
-/// - `kind = Session` controls the how kube generates the route, in this case it becomes
+/// - `kind = Session` controls how [`kube`] generates the route, in this case it becomes
 ///   `/sessions`;
 /// - `root = "SessionCrd"` is the json return value we get from this resource's API;
 /// - `SessionSpec` itself contains the custom data we want to pass in the the response, which in
