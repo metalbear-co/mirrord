@@ -24,22 +24,33 @@ async fn operator_session_prepare() -> Result<(
 }
 
 /// Handles the cleanup part of progress after an operator session command.
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "trace")]
 fn operator_session_finished(
     result: Option<Status>,
     mut sub_progress: ProgressTracker,
     mut progress: ProgressTracker,
-) -> Result<()> {
-    if let Some(status) = result {
-        sub_progress.success(Some(&format!(
-            "session operation completed with {status:?}"
-        )));
+) {
+    match result {
+        Some(status) => {
+            if status.is_failure() {
+                sub_progress.failure(Some(&format!(
+                    "session operation failed with {}!",
+                    status.code
+                )));
+                progress.failure(Some("Session operation failed!"));
+            } else {
+                sub_progress.success(Some(&format!(
+                    "session operation finished successfully with {}!",
+                    status.code
+                )));
+                progress.success(Some("Session operation is completed!"));
+            }
+        }
+        None => {
+            sub_progress.print("session operation pending");
+            progress.print("Operation is pending.");
+        }
     }
-
-    sub_progress.success(Some("session operation finished"));
-    progress.success(Some("Done with session stuff!"));
-
-    Ok(())
 }
 
 /// `mirrord operator session kill_all`: kills every operator session, this is basically a
@@ -59,7 +70,9 @@ pub(super) async fn operator_session_kill_all() -> Result<()> {
         })
         .map_err(CliError::from)?;
 
-    operator_session_finished(result.right(), sub_progress, progress)
+    operator_session_finished(result.right(), sub_progress, progress);
+
+    Ok(())
 }
 
 /// `mirrord operator session kill --id {id}`: kills the operator session specified by `id`.
@@ -78,7 +91,9 @@ pub(super) async fn operator_session_kill_one(id: u64) -> Result<()> {
         })
         .map_err(CliError::from)?;
 
-    operator_session_finished(result.right(), sub_progress, progress)
+    operator_session_finished(result.right(), sub_progress, progress);
+
+    Ok(())
 }
 
 /// `mirrord operator session kill {id}`: performs a clean-up for operator sessions that are still
@@ -98,5 +113,7 @@ pub(super) async fn operator_session_retain_active() -> Result<()> {
         })
         .map_err(CliError::from)?;
 
-    operator_session_finished(result.right(), sub_progress, progress)
+    operator_session_finished(result.right(), sub_progress, progress);
+
+    Ok(())
 }

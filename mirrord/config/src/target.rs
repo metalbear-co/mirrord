@@ -295,14 +295,15 @@ pub struct PodTarget {
 
 impl Display for PodTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}{}", ...)
+        write!(
+            f,
             "{}{}",
             self.container
                 .as_ref()
                 .map(|c| format!("{c}/"))
                 .unwrap_or_default(),
             self.pod.clone()
-        ))
+        )
     }
 }
 

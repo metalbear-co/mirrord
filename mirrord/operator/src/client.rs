@@ -180,7 +180,9 @@ pub struct OperatorSessionConnection {
 
 /// Allows us to access the operator's [`SessionCrd`] [`Api`].
 pub async fn session_api(config: Option<String>) -> Result<Api<SessionCrd>> {
-    let kube_api: Client = create_kube_api(false, config, None).await?;
+    let kube_api: Client = create_kube_api(false, config, None)
+        .await
+        .map_err(OperatorApiError::CreateApiError)?;
 
     Ok(Api::all(kube_api))
 }
