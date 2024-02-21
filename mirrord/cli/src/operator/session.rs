@@ -47,8 +47,9 @@ fn operator_session_finished(
             }
         }
         None => {
-            sub_progress.print("session operation pending");
-            progress.print("Operation is pending.");
+            // Either the operation is pending, or there was nothing to do in the operator.
+            sub_progress.success(None);
+            progress.success(None);
         }
     }
 }
