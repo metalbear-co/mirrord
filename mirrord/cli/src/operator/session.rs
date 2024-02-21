@@ -105,7 +105,7 @@ pub(super) async fn operator_session_retain_active() -> Result<()> {
     sub_progress.print("retaining only active sessions");
 
     let result = api
-        .delete("retain_active", &DeleteParams::default())
+        .delete("inactive", &DeleteParams::default())
         .await
         .map_err(|error| OperatorApiError::KubeError {
             error,
