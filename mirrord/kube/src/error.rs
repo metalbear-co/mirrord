@@ -77,5 +77,5 @@ pub enum KubeApiError {
     NodePodLimitExceeded(String, usize),
 
     #[error("Path expansion for kubeconfig failed: {0}")]
-    ConfigPathExpansionError(String)
+    ConfigPathExpansionError(String),
 }
