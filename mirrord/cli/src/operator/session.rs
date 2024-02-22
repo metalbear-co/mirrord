@@ -34,14 +34,14 @@ fn operator_session_finished(
         Some(status) => {
             if status.is_failure() {
                 sub_progress.failure(Some(&format!(
-                    "session operation failed with {}!",
-                    status.code
+                    "session operation failed due to {} with code {}!",
+                    status.reason, status.code
                 )));
                 progress.failure(Some("Session operation failed!"));
             } else {
                 sub_progress.success(Some(&format!(
-                    "session operation finished successfully with {}!",
-                    status.code
+                    "session operation finished successfully with {} {}!",
+                    status.message, status.code
                 )));
                 progress.success(Some("Session operation is completed!"));
             }
@@ -63,7 +63,7 @@ pub(super) async fn operator_session_kill_all() -> Result<()> {
     sub_progress.print("killing all sessions");
 
     let result = api
-        .delete("active", &DeleteParams::default())
+        .delete_collection(&Default::default(), &Default::default())
         .await
         .map_err(|error| OperatorApiError::KubeError {
             error,
@@ -84,7 +84,7 @@ pub(super) async fn operator_session_kill_one(id: u64) -> Result<()> {
     sub_progress.print("killing session with id {session_id}");
 
     let result = api
-        .delete(&format!("active/{id}"), &DeleteParams::default())
+        .delete(&format!("{id}"), &DeleteParams::default())
         .await
         .map_err(|error| OperatorApiError::KubeError {
             error,
