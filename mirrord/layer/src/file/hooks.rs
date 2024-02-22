@@ -40,7 +40,7 @@ use crate::{
         ops::{access, lseek, open, read, write},
     },
     hooks::HookManager,
-    replace, replace_with_fallback,
+    replace,
 };
 
 #[cfg(target_os = "macos")]
@@ -1212,7 +1212,7 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FN___LXSTAT64
         );
         replace!(hook_manager, "lstat", lstat_detour, FnLstat, FN_LSTAT);
-        replace_with_fallback!(
+        crate::replace_with_fallback!(
             hook_manager,
             "fstat",
             fstat_detour,
