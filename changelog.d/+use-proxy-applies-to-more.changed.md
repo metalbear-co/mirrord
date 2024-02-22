@@ -1,1 +1,0 @@
-use_proxy configuration now applies to mirrord operator status, and mirrord ls
