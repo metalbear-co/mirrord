@@ -59,7 +59,6 @@ where
         let skipped_ports = ipt
             .list_rules(chain_name)?
             .iter()
-            .inspect(|rule| tracing::trace!("{chain_name}: {rule}"))
             .filter_map(|rule| {
                 lookup_regex
                     .captures(rule)
@@ -80,37 +79,38 @@ where
     IPT: IPTables + Send + Sync,
 {
     async fn mount_entrypoint(&self) -> Result<()> {
-        self.prerouteing.mount_entrypoint().await?;
-        self.output.mount_entrypoint().await?;
+        tokio::try_join!(
+            self.prerouteing.mount_entrypoint(),
+            self.output.mount_entrypoint(),
+        )?;
 
         Ok(())
     }
 
     async fn unmount_entrypoint(&self) -> Result<()> {
-        self.prerouteing.unmount_entrypoint().await?;
-        self.output.unmount_entrypoint().await?;
+        tokio::try_join!(
+            self.prerouteing.unmount_entrypoint(),
+            self.output.unmount_entrypoint(),
+        )?;
 
         Ok(())
     }
 
     async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.prerouteing
-            .add_redirect(redirected_port, target_port)
-            .await?;
-        self.output
-            .add_redirect(redirected_port, target_port)
-            .await?;
+        tokio::try_join!(
+            self.prerouteing.add_redirect(redirected_port, target_port),
+            self.output.add_redirect(redirected_port, target_port)
+        )?;
 
         Ok(())
     }
 
     async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.prerouteing
-            .remove_redirect(redirected_port, target_port)
-            .await?;
-        self.output
-            .remove_redirect(redirected_port, target_port)
-            .await?;
+        tokio::try_join!(
+            self.prerouteing
+                .remove_redirect(redirected_port, target_port),
+            self.output.remove_redirect(redirected_port, target_port),
+        )?;
 
         Ok(())
     }
@@ -236,7 +236,7 @@ mod tests {
         mock.expect_insert_rule()
             .with(
                 eq(IPTABLE_MESH.as_str()),
-                eq("-o lo -m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(2),
             )
             .times(1)
