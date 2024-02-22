@@ -13,7 +13,8 @@ use crate::{
     steal::ip_tables::{
         flush_connections::FlushConnections,
         mesh::{MeshRedirect, MeshVendorExt},
-        redirect::{PreroutingRedirect, Redirect},
+        prerouting::PreroutingRedirect,
+        redirect::Redirect,
         standard::StandardRedirect,
     },
 };
@@ -51,6 +52,8 @@ mod iptables {
 pub(crate) mod chain;
 pub(crate) mod flush_connections;
 pub(crate) mod mesh;
+pub(crate) mod output;
+pub(crate) mod prerouting;
 pub(crate) mod redirect;
 pub(crate) mod standard;
 
