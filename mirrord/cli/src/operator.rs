@@ -20,6 +20,7 @@ use tracing::warn;
 use crate::{
     config::{OperatorArgs, OperatorCommand},
     error::CliError,
+    util::remove_proxy_env,
     Result,
 };
 
@@ -111,6 +112,9 @@ async fn get_status_api(config: Option<String>) -> Result<Api<MirrordOperatorCrd
     let kube_api = if let Some(config_path) = config {
         let mut cfg_context = ConfigContext::default();
         let config = LayerFileConfig::from_path(config_path)?.generate_config(&mut cfg_context)?;
+        if !config.use_proxy {
+            remove_proxy_env();
+        }
         create_kube_api(
             config.accept_invalid_certificates,
             config.kubeconfig,

@@ -47,10 +47,13 @@ mod extract;
 mod internal_proxy;
 mod operator;
 mod teams;
+mod util;
 mod verify_config;
 
 pub(crate) use error::{CliError, Result};
 use verify_config::verify_config;
+
+use crate::util::remove_proxy_env;
 
 async fn exec_process<P>(
     config: LayerConfig,
@@ -339,6 +342,9 @@ async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
     {
         let mut cfg_context = ConfigContext::default();
         let layer_config = LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?;
+        if !layer_config.use_proxy {
+            remove_proxy_env();
+        }
         (
             layer_config.accept_invalid_certificates,
             layer_config.kubeconfig,
