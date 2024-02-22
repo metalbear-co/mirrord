@@ -86,7 +86,7 @@ macro_rules! replace {
 ///
 /// ```rust, no_run
 /// unsafe {
-///     replace!(&mut hook_manager, "close", close_detour, FnClose, FN_CLOSE);
+///     replace_with_fallback!(hook_manager, "close", close_detour, FnClose, FN_CLOSE, libc::close);
 /// }
 /// ```
 #[macro_export]
