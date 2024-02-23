@@ -60,6 +60,7 @@ mod dns;
 mod env;
 mod error;
 mod file;
+mod http;
 mod namespace;
 mod outgoing;
 mod runtime;

@@ -24,6 +24,9 @@ pub(crate) enum AgentError {
     #[error("StealerCommand sender failed with `{0}`")]
     SendStealerCommand(#[from] tokio::sync::mpsc::error::SendError<StealerCommand>),
 
+    #[error("TcpStealerApi failed to reserve channel slot for sending the closing message")]
+    ReserveStealerCommand,
+
     #[error("FileRequest sender failed with `{0}`")]
     SendFileRequest(#[from] tokio::sync::mpsc::error::SendError<(u32, FileRequest)>),
 
@@ -44,9 +47,6 @@ pub(crate) enum AgentError {
 
     #[error("UdpOutgoingTrafficRequest sender failed with `{0}`")]
     SendUdpOutgoingTrafficRequest(#[from] tokio::sync::mpsc::error::SendError<LayerUdpOutgoing>),
-
-    #[error("Request channel closed unexpectedly.")]
-    HttpRequestReceiverClosed,
 
     #[error("ConnectRequest sender failed with `{0}`")]
     SendOutgoingTrafficResponse(#[from] tokio::sync::mpsc::error::SendError<DaemonTcpOutgoing>),
@@ -108,9 +108,6 @@ pub(crate) enum AgentError {
 
     #[error("Reading request body failed with `{0}`")]
     HttpRequestSerializationError(#[from] hyper::Error),
-
-    #[error("HTTP filter-stealing error: `{0}`")]
-    HttpFilterError(#[from] crate::steal::http::error::HttpTrafficError),
 
     #[error("Failed to encode a an HTTP response with error: `{0}`")]
     HttpEncoding(#[from] hyper::http::Error),

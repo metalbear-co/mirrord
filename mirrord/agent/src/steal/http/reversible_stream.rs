@@ -1,3 +1,5 @@
+use std::io;
+
 use pin_project::pin_project;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite},
@@ -5,9 +7,6 @@ use tokio::{
     time,
     time::{Duration, Instant},
 };
-use tracing::{trace, warn};
-
-use crate::steal::http::error::HttpTrafficError;
 
 /// Wraps a [`TcpStream`] to allow a sort of _peek_ functionality, by reading the first bytes, but
 /// then keeping them for later reads.
@@ -42,10 +41,7 @@ pub(crate) struct ReversibleStream<const HEADER_SIZE: usize> {
 impl<const HEADER_SIZE: usize> ReversibleStream<HEADER_SIZE> {
     /// Build a Reversible stream from a TcpStream, move on if not done within given timeout.
     /// Return an Error if there was an error while reading from the TCP Stream.
-    pub(crate) async fn read_header(
-        stream: TcpStream,
-        timeout: Duration,
-    ) -> Result<Self, HttpTrafficError> {
+    pub(crate) async fn read_header(stream: TcpStream, timeout: Duration) -> io::Result<Self> {
         let mut this = Self {
             stream,
             header: [0; HEADER_SIZE],
@@ -67,22 +63,22 @@ impl<const HEADER_SIZE: usize> ReversibleStream<HEADER_SIZE> {
             match time::timeout_at(deadline, this.stream.read_buf(&mut mut_buf)).await {
                 Ok(Ok(0)) => {
                     if this.header_len != HEADER_SIZE {
-                        warn!(
+                        tracing::trace!(
                             "Got early EOF after only {} bytes while creating reversible stream.",
                             this.header_len
                         );
                     } else {
-                        trace!("\"Peeking\" into TCP stream start completed.")
+                        tracing::trace!("\"Peeking\" into TCP stream start completed.")
                     }
                     break;
                 }
                 Ok(Ok(n)) => {
                     this.header_len += n;
-                    trace!("Read {n} header bytes, {} total.", this.header_len);
+                    tracing::trace!("Read {n} header bytes, {} total.", this.header_len);
                 }
                 Ok(Err(read_error)) => Err(read_error)?,
                 Err(_elapsed) => {
-                    warn!(
+                    tracing::trace!(
                         "Got timeout while trying to read first {HEADER_SIZE} bytes of TCP stream."
                     );
                     break;
@@ -90,7 +86,7 @@ impl<const HEADER_SIZE: usize> ReversibleStream<HEADER_SIZE> {
             }
         }
         debug_assert!(this.header_len <= HEADER_SIZE);
-        trace!(
+        tracing::trace!(
             "created reversible stream with header: {}",
             String::from_utf8_lossy(&this.header)
         );

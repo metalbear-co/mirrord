@@ -1,7 +1,5 @@
-use std::collections::HashMap;
-
 use http_body_util::BodyExt;
-use hyper::{body::Incoming, http::request, Request};
+use hyper::{body::Incoming, Request};
 use mirrord_protocol::{
     tcp::{
         DaemonTcp, HttpRequest, HttpResponseFallback, InternalHttpBody, InternalHttpRequest,
@@ -9,21 +7,14 @@ use mirrord_protocol::{
     },
     ConnectionId, Port, RequestId,
 };
-use tokio::{
-    select,
-    sync::{mpsc::Sender, oneshot},
-};
+use tokio::{select, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
-use tracing::warn;
 
-use crate::{
-    error::{AgentError, Result},
-    steal::http::Response,
-    util::{ClientId, IndexAllocator},
-};
+use crate::{error::AgentError, util::ClientId};
 
 pub(super) mod api;
 pub(super) mod connection;
+mod connections;
 pub(super) mod http;
 pub(super) mod ip_tables;
 mod orig_dst;
@@ -82,89 +73,4 @@ pub struct StealerCommand {
 
     /// The command message sent from (layer -> agent) to be handled by the stealer worker.
     command: Command,
-}
-
-/// A struct that the [`HyperHandler::call`] sends [`TcpConnectionStealer::start`], with a request
-/// that matched a filter and should be forwarded to a layer, and sender in which the response to
-/// that request can be sent back.
-#[derive(Debug)]
-pub struct HandlerHttpRequest {
-    pub request: MatchedHttpRequest,
-
-    /// For sending the response from the stealer task back to the hyper service.
-    /// [`TcpConnectionStealer::start`] -----response to this request-----> [`HyperHandler::call`]
-    pub response_tx: oneshot::Sender<Response>,
-}
-
-/// A stolen HTTP request that matched a client's filter. To be sent from the filter code to the
-/// connection task to be forwarded to the matching client.
-#[derive(Debug)]
-pub struct MatchedHttpRequest {
-    pub port: Port,
-    pub connection_id: ConnectionId,
-    pub client_id: ClientId,
-    pub request_id: RequestId,
-    pub request: Request<Incoming>,
-}
-
-impl MatchedHttpRequest {
-    async fn into_serializable(self) -> Result<HttpRequest<InternalHttpBody>, hyper::Error> {
-        let (
-            request::Parts {
-                method,
-                uri,
-                version,
-                headers,
-                ..
-            },
-            body,
-        ) = self.request.into_parts();
-
-        let body = InternalHttpBody::from_body(body).await?;
-
-        let internal_request = InternalHttpRequest {
-            method,
-            uri,
-            headers,
-            version,
-            body,
-        };
-
-        Ok(HttpRequest {
-            port: self.port,
-            connection_id: self.connection_id,
-            request_id: self.request_id,
-            internal_request,
-        })
-    }
-
-    async fn into_serializable_fallback(self) -> Result<HttpRequest<Vec<u8>>, hyper::Error> {
-        let (
-            request::Parts {
-                method,
-                uri,
-                version,
-                headers,
-                ..
-            },
-            body,
-        ) = self.request.into_parts();
-
-        let body = body.collect().await?.to_bytes().to_vec();
-
-        let internal_request = InternalHttpRequest {
-            method,
-            uri,
-            headers,
-            version,
-            body,
-        };
-
-        Ok(HttpRequest {
-            port: self.port,
-            connection_id: self.connection_id,
-            request_id: self.request_id,
-            internal_request,
-        })
-    }
 }
