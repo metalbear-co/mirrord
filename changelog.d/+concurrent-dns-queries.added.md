@@ -1,0 +1,1 @@
+The agent now processes all DNS queries concurrently. Also, client sessions in the agent do not block on the DNS queries.
