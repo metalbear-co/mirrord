@@ -112,7 +112,6 @@ impl<const HEADER_SIZE: usize> AsyncRead for ReversibleStream<HEADER_SIZE> {
             std::task::Poll::Ready(Ok(()))
         } else {
             std::pin::Pin::new(&mut self.get_mut().stream).poll_read(cx, buf)
-            // self.stream.poll_read(cx, buf)
         }
     }
 }
