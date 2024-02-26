@@ -1,0 +1,1 @@
+Add information how to use config file in config docs
