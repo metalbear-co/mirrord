@@ -316,6 +316,14 @@
             "null"
           ]
         },
+        "nftables": {
+          "title": "agent.nftables {#agent-nftables}",
+          "description": "Use iptables-nft instead of iptables-legacy. Defaults to `false`.\n\nNeeded if your mesh uses nftables instead of iptables-legacy,",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "privileged": {
           "title": "agent.privileged {#agent-privileged}",
           "description": "Run the mirror agent as privileged container. Defaults to `false`.\n\nMight be needed in strict environments such as Bottlerocket.",

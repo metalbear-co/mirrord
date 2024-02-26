@@ -690,6 +690,7 @@ mod tests {
                 tolerations: None,
                 check_out_of_pods: None,
                 resources: None,
+                nftables: None,
             }),
             feature: Some(FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true).into(),
