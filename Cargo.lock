@@ -2698,7 +2698,7 @@ dependencies = [
 [[package]]
 name = "iptables"
 version = "0.5.1"
-source = "git+https://github.com/metalbear-co/rust-iptables.git?branch=add_specify_cmd#111f25916c4a44d91f8b48403f3783d9ad8fd5ef"
+source = "git+https://github.com/metalbear-co/rust-iptables.git?rev=e66c7332e361df3c61a194f08eefe3f40763d624#e66c7332e361df3c61a194f08eefe3f40763d624"
 dependencies = [
  "lazy_static",
  "nix 0.27.1",
