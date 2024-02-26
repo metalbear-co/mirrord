@@ -4,7 +4,7 @@ use mirrord_protocol::{
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
         LayerConnect,
     },
-    tcp::{DaemonTcp, LayerTcpSteal},
+    tcp::DaemonTcp,
     FileRequest, FileResponse,
 };
 use thiserror::Error;
@@ -35,9 +35,6 @@ pub(crate) enum AgentError {
 
     #[error("DaemonTcp sender failed with `{0}`")]
     SendDaemonTcp(#[from] tokio::sync::mpsc::error::SendError<DaemonTcp>),
-
-    #[error("StealerCommand sender failed with `{0}`")]
-    TrySendStealerCommand(#[from] tokio::sync::mpsc::error::TrySendError<StealerCommand>),
 
     #[error("ConnectRequest sender failed with `{0}`")]
     SendConnectRequest(#[from] tokio::sync::mpsc::error::SendError<LayerConnect>),
@@ -80,9 +77,6 @@ pub(crate) enum AgentError {
 
     #[error("Bollard failed with `{0}`")]
     Bollard(#[from] bollard::errors::Error),
-
-    #[error("LayerTcpSteal sender failed with `{0}`")]
-    SendLayerTcpSteal(#[from] tokio::sync::mpsc::error::SendError<LayerTcpSteal>),
 
     #[error("IPTables failed with `{0}`")]
     IPTablesError(String),

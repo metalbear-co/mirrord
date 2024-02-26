@@ -1,24 +1,21 @@
-use http_body_util::BodyExt;
-use hyper::{body::Incoming, Request};
 use mirrord_protocol::{
-    tcp::{
-        DaemonTcp, HttpRequest, HttpResponseFallback, InternalHttpBody, InternalHttpRequest,
-        StealType, TcpData,
-    },
-    ConnectionId, Port, RequestId,
+    tcp::{DaemonTcp, HttpResponseFallback, StealType, TcpData},
+    ConnectionId, Port,
 };
-use tokio::{select, sync::mpsc::Sender};
-use tokio_util::sync::CancellationToken;
+use tokio::sync::mpsc::Sender;
 
-use crate::{error::AgentError, util::ClientId};
+use crate::util::ClientId;
 
-pub(super) mod api;
-pub(super) mod connection;
+mod api;
+mod connection;
 mod connections;
-pub(super) mod http;
-pub(super) mod ip_tables;
+mod http;
+pub mod ip_tables;
 mod orig_dst;
 mod subscriptions;
+
+pub(crate) use api::TcpStealerApi;
+pub(crate) use connection::TcpConnectionStealer;
 
 /// Commands from the agent that are passed down to the stealer worker, through [`TcpStealerApi`].
 ///
@@ -42,11 +39,12 @@ enum Command {
 
     /// Part of the [`Drop`] implementation of [`TcpStealerApi`].
     ///
-    /// Closes a layer connection, and unsubscribe its ports.
+    /// Closes a layer connection, and unsubscribes its ports.
     ClientClose,
 
-    /// A connection here is a pair of ([`ReadHalf`], [`WriteHalf`]) streams that are used to
-    /// capture a remote connection (the connection we're stealing data from).
+    /// Unsubscribes the layer from the connection.
+    ///
+    /// The agent stops sending incoming traffic.
     ConnectionUnsubscribe(ConnectionId),
 
     /// There is new data in the direction going from the local process to the end-user (Going

@@ -4,27 +4,48 @@ use std::{
 };
 
 use fancy_regex::Regex;
-use hyper::http::{header::UPGRADE, request::Parts};
+use http_body_util::BodyExt;
+use hyper::{
+    body::Incoming,
+    http::{header::UPGRADE, request::Parts},
+    Request,
+};
 use mirrord_protocol::{
-    tcp::{TcpClose, HTTP_FILTERED_UPGRADE_VERSION, HTTP_FRAMED_VERSION},
+    tcp::{
+        DaemonTcp, HttpRequest, HttpResponseFallback, InternalHttpBody, InternalHttpRequest,
+        StealType, TcpClose, TcpData, HTTP_FILTERED_UPGRADE_VERSION, HTTP_FRAMED_VERSION,
+    },
+    ConnectionId, Port,
     RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
+    RequestId,
 };
-use tokio::{net::TcpStream, sync::mpsc::Receiver};
+use tokio::{
+    net::TcpStream,
+    sync::mpsc::{Receiver, Sender},
+};
+use tokio_util::sync::CancellationToken;
 
-use self::{
-    connections::{ConnectionMessageIn, ConnectionMessageOut, StolenConnection, StolenConnections},
-    subscriptions::{IpTablesRedirector, PortSubscriptions},
+use crate::{
+    error::{AgentError, Result},
+    steal::{
+        connections::{
+            ConnectionMessageIn, ConnectionMessageOut, StolenConnection, StolenConnections,
+        },
+        http::HttpFilter,
+        orig_dst,
+        subscriptions::{IpTablesRedirector, PortSubscriptions},
+        Command, StealerCommand,
+    },
+    util::ClientId,
 };
-use super::*;
-use crate::{error::Result, steal::http::HttpFilter};
 
 /// A stolen HTTP request that matched a client's filter.
 #[derive(Debug)]
-pub struct MatchedHttpRequest {
-    pub connection_id: ConnectionId,
-    pub port: Port,
-    pub request_id: RequestId,
-    pub request: Request<Incoming>,
+struct MatchedHttpRequest {
+    connection_id: ConnectionId,
+    port: Port,
+    request_id: RequestId,
+    request: Request<Incoming>,
 }
 
 impl MatchedHttpRequest {
@@ -89,13 +110,35 @@ impl MatchedHttpRequest {
     }
 }
 
+/// A stealer client.
 struct Client {
+    /// For sending messages to client's [`TcpStealerApi`](super::api::TcpStealerApi).
+    /// Comes to [`TcpConnectionStealer`] in [`Command::NewClient`].
     tx: Sender<DaemonTcp>,
+    /// Clients [`mirrord_protocol`] verison.
     protocol_version: semver::Version,
+    /// Client subscriptions to stolen connections.
+    /// Used to unsubscribe when the client exits.
     subscribed_connections: HashSet<ConnectionId>,
 }
 
 impl Client {
+    /// Attempts to spawn a new [`tokio::task`] to transform the given [`MatchedHttpRequest`] into
+    /// [`DaemonTcp::HttpRequest`] or [`DaemonTcp::HttpRequestFramed`] and send it via cloned
+    /// [`Client::tx`].
+    ///
+    /// Inspects [`Client::protocol_version`] to pick between [`DaemonTcp`] variants and check for
+    /// upgrade requests.
+    ///
+    /// Returns `true` if the [`tokio::task`] was spawned.
+    /// Otherwise, returns `false`. Currently, this is the case only when the given
+    /// [`MatchedHttpRequest`] is an upgrade request, but client's protocol version does not match
+    /// [`HTTP_FILTERED_UPGRADE_VERSION`].
+    ///
+    /// # Why async?
+    ///
+    /// This method spawns a [`tokio::task`] to read the [`Incoming`] body od the request without
+    /// blocking the main [`TcpConnectionStealer`] loop.
     fn send_request_async(&self, request: MatchedHttpRequest) -> bool {
         if request.request.headers().contains_key(UPGRADE)
             && !HTTP_FILTERED_UPGRADE_VERSION.matches(&self.protocol_version)
@@ -128,32 +171,29 @@ impl Client {
 
 /// Created once per agent during initialization.
 ///
-/// Runs as a separate thread while the agent lives.
-///
-/// - (agent -> stealer) communication is handled by [`command_rx`];
-/// - (stealer -> agent) communication is handled by [`client_senders`], and the [`Sender`] channels
-///   come inside [`StealerCommand`]s through  [`command_rx`];
+/// Meant to be run (see [`TcpConnectionStealer::start`]) in a separate thread while the agent
+/// lives. When handling port subscription requests, this struct manipulates iptables, so it should
+/// run in the same network namespace as the agent's target.
 pub(crate) struct TcpConnectionStealer {
     /// For managing active subscriptions and port redirections.
     port_subscriptions: PortSubscriptions<IpTablesRedirector>,
 
-    /// Communication between (agent -> stealer) task.
-    ///
-    /// The agent controls the stealer task through [`TcpStealerAPI::command_tx`].
+    /// For receiving commands.
+    /// The other end of this channel belongs to [`TcpStealerApi`](super::api::TcpStealerApi).
     command_rx: Receiver<StealerCommand>,
 
-    /// Connected clients (layer instances) and the channels which the stealer task uses to send
-    /// back messages (stealer -> agent -> layer).
+    /// Connected [`Client`]s (layer instances).
     clients: HashMap<ClientId, Client>,
 
+    /// Set of active connections stolen by [`Self::port_subscriptions`].
     connections: StolenConnections,
 }
 
 impl TcpConnectionStealer {
     pub const TASK_NAME: &'static str = "Stealer";
 
-    /// Initializes a new [`TcpConnectionStealer`] fields, but doesn't start the actual working
-    /// task (call [`TcpConnectionStealer::start`] to do so).
+    /// Initializes a new [`TcpConnectionStealer`], but doesn't start the actual work.
+    /// You need to call [`TcpConnectionStealer::start`] to do so.
     #[tracing::instrument(level = "trace")]
     pub(crate) async fn new(command_rx: Receiver<StealerCommand>) -> Result<Self, AgentError> {
         let port_subscriptions = {
@@ -176,30 +216,22 @@ impl TcpConnectionStealer {
 
     /// Runs the tcp traffic stealer loop.
     ///
-    /// The loop deals with 6 different paths:
+    /// The loop deals with 5 different paths:
     ///
-    /// 1. Receiving [`StealerCommand`]s and calling [`TcpConnectionStealer::handle_command`];
+    /// 1. Receiving a new [`StealerCommand`];
     ///
-    /// 2. Accepting remote connections through the [`TcpConnectionStealer::stealer`]
-    /// [`TcpListener`]. We steal traffic from the created streams.
+    /// 2. Accepting a new stolen connection based on the clients' port subscriptions;
     ///
-    /// 3. Reading incoming data from the stolen remote connections (accepted in 2.) and forwarding
-    /// to clients.
+    /// 3. Receiving an update from one of the active stolen connections;
     ///
-    /// 4. Receiving filtered HTTP requests and forwarding them to clients (layers).
-    ///
-    /// 5. Receiving the connection IDs of closing filtered HTTP connections, and informing all
-    /// clients that were forward a request out of that connection of the closing of that
-    /// connection.
-    ///
-    /// 6. Handling the cancellation of the whole stealer thread.
+    /// 4. Handling the cancellation of the whole stealer thread (given `cancellation_token`).
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn start(
         mut self,
         cancellation_token: CancellationToken,
     ) -> Result<(), AgentError> {
         loop {
-            select! {
+            tokio::select! {
                 command = self.command_rx.recv() => {
                     let Some(command) = command else {
                         break Ok(());
@@ -258,6 +290,7 @@ impl TcpConnectionStealer {
         Ok(())
     }
 
+    /// Handles an update from one of the connections in [`Self::connections`].
     #[tracing::instrument(level = "trace", skip(self))]
     async fn handle_connection_update(
         &mut self,
@@ -268,34 +301,63 @@ impl TcpConnectionStealer {
                 connection_id,
                 client_id,
             } => {
-                let client = self.clients.get_mut(&client_id).expect("client not found");
+                let Some(client) = self.clients.get_mut(&client_id) else {
+                    tracing::trace!(client_id, connection_id, "Client has already exited");
+                    return Ok(());
+                };
 
-                if client.subscribed_connections.remove(&connection_id) {
-                    self.send_message_to_client(
-                        client_id,
-                        DaemonTcp::Close(TcpClose { connection_id }),
-                    )
-                    .await;
+                if !client.subscribed_connections.remove(&connection_id) {
+                    tracing::trace!(client_id, connection_id, "Client has already unsubscribed");
+                    return Ok(());
                 }
+
+                let _ = client
+                    .tx
+                    .send(DaemonTcp::Close(TcpClose { connection_id }))
+                    .await;
             }
 
             ConnectionMessageOut::SubscribedTcp {
                 client_id,
                 connection,
             } => {
-                let client = self.clients.get_mut(&client_id).expect("client not found");
+                let Some(client) = self.clients.get_mut(&client_id) else {
+                    tracing::trace!(
+                        client_id,
+                        connection_id = connection.connection_id,
+                        "Client has already exited"
+                    );
+                    self.connections
+                        .send(
+                            connection.connection_id,
+                            ConnectionMessageIn::Unsubscribed { client_id },
+                        )
+                        .await;
+                    return Ok(());
+                };
+
                 client
                     .subscribed_connections
                     .insert(connection.connection_id);
-                self.send_message_to_client(client_id, DaemonTcp::NewConnection(connection))
-                    .await;
+
+                let _ = client.tx.send(DaemonTcp::NewConnection(connection)).await;
             }
 
             ConnectionMessageOut::SubscribedHttp {
                 client_id,
                 connection_id,
             } => {
-                let client = self.clients.get_mut(&client_id).expect("client not found");
+                let Some(client) = self.clients.get_mut(&client_id) else {
+                    tracing::trace!(client_id, connection_id, "Client has already exited");
+                    self.connections
+                        .send(
+                            connection_id,
+                            ConnectionMessageIn::Unsubscribed { client_id },
+                        )
+                        .await;
+                    return Ok(());
+                };
+
                 client.subscribed_connections.insert(connection_id);
             }
 
@@ -304,15 +366,25 @@ impl TcpConnectionStealer {
                 connection_id,
                 data,
             } => {
-                self.send_message_to_client(
-                    client_id,
-                    DaemonTcp::Data(TcpData {
+                let Some(client) = self.clients.get(&client_id) else {
+                    tracing::trace!(client_id, connection_id, "Client has already exited");
+                    return Ok(());
+                };
+
+                if !client.subscribed_connections.contains(&connection_id) {
+                    tracing::trace!(client_id, connection_id, "Client has already unsubscribed");
+                    return Ok(());
+                }
+
+                let _ = client
+                    .tx
+                    .send(DaemonTcp::Data(TcpData {
                         connection_id,
                         bytes: data,
-                    }),
-                )
-                .await;
+                    }))
+                    .await;
             }
+
             ConnectionMessageOut::Request {
                 client_id,
                 connection_id,
@@ -320,7 +392,16 @@ impl TcpConnectionStealer {
                 id,
                 port,
             } => {
-                let client = self.clients.get(&client_id).expect("client not found");
+                let Some(client) = self.clients.get(&client_id) else {
+                    tracing::trace!(client_id, connection_id, "Client has already exited");
+                    return Ok(());
+                };
+
+                if !client.subscribed_connections.contains(&connection_id) {
+                    tracing::trace!(client_id, connection_id, "Client has already unsubscribed");
+                    return Ok(());
+                }
+
                 let matched_request = MatchedHttpRequest {
                     connection_id,
                     request,
@@ -365,8 +446,8 @@ impl TcpConnectionStealer {
             Err(e) => Err(e.into()),
         };
 
-        self.send_message_to_client(client_id, DaemonTcp::SubscribeResult(res))
-            .await;
+        let client = self.clients.get(&client_id).expect("client not found");
+        let _ = client.tx.send(DaemonTcp::SubscribeResult(res)).await;
 
         Ok(())
     }
@@ -386,19 +467,6 @@ impl TcpConnectionStealer {
         }
 
         Ok(())
-    }
-
-    /// Attempts to send a [`DaemonTcp`] message back to the client with `client_id`.
-    /// If client's channel is closed, does nothing.
-    /// Dead clients cleanup is done upon receiving [`Command::ClientClose`], which is always sent
-    /// by [`TcpStealerApi`](super::api::TcpStealerApi) in [`Drop::drop`] implementation.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn send_message_to_client(&mut self, client_id: ClientId, message: DaemonTcp) {
-        let client = self.clients.get(&client_id).expect("client not found");
-
-        if client.tx.send(message).await.is_err() {
-            tracing::trace!(client_id, "Client channel closed");
-        }
     }
 
     /// Converts the given [`HttpResponseFallback`] to a [`hyper::Response`] and sends it to
