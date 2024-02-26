@@ -815,7 +815,7 @@
         },
         "log_level": {
           "title": "internal_proxy.log_level {#internal_proxy-log_level}",
-          "description": "Set the log level for the internal proxy. RUST_LOG convention (i.e `mirrord=trace`) will only beu sed if log_destination is set",
+          "description": "Set the log level for the internal proxy. RUST_LOG convention (i.e `mirrord=trace`) will only be used if log_destination is set",
           "type": [
             "string",
             "null"
