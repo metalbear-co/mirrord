@@ -27,7 +27,7 @@ impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
 }
 
 /// [`HeaderMap`](hyper::http::header::HeaderMap) entries formatted like `k: v` (format expected by
-/// [`HttpFilter::Header`]). Cached in [`Request::extensions`] the first time
+/// [`HttpFilter::Header`]). Computed and cached in [`Request::extensions`] the first time
 /// [`HttpFilter::matches`] is called on the [`Request`].
 struct NormalizedHeaders(Vec<String>);
 
@@ -76,6 +76,7 @@ impl HttpFilter {
 
                 headers.has_match(filter)
             }
+
             Self::Path(filter) => {
                 let path = request.uri().path();
                 filter

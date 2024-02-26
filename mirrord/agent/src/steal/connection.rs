@@ -253,7 +253,7 @@ impl TcpConnectionStealer {
             port_subscription,
         };
 
-        self.connections.serve(stolen_connection);
+        self.connections.manage(stolen_connection);
 
         Ok(())
     }
