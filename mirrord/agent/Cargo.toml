@@ -60,7 +60,7 @@ semver.workspace = true
 drain.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-iptables = "0.5"
+iptables = {git = "https://github.com/metalbear-co/rust-iptables.git", branch = "add_specify_cmd"}
 rawsocket = {git = "https://github.com/metalbear-co/rawsocket.git"}
 
 

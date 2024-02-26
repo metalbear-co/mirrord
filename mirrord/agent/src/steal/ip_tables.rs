@@ -117,6 +117,17 @@ pub struct IPTablesWrapper {
     tables: Arc<iptables::IPTables>,
 }
 
+/// wrapper around iptables::new that uses nft or legacy based on env
+pub fn new_iptables() -> Result<IPTables, Box<dyn Error>> {
+    if let Some(val) = std::env::var("MIRRORD_AGENT_NFTABLES")
+        && val.lowercase() == "true"
+    {
+        iptables::new_with_cmd("/usr/sbin/iptables-nft")
+    } else {
+        iptables::new_with_cmd("/usr/sbin/iptables-legacy")
+    }
+}
+
 impl Debug for IPTablesWrapper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IPTablesWrapper")
