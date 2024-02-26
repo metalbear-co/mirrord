@@ -58,13 +58,23 @@ fn operator_session_finished(
 /// `.clear()`;
 #[tracing::instrument(level = "trace", ret)]
 pub(super) async fn operator_session_kill_all() -> Result<()> {
-    let (progress, api, sub_progress) = operator_session_prepare().await?;
+    let (mut progress, api, mut sub_progress) = operator_session_prepare().await?;
 
     sub_progress.print("killing all sessions");
 
     let result = api
         .delete_collection(&Default::default(), &Default::default())
         .await
+        .inspect_err(|kube_fail| match kube_fail {
+            kube::Error::Api(response) if response.code == 404 => {
+                let not_supported = "`operator session kill-all` is not supported by the mirrord-operator found in your cluster, consider updating it!";
+
+                sub_progress.failure(Some(not_supported));
+                progress.failure(Some("Session operation `kill-all` failed!"));
+                error!(not_supported);
+            }
+            _ => (),
+        })
         .map_err(|error| OperatorApiError::KubeError {
             error,
             operation: OperatorOperation::GettingStatus,
@@ -79,13 +89,23 @@ pub(super) async fn operator_session_kill_all() -> Result<()> {
 /// `mirrord operator session kill --id {id}`: kills the operator session specified by `id`.
 #[tracing::instrument(level = "trace", ret)]
 pub(super) async fn operator_session_kill_one(id: u64) -> Result<()> {
-    let (progress, api, sub_progress) = operator_session_prepare().await?;
+    let (mut progress, api, mut sub_progress) = operator_session_prepare().await?;
 
     sub_progress.print("killing session with id {session_id}");
 
     let result = api
         .delete(&format!("{id}"), &DeleteParams::default())
         .await
+        .inspect_err(|kube_fail| match kube_fail {
+            kube::Error::Api(response) if response.code == 404 => {
+                let not_supported = "`operator session kill` is not supported by the mirrord-operator found in your cluster, consider updating it!";
+
+                sub_progress.failure(Some(not_supported));
+                progress.failure(Some("Session operation `kill` failed!"));
+                error!(not_supported);
+            }
+            _ => (),
+        })
         .map_err(|error| OperatorApiError::KubeError {
             error,
             operation: OperatorOperation::GettingStatus,
@@ -101,13 +121,23 @@ pub(super) async fn operator_session_kill_one(id: u64) -> Result<()> {
 /// stored;
 #[tracing::instrument(level = "trace", ret)]
 pub(super) async fn operator_session_retain_active() -> Result<()> {
-    let (progress, api, sub_progress) = operator_session_prepare().await?;
+    let (mut progress, api, mut sub_progress) = operator_session_prepare().await?;
 
     sub_progress.print("retaining only active sessions");
 
     let result = api
         .delete("inactive", &DeleteParams::default())
         .await
+        .inspect_err(|kube_fail| match kube_fail {
+            kube::Error::Api(response) if response.code == 404 => {
+                let not_supported = "`operator session retain-active` is not supported by the mirrord-operator found in your cluster, consider updating it!";
+
+                sub_progress.failure(Some(not_supported));
+                progress.failure(Some("Session operation `retain-active` failed!"));
+                error!(not_supported);
+            }
+            _ => (),
+        })
         .map_err(|error| OperatorApiError::KubeError {
             error,
             operation: OperatorOperation::GettingStatus,
