@@ -107,3 +107,72 @@ impl<T: AsyncRead + AsyncWrite + Unpin> UnfilteredStealTask<T> {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use tokio::{
+        net::{TcpListener, TcpStream},
+        sync::mpsc,
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn two_way_exchange() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let (mut client_stream, (server_stream, _)) =
+            tokio::try_join!(TcpStream::connect(addr), listener.accept(),).unwrap();
+
+        let (in_tx, mut in_rx) = mpsc::channel(8);
+        let (out_tx, mut out_rx) = mpsc::channel(8);
+
+        let handle = tokio::spawn(async move {
+            let task = UnfilteredStealTask {
+                connection_id: 1,
+                client_id: 2,
+                stream: server_stream,
+            };
+
+            task.run(out_tx, &mut in_rx).await.unwrap();
+        });
+
+        tokio::try_join!(client_stream.write_all(b"bytes from peer"), async {
+            let _ = in_tx
+                .send(ConnectionMessageIn::Raw {
+                    data: b"bytes from client".to_vec(),
+                    client_id: 2,
+                })
+                .await;
+            Ok(())
+        })
+        .unwrap();
+
+        let msg = out_rx.recv().await.unwrap();
+        let data = match msg {
+            ConnectionMessageOut::Raw {
+                client_id: 2,
+                connection_id: 1,
+                data,
+            } => data,
+            other => unreachable!("unexpected message: {other:?}"),
+        };
+        assert_eq!(data, b"bytes from peer");
+
+        let mut client_read = *b"bytes from client";
+        let bytes_read = client_stream.read_exact(&mut client_read).await.unwrap();
+        assert_eq!(bytes_read, client_read.len());
+        assert_eq!(&client_read, b"bytes from client");
+
+        in_tx
+            .send(ConnectionMessageIn::Unsubscribed { client_id: 2 })
+            .await
+            .unwrap();
+
+        handle.await.unwrap();
+
+        let msg = out_rx.recv().await;
+        assert!(msg.is_none());
+    }
+}
