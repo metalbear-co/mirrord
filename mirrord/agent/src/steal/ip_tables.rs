@@ -118,7 +118,7 @@ pub struct IPTablesWrapper {
 }
 
 /// wrapper around iptables::new that uses nft or legacy based on env
-pub fn new_iptables() -> Result<IPTables, Box<dyn Error>> {
+pub fn new_iptables() -> Result<iptables::IPTables, Box<dyn std::error::Error>> {
     if let Some(val) = std::env::var("MIRRORD_AGENT_NFTABLES")
         && val.lowercase() == "true"
     {
