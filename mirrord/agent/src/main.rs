@@ -762,7 +762,7 @@ async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
 }
 
 async fn clear_iptable_chain() -> Result<()> {
-    let ipt = new_iptables().unwrap();
+    let ipt = new_iptables();
 
     SafeIpTables::load(IPTablesWrapper::from(ipt), false)
         .await?

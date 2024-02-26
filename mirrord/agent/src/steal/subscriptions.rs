@@ -94,7 +94,7 @@ impl PortRedirector for IpTablesRedirector {
         let iptables = match self.iptables.as_ref() {
             Some(iptables) => iptables,
             None => {
-                let iptables = new_iptables().unwrap();
+                let iptables = new_iptables();
                 let safe = SafeIpTables::create(iptables.into(), self.flush_connections).await?;
                 self.iptables.insert(safe)
             }
