@@ -426,7 +426,7 @@ impl ConnectionTask {
     ///
     /// This task is responsible for **always** sending [`ConnectionMessageOut::Closed`] to
     /// interested stealer clients, even when an error has occurred.
-    async fn run(self) -> Result<(), ConnectionTaskError> {
+    async fn run(mut self) -> Result<(), ConnectionTaskError> {
         match self.connection.port_subscription {
             PortSubscription::Unfiltered(client_id) => {
                 self.tx
@@ -446,11 +446,9 @@ impl ConnectionTask {
                     connection_id: self.connection_id,
                     client_id,
                     stream: self.connection.stream,
-                    tx: self.tx,
-                    rx: self.rx,
                 };
 
-                task.run().await
+                task.run(self.tx, &mut self.rx).await
             }
 
             PortSubscription::Filtered(filters) => {
@@ -479,11 +477,9 @@ impl ConnectionTask {
                     self.connection.destination,
                     http_version,
                     stream,
-                    self.rx,
-                    self.tx,
                 );
 
-                task.run().await
+                task.run(self.tx.clone(), &mut self.rx).await
             }
         }
     }

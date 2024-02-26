@@ -9,16 +9,28 @@ use tokio::{
 use super::{ConnectionMessageIn, ConnectionMessageOut, ConnectionTaskError};
 use crate::util::ClientId;
 
+/// Manages an unfiltered stolen connection.
 pub struct UnfilteredStealTask<T> {
     pub connection_id: ConnectionId,
+    /// Id of the stealer client that exclusively owns this connection.
     pub client_id: ClientId,
+    /// Stolen connection as a raw IO stream.
     pub stream: T,
-    pub tx: Sender<ConnectionMessageOut>,
-    pub rx: Receiver<ConnectionMessageIn>,
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin> UnfilteredStealTask<T> {
-    pub async fn run(mut self) -> Result<(), ConnectionTaskError> {
+    /// Runs this task until the managed connection is closed.
+    ///
+    /// # Note
+    ///
+    /// Does not send [`ConnectionMessageOut::SubscribedTcp`], assuming that this message has
+    /// already been sent to the client. This allows this code to be used for both unfiltered
+    /// and upgraded connections.
+    pub async fn run(
+        mut self,
+        tx: Sender<ConnectionMessageOut>,
+        rx: &mut Receiver<ConnectionMessageIn>,
+    ) -> Result<(), ConnectionTaskError> {
         let mut buffer = [0_u8; 1024];
         let mut reading_closed = false;
 
@@ -41,16 +53,23 @@ impl<T: AsyncRead + AsyncWrite + Unpin> UnfilteredStealTask<T> {
                             data,
                         };
 
-                        self.tx.send(message).await?;
+                        tx.send(message).await?;
                     }
 
                     Err(e) if e.kind() == ErrorKind::WouldBlock => {}
 
-                    Err(e) => break Err(e.into()),
+                    Err(e) => {
+                        tx.send(ConnectionMessageOut::Closed {
+                            client_id: self.client_id,
+                            connection_id: self.connection_id
+                        }).await?;
+
+                        break Err(e.into());
+                    }
 
                 },
 
-                message = self.rx.recv() => match message.ok_or(ConnectionTaskError::RecvError)? {
+                message = rx.recv() => match message.ok_or(ConnectionTaskError::RecvError)? {
                     message if message.client_id() != self.client_id => {
                         tracing::error!(
                             client_id = message.client_id(),
@@ -60,8 +79,16 @@ impl<T: AsyncRead + AsyncWrite + Unpin> UnfilteredStealTask<T> {
                         );
                     }
 
-                    ConnectionMessageIn::Raw { data, .. } => {
-                        self.stream.write_all(&data).await?;
+                    ConnectionMessageIn::Raw { data, .. } => match self.stream.write_all(&data).await {
+                        Ok(..) => {},
+                        Err(e) => {
+                            tx.send(ConnectionMessageOut::Closed {
+                                client_id: self.client_id,
+                                connection_id: self.connection_id
+                            }).await?;
+
+                            break Err(e.into());
+                        }
                     },
 
                     ConnectionMessageIn::Response { request_id, .. } | ConnectionMessageIn::ResponseFailed { request_id, .. } => {

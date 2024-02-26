@@ -10,7 +10,7 @@ use std::{
 use bytes::Bytes;
 use dashmap::DashMap;
 use http::Version;
-use http_body_util::{combinators::BoxBody, BodyExt, Empty};
+use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::{
     body::Incoming,
     client::conn::{http1, http2},
@@ -42,16 +42,22 @@ use crate::{
 /// [`Body`](hyper::body::Body) type used in [`FilteredStealTask`].
 pub type DynamicBody = BoxBody<Bytes, hyper::Error>;
 
+/// Incoming [`Request`] extracted from the HTTP connection in the [`FilteringService`].
 struct ExtractedRequest {
     request: Request<Incoming>,
     response_tx: oneshot::Sender<RequestHandling>,
 }
 
+/// Response instruction for [`FilteringService`].
+/// Sent from [`FilteredStealTask`] in [`ExtractedRequest::response_tx`].
 enum RequestHandling {
+    /// The [`Request`] should be handled by the HTTP server running at the given address.
     LetThrough {
         to: SocketAddr,
         unchanged: Request<Incoming>,
     },
+    /// The [`FilteringService`] should respond immediately with the given [`Response`]
+    /// on behalf of the given stealer client.
     RespondWith {
         response: Response<DynamicBody>,
         for_client: ClientId,
@@ -70,7 +76,7 @@ pub enum UpgradedServerSide {
     OriginalDestination(Upgraded),
 }
 
-/// Two connections recovered after an HTTP upgrade occurred in [`FilteringService`].
+/// Two connections recovered after an HTTP upgrade that happened in [`FilteringService`].
 pub struct UpgradedConnection {
     /// Client side - an HTTP client that tried to connect with agent's target.
     pub http_client_io: Upgraded,
@@ -78,28 +84,42 @@ pub struct UpgradedConnection {
     pub http_server_io: UpgradedServerSide,
 }
 
-/// [`Service`] that matches incoming [`Request`]s against a set of stealer clients'
-/// [`HttpFilter`]s. If a [`Request`] matches a filter for some client, this service responds with
-/// what is provided by this client. If a [`Request`] does not match any filter, it is proxied to
-/// its original destination.
+/// Simple [`Service`] implementor that uses [`mpsc`] channels to pass incoming [`Request`]s to a
+/// [`FilteredStealTask`].
 #[derive(Clone)]
 struct FilteringService {
     /// For sending incoming requests to the [`FilteredStealTask`].
     requests_tx: Sender<ExtractedRequest>,
 
     /// For recovering the upgraded connection in [`FilteredStealTask`].
+    ///
+    /// # Note
+    ///
+    /// At most one value will **always** be sent through this channel (only one http upgrade is
+    /// possible). However, using a [`oneshot`] here would require a combination of an [`Arc`],
+    /// a [`Mutex`](std::sync::Mutex) and an [`Option`]. [`mpsc`] is used here for simplicity.
     upgrade_tx: Sender<UpgradedConnection>,
 }
 
 impl FilteringService {
-    fn bad_gateway(version: Version) -> Response<DynamicBody> {
+    /// Produces a new [`StatusCode::BAD_GATEWAY`] [`Response`] with the given [`Version`] and the
+    /// given `error` in body.
+    fn bad_gateway(version: Version, error: &str) -> Response<DynamicBody> {
+        let body = format!("mirrord: {error}");
+
         Response::builder()
             .status(StatusCode::BAD_GATEWAY)
             .version(version)
-            .body(BoxBody::new(Empty::new().map_err(|_| unreachable!())))
+            .body(BoxBody::new(body.map_err(|_| unreachable!())))
             .expect("creating an empty response should not fail")
     }
 
+    /// Sends the given [`Request`] to the destination given as `to`.
+    ///
+    /// # TODO
+    ///
+    /// This method always creates a new TCP connection and preforms an HTTP handshake.
+    /// Also, it does not retry the request upon failure.
     async fn send_request(
         to: SocketAddr,
         request: Request<Incoming>,
@@ -158,6 +178,8 @@ impl FilteringService {
         }
     }
 
+    /// Sends the given [`Request`] to the destination given as `to`. If the [`Response`] is
+    /// [`StatusCode::SWITCHING_PROTOCOLS`], spawns a new [`tokio::task`] to await for upgrade.
     async fn let_through(
         &self,
         to: SocketAddr,
@@ -169,7 +191,12 @@ impl FilteringService {
         let mut response = Self::send_request(to, request)
             .await
             .map(|response| response.map(BoxBody::new))
-            .unwrap_or_else(|| Self::bad_gateway(version));
+            .unwrap_or_else(|| {
+                Self::bad_gateway(
+                    version,
+                    "failed to pass the request to its original destination",
+                )
+            });
 
         if response.status() == StatusCode::SWITCHING_PROTOCOLS {
             let http_server_on_upgrade = hyper::upgrade::on(&mut response);
@@ -199,18 +226,22 @@ impl FilteringService {
         response
     }
 
-    async fn respond_with(
+    /// Checks whether the given [`Response`] is [`StatusCode::SWITCHING_PROTOCOLS`].
+    /// If this is the case, spawns new [`tokio::task`] to await on the given [`OnUpgrade`].
+    /// Assumes that the [`Response`] comes from the stealer client given as `from_client`
+    /// and the given `on_upgrade` comes from the original [`Request`].
+    async fn check_protocol_switch(
         &self,
-        response: Response<DynamicBody>,
+        response: &Response<DynamicBody>,
         on_upgrade: OnUpgrade,
-        for_client: ClientId,
-    ) -> Response<DynamicBody> {
+        from_client: ClientId,
+    ) {
         if response.status() == StatusCode::SWITCHING_PROTOCOLS {
             let upgrade_tx = self.upgrade_tx.clone();
 
             task::spawn(async move {
                 let Ok(upgraded) = on_upgrade.await.inspect_err(|error| {
-                    tracing::trace!(?error, client_id = for_client, "HTTP upgrade failed")
+                    tracing::trace!(?error, client_id = from_client, "HTTP upgrade failed")
                 }) else {
                     return;
                 };
@@ -218,19 +249,22 @@ impl FilteringService {
                 let res = upgrade_tx
                     .send(UpgradedConnection {
                         http_client_io: upgraded,
-                        http_server_io: UpgradedServerSide::MatchedClient(for_client),
+                        http_server_io: UpgradedServerSide::MatchedClient(from_client),
                     })
                     .await;
 
                 if res.is_err() {
-                    tracing::trace!(client_id = for_client, "HTTP upgrade lost - channel closed");
+                    tracing::trace!(
+                        client_id = from_client,
+                        "HTTP upgrade lost - channel closed"
+                    );
                 }
             });
         }
-
-        response
     }
 
+    /// Extracts [`OnUpgrade`] from the given [`Request`] and sends it to [`FilteredStealTask`].
+    /// Waits on a dynamically created [`oneshot::channel`] for [`RequestHandling`] instruction.
     async fn handle_request(
         &self,
         mut request: Request<Incoming>,
@@ -253,8 +287,15 @@ impl FilteringService {
             Ok(RequestHandling::RespondWith {
                 response,
                 for_client,
-            }) => self.respond_with(response, on_upgrade, for_client).await,
-            Err(..) => Self::bad_gateway(version),
+            }) => {
+                self.check_protocol_switch(&response, on_upgrade, for_client)
+                    .await;
+                response
+            }
+            Err(..) => Self::bad_gateway(
+                version,
+                "failed to receive a response from the connected mirrord session",
+            ),
         };
 
         Ok(response)
@@ -275,29 +316,46 @@ impl Service<Request<Incoming>> for FilteringService {
     }
 }
 
+/// Manages a filtered stolen connection.
+///
+/// Uses a custom [`Service`] implementation to handle HTTP protocol details, change the raw IO
+/// stream into a series requests and provide responses.
 pub struct FilteredStealTask<T> {
     connection_id: ConnectionId,
+    /// Original destination of the stolen connection. Used when passing through HTTP requests that
+    /// don't not match any filter in [`Self::filters`].
     original_destination: SocketAddr,
 
+    /// Stealer client to [`HttpFilter`] mapping. Allows for routing HTTP requests to correct
+    /// stealer clients.
+    ///
+    /// # Note
+    ///
+    /// This mapping is shared via [`Arc`], allowing for dynamic updates from the outside.
+    /// This allows for *injecting* new stealer clients into exisiting connections.
     filters: Arc<DashMap<ClientId, HttpFilter>>,
-    clients: HashMap<ClientId, bool>,
 
-    /// For receiving all incoming [`Request`]s. Sender belongs to related [`FilteringService`].
+    /// Stealer client to subscription state mapping.
+    /// 1. `true` -> client is subscribed
+    /// 2. `false` -> client has unsubscribed or we sent [`ConnectionMessageOut::Closed`].
+    /// 3. `None` -> client does not know about this connection at all
+    subscribed: HashMap<ClientId, bool>,
+
+    /// For receiving [`Request`]s extracted by the [`FilteringService`].
     requests_rx: Receiver<ExtractedRequest>,
 
-    /// 1. Handle for the [`tokio::task`] that polls the [`hyper`] connection.
-    /// 2. [`DropGuard`] for this [`tokio::task`], so that it abort when this struct is dropped.
-    hyper_conn_task: (JoinHandle<Option<UpgradedConnection>>, DropGuard),
+    /// 1. Handle for the [`tokio::task`] that polls the [`hyper`] connection of related
+    ///    [`FilteringService`].
+    /// 2. [`DropGuard`] for this [`tokio::task`], so that it aborts when this struct is dropped.
+    hyper_conn_task: Option<(JoinHandle<Option<UpgradedConnection>>, DropGuard)>,
 
     /// Requests blocked on stealer clients' responses.
     blocked_requests: HashMap<(ClientId, RequestId), oneshot::Sender<RequestHandling>>,
 
+    /// Id of the next HTTP request that will be intercepted.
     next_request_id: RequestId,
 
-    task_rx: Receiver<ConnectionMessageIn>,
-    task_tx: Sender<ConnectionMessageOut>,
-
-    /// For safely downcasting stream after an HTTP upgrade. See [`Upgraded::downcast`].
+    /// For safely downcasting the IO stream after an HTTP upgrade. See [`Upgraded::downcast`].
     _io_type: PhantomData<fn() -> T>,
 }
 
@@ -305,17 +363,16 @@ impl<T> FilteredStealTask<T>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    /// Starts a new instance of this HTTP server.
-    /// The server will manage the connection given as `io` and use the provided `filters` for
-    /// matching incoming [`Request`]s with stealing clients.
+    /// Creates a new instance of this task. The task will manage the connection given as `io` and
+    /// use the provided `filters` for matching incoming [`Request`]s with stealing clients.
+    ///
+    /// The task will not run yet, see [`Self::run`].
     pub fn new(
         connection_id: ConnectionId,
         filters: Arc<DashMap<ClientId, HttpFilter>>,
         original_destination: SocketAddr,
         http_version: HttpVersion,
         io: T,
-        rx: Receiver<ConnectionMessageIn>,
-        tx: Sender<ConnectionMessageOut>,
     ) -> Self {
         let (upgrade_tx, mut upgrade_rx) = mpsc::channel(1);
         let (requests_tx, requests_rx) = mpsc::channel(8);
@@ -371,25 +428,28 @@ where
             connection_id,
             original_destination,
             filters,
-            clients: Default::default(),
+            subscribed: Default::default(),
             requests_rx,
-            hyper_conn_task: (task_handle, drop_guard),
+            hyper_conn_task: Some((task_handle, drop_guard)),
             blocked_requests: Default::default(),
             next_request_id: Default::default(),
-            task_rx: rx,
-            task_tx: tx,
             _io_type: Default::default(),
         }
     }
 
-    /// Matches the given [`Request`] against [`Self::filters`] and state of [`Self::clients`].
+    /// Matches the given [`Request`] against [`Self::filters`] and state of [`Self::subscribed`].
     fn match_request<B>(&self, request: &mut Request<B>) -> Option<ClientId> {
         self.filters
             .iter()
             .filter_map(|entry| entry.value().matches(request).then(|| *entry.key()))
-            .find(|client_id| self.clients.get(client_id).copied().unwrap_or(true))
+            .find(|client_id| self.subscribed.get(client_id).copied().unwrap_or(true))
     }
 
+    /// Sends the given [`Response`] to the [`FilteringService`] via [`oneshot::Sender`] from
+    /// [`Self::blocked_requests`].
+    ///
+    /// If there is no blocked request for the given ([`ClientId`], [`RequestId`]) combination or
+    /// the HTTP connection is dead, does nothing.
     fn handle_response(
         &mut self,
         client_id: ClientId,
@@ -424,6 +484,12 @@ where
         }
     }
 
+    /// Notifies the [`FilteringService`] that the client failed to provide a [`Response`] for the
+    /// request with the given id. The [`FilteringService`] is notified by dropping a
+    /// [`oneshot::Sender`] from [`Self::blocked_requests`].
+    ///
+    /// If there is no blocked request for the given ([`ClientId`], [`RequestId`]) combination or
+    /// the HTTP connection is dead, does nothing.
     fn handle_response_failure(&mut self, client_id: ClientId, request_id: RequestId) {
         let removed = self
             .blocked_requests
@@ -439,57 +505,66 @@ where
         }
     }
 
+    /// Handles a [`Request`] intercepted by the [`FilteringService`].
     async fn handle_request(
         &mut self,
         mut request: ExtractedRequest,
+        tx: &Sender<ConnectionMessageOut>,
     ) -> Result<(), ConnectionTaskError> {
         let Some(client_id) = self.match_request(&mut request.request) else {
-            let _ = request
-                .response_tx
-                .send(RequestHandling::LetThrough {
-                    to: self.original_destination,
-                    unchanged: request.request,
-                })
-                .is_err();
+            let _ = request.response_tx.send(RequestHandling::LetThrough {
+                to: self.original_destination,
+                unchanged: request.request,
+            });
+
             return Ok(());
         };
 
-        if self.clients.insert(client_id, true).is_none() {
-            self.task_tx
-                .send(ConnectionMessageOut::SubscribedHttp {
-                    client_id,
-                    connection_id: self.connection_id,
-                })
-                .await?;
+        if self.subscribed.insert(client_id, true).is_none() {
+            // First time this client will receive a request from this connection.
+            tx.send(ConnectionMessageOut::SubscribedHttp {
+                client_id,
+                connection_id: self.connection_id,
+            })
+            .await?;
         }
 
         let id = self.next_request_id;
         self.next_request_id += 1;
 
-        self.task_tx
-            .send(ConnectionMessageOut::Request {
-                client_id,
-                connection_id: self.connection_id,
-                request: request.request,
-                id,
-                port: self.original_destination.port(),
-            })
-            .await?;
+        tx.send(ConnectionMessageOut::Request {
+            client_id,
+            connection_id: self.connection_id,
+            request: request.request,
+            id,
+            port: self.original_destination.port(),
+        })
+        .await?;
 
         self.blocked_requests
             .insert((client_id, id), request.response_tx);
 
-        self.clients.insert(client_id, true);
-
         Ok(())
     }
 
-    pub async fn run(mut self) -> Result<(), ConnectionTaskError> {
+    /// Runs this task until the connection is closed.
+    /// Handles HTTP upgrades by transforming into an [`UnfilteredStealTask`].
+    ///
+    /// # Note
+    ///
+    /// Does not send [`ConnectionMessageOut::Closed`], leaving this up to wrapper method
+    /// [`Self::run`]. [`Self::run`] calls this method and then sends
+    /// [`ConnectionMessageOut::Closed`] based on state in [`Self::subscribed`].
+    async fn run_inner(
+        &mut self,
+        tx: Sender<ConnectionMessageOut>,
+        rx: &mut Receiver<ConnectionMessageIn>,
+    ) -> Result<(), ConnectionTaskError> {
         let mut queued_raw_data = vec![];
 
         loop {
             tokio::select! {
-                message = self.task_rx.recv() => match message.ok_or(ConnectionTaskError::RecvError)? {
+                message = rx.recv() => match message.ok_or(ConnectionTaskError::RecvError)? {
                     ConnectionMessageIn::Raw { data, client_id } => {
                         tracing::trace!(client_id, connection_id = self.connection_id, "Received raw data");
                         queued_raw_data.push((data, client_id));
@@ -503,22 +578,26 @@ where
                         queued_raw_data.retain(|(_, id)| *id != client_id);
                     },
                     ConnectionMessageIn::Unsubscribed { client_id } => {
-                        self.clients.insert(client_id, false);
+                        self.subscribed.insert(client_id, false);
                         self.blocked_requests.retain(|key, _| key.0 != client_id);
                     },
                 },
 
                 request = self.requests_rx.recv() => match request {
-                    Some(request) => self.handle_request(request).await?,
+                    Some(request) => self.handle_request(request, &tx).await?,
 
+                    // No more requests from the `FilteringService`.
+                    // HTTP connection is closed and possibly upgraded.
                     None => break,
                 }
             }
         }
 
-        let Some(upgraded) = self
+        let (task_handle, _drop_guard) = self
             .hyper_conn_task
-            .0
+            .take()
+            .expect("task handle is consumed only here");
+        let Some(upgraded) = task_handle
             .await
             .map_err(|_| ConnectionTaskError::HttpConnectionTaskPanicked)?
         else {
@@ -533,6 +612,7 @@ where
         let http_client_read_buf = parts.read_buf;
 
         match upgraded.http_server_io {
+            // Connection was upgraded and some HTTP filter matched the upgrade request.
             UpgradedServerSide::MatchedClient(client_id) => {
                 tracing::trace!(
                     connection_id = self.connection_id,
@@ -547,58 +627,56 @@ where
                     http_client_io.write_all(&data).await?;
                 }
 
-                let subscribed = self.clients.remove(&client_id).unwrap_or(false);
+                for (id, subscribed) in self.subscribed.iter_mut() {
+                    if *subscribed && *id != client_id {
+                        tx.send(ConnectionMessageOut::Closed {
+                            client_id: *id,
+                            connection_id: self.connection_id,
+                        })
+                        .await?;
 
-                for (client_id, subscribed) in self.clients {
-                    if subscribed {
-                        self.task_tx
-                            .send(ConnectionMessageOut::Closed {
-                                client_id,
-                                connection_id: self.connection_id,
-                            })
-                            .await?;
+                        *subscribed = false;
                     }
                 }
 
-                if subscribed {
+                if self.subscribed.get(&client_id).copied() != Some(true) {
                     return Ok(());
                 }
 
                 if !http_client_read_buf.is_empty() {
-                    self.task_tx
-                        .send(ConnectionMessageOut::Raw {
-                            client_id,
-                            connection_id: self.connection_id,
-                            data: http_client_read_buf.into(),
-                        })
-                        .await?;
+                    tx.send(ConnectionMessageOut::Raw {
+                        client_id,
+                        connection_id: self.connection_id,
+                        data: http_client_read_buf.into(),
+                    })
+                    .await?;
                 }
 
                 UnfilteredStealTask {
                     connection_id: self.connection_id,
                     client_id,
                     stream: http_client_io,
-                    tx: self.task_tx,
-                    rx: self.task_rx,
                 }
-                .run()
+                .run(tx, rx)
                 .await
             }
 
+            // Connection was upgraded and no HTTP filter matched the upgrade request.
             UpgradedServerSide::OriginalDestination(upgraded) => {
                 tracing::trace!(
                     connection_id = self.connection_id,
                     "HTTP connection upgraded for original destination",
                 );
 
-                for (client_id, subscribed) in self.clients {
-                    if subscribed {
-                        self.task_tx
-                            .send(ConnectionMessageOut::Closed {
-                                connection_id: self.connection_id,
-                                client_id,
-                            })
-                            .await?;
+                for (client_id, subscribed) in self.subscribed.iter_mut() {
+                    if *subscribed {
+                        tx.send(ConnectionMessageOut::Closed {
+                            connection_id: self.connection_id,
+                            client_id: *client_id,
+                        })
+                        .await?;
+
+                        *subscribed = false;
                     }
                 }
 
@@ -630,5 +708,26 @@ where
                 Ok(())
             }
         }
+    }
+
+    /// Runs this task until the connection is closed.
+    pub async fn run(
+        mut self,
+        tx: Sender<ConnectionMessageOut>,
+        rx: &mut Receiver<ConnectionMessageIn>,
+    ) -> Result<(), ConnectionTaskError> {
+        let res = self.run_inner(tx.clone(), rx).await;
+
+        for (client_id, subscribed) in self.subscribed {
+            if subscribed {
+                tx.send(ConnectionMessageOut::Closed {
+                    client_id,
+                    connection_id: self.connection_id,
+                })
+                .await?;
+            }
+        }
+
+        res
     }
 }
