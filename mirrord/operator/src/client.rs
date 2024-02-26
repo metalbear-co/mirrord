@@ -160,9 +160,6 @@ pub struct OperatorApi {
     client: Client,
     target_api: Api<TargetCrd>,
     copy_target_api: Api<CopyTargetCrd>,
-
-    /// [`Api`] to the operator's [`SessionCrd`] resources (routes).
-    _sessions_api: Api<SessionCrd>,
     target_namespace: Option<String>,
     target_config: TargetConfig,
     on_concurrent_steal: ConcurrentSteal,
@@ -365,13 +362,10 @@ impl OperatorApi {
         let copy_target_api: Api<CopyTargetCrd> =
             get_k8s_resource_api(&client, target_namespace.as_deref());
 
-        let _sessions_api = session_api(None).await?;
-
         Ok(OperatorApi {
             client,
             target_api,
             copy_target_api,
-            _sessions_api,
             target_namespace,
             target_config,
             on_concurrent_steal,

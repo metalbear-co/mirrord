@@ -66,7 +66,7 @@ pub(super) async fn operator_session_kill_all() -> Result<()> {
         .delete_collection(&Default::default(), &Default::default())
         .await
         .inspect_err(|kube_fail| match kube_fail {
-            kube::Error::Api(response) if response.code == 404 => {
+            kube::Error::Api(response) if response.code == 404 && response.reason.contains("parse") => {
                 let not_supported = "`operator session kill-all` is not supported by the mirrord-operator found in your cluster, consider updating it!";
 
                 sub_progress.failure(Some(not_supported));
@@ -97,7 +97,7 @@ pub(super) async fn operator_session_kill_one(id: u64) -> Result<()> {
         .delete(&format!("{id}"), &DeleteParams::default())
         .await
         .inspect_err(|kube_fail| match kube_fail {
-            kube::Error::Api(response) if response.code == 404 => {
+            kube::Error::Api(response) if response.code == 404 && response.reason.contains("parse") => {
                 let not_supported = "`operator session kill` is not supported by the mirrord-operator found in your cluster, consider updating it!";
 
                 sub_progress.failure(Some(not_supported));
@@ -129,7 +129,7 @@ pub(super) async fn operator_session_retain_active() -> Result<()> {
         .delete("inactive", &DeleteParams::default())
         .await
         .inspect_err(|kube_fail| match kube_fail {
-            kube::Error::Api(response) if response.code == 404 => {
+            kube::Error::Api(response) if response.code == 404 && response.reason.contains("parse") => {
                 let not_supported = "`operator session retain-active` is not supported by the mirrord-operator found in your cluster, consider updating it!";
 
                 sub_progress.failure(Some(not_supported));
