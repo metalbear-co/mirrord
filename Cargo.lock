@@ -3349,7 +3349,6 @@ dependencies = [
  "num-traits",
  "oci-spec",
  "once_cell",
- "pin-project",
  "pnet",
  "rand",
  "rawsocket",

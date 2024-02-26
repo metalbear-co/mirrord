@@ -1,6 +1,5 @@
 use std::io;
 
-use pin_project::pin_project;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite},
     net::TcpStream,
@@ -17,9 +16,7 @@ use tokio::{
 /// Thanks [finomnis](https://stackoverflow.com/users/2902833/finomnis) for the help!
 // impl deref with pin
 #[derive(Debug)]
-#[pin_project]
 pub(crate) struct ReversibleStream<const HEADER_SIZE: usize> {
-    #[pin]
     stream: TcpStream,
 
     header: [u8; HEADER_SIZE],
@@ -104,19 +101,18 @@ impl<const HEADER_SIZE: usize> AsyncRead for ReversibleStream<HEADER_SIZE> {
         cx: &mut std::task::Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        let this = self.project();
+        if self.num_forwarded < self.header_len {
+            let leftover = &self.header[self.num_forwarded..self.header_len];
 
-        if this.num_forwarded < this.header_len {
-            let leftover = &this.header[*this.num_forwarded..*this.header_len];
-
-            let forward = leftover.get(..buf.remaining()).unwrap_or(leftover);
+            let forward: &[u8] = leftover.get(..buf.remaining()).unwrap_or(leftover);
             buf.put_slice(forward);
 
-            *this.num_forwarded += forward.len();
+            self.get_mut().num_forwarded += forward.len();
 
             std::task::Poll::Ready(Ok(()))
         } else {
-            this.stream.poll_read(cx, buf)
+            std::pin::Pin::new(&mut self.get_mut().stream).poll_read(cx, buf)
+            // self.stream.poll_read(cx, buf)
         }
     }
 }
@@ -127,20 +123,20 @@ impl<const HEADER_SIZE: usize> AsyncWrite for ReversibleStream<HEADER_SIZE> {
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
-        self.project().stream.poll_write(cx, buf)
+        std::pin::Pin::new(&mut self.get_mut().stream).poll_write(cx, buf)
     }
 
     fn poll_flush(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        self.project().stream.poll_flush(cx)
+        std::pin::Pin::new(&mut self.get_mut().stream).poll_flush(cx)
     }
 
     fn poll_shutdown(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        self.project().stream.poll_shutdown(cx)
+        std::pin::Pin::new(&mut self.get_mut().stream).poll_shutdown(cx)
     }
 }
