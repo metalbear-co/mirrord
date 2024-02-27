@@ -117,7 +117,7 @@ impl SessionCommandHandler {
             if status.is_failure() {
                 sub_progress.failure(Some(&format!(
                     "`{command}` failed due to `{}` with code `{}`!",
-                    status.reason, status.code
+                    status.message, status.code
                 )));
                 progress.failure(Some("Session operation failed!"));
 
@@ -127,7 +127,7 @@ impl SessionCommandHandler {
                 })
             } else {
                 sub_progress.success(Some(&format!(
-                    "`{command}` finished successfully with `{}` `{}`.",
+                    "`{command}` finished successfully with `{}` with code `{}`.",
                     status.message, status.code
                 )));
                 progress.success(Some("Session operation is completed."));
