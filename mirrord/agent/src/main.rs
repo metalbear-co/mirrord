@@ -45,8 +45,8 @@ use crate::{
         api::TcpStealerApi,
         connection::TcpConnectionStealer,
         ip_tables::{
-            IPTablesWrapper, SafeIpTables, IPTABLE_MESH, IPTABLE_MESH_ENV, IPTABLE_PREROUTING,
-            IPTABLE_PREROUTING_ENV, IPTABLE_STANDARD, IPTABLE_STANDARD_ENV,
+            new_iptables, IPTablesWrapper, SafeIpTables, IPTABLE_MESH, IPTABLE_MESH_ENV,
+            IPTABLE_PREROUTING, IPTABLE_PREROUTING_ENV, IPTABLE_STANDARD, IPTABLE_STANDARD_ENV,
         },
         StealerCommand,
     },
@@ -762,7 +762,7 @@ async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
 }
 
 async fn clear_iptable_chain() -> Result<()> {
-    let ipt = iptables::new(false).unwrap();
+    let ipt = new_iptables();
 
     SafeIpTables::load(IPTablesWrapper::from(ipt), false)
         .await?
