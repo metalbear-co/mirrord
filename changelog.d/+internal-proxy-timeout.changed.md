@@ -1,1 +1,0 @@
-Increase internal proxy timeout from 5 seconds to 10 seconds to fix long agent ops
