@@ -1,10 +1,5 @@
 use std::{
-    collections::HashMap,
-    future::{poll_fn, Future},
-    marker::PhantomData,
-    net::SocketAddr,
-    pin::Pin,
-    sync::Arc,
+    collections::HashMap, future::Future, marker::PhantomData, net::SocketAddr, pin::Pin, sync::Arc,
 };
 
 use bytes::Bytes;
@@ -155,20 +150,16 @@ impl FilteringService {
             }
 
             _ => {
-                let (mut request_sender, mut connection) =
-                    http1::handshake(TokioIo::new(tcp_stream))
-                        .await
-                        .inspect_err(|error| {
-                            tracing::error!(
-                                ?error,
-                                "HTTP1 handshake with original destination failed"
-                            )
-                        })
-                        .ok()?;
+                let (mut request_sender, connection) = http1::handshake(TokioIo::new(tcp_stream))
+                    .await
+                    .inspect_err(|error| {
+                        tracing::error!(?error, "HTTP1 handshake with original destination failed")
+                    })
+                    .ok()?;
 
                 // We need this to progress the connection forward (hyper thing).
                 tokio::spawn(async move {
-                    if let Err(error) = poll_fn(|cx| connection.poll_without_shutdown(cx)).await {
+                    if let Err(error) = connection.await {
                         tracing::error!(?error, "Connection with original destination failed");
                     }
                 });
@@ -179,14 +170,14 @@ impl FilteringService {
     }
 
     /// Sends the given [`Request`] to the destination given as `to`. If the [`Response`] is
-    /// [`StatusCode::SWITCHING_PROTOCOLS`], spawns a new [`tokio::task`] to await for upgrade.
+    /// [`StatusCode::SWITCHING_PROTOCOLS`], spawns a new [`tokio::task`] to await for the given
+    /// [`OnUpgrade`].
     async fn let_through(
         &self,
+        request: Request<Incoming>,
+        on_upgrade: OnUpgrade,
         to: SocketAddr,
-        mut request: Request<Incoming>,
     ) -> Response<DynamicBody> {
-        let http_client_on_upgrade = hyper::upgrade::on(&mut request);
-
         let version = request.version();
         let mut response = Self::send_request(to, request)
             .await
@@ -204,7 +195,7 @@ impl FilteringService {
 
             task::spawn(async move {
                 let Ok((upgraded_client, upgraded_server)) =
-                    tokio::try_join!(http_client_on_upgrade, http_server_on_upgrade)
+                    tokio::try_join!(on_upgrade, http_server_on_upgrade)
                         .inspect_err(|error| tracing::trace!(?error, "HTTP upgrade failed"))
                 else {
                     return;
@@ -282,7 +273,7 @@ impl FilteringService {
 
         let response = match response_rx.await {
             Ok(RequestHandling::LetThrough { to, unchanged }) => {
-                self.let_through(to, unchanged).await
+                self.let_through(unchanged, on_upgrade, to).await
             }
             Ok(RequestHandling::RespondWith {
                 response,
@@ -560,7 +551,10 @@ where
         tx: Sender<ConnectionMessageOut>,
         rx: &mut Receiver<ConnectionMessageIn>,
     ) -> Result<(), ConnectionTaskError> {
-        let mut queued_raw_data = vec![];
+        // Raw data that was received before we moved to the after-upgrade phase.
+        // The stealer client might start sending raw bytes immediately after the `101 SWITCHING
+        // PROTOCOLS` response.
+        let mut queued_raw_data: Vec<(Vec<u8>, ClientId)> = vec![];
 
         loop {
             tokio::select! {
@@ -571,11 +565,9 @@ where
                     },
                     ConnectionMessageIn::Response { response, request_id, client_id } => {
                         self.handle_response(client_id, request_id, response);
-                        queued_raw_data.retain(|(_, id)| *id != client_id);
                     },
                     ConnectionMessageIn::ResponseFailed { request_id, client_id } => {
                         self.handle_response_failure(client_id, request_id);
-                        queued_raw_data.retain(|(_, id)| *id != client_id);
                     },
                     ConnectionMessageIn::Unsubscribed { client_id } => {
                         self.subscribed.insert(client_id, false);
@@ -639,7 +631,7 @@ where
                     }
                 }
 
-                if self.subscribed.get(&client_id).copied() != Some(true) {
+                if self.subscribed.remove(&client_id) != Some(true) {
                     return Ok(());
                 }
 
@@ -729,5 +721,804 @@ where
         }
 
         res
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use bytes::BytesMut;
+    use http::{
+        header::{CONNECTION, UPGRADE},
+        HeaderValue, Method,
+    };
+    use http_body_util::Empty;
+    use hyper::{client::conn::http1::SendRequest, service::service_fn};
+    use tokio::{io::AsyncReadExt, net::TcpListener, task::JoinSet};
+
+    use super::*;
+
+    /// Full setup for [`FilteredStealTask`] tests.
+    struct TestSetup {
+        /// [`HttpFilter`]s mapping used by the task.
+        filters: Arc<DashMap<ClientId, HttpFilter>>,
+        /// Address of the original HTTP server (the one we steal from).
+        original_address: SocketAddr,
+        /// Stolen connection wrapped into HTTP.
+        request_sender: SendRequest<DynamicBody>,
+        /// For sending [`ConnectionMessageIn`] to the task.
+        task_in_tx: Sender<ConnectionMessageIn>,
+        /// For receiving [`ConnectionMessageOut`] from the task.
+        task_out_rx: Receiver<ConnectionMessageOut>,
+        /// Background tasks spawned during this test.
+        tasks: JoinSet<()>,
+        /// For cancelling the background task running the original HTTP server.
+        original_server_token: CancellationToken,
+    }
+
+    impl TestSetup {
+        /// Name of the dummy protocol we're upgrading to.
+        /// Protocol goes like this:
+        /// 1. The server sends bytes 'hello'.
+        /// 2. The server echoes back everything it receives from the client.
+        const TEST_PROTO: &'static str = "testproto";
+
+        /// Id of the stolen connection.
+        const CONNECTION_ID: ConnectionId = 0;
+
+        /// Request handler of the original HTTP server.
+        /// Responds with [`StatusCode::BAD_REQUEST`] to anything that is not a valid
+        /// [`Self::TEST_PROTO`] upgrade request. Allows the connection to
+        /// [`Self::TEST_PROTO`].
+        async fn handle_request(
+            request: Request<Incoming>,
+        ) -> hyper::Result<Response<DynamicBody>> {
+            let mut response = Response::new(Empty::new().map_err(|_| unreachable!()).boxed());
+            *response.version_mut() = request.version();
+
+            let contains_expected_upgrade = request
+                .headers()
+                .get(UPGRADE)
+                .filter(|proto| *proto == Self::TEST_PROTO)
+                .is_some()
+                && request
+                    .headers()
+                    .get(CONNECTION)
+                    .filter(|value| *value == "upgrade")
+                    .is_some();
+
+            if !contains_expected_upgrade {
+                *response.status_mut() = StatusCode::BAD_REQUEST;
+                return Ok(response);
+            }
+
+            task::spawn(async move {
+                let upgraded = hyper::upgrade::on(request).await.unwrap();
+                let parts = upgraded.downcast::<TokioIo<TcpStream>>().unwrap();
+                let mut stream = parts.io.into_inner();
+
+                stream.write_all(b"hello").await.unwrap();
+                if !parts.read_buf.is_empty() {
+                    stream.write_all(&parts.read_buf).await.unwrap();
+                }
+                stream.flush().await.unwrap();
+
+                let mut buffer = BytesMut::with_capacity(4096);
+
+                loop {
+                    stream.read_buf(&mut buffer).await.unwrap();
+                    if buffer.is_empty() {
+                        break;
+                    }
+                    stream.write_all(&buffer).await.unwrap();
+                    stream.flush().await.unwrap();
+                    buffer.clear();
+                }
+            });
+
+            *response.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
+            response
+                .headers_mut()
+                .insert(UPGRADE, HeaderValue::from_static(Self::TEST_PROTO));
+            response
+                .headers_mut()
+                .insert(CONNECTION, HeaderValue::from_static("upgrade"));
+
+            Ok(response)
+        }
+
+        /// Creates a new instance of this struct.
+        /// Spawns an HTTP server using [`Self::handle_request`], spawns [`FilteredStealTask`],
+        /// prepares connections.
+        async fn new() -> Self {
+            let mut tasks = JoinSet::new();
+
+            let original_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let original_address = original_listener.local_addr().unwrap();
+            let original_server_token = CancellationToken::new();
+            let token_clone = original_server_token.clone();
+
+            let (server_stream, client_stream) = {
+                let stealing_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let ((server_stream, _), client_stream) = tokio::try_join!(
+                    stealing_listener.accept(),
+                    TcpStream::connect(stealing_listener.local_addr().unwrap()),
+                )
+                .unwrap();
+
+                (server_stream, client_stream)
+            };
+
+            tasks.spawn(async move {
+                let mut tasks = JoinSet::new();
+
+                loop {
+                    tokio::select! {
+                        accept = original_listener.accept() => {
+                            let (stream, _) = accept.unwrap();
+                            let conn = hyper::server::conn::http1::Builder::new()
+                                .serve_connection(TokioIo::new(stream), service_fn(Self::handle_request));
+
+                            tasks.spawn(async move {
+                                conn.with_upgrades()
+                                    .await
+                                    .unwrap();
+                            });
+                        },
+
+                        Some(res) = tasks.join_next() => res.unwrap(),
+
+                        _ = token_clone.cancelled() => break,
+                    }
+                }
+
+                tasks.shutdown().await;
+            });
+
+            let filters: Arc<DashMap<ClientId, HttpFilter>> = Default::default();
+            let filters_clone = filters.clone();
+
+            let (in_tx, mut in_rx) = mpsc::channel(8);
+            let (out_tx, out_rx) = mpsc::channel(8);
+
+            tasks.spawn(async move {
+                let task = FilteredStealTask::new(
+                    Self::CONNECTION_ID,
+                    filters_clone,
+                    original_address,
+                    HttpVersion::V1,
+                    server_stream,
+                );
+
+                task.run(out_tx, &mut in_rx).await.unwrap();
+            });
+
+            let (request_sender, conn) = hyper::client::conn::http1::handshake::<_, DynamicBody>(
+                TokioIo::new(client_stream),
+            )
+            .await
+            .unwrap();
+
+            tasks.spawn(async move {
+                conn.await.unwrap();
+            });
+
+            TestSetup {
+                filters,
+                original_address,
+                request_sender,
+                task_in_tx: in_tx,
+                task_out_rx: out_rx,
+                tasks,
+                original_server_token,
+            }
+        }
+
+        /// Prepares a new [`Request`] to be sent via [`Self::request_sender`].
+        ///
+        /// # Params
+        ///
+        /// 1. `client_id` - If this is set to [`Some`] value, the request will contain a header
+        ///    such that the [`FilteredStealTask`] will steal the request for the client.
+        /// 2. `is_upgrade` - If `false`, an ordinary `GET` request will be produced. If `true`, a
+        ///    [`Self::TEST_PROTO`] upgrade request will be produced.
+        fn prepare_request(
+            &self,
+            client_id: Option<ClientId>,
+            is_upgrade: bool,
+        ) -> Request<DynamicBody> {
+            let mut builder = Request::builder().method(Method::GET).uri(if is_upgrade {
+                "testproto://www.some-server.com"
+            } else {
+                "http://www.some-server.com"
+            });
+
+            if let Some(client_id) = client_id {
+                builder = builder.header("x-client", &client_id.to_string());
+                self.filters.insert(
+                    client_id,
+                    HttpFilter::Header(format!("x-client: {client_id}").parse().unwrap()),
+                );
+            }
+
+            if is_upgrade {
+                builder = builder
+                    .header(UPGRADE, Self::TEST_PROTO)
+                    .header(CONNECTION, "upgrade");
+            }
+
+            builder
+                .body(Empty::new().map_err(|_| unreachable!()).boxed())
+                .unwrap()
+        }
+
+        /// 1. Closes the stolen connection and the original HTTP server.
+        /// 2. Waits until [`FilteredStealTask`] finishes.
+        /// 3. Checks results of the background tasks.
+        async fn shutdown(mut self) -> Receiver<ConnectionMessageOut> {
+            std::mem::drop(self.request_sender);
+            self.task_in_tx.closed().await;
+            self.original_server_token.cancel();
+
+            while let Some(task_result) = self.tasks.join_next().await {
+                task_result.unwrap();
+            }
+
+            self.task_out_rx
+        }
+    }
+
+    /// Stolen connection receives 5 requests.
+    /// The first one does not match any client's filter.
+    /// Each consecutive request matches some other client's filter.
+    /// Then, connection is closed and all 4 clients are notified.
+    #[tokio::test]
+    async fn multiple_clients() {
+        let mut setup = TestSetup::new().await;
+
+        // First request does not match any filter, should reach the original destination.
+        let request = setup.prepare_request(None, false);
+        let response = setup.request_sender.send_request(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        // Consecutive requests should reach stealer clients.
+        for client_id in 0..4 {
+            let request = setup.prepare_request(Some(client_id), false);
+            tokio::join!(
+                async {
+                    let response = setup.request_sender.send_request(request).await.unwrap();
+                    assert_eq!(response.status(), StatusCode::OK);
+                },
+                async {
+                    match setup.task_out_rx.recv().await.unwrap() {
+                        ConnectionMessageOut::SubscribedHttp {
+                            client_id: received_client_id,
+                            connection_id: TestSetup::CONNECTION_ID,
+                        } => {
+                            assert_eq!(received_client_id, client_id);
+                        }
+                        other => unreachable!("unexpected message: {other:?}"),
+                    };
+
+                    let request_id = match setup.task_out_rx.recv().await.unwrap() {
+                        ConnectionMessageOut::Request {
+                            client_id: received_client_id,
+                            connection_id: TestSetup::CONNECTION_ID,
+                            id,
+                            port,
+                            ..
+                        } => {
+                            assert_eq!(received_client_id, client_id);
+                            assert_eq!(port, setup.original_address.port());
+                            id
+                        }
+                        other => unreachable!("unexpected message: {other:?}"),
+                    };
+
+                    let response = Response::builder()
+                        .status(StatusCode::OK)
+                        .body(Empty::new().map_err(|_| unreachable!()).boxed())
+                        .unwrap();
+
+                    setup
+                        .task_in_tx
+                        .send(ConnectionMessageIn::Response {
+                            client_id,
+                            request_id,
+                            response,
+                        })
+                        .await
+                        .unwrap();
+                }
+            );
+        }
+
+        let mut rx = tokio::time::timeout(std::time::Duration::from_secs(5), setup.shutdown())
+            .await
+            .unwrap();
+
+        let mut clients_closed = [false; 4];
+        for _ in 0..4 {
+            match rx.recv().await.unwrap() {
+                ConnectionMessageOut::Closed {
+                    client_id,
+                    connection_id: TestSetup::CONNECTION_ID,
+                } => {
+                    clients_closed[usize::try_from(client_id).unwrap()] = true;
+                }
+                other => unreachable!("unexpected message: {other:?}"),
+            };
+        }
+
+        assert!(clients_closed.iter().all(|closed| *closed));
+
+        assert!(rx.recv().await.is_none());
+    }
+
+    /// Stolen connection receives 2 requests, both match the same client's filter.
+    /// After processing 2 requests, client unsubscribes the connection.
+    /// Then, connection is closed and the client is not notified.
+    #[tokio::test]
+    async fn subscribed_unsubscribed() {
+        let mut setup = TestSetup::new().await;
+
+        // The client should see the `SubscribedHttp` message before the first request.
+        let request = setup.prepare_request(Some(0), false);
+        tokio::join!(
+            async {
+                let response = setup.request_sender.send_request(request).await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+            },
+            async {
+                match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::SubscribedHttp {
+                        client_id: 0,
+                        connection_id: TestSetup::CONNECTION_ID,
+                    } => {}
+                    other => unreachable!("unexpected message: {other:?}"),
+                };
+
+                let request_id = match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::Request {
+                        client_id: 0,
+                        connection_id: TestSetup::CONNECTION_ID,
+                        id,
+                        port,
+                        ..
+                    } => {
+                        assert_eq!(port, setup.original_address.port());
+                        id
+                    }
+                    other => unreachable!("unexpected message: {other:?}"),
+                };
+
+                let response = Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Empty::new().map_err(|_| unreachable!()).boxed())
+                    .unwrap();
+
+                setup
+                    .task_in_tx
+                    .send(ConnectionMessageIn::Response {
+                        client_id: 0,
+                        request_id,
+                        response,
+                    })
+                    .await
+                    .unwrap();
+            }
+        );
+
+        // The client should not see the `SusbcribedHttp` message before the second request.
+        let request = setup.prepare_request(Some(0), false);
+        tokio::join!(
+            async {
+                let response = setup.request_sender.send_request(request).await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+            },
+            async {
+                let request_id = match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::Request {
+                        client_id: 0,
+                        connection_id: TestSetup::CONNECTION_ID,
+                        id,
+                        port,
+                        ..
+                    } => {
+                        assert_eq!(port, setup.original_address.port());
+                        id
+                    }
+                    other => unreachable!("unexpected message: {other:?}"),
+                };
+
+                let response = Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Empty::new().map_err(|_| unreachable!()).boxed())
+                    .unwrap();
+
+                setup
+                    .task_in_tx
+                    .send(ConnectionMessageIn::Response {
+                        client_id: 0,
+                        request_id,
+                        response,
+                    })
+                    .await
+                    .unwrap();
+            }
+        );
+
+        setup
+            .task_in_tx
+            .send(ConnectionMessageIn::Unsubscribed { client_id: 0 })
+            .await
+            .unwrap();
+
+        let mut rx = setup.shutdown().await;
+        // The task should not produce the `Closed` message - the client has unsubscribed.
+        assert!(rx.recv().await.is_none());
+    }
+
+    /// Stolen connection receives a request that matches some client filter.
+    /// Then, the connection receives an upgrade request that does not match any filter.
+    /// The client is notified that the connection has closed and bytes are proxied between the
+    /// original HTTP server and the request sender.
+    #[tokio::test]
+    async fn upgrade_for_original_dst() {
+        let mut setup = TestSetup::new().await;
+
+        let request = setup.prepare_request(Some(0), false);
+        tokio::join!(
+            async {
+                let response = setup.request_sender.send_request(request).await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+            },
+            async {
+                match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::SubscribedHttp {
+                        client_id: 0,
+                        connection_id: TestSetup::CONNECTION_ID,
+                    } => {}
+                    other => unreachable!("unexpected message: {other:?}"),
+                };
+
+                let request_id = match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::Request {
+                        client_id: 0,
+                        connection_id: TestSetup::CONNECTION_ID,
+                        id,
+                        port,
+                        ..
+                    } => {
+                        assert_eq!(port, setup.original_address.port());
+                        id
+                    }
+                    other => unreachable!("unexpected message: {other:?}"),
+                };
+
+                let response = Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Empty::new().map_err(|_| unreachable!()).boxed())
+                    .unwrap();
+
+                setup
+                    .task_in_tx
+                    .send(ConnectionMessageIn::Response {
+                        client_id: 0,
+                        request_id,
+                        response,
+                    })
+                    .await
+                    .unwrap();
+            }
+        );
+
+        let request = setup.prepare_request(None, true);
+        let response = setup.request_sender.send_request(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+        let upgraded = hyper::upgrade::on(response).await.unwrap();
+        let mut stream = TokioIo::new(upgraded);
+
+        let mut buffer = *b"hello can you hear me";
+        stream
+            .write_all(buffer.strip_prefix(b"hello").unwrap())
+            .await
+            .unwrap();
+        stream.flush().await.unwrap();
+        stream.read_exact(&mut buffer).await.unwrap();
+
+        assert_eq!(&buffer, b"hello can you hear me");
+
+        std::mem::drop(stream);
+        let mut rx = setup.shutdown().await;
+
+        match rx.recv().await.unwrap() {
+            ConnectionMessageOut::Closed {
+                client_id: 0,
+                connection_id: TestSetup::CONNECTION_ID,
+            } => {}
+            other => unreachable!("unexpected message: {other:?}"),
+        }
+
+        assert!(rx.recv().await.is_none());
+    }
+
+    /// Stolen connection receives a request that matches some client's filter.
+    /// Then, the connection receives an upgrade request that matches some other client's filter.
+    /// The first client is notified that the connection has closed and bytes are proxied between
+    /// the second client and the request sender.
+    #[tokio::test]
+    async fn upgrade_for_stealer_client() {
+        let mut setup = TestSetup::new().await;
+
+        let request = setup.prepare_request(Some(0), false);
+        tokio::join!(
+            async {
+                let response = setup.request_sender.send_request(request).await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+            },
+            async {
+                match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::SubscribedHttp {
+                        client_id: 0,
+                        connection_id: TestSetup::CONNECTION_ID,
+                    } => {}
+                    other => unreachable!("unexpected message: {other:?}"),
+                };
+
+                let request_id = match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::Request {
+                        client_id: 0,
+                        connection_id: TestSetup::CONNECTION_ID,
+                        id,
+                        port,
+                        ..
+                    } => {
+                        assert_eq!(port, setup.original_address.port());
+                        id
+                    }
+                    other => unreachable!("unexpected message: {other:?}"),
+                };
+
+                let response = Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Empty::new().map_err(|_| unreachable!()).boxed())
+                    .unwrap();
+
+                setup
+                    .task_in_tx
+                    .send(ConnectionMessageIn::Response {
+                        client_id: 0,
+                        request_id,
+                        response,
+                    })
+                    .await
+                    .unwrap();
+            }
+        );
+
+        let request = setup.prepare_request(Some(1), true);
+        tokio::join!(
+            async {
+                let response = setup.request_sender.send_request(request).await.unwrap();
+                assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+                let mut upgraded = TokioIo::new(hyper::upgrade::on(response).await.unwrap());
+                upgraded.write_all(b"hello from client").await.unwrap();
+                let mut buffer = *b"hello from server";
+                upgraded.read_exact(&mut buffer).await.unwrap();
+                assert_eq!(&buffer, b"hello from server");
+            },
+            async {
+                match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::SubscribedHttp {
+                        client_id: 1,
+                        connection_id: TestSetup::CONNECTION_ID,
+                    } => {}
+                    other => unreachable!("unexpected message: {other:?}"),
+                };
+
+                let request_id = match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::Request {
+                        client_id: 1,
+                        connection_id: TestSetup::CONNECTION_ID,
+                        id,
+                        port,
+                        request,
+                    } => {
+                        assert_eq!(port, setup.original_address.port());
+                        assert_eq!(
+                            request.headers().get(UPGRADE).and_then(|v| v.to_str().ok()),
+                            Some(TestSetup::TEST_PROTO)
+                        );
+                        assert_eq!(
+                            request
+                                .headers()
+                                .get(CONNECTION)
+                                .and_then(|v| v.to_str().ok()),
+                            Some("upgrade")
+                        );
+                        id
+                    }
+                    other => unreachable!("unexpected message: {other:?}"),
+                };
+
+                let response = Response::builder()
+                    .status(StatusCode::SWITCHING_PROTOCOLS)
+                    .header(UPGRADE, TestSetup::TEST_PROTO)
+                    .header(CONNECTION, "upgrade")
+                    .body(Empty::new().map_err(|_| unreachable!()).boxed())
+                    .unwrap();
+
+                setup
+                    .task_in_tx
+                    .send(ConnectionMessageIn::Response {
+                        client_id: 1,
+                        request_id,
+                        response,
+                    })
+                    .await
+                    .unwrap();
+
+                setup
+                    .task_in_tx
+                    .send(ConnectionMessageIn::Raw {
+                        client_id: 1,
+                        data: b"hello from server".to_vec(),
+                    })
+                    .await
+                    .unwrap();
+
+                match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::Closed {
+                        client_id: 0,
+                        connection_id: TestSetup::CONNECTION_ID,
+                    } => {}
+                    other => unreachable!("unexpected message: {other:?}"),
+                }
+
+                match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::Raw {
+                        client_id: 1,
+                        connection_id: TestSetup::CONNECTION_ID,
+                        data,
+                    } => {
+                        assert_eq!(&data, b"hello from client");
+                    }
+                    other => unreachable!("unexpected message: {other:?}"),
+                }
+            }
+        );
+
+        setup
+            .task_in_tx
+            .send(ConnectionMessageIn::Unsubscribed { client_id: 1 })
+            .await
+            .unwrap();
+
+        let mut rx = setup.shutdown().await;
+        let next_message = rx.recv().await;
+        assert!(next_message.is_none(), "unexpected: {next_message:?}");
+    }
+
+    /// The stolen connection receives a request that does not match any filter.
+    /// The original HTTP server is dead and the request sender gets a [`StatusCode::BAD_GATEWAY`]
+    /// response.
+    #[tokio::test]
+    async fn bad_response_original_server() {
+        let mut setup = TestSetup::new().await;
+
+        // Killing the original server.
+        setup.original_server_token.cancel();
+        setup.tasks.join_next().await.unwrap().unwrap();
+
+        let request = setup.prepare_request(None, false);
+        let response = setup.request_sender.send_request(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    }
+
+    /// The stolen connection receives a request that matches some client's filter.
+    /// The client fails to provide a response and the request sender gets a
+    /// [`StatusCode::BAD_GATEWAY`] response.
+    #[tokio::test]
+    async fn response_from_client_failed() {
+        let mut setup = TestSetup::new().await;
+
+        let request = setup.prepare_request(Some(0), false);
+        tokio::join!(
+            async {
+                let response = setup.request_sender.send_request(request).await.unwrap();
+                assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+            },
+            async {
+                match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::SubscribedHttp {
+                        client_id: 0,
+                        connection_id: TestSetup::CONNECTION_ID,
+                    } => {}
+                    other => unreachable!("unexpected message: {other:?}"),
+                };
+
+                let request_id = match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::Request {
+                        client_id: 0,
+                        connection_id: TestSetup::CONNECTION_ID,
+                        id,
+                        port,
+                        ..
+                    } => {
+                        assert_eq!(port, setup.original_address.port());
+                        id
+                    }
+                    other => unreachable!("unexpected message: {other:?}"),
+                };
+
+                setup
+                    .task_in_tx
+                    .send(ConnectionMessageIn::ResponseFailed {
+                        client_id: 0,
+                        request_id,
+                    })
+                    .await
+                    .unwrap();
+            }
+        );
+
+        setup
+            .task_in_tx
+            .send(ConnectionMessageIn::Unsubscribed { client_id: 0 })
+            .await
+            .unwrap();
+
+        let mut rx = setup.shutdown().await;
+        // The task should not produce the `Closed` message - the client has unsubscribed.
+        assert!(rx.recv().await.is_none());
+    }
+
+    /// The stolen connection receives a request that matches some client's filter.
+    /// The client unsubscribes before providing a response and the request sender gets a
+    /// [`StatusCode::BAD_GATEWAY`] response.
+    #[tokio::test]
+    async fn client_unsubscribed_while_blocking_a_request() {
+        let mut setup = TestSetup::new().await;
+
+        let request = setup.prepare_request(Some(0), false);
+        tokio::join!(
+            async {
+                let response = setup.request_sender.send_request(request).await.unwrap();
+                assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+            },
+            async {
+                match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::SubscribedHttp {
+                        client_id: 0,
+                        connection_id: TestSetup::CONNECTION_ID,
+                    } => {}
+                    other => unreachable!("unexpected message: {other:?}"),
+                };
+
+                match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::Request {
+                        client_id: 0,
+                        connection_id: TestSetup::CONNECTION_ID,
+                        id,
+                        port,
+                        ..
+                    } => {
+                        assert_eq!(port, setup.original_address.port());
+                        id
+                    }
+                    other => unreachable!("unexpected message: {other:?}"),
+                };
+
+                setup
+                    .task_in_tx
+                    .send(ConnectionMessageIn::Unsubscribed { client_id: 0 })
+                    .await
+                    .unwrap();
+            }
+        );
+
+        let mut rx = setup.shutdown().await;
+        // The task should not produce the `Closed` message - the client has unsubscribed.
+        assert!(rx.recv().await.is_none());
     }
 }

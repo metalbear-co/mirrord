@@ -209,7 +209,7 @@ impl fmt::Debug for ConnectionMessageOut {
                 client_id,
                 connection,
             } => {
-                debug_struct.field("type", &"Opened");
+                debug_struct.field("type", &"SubscribedTcp");
                 debug_struct.field("connection_id", &connection.connection_id);
                 debug_struct.field("client_id", client_id);
                 debug_struct.field("connection", connection);
@@ -218,7 +218,7 @@ impl fmt::Debug for ConnectionMessageOut {
                 client_id,
                 connection_id,
             } => {
-                debug_struct.field("type", &"Opened");
+                debug_struct.field("type", &"SubscribedHttp");
                 debug_struct.field("connection_id", connection_id);
                 debug_struct.field("client_id", client_id);
             }
