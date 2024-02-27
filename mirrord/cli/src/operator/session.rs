@@ -1,10 +1,11 @@
 use kube::{core::ErrorResponse, Api};
 use mirrord_operator::{
     client::{session_api, OperatorApiError, OperatorOperation},
-    crd::SessionCrd,
+    crd::{MirrordOperatorCrd, SessionCrd, OPERATOR_STATUS_NAME},
 };
 use mirrord_progress::{Progress, ProgressTracker};
 
+use super::get_status_api;
 use crate::{Result, SessionCommand};
 
 /// Handles the [`SessionCommand`]s that deal with session management in the operator.
@@ -15,6 +16,9 @@ pub(super) struct SessionCommandHandler {
     /// Progress reporter for the commands, we use this to give out details on how the
     /// operation is going.
     sub_progress: ProgressTracker,
+
+    /// Kube API to talk with session routes in the operator.
+    operator_api: Api<MirrordOperatorCrd>,
 
     /// Kube API to talk with session routes in the operator.
     session_api: Api<SessionCrd>,
@@ -29,6 +33,10 @@ impl SessionCommandHandler {
     pub(super) async fn new(command: SessionCommand) -> Result<Self> {
         let mut progress = ProgressTracker::from_env("Operator session action");
 
+        let operator_api = get_status_api(None).await.inspect_err(|fail| {
+            progress.failure(Some(&format!("Failed to create operator API with {fail}!")))
+        })?;
+
         let session_api = session_api(None).await.inspect_err(|fail| {
             progress.failure(Some(&format!("Failed to create session API with {fail}!")))
         })?;
@@ -38,6 +46,7 @@ impl SessionCommandHandler {
         Ok(Self {
             progress,
             sub_progress,
+            operator_api,
             session_api,
             command,
         })
@@ -50,9 +59,19 @@ impl SessionCommandHandler {
         let Self {
             mut progress,
             mut sub_progress,
+            operator_api,
             session_api,
             command,
         } = self;
+
+        let operator_version = operator_api
+            .get(OPERATOR_STATUS_NAME)
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::GettingStatus,
+            })
+            .map(|crd| crd.spec.operator_version)?;
 
         sub_progress.print(&format!("executing `{command}`"));
 
@@ -78,7 +97,7 @@ impl SessionCommandHandler {
             {
                 OperatorApiError::UnsupportedFeature {
                     feature: "session management".to_string(),
-                    operator_version: "foobar".to_string(),
+                    operator_version,
                 }
             }
             // Something actually went wrong.
