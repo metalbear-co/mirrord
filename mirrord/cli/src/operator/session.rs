@@ -1,150 +1,129 @@
-use kube::{api::DeleteParams, core::Status, Api};
-use mirrord_operator::client::{session_api, OperatorApiError, OperatorOperation};
+use kube::{core::ErrorResponse, Api};
+use mirrord_operator::{
+    client::{session_api, OperatorApiError, OperatorOperation},
+    crd::SessionCrd,
+};
 use mirrord_progress::{Progress, ProgressTracker};
-use tracing::error;
 
-use crate::{error::CliError, Result};
+use crate::{Result, SessionCommand};
 
-/// Prepares progress and kube api for use in the operator session commands.
-#[tracing::instrument(level = "trace", ret)]
-async fn operator_session_prepare() -> Result<(
-    ProgressTracker,
-    Api<mirrord_operator::crd::SessionCrd>,
-    ProgressTracker,
-)> {
-    let progress = ProgressTracker::from_env("Operator session action");
+/// Handles the [`SessionCommand`]s that deal with session management in the operator.
+pub(super) struct SessionCommandHandler {
+    /// Final progress reporter, showing that the operation either succeeded or failed.
+    progress: ProgressTracker,
 
-    let session_api = session_api(None)
-        .await
-        .inspect_err(|fail| error!(error = ?fail, "Failed to create session API"))?;
+    /// Progress reporter for the commands, we use this to give out details on how the
+    /// operation is going.
+    sub_progress: ProgressTracker,
 
-    let sub_progress = progress.subtask("preparing...");
+    /// Kube API to talk with session routes in the operator.
+    session_api: Api<SessionCrd>,
 
-    Ok((progress, session_api, sub_progress))
+    /// The command the user is trying to execute from the cli.
+    command: SessionCommand,
 }
 
-/// Handles the cleanup part of progress after an operator session command.
-#[tracing::instrument(level = "trace")]
-fn operator_session_finished(
-    result: Option<Status>,
-    mut sub_progress: ProgressTracker,
-    mut progress: ProgressTracker,
-) {
-    match result {
-        Some(status) => {
+impl SessionCommandHandler {
+    /// Starts a new handler for [`SessionCommand`]s.
+    #[tracing::instrument(level = "trace")]
+    pub(super) async fn new(command: SessionCommand) -> Result<Self> {
+        let mut progress = ProgressTracker::from_env("Operator session action");
+
+        let session_api = session_api(None).await.inspect_err(|fail| {
+            progress.failure(Some(&format!("Failed to create session API with {fail}!")))
+        })?;
+
+        let sub_progress = progress.subtask("preparing...");
+
+        Ok(Self {
+            progress,
+            sub_progress,
+            session_api,
+            command,
+        })
+    }
+
+    /// Does the actual work of talking to the operator through the kube [`Api`], using
+    /// the routes defined in [`SessionCrd`].
+    #[tracing::instrument(level = "trace", skip(self), ret)]
+    pub(super) async fn handle(self) -> Result<()> {
+        let Self {
+            mut progress,
+            mut sub_progress,
+            session_api,
+            command,
+        } = self;
+
+        sub_progress.print(&format!("executing `{command}`"));
+
+        // We're interested in the `Status`es, so we map the results into those.
+        match command {
+            SessionCommand::Kill { id } => session_api
+                .delete(&format!("{id}"), &Default::default())
+                .await
+                .map(|either| either.right()),
+            SessionCommand::KillAll => session_api
+                .delete_collection(&Default::default(), &Default::default())
+                .await
+                .map(|either| either.right()),
+            SessionCommand::RetainActive => session_api
+                .delete("inactive", &Default::default())
+                .await
+                .map(|either| either.right()),
+        }
+        .map_err(|kube_fail| match kube_fail {
+            // The random `reason` we get when the operator returns from a "missing route".
+            kube::Error::Api(ErrorResponse { code, reason, .. })
+                if code == 404 && reason.contains("parse") =>
+            {
+                OperatorApiError::UnsupportedFeature {
+                    feature: "session management".to_string(),
+                    operator_version: "foobar".to_string(),
+                }
+            }
+            // Something actually went wrong.
+            other => OperatorApiError::KubeError {
+                error: other,
+                operation: OperatorOperation::SessionManagement,
+            },
+        })
+        // Finish the progress report here if we have an error response. 
+        .inspect_err(|fail| {
+            sub_progress.failure(Some(&fail.to_string()));
+            progress.failure(Some("Session management operation failed!"));
+        })?
+        // The kube api interaction was successful, but we might still fail the operation
+        // itself, so let's check the `Status` and report.
+        .map(|status| {
             if status.is_failure() {
                 sub_progress.failure(Some(&format!(
-                    "session operation failed due to {} with code {}!",
+                    "`{command}` failed due to `{}` with code `{}`!",
                     status.reason, status.code
                 )));
                 progress.failure(Some("Session operation failed!"));
+
+                Err(OperatorApiError::StatusFailure {
+                    operation: command.to_string(),
+                    status,
+                })
             } else {
                 sub_progress.success(Some(&format!(
-                    "session operation finished successfully with {} {}!",
+                    "`{command}` finished successfully with `{}` `{}`.",
                     status.message, status.code
                 )));
-                progress.success(Some("Session operation is completed!"));
+                progress.success(Some("Session operation is completed."));
+
+                Ok(())
             }
-        }
-        None => {
-            // Either the operation is pending, or there was nothing to do in the operator.
-            sub_progress.success(None);
-            progress.success(None);
-        }
+        })
+        .transpose()?
+        // We might've gotten a `SessionCrd` instead of a `Status` (we have a `Left(T)`),
+        // meaning that the operation has started, but it might not be finished yet.
+        .unwrap_or_else(|| {
+            sub_progress.success(Some(&format!("No issues found when executing `{command}`, but the operation status could not be determined at this time.")));
+            progress.success(Some(&format!("`{command}` is done, but the operation might be pending.")));
+        });
+
+        Ok(())
     }
-}
-
-/// `mirrord operator session kill_all`: kills every operator session, this is basically a
-/// `.clear()`;
-#[tracing::instrument(level = "trace", ret)]
-pub(super) async fn operator_session_kill_all() -> Result<()> {
-    let (mut progress, api, mut sub_progress) = operator_session_prepare().await?;
-
-    sub_progress.print("killing all sessions");
-
-    let result = api
-        .delete_collection(&Default::default(), &Default::default())
-        .await
-        .inspect_err(|kube_fail| match kube_fail {
-            kube::Error::Api(response) if response.code == 404 && response.reason.contains("parse") => {
-                let not_supported = "`operator session kill-all` is not supported by the mirrord-operator found in your cluster, consider updating it!";
-
-                sub_progress.failure(Some(not_supported));
-                progress.failure(Some("Session operation `kill-all` failed!"));
-                error!(not_supported);
-            }
-            _ => (),
-        })
-        .map_err(|error| OperatorApiError::KubeError {
-            error,
-            operation: OperatorOperation::GettingStatus,
-        })
-        .map_err(CliError::from)?;
-
-    operator_session_finished(result.right(), sub_progress, progress);
-
-    Ok(())
-}
-
-/// `mirrord operator session kill --id {id}`: kills the operator session specified by `id`.
-#[tracing::instrument(level = "trace", ret)]
-pub(super) async fn operator_session_kill_one(id: u64) -> Result<()> {
-    let (mut progress, api, mut sub_progress) = operator_session_prepare().await?;
-
-    sub_progress.print("killing session with id {session_id}");
-
-    let result = api
-        .delete(&format!("{id}"), &DeleteParams::default())
-        .await
-        .inspect_err(|kube_fail| match kube_fail {
-            kube::Error::Api(response) if response.code == 404 && response.reason.contains("parse") => {
-                let not_supported = "`operator session kill` is not supported by the mirrord-operator found in your cluster, consider updating it!";
-
-                sub_progress.failure(Some(not_supported));
-                progress.failure(Some("Session operation `kill` failed!"));
-                error!(not_supported);
-            }
-            _ => (),
-        })
-        .map_err(|error| OperatorApiError::KubeError {
-            error,
-            operation: OperatorOperation::GettingStatus,
-        })
-        .map_err(CliError::from)?;
-
-    operator_session_finished(result.right(), sub_progress, progress);
-
-    Ok(())
-}
-
-/// `mirrord operator session kill {id}`: performs a clean-up for operator sessions that are still
-/// stored;
-#[tracing::instrument(level = "trace", ret)]
-pub(super) async fn operator_session_retain_active() -> Result<()> {
-    let (mut progress, api, mut sub_progress) = operator_session_prepare().await?;
-
-    sub_progress.print("retaining only active sessions");
-
-    let result = api
-        .delete("inactive", &DeleteParams::default())
-        .await
-        .inspect_err(|kube_fail| match kube_fail {
-            kube::Error::Api(response) if response.code == 404 && response.reason.contains("parse") => {
-                let not_supported = "`operator session retain-active` is not supported by the mirrord-operator found in your cluster, consider updating it!";
-
-                sub_progress.failure(Some(not_supported));
-                progress.failure(Some("Session operation `retain-active` failed!"));
-                error!(not_supported);
-            }
-            _ => (),
-        })
-        .map_err(|error| OperatorApiError::KubeError {
-            error,
-            operation: OperatorOperation::GettingStatus,
-        })
-        .map_err(CliError::from)?;
-
-    operator_session_finished(result.right(), sub_progress, progress);
-
-    Ok(())
 }

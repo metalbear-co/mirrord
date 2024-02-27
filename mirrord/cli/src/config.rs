@@ -233,6 +233,8 @@ pub(super) enum OperatorCommand {
 /// `mirrord operator session` family of commands.
 ///
 /// Allows the user to forcefully kill operator sessions, use with care!
+///
+/// Implements [`core::fmt::Display`] to show the user a nice message.
 #[derive(Debug, Subcommand, Clone, Copy)]
 pub(crate) enum SessionCommand {
     /// Kills the session specified by `id`.
@@ -248,6 +250,16 @@ pub(crate) enum SessionCommand {
     /// the session storage.
     #[clap(hide(true))]
     RetainActive,
+}
+
+impl core::fmt::Display for SessionCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SessionCommand::Kill { id } => write!(f, "mirrord operator kill --id {id}"),
+            SessionCommand::KillAll => write!(f, "mirrord operator kill-all"),
+            SessionCommand::RetainActive => write!(f, "mirrord operator retain-active"),
+        }
+    }
 }
 
 /// Parses the operator session id from hex (without `0x` prefix) into `u64`.

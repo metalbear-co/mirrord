@@ -50,6 +50,7 @@ pub enum OperatorOperation {
     WebsocketConnection,
     CopyingTarget,
     GettingStatus,
+    SessionManagement,
 }
 
 impl Display for OperatorOperation {
@@ -60,6 +61,7 @@ impl Display for OperatorOperation {
             Self::WebsocketConnection => "creating a websocket connection",
             Self::CopyingTarget => "copying target",
             Self::GettingStatus => "getting status",
+            Self::SessionManagement => "session management",
         };
 
         f.write_str(as_str)
@@ -70,21 +72,35 @@ impl Display for OperatorOperation {
 pub enum OperatorApiError {
     #[error("invalid target: {reason}")]
     InvalidTarget { reason: String },
+
     #[error("failed to build a websocket connect request: {0}")]
     ConnectRequestBuildError(HttpError),
+
     #[error("failed to create mirrord operator API: {0}")]
     CreateApiError(KubeApiError),
+
     #[error("{operation} failed: {error}")]
     KubeError {
         error: kube::Error,
         operation: OperatorOperation,
     },
+
     #[error("can't start proccess because other locks exist on target")]
     ConcurrentStealAbort,
+
     #[error("mirrord operator {operator_version} does not support feature {feature}")]
     UnsupportedFeature {
         feature: String,
         operator_version: String,
+    },
+
+    #[error(
+        "Tried executing {operation}, but operator returned with `{}` and code `{}``!", 
+        status.reason, status.code
+    )]
+    StatusFailure {
+        operation: String,
+        status: kube::core::Status,
     },
 }
 

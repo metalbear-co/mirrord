@@ -1,5 +1,6 @@
 use std::{fs::File, path::PathBuf, time::Duration};
 
+use futures::TryFutureExt;
 use kube::Api;
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
@@ -17,14 +18,12 @@ use serde::Deserialize;
 use tokio::fs;
 use tracing::warn;
 
-use self::session::{
-    operator_session_kill_all, operator_session_kill_one, operator_session_retain_active,
-};
+use self::session::SessionCommandHandler;
 use crate::{
     config::{OperatorArgs, OperatorCommand},
     error::CliError,
     util::remove_proxy_env,
-    Result, SessionCommand,
+    Result,
 };
 
 mod session;
@@ -289,12 +288,10 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             license_path,
         } => operator_setup(accept_tos, file, namespace, license_key, license_path).await,
         OperatorCommand::Status { config_file } => operator_status(config_file).await,
-        OperatorCommand::Session(SessionCommand::Kill { id }) => {
-            operator_session_kill_one(id).await
-        }
-        OperatorCommand::Session(SessionCommand::KillAll) => operator_session_kill_all().await,
-        OperatorCommand::Session(SessionCommand::RetainActive) => {
-            operator_session_retain_active().await
+        OperatorCommand::Session(session_command) => {
+            SessionCommandHandler::new(session_command)
+                .and_then(SessionCommandHandler::handle)
+                .await
         }
     }
 }

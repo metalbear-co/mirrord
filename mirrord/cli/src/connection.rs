@@ -36,6 +36,7 @@ impl OperatorApiErrorExt for OperatorApiError {
             | Self::CreateApiError(..)
             | Self::InvalidTarget { .. }
             | Self::UnsupportedFeature { .. }
+            | Self::StatusFailure { .. }
             | Self::KubeError { .. } => true,
         }
     }
