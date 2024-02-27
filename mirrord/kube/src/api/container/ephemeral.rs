@@ -215,7 +215,8 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
             "targetContainerName": runtime_data.container_name,
             "env": [
                 {"name": "RUST_LOG", "value": agent.log_level},
-                { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() }
+                { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() },
+                { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() }
             ],
             "command": command_line,
         })).map_err(KubeApiError::from)

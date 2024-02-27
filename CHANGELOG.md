@@ -8,6 +8,25 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.89.1](https://github.com/metalbear-co/mirrord/tree/3.89.1) - 2024-02-22
+
+
+### Fixed
+
+- Fixed issue with Golang calling fstat on Linux causing crash
+  [#2254](https://github.com/metalbear-co/mirrord/issues/2254)
+
+
+## [3.89.0](https://github.com/metalbear-co/mirrord/tree/3.89.0) - 2024-02-22
+
+
+### Changed
+
+- Change intproxy log to append
+- use_proxy configuration now applies to mirrord operator status, and mirrord
+  ls
+
+
 ## [3.88.0](https://github.com/metalbear-co/mirrord/tree/3.88.0) - 2024-02-18
 
 

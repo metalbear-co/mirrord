@@ -8,6 +8,9 @@ The configuration supports templating using the [Tera](https://keats.github.io/t
 Currently we don't provide additional values to the context, if you have anything you want us to
 provide please let us know.
 
+To use a configuration file in the CLI, use the `-f <CONFIG_PATH>` flag.
+Or if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file or use the UI.
+
 To help you get started, here are examples of a basic configuration file, and a complete
 configuration file containing all fields.
 
@@ -1044,7 +1047,7 @@ want to increase the timeouts a bit.
 }
 ```
 
-### internal_proxy.idle_timeout {#agent-idle_timeout}
+### internal_proxy.idle_timeout {#internal_proxy-idle_timeout}
 
 How much time to wait while we don't have any active connections before exiting.
 
@@ -1059,7 +1062,7 @@ and don't connect to the proxy.
 }
 ```
 
-### internal_proxy.start_idle_timeout {#agent-start_idle_timeout}
+### internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}
 
 How much time to wait for the first connection to the proxy in seconds.
 
@@ -1073,4 +1076,12 @@ on process execution, delaying the layer startup and connection to proxy.
   }
 }
 ```
+
+### internal_proxy.log_destination {#internal_proxy-log_destination}
+Set the log file destination for the internal proxy.
+
+### internal_proxy.log_level {#internal_proxy-log_level}
+Set the log level for the internal proxy.
+RUST_LOG convention (i.e `mirrord=trace`)
+will only be used if log_destination is set
 
