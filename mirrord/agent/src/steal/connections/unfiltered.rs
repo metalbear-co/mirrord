@@ -1,5 +1,6 @@
 use std::io::ErrorKind;
 
+use bytes::BytesMut;
 use mirrord_protocol::ConnectionId;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
@@ -31,29 +32,26 @@ impl<T: AsyncRead + AsyncWrite + Unpin> UnfilteredStealTask<T> {
         tx: Sender<ConnectionMessageOut>,
         rx: &mut Receiver<ConnectionMessageIn>,
     ) -> Result<(), ConnectionTaskError> {
-        let mut buffer = [0_u8; 1024];
+        let mut buf = BytesMut::with_capacity(64 * 1024);
         let mut reading_closed = false;
 
         loop {
             tokio::select! {
-                read = self.stream.read(&mut buffer), if !reading_closed => match read {
-                    Ok(0) => {
+                read = self.stream.read_buf(&mut buf), if !reading_closed => match read {
+                    Ok(..) if buf.is_empty() => {
                         reading_closed = true;
                     }
 
-                    Ok(bytes_read) => {
-                        let data = buffer
-                            .get(..bytes_read)
-                            .expect("count of bytes read is out of range")
-                            .to_vec();
-
+                    Ok(..) => {
                         let message = ConnectionMessageOut::Raw {
                             client_id: self.client_id,
                             connection_id: self.connection_id,
-                            data,
+                            data: buf.to_vec(),
                         };
 
                         tx.send(message).await?;
+
+                        buf.clear();
                     }
 
                     Err(e) if e.kind() == ErrorKind::WouldBlock => {}
