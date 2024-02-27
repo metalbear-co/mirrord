@@ -293,8 +293,8 @@ pub(crate) enum CliError {
     #[diagnostic(help(r#"Check that int proxy log file is in valid writable path"#))]
     OpenIntProxyLogFile(std::io::Error),
 
-    #[error("Operator returned a failure status for {operation}!")]
-    #[diagnostic(help(r#"{}"#, status.reason))]
+    #[error("Operator returned a failure status for `{operation}`!")]
+    #[diagnostic(help(r#"{}"#, status.message))]
     StatusFailure {
         operation: String,
         status: kube::core::Status,
