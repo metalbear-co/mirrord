@@ -22,11 +22,11 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-    group = "operator.metalbear.co",
-    version = "v1",
-    kind = "Target",
-    root = "TargetCrd",
-    namespaced
+group = "operator.metalbear.co",
+version = "v1",
+kind = "Target",
+root = "TargetCrd",
+namespaced
 )]
 pub struct TargetSpec {
     /// None when targetless.
@@ -90,11 +90,11 @@ pub static OPERATOR_STATUS_NAME: &str = "operator";
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-    group = "operator.metalbear.co",
-    version = "v1",
-    kind = "MirrordOperator",
-    root = "MirrordOperatorCrd",
-    status = "MirrordOperatorStatus"
+group = "operator.metalbear.co",
+version = "v1",
+kind = "MirrordOperator",
+root = "MirrordOperatorCrd",
+status = "MirrordOperatorStatus"
 )]
 pub struct MirrordOperatorSpec {
     pub operator_version: String,
@@ -277,11 +277,11 @@ impl From<&OperatorFeatures> for NewOperatorFeature {
 /// (operator's copy pod feature).
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-    group = "operator.metalbear.co",
-    version = "v1",
-    kind = "CopyTarget",
-    root = "CopyTargetCrd",
-    namespaced
+group = "operator.metalbear.co",
+version = "v1",
+kind = "CopyTarget",
+root = "CopyTargetCrd",
+namespaced
 )]
 pub struct CopyTargetSpec {
     /// Original target. Only [`Target::Pod`] and [`Target::Deployment`] are accepted.
@@ -311,11 +311,11 @@ pub enum BlockedFeature {
 /// Custom resource for policies that limit what mirrord features users can use.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-    // The operator group is handled by the operator, we want policies to be handled by k8s.
-    group = "policies.mirrord.metalbear.co",
-    version = "v1alpha",
-    kind = "MirrordPolicy",
-    namespaced
+// The operator group is handled by the operator, we want policies to be handled by k8s.
+group = "policies.mirrord.metalbear.co",
+version = "v1alpha",
+kind = "MirrordPolicy",
+namespaced
 )]
 #[serde(rename_all = "camelCase")] // target_path -> targetPath in yaml.
 pub struct MirrordPolicySpec {
@@ -334,23 +334,23 @@ pub struct MirrordPolicySpec {
     pub block: Vec<BlockedFeature>,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")] // queue_name_key -> queueNameKey in yaml.
+pub struct ConfigMapQueueNameSource {
+    /// The name of the config map that holds the name of the queue we want to split.
+    pub name: String,
+
+    /// The name of the key in the config map that holds the name of the queue we want to
+    /// split.
+    pub queue_name_key: String,
+}
+
 /// Set where the application reads the name of the queue from, so that mirrord can find that queue,
 /// split it, and temporarily change the name there to the name of the branch queue when splitting.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")] // ConfigMap -> configMap in yaml.
 pub enum QueueNameSource {
-    #[serde(rename_all = "camelCase")] // queue_name_key -> queueNameKey in yaml.
-    ConfigMap {
-        /// The name of the config map that holds the name of the queue we want to split.
-        name: String,
-
-        /// The name of the key in the config map that holds the name of the queue we want to
-        /// split.
-        queue_name_key: String,
-
-        /// For when the queue name is inside a complex property - a file in a ConfigMap.
-        sub_key: Option<String>,
-    },
+    ConfigMap(ConfigMapQueueNameSource),
     EnvVar(String),
 }
 
@@ -387,12 +387,12 @@ pub struct QueueSplitterStatus {
 /// to the spec and the user's filter.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-    group = "splitters.mirrord.metalbear.co",
-    version = "v1alpha",
-    kind = "MirrordQueueSplitter",
-    shortname = "qs",
-    status = "QueueSplitterStatus",
-    namespaced
+group = "splitters.mirrord.metalbear.co",
+version = "v1alpha",
+kind = "MirrordQueueSplitter",
+shortname = "qs",
+status = "QueueSplitterStatus",
+namespaced
 )]
 pub struct MirrordQueueSplitterSpec {
     /// A map of the queues that should be split.
@@ -407,19 +407,18 @@ pub struct MirrordQueueSplitterSpec {
 #[serde(rename(SQSFilterStatus))]
 pub struct SqsFilterStatus {
     // TODO: ?
-    pub active: bool,
 }
 
 // TODO: docs
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-    group = "splitters.mirrord.metalbear.co",
-    version = "v1alpha",
-    kind = "MirrordSQSFilter",
-    root = "MirrordSqsFilter", // for Rust naming conventions (Sqs, not SQS)
-    shortname = "qs",
-    status = "SqsFilterStatus",
-    namespaced
+group = "splitters.mirrord.metalbear.co",
+version = "v1alpha",
+kind = "MirrordSQSFilter",
+root = "MirrordSqsFilter", // for Rust naming conventions (Sqs, not SQS)
+shortname = "qs",
+status = "SqsFilterStatus",
+namespaced
 )]
 #[serde(rename_all = "camelCase")] // queue_name -> queueName in yaml.
 pub struct MirrordSqsFilterSpec {
