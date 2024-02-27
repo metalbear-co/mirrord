@@ -1,0 +1,1 @@
+Increased size of buffers used by TCP stealer to read incoming streams (from 4k to 64k).
