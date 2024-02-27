@@ -110,45 +110,55 @@ impl BackgroundTask for Interceptor {
     async fn run(self, message_bus: &mut MessageBus<Self>) -> InterceptorResult<(), Self::Error> {
         let mut stream = self.socket.connect(self.peer).await?;
 
-        match message_bus.recv().await {
-            Some(MessageIn::Raw(data)) => {
-                stream.write_all(&data).await?;
-                RawConnection { stream }.run(message_bus).await
-            }
-            Some(MessageIn::Http(request)) => {
-                let sender = super::http::handshake(request.version(), stream).await?;
-                let mut http_conn = HttpConnection {
-                    sender,
-                    peer: self.peer,
-                };
-                let (response, on_upgrade) = http_conn.send(request).await?;
-                message_bus.send(MessageOut::Http(response)).await;
-
-                let raw = if let Some(on_upgrade) = on_upgrade {
-                    let upgraded = on_upgrade.await?;
-                    let parts = upgraded
-                        .downcast::<TokioIo<TcpStream>>()
-                        .expect("IO type is known");
-                    if !parts.read_buf.is_empty() {
-                        message_bus
-                            .send(MessageOut::Raw(parts.read_buf.into()))
-                            .await;
-                    }
-
-                    Some(RawConnection {
-                        stream: parts.io.into_inner(),
-                    })
-                } else {
-                    http_conn.run(message_bus).await?
-                };
-
-                if let Some(raw) = raw {
-                    raw.run(message_bus).await
-                } else {
-                    Ok(())
+        // First, we determine whether this is a raw TCP connection or an HTTP connection.
+        // If we receive an HTTP request from our parent task, this must be an HTTP connection.
+        // If we receive raw bytes or our peer starts sending some data, this must be raw TCP.
+        let request = tokio::select! {
+            message = message_bus.recv() => match message {
+                Some(MessageIn::Raw(data)) => {
+                    stream.write_all(&data).await?;
+                    return RawConnection { stream }.run(message_bus).await;
                 }
+                Some(MessageIn::Http(request)) => request,
+                None => return Ok(()),
+            },
+
+            result = stream.readable() => {
+                result?;
+                return RawConnection { stream }.run(message_bus).await;
             }
-            None => Ok(()),
+        };
+
+        let sender = super::http::handshake(request.version(), stream).await?;
+        let mut http_conn = HttpConnection {
+            sender,
+            peer: self.peer,
+        };
+        let (response, on_upgrade) = http_conn.send(request).await?;
+        message_bus.send(MessageOut::Http(response)).await;
+
+        let raw = if let Some(on_upgrade) = on_upgrade {
+            let upgraded = on_upgrade.await?;
+            let parts = upgraded
+                .downcast::<TokioIo<TcpStream>>()
+                .expect("IO type is known");
+            if !parts.read_buf.is_empty() {
+                message_bus
+                    .send(MessageOut::Raw(parts.read_buf.into()))
+                    .await;
+            }
+
+            Some(RawConnection {
+                stream: parts.io.into_inner(),
+            })
+        } else {
+            http_conn.run(message_bus).await?
+        };
+
+        if let Some(raw) = raw {
+            raw.run(message_bus).await
+        } else {
+            Ok(())
         }
     }
 }
