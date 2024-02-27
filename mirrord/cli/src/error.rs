@@ -294,7 +294,10 @@ pub(crate) enum CliError {
     OpenIntProxyLogFile(std::io::Error),
 
     #[error("Operator returned a failure status for `{operation}`!")]
-    #[diagnostic(help(r#"{}"#, status.message))]
+    #[diagnostic(help(
+        "We were able to execute the command, but something went wrong. \
+        Check if the session id is still alive in the operator with `mirrord operator status`."
+    ))]
     StatusFailure {
         operation: String,
         status: kube::core::Status,
