@@ -7,6 +7,7 @@ use std::{
     time::Duration,
 };
 
+use bytes::BytesMut;
 use hyper::{upgrade::OnUpgrade, StatusCode, Version};
 use hyper_util::rt::TokioIo;
 use mirrord_protocol::tcp::{
@@ -361,7 +362,7 @@ struct RawConnection {
 impl RawConnection {
     /// Proxies raw TCP data until the [`MessageBus`] closes.
     async fn run(mut self, message_bus: &mut MessageBus<Interceptor>) -> InterceptorResult<()> {
-        let mut buffer = vec![0; 1024];
+        let mut buf = BytesMut::with_capacity(64 * 1024);
         let mut remote_closed = false;
         let mut reading_closed = false;
 
@@ -369,14 +370,15 @@ impl RawConnection {
             tokio::select! {
                 biased;
 
-                res = self.stream.read(&mut buffer[..]), if !reading_closed => match res {
+                res = self.stream.read_buf(&mut buf), if !reading_closed => match res {
                     Err(e) if e.kind() == ErrorKind::WouldBlock => {},
                     Err(e) => break Err(e.into()),
                     Ok(0) => {
                         reading_closed = true;
                     }
-                    Ok(read) => {
-                        message_bus.send(MessageOut::Raw(buffer.get(..read).unwrap().to_vec())).await;
+                    Ok(..) => {
+                        message_bus.send(MessageOut::Raw(buf.to_vec())).await;
+                        buf.clear();
                     }
                 },
 

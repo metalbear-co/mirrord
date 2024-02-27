@@ -253,6 +253,15 @@ pub struct AgentConfig {
     #[config(default = false)]
     pub privileged: bool,
 
+    /// ### agent.nftables {#agent-nftables}
+    ///
+    /// Use iptables-nft instead of iptables-legacy.
+    /// Defaults to `false`.
+    ///
+    /// Needed if your mesh uses nftables instead of iptables-legacy,
+    #[config(default = false)]
+    pub nftables: bool,
+
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).

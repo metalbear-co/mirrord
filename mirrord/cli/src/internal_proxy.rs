@@ -28,6 +28,7 @@ use nix::libc;
 use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, log::trace};
+use tracing_subscriber::EnvFilter;
 
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
@@ -144,6 +145,22 @@ fn get_agent_connect_info() -> Result<Option<AgentConnectInfo>> {
 /// It listens for inbound layer connect and forwards to agent.
 pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
     let config = LayerConfig::from_env()?;
+
+    if let Some(ref log_destination) = config.internal_proxy.log_destination {
+        let output_file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_destination)
+            .map_err(CliError::OpenIntProxyLogFile)?;
+        let tracing_registry = tracing_subscriber::fmt().with_writer(output_file);
+        if let Some(ref log_level) = config.internal_proxy.log_level {
+            tracing_registry
+                .with_env_filter(EnvFilter::builder().parse_lossy(log_level))
+                .init();
+        } else {
+            tracing_registry.init();
+        }
+    }
     let agent_connect_info = get_agent_connect_info()?;
 
     let mut analytics = AnalyticsReporter::new(config.telemetry, watch);

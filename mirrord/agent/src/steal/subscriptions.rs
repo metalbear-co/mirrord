@@ -10,7 +10,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 use super::{
     http::HttpFilter,
-    ip_tables::{IPTablesWrapper, SafeIpTables},
+    ip_tables::{new_iptables, IPTablesWrapper, SafeIpTables},
 };
 use crate::{error::AgentError, util::ClientId};
 
@@ -94,7 +94,7 @@ impl PortRedirector for IpTablesRedirector {
         let iptables = match self.iptables.as_ref() {
             Some(iptables) => iptables,
             None => {
-                let iptables = iptables::new(false).unwrap();
+                let iptables = new_iptables();
                 let safe = SafeIpTables::create(iptables.into(), self.flush_connections).await?;
                 self.iptables.insert(safe)
             }

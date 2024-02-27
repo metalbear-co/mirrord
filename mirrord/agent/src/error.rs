@@ -85,7 +85,7 @@ pub(crate) enum AgentError {
     JoinTask,
 
     #[error("DNS request send failed with `{0}`")]
-    DnsRequestSendError(#[from] tokio::sync::mpsc::error::SendError<crate::dns::DnsRequest>),
+    DnsRequestSendError(#[from] tokio::sync::mpsc::error::SendError<crate::dns::DnsCommand>),
 
     #[error("DNS response receive failed with `{0}`")]
     DnsResponseReceiveError(#[from] tokio::sync::oneshot::error::RecvError),

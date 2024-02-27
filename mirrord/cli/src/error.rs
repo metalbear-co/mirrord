@@ -254,6 +254,9 @@ pub(crate) enum CliError {
         r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
     ))]
     ConnectRequestBuildError(HttpError),
+    #[error("Failed to open log file for writing: {0:#?}")]
+    #[diagnostic(help(r#"Check that int proxy log file is in valid writable path"#))]
+    OpenIntProxyLogFile(std::io::Error),
 }
 
 impl From<OperatorApiError> for CliError {

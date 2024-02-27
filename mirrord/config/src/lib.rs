@@ -20,7 +20,6 @@ use config::{ConfigContext, ConfigError, MirrordConfig};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
-use target::Target;
 use tera::Tera;
 use tracing::warn;
 
@@ -51,6 +50,10 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 /// The configuration supports templating using the [Tera](https://keats.github.io/tera/docs/) template engine.
 /// Currently we don't provide additional values to the context, if you have anything you want us to
 /// provide please let us know.
+///
+/// To use a configuration file in the CLI, use the `-f <CONFIG_PATH>` flag.
+/// Or if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file
+/// or use the UI.
 ///
 /// To help you get started, here are examples of a basic configuration file, and a complete
 /// configuration file containing all fields.
@@ -433,20 +436,6 @@ impl LayerConfig {
                         .into(),
                 );
             }
-
-            if self.feature.copy_target.scale_down {
-                match (context.ide, self.target.path.as_ref()) {
-                    (_, Some(Target::Deployment(..))) => {}
-                    (true, None) => {}
-                    _ => {
-                        return Err(ConfigError::Conflict(
-                            "The scale down feature is compatible only with deployment targets, \
-                            please either disable this option or specify a deployment target."
-                                .into(),
-                        ));
-                    }
-                }
-            }
         }
 
         Ok(())
@@ -701,6 +690,7 @@ mod tests {
                 tolerations: None,
                 check_out_of_pods: None,
                 resources: None,
+                nftables: None,
             }),
             feature: Some(FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true).into(),

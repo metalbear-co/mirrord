@@ -1,137 +1,180 @@
-use std::{
-    fs::{self, File},
-    path::{Path, PathBuf},
-};
+use std::{future, path::PathBuf};
 
+use futures::{stream::FuturesOrdered, StreamExt};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse},
     DnsLookupError, RemoteResult, ResolveErrorKindInternal, ResponseError,
 };
-use tokio::sync::{
-    mpsc::{self, Receiver, Sender},
-    oneshot,
+use tokio::{
+    fs,
+    sync::{
+        mpsc::{Receiver, Sender},
+        oneshot,
+    },
 };
-use tracing::{error, trace};
+use tokio_util::sync::CancellationToken;
 use trust_dns_resolver::{system_conf::parse_resolv_conf, AsyncResolver, Hosts};
 
 use crate::{
-    error::Result,
-    util::run_thread_in_namespace,
-    watched_task::{TaskStatus, WatchedTask},
+    error::{AgentError, Result},
+    watched_task::TaskStatus,
 };
 
 #[derive(Debug)]
-pub(crate) struct DnsRequest {
+pub(crate) struct DnsCommand {
     request: GetAddrInfoRequest,
-    tx: oneshot::Sender<GetAddrInfoResponse>,
+    response_tx: oneshot::Sender<RemoteResult<DnsLookup>>,
 }
 
-// TODO(alex): aviram's suggested caching the resolver, but this should not be done by having a
-// single cached resolver, as we use system files that might change, thus invalidating our cache.
-// The cache should be hash-based.
-/// Uses `AsyncResolver:::lookup_ip` to resolve `host`.
-///
-/// `root_path` is used to read `/proc/{pid}/root` configuration files when creating a resolver.
-#[tracing::instrument(level = "trace", ret)]
-async fn dns_lookup(root_path: &Path, host: String) -> RemoteResult<DnsLookup> {
-    let resolv_conf_path = root_path.join("etc").join("resolv.conf");
-    let hosts_path = root_path.join("etc").join("hosts");
-
-    let resolv_conf = fs::read(resolv_conf_path)?;
-    let hosts_file = File::open(hosts_path)?;
-
-    let (config, mut options) = parse_resolv_conf(resolv_conf)?;
-    options.server_ordering_strategy =
-        trust_dns_resolver::config::ServerOrderingStrategy::UserProvidedOrder;
-
-    let mut resolver = AsyncResolver::tokio(config, options)?;
-
-    let hosts = Hosts::default().read_hosts_conf(hosts_file)?;
-    resolver.set_hosts(Some(hosts));
-
-    let lookup = resolver
-        .lookup_ip(host)
-        .await
-        .inspect(|lookup| trace!("lookup {lookup:#?}"))?
-        .into();
-
-    Ok(lookup)
+/// Background task for resolving hostnames to IP addresses.
+/// Should be run in the same network namespace as the agent's target.
+pub(crate) struct DnsWorker {
+    etc_path: PathBuf,
+    request_rx: Receiver<DnsCommand>,
 }
 
-/// Task for the DNS resolving thread that runs in the `/proc/{pid}/ns` network namespace.
-///
-/// Reads a `DnsRequest` from `rx` and returns the resolved addresses (or `Error`) through
-/// `DnsRequest::tx`.
-pub(crate) async fn dns_worker(mut rx: Receiver<DnsRequest>, pid: Option<u64>) -> Result<()> {
-    let root_path = pid
-        .map(|pid| PathBuf::from("/proc").join(pid.to_string()).join("root"))
-        .unwrap_or_else(|| PathBuf::from("/"));
+impl DnsWorker {
+    pub const TASK_NAME: &'static str = "DNS worker";
 
-    while let Some(DnsRequest { request, tx }) = rx.recv().await {
-        trace!("dns_worker -> request {:#?}", request);
+    /// Creates a new instance of this worker.
+    /// To run this worker, call [`Self::run`].
+    ///
+    /// # Note
+    ///
+    /// `pid` is used to find the correct path of `etc` directory.
+    pub(crate) fn new(pid: Option<u64>, request_rx: Receiver<DnsCommand>) -> Self {
+        let etc_path = pid
+            .map(|pid| {
+                PathBuf::from("/proc")
+                    .join(pid.to_string())
+                    .join("root/etc")
+            })
+            .unwrap_or_else(|| PathBuf::from("/etc"));
 
-        let result = dns_lookup(root_path.as_path(), request.node)
-            .await
-            .map_err(|err| {
-                error!("dns_lookup -> ResponseError:: {err:?}");
-                match err {
-                    ResponseError::DnsLookup(err) => ResponseError::DnsLookup(err),
-                    _ => ResponseError::DnsLookup(DnsLookupError {
-                        kind: ResolveErrorKindInternal::Unknown,
-                    }),
-                }
-            });
-        if let Err(result) = tx.send(GetAddrInfoResponse(result)) {
-            error!("couldn't send result to caller {result:?}");
+        Self {
+            etc_path,
+            request_rx,
         }
     }
 
-    Ok(())
+    /// Reads `/etc/resolv.conf` and `/etc/hosts` files, then uses [`AsyncResolver`] to resolve
+    /// address of the given `host`.
+    ///
+    /// # TODO
+    ///
+    /// We could probably cache results here.
+    /// We cannot cache the [`AsyncResolver`] itself, becaues the configuration in `etc` may change.
+    async fn do_lookup(etc_path: PathBuf, host: String) -> RemoteResult<DnsLookup> {
+        let resolv_conf_path = etc_path.join("resolv.conf");
+        let hosts_path = etc_path.join("hosts");
+
+        let resolv_conf = fs::read(resolv_conf_path).await?;
+        let hosts_conf = fs::read(hosts_path).await?;
+
+        let (config, mut options) = parse_resolv_conf(resolv_conf)?;
+        options.server_ordering_strategy =
+            trust_dns_resolver::config::ServerOrderingStrategy::UserProvidedOrder;
+
+        let mut resolver = AsyncResolver::tokio(config, options)?;
+
+        let hosts = Hosts::default().read_hosts_conf(hosts_conf.as_slice())?;
+        resolver.set_hosts(Some(hosts));
+
+        let lookup = resolver
+            .lookup_ip(host)
+            .await
+            .inspect(|lookup| tracing::trace!(?lookup, "Lookup finished"))?
+            .into();
+
+        Ok(lookup)
+    }
+
+    /// Handles the given [`DnsCommand`] in a separate [`tokio::task`].
+    fn handle_message(&self, message: DnsCommand) {
+        let etc_path = self.etc_path.clone();
+
+        let lookup_future = async move {
+            let result = Self::do_lookup(etc_path, message.request.node).await;
+            if let Err(result) = message.response_tx.send(result) {
+                tracing::error!(?result, "Failed to send query response");
+            }
+        };
+
+        tokio::spawn(lookup_future);
+    }
+
+    pub(crate) async fn run(
+        mut self,
+        cancellation_token: CancellationToken,
+    ) -> Result<(), AgentError> {
+        loop {
+            tokio::select! {
+                _ = cancellation_token.cancelled() => break Ok(()),
+
+                message = self.request_rx.recv() => match message {
+                    None => break Ok(()),
+                    Some(message) => self.handle_message(message),
+                },
+            }
+        }
+    }
 }
 
-#[derive(Clone)]
 pub(crate) struct DnsApi {
     task_status: TaskStatus,
-    sender: Sender<DnsRequest>,
+    request_tx: Sender<DnsCommand>,
+    /// [`DnsWorker`] processes all requests concurrently, so we use a combination of [`oneshot`]
+    /// channels and [`FuturesOrdered`] to preserve order of responses.
+    responses: FuturesOrdered<oneshot::Receiver<RemoteResult<DnsLookup>>>,
 }
 
 impl DnsApi {
-    const TASK_NAME: &'static str = "DNS worker";
-
-    pub fn new(pid: Option<u64>, channel_size: usize) -> Self {
-        let (sender, receiver) = mpsc::channel(channel_size);
-
-        let watched_task = WatchedTask::new(Self::TASK_NAME, dns_worker(receiver, pid));
-        let task_status = watched_task.status();
-        run_thread_in_namespace(
-            watched_task.start(),
-            Self::TASK_NAME.to_string(),
-            pid,
-            "net",
-        );
-
+    pub(crate) fn new(task_status: TaskStatus, task_sender: Sender<DnsCommand>) -> Self {
         Self {
             task_status,
-            sender,
+            request_tx: task_sender,
+            responses: Default::default(),
         }
     }
 
-    #[tracing::instrument(level = "trace", ret, skip(self))]
-    async fn try_make_request(&self, request: GetAddrInfoRequest) -> Result<GetAddrInfoResponse> {
-        let (tx, rx) = oneshot::channel();
-        let request = DnsRequest { request, tx };
-        self.sender.send(request).await?;
-        rx.await.map_err(Into::into)
-    }
-
-    #[tracing::instrument(level = "trace", ret, skip(self))]
-    pub async fn make_request(
+    /// Schedules a new DNS request.
+    /// Results of scheduled requests are available via [`Self::recv`] (order is preserved).
+    pub(crate) async fn make_request(
         &mut self,
         request: GetAddrInfoRequest,
-    ) -> Result<GetAddrInfoResponse> {
-        match self.try_make_request(request).await {
-            Ok(res) => Ok(res),
-            Err(_) => Err(self.task_status.unwrap_err().await),
+    ) -> Result<(), AgentError> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        let command = DnsCommand {
+            request,
+            response_tx,
+        };
+        if self.request_tx.send(command).await.is_err() {
+            return Err(self.task_status.unwrap_err().await);
+        }
+
+        self.responses.push_back(response_rx);
+
+        Ok(())
+    }
+
+    /// Returns the result of the oldest outstanding DNS request issued with this struct (see
+    /// [`Self::make_request`]).
+    pub(crate) async fn recv(&mut self) -> Result<GetAddrInfoResponse, AgentError> {
+        let Some(response) = self.responses.next().await else {
+            return future::pending().await;
+        };
+
+        match response? {
+            Ok(lookup) => Ok(GetAddrInfoResponse(Ok(lookup))),
+            Err(ResponseError::DnsLookup(err)) => {
+                Ok(GetAddrInfoResponse(Err(ResponseError::DnsLookup(err))))
+            }
+            Err(..) => Ok(GetAddrInfoResponse(Err(ResponseError::DnsLookup(
+                DnsLookupError {
+                    kind: ResolveErrorKindInternal::Unknown,
+                },
+            )))),
         }
     }
 }
