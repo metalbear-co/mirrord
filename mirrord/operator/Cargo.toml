@@ -14,29 +14,29 @@ publish.workspace = true
 edition.workspace = true
 
 [features]
-default = []
+default = ["crd"]
 license-fetch = ["dep:reqwest"]
 client = [
-  "crd",
-  "dep:base64",
-  "dep:bincode",
-  "dep:http",
-  "dep:futures",
-  "dep:mirrord-analytics",
-  "dep:mirrord-auth",
-  "dep:mirrord-kube",
-  "dep:mirrord-progress",
-  "dep:mirrord-protocol",
-  "dep:rand",
-  "dep:tokio-tungstenite",
-  "dep:tracing",
+    "crd",
+    "dep:base64",
+    "dep:bincode",
+    "dep:http",
+    "dep:futures",
+    "dep:mirrord-analytics",
+    "dep:mirrord-auth",
+    "dep:mirrord-kube",
+    "dep:mirrord-progress",
+    "dep:mirrord-protocol",
+    "dep:rand",
+    "dep:tokio-tungstenite",
+    "dep:tracing",
 ]
 crd = [
-  "dep:k8s-openapi",
-  "dep:kube",
-  "dep:mirrord-config",
-  "dep:tokio",
-  "dep:serde_json"
+    "dep:k8s-openapi",
+    "dep:kube",
+    "dep:mirrord-config",
+    "dep:tokio",
+    "dep:serde_json"
 ]
 setup = ["crd", "dep:serde_yaml"]
 
@@ -52,7 +52,7 @@ mirrord-protocol = { path = "../protocol", optional = true }
 async-trait = "0.1"
 actix-codec = { workspace = true, optional = true }
 base64 = { version = "0.21", optional = true }
-bincode =  { version = "2.0.0-rc.2", features = ["serde"], optional = true }
+bincode = { version = "2.0.0-rc.2", features = ["serde"], optional = true }
 bytes = { workspace = true, optional = true }
 chrono = { version = "0.4", features = ["clock", "serde"] }
 http = { version = "0.2", optional = true }
