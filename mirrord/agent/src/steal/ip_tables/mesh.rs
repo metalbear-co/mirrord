@@ -129,8 +129,6 @@ impl MeshVendorExt for MeshVendor {
         let output = ipt.list_rules("OUTPUT")?;
 
         Ok(output.iter().find_map(|rule| {
-            tracing::debug!("OUTPUT: {rule}");
-
             if rule.contains("-j PROXY_INIT_OUTPUT") {
                 Some(MeshVendor::Linkerd)
             } else if rule.contains("-j ISTIO_OUTPUT") {
