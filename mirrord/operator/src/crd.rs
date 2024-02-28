@@ -121,6 +121,25 @@ pub struct Session {
     pub locked_ports: Option<Vec<(u16, String, Option<String>)>>,
 }
 
+/// Resource used to access the operator's session management routes.
+///
+/// - `kind = Session` controls how [`kube`] generates the route, in this case it becomes
+///   `/sessions`;
+/// - `root = "SessionCrd"` is the json return value we get from this resource's API;
+/// - `SessionSpec` itself contains the custom data we want to pass in the the response, which in
+///   this case is nothing;
+///
+/// The [`SessionCrd`] is used to provide the k8s_openapi `APIResource`, see `API_RESOURCE_LIST` in
+/// the operator.
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+    group = "operator.metalbear.co",
+    version = "v1",
+    kind = "Session",
+    root = "SessionCrd"
+)]
+pub struct SessionSpec;
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LicenseInfoOwned {
     pub name: String,

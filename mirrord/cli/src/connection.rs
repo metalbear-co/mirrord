@@ -36,6 +36,7 @@ impl OperatorApiErrorExt for OperatorApiError {
             | Self::CreateApiError(..)
             | Self::InvalidTarget { .. }
             | Self::UnsupportedFeature { .. }
+            | Self::StatusFailure { .. }
             | Self::KubeError { .. } => true,
         }
     }
@@ -45,7 +46,7 @@ impl OperatorApiErrorExt for OperatorApiError {
 ///
 /// First it checks if we have an `operator` in the [`config`](LayerConfig), which we do if the
 /// user has installed the mirrord-operator in their cluster, even without a valid license. And
-/// then we create a session with the operator with [`create_operator_session`].
+/// then we create a session with the operator with [`OperatorApi::create_session`].
 ///
 /// If there is no operator, or the license is not good enough for starting an operator session,
 /// then we create the mirrord-agent and run mirrord by itself, without the operator.
