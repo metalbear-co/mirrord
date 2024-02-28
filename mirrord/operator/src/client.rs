@@ -240,11 +240,11 @@ impl OperatorApi {
             if days_until_expiration <= <DateTime<Utc> as LicenseValidity>::CLOSE_TO_EXPIRATION_DAYS
             {
                 let expiring_soon = (days_until_expiration > 0)
-                    .then(|| format!(", in {days_until_expiration} days"))
-                    .unwrap_or_else(|| ", today".to_string());
+                    .then(|| format!("soon , in {days_until_expiration} day{}", if days_until_expiration > 1 { "s" } else { "" }))
+                    .unwrap_or_else(|| "today".to_string());
 
                 let expiring_message =
-                    format!("Operator license will expire soon{expiring_soon}!",);
+                    format!("Operator license will expire {expiring_soon}!",);
 
                 progress.warning(&expiring_message);
                 warn!(expiring_message);
