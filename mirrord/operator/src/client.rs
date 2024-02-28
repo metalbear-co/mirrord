@@ -250,7 +250,7 @@ impl OperatorApi {
                 warn!(expiring_message);
             } else {
                 let good_validity_message =
-                    format!("License is valid for {days_until_expiration} days.");
+                    format!("Operator license is valid for {days_until_expiration} more days.");
 
                 progress.info(&good_validity_message);
                 tracing::info!(good_validity_message);
