@@ -25,18 +25,25 @@ const GENERAL_HELP: &str = r#"
 pub(crate) enum InternalProxySetupError {
     #[error("Couldn't listen for connections {0:#?}")]
     ListenError(std::io::Error),
+
     #[error("Couldn't get local port {0:#?}")]
     LocalPortError(std::io::Error),
+
     #[error("Couldn't connect to agent via TCP {0:#?}")]
     TcpConnectError(std::io::Error),
+
     #[error("Agent closed connection on ping/pong, image version/arch mismatch?")]
     AgentClosedConnection,
+
     #[error("Ping error {0:#?} - image version/arch mismatch?")]
     PingError(#[from] tokio::sync::mpsc::error::SendError<mirrord_protocol::ClientMessage>),
+
     #[error("Set sid failed {0:#?}, please report a bug")]
     SetSidError(nix::Error),
+
     #[error("No connection method, please report a bug")]
     NoConnectionMethod,
+
     #[error("Failed pausing target container {0:#?}")]
     PauseError(String),
 }
@@ -184,6 +191,7 @@ pub(crate) enum CliError {
         "Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}",
     ))]
     ConfigFilePathError(PathBuf, std::io::Error),
+
     #[error("Creating kubernetes manifest yaml file failed with err : {0:#?}")]
     #[diagnostic(help(
         r#"Check if you have permissions to write to the file and/or directory exists{GENERAL_HELP}"#
@@ -300,7 +308,7 @@ pub(crate) enum CliError {
     ))]
     StatusFailure {
         operation: String,
-        status: kube::core::Status,
+        status: Box<kube::core::Status>,
     },
 }
 

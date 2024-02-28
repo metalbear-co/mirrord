@@ -100,7 +100,7 @@ pub enum OperatorApiError {
     )]
     StatusFailure {
         operation: String,
-        status: kube::core::Status,
+        status: Box<kube::core::Status>,
     },
 }
 

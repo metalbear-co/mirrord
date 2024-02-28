@@ -123,7 +123,7 @@ impl SessionCommandHandler {
 
                 Err(OperatorApiError::StatusFailure {
                     operation: command.to_string(),
-                    status,
+                    status: Box::new(status),
                 })
             } else {
                 sub_progress.success(Some(&format!(
