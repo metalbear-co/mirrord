@@ -409,6 +409,14 @@ pub struct SqsFilterStatus {
     // TODO: ?
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")] // original_name -> originalName in yaml.
+pub struct TempConfigMap {
+    pub original_name: String,
+    pub new_name: String,
+    pub new_values: HashMap<String, String>,
+}
+
 // TODO: docs
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
