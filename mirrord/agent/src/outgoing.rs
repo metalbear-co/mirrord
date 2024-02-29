@@ -44,6 +44,9 @@ pub(crate) struct TcpOutgoingApi {
     daemon_rx: Receiver<Daemon>,
 }
 
+/// Buffer size for reading from the outgoing connections.
+const READ_BUFFER_SIZE: usize = 64 * 1024;
+
 #[tracing::instrument(level = "trace", skip(allocator, writers, readers, daemon_tx))]
 async fn layer_recv(
     layer_message: LayerTcpOutgoing,
@@ -81,7 +84,10 @@ async fn layer_recv(
                 // and writing from multiple hosts without blocking.
                 let (read_half, write_half) = split(remote_stream);
                 writers.insert(connection_id, write_half);
-                readers.insert(connection_id, ReaderStream::new(read_half));
+                readers.insert(
+                    connection_id,
+                    ReaderStream::with_capacity(read_half, READ_BUFFER_SIZE),
+                );
 
                 Ok(DaemonConnect {
                     connection_id,

@@ -35,7 +35,7 @@ use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 use tracing::{debug, error, warn};
 
 use crate::crd::{
-    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, NewOperatorFeature, TargetCrd,
+    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, NewOperatorFeature, SessionCrd, TargetCrd,
     OPERATOR_STATUS_NAME,
 };
 
@@ -51,6 +51,7 @@ pub enum OperatorOperation {
     WebsocketConnection,
     CopyingTarget,
     GettingStatus,
+    SessionManagement,
 }
 
 impl Display for OperatorOperation {
@@ -61,6 +62,7 @@ impl Display for OperatorOperation {
             Self::WebsocketConnection => "creating a websocket connection",
             Self::CopyingTarget => "copying target",
             Self::GettingStatus => "getting status",
+            Self::SessionManagement => "session management",
         };
 
         f.write_str(as_str)
@@ -71,21 +73,35 @@ impl Display for OperatorOperation {
 pub enum OperatorApiError {
     #[error("invalid target: {reason}")]
     InvalidTarget { reason: String },
+
     #[error("failed to build a websocket connect request: {0}")]
     ConnectRequestBuildError(HttpError),
+
     #[error("failed to create mirrord operator API: {0}")]
     CreateApiError(KubeApiError),
+
     #[error("{operation} failed: {error}")]
     KubeError {
         error: kube::Error,
         operation: OperatorOperation,
     },
+
     #[error("can't start proccess because other locks exist on target")]
     ConcurrentStealAbort,
+
     #[error("mirrord operator {operator_version} does not support feature {feature}")]
     UnsupportedFeature {
         feature: NewOperatorFeature,
         operator_version: String,
+    },
+
+    #[error(
+    "Tried executing {operation}, but operator returned with `{}` and code `{}``!",
+    status.reason, status.code
+    )]
+    StatusFailure {
+        operation: String,
+        status: Box<kube::core::Status>,
     },
 }
 
@@ -174,6 +190,15 @@ pub struct OperatorSessionConnection {
     pub info: OperatorSessionInformation,
 }
 
+/// Allows us to access the operator's [`SessionCrd`] [`Api`].
+pub async fn session_api(config: Option<String>) -> Result<Api<SessionCrd>> {
+    let kube_api: Client = create_kube_api(false, config, None)
+        .await
+        .map_err(OperatorApiError::CreateApiError)?;
+
+    Ok(Api::all(kube_api))
+}
+
 impl OperatorApi {
     /// We allow copied pods to live only for 30 seconds before the internal proxy connects.
     const COPIED_POD_IDLE_TTL: u32 = 30;
@@ -189,7 +214,7 @@ impl OperatorApi {
         Ok(())
     }
 
-    #[tracing::instrument(level = "debug", skip(api))]
+    #[tracing::instrument(level = "trace", skip(api))]
     pub async fn get_client_certificate(
         api: &OperatorApi,
         operator: &MirrordOperatorCrd,
@@ -218,8 +243,8 @@ impl OperatorApi {
         progress: &P,
         analytics: &mut AnalyticsReporter,
     ) -> Result<OperatorSessionConnection>
-    where
-        P: Progress + Send + Sync,
+        where
+            P: Progress + Send + Sync,
     {
         let operator_api = OperatorApi::new(config).await?;
 
@@ -271,10 +296,10 @@ impl OperatorApi {
         if operator_version > mirrord_version {
             // we make two sub tasks since it looks best this way
             version_progress.warning(
-                    &format!(
-                        "Your mirrord plugin/CLI version {} does not match the operator version {}. This can lead to unforeseen issues.",
-                        mirrord_version,
-                        operator_version));
+                &format!(
+                    "Your mirrord plugin/CLI version {} does not match the operator version {}. This can lead to unforeseen issues.",
+                    mirrord_version,
+                    operator_version));
             version_progress.success(None);
             version_progress = progress.subtask("comparing versions");
             version_progress.warning(
@@ -339,8 +364,8 @@ impl OperatorApi {
             config.kubeconfig.clone(),
             config.kube_context.clone(),
         )
-        .await
-        .map_err(OperatorApiError::CreateApiError)?;
+            .await
+            .map_err(OperatorApiError::CreateApiError)?;
 
         let target_namespace = if target_config.path.is_some() {
             target_config.namespace.clone()
@@ -456,9 +481,9 @@ impl OperatorApi {
             .target_api
             .get_subresource("port-locks", &target.name())
             .await
-        else {
-            return Ok(());
-        };
+            else {
+                return Ok(());
+            };
 
         let no_port_locks = lock_target
             .spec
@@ -595,12 +620,12 @@ pub struct ConnectionWrapper<T> {
 }
 
 impl<T> ConnectionWrapper<T>
-where
-    for<'stream> T: StreamExt<Item = Result<Message, TungsteniteError>>
-        + SinkExt<Message, Error = TungsteniteError>
-        + Send
-        + Unpin
-        + 'stream,
+    where
+            for<'stream> T: StreamExt<Item=Result<Message, TungsteniteError>>
+    + SinkExt<Message, Error=TungsteniteError>
+    + Send
+    + Unpin
+    + 'stream,
 {
     fn wrap(
         connection: T,

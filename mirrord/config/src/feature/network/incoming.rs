@@ -145,7 +145,7 @@ impl MirrordToggleableConfig for IncomingFileConfig {
     fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
         let mode = FromEnv::new("MIRRORD_AGENT_TCP_STEAL_TRAFFIC")
             .source_value(context)
-            .unwrap_or_else(|| Ok(Default::default()))?;
+            .unwrap_or_else(|| Ok(IncomingMode::Off))?;
 
         let on_concurrent_steal = FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
             .layer(|layer| Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer))
@@ -230,15 +230,21 @@ pub struct IncomingAdvancedFileConfig {
 /// See the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more
 /// details.
 ///
-/// Incoming traffic supports 3 modes of operation:
+/// Incoming traffic supports 3 [modes](#feature-network-incoming-mode) of operation:
 ///
 /// 1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested
 /// listeners;
 ///
-/// 2. Steal: Captures the TCP data from a port, and forwards it to the local process, see
-/// [`"mode": "steal"`](#feature-network-incoming-mode);
+/// 2. Steal: Captures the TCP data from a port, and forwards it to the local process.
 ///
 /// 3. Off: Disables the incoming network feature.
+///
+/// This field can either take an object with more configuration fields (that are documented below),
+/// or alternatively -
+/// - A boolean:
+///   - `true`: use the default configuration, same as not specifying this field at all.
+///   - `false`: disable incoming configuration.
+/// - One of the incoming [modes](#feature-network-incoming-mode) (lowercase).
 ///
 /// Examples:
 ///
@@ -249,6 +255,18 @@ pub struct IncomingAdvancedFileConfig {
 ///   "feature": {
 ///     "network": {
 ///       "incoming": "steal"
+///     }
+///   }
+/// }
+/// ```
+///
+/// Disable the incoming traffic feature:
+///
+/// ```json
+/// {
+///   "feature": {
+///     "network": {
+///       "incoming": false
 ///     }
 ///   }
 /// }

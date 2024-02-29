@@ -92,6 +92,10 @@ pub(crate) struct TcpConnectionStealer {
 impl TcpConnectionStealer {
     pub const TASK_NAME: &'static str = "Stealer";
 
+    /// Capacity of read buffers for [`ReaderStream`]s inside [`Self::read_streams`].
+    /// Essentialy - length of buffer for reading from tcp sockets with unfiltered steal.
+    const READ_STREAM_BUFFER_LEN: usize = 64 * 1024;
+
     /// Initializes a new [`TcpConnectionStealer`] fields, but doesn't start the actual working
     /// task (call [`TcpConnectionStealer::start`] to do so).
     #[tracing::instrument(level = "trace")]
@@ -300,8 +304,10 @@ impl TcpConnectionStealer {
 
         let (read_half, write_half) = tokio::io::split(stream);
         self.write_streams.insert(connection_id, write_half);
-        self.read_streams
-            .insert(connection_id, ReaderStream::new(read_half));
+        self.read_streams.insert(
+            connection_id,
+            ReaderStream::with_capacity(read_half, Self::READ_STREAM_BUFFER_LEN),
+        );
 
         self.connection_clients.insert(connection_id, client_id);
         self.client_connections

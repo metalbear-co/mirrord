@@ -1,2 +1,0 @@
-1. mirrord CLI now does not check target type when the `copy_target` feature is enabled. The check is now done only in the operator.
-2. `mirrord operator setup` not includes permissions to read and change rollouts scale.

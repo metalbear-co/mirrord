@@ -20,7 +20,7 @@ pub use common::*;
 async fn issue_2055(dylib_path: &PathBuf) {
     let application = Application::CIssue2055;
     let (mut test_process, mut intproxy) = application
-        .start_process_with_layer(dylib_path, Default::default(), None)
+        .start_process_with_layer(dylib_path, vec![("MIRRORD_REMOTE_DNS", "true")], None)
         .await;
 
     println!("Application started, waiting for `GetAddrInfoRequest`.");

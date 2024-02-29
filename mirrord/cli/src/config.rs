@@ -223,6 +223,49 @@ pub(super) enum OperatorCommand {
         #[arg(short = 'f')]
         config_file: Option<String>,
     },
+    /// Operator session management commands.
+    ///
+    /// Allows the user to forcefully kill living sessions.
+    #[command(subcommand)]
+    Session(SessionCommand),
+}
+
+/// `mirrord operator session` family of commands.
+///
+/// Allows the user to forcefully kill operator sessions, use with care!
+///
+/// Implements [`core::fmt::Display`] to show the user a nice message.
+#[derive(Debug, Subcommand, Clone, Copy)]
+pub(crate) enum SessionCommand {
+    /// Kills the session specified by `id`.
+    Kill {
+        /// Id of the session.
+        #[arg(short, long, value_parser=hex_id)]
+        id: u64,
+    },
+    /// Kills all operator sessions.
+    KillAll,
+
+    /// Kills _inactive_ sessions, might be useful if an undead session is still being stored in
+    /// the session storage.
+    #[clap(hide(true))]
+    RetainActive,
+}
+
+impl core::fmt::Display for SessionCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SessionCommand::Kill { id } => write!(f, "mirrord operator kill --id {id}"),
+            SessionCommand::KillAll => write!(f, "mirrord operator kill-all"),
+            SessionCommand::RetainActive => write!(f, "mirrord operator retain-active"),
+        }
+    }
+}
+
+/// Parses the operator session id from hex (without `0x` prefix) into `u64`.
+fn hex_id(raw: &str) -> Result<u64, String> {
+    u64::from_str_radix(raw, 16)
+        .map_err(|fail| format!("Failed parsing hex session id value with {fail}!"))
 }
 
 #[derive(ValueEnum, Clone, Debug)]

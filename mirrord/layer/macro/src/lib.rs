@@ -78,6 +78,7 @@ pub fn hook_fn(
 
         let output = quote! {
 
+            #[allow(non_camel_case_types)]
             #type_alias;
 
             #[allow(non_upper_case_globals)]
@@ -173,6 +174,7 @@ pub fn hook_guard_fn(
         modified_function.block.stmts.extend(statements);
 
         let output = quote! {
+            #[allow(non_camel_case_types)]
             #type_alias;
 
             #original_fn;

@@ -7,6 +7,7 @@ use std::{
     path::PathBuf,
 };
 
+use bytes::BytesMut;
 use mirrord_intproxy_protocol::NetProtocol;
 use mirrord_protocol::{
     outgoing::{
@@ -154,22 +155,22 @@ impl PreparedSocket {
     /// Accepts one connection on this socket and returns a new socket for sending and receiving
     /// data.
     pub async fn accept(self) -> io::Result<ConnectedSocket> {
-        let (inner, is_really_connected, buf_size) = match self {
+        let (inner, is_really_connected) = match self {
             Self::TcpListener(listener) => {
                 let (stream, _) = listener.accept().await?;
-                (InnerConnectedSocket::TcpStream(stream), true, 1024)
+                (InnerConnectedSocket::TcpStream(stream), true)
             }
-            Self::UdpSocket(socket) => (InnerConnectedSocket::UdpSocket(socket), false, 1500),
+            Self::UdpSocket(socket) => (InnerConnectedSocket::UdpSocket(socket), false),
             Self::UnixListener(listener) => {
                 let (stream, _) = listener.accept().await?;
-                (InnerConnectedSocket::UnixStream(stream), true, 1024)
+                (InnerConnectedSocket::UnixStream(stream), true)
             }
         };
 
         Ok(ConnectedSocket {
             inner,
             is_really_connected,
-            buffer: vec![0; buf_size],
+            buffer: BytesMut::with_capacity(64 * 1024),
         })
     }
 }
@@ -185,7 +186,7 @@ pub struct ConnectedSocket {
     inner: InnerConnectedSocket,
     /// Meaningful only when `inner` is [`InnerConnectedSocket::UdpSocket`].
     is_really_connected: bool,
-    buffer: Vec<u8>,
+    buffer: BytesMut,
 }
 
 impl ConnectedSocket {
@@ -223,19 +224,22 @@ impl ConnectedSocket {
                     self.is_really_connected = true;
                 }
 
-                let received = socket.recv(&mut self.buffer).await?;
-
-                let bytes = self.buffer.get(..received).unwrap().to_vec();
-
+                socket.recv_buf(&mut self.buffer).await?;
+                let bytes = self.buffer.to_vec();
+                self.buffer.clear();
                 Ok(bytes)
             }
             InnerConnectedSocket::TcpStream(stream) => {
-                let received = stream.read(&mut self.buffer).await?;
-                Ok(self.buffer.get(..received).unwrap().to_vec())
+                stream.read_buf(&mut self.buffer).await?;
+                let bytes = self.buffer.to_vec();
+                self.buffer.clear();
+                Ok(bytes)
             }
             InnerConnectedSocket::UnixStream(stream) => {
-                let received = stream.read(&mut self.buffer).await?;
-                Ok(self.buffer.get(..received).unwrap().to_vec())
+                stream.read_buf(&mut self.buffer).await?;
+                let bytes = self.buffer.to_vec();
+                self.buffer.clear();
+                Ok(bytes)
             }
         }
     }

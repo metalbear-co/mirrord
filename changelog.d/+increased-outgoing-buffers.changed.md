@@ -1,0 +1,1 @@
+Increased size of buffers used by outgoing feature to read streams (from 4k to 64k in the agent, from 1k to 64k in the internal proxy).

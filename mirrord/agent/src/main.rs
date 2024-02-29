@@ -12,6 +12,7 @@ use std::{
 };
 
 use actix_codec::Framed;
+use dns::{DnsCommand, DnsWorker};
 use futures::{
     stream::{FuturesUnordered, StreamExt},
     SinkExt, TryFutureExt,
@@ -44,8 +45,8 @@ use crate::{
         api::TcpStealerApi,
         connection::TcpConnectionStealer,
         ip_tables::{
-            IPTablesWrapper, SafeIpTables, IPTABLE_MESH, IPTABLE_MESH_ENV, IPTABLE_PREROUTING,
-            IPTABLE_PREROUTING_ENV, IPTABLE_STANDARD, IPTABLE_STANDARD_ENV,
+            new_iptables, IPTablesWrapper, SafeIpTables, IPTABLE_MESH, IPTABLE_MESH_ENV,
+            IPTABLE_PREROUTING, IPTABLE_PREROUTING_ENV, IPTABLE_STANDARD, IPTABLE_STANDARD_ENV,
         },
         StealerCommand,
     },
@@ -245,7 +246,7 @@ impl<Command> Clone for BackgroundTask<Command> {
 struct BackgroundTasks {
     sniffer: BackgroundTask<SnifferCommand>,
     stealer: BackgroundTask<StealerCommand>,
-    dns_api: DnsApi,
+    dns: BackgroundTask<DnsCommand>,
 }
 
 struct ClientConnectionHandler {
@@ -282,6 +283,7 @@ impl ClientConnectionHandler {
         let tcp_sniffer_api = Self::ceate_sniffer_api(id, bg_tasks.sniffer, &mut stream).await;
         let tcp_stealer_api =
             Self::ceate_stealer_api(id, bg_tasks.stealer, protocol_version, &mut stream).await?;
+        let dns_api = Self::create_dns_api(bg_tasks.dns);
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
         let udp_outgoing_api = UdpOutgoingApi::new(pid);
@@ -294,7 +296,7 @@ impl ClientConnectionHandler {
             tcp_stealer_api,
             tcp_outgoing_api,
             udp_outgoing_api,
-            dns_api: bg_tasks.dns_api,
+            dns_api,
             env,
             container_handle,
         };
@@ -362,6 +364,15 @@ impl ClientConnectionHandler {
         }
     }
 
+    fn create_dns_api(task: BackgroundTask<DnsCommand>) -> DnsApi {
+        match task {
+            BackgroundTask::Running(task_status, task_sender) => {
+                DnsApi::new(task_status, task_sender)
+            }
+            BackgroundTask::Disabled => unreachable!("dns task is never disabled"),
+        }
+    }
+
     /// Starts a loop that handles client connection and state.
     ///
     /// Breaks upon receiver/sender drop.
@@ -413,6 +424,10 @@ impl ClientConnectionHandler {
                 },
                 message = self.udp_outgoing_api.daemon_message() => match message {
                     Ok(message) => self.respond(DaemonMessage::UdpOutgoing(message)).await?,
+                    Err(e) => break e,
+                },
+                message = self.dns_api.recv() => match message {
+                    Ok(message) => self.respond(DaemonMessage::GetAddrInfoResponse(message)).await?,
                     Err(e) => break e,
                 },
                 _ = cancellation_token.cancelled() => return Ok(()),
@@ -472,11 +487,7 @@ impl ClientConnectionHandler {
                     .await?
             }
             ClientMessage::GetAddrInfoRequest(request) => {
-                let response = self.dns_api.make_request(request).await?;
-                trace!("GetAddrInfoRequest -> response {:#?}", response);
-
-                self.respond(DaemonMessage::GetAddrInfoResponse(response))
-                    .await?
+                self.dns_api.make_request(request).await?;
             }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => {
@@ -559,8 +570,7 @@ async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
 
     let (sniffer_command_tx, sniffer_command_rx) = mpsc::channel::<SnifferCommand>(1000);
     let (stealer_command_tx, stealer_command_rx) = mpsc::channel::<StealerCommand>(1000);
-
-    let dns_api = DnsApi::new(state.container_pid(), 1000);
+    let (dns_command_tx, dns_command_rx) = mpsc::channel::<DnsCommand>(1000);
 
     let (sniffer_task, sniffer_status) = if args.mode.is_targetless() {
         (None, None)
@@ -617,6 +627,23 @@ async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
         (Some(task), Some(status))
     };
 
+    let (dns_task, dns_status) = {
+        let cancellation_token = cancellation_token.clone();
+        let watched_task = WatchedTask::new(
+            DnsWorker::TASK_NAME,
+            DnsWorker::new(state.container_pid(), dns_command_rx).run(cancellation_token),
+        );
+        let status = watched_task.status();
+        let task = run_thread_in_namespace(
+            watched_task.start(),
+            DnsWorker::TASK_NAME.to_string(),
+            state.container_pid(),
+            "net",
+        );
+
+        (task, status)
+    };
+
     let bg_tasks = BackgroundTasks {
         sniffer: sniffer_status
             .map(|status| BackgroundTask::Running(status, sniffer_command_tx))
@@ -624,7 +651,7 @@ async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
         stealer: stealer_status
             .map(|status| BackgroundTask::Running(status, stealer_command_tx))
             .unwrap_or(BackgroundTask::Disabled),
-        dns_api,
+        dns: BackgroundTask::Running(dns_status, dns_command_tx),
     };
 
     // WARNING: `wait_for_agent_startup` in `mirrord/kube/src/api/container.rs` expects a line
@@ -700,7 +727,9 @@ async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
     drop(cancel_guard);
 
     let BackgroundTasks {
-        sniffer, stealer, ..
+        sniffer,
+        stealer,
+        dns,
     } = bg_tasks;
 
     if let (Some(sniffer_task), BackgroundTask::Running(mut sniffer_status, _)) =
@@ -721,12 +750,19 @@ async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
         }
     }
 
+    if let BackgroundTask::Running(mut dns_status, _) = dns {
+        dns_task.join().map_err(|_| AgentError::JoinTask)?;
+        if let Some(err) = dns_status.err().await {
+            error!("start_agent -> dns task failed with error: {}", err);
+        }
+    }
+
     trace!("Agent shutdown.");
     Ok(())
 }
 
 async fn clear_iptable_chain() -> Result<()> {
-    let ipt = iptables::new(false).unwrap();
+    let ipt = new_iptables();
 
     SafeIpTables::load(IPTablesWrapper::from(ipt), false)
         .await?

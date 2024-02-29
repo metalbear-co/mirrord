@@ -280,7 +280,8 @@ where
     };
 
     let mut config = if let Some(kubeconfig) = kubeconfig {
-        let kubeconfig = shellexpand::tilde(&kubeconfig);
+        let kubeconfig = shellexpand::full(&kubeconfig)
+            .map_err(|e| KubeApiError::ConfigPathExpansionError(e.to_string()))?;
         let parsed_kube_config = Kubeconfig::read_from(kubeconfig.deref())?;
         Config::from_custom_kubeconfig(parsed_kube_config, &kube_config_opts).await?
     } else if kube_config_opts.context.is_some() {
