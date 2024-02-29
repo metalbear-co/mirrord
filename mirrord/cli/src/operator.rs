@@ -1,5 +1,6 @@
 use std::{fs::File, path::PathBuf, time::Duration};
 
+use futures::TryFutureExt;
 use kube::Api;
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
@@ -17,11 +18,15 @@ use serde::Deserialize;
 use tokio::fs;
 use tracing::warn;
 
+use self::session::SessionCommandHandler;
 use crate::{
     config::{OperatorArgs, OperatorCommand},
     error::CliError,
+    util::remove_proxy_env,
     Result,
 };
+
+mod session;
 
 #[derive(Deserialize)]
 struct OperatorVersionResponse {
@@ -107,10 +112,14 @@ async fn operator_setup(
     Ok(())
 }
 
+#[tracing::instrument(level = "trace", ret)]
 async fn get_status_api(config: Option<String>) -> Result<Api<MirrordOperatorCrd>> {
     let kube_api = if let Some(config_path) = config {
         let mut cfg_context = ConfigContext::default();
         let config = LayerFileConfig::from_path(config_path)?.generate_config(&mut cfg_context)?;
+        if !config.use_proxy {
+            remove_proxy_env();
+        }
         create_kube_api(
             config.accept_invalid_certificates,
             config.kubeconfig,
@@ -279,5 +288,10 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             license_path,
         } => operator_setup(accept_tos, file, namespace, license_key, license_path).await,
         OperatorCommand::Status { config_file } => operator_status(config_file).await,
+        OperatorCommand::Session(session_command) => {
+            SessionCommandHandler::new(session_command)
+                .and_then(SessionCommandHandler::handle)
+                .await
+        }
     }
 }

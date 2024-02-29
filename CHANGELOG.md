@@ -8,6 +8,50 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.90.0](https://github.com/metalbear-co/mirrord/tree/3.90.0) - 2024-02-27
+
+
+### Added
+
+- Add agent configuration to use nftables instead of iptables-legacy to make it
+  work in mesh that uses nftables.
+  [#2272](https://github.com/metalbear-co/mirrord/issues/2272)
+- The agent now processes all DNS queries concurrently. Also, client sessions
+  in the agent do not block on the DNS queries.
+
+
+### Changed
+
+- change kubeconfig path expansion to use env as well
+  [#2262](https://github.com/metalbear-co/mirrord/issues/2262)
+- Increase internal proxy timeout from 5 seconds to 10 seconds to fix long
+  agent ops
+
+
+### Internal
+
+- Add information how to use config file in config docs
+
+
+## [3.89.1](https://github.com/metalbear-co/mirrord/tree/3.89.1) - 2024-02-22
+
+
+### Fixed
+
+- Fixed issue with Golang calling fstat on Linux causing crash
+  [#2254](https://github.com/metalbear-co/mirrord/issues/2254)
+
+
+## [3.89.0](https://github.com/metalbear-co/mirrord/tree/3.89.0) - 2024-02-22
+
+
+### Changed
+
+- Change intproxy log to append
+- use_proxy configuration now applies to mirrord operator status, and mirrord
+  ls
+
+
 ## [3.88.0](https://github.com/metalbear-co/mirrord/tree/3.88.0) - 2024-02-18
 
 

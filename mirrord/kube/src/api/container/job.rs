@@ -208,7 +208,8 @@ impl ContainerVariant for JobVariant<'_> {
                                 "command": command_line,
                                 "env": [
                                     { "name": "RUST_LOG", "value": agent.log_level },
-                                    { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() }
+                                    { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() },
+                                    { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() }
                                 ],
                                 // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                                 "resources": resources
@@ -388,7 +389,8 @@ mod test {
                                 "command": ["./mirrord-agent", "-l", "3000", "targetless"],
                                 "env": [
                                     { "name": "RUST_LOG", "value": agent.log_level },
-                                    { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() }
+                                    { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() },
+                                    { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() }
                                 ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                                 {
@@ -510,7 +512,8 @@ mod test {
                                 "command": ["./mirrord-agent", "-l", "3000", "targeted", "--container-id", "container", "--container-runtime", "docker"],
                                 "env": [
                                     { "name": "RUST_LOG", "value": agent.log_level },
-                                    { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() }
+                                    { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() },
+                                    { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() }
                                 ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                                 {

@@ -160,6 +160,10 @@ static EXECUTABLE_PATH: OnceLock<String> = OnceLock::new();
 /// Program arguments
 static EXECUTABLE_ARGS: OnceLock<Vec<OsString>> = OnceLock::new();
 
+/// Proxy Connection timeout
+/// Set to 10 seconds as most agent operations timeout after 5 seconds
+const PROXY_CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
 fn layer_pre_initialization() -> Result<(), LayerError> {
     let given_process = EXECUTABLE_NAME.get_or_try_init(ExecutableName::from_env)?;
@@ -226,7 +230,7 @@ fn load_only_layer_start(config: &LayerConfig) {
         .expect("failed to parse internal proxy address");
 
     let new_connection =
-        ProxyConnection::new(address, NewSessionRequest::New, Duration::from_secs(5))
+        ProxyConnection::new(address, NewSessionRequest::New, PROXY_CONNECTION_TIMEOUT)
             .expect("failed to initialize proxy connection");
 
     unsafe {
@@ -354,7 +358,7 @@ fn layer_start(mut config: LayerConfig) {
     unsafe {
         let address = setup().proxy_address();
         let new_connection =
-            ProxyConnection::new(address, NewSessionRequest::New, Duration::from_secs(5))
+            ProxyConnection::new(address, NewSessionRequest::New, PROXY_CONNECTION_TIMEOUT)
                 .expect("failed to initialize proxy connection");
         PROXY_CONNECTION
             .set(new_connection)
