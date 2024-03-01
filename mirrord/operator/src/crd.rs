@@ -232,10 +232,10 @@ pub struct Session {
 /// the operator.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-    group = "operator.metalbear.co",
-    version = "v1",
-    kind = "Session",
-    root = "SessionCrd"
+group = "operator.metalbear.co",
+version = "v1",
+kind = "Session",
+root = "SessionCrd"
 )]
 pub struct SessionSpec;
 
@@ -313,7 +313,7 @@ pub struct CopyTargetSpec {
     pub scale_down: bool,
     // TODO: docs
     /// queue id -> (attribute name -> regex)
-    pub sqs_filter: Option<HashMap<String, HashMap<String, String>>>,
+    pub sqs_filter: Option<HashMap<QueueId, SqsMessageFilter>>,
 }
 
 /// Features and operations that can be blocked by a `MirrordPolicy`.
@@ -428,14 +428,6 @@ pub struct SqsFilterStatus {
     // TODO: ?
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")] // original_name -> originalName in yaml.
-pub struct TempConfigMap {
-    pub original_name: String,
-    pub new_name: String,
-    pub new_values: HashMap<String, String>,
-}
-
 // TODO: docs
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
@@ -454,7 +446,7 @@ pub struct MirrordSqsFilterSpec {
     pub queue_name: String,
 
     // TODO: docs
-    pub output_queue_name: OutputQueueName,
+    pub output_queue_name: String,
 
     // TODO: docs
     pub filter: SqsMessageFilter,
