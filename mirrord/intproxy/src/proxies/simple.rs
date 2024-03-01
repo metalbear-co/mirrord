@@ -231,7 +231,7 @@ impl AddrInfoCache {
     ///
     /// # Panic
     ///
-    /// This method panics if this struct does not now of any incomplete [`GetAddrInfoRequest`].
+    /// This method panics if this struct does not know of any incomplete [`GetAddrInfoRequest`].
     fn response_came(&mut self, lookup: DnsLookup) {
         let host = self
             .outstanding_requests
