@@ -398,16 +398,20 @@ impl OutgoingFilterExt for OutgoingFilter {
 
                     match (name.as_str(), *port).to_socket_addrs() {
                         Ok(addresses) => addresses.map(|addr| addr.ip()).collect(),
-                        // There is no special `ErrorKind` for case when no records are found.
-                        Err(e)
-                            if e.to_string()
-                                .contains("Temporary failure in name resolution") =>
-                        {
-                            vec![]
-                        }
                         Err(e) => {
-                            tracing::error!(error = ?e, "Local resolution of OutgoingFilter failed");
-                            return Err(e.into());
+                            let as_string = e.to_string();
+                            if as_string.contains("Temporary failure in name resolution")
+                                || as_string
+                                    .contains("nodename nor servname provided, or not known")
+                            {
+                                // There is no special `ErrorKind` for case when no records are
+                                // found. We catch this case based
+                                // on error message.
+                                vec![]
+                            } else {
+                                tracing::error!(error = ?e, "Local resolution of OutgoingFilter failed");
+                                return Err(e.into());
+                            }
                         }
                     }
                 };
