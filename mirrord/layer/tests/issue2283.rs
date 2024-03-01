@@ -40,7 +40,10 @@ async fn test_issue2283(
         intproxy
             .expect_file_open_for_reading("/etc/hostname", 2137)
             .await;
-        intproxy.expect_file_read("metalbear-hostname", 2137).await;
+        intproxy.expect_only_file_read(2137).await;
+        intproxy
+            .answer_file_read("metalbear-hostname".as_bytes().to_vec())
+            .await;
         intproxy.expect_file_close(2137).await;
     }
 
