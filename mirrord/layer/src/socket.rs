@@ -388,7 +388,10 @@ impl OutgoingFilterExt for OutgoingFilter {
                                 kind: ResolveErrorKindInternal::NoRecordsFound(..),
                             },
                         ))) => vec![],
-                        Err(e) => return Err(e),
+                        Err(e) => {
+                            tracing::error!(error = ?e, "Remote resolution of OutgoingFilter failed");
+                            return Err(e);
+                        }
                     }
                 } else {
                     let _guard = DetourGuard::new();
@@ -402,7 +405,10 @@ impl OutgoingFilterExt for OutgoingFilter {
                         {
                             vec![]
                         }
-                        Err(e) => return Err(e.into()),
+                        Err(e) => {
+                            tracing::error!(error = ?e, "Local resolution of OutgoingFilter failed");
+                            return Err(e.into());
+                        }
                     }
                 };
 
