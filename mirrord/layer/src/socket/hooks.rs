@@ -515,14 +515,6 @@ pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled
         FN_GETHOSTNAME
     );
 
-    replace!(
-        hook_manager,
-        "gethostbyname",
-        gethostbyname_detour,
-        FnGethostbyname,
-        FN_GETHOSTBYNAME
-    );
-
     #[cfg(target_os = "linux")]
     {
         // Here we replace a function of libuv and not libc, so we pass None as the .
@@ -555,6 +547,14 @@ pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled
     );
 
     if enabled_remote_dns {
+        replace!(
+            hook_manager,
+            "gethostbyname",
+            gethostbyname_detour,
+            FnGethostbyname,
+            FN_GETHOSTBYNAME
+        );
+
         replace!(
             hook_manager,
             "getaddrinfo",
