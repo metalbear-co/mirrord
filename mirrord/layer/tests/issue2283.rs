@@ -36,6 +36,14 @@ async fn test_issue2283(
         )
         .await;
 
+    if cfg!(target_os = "macos") {
+        intproxy
+            .expect_file_open_for_reading("/etc/hostname", 2137)
+            .await;
+        intproxy.expect_file_read("metalbear-hostname", 2137).await;
+        intproxy.expect_file_close(2137).await;
+    }
+
     let message = intproxy.recv().await;
     assert_matches!(message, ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node }) if node == "test-server");
 
