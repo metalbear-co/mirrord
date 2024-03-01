@@ -627,6 +627,12 @@ impl OperatorClusterUserRole {
                     verbs: vec!["proxy".to_owned()],
                     ..Default::default()
                 },
+                PolicyRule {
+                    api_groups: Some(vec!["operator.metalbear.co".to_owned()]),
+                    resources: Some(vec!["sessions".to_owned()]),
+                    verbs: vec!["deletecollection".to_owned(), "delete".to_owned()],
+                    ..Default::default()
+                },
             ]),
             ..Default::default()
         };
