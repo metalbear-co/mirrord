@@ -3,7 +3,7 @@ use std::{env::VarError, net::SocketAddr, ptr, str::ParseBoolError};
 use errno::set_errno;
 use ignore_codes::*;
 use libc::{c_char, hostent, DIR, FILE};
-use mirrord_config::{config::ConfigError, feature::network::outgoing::OutgoingFilterError};
+use mirrord_config::config::ConfigError;
 use mirrord_protocol::{ResponseError, SerializationError};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
@@ -148,9 +148,6 @@ pub(crate) enum LayerError {
     #[cfg(target_os = "macos")]
     #[error("Exec failed with error {0:?}, please report this error!")]
     ExecFailed(exec::Error),
-
-    #[error("mirrord-layer: Something went wrong with the outgoing filter `{0}`.")]
-    OutgoingFilterError(#[from] OutgoingFilterError),
 }
 
 impl From<SerializationError> for LayerError {
