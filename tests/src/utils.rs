@@ -284,11 +284,13 @@ impl TestProcess {
         args: Vec<String>,
         env: HashMap<&str, &str>,
     ) -> TestProcess {
+        println!("EXECUTING: {executable}");
         let child = Command::new(executable)
             .args(args)
             .envs(env)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .kill_on_drop(true)
             .spawn()
             .unwrap();
         println!("Started application.");
@@ -449,6 +451,7 @@ pub async fn run_mirrord(args: Vec<&str>, env: HashMap<&str, &str>) -> TestProce
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .kill_on_drop(true)
         .spawn()
         .unwrap();
     println!(
