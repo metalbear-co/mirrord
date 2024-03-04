@@ -857,7 +857,7 @@
       "properties": {
         "dns": {
           "title": "feature.network.dns {#feature-network-dns}",
-          "description": "Resolve DNS via the remote pod.\n\nDefaults to `true`.",
+          "description": "Resolve DNS via the remote pod.\n\nDefaults to `true`.\n\n- Caveats: DNS resolving can be done in multiple ways, some frameworks will use `getaddrinfo`, while others will create a connection on port `53` and perform a sort of manual resolution. Just enabling the `dns` feature in mirrord might not be enough. If you see an address resolution error, try enabling the [`fs`](#feature-fs) feature, and setting `read_only: [\"/etc/resolv.conf\"]`.",
           "type": [
             "boolean",
             "null"
