@@ -423,7 +423,7 @@ pub struct MirrordQueueSplitterSpec {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(rename(SQSFilterStatus))]
+#[serde(rename = "SQSFilterStatus")]
 pub struct SqsFilterStatus {
     // TODO: ?
 }
