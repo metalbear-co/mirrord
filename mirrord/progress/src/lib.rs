@@ -9,6 +9,12 @@ use serde_json::to_string;
 /// to determine the mode of progress reporting
 pub const MIRRORD_PROGRESS_ENV: &str = "MIRRORD_PROGRESS_MODE";
 
+/// Progress report API for displaying notifications in cli/extensions.
+///
+/// This is our IDE friendly way of sending notification messages from the cli, be careful not to
+/// mix it (e.g. calling `progress.info`) with regular [`println!`], as the IDE may fail to parse
+/// the [`ProgressMessage`] (intellij will fail with `"failed to parse a message from mirrord
+/// binary"`), and we end up displaying an error instead.
 #[enum_dispatch]
 pub trait Progress: Sized {
     /// Create a subtask report from this task.
@@ -23,6 +29,9 @@ pub trait Progress: Sized {
     /// When you want to issue a warning on current task
     fn warning(&self, msg: &str);
 
+    /// When you want to print a message, IDE support.
+    fn info(&self, msg: &str);
+
     /// When you want to print a message, cli only.
     fn print(&self, msg: &str);
 
@@ -35,12 +44,14 @@ pub trait Progress: Sized {
 #[derive(Debug)]
 #[enum_dispatch(Progress)]
 pub enum ProgressTracker {
-    // /// Display dynamic progress with spinners.
+    /// Display dynamic progress with spinners.
     SpinnerProgress(SpinnerProgress),
     /// Display simple human-readable messages in new lines.
     SimpleProgress(SimpleProgress),
-    // /// Output progress messages in JSON format for programmatic use.
+
+    /// Output progress messages in JSON format for programmatic use.
     JsonProgress(JsonProgress),
+
     /// Do not output progress.
     NullProgress(NullProgress),
 }
@@ -60,6 +71,8 @@ impl Progress for NullProgress {
     fn failure(&mut self, _: Option<&str>) {}
 
     fn warning(&self, _: &str) {}
+
+    fn info(&self, _: &str) {}
 
     fn print(&self, _: &str) {}
 }
@@ -116,12 +129,20 @@ impl Progress for JsonProgress {
 
     fn print(&self, _: &str) {}
 
+    fn info(&self, msg: &str) {
+        let message = ProgressMessage::Info {
+            message: msg.to_string(),
+        };
+        message.print();
+    }
+
     fn warning(&self, msg: &str) {
         let message = ProgressMessage::Warning(WarningMessage {
             message: msg.to_string(),
         });
         message.print();
     }
+
     fn failure(&mut self, msg: Option<&str>) {
         self.done = true;
         self.print_finished_task(false, msg)
@@ -172,6 +193,11 @@ impl Progress for SimpleProgress {
     fn warning(&self, msg: &str) {
         println!("{msg}");
     }
+
+    fn info(&self, msg: &str) {
+        println!("{msg}");
+    }
+
     fn failure(&mut self, msg: Option<&str>) {
         println!("{msg:?}");
     }
@@ -244,6 +270,12 @@ impl Progress for SpinnerProgress {
 
     fn warning(&self, msg: &str) {
         let formatted_message = format!("! {msg}");
+        self.print(&formatted_message);
+        self.progress.set_message(formatted_message);
+    }
+
+    fn info(&self, msg: &str) {
+        let formatted_message = format!("* {msg}");
         self.print(&formatted_message);
         self.progress.set_message(formatted_message);
     }
@@ -332,12 +364,16 @@ struct WarningMessage {
     message: String,
 }
 
+/// The message types that we report on [`Progress`].
+///
+/// These are used by the extensions (vscode and intellij) to show nice notifications.
 #[derive(Serialize, Debug, Clone)]
 #[serde(tag = "type")]
 enum ProgressMessage {
     NewTask(NewTaskMessage),
     Warning(WarningMessage),
     FinishedTask(FinishedTaskMessage),
+    Info { message: String },
 }
 
 impl ProgressMessage {

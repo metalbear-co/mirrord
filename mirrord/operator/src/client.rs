@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::crd::{
     CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, SessionCrd, TargetCrd,
@@ -259,17 +259,31 @@ impl OperatorApi {
         // but maybe the time of the local user and of the operator are out of sync, so we
         // could end up blocking a valid license (or even just warning on it could be
         // confusing).
-        if let Some(expiring_soon) =
+        if let Some(days_until_expiration) =
             DateTime::from_naive_date(operator.spec.license.expire_at).days_until_expiration()
-            && (expiring_soon <= <DateTime<Utc> as LicenseValidity>::CLOSE_TO_EXPIRATION_DAYS)
         {
-            let expiring_message = format!(
-                "Operator license will expire soon, in {} days!",
-                expiring_soon,
-            );
+            if days_until_expiration <= <DateTime<Utc> as LicenseValidity>::CLOSE_TO_EXPIRATION_DAYS
+            {
+                let expiring_soon = (days_until_expiration > 0)
+                    .then(|| {
+                        format!(
+                            "soon, in {days_until_expiration} day{}",
+                            if days_until_expiration > 1 { "s" } else { "" }
+                        )
+                    })
+                    .unwrap_or_else(|| "today".to_string());
 
-            progress.warning(&expiring_message);
-            warn!(expiring_message);
+                let expiring_message = format!("Operator license will expire {expiring_soon}!",);
+
+                progress.warning(&expiring_message);
+                warn!(expiring_message);
+            } else if operator.spec.license.name.contains("(Trial)") {
+                let good_validity_message =
+                    format!("Operator license is valid for {days_until_expiration} more days.");
+
+                progress.info(&good_validity_message);
+                info!(good_validity_message);
+            }
         }
 
         Self::check_config(config, &operator)?;

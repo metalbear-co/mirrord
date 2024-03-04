@@ -34,7 +34,7 @@ use crate::{
 };
 
 /// Holds the pair of [`IpAddr`] with their hostnames, resolved remotely through
-/// [`getaddrinfo`].
+/// [`remote_getaddrinfo`].
 ///
 /// Used by [`connect_outgoing`] to retrieve the hostname from the address that the user called
 /// [`connect`] with, so we can resolve it locally when neccessary.
@@ -752,9 +752,17 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
 
 /// Handles the remote communication part of [`getaddrinfo`], call this if you want to resolve a DNS
 /// through the agent, but don't need to deal with all the [`libc::getaddrinfo`] stuff.
+///
+/// # Note
+///
+/// This function updates the mapping in [`REMOTE_DNS_REVERSE_MAPPING`].
 #[tracing::instrument(level = "trace", ret)]
 pub(super) fn remote_getaddrinfo(node: String) -> HookResult<Vec<(String, IpAddr)>> {
     let addr_info_list = common::make_proxy_request_with_response(GetAddrInfoRequest { node })?.0?;
+
+    addr_info_list.iter().for_each(|lookup| {
+        REMOTE_DNS_REVERSE_MAPPING.insert(lookup.ip, lookup.name.clone());
+    });
 
     Ok(addr_info_list
         .into_iter()
@@ -832,11 +840,6 @@ pub(super) fn getaddrinfo(
     let result = resolved_addr
         .into_iter()
         .map(|(name, address)| {
-            // Cache the resolved hosts to use in the outgoing traffic filter.
-            {
-                let _ = REMOTE_DNS_REVERSE_MAPPING.insert(address, node.clone());
-            }
-
             let rawish_sock_addr = SockAddr::from(SocketAddr::new(address, service));
             let ai_addrlen = rawish_sock_addr.len();
             let ai_family = rawish_sock_addr.family() as _;
