@@ -211,7 +211,11 @@ pub struct LayerConfig {
     /// Note: It requires agent configuration to be set to privileged when running with the
     /// ephemeral agent option. Defaults to `false`.
     /// Note2: Pause + ephemeral might not work on Docker runtimes.
-    #[config(env = "MIRRORD_PAUSE", default = false, deprecated = "pause is deprecated in favor of copy + scaledown teams feature. Read the blogpost here https://metalbear.co/blog/on-pausing-containers-how-we-built-and-why-we-deprecated-our-container-pause-feature/")]
+    #[config(
+        env = "MIRRORD_PAUSE",
+        default = false,
+        deprecated = "pause is deprecated in favor of copy + scaledown teams feature. Read the blogpost here https://metalbear.co/blog/on-pausing-containers-how-we-built-and-why-we-deprecated-our-container-pause-feature/"
+    )]
     pub pause: bool,
 
     /// ## connect_tcp {#root-connect_tpc}
