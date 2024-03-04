@@ -102,16 +102,10 @@ impl LicenseValidity for DateTime<Utc> {
     }
 
     fn days_until_expiration(&self) -> Option<u64> {
-        if self.is_good() {
-            let until_expiration = (*self - Utc::now()).num_days();
+        let expiration_in_days = (*self - Utc::now()).num_days();
 
-            // We only want to return `Some(>= 0)`, never any negative numbers.
-            (0..=2)
-                .contains(&until_expiration)
-                .then_some(until_expiration as u64)
-        } else {
-            None
-        }
+        // We only want to return `Some(>= 0)`, never any negative numbers.
+        (self.is_good() && expiration_in_days >= 0).then(|| (*self - Utc::now()).num_days() as u64)
     }
 }
 

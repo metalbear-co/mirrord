@@ -1,11 +1,11 @@
 //! The most basic proxying logic. Handles cases when the only job to do in the internal proxy is to
 //! pass requests and responses between the layer and the agent.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use mirrord_intproxy_protocol::{LayerId, MessageId, ProxyToLayerMessage};
 use mirrord_protocol::{
-    dns::{GetAddrInfoRequest, GetAddrInfoResponse},
+    dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse},
     file::{CloseDirRequest, CloseFileRequest, OpenDirResponse, OpenFileResponse},
     ClientMessage, FileRequest, FileResponse, GetEnvVarsRequest, RemoteResult,
 };
@@ -47,6 +47,8 @@ pub struct SimpleProxy {
     addr_info_reqs: RequestQueue,
     /// For [`GetEnvVarsRequest`]s.
     get_env_reqs: RequestQueue,
+    /// Cache for resolved domain names.
+    addr_info_cache: AddrInfoCache,
 }
 
 impl BackgroundTask for SimpleProxy {
@@ -132,14 +134,31 @@ impl BackgroundTask for SimpleProxy {
                         .await;
                 }
                 SimpleProxyMessage::AddrInfoReq(message_id, session_id, req) => {
-                    self.addr_info_reqs.insert(message_id, session_id);
-                    message_bus
-                        .send(ProxyMessage::ToAgent(ClientMessage::GetAddrInfoRequest(
-                            req,
-                        )))
-                        .await;
+                    if let Some(cached_response) = self.addr_info_cache.get_cached(&req.node) {
+                        message_bus
+                            .send(ProxyMessage::ToLayer(ToLayer {
+                                message_id,
+                                layer_id: session_id,
+                                message: ProxyToLayerMessage::GetAddrInfo(GetAddrInfoResponse(Ok(
+                                    cached_response,
+                                ))),
+                            }))
+                            .await;
+                    } else {
+                        self.addr_info_reqs.insert(message_id, session_id);
+                        self.addr_info_cache.request_sent(req.node.clone());
+                        message_bus
+                            .send(ProxyMessage::ToAgent(ClientMessage::GetAddrInfoRequest(
+                                req,
+                            )))
+                            .await;
+                    }
                 }
                 SimpleProxyMessage::AddrInfoRes(res) => {
+                    if let Ok(lookup) = res.0.as_ref() {
+                        self.addr_info_cache.response_came(lookup.clone());
+                    }
+
                     let (message_id, layer_id) = self.addr_info_reqs.get()?;
                     message_bus
                         .send(ToLayer {
@@ -185,5 +204,45 @@ impl BackgroundTask for SimpleProxy {
 
         tracing::trace!("message bus closed, exiting");
         Ok(())
+    }
+}
+
+/// Cache for successful [`DnsLookup`]s done by the agent.
+/// DNS mappings should not change very often, so it should be safe to cache these for the time of
+/// one mirrord session.
+#[derive(Default)]
+struct AddrInfoCache {
+    /// [`GetAddrInfoRequest::node`]s from the DNS requests that still require a response from the
+    /// agent.
+    outstanding_requests: VecDeque<String>,
+    /// Agent's successful responses to previous requests.
+    responses: HashMap<String, DnsLookup>,
+}
+
+impl AddrInfoCache {
+    /// Notifies this cache that a new [`GetAddrInfoRequest`] has been sent.
+    fn request_sent(&mut self, host: String) {
+        self.outstanding_requests.push_back(host);
+    }
+
+    /// Notifies this cache that the agent has responded with success to a [`GetAddrInfoRequest`].
+    /// The given [`DnsLookup`] is matched against the `host` from the oldest incomplete
+    /// [`GetAddrInfoRequest`] this struct knows of.
+    ///
+    /// # Panic
+    ///
+    /// This method panics if this struct does not know of any incomplete [`GetAddrInfoRequest`].
+    fn response_came(&mut self, lookup: DnsLookup) {
+        let host = self
+            .outstanding_requests
+            .pop_front()
+            .expect("received too many GetAddrInfoResponses");
+
+        self.responses.insert(host, lookup);
+    }
+
+    /// Returns a cached response for the given `host`.
+    fn get_cached(&mut self, host: &str) -> Option<DnsLookup> {
+        self.responses.get(host).cloned()
     }
 }
