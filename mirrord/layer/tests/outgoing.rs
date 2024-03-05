@@ -29,7 +29,6 @@ pub use common::*;
 ///
 /// # Ignored
 /// This test is ignored due to a bug - `recv_from` call returns an invalid remote peer address.
-#[ignore]
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
