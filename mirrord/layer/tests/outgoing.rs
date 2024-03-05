@@ -26,9 +26,6 @@ pub use common::*;
 /// 2. Connects to the remote peer
 /// 3. Sends some data
 /// 4. Expects the peer to send the same data back
-///
-/// # Ignored
-/// This test is ignored due to a bug - `recv_from` call returns an invalid remote peer address.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
