@@ -1,1 +1,0 @@
-Fixed lints in hook macros.

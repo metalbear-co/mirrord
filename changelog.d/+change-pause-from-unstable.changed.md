@@ -1,1 +1,0 @@
-Change pause feature from unstable to deprecated
