@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    sync::LazyLock,
     thread,
 };
 
@@ -12,13 +11,10 @@ use futures::{
 };
 use mirrord_protocol::{
     outgoing::{udp::*, *},
-    ConnectionId, RemoteError, ResponseError,
+    ConnectionId, ResponseError,
 };
-use regex::Regex;
 use streammap_ext::StreamMap;
 use tokio::{
-    fs::File,
-    io::AsyncReadExt,
     net::UdpSocket,
     select,
     sync::mpsc::{self, Receiver, Sender},
@@ -34,9 +30,6 @@ use crate::{
 
 type Layer = LayerUdpOutgoing;
 type Daemon = DaemonUdpOutgoing;
-
-static NAMESERVER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^nameserver.*").unwrap());
-const DNS_PORT: u16 = 53;
 
 /// Handles (briefly) the `UdpOutgoingRequest` and `UdpOutgoingResponse` messages, mostly the
 /// passing of these messages to the `interceptor_task` thread.
@@ -54,40 +47,16 @@ pub(crate) struct UdpOutgoingApi {
     daemon_rx: Receiver<Daemon>,
 }
 
-async fn resolve_dns() -> Result<SocketAddr, ResponseError> {
-    trace!("resolve_dns -> ");
-
-    let mut resolv_conf_contents = String::with_capacity(1024);
-    let mut resolv_conf = File::open("/etc/resolv.conf").await?;
-
-    resolv_conf
-        .read_to_string(&mut resolv_conf_contents)
-        .await?;
-
-    let nameserver = resolv_conf_contents
-        .lines()
-        .find(|line| NAMESERVER.is_match(line))
-        .ok_or(RemoteError::NameserverNotFound)?
-        .split_whitespace()
-        .last()
-        .ok_or(RemoteError::NameserverNotFound)?;
-
-    let dns_address: SocketAddr = format!("{nameserver}:{DNS_PORT}")
-        .parse()
-        .map_err(RemoteError::from)?;
-
-    Ok(dns_address)
-}
-
+/// Performs an [`UdpSocket::connect`] that handles 3 situations:
+///
+/// 1. Normal `connect` called on an udp socket by the user, through the [`LayerConnect`] message;
+/// 2. DNS special-case connection that comes on port `53`, where we have a hack that fakes a
+///    connected udp socket. This case in particular requires that the user enable file ops with
+///    read access to `/etc/resolv.conf`, otherwise they'll be getting a mismatched connection;
+/// 3. User is trying to use `sendto` and `recvfrom`, we use the same hack as in DNS to fake a
+///    connection.
+#[tracing::instrument(level = "trace", ret)]
 async fn connect(remote_address: SocketAddr) -> Result<UdpSocket, ResponseError> {
-    trace!("connect -> remote_address {:#?}", remote_address);
-
-    let remote_address = if remote_address.port() == DNS_PORT {
-        resolve_dns().await?
-    } else {
-        remote_address
-    };
-
     let mirror_address = match remote_address {
         std::net::SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
         std::net::SocketAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
@@ -108,6 +77,7 @@ impl UdpOutgoingApi {
 
         let watched_task =
             WatchedTask::new(Self::TASK_NAME, Self::interceptor_task(layer_rx, daemon_tx));
+
         let task_status = watched_task.status();
         let task = run_thread_in_namespace(
             watched_task.start(),
@@ -124,7 +94,9 @@ impl UdpOutgoingApi {
         }
     }
 
-    /// Does the actual work for `Request`s and prepares the `Responses:
+    /// The [`UdpOutgoingApi`] task.
+    ///
+    /// Receives [`LayerUdpOutgoing`] messages and replies with [`DaemonUdpOutgoing`].
     #[allow(clippy::type_complexity)]
     async fn interceptor_task(
         mut layer_rx: Receiver<Layer>,
