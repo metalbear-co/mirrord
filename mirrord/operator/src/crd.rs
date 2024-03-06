@@ -4,6 +4,7 @@ use std::{
 };
 
 use chrono::NaiveDate;
+use k8s_openapi::api::core::v1::PodTemplateSpec;
 use kube::CustomResource;
 pub use mirrord_config::feature::split_queues::QueueId;
 use mirrord_config::{
@@ -266,6 +267,7 @@ pub enum NewOperatorFeature {
     ProxyApi,
     CopyTarget,
     Sqs,
+    SessionManagement,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[serde(other)]
@@ -279,6 +281,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::CopyTarget => "copy target",
             NewOperatorFeature::Sqs => "SQS queue splitting",
             NewOperatorFeature::FeatureFromTheFuture => "unknown feature",
+            NewOperatorFeature::SessionManagement => "session management",
         };
         f.write_str(name)
     }
@@ -312,8 +315,7 @@ pub struct CopyTargetSpec {
     /// Ignored if [`Target`] is not [`Target::Deployment`].
     pub scale_down: bool,
     // TODO: docs
-    /// queue id -> (attribute name -> regex)
-    pub sqs_filter: Option<HashMap<QueueId, SqsMessageFilter>>,
+    pub sqs_filter: Option<bool>,
 }
 
 /// Features and operations that can be blocked by a `MirrordPolicy`.
@@ -424,8 +426,10 @@ pub struct MirrordQueueSplitterSpec {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename = "SQSFilterStatus")]
-pub struct SqsFilterStatus {
-    // TODO: ?
+pub enum SqsSessionStatus {
+    #[serde(default)]
+    Requested,
+    Started(PodTemplateSpec),
 }
 
 // TODO: docs
@@ -433,21 +437,12 @@ pub struct SqsFilterStatus {
 #[kube(
 group = "splitters.mirrord.metalbear.co",
 version = "v1alpha",
-kind = "MirrordSQSFilter",
-root = "MirrordSqsFilter", // for Rust naming conventions (Sqs, not SQS)
-shortname = "qs",
-status = "SqsFilterStatus",
+kind = "MirrordSQSSession",
+root = "MirrordSqsSession", // for Rust naming conventions (Sqs, not SQS)
+status = "SqsSessionStatus",
 namespaced
 )]
-#[serde(rename_all = "camelCase")] // queue_name -> queueName in yaml.
-pub struct MirrordSqsFilterSpec {
-    pub queue_id: QueueId,
-
-    pub queue_name: String,
-
-    // TODO: docs
-    pub output_queue_name: String,
-
-    // TODO: docs
-    pub filter: SqsMessageFilter,
+#[serde(rename_all = "camelCase")] // queue_filters -> queueFilters
+pub struct MirrordSqsSessionSpec {
+    pub queue_filters: HashMap<QueueId, SqsMessageFilter>,
 }
