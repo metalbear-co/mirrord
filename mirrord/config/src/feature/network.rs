@@ -60,6 +60,12 @@ pub struct NetworkConfig {
     /// Resolve DNS via the remote pod.
     ///
     /// Defaults to `true`.
+    ///
+    /// - Caveats: DNS resolving can be done in multiple ways, some frameworks will use
+    /// `getaddrinfo`, while others will create a connection on port `53` and perform a sort
+    /// of manual resolution. Just enabling the `dns` feature in mirrord might not be enough.
+    /// If you see an address resolution error, try enabling the [`fs`](#feature-fs) feature,
+    /// and setting `read_only: ["/etc/resolv.conf"]`.
     #[config(env = "MIRRORD_REMOTE_DNS", default = true)]
     pub dns: bool,
 }
