@@ -79,38 +79,37 @@ where
     IPT: IPTables + Send + Sync,
 {
     async fn mount_entrypoint(&self) -> Result<()> {
-        tokio::try_join!(
-            self.prerouteing.mount_entrypoint(),
-            self.output.mount_entrypoint(),
-        )?;
+        self.prerouteing.mount_entrypoint().await?;
+        self.output.mount_entrypoint().await?;
 
         Ok(())
     }
 
     async fn unmount_entrypoint(&self) -> Result<()> {
-        tokio::try_join!(
-            self.prerouteing.unmount_entrypoint(),
-            self.output.unmount_entrypoint(),
-        )?;
+        self.prerouteing.unmount_entrypoint().await?;
+        self.output.unmount_entrypoint().await?;
 
         Ok(())
     }
 
     async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        tokio::try_join!(
-            self.prerouteing.add_redirect(redirected_port, target_port),
-            self.output.add_redirect(redirected_port, target_port)
-        )?;
+        self.prerouteing
+            .add_redirect(redirected_port, target_port)
+            .await?;
+        self.output
+            .add_redirect(redirected_port, target_port)
+            .await?;
 
         Ok(())
     }
 
     async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        tokio::try_join!(
-            self.prerouteing
-                .remove_redirect(redirected_port, target_port),
-            self.output.remove_redirect(redirected_port, target_port),
-        )?;
+        self.prerouteing
+            .remove_redirect(redirected_port, target_port)
+            .await?;
+        self.output
+            .remove_redirect(redirected_port, target_port)
+            .await?;
 
         Ok(())
     }
