@@ -13,6 +13,7 @@ use mirrord_config::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use mirrord_config::target::{DeploymentTarget, RolloutTarget};
 
 use self::label_selector::LabelSelector;
 use crate::client::OperatorApiError;
@@ -314,8 +315,8 @@ pub struct CopyTargetSpec {
     /// Should the operator scale down target deployment to 0 while this pod is alive.
     /// Ignored if [`Target`] is not [`Target::Deployment`].
     pub scale_down: bool,
-    // TODO: docs
-    pub sqs_filter: Option<bool>,
+    /// queue id -> (attribute name -> regex)
+    pub sqs_filter: Option<HashMap<QueueId, SqsMessageFilter>>,
 }
 
 /// Features and operations that can be blocked by a `MirrordPolicy`.
@@ -445,4 +446,6 @@ namespaced
 #[serde(rename_all = "camelCase")] // queue_filters -> queueFilters
 pub struct MirrordSqsSessionSpec {
     pub queue_filters: HashMap<QueueId, SqsMessageFilter>,
+    pub queue_consumer: QueueConsumer,
+    pub session_id: u64,
 }
