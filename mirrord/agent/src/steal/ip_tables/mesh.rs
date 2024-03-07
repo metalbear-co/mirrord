@@ -3,21 +3,14 @@ use std::sync::{Arc, LazyLock};
 use async_trait::async_trait;
 use fancy_regex::Regex;
 use mirrord_protocol::{MeshVendor, Port};
-use nix::unistd::getgid;
-use tracing::warn;
 
 use crate::{
     error::Result,
     steal::ip_tables::{
-        chain::IPTableChain,
-        redirect::{PreroutingRedirect, Redirect},
-        IPTables, IPTABLE_MESH,
+        output::OutputRedirect, prerouting::PreroutingRedirect, redirect::Redirect, IPTables,
+        IPTABLE_MESH,
     },
 };
-
-/// [`Regex`] used to select the `owner` rule from the list of `iptables` rules.
-static UID_LOOKUP_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"-m owner --uid-owner \d+").unwrap());
 
 static LINKERD_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"-p tcp -m multiport --dports ([\d:,]+)").unwrap());
@@ -26,73 +19,45 @@ static ISTIO_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"-p tcp -m tcp --dport ([\d:,]+)").unwrap());
 
 pub(crate) struct MeshRedirect<IPT: IPTables> {
-    preroute: PreroutingRedirect<IPT>,
-    managed: IPTableChain<IPT>,
-    own_packet_filter: String,
+    prerouteing: PreroutingRedirect<IPT>,
+    output: OutputRedirect<IPT>,
 }
 
 impl<IPT> MeshRedirect<IPT>
 where
     IPT: IPTables,
 {
-    const ENTRYPOINT: &'static str = "OUTPUT";
-
     pub fn create(ipt: Arc<IPT>, vendor: MeshVendor) -> Result<Self> {
-        let preroute = PreroutingRedirect::create(ipt.clone())?;
-        let own_packet_filter = Self::get_own_packet_filter(&ipt, &vendor)?;
+        let prerouteing = PreroutingRedirect::create(ipt.clone())?;
 
         for port in Self::get_skip_ports(&ipt, &vendor)? {
-            preroute.add_rule(&format!("-m multiport -p tcp ! --dports {port} -j RETURN"))?;
+            prerouteing.add_rule(&format!("-m multiport -p tcp ! --dports {port} -j RETURN"))?;
         }
 
-        let managed = IPTableChain::create(ipt, IPTABLE_MESH.to_string())?;
-
-        let gid = getgid();
-        managed.add_rule(&format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))?;
+        let output = OutputRedirect::create(ipt, IPTABLE_MESH.to_string())?;
 
         Ok(MeshRedirect {
-            preroute,
-            managed,
-            own_packet_filter,
+            prerouteing,
+            output,
         })
     }
 
-    pub fn load(ipt: Arc<IPT>, vendor: MeshVendor) -> Result<Self> {
-        let own_packet_filter = Self::get_own_packet_filter(&ipt, &vendor)?;
-        let preroute = PreroutingRedirect::load(ipt.clone())?;
-        let managed = IPTableChain::load(ipt, IPTABLE_MESH.to_string())?;
+    pub fn load(ipt: Arc<IPT>, _vendor: MeshVendor) -> Result<Self> {
+        let prerouteing = PreroutingRedirect::load(ipt.clone())?;
+        let output = OutputRedirect::load(ipt, IPTABLE_MESH.to_string())?;
 
         Ok(MeshRedirect {
-            preroute,
-            managed,
-            own_packet_filter,
+            prerouteing,
+            output,
         })
-    }
-
-    fn get_own_packet_filter(ipt: &IPT, vendor: &MeshVendor) -> Result<String> {
-        let chain_name = vendor.output_chain();
-
-        let own_packet_filter = ipt
-            .list_rules(chain_name)?
-            .iter()
-            .find_map(|rule| UID_LOOKUP_REGEX.find(rule).ok().flatten())
-            .map(|m| format!("-o lo {}", m.as_str()))
-            .unwrap_or_else(|| {
-                warn!(
-                    "Couldn't find --uid-owner of meshed chain {chain_name:?} falling back on \"-o lo\" rule",
-                );
-
-                "-o lo".to_owned()
-            });
-
-        Ok(own_packet_filter)
     }
 
     fn get_skip_ports(ipt: &IPT, vendor: &MeshVendor) -> Result<Vec<String>> {
+        let chain_name = vendor.input_chain();
         let lookup_regex = vendor.skip_ports_regex();
 
         let skipped_ports = ipt
-            .list_rules(vendor.input_chain())?
+            .list_rules(chain_name)?
             .iter()
             .filter_map(|rule| {
                 lookup_regex
@@ -114,53 +79,37 @@ where
     IPT: IPTables + Send + Sync,
 {
     async fn mount_entrypoint(&self) -> Result<()> {
-        self.preroute.mount_entrypoint().await?;
-
-        self.managed.inner().add_rule(
-            Self::ENTRYPOINT,
-            &format!("-j {}", self.managed.chain_name()),
-        )?;
+        self.prerouteing.mount_entrypoint().await?;
+        self.output.mount_entrypoint().await?;
 
         Ok(())
     }
 
     async fn unmount_entrypoint(&self) -> Result<()> {
-        self.preroute.unmount_entrypoint().await?;
-
-        self.managed.inner().remove_rule(
-            Self::ENTRYPOINT,
-            &format!("-j {}", self.managed.chain_name()),
-        )?;
+        self.prerouteing.unmount_entrypoint().await?;
+        self.output.unmount_entrypoint().await?;
 
         Ok(())
     }
 
     async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.preroute
+        self.prerouteing
             .add_redirect(redirected_port, target_port)
             .await?;
-
-        let redirect_rule = format!(
-            "{} -m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}",
-            self.own_packet_filter
-        );
-
-        self.managed.add_rule(&redirect_rule)?;
+        self.output
+            .add_redirect(redirected_port, target_port)
+            .await?;
 
         Ok(())
     }
 
     async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.preroute
+        self.prerouteing
             .remove_redirect(redirected_port, target_port)
             .await?;
-
-        let redirect_rule = format!(
-            "{} -m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}",
-            self.own_packet_filter
-        );
-
-        self.managed.remove_rule(&redirect_rule)?;
+        self.output
+            .remove_redirect(redirected_port, target_port)
+            .await?;
 
         Ok(())
     }
@@ -214,6 +163,7 @@ impl MeshVendorExt for MeshVendor {
 #[cfg(test)]
 mod tests {
     use mockall::predicate::*;
+    use nix::unistd::getgid;
 
     use super::*;
     use crate::steal::ip_tables::{MockIPTables, IPTABLE_PREROUTING};
@@ -283,7 +233,7 @@ mod tests {
         mock.expect_insert_rule()
             .with(
                 eq(IPTABLE_MESH.as_str()),
-                eq("-o lo -m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(2),
             )
             .times(1)
