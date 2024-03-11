@@ -534,10 +534,10 @@ pub(crate) fn statx_logic(
         & libc::STATX_GID
         & libc::STATX_ATIME
         & libc::STATX_MTIME
+        & libc::STATX_CTIME
         & libc::STATX_INO
         & libc::STATX_SIZE
-        & libc::STATX_BLOCKS
-        & libc::STATX_BTIME;
+        & libc::STATX_BLOCKS;
     statx_buf.stx_attributes_mask = 0;
 
     statx_buf.stx_blksize = response.block_size.try_into().unwrap_or(u32::MAX);
@@ -549,7 +549,7 @@ pub(crate) fn statx_logic(
     statx_buf.stx_size = response.size;
     statx_buf.stx_blocks = response.blocks;
     statx_buf.stx_atime = nanos_to_statx(response.access_time);
-    statx_buf.stx_btime = nanos_to_statx(response.creation_time);
+    statx_buf.stx_ctime = nanos_to_statx(response.creation_time);
     statx_buf.stx_mtime = nanos_to_statx(response.modification_time);
     let (major, minor) = device_id_to_statx(response.rdevice_id);
     statx_buf.stx_rdev_major = major;
