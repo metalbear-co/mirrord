@@ -1,7 +1,7 @@
 use core::ffi::CStr;
-use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
+use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, time::Duration};
 
-use libc::{c_int, iovec, unlink, AT_FDCWD, FILE};
+use libc::{c_char, c_int, iovec, statx, statx_timestamp, unlink, AT_FDCWD, FILE};
 use mirrord_protocol::file::{
     OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
     WriteFileResponse, XstatFsResponse, XstatResponse,
@@ -11,7 +11,7 @@ use tracing::{error, trace};
 
 use super::{hooks::FN_OPEN, open_dirs::OPEN_DIRS, *};
 use crate::{
-    common,
+    common::{self, CheckedInto},
     detour::{Bypass, Detour},
     error::{HookError, HookResult as Result},
 };
@@ -442,6 +442,123 @@ pub(crate) fn xstat(
     let response = common::make_proxy_request_with_response(lstat)??;
 
     Detour::Success(response)
+}
+
+/// Logic for the `libc::statx` function.
+/// See [manual](https://man7.org/linux/man-pages/man2/statx.2.html) for reference.
+///
+/// # Warning
+///
+/// Due to backwards compatibility on the [`mirrord_protocol`] level, we use [`XstatRequest`] to get
+/// the remote file metadata.
+/// Because of this, we're not able to fill all field of the [`statx`] structure. Missing fields
+/// are:
+/// 1. [`statx::stx_attributes`]
+/// 2. [`statx::stx_ctime`]
+/// 3. [`statx::stx_mnt_id`]
+/// 4. [`statx::stx_dio_mem_align`] and [`statx::stx_dio_offset_align`]
+///
+/// Luckily, [`statx::stx_mask`] and [`statx::stx_attributes_mask`] fields allow us to inform the
+/// caller about respective fields being skipped.
+pub(crate) fn statx_logic(
+    dir_fd: RawFd,
+    path_name: *const c_char,
+    flags: c_int,
+    mask: c_int,
+    statx_buf: *mut statx,
+) -> Detour<c_int> {
+    let statx_buf = unsafe { statx_buf.as_mut().ok_or(HookError::BadPointer)? };
+
+    if path_name.is_null() {
+        return Detour::Error(HookError::BadPointer);
+    }
+    let path_name: PathBuf = path_name.checked_into()?;
+
+    if (mask & libc::STATX__RESERVED) != 0 {
+        return Detour::Error(HookError::BadFlag);
+    }
+
+    let (fd, path) = if path_name.is_absolute() {
+        ensure_not_ignored!(path_name, false);
+        (None, Some(path_name))
+    } else if !path_name.as_os_str().is_empty() && dir_fd == libc::AT_FDCWD {
+        return Detour::Bypass(Bypass::RelativePath(path_name));
+    } else if !path_name.as_os_str().is_empty() {
+        (Some(get_remote_fd(dir_fd)?), Some(path_name))
+    } else if (flags & libc::AT_EMPTY_PATH) == 0 {
+        (Some(get_remote_fd(dir_fd)?), None)
+    } else {
+        return Detour::Error(HookError::FileNotFound);
+    };
+
+    let response = {
+        let fd = fd
+            .map(u64::try_from)
+            .transpose()
+            .map_err(|_| HookError::BadDescriptor)?;
+        let follow_symlink = (flags & libc::AT_SYMLINK_NOFOLLOW) == 0;
+
+        let request = XstatRequest {
+            fd,
+            path,
+            follow_symlink,
+        };
+
+        common::make_proxy_request_with_response(request)??.metadata
+    };
+
+    /// Converts a nanosecond timestamp from
+    /// [`MetadataInternal`](mirrord_protocol::file::MetadataInternal) to [`statx_timestamp`]
+    /// format.
+    fn nanos_to_statx(nanos: i64) -> statx_timestamp {
+        let duration = Duration::from_nanos(nanos.try_into().unwrap_or(0));
+
+        statx_timestamp {
+            tv_sec: duration.as_secs().try_into().unwrap_or(i64::MAX),
+            tv_nsec: duration.subsec_nanos(),
+            __statx_timestamp_pad1: [0],
+        }
+    }
+
+    /// Converts a device id from [`MetadataInternal`](mirrord_protocol::file::MetadataInternal) to
+    /// format expected by [`statx`]: (major,minor) number.
+    fn device_id_to_statx(id: u64) -> (u32, u32) {
+        // SAFETY: these functions only do operations on bits, nothing unsafe here
+        unsafe { (libc::major(id), libc::minor(id)) }
+    }
+
+    statx_buf.stx_mask = libc::STATX_TYPE
+        & libc::STATX_MODE
+        & libc::STATX_NLINK
+        & libc::STATX_UID
+        & libc::STATX_GID
+        & libc::STATX_ATIME
+        & libc::STATX_MTIME
+        & libc::STATX_INO
+        & libc::STATX_SIZE
+        & libc::STATX_BLOCKS
+        & libc::STATX_BTIME;
+    statx_buf.stx_attributes_mask = 0;
+
+    statx_buf.stx_blksize = response.block_size.try_into().unwrap_or(u32::MAX);
+    statx_buf.stx_nlink = response.hard_links.try_into().unwrap_or(u32::MAX);
+    statx_buf.stx_uid = response.user_id;
+    statx_buf.stx_gid = response.group_id;
+    statx_buf.stx_mode = response.mode as u16; // we only care about the lower half
+    statx_buf.stx_ino = response.inode;
+    statx_buf.stx_size = response.size;
+    statx_buf.stx_blocks = response.blocks;
+    statx_buf.stx_atime = nanos_to_statx(response.access_time);
+    statx_buf.stx_btime = nanos_to_statx(response.creation_time);
+    statx_buf.stx_mtime = nanos_to_statx(response.modification_time);
+    let (major, minor) = device_id_to_statx(response.rdevice_id);
+    statx_buf.stx_rdev_major = major;
+    statx_buf.stx_rdev_minor = minor;
+    let (major, minor) = device_id_to_statx(response.device_id);
+    statx_buf.stx_dev_major = major;
+    statx_buf.stx_dev_minor = minor;
+
+    Detour::Success(0)
 }
 
 #[tracing::instrument(level = "trace")]

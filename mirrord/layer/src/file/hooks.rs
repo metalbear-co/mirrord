@@ -9,8 +9,8 @@ use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
 
 use errno::{set_errno, Errno};
 use libc::{
-    self, c_char, c_int, c_void, dirent, iovec, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
-    AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY,
+    self, c_char, c_int, c_void, dirent, iovec, off_t, size_t, ssize_t, stat, statfs, statx,
+    AT_EACCESS, AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY,
 };
 #[cfg(target_os = "linux")]
 use libc::{dirent64, stat64, EBADF, ENOENT, ENOTDIR};
@@ -794,6 +794,19 @@ unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -
     )
 }
 
+/// Hook for `libc::statx`.
+#[hook_guard_fn]
+unsafe extern "C" fn statx_detour(
+    dir_fd: RawFd,
+    path_name: *const c_char,
+    flags: c_int,
+    mask: c_int,
+    statx_buf: *mut statx,
+) -> c_int {
+    statx_logic(dir_fd, path_name, flags, mask, statx_buf)
+        .unwrap_or_bypass_with(|_bypass| FN_STATX(dir_fd, path_name, flags, mask, statx_buf))
+}
+
 /// Hook for libc's stat syscall wrapper.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn __xstat_detour(
@@ -1175,12 +1188,11 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         FN_REALPATH_DARWIN_EXTSN
     );
 
-    // this requires newer libc which we don't link with to support old libc..
-    // leaving this in code so we can enable it when libc is updated.
-    // #[cfg(target_os = "linux")]
-    // {
-    //     replace!(hook_manager, "statx", statx_detour, FnStatx, FN_STATX);
-    // }
+    #[cfg(target_os = "linux")]
+    {
+        replace!(hook_manager, "statx", statx_detour, FnStatx, FN_STATX);
+    }
+
     #[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
     {
         replace!(

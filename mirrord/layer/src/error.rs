@@ -94,6 +94,12 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: Proxy connection failed: `{0}`")]
     ProxyError(#[from] ProxyError),
+
+    #[error("mirrord-layer: Invalid descriptor argument")]
+    BadDescriptor,
+
+    #[error("mirrord-layer: Bad flag passed in argument")]
+    BadFlag,
 }
 
 /// Errors internal to mirrord-layer.
@@ -256,6 +262,8 @@ impl From<HookError> for i64 {
             HookError::BadPointer => libc::EFAULT,
             HookError::AddressAlreadyBound(_) => libc::EADDRINUSE,
             HookError::FileNotFound => libc::ENOENT,
+            HookError::BadDescriptor => libc::EBADF,
+            HookError::BadFlag => libc::EINVAL,
         };
 
         set_errno(errno::Errno(libc_error));
