@@ -1,5 +1,7 @@
 use core::ffi::CStr;
-use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, time::Duration};
+#[cfg(target_os = "linux")]
+use std::time::Duration;
+use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 #[cfg(target_os = "linux")]
 use libc::{c_char, statx, statx_timestamp};
