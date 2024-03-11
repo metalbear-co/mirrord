@@ -9,11 +9,11 @@ use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
 
 use errno::{set_errno, Errno};
 use libc::{
-    self, c_char, c_int, c_void, dirent, iovec, off_t, size_t, ssize_t, stat, statfs, statx,
-    AT_EACCESS, AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY,
+    self, c_char, c_int, c_void, dirent, iovec, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
+    AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY,
 };
 #[cfg(target_os = "linux")]
-use libc::{dirent64, stat64, EBADF, ENOENT, ENOTDIR};
+use libc::{dirent64, stat64, statx, EBADF, ENOENT, ENOTDIR};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
     FsMetadataInternal, MetadataInternal, ReadFileResponse, WriteFileResponse,
@@ -795,6 +795,7 @@ unsafe extern "C" fn stat_detour(raw_path: *const c_char, out_stat: *mut stat) -
 }
 
 /// Hook for `libc::statx`.
+#[cfg(target_os = "linux")]
 #[hook_guard_fn]
 unsafe extern "C" fn statx_detour(
     dir_fd: RawFd,

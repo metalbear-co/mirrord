@@ -1,7 +1,9 @@
 use core::ffi::CStr;
 use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, time::Duration};
 
-use libc::{c_char, c_int, iovec, statx, statx_timestamp, unlink, AT_FDCWD, FILE};
+use libc::{c_char, c_int, iovec, unlink, AT_FDCWD, FILE};
+#[cfg(target_os = "linux")]
+use libc::{statx, statx_timestamp};
 use mirrord_protocol::file::{
     OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
     WriteFileResponse, XstatFsResponse, XstatResponse,
@@ -460,6 +462,7 @@ pub(crate) fn xstat(
 ///
 /// Luckily, [`statx::stx_mask`] and [`statx::stx_attributes_mask`] fields allow us to inform the
 /// caller about respective fields being skipped.
+#[cfg(target_os = "linux")]
 pub(crate) fn statx_logic(
     dir_fd: RawFd,
     path_name: *const c_char,
