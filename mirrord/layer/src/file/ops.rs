@@ -1,9 +1,9 @@
 use core::ffi::CStr;
 use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf, time::Duration};
 
-use libc::{c_char, c_int, iovec, unlink, AT_FDCWD, FILE};
 #[cfg(target_os = "linux")]
-use libc::{statx, statx_timestamp};
+use libc::{c_char, statx, statx_timestamp};
+use libc::{c_int, iovec, unlink, AT_FDCWD, FILE};
 use mirrord_protocol::file::{
     OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
     WriteFileResponse, XstatFsResponse, XstatResponse,
@@ -12,8 +12,10 @@ use rand::distributions::{Alphanumeric, DistString};
 use tracing::{error, trace};
 
 use super::{hooks::FN_OPEN, open_dirs::OPEN_DIRS, *};
+#[cfg(target_os = "linux")]
+use crate::common::CheckedInto;
 use crate::{
-    common::{self, CheckedInto},
+    common,
     detour::{Bypass, Detour},
     error::{HookError, HookResult as Result},
 };

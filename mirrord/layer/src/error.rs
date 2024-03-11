@@ -95,12 +95,15 @@ pub(crate) enum HookError {
     #[error("mirrord-layer: Proxy connection failed: `{0}`")]
     ProxyError(#[from] ProxyError),
 
+    #[cfg(target_os = "linux")]
     #[error("mirrord-layer: Invalid descriptor argument")]
     BadDescriptor,
 
+    #[cfg(target_os = "linux")]
     #[error("mirrord-layer: Bad flag passed in argument")]
     BadFlag,
 
+    #[cfg(target_os = "linux")]
     #[error("mirrord-layer: Empty file path passed in argument")]
     EmptyPath,
 }
@@ -265,8 +268,11 @@ impl From<HookError> for i64 {
             HookError::BadPointer => libc::EFAULT,
             HookError::AddressAlreadyBound(_) => libc::EADDRINUSE,
             HookError::FileNotFound => libc::ENOENT,
+            #[cfg(target_os = "linux")]
             HookError::BadDescriptor => libc::EBADF,
+            #[cfg(target_os = "linux")]
             HookError::BadFlag => libc::EINVAL,
+            #[cfg(target_os = "linux")]
             HookError::EmptyPath => libc::ENOENT,
         };
 
