@@ -961,43 +961,6 @@ unsafe extern "C" fn realpath_darwin_extsn_detour(
         .unwrap_or_bypass_with(|_| FN_REALPATH_DARWIN_EXTSN(source_path, output_path))
 }
 
-// this requires newer libc which we don't link with to support old libc..
-// leaving this in code so we can enable it when libc is updated.
-// #[cfg(target_os = "linux")]
-// /// Hook for `libc::statx`. This is only available on Linux.
-// #[hook_guard_fn]
-// unsafe extern "C" fn statx_detour(
-//     fd: RawFd,
-//     raw_path: *const c_char,
-//     flag: c_int,
-//     out_stat: *mut statx,
-// ) -> c_int { let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0; let path = if flags &
-//   libc::AT_EMPTYPATH != 0 { None } else { Some((!raw_path.is_null()).then(||
-//   CStr::from_ptr(raw_path))) }; let (Ok(result) | Err(result)) = xstat(path, Some(fd),
-//   follow_symlink) .map(|res| { let res = res.metadata; out_stat.write_bytes(0, 1); let out = &mut
-//   *out_stat; // Set mask for available fields out.stx_mask = libc::STATX_BASIC_STATS;
-//   out.stx_mode = best_effort_cast(metadata.mode); out.stx_size = best_effort_cast(metadata.size);
-//   out.stx_atime.tv_nsec = metadata.access_time; out.stx_mtime.tv_nsec =
-//   metadata.modification_time; out.stx_ctime.tv_nsec = metadata.creation_time;
-//   out.stx_atime.tv_sec = nano_to_secs(metadata.access_time); out.stx_mtime.tv_sec =
-//   nano_to_secs(metadata.modification_time); out.stx_ctime.tv_sec =
-//   nano_to_secs(metadata.creation_time); out.stx_nlink = best_effort_cast(metadata.hard_links);
-//   out.stx_uid = metadata.user_id; out.stx_gid = metadata.group_id; out.stx_ino =
-//   best_effort_cast(metadata.inode); out.stx_blksize = best_effort_cast(metadata.block_size);
-//   out.stx_blocks = best_effort_cast(metadata.blocks);
-
-//             out.stx_dev_major = libc::major(metadata.device_id);
-//             out.stx_dev_minor = libc::minor(metadata.device_id);
-//             out.stx_rdev_major = libc::major(metadata.rdevice_id);
-//             out.stx_rdev_minor = libc::minor(metadata.rdevice_id);
-//             0
-//         })
-//         .unwrap_or_bypass_with(|_| FN_STATX(fd, raw_path, flag, out_stat))
-//         .map_err(From::from);
-
-//     result
-// }
-
 fn vec_to_iovec(bytes: &[u8], iovecs: &[iovec]) {
     let mut copied = 0;
     let mut iov_index = 0;
