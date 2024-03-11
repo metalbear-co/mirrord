@@ -177,8 +177,10 @@ pub fn hook_guard_fn(
             #[allow(non_camel_case_types)]
             #type_alias;
 
+            #[allow(non_upper_case_globals)]
             #original_fn;
 
+            #[allow(non_upper_case_globals)]
             #modified_function
 
         };
