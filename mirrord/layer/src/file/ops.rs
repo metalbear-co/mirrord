@@ -474,11 +474,8 @@ pub(crate) fn statx_logic(
     mask: c_int,
     statx_buf: *mut statx,
 ) -> Detour<c_int> {
-    let statx_buf = unsafe {
-        let as_ref = statx_buf.as_mut().ok_or(HookError::BadPointer)?;
-        *as_ref = std::mem::zeroed();
-        as_ref
-    };
+    // SAFETY: we don't check pointers passed as arguments to hooked functions
+    let statx_buf = unsafe { statx_buf.as_mut().ok_or(HookError::BadPointer)? };
 
     if path_name.is_null() {
         return Detour::Error(HookError::BadPointer);
@@ -538,6 +535,8 @@ pub(crate) fn statx_logic(
         unsafe { (libc::major(id), libc::minor(id)) }
     }
 
+    // SAFETY: all-zero statx struct is valid
+    *statx_buf = unsafe { std::mem::zeroed() };
     statx_buf.stx_mask = libc::STATX_TYPE
         & libc::STATX_MODE
         & libc::STATX_NLINK
