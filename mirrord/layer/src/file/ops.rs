@@ -485,10 +485,10 @@ pub(crate) fn statx_logic(
         return Detour::Bypass(Bypass::RelativePath(path_name));
     } else if !path_name.as_os_str().is_empty() {
         (Some(get_remote_fd(dir_fd)?), Some(path_name))
-    } else if (flags & libc::AT_EMPTY_PATH) == 0 {
+    } else if (flags & libc::AT_EMPTY_PATH) != 0 {
         (Some(get_remote_fd(dir_fd)?), None)
     } else {
-        return Detour::Error(HookError::FileNotFound);
+        return Detour::Error(HookError::EmptyPath);
     };
 
     let response = {

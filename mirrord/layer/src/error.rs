@@ -100,6 +100,9 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: Bad flag passed in argument")]
     BadFlag,
+
+    #[error("mirrord-layer: Empty file path passed in argument")]
+    EmptyPath,
 }
 
 /// Errors internal to mirrord-layer.
@@ -264,6 +267,7 @@ impl From<HookError> for i64 {
             HookError::FileNotFound => libc::ENOENT,
             HookError::BadDescriptor => libc::EBADF,
             HookError::BadFlag => libc::EINVAL,
+            HookError::EmptyPath => libc::ENOENT,
         };
 
         set_errno(errno::Errno(libc_error));
