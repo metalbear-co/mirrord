@@ -175,13 +175,13 @@ impl ContainerVariant for JobVariant<'_> {
             "metadata": {
                 "name": params.name,
                 "labels": {
+                    "kuma.io/sidecar-injection": "disabled",
                     "app": "mirrord"
                 },
                 "annotations":
                 {
                     "sidecar.istio.io/inject": "false",
-                    "linkerd.io/inject": "disabled",
-                    "kuma.io/sidecar-injection": "disabled"
+                    "linkerd.io/inject": "disabled"
                 }
             },
             "spec": {
@@ -190,10 +190,10 @@ impl ContainerVariant for JobVariant<'_> {
                     "metadata": {
                         "annotations": {
                             "sidecar.istio.io/inject": "false",
-                            "linkerd.io/inject": "disabled",
-                            "kuma.io/sidecar-injection": "disabled"
+                            "linkerd.io/inject": "disabled"
                         },
                         "labels": {
+                            "kuma.io/sidecar-injection": "disabled",
                             "app": "mirrord"
                         }
                     },
@@ -358,13 +358,13 @@ mod test {
             "metadata": {
                 "name": "foobar",
                 "labels": {
+                    "kuma.io/sidecar-injection": "disabled",
                     "app": "mirrord"
                 },
                 "annotations":
                 {
                     "sidecar.istio.io/inject": "false",
-                    "linkerd.io/inject": "disabled",
-                    "kuma.io/sidecar-injection": "disabled"
+                    "linkerd.io/inject": "disabled"
                 }
             },
             "spec": {
@@ -373,10 +373,10 @@ mod test {
                     "metadata": {
                         "annotations": {
                             "sidecar.istio.io/inject": "false",
-                            "linkerd.io/inject": "disabled",
-                            "kuma.io/sidecar-injection": "disabled"
+                            "linkerd.io/inject": "disabled"
                         },
                         "labels": {
+                            "kuma.io/sidecar-injection": "disabled",
                             "app": "mirrord"
                         }
                     },
@@ -450,13 +450,13 @@ mod test {
             "metadata": {
                 "name": "foobar",
                 "labels": {
+                    "kuma.io/sidecar-injection": "disabled",
                     "app": "mirrord"
                 },
                 "annotations":
                 {
                     "sidecar.istio.io/inject": "false",
-                    "linkerd.io/inject": "disabled",
-                    "kuma.io/sidecar-injection": "disabled"
+                    "linkerd.io/inject": "disabled"
                 }
             },
             "spec": {
@@ -465,10 +465,10 @@ mod test {
                     "metadata": {
                         "annotations": {
                             "sidecar.istio.io/inject": "false",
-                            "linkerd.io/inject": "disabled",
-                            "kuma.io/sidecar-injection": "disabled"
+                            "linkerd.io/inject": "disabled"
                         },
                         "labels": {
+                            "kuma.io/sidecar-injection": "disabled",
                             "app": "mirrord"
                         }
                     },

@@ -12,10 +12,10 @@ use crate::{
     },
 };
 
-static LINKERD_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
+static MULTIPORT_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"-p tcp -m multiport --dports ([\d:,]+)").unwrap());
 
-static ISTIO_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
+static TCP_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"-p tcp -m tcp --dport ([\d:,]+)").unwrap());
 
 pub(crate) struct MeshRedirect<IPT: IPTables> {
@@ -132,6 +132,8 @@ impl MeshVendorExt for MeshVendor {
                 Some(MeshVendor::Linkerd)
             } else if rule.contains("-j ISTIO_OUTPUT") {
                 Some(MeshVendor::Istio)
+            } else if rule.contains("-j KUMA_MESH_OUTBOUND") {
+                Some(MeshVendor::Kuma)
             } else {
                 None
             }
@@ -142,6 +144,7 @@ impl MeshVendorExt for MeshVendor {
         match self {
             MeshVendor::Linkerd => "PROXY_INIT_REDIRECT",
             MeshVendor::Istio => "ISTIO_INBOUND",
+            MeshVendor::Kuma => "KUMA_MESH_INBOUND",
         }
     }
 
@@ -149,13 +152,15 @@ impl MeshVendorExt for MeshVendor {
         match self {
             MeshVendor::Linkerd => "PROXY_INIT_OUTPUT",
             MeshVendor::Istio => "ISTIO_OUTPUT",
+            MeshVendor::Kuma => "KUMA_MESH_OUTBOUND",
         }
     }
 
     fn skip_ports_regex(&self) -> &Regex {
         match self {
-            MeshVendor::Linkerd => &LINKERD_SKIP_PORTS_LOOKUP_REGEX,
-            MeshVendor::Istio => &ISTIO_SKIP_PORTS_LOOKUP_REGEX,
+            MeshVendor::Linkerd => &MULTIPORT_SKIP_PORTS_LOOKUP_REGEX,
+            MeshVendor::Istio => &TCP_SKIP_PORTS_LOOKUP_REGEX,
+            MeshVendor::Kuma => &TCP_SKIP_PORTS_LOOKUP_REGEX,
         }
     }
 }
