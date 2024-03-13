@@ -1,6 +1,6 @@
 use std::ops::Deref;
 #[cfg(feature = "incluster")]
-use std::{net::SocketAddr, time::Duration};
+use std::time::Duration;
 
 use k8s_openapi::{
     api::core::v1::{Namespace, Pod},
@@ -17,8 +17,6 @@ use mirrord_config::{
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "incluster")]
-use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 #[cfg(not(feature = "incluster"))]
 use tokio_retry::{
@@ -27,6 +25,10 @@ use tokio_retry::{
 };
 use tracing::{debug, info, trace};
 
+#[cfg(feature = "incluster")]
+use super::connector::AgentInclusterConnector;
+#[cfg(not(feature = "incluster"))]
+use super::wrap_raw_connection;
 use crate::{
     api::{
         container::{
@@ -37,7 +39,7 @@ use crate::{
             ContainerApi, ContainerParams,
         },
         runtime::RuntimeDataProvider,
-        wrap_raw_connection, AgentManagment,
+        AgentManagment,
     },
     error::{KubeApiError, Result},
 };
@@ -48,6 +50,9 @@ pub struct KubernetesAPI {
     client: Client,
     agent: AgentConfig,
     target: TargetConfig,
+    /// Used to create a connection with the agent once it's created.
+    #[cfg(feature = "incluster")]
+    connector: AgentInclusterConnector,
 }
 
 impl KubernetesAPI {
@@ -71,7 +76,16 @@ impl KubernetesAPI {
             client,
             agent,
             target,
+            #[cfg(feature = "incluster")]
+            connector: AgentInclusterConnector::Tcp,
         }
+    }
+
+    /// Replaces [`Self::connector`].
+    #[cfg(feature = "incluster")]
+    pub fn with_connector(&mut self, connector: AgentInclusterConnector) -> &mut Self {
+        self.connector = connector;
+        self
     }
 
     pub async fn detect_openshift<P>(&self, progress: &P) -> Result<()>
@@ -128,6 +142,7 @@ impl AgentManagment for KubernetesAPI {
     type AgentRef = AgentKubernetesConnectInfo;
     type Err = KubeApiError;
 
+    /// Connect to the agent using [`Self::connector`].
     #[cfg(feature = "incluster")]
     async fn create_connection(
         &self,
@@ -142,33 +157,37 @@ impl AgentManagment for KubernetesAPI {
         let pod = pod_api.get(&pod_name).await?;
 
         let conn = if let Some(pod_ip) = pod.status.and_then(|status| status.pod_ip) {
-            trace!("connecting to pod_ip {pod_ip}:{}", agent_port);
-
             // When pod_ip is available we directly create it as SocketAddr to prevent tokio from
-            // performing a DNS lookup
-            tokio::time::timeout(
-                Duration::from_secs(self.agent.startup_timeout),
-                TcpStream::connect(SocketAddr::new(pod_ip.parse()?, agent_port)),
-            )
-            .await
-        } else {
-            trace!("connecting to pod {pod_name}:{agent_port}");
-            let connection_string = if let Some(namespace) = namespace {
-                format!("{pod_name}.{namespace}:{agent_port}")
-            } else {
-                format!("{pod_name}:{agent_port}")
-            };
-            tokio::time::timeout(
-                Duration::from_secs(self.agent.startup_timeout),
-                TcpStream::connect(connection_string),
-            )
-            .await
-        }
-        .map_err(|_| KubeApiError::AgentReadyTimeout)??;
+            // performing a DNS lookup.
+            let ip = pod_ip.parse()?;
+            trace!("connecting to pod {pod_ip}:{agent_port}");
 
-        Ok(wrap_raw_connection(conn))
+            tokio::time::timeout(
+                Duration::from_secs(self.agent.startup_timeout),
+                self.connector.connect_ip(ip, agent_port),
+            )
+            .await
+            .map_err(|_| KubeApiError::AgentReadyTimeout)??
+        } else {
+            let hostname = match namespace {
+                Some(namespace) => format!("{pod_name}.{namespace}"),
+                None => pod_name,
+            };
+            trace!("connecting to pod {hostname}:{agent_port}");
+
+            tokio::time::timeout(
+                Duration::from_secs(self.agent.startup_timeout),
+                self.connector
+                    .connect_hostname(hostname.as_str(), agent_port),
+            )
+            .await
+            .map_err(|_| KubeApiError::AgentReadyTimeout)??
+        };
+
+        Ok(conn)
     }
 
+    /// Connects to the agent using kube's [`Api::portforward`].
     #[cfg(not(feature = "incluster"))]
     async fn create_connection(
         &self,
@@ -229,12 +248,20 @@ impl AgentManagment for KubernetesAPI {
             progress.warning("couldn't determine mesh / sidecar with mirror mode");
         }
 
+        #[cfg(not(feature = "incluster"))]
         let params = ContainerParams::new();
+        #[cfg(feature = "incluster")]
+        let params = {
+            let mut params = ContainerParams::new();
+            params.extra_env.extend(self.connector.agent_extra_env());
+            params
+        };
 
         info!("Spawning new agent.");
 
         info!("Using port `{:?}` for communication", params.port);
         info!("Using group-id `{:?}`", params.gid);
+        info!("Using extra env `{:?}", params.extra_env);
 
         let agent_connect_info = match (runtime_data, self.agent.ephemeral) {
             (None, false) => {

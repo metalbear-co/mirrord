@@ -199,6 +199,22 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
             command_line,
         } = self;
 
+        let env = [
+            ("RUST_LOG".to_string(), agent.log_level.clone()),
+            (
+                "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS".to_string(),
+                agent.flush_connections.to_string(),
+            ),
+            (
+                "MIRRORD_AGENT_NFTABLES".to_string(),
+                agent.nftables.to_string(),
+            ),
+        ]
+        .into_iter()
+        .chain(params.extra_env.iter().cloned())
+        .map(|(name, value)| json!({ "name": name, "value": value }))
+        .collect::<Vec<_>>();
+
         serde_json::from_value(json!({
             "name": params.name,
             "image": get_agent_image(agent),
@@ -213,12 +229,9 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
             },
             "imagePullPolicy": agent.image_pull_policy,
             "targetContainerName": runtime_data.container_name,
-            "env": [
-                {"name": "RUST_LOG", "value": agent.log_level},
-                { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() },
-                { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() }
-            ],
+            "env": env,
             "command": command_line,
-        })).map_err(KubeApiError::from)
+        }))
+        .map_err(KubeApiError::from)
     }
 }

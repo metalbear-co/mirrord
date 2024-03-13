@@ -10,6 +10,8 @@ use tracing::{error, info, warn};
 
 use crate::error::Result;
 
+#[cfg(feature = "incluster")]
+pub mod connector;
 pub mod container;
 pub mod kubernetes;
 mod runtime;
