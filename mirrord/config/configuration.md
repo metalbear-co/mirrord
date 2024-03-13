@@ -337,6 +337,25 @@ Supports `"IfNotPresent"`, `"Always"`, `"Never"`, or any valid kubernetes
 
 Defaults to `"IfNotPresent"`
 
+### agent.image_pull_secrets {#agent-image_pull_secrets}
+
+List of secrets the agent pod has access to.
+
+Takes an array of hash with the format `{ name: <secret-name> }`.
+
+Read more [here](https://kubernetes.io/docs/concepts/containers/images/).
+
+```json
+{
+  "agent": {
+    "image_pull_secrets": [
+      { "very-secret": "secret-key" },
+      { "very-secret": "keep-your-secrets" }
+    ]
+  }
+}
+```
+
 ### agent.log_level {#agent-log_level}
 
 Log level for the agent.
