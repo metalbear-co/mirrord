@@ -312,7 +312,7 @@ pub struct IncomingConfig {
     /// Ports to ignore when mirroring/stealing traffic, these ports will remain local.
     ///
     /// Can be especially useful when
-    /// [`feature.network.incoming.mode`](#feature-network-incoming-mode) is set to `"stealer"
+    /// [`feature.network.incoming.mode`](#feature-network-incoming-mode) is set to `"steal"
     /// `, and you want to avoid redirecting traffic from some ports (for example, traffic from
     /// a health probe, or other heartbeat-like traffic).
     pub ignore_ports: HashSet<u16>,
