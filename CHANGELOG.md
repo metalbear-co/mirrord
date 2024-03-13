@@ -8,6 +8,26 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.92.0](https://github.com/metalbear-co/mirrord/tree/3.92.0) - 2024-03-13
+
+
+### Added
+
+- Added support for `statx` function.
+  [#2204](https://github.com/metalbear-co/mirrord/issues/2204)
+
+
+### Fixed
+
+- Fix incoming network interception via port-forward when "stealing" traffic
+  with a mesh like linkerd or istio (Using the same `OUTPUT` iptable rules for
+  both meshed and not meshed networks)
+  [#2255](https://github.com/metalbear-co/mirrord/issues/2255)
+- Add Kuma mesh detection and support to mirrord-agent.
+  [#2296](https://github.com/metalbear-co/mirrord/issues/2296)
+- Added sidecar exclusion for kuma mesh, fixing issues running in that setup
+
+
 ## [3.91.0](https://github.com/metalbear-co/mirrord/tree/3.91.0) - 2024-03-05
 
 
