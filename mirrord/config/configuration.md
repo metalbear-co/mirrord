@@ -802,8 +802,8 @@ Steal only traffic that matches the
 Ports to ignore when mirroring/stealing traffic, these ports will remain local.
 
 Can be especially useful when
-[`feature.network.incoming.mode`](#feature-network-incoming-mode) is set to `"steal"
-`, and you want to avoid redirecting traffic from some ports (for example, traffic from
+[`feature.network.incoming.mode`](#feature-network-incoming-mode) is set to `"steal"`,
+and you want to avoid redirecting traffic from some ports (for example, traffic from
 a health probe, or other heartbeat-like traffic).
 
 #### feature.network.incoming.listen_ports {#feature-network-incoming-listen_ports}
