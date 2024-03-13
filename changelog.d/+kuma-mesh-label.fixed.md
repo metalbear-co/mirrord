@@ -1,0 +1,1 @@
+Added sidecar exclusion for kuma mesh, fixing issues running in that setup

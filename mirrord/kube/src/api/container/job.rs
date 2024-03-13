@@ -180,7 +180,8 @@ impl ContainerVariant for JobVariant<'_> {
                 "annotations":
                 {
                     "sidecar.istio.io/inject": "false",
-                    "linkerd.io/inject": "disabled"
+                    "linkerd.io/inject": "disabled",
+                    "kuma.io/sidecar-injection": "disabled"
                 }
             },
             "spec": {
@@ -189,7 +190,8 @@ impl ContainerVariant for JobVariant<'_> {
                     "metadata": {
                         "annotations": {
                             "sidecar.istio.io/inject": "false",
-                            "linkerd.io/inject": "disabled"
+                            "linkerd.io/inject": "disabled",
+                            "kuma.io/sidecar-injection": "disabled"
                         },
                         "labels": {
                             "app": "mirrord"
@@ -361,7 +363,8 @@ mod test {
                 "annotations":
                 {
                     "sidecar.istio.io/inject": "false",
-                    "linkerd.io/inject": "disabled"
+                    "linkerd.io/inject": "disabled",
+                    "kuma.io/sidecar-injection": "disabled"
                 }
             },
             "spec": {
@@ -370,7 +373,8 @@ mod test {
                     "metadata": {
                         "annotations": {
                             "sidecar.istio.io/inject": "false",
-                            "linkerd.io/inject": "disabled"
+                            "linkerd.io/inject": "disabled",
+                            "kuma.io/sidecar-injection": "disabled"
                         },
                         "labels": {
                             "app": "mirrord"
@@ -451,7 +455,8 @@ mod test {
                 "annotations":
                 {
                     "sidecar.istio.io/inject": "false",
-                    "linkerd.io/inject": "disabled"
+                    "linkerd.io/inject": "disabled",
+                    "kuma.io/sidecar-injection": "disabled"
                 }
             },
             "spec": {
@@ -460,7 +465,8 @@ mod test {
                     "metadata": {
                         "annotations": {
                             "sidecar.istio.io/inject": "false",
-                            "linkerd.io/inject": "disabled"
+                            "linkerd.io/inject": "disabled",
+                            "kuma.io/sidecar-injection": "disabled"
                         },
                         "labels": {
                             "app": "mirrord"
