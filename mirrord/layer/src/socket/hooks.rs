@@ -1,5 +1,5 @@
 use alloc::ffi::CString;
-use core::{cmp, ffi::CStr, mem};
+use core::{cmp, ffi::CStr};
 use std::{os::unix::io::RawFd, sync::LazyLock};
 
 use dashmap::DashSet;
@@ -263,8 +263,9 @@ unsafe extern "C" fn getaddrinfo_detour(
 ) -> c_int {
     let rawish_node = (!raw_node.is_null()).then(|| CStr::from_ptr(raw_node));
     let rawish_service = (!raw_service.is_null()).then(|| CStr::from_ptr(raw_service));
+    let rawish_hints = raw_hints.as_ref();
 
-    getaddrinfo(rawish_node, rawish_service, mem::transmute(raw_hints))
+    getaddrinfo(rawish_node, rawish_service, rawish_hints)
         .map(|c_addr_info_ptr| {
             out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
             MANAGED_ADDRINFO.insert(c_addr_info_ptr as usize);
