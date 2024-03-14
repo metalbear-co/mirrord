@@ -242,7 +242,140 @@ impl AddrInfoCache {
     }
 
     /// Returns a cached response for the given `host`.
+    #[tracing::instrument(level = "trace", name = "get_cached_dns_response", skip(self), ret)]
     fn get_cached(&mut self, host: &str) -> Option<DnsLookup> {
         self.responses.get(host).cloned()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use core::fmt;
+    use std::net::IpAddr;
+
+    use mirrord_protocol::dns::LookupRecord;
+
+    use super::*;
+    use crate::background_tasks::{BackgroundTasks, TaskUpdate};
+
+    fn assert_is_dns_req<E: fmt::Debug>(update: TaskUpdate<ProxyMessage, E>, expected_node: &str) {
+        match update {
+            TaskUpdate::Message(ProxyMessage::ToAgent(ClientMessage::GetAddrInfoRequest(
+                GetAddrInfoRequest { node },
+            ))) => {
+                assert_eq!(node, expected_node);
+            }
+            other => panic!("unexpected request: {other:?}"),
+        }
+    }
+
+    fn assert_is_dns_res<E: fmt::Debug>(
+        update: TaskUpdate<ProxyMessage, E>,
+        expected_ip: IpAddr,
+        expected_message_id: u64,
+        expected_layer_id: LayerId,
+    ) {
+        match update {
+            TaskUpdate::Message(ProxyMessage::ToLayer(ToLayer {
+                message_id,
+                layer_id,
+                message: ProxyToLayerMessage::GetAddrInfo(res),
+            })) => {
+                assert_eq!(res.0.unwrap().0.first().unwrap().ip, expected_ip,);
+                assert_eq!(message_id, expected_message_id);
+                assert_eq!(layer_id, expected_layer_id);
+            }
+            other => panic!("unexpected message {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn dns_cache() {
+        let mut bg_tasks: BackgroundTasks<(), ProxyMessage, RequestQueueEmpty> =
+            BackgroundTasks::default();
+        let tx = bg_tasks.register(SimpleProxy::default(), (), 16);
+
+        // Simulate two concurrent DNS requests from the user app.
+        tx.send(SimpleProxyMessage::AddrInfoReq(
+            0,
+            LayerId(0),
+            GetAddrInfoRequest {
+                node: "node1".to_string(),
+            },
+        ))
+        .await;
+        tx.send(SimpleProxyMessage::AddrInfoReq(
+            1,
+            LayerId(0),
+            GetAddrInfoRequest {
+                node: "node2".to_string(),
+            },
+        ))
+        .await;
+
+        // Check that the proxy sent requests to the agent.
+        let ((), update) = bg_tasks.next().await.unwrap();
+        assert_is_dns_req(update, "node1");
+        let ((), update) = bg_tasks.next().await.unwrap();
+        assert_is_dns_req(update, "node2");
+
+        // Simulate agent responses.
+        tx.send(SimpleProxyMessage::AddrInfoRes(GetAddrInfoResponse(Ok(
+            DnsLookup(vec![LookupRecord {
+                name: "node1.some.name".to_string(),
+                ip: "1.1.1.1".parse().unwrap(),
+            }]),
+        ))))
+        .await;
+        tx.send(SimpleProxyMessage::AddrInfoRes(GetAddrInfoResponse(Ok(
+            DnsLookup(vec![LookupRecord {
+                name: "node2.some.name".to_string(),
+                ip: "2.2.2.2".parse().unwrap(),
+            }]),
+        ))))
+        .await;
+
+        // Check that the proxy sent responses to the user app.
+        let ((), update) = bg_tasks.next().await.unwrap();
+        assert_is_dns_res(update, "1.1.1.1".parse().unwrap(), 0, LayerId(0));
+        let ((), update) = bg_tasks.next().await.unwrap();
+        assert_is_dns_res(update, "2.2.2.2".parse().unwrap(), 1, LayerId(0));
+
+        // Simulate three DNS requests from the user app.
+        // The requested names where already resolved before,
+        // so the proxy should use the cache and not sent any request to the agent.
+
+        tx.send(SimpleProxyMessage::AddrInfoReq(
+            3,
+            LayerId(0),
+            GetAddrInfoRequest {
+                node: "node1".to_string(),
+            },
+        ))
+        .await;
+        let ((), update) = bg_tasks.next().await.unwrap();
+        assert_is_dns_res(update, "1.1.1.1".parse().unwrap(), 3, LayerId(0));
+
+        tx.send(SimpleProxyMessage::AddrInfoReq(
+            4,
+            LayerId(0),
+            GetAddrInfoRequest {
+                node: "node1".to_string(),
+            },
+        ))
+        .await;
+        let ((), update) = bg_tasks.next().await.unwrap();
+        assert_is_dns_res(update, "1.1.1.1".parse().unwrap(), 4, LayerId(0));
+
+        tx.send(SimpleProxyMessage::AddrInfoReq(
+            5,
+            LayerId(0),
+            GetAddrInfoRequest {
+                node: "node2".to_string(),
+            },
+        ))
+        .await;
+        let ((), update) = bg_tasks.next().await.unwrap();
+        assert_is_dns_res(update, "2.2.2.2".parse().unwrap(), 5, LayerId(0));
     }
 }
