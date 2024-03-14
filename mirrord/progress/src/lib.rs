@@ -32,7 +32,9 @@ pub trait Progress: Sized {
     /// When you want to print a message, IDE support.
     fn info(&self, msg: &str);
 
-    /// When you want to print a message, IDE support.
+    /// When you want to send a message to the IDE that doesn't need to be shown to the user.
+    ///
+    /// You may use this to pass additional context to the IDE through the `value` object.
     fn internal(&self, value: serde_json::Value);
 
     /// When you want to print a message, cli only.
