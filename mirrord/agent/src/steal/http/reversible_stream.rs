@@ -1,4 +1,8 @@
-use std::io;
+use std::{
+    io,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite},
@@ -97,10 +101,10 @@ impl<const HEADER_SIZE: usize> ReversibleStream<HEADER_SIZE> {
 
 impl<const HEADER_SIZE: usize> AsyncRead for ReversibleStream<HEADER_SIZE> {
     fn poll_read(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
+    ) -> Poll<io::Result<()>> {
         if self.num_forwarded < self.header_len {
             let leftover = &self.header[self.num_forwarded..self.header_len];
 
@@ -109,33 +113,27 @@ impl<const HEADER_SIZE: usize> AsyncRead for ReversibleStream<HEADER_SIZE> {
 
             self.get_mut().num_forwarded += forward.len();
 
-            std::task::Poll::Ready(Ok(()))
+            Poll::Ready(Ok(()))
         } else {
-            std::pin::Pin::new(&mut self.get_mut().stream).poll_read(cx, buf)
+            Pin::new(&mut self.get_mut().stream).poll_read(cx, buf)
         }
     }
 }
 
 impl<const HEADER_SIZE: usize> AsyncWrite for ReversibleStream<HEADER_SIZE> {
     fn poll_write(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
         buf: &[u8],
-    ) -> std::task::Poll<std::io::Result<usize>> {
-        std::pin::Pin::new(&mut self.get_mut().stream).poll_write(cx, buf)
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.get_mut().stream).poll_write(cx, buf)
     }
 
-    fn poll_flush(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        std::pin::Pin::new(&mut self.get_mut().stream).poll_flush(cx)
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().stream).poll_flush(cx)
     }
 
-    fn poll_shutdown(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        std::pin::Pin::new(&mut self.get_mut().stream).poll_shutdown(cx)
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().stream).poll_shutdown(cx)
     }
 }
