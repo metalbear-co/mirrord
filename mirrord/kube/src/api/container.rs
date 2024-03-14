@@ -19,6 +19,8 @@ pub mod util;
 
 pub static SKIP_NAMES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     HashSet::from([
+        "kuma-sidecar",
+        "kuma-init",
         "istio-proxy",
         "istio-init",
         "linkerd-proxy",
@@ -91,12 +93,15 @@ pub fn choose_container<'a>(
 ) -> (Option<&'a ContainerStatus>, Option<MeshVendor>) {
     const ISTIO: [&str; 2] = ["istio-proxy", "istio-init"];
     const LINKERD: [&str; 2] = ["linkerd-proxy", "linkerd-init"];
+    const KUMA: [&str; 2] = ["kuma-sidecar", "kuma-init"];
 
     let mesh = container_statuses.iter().find_map(|status| {
         if ISTIO.contains(&status.name.as_str()) {
             Some(MeshVendor::Istio)
         } else if LINKERD.contains(&status.name.as_str()) {
             Some(MeshVendor::Linkerd)
+        } else if KUMA.contains(&status.name.as_str()) {
+            Some(MeshVendor::Kuma)
         } else {
             None
         }
