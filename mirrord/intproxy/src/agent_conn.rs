@@ -111,6 +111,11 @@ impl AgentConnection {
 
         Ok(Self { agent_tx, agent_rx })
     }
+
+    #[tracing::instrument(level = "trace", name = "send_agent_message", skip(self), ret)]
+    async fn send(&self, msg: ClientMessage) -> Result<(), AgentChannelError> {
+        self.agent_tx.send(msg).await.map_err(|_| AgentChannelError)
+    }
 }
 
 /// This error occurs when the [`AgentConnection`] fails to communicate with the inner
@@ -133,9 +138,9 @@ impl BackgroundTask for AgentConnection {
                         break Ok(());
                     },
                     Some(msg) => {
-                        if self.agent_tx.send(msg).await.is_err() {
-                            tracing::error!("failed to send message to the agent, inner task down");
-                            break Err(AgentChannelError);
+                        if let Err(error) = self.send(msg).await {
+                            tracing::error!(%error, "failed to send message to the agent");
+                            break Err(error);
                         }
                     }
                 },
