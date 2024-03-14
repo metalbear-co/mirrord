@@ -224,38 +224,6 @@ impl HttpConnection {
                 ))
             }
 
-            Ok(mut res) if matches!(request, HttpRequestFallback::Framed(_)) => {
-                let mut upgrade = if res.status() == StatusCode::SWITCHING_PROTOCOLS {
-                    Some(hyper::upgrade::on(&mut res))
-                } else {
-                    None
-                };
-
-                let response = HttpResponse::<InternalHttpBody>::from_hyper_response(
-                        res,
-                        self.peer.port(),
-                        request.connection_id(),
-                        request.request_id()
-                    )
-                        .await
-                        .map(HttpResponseFallback::Framed)
-                        .unwrap_or_else(|e| {
-                            tracing::error!(
-                                "Failed to read response to filtered http request: {e:?}. \
-                                Please consider reporting this issue on \
-                                https://github.com/metalbear-co/mirrord/issues/new?labels=bug&template=bug_report.yml"
-                            );
-                            upgrade = None;
-                            HttpResponseFallback::response_from_request(
-                                request,
-                                StatusCode::BAD_GATEWAY,
-                                "mirrord",
-                            )
-                        });
-
-                Ok((response, upgrade))
-            }
-
             Ok(mut res) => {
                 let mut upgrade = if res.status() == StatusCode::SWITCHING_PROTOCOLS {
                     Some(hyper::upgrade::on(&mut res))
@@ -263,26 +231,43 @@ impl HttpConnection {
                     None
                 };
 
-                let response = HttpResponse::<Vec<u8>>::from_hyper_response(
-                        res, self.peer.port(),
-                        request.connection_id(),
-                        request.request_id()
-                    )
+                let result = match &request {
+                    HttpRequestFallback::Framed(..) => {
+                        HttpResponse::<InternalHttpBody>::from_hyper_response(
+                            res,
+                            self.peer.port(),
+                            request.connection_id(),
+                            request.request_id(),
+                        )
+                        .await
+                        .map(HttpResponseFallback::Framed)
+                    }
+                    HttpRequestFallback::Fallback(..) => {
+                        HttpResponse::<Vec<u8>>::from_hyper_response(
+                            res,
+                            self.peer.port(),
+                            request.connection_id(),
+                            request.request_id(),
+                        )
                         .await
                         .map(HttpResponseFallback::Fallback)
-                        .unwrap_or_else(|e| {
-                            tracing::error!(
-                                "Failed to read response to filtered http request: {e:?}. \
-                                Please consider reporting this issue on \
-                                https://github.com/metalbear-co/mirrord/issues/new?labels=bug&template=bug_report.yml"
-                            );
-                            upgrade = None;
-                            HttpResponseFallback::response_from_request(
-                                request,
-                                StatusCode::BAD_GATEWAY,
-                                "mirrord",
-                            )
-                        });
+                    }
+                };
+
+                let response = result
+                    .unwrap_or_else(|e| {
+                        tracing::error!(
+                            "Failed to read response to filtered http request: {e:?}. \
+                            Please consider reporting this issue on \
+                            https://github.com/metalbear-co/mirrord/issues/new?labels=bug&template=bug_report.yml"
+                        );
+                        upgrade = None;
+                        HttpResponseFallback::response_from_request(
+                            request,
+                            StatusCode::BAD_GATEWAY,
+                            "mirrord",
+                        )
+                    });
 
                 Ok((response, upgrade))
             }
