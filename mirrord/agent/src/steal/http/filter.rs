@@ -26,25 +26,6 @@ impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
     }
 }
 
-/// [`HeaderMap`](hyper::http::header::HeaderMap) entries formatted like `k: v` (format expected by
-/// [`HttpFilter::Header`]). Computed and cached in [`Request::extensions`] the first time
-/// [`HttpFilter::matches`] is called on the [`Request`].
-struct NormalizedHeaders(Vec<String>);
-
-impl NormalizedHeaders {
-    /// Checks whether any header in this set matches the given [`Regex`].
-    fn has_match(&self, regex: &Regex) -> bool {
-        self.0.iter().any(|header| {
-            regex
-                .is_match(header)
-                .inspect_err(|error| {
-                    tracing::error!(header, ?regex, ?error, "Error while matching header");
-                })
-                .unwrap_or(false)
-        })
-    }
-}
-
 impl HttpFilter {
     /// Checks whether the given [`Request`] matches this filter.
     pub fn matches<T>(&self, request: &mut Request<T>) -> bool {
@@ -87,5 +68,24 @@ impl HttpFilter {
                     .unwrap_or(false)
             }
         }
+    }
+}
+
+/// [`HeaderMap`](hyper::http::header::HeaderMap) entries formatted like `k: v` (format expected by
+/// [`HttpFilter::Header`]). Computed and cached in [`Request::extensions`] the first time
+/// [`HttpFilter::matches`] is called on the [`Request`].
+struct NormalizedHeaders(Vec<String>);
+
+impl NormalizedHeaders {
+    /// Checks whether any header in this set matches the given [`Regex`].
+    fn has_match(&self, regex: &Regex) -> bool {
+        self.0.iter().any(|header| {
+            regex
+                .is_match(header)
+                .inspect_err(|error| {
+                    tracing::error!(header, ?regex, ?error, "Error while matching header");
+                })
+                .unwrap_or(false)
+        })
     }
 }
