@@ -32,6 +32,9 @@ pub trait Progress: Sized {
     /// When you want to print a message, IDE support.
     fn info(&self, msg: &str);
 
+    /// When you want to print a message, IDE support.
+    fn internal(&self, value: serde_json::Value);
+
     /// When you want to print a message, cli only.
     fn print(&self, msg: &str);
 
@@ -73,6 +76,8 @@ impl Progress for NullProgress {
     fn warning(&self, _: &str) {}
 
     fn info(&self, _: &str) {}
+
+    fn internal(&self, _: serde_json::Value) {}
 
     fn print(&self, _: &str) {}
 }
@@ -133,6 +138,11 @@ impl Progress for JsonProgress {
         let message = ProgressMessage::Info {
             message: msg.to_string(),
         };
+        message.print();
+    }
+
+    fn internal(&self, value: serde_json::Value) {
+        let message = ProgressMessage::Internal { value };
         message.print();
     }
 
@@ -197,6 +207,8 @@ impl Progress for SimpleProgress {
     fn info(&self, msg: &str) {
         println!("{msg}");
     }
+
+    fn internal(&self, _: serde_json::Value) {}
 
     fn failure(&mut self, msg: Option<&str>) {
         println!("{msg:?}");
@@ -279,6 +291,8 @@ impl Progress for SpinnerProgress {
         self.print(&formatted_message);
         self.progress.set_message(formatted_message);
     }
+
+    fn internal(&self, _: serde_json::Value) {}
 
     fn failure(&mut self, msg: Option<&str>) {
         self.done = true;
@@ -374,6 +388,7 @@ enum ProgressMessage {
     Warning(WarningMessage),
     FinishedTask(FinishedTaskMessage),
     Info { message: String },
+    Internal { value: serde_json::Value },
 }
 
 impl ProgressMessage {

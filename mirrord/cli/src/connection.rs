@@ -78,7 +78,11 @@ where
 
         match OperatorApi::create_session(config, &subtask, analytics).await {
             Ok(session) => {
+                // Send to IDEs that we're using the operator.
+                progress.internal(serde_json::json!({ "operator": session.info }));
+
                 subtask.success(Some("connected to the operator"));
+
                 return Ok((
                     AgentConnectInfo::Operator(session.info),
                     AgentConnection {
@@ -94,6 +98,9 @@ where
             }
         }
     }
+
+    // Send to IDEs that no operator is being used.
+    progress.internal(serde_json::json!({ "operator": null }));
 
     if config.feature.copy_target.enabled {
         return Err(CliError::FeatureRequiresOperatorError("copy target".into()));
