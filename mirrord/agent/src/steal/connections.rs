@@ -287,6 +287,7 @@ impl StolenConnections {
 
     /// Adds the given [`StolenConnection`] to this set. Spawns a new [`tokio::task`] that will
     /// manage it.
+    #[tracing::instrument(level = "trace", name = "manage_stolen_connection", skip(self))]
     pub fn manage(&mut self, connection: StolenConnection) {
         let connection_id = self.next_connection_id;
         self.next_connection_id += 1;
@@ -294,6 +295,7 @@ impl StolenConnections {
         let (task_tx, task_rx) = mpsc::channel(Self::TASK_IN_CHANNEL_CAPACITY);
         let main_tx = self.main_tx.clone();
 
+        tracing::trace!(connection_id, "Spawning connection task");
         self.tasks.spawn(async move {
             let task = ConnectionTask {
                 connection_id,
@@ -319,6 +321,7 @@ impl StolenConnections {
 
     /// Sends the given [`ConnectionMessageIn`] to the task responsible for the connection with the
     /// given [`ConnectionId`]. If the task is not found or dead, does nothing.
+    #[tracing::instrument(level = "trace", name = "send_message_to_connection_task", skip(self))]
     pub async fn send(&self, connection_id: ConnectionId, message: ConnectionMessageIn) {
         let Some(tx) = self.connection_txs.get(&connection_id) else {
             tracing::trace!(
@@ -377,6 +380,19 @@ pub struct StolenConnection {
     pub destination: SocketAddr,
     /// Subscription that triggered the steal.
     pub port_subscription: PortSubscription,
+}
+
+impl fmt::Debug for StolenConnection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StolenConnection")
+            .field("source", &self.source)
+            .field("destination", &self.destination)
+            .field(
+                "filtered",
+                &matches!(self.port_subscription, PortSubscription::Filtered(..)),
+            )
+            .finish()
+    }
 }
 
 /// Errors that can occur in [`ConnectionTask`] while managing a [`StolenConnection`].

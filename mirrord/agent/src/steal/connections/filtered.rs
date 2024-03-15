@@ -361,6 +361,11 @@ where
     /// use the provided `filters` for matching incoming [`Request`]s with stealing clients.
     ///
     /// The task will not run yet, see [`Self::run`].
+    #[tracing::instrument(
+        level = "trace",
+        name = "create_new_filtered_steal_task",
+        skip(filters, io)
+    )]
     pub fn new(
         connection_id: ConnectionId,
         filters: Arc<DashMap<ClientId, HttpFilter>>,
@@ -432,6 +437,17 @@ where
     }
 
     /// Matches the given [`Request`] against [`Self::filters`] and state of [`Self::subscribed`].
+    #[tracing::instrument(
+        level = "trace",
+        name = "match_request_with_filter",
+        skip(self, request),
+        fields(
+            request_path = request.uri().path(),
+            request_headers = ?request.headers(),
+            filters = ?self.filters,
+        )
+        ret,
+    )]
     fn match_request<B>(&self, request: &mut Request<B>) -> Option<ClientId> {
         self.filters
             .iter()
@@ -444,6 +460,16 @@ where
     ///
     /// If there is no blocked request for the given ([`ClientId`], [`RequestId`]) combination or
     /// the HTTP connection is dead, does nothing.
+    #[tracing::instrument(
+        level = "trace",
+        name = "handle_filtered_request_response",
+        skip(self, response),
+        fields(
+            status = u16::from(response.status()),
+            connection_id = self.connection_id,
+            original_destination = %self.original_destination,
+        )
+    )]
     fn handle_response(
         &mut self,
         client_id: ClientId,
@@ -484,6 +510,15 @@ where
     ///
     /// If there is no blocked request for the given ([`ClientId`], [`RequestId`]) combination or
     /// the HTTP connection is dead, does nothing.
+    #[tracing::instrument(
+        level = "trace",
+        name = "handle_filtered_request_response_failure",
+        skip(self),
+        fields(
+            connection_id = self.connection_id,
+            original_destination = %self.original_destination,
+        )
+    )]
     fn handle_response_failure(&mut self, client_id: ClientId, request_id: RequestId) {
         let removed = self
             .blocked_requests
@@ -500,6 +535,7 @@ where
     }
 
     /// Handles a [`Request`] intercepted by the [`FilteringService`].
+    #[tracing::instrument(level = "trace", skip(self, request, tx), ret, err(Debug))]
     async fn handle_request(
         &mut self,
         mut request: ExtractedRequest,
