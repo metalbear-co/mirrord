@@ -354,6 +354,9 @@ impl<T> FilteredStealTask<T>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    /// Limits the number requests served concurrently by [`FilteringService`].
+    const MAX_CONCURRENT_REQUESTS: usize = 128;
+
     /// Creates a new instance of this task. The task will manage the connection given as `io` and
     /// use the provided `filters` for matching incoming [`Request`]s with stealing clients.
     ///
@@ -366,7 +369,7 @@ where
         io: T,
     ) -> Self {
         let (upgrade_tx, mut upgrade_rx) = mpsc::channel(1);
-        let (requests_tx, requests_rx) = mpsc::channel(8);
+        let (requests_tx, requests_rx) = mpsc::channel(Self::MAX_CONCURRENT_REQUESTS);
 
         let service = FilteringService {
             requests_tx,
