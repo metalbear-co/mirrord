@@ -31,10 +31,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::crd::{
-    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, TargetCrd,
+    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, SessionCrd, TargetCrd,
     OPERATOR_STATUS_NAME,
 };
 
@@ -50,6 +50,7 @@ pub enum OperatorOperation {
     WebsocketConnection,
     CopyingTarget,
     GettingStatus,
+    SessionManagement,
 }
 
 impl Display for OperatorOperation {
@@ -60,6 +61,7 @@ impl Display for OperatorOperation {
             Self::WebsocketConnection => "creating a websocket connection",
             Self::CopyingTarget => "copying target",
             Self::GettingStatus => "getting status",
+            Self::SessionManagement => "session management",
         };
 
         f.write_str(as_str)
@@ -70,21 +72,35 @@ impl Display for OperatorOperation {
 pub enum OperatorApiError {
     #[error("invalid target: {reason}")]
     InvalidTarget { reason: String },
+
     #[error("failed to build a websocket connect request: {0}")]
     ConnectRequestBuildError(HttpError),
+
     #[error("failed to create mirrord operator API: {0}")]
     CreateApiError(KubeApiError),
+
     #[error("{operation} failed: {error}")]
     KubeError {
         error: kube::Error,
         operation: OperatorOperation,
     },
+
     #[error("can't start proccess because other locks exist on target")]
     ConcurrentStealAbort,
+
     #[error("mirrord operator {operator_version} does not support feature {feature}")]
     UnsupportedFeature {
         feature: String,
         operator_version: String,
+    },
+
+    #[error(
+        "Tried executing {operation}, but operator returned with `{}` and code `{}``!", 
+        status.reason, status.code
+    )]
+    StatusFailure {
+        operation: String,
+        status: Box<kube::core::Status>,
     },
 }
 
@@ -175,6 +191,15 @@ pub struct OperatorSessionConnection {
     pub info: OperatorSessionInformation,
 }
 
+/// Allows us to access the operator's [`SessionCrd`] [`Api`].
+pub async fn session_api(config: Option<String>) -> Result<Api<SessionCrd>> {
+    let kube_api: Client = create_kube_api(false, config, None)
+        .await
+        .map_err(OperatorApiError::CreateApiError)?;
+
+    Ok(Api::all(kube_api))
+}
+
 impl OperatorApi {
     /// We allow copied pods to live only for 30 seconds before the internal proxy connects.
     const COPIED_POD_IDLE_TTL: u32 = 30;
@@ -192,7 +217,7 @@ impl OperatorApi {
         Ok(())
     }
 
-    #[tracing::instrument(level = "debug", skip(api))]
+    #[tracing::instrument(level = "trace", skip(api))]
     pub async fn get_client_certificate(
         api: &OperatorApi,
         operator: &MirrordOperatorCrd,
@@ -234,17 +259,31 @@ impl OperatorApi {
         // but maybe the time of the local user and of the operator are out of sync, so we
         // could end up blocking a valid license (or even just warning on it could be
         // confusing).
-        if let Some(expiring_soon) =
+        if let Some(days_until_expiration) =
             DateTime::from_naive_date(operator.spec.license.expire_at).days_until_expiration()
-            && (expiring_soon <= <DateTime<Utc> as LicenseValidity>::CLOSE_TO_EXPIRATION_DAYS)
         {
-            let expiring_message = format!(
-                "Operator license will expire soon, in {} days!",
-                expiring_soon,
-            );
+            if days_until_expiration <= <DateTime<Utc> as LicenseValidity>::CLOSE_TO_EXPIRATION_DAYS
+            {
+                let expiring_soon = (days_until_expiration > 0)
+                    .then(|| {
+                        format!(
+                            "soon, in {days_until_expiration} day{}",
+                            if days_until_expiration > 1 { "s" } else { "" }
+                        )
+                    })
+                    .unwrap_or_else(|| "today".to_string());
 
-            progress.warning(&expiring_message);
-            warn!(expiring_message);
+                let expiring_message = format!("Operator license will expire {expiring_soon}!",);
+
+                progress.warning(&expiring_message);
+                warn!(expiring_message);
+            } else if operator.spec.license.name.contains("(Trial)") {
+                let good_validity_message =
+                    format!("Operator license is valid for {days_until_expiration} more days.");
+
+                progress.info(&good_validity_message);
+                info!(good_validity_message);
+            }
         }
 
         Self::check_config(config, &operator)?;

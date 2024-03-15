@@ -655,6 +655,8 @@ pub enum Application {
     CIssue2178,
     RustIssue2058,
     Realpath,
+    NodeIssue2283,
+    RustIssue2204,
     // For running applications with the executable and arguments determined at runtime.
     DynamicApp(String, Vec<String>),
 }
@@ -689,7 +691,7 @@ impl Application {
             Application::PythonFastApiHTTP => String::from("uvicorn"),
             Application::Fork => String::from("tests/apps/fork/out.c_test_app"),
             Application::Realpath => String::from("tests/apps/realpath/out.c_test_app"),
-            Application::NodeHTTP => String::from("node"),
+            Application::NodeHTTP | Application::NodeIssue2283 => String::from("node"),
             Application::JavaTemurinSip => format!(
                 "{}/.sdkman/candidates/java/17.0.6-tem/bin/java",
                 std::env::var("HOME").unwrap(),
@@ -802,6 +804,7 @@ impl Application {
                 "tests/apps/issue2178/out.c_test_app",
             ),
             Application::RustIssue2058 => String::from("tests/apps/issue2058/target/issue2058"),
+            Application::RustIssue2204 => String::from("tests/apps/issue2204/target/issue2204"),
             Application::DynamicApp(exe, _) => exe.clone(),
         }
     }
@@ -845,6 +848,10 @@ impl Application {
             }
             Application::NodeSpawn => {
                 app_path.push("node_spawn.mjs");
+                vec![app_path.to_string_lossy().to_string()]
+            }
+            Application::NodeIssue2283 => {
+                app_path.push("issue2883.js");
                 vec![app_path.to_string_lossy().to_string()]
             }
             Application::PythonSelfConnect => {
@@ -894,7 +901,8 @@ impl Application {
             | Application::RustIssue2058
             | Application::OpenFile
             | Application::CIssue2055
-            | Application::CIssue2178 => vec![],
+            | Application::CIssue2178
+            | Application::RustIssue2204 => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
@@ -963,6 +971,8 @@ impl Application {
             | Application::OpenFile
             | Application::CIssue2055
             | Application::CIssue2178
+            | Application::NodeIssue2283
+            | Application::RustIssue2204
             | Application::DynamicApp(..) => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,

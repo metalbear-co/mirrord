@@ -9,7 +9,8 @@ Currently we don't provide additional values to the context, if you have anythin
 provide please let us know.
 
 To use a configuration file in the CLI, use the `-f <CONFIG_PATH>` flag.
-Or if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file or use the UI.
+Or if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file
+or use the UI.
 
 To help you get started, here are examples of a basic configuration file, and a complete
 configuration file containing all fields.
@@ -295,6 +296,13 @@ Flushes existing connections when starting to steal, might fix issues where conn
 aren't stolen (due to being already established)
 
 Defaults to `true`.
+
+### agent.nftables {#agent-nftables}
+
+Use iptables-nft instead of iptables-legacy.
+Defaults to `false`.
+
+Needed if your mesh uses nftables instead of iptables-legacy,
 
 ### agent.privileged {#agent-privileged}
 
@@ -713,6 +721,12 @@ Resolve DNS via the remote pod.
 
 Defaults to `true`.
 
+- Caveats: DNS resolving can be done in multiple ways, some frameworks will use
+`getaddrinfo`, while others will create a connection on port `53` and perform a sort
+of manual resolution. Just enabling the `dns` feature in mirrord might not be enough.
+If you see an address resolution error, try enabling the [`fs`](#feature-fs) feature,
+and setting `read_only: ["/etc/resolv.conf"]`.
+
 ### feature.network.incoming {#feature-network-incoming}
 Controls the incoming TCP traffic feature.
 
@@ -788,8 +802,8 @@ Steal only traffic that matches the
 Ports to ignore when mirroring/stealing traffic, these ports will remain local.
 
 Can be especially useful when
-[`feature.network.incoming.mode`](#feature-network-incoming-mode) is set to `"stealer"
-`, and you want to avoid redirecting traffic from some ports (for example, traffic from
+[`feature.network.incoming.mode`](#feature-network-incoming-mode) is set to `"steal"`,
+and you want to avoid redirecting traffic from some ports (for example, traffic from
 a health probe, or other heartbeat-like traffic).
 
 #### feature.network.incoming.listen_ports {#feature-network-incoming-listen_ports}

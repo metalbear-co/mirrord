@@ -175,6 +175,7 @@ impl ContainerVariant for JobVariant<'_> {
             "metadata": {
                 "name": params.name,
                 "labels": {
+                    "kuma.io/sidecar-injection": "disabled",
                     "app": "mirrord"
                 },
                 "annotations":
@@ -192,6 +193,7 @@ impl ContainerVariant for JobVariant<'_> {
                             "linkerd.io/inject": "disabled"
                         },
                         "labels": {
+                            "kuma.io/sidecar-injection": "disabled",
                             "app": "mirrord"
                         }
                     },
@@ -356,6 +358,7 @@ mod test {
             "metadata": {
                 "name": "foobar",
                 "labels": {
+                    "kuma.io/sidecar-injection": "disabled",
                     "app": "mirrord"
                 },
                 "annotations":
@@ -373,6 +376,7 @@ mod test {
                             "linkerd.io/inject": "disabled"
                         },
                         "labels": {
+                            "kuma.io/sidecar-injection": "disabled",
                             "app": "mirrord"
                         }
                     },
@@ -446,6 +450,7 @@ mod test {
             "metadata": {
                 "name": "foobar",
                 "labels": {
+                    "kuma.io/sidecar-injection": "disabled",
                     "app": "mirrord"
                 },
                 "annotations":
@@ -463,6 +468,7 @@ mod test {
                             "linkerd.io/inject": "disabled"
                         },
                         "labels": {
+                            "kuma.io/sidecar-injection": "disabled",
                             "app": "mirrord"
                         }
                     },

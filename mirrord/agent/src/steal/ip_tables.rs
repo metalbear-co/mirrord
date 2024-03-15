@@ -13,7 +13,8 @@ use crate::{
     steal::ip_tables::{
         flush_connections::FlushConnections,
         mesh::{MeshRedirect, MeshVendorExt},
-        redirect::{PreroutingRedirect, Redirect},
+        prerouting::PreroutingRedirect,
+        redirect::Redirect,
         standard::StandardRedirect,
     },
 };
@@ -51,6 +52,8 @@ mod iptables {
 pub(crate) mod chain;
 pub(crate) mod flush_connections;
 pub(crate) mod mesh;
+pub(crate) mod output;
+pub(crate) mod prerouting;
 pub(crate) mod redirect;
 pub(crate) mod standard;
 
@@ -504,9 +507,7 @@ mod tests {
         mock.expect_insert_rule()
             .with(
                 str::starts_with("MIRRORD_OUTPUT_"),
-                eq(
-                    "-o lo -m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420",
-                ),
+                eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(2),
             )
             .times(1)
@@ -523,9 +524,7 @@ mod tests {
         mock.expect_remove_rule()
             .with(
                 str::starts_with("MIRRORD_OUTPUT_"),
-                eq(
-                    "-o lo -m owner --uid-owner 2102 -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420",
-                ),
+                eq("-o lo -m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
             .returning(|_, _| Ok(()));

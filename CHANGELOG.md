@@ -8,6 +8,69 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.92.0](https://github.com/metalbear-co/mirrord/tree/3.92.0) - 2024-03-13
+
+
+### Added
+
+- Added support for `statx` function.
+  [#2204](https://github.com/metalbear-co/mirrord/issues/2204)
+
+
+### Fixed
+
+- Fix incoming network interception via port-forward when "stealing" traffic
+  with a mesh like linkerd or istio (Using the same `OUTPUT` iptable rules for
+  both meshed and not meshed networks)
+  [#2255](https://github.com/metalbear-co/mirrord/issues/2255)
+- Add Kuma mesh detection and support to mirrord-agent.
+  [#2296](https://github.com/metalbear-co/mirrord/issues/2296)
+- Added sidecar exclusion for kuma mesh, fixing issues running in that setup
+
+
+## [3.91.0](https://github.com/metalbear-co/mirrord/tree/3.91.0) - 2024-03-05
+
+
+### Added
+
+- Adds operator session management commands to mirrord-cli, these are: `mirrord
+  operator session kill-all`, `mirrord operator session kill --id {id}`, and
+  the hidden `mirrrod operator session retain-active`.
+  [#217](https://github.com/metalbear-co/mirrord/issues/217)
+- Notify user on license validity.
+  [#382](https://github.com/metalbear-co/mirrord/issues/382)
+
+
+### Changed
+
+- Adds a new `PolicyRule` for `delete` and `deletecollection` of `sessions` for
+  `mirrord operator setup`.
+  [#456](https://github.com/metalbear-co/mirrord/issues/456)
+- Change pause feature from unstable to deprecated
+- Increased size of buffers used by TCP steal to read incoming streams (from 4k
+  to 64k in the agent, from 1k to 64k in the internal proxy).
+- Increased size of buffers used by outgoing feature to read streams (from 4k
+  to 64k in the agent, from 1k to 64k in the internal proxy).
+
+
+### Fixed
+
+- Fixed a bug where `gethostbyname` calls where intercepted regardless of the
+  remote dns feature status.
+  [#2281](https://github.com/metalbear-co/mirrord/issues/2281)
+- Fixed a bug where non-existent hosts in outgoing filter would prevent the
+  application from initiating outgoing connections.
+  [#2283](https://github.com/metalbear-co/mirrord/issues/2283)
+- Remove special handling for DNS when dealing with UDP outgoing sockets
+  (manual UDP resolving).
+  [#2289](https://github.com/metalbear-co/mirrord/issues/2289)
+
+
+### Internal
+
+- Fixed lints in hook macros.
+
+
 ## [3.90.0](https://github.com/metalbear-co/mirrord/tree/3.90.0) - 2024-02-27
 
 

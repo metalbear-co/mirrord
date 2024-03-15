@@ -3,7 +3,7 @@ use std::{env::VarError, net::SocketAddr, ptr, str::ParseBoolError};
 use errno::set_errno;
 use ignore_codes::*;
 use libc::{c_char, hostent, DIR, FILE};
-use mirrord_config::{config::ConfigError, feature::network::outgoing::OutgoingFilterError};
+use mirrord_config::config::ConfigError;
 use mirrord_protocol::{ResponseError, SerializationError};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
@@ -94,6 +94,18 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: Proxy connection failed: `{0}`")]
     ProxyError(#[from] ProxyError),
+
+    #[cfg(target_os = "linux")]
+    #[error("mirrord-layer: Invalid descriptor argument")]
+    BadDescriptor,
+
+    #[cfg(target_os = "linux")]
+    #[error("mirrord-layer: Bad flag passed in argument")]
+    BadFlag,
+
+    #[cfg(target_os = "linux")]
+    #[error("mirrord-layer: Empty file path passed in argument")]
+    EmptyPath,
 }
 
 /// Errors internal to mirrord-layer.
@@ -148,9 +160,6 @@ pub(crate) enum LayerError {
     #[cfg(target_os = "macos")]
     #[error("Exec failed with error {0:?}, please report this error!")]
     ExecFailed(exec::Error),
-
-    #[error("mirrord-layer: Something went wrong with the outgoing filter `{0}`.")]
-    OutgoingFilterError(#[from] OutgoingFilterError),
 }
 
 impl From<SerializationError> for LayerError {
@@ -259,6 +268,12 @@ impl From<HookError> for i64 {
             HookError::BadPointer => libc::EFAULT,
             HookError::AddressAlreadyBound(_) => libc::EADDRINUSE,
             HookError::FileNotFound => libc::ENOENT,
+            #[cfg(target_os = "linux")]
+            HookError::BadDescriptor => libc::EBADF,
+            #[cfg(target_os = "linux")]
+            HookError::BadFlag => libc::EINVAL,
+            #[cfg(target_os = "linux")]
+            HookError::EmptyPath => libc::ENOENT,
         };
 
         set_errno(errno::Errno(libc_error));

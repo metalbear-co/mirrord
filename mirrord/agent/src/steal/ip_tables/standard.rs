@@ -2,56 +2,41 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use mirrord_protocol::Port;
-use nix::unistd::getgid;
-use tracing::warn;
 
 use crate::{
     error::Result,
     steal::ip_tables::{
-        chain::IPTableChain, redirect::PreroutingRedirect, IPTables, Redirect, IPTABLE_STANDARD,
+        output::OutputRedirect, prerouting::PreroutingRedirect, IPTables, Redirect,
+        IPTABLE_STANDARD,
     },
 };
 
 pub(crate) struct StandardRedirect<IPT: IPTables> {
-    preroute: PreroutingRedirect<IPT>,
-    managed: IPTableChain<IPT>,
-    own_packet_filter: String,
+    prerouteing: PreroutingRedirect<IPT>,
+    output: OutputRedirect<IPT>,
 }
 
 impl<IPT> StandardRedirect<IPT>
 where
     IPT: IPTables,
 {
-    const ENTRYPOINT: &'static str = "OUTPUT";
-
     pub fn create(ipt: Arc<IPT>) -> Result<Self> {
-        let preroute = PreroutingRedirect::create(ipt.clone())?;
-        let managed = IPTableChain::create(ipt, IPTABLE_STANDARD.to_string())?;
-        let own_packet_filter = "-o lo".to_owned();
-
-        let gid = getgid();
-        managed
-            .add_rule(&format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))
-            .inspect_err(|_| {
-                warn!("Unable to create iptable rule with \"--gid-owner {gid}\" filter")
-            })?;
+        let prerouteing = PreroutingRedirect::create(ipt.clone())?;
+        let output = OutputRedirect::create(ipt, IPTABLE_STANDARD.to_string())?;
 
         Ok(StandardRedirect {
-            preroute,
-            managed,
-            own_packet_filter,
+            prerouteing,
+            output,
         })
     }
 
     pub fn load(ipt: Arc<IPT>) -> Result<Self> {
-        let preroute = PreroutingRedirect::load(ipt.clone())?;
-        let managed = IPTableChain::create(ipt, IPTABLE_STANDARD.to_string())?;
-        let own_packet_filter = "-o lo".to_owned();
+        let prerouteing = PreroutingRedirect::load(ipt.clone())?;
+        let output = OutputRedirect::load(ipt, IPTABLE_STANDARD.to_string())?;
 
         Ok(StandardRedirect {
-            preroute,
-            managed,
-            own_packet_filter,
+            prerouteing,
+            output,
         })
     }
 }
@@ -64,52 +49,37 @@ where
     IPT: IPTables + Send + Sync,
 {
     async fn mount_entrypoint(&self) -> Result<()> {
-        self.preroute.mount_entrypoint().await?;
-
-        self.managed.inner().add_rule(
-            Self::ENTRYPOINT,
-            &format!("-j {}", self.managed.chain_name()),
-        )?;
+        self.prerouteing.mount_entrypoint().await?;
+        self.output.mount_entrypoint().await?;
 
         Ok(())
     }
 
     async fn unmount_entrypoint(&self) -> Result<()> {
-        self.preroute.unmount_entrypoint().await?;
-
-        self.managed.inner().remove_rule(
-            Self::ENTRYPOINT,
-            &format!("-j {}", self.managed.chain_name()),
-        )?;
+        self.prerouteing.unmount_entrypoint().await?;
+        self.output.unmount_entrypoint().await?;
 
         Ok(())
     }
 
     async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.preroute
+        self.prerouteing
             .add_redirect(redirected_port, target_port)
             .await?;
-        let redirect_rule = format!(
-            "{} -m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}",
-            self.own_packet_filter
-        );
-
-        self.managed.add_rule(&redirect_rule)?;
+        self.output
+            .add_redirect(redirected_port, target_port)
+            .await?;
 
         Ok(())
     }
 
     async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.preroute
+        self.prerouteing
             .remove_redirect(redirected_port, target_port)
             .await?;
-
-        let redirect_rule = format!(
-            "{} -m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}",
-            self.own_packet_filter
-        );
-
-        self.managed.remove_rule(&redirect_rule)?;
+        self.output
+            .remove_redirect(redirected_port, target_port)
+            .await?;
 
         Ok(())
     }
