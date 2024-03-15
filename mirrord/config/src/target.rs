@@ -21,6 +21,7 @@ use crate::{
 pub enum TargetFileConfig {
     // Generated when the value of the `target` field is a string, or when there is no target.
     // we need default else target value will be required in some scenarios.
+    #[schemars(with = "String")]
     Simple(#[serde(default, deserialize_with = "string_or_struct_option")] Option<Target>),
     Advanced {
         /// <!--${internal}-->
