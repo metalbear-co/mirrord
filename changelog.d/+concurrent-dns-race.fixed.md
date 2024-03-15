@@ -1,0 +1,1 @@
+Fixed an issue where concurrent DNS requests would mix their responses

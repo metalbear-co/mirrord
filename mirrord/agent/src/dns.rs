@@ -13,7 +13,10 @@ use tokio::{
     },
 };
 use tokio_util::sync::CancellationToken;
-use trust_dns_resolver::{system_conf::parse_resolv_conf, AsyncResolver, Hosts};
+use trust_dns_resolver::{
+    name_server::GenericConnection, proto::xfer::DnsHandle, system_conf::parse_resolv_conf,
+    AsyncResolver, ConnectionProvider, Hosts,
+};
 
 use crate::{
     error::{AgentError, Result},
@@ -64,9 +67,41 @@ impl DnsWorker {
     ///
     /// We could probably cache results here.
     /// We cannot cache the [`AsyncResolver`] itself, becaues the configuration in `etc` may change.
-    async fn do_lookup(etc_path: PathBuf, host: String) -> RemoteResult<DnsLookup> {
-        let resolv_conf_path = etc_path.join("resolv.conf");
-        let hosts_path = etc_path.join("hosts");
+    async fn do_lookup<P: ConnectionProvider<Conn = GenericConnection>>(
+        host: String,
+        resolver: AsyncResolver<GenericConnection, P>,
+    ) -> RemoteResult<DnsLookup> {
+        let lookup = resolver
+            .lookup_ip(host)
+            .await
+            .inspect(|lookup| tracing::trace!(?lookup, "Lookup finished"))?
+            .into();
+
+        Ok(lookup)
+    }
+
+    /// Handles the given [`DnsCommand`] in a separate [`tokio::task`].
+    fn handle_message<P: ConnectionProvider<Conn = GenericConnection>>(
+        &self,
+        message: DnsCommand,
+        resolver: AsyncResolver<GenericConnection, P>,
+    ) {
+        let lookup_future = async move {
+            let result = Self::do_lookup(message.request.node, resolver).await;
+            if let Err(result) = message.response_tx.send(result) {
+                tracing::error!(?result, "Failed to send query response");
+            }
+        };
+
+        tokio::spawn(lookup_future);
+    }
+
+    pub(crate) async fn run(
+        mut self,
+        cancellation_token: CancellationToken,
+    ) -> Result<(), AgentError> {
+        let resolv_conf_path = self.etc_path.join("resolv.conf");
+        let hosts_path = self.etc_path.join("hosts");
 
         let resolv_conf = fs::read(resolv_conf_path).await?;
         let hosts_conf = fs::read(hosts_path).await?;
@@ -80,40 +115,13 @@ impl DnsWorker {
         let hosts = Hosts::default().read_hosts_conf(hosts_conf.as_slice())?;
         resolver.set_hosts(Some(hosts));
 
-        let lookup = resolver
-            .lookup_ip(host)
-            .await
-            .inspect(|lookup| tracing::trace!(?lookup, "Lookup finished"))?
-            .into();
-
-        Ok(lookup)
-    }
-
-    /// Handles the given [`DnsCommand`] in a separate [`tokio::task`].
-    fn handle_message(&self, message: DnsCommand) {
-        let etc_path = self.etc_path.clone();
-
-        let lookup_future = async move {
-            let result = Self::do_lookup(etc_path, message.request.node).await;
-            if let Err(result) = message.response_tx.send(result) {
-                tracing::error!(?result, "Failed to send query response");
-            }
-        };
-
-        tokio::spawn(lookup_future);
-    }
-
-    pub(crate) async fn run(
-        mut self,
-        cancellation_token: CancellationToken,
-    ) -> Result<(), AgentError> {
         loop {
             tokio::select! {
                 _ = cancellation_token.cancelled() => break Ok(()),
 
                 message = self.request_rx.recv() => match message {
                     None => break Ok(()),
-                    Some(message) => self.handle_message(message),
+                    Some(message) => self.handle_message(message, resolver.clone()),
                 },
             }
         }

@@ -8,6 +8,7 @@ use mirrord_protocol::{
     FileRequest, FileResponse,
 };
 use thiserror::Error;
+use trust_dns_resolver::error::ResolveError;
 
 use crate::{
     cgroup::CgroupError, namespace::NamespaceError, sniffer::SnifferCommand, steal::StealerCommand,
@@ -146,6 +147,9 @@ pub(crate) enum AgentError {
 
     #[error(transparent)]
     FailedNamespaceEnter(#[from] NamespaceError),
+
+    #[error("DNS Resovler failed starting, try to run agent privileged or report issue {0}")]
+    DnsResolveError(#[from] ResolveError),
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;
