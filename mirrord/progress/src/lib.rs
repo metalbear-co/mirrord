@@ -406,6 +406,8 @@ pub enum IdeAction {
 pub struct IdeMessage {
     /// Allows us to identify this message and map it to something meaningful in the IDEs.
     ///
+    /// Not shown to the user.
+    ///
     /// In vscode, this should map to a `configEntry` defined in `package.json`.
     pub id: String,
 

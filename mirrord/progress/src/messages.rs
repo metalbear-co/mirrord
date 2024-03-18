@@ -5,9 +5,9 @@
 pub const MULTIPOD_WARNING: (&str, &str) = (
     "multipod_warning",
     "When targeting multi-pod deployments, mirrord impersonates the \
-        first pod in the deployment.\n\n\
+        first pod in the deployment.\
         Support for multi-pod impersonation requires the mirrord operator, \
-        which is part of mirrord for Teams.\n\n\
+        which is part of mirrord for Teams.\
         You can get started with mirrord for Teams at this link: \
         https://mirrord.dev/docs/overview/teams/",
 );
