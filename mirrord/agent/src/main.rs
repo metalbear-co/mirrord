@@ -6,34 +6,36 @@
 #![warn(clippy::indexing_slicing)]
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
+    mem,
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
 };
 
-use actix_codec::Framed;
 use dns::{DnsCommand, DnsWorker};
-use futures::{
-    stream::{FuturesUnordered, StreamExt},
-    SinkExt, TryFutureExt,
-};
+use futures::TryFutureExt;
 use mirrord_protocol::{
-    pause::DaemonPauseTarget, ClientMessage, DaemonCodec, DaemonMessage, GetEnvVarsRequest,
-    LogMessage,
+    pause::DaemonPauseTarget, ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
     sync::mpsc::{self, Sender},
-    task::JoinHandle,
+    task::JoinSet,
     time::{timeout, Duration},
 };
+use tokio_rustls::{rustls, TlsConnector};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
     cli::Args,
+    client_connection::ClientConnection,
     container_handle::ContainerHandle,
     dns::DnsApi,
     error::{AgentError, Result},
@@ -50,12 +52,13 @@ use crate::{
         },
         StealerCommand,
     },
-    util::{run_thread_in_namespace, ClientId, IndexAllocator},
+    util::{run_thread_in_namespace, ClientId},
     watched_task::{TaskStatus, WatchedTask},
 };
 
 mod cgroup;
 mod cli;
+mod client_connection;
 mod container_handle;
 mod dns;
 mod env;
@@ -69,24 +72,41 @@ mod steal;
 mod util;
 mod watched_task;
 
+/// Size of [`mpsc`] channels connecting [`TcpStealerApi`] and [`TcpSnifferApi`] with their
+/// background tasks.
 const CHANNEL_SIZE: usize = 1024;
 
-/// Keeps track of connected clients.
-#[derive(Debug)]
+/// Keeps track of next client id.
+/// Stores common data used when serving client connections.
+/// Can be cheaply cloned and passed to per-client background tasks.
+#[derive(Clone)]
 struct State {
-    clients: HashSet<ClientId>,
-    index_allocator: IndexAllocator<ClientId, 100>,
+    /// [`ClientId`] for the next client that connects to this agent.
+    next_client_id: Arc<AtomicU32>,
     /// Handle to the target container if there is one.
     /// This is optional because it is acceptable not to pass the container runtime and id if not
     /// pausing. When those args are not passed, container is [`None`].
     container: Option<ContainerHandle>,
-    env: HashMap<String, String>,
+    env: Arc<HashMap<String, String>>,
     ephemeral: bool,
+    tls_connector: Option<TlsConnector>,
 }
 
 impl State {
     /// Return [`Err`] if container runtime operations failed.
     pub async fn new(args: &Args, watch: drain::Watch) -> Result<State> {
+        let tls_connector = if args.use_tls {
+            let mut root_store = rustls::RootCertStore::empty();
+            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            let config = rustls::ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_no_client_auth();
+
+            Some(TlsConnector::from(Arc::new(config)))
+        } else {
+            None
+        };
+
         let mut env: HashMap<String, String> = HashMap::new();
 
         let (ephemeral, container, pid) = match &args.mode {
@@ -131,11 +151,11 @@ impl State {
         };
 
         Ok(State {
-            clients: HashSet::new(),
-            index_allocator: Default::default(),
+            next_client_id: Default::default(),
             container,
-            env,
+            env: Arc::new(env),
             ephemeral,
+            tls_connector,
         })
     }
 
@@ -144,84 +164,38 @@ impl State {
         self.container.as_ref().map(ContainerHandle::pid)
     }
 
-    /// If there are [`ClientId`]s left, insert new one and return it.
-    pub async fn new_client(&mut self) -> Result<ClientId> {
-        let new_id = self
-            .index_allocator
-            .next_index()
-            .ok_or(AgentError::ConnectionLimitReached)?;
-        self.clients.insert(new_id);
-        Ok(new_id)
-    }
-
-    pub async fn new_connection(
-        &mut self,
+    pub async fn serve_client_connection(
+        self,
         stream: TcpStream,
         tasks: BackgroundTasks,
         cancellation_token: CancellationToken,
         protocol_version: semver::Version,
-    ) -> Result<Option<JoinHandle<u32>>> {
-        let mut stream = Framed::new(stream, DaemonCodec::default());
+    ) -> u32 {
+        let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
 
-        let client_id = match self.new_client().await {
-            Ok(id) => id,
-            Err(err) => {
-                let _ = stream.send(DaemonMessage::Close(err.to_string())).await; // Ignore message send error.
-
-                if let AgentError::ConnectionLimitReached = err {
-                    error!("{err}");
-                    return Ok(None);
-                } else {
-                    // Propagate all errors that are not ConnectionLimitReached.
-                    Err(err)?
-                }
-            }
-        };
-
-        let container_handle = self.container.clone();
-        let ephemeral_container = self.ephemeral;
-        let env = self.env.clone();
-
-        let task = tokio::spawn(async move {
-            let result = ClientConnectionHandler::new(
-                client_id,
-                stream,
-                container_handle,
-                ephemeral_container,
-                tasks,
-                env,
-                protocol_version,
-            )
+        let result = ClientConnection::new(stream, client_id, self.tls_connector.clone())
+            .map_err(AgentError::from)
+            .and_then(|connection| {
+                ClientConnectionHandler::new(client_id, connection, tasks, protocol_version, self)
+            })
             .and_then(|client| client.start(cancellation_token))
             .await;
 
-            match result {
-                Ok(_) => {
-                    trace!(
-                        "ClientConnectionHandler::start -> Client {} disconnected",
-                        client_id
-                    );
-                }
-                Err(e) => {
-                    error!(
-                        "ClientConnectionHandler::start -> Client {} disconnected with error: {}",
-                        client_id, e
-                    );
-                }
+        match result {
+            Ok(()) => {
+                trace!(client_id, "serve_client_connection -> Client disconnected");
             }
 
-            client_id
-        });
+            Err(error) => {
+                error!(
+                    client_id,
+                    ?error,
+                    "serve_client_connection -> Client disconnected with error",
+                );
+            }
+        }
 
-        Ok(Some(task))
-    }
-
-    /// Free id of the given client.
-    pub async fn remove_client(&mut self, client_id: ClientId) -> Result<()> {
-        self.clients.remove(&client_id);
-        self.index_allocator.free_index(client_id);
-
-        Ok(())
+        client_id
     }
 }
 
@@ -253,52 +227,47 @@ struct ClientConnectionHandler {
     id: ClientId,
     /// Handles mirrord's file operations, see [`FileManager`].
     file_manager: FileManager,
-    stream: Framed<TcpStream, DaemonCodec>,
+    connection: ClientConnection,
     tcp_sniffer_api: Option<TcpSnifferApi>,
     tcp_stealer_api: Option<TcpStealerApi>,
     tcp_outgoing_api: TcpOutgoingApi,
     udp_outgoing_api: UdpOutgoingApi,
     dns_api: DnsApi,
-    env: HashMap<String, String>,
-    /// Handle to the target container if there is one.
-    /// Used for pausing the container.
-    container_handle: Option<ContainerHandle>,
+    state: State,
 }
 
 impl ClientConnectionHandler {
     /// Initializes [`ClientConnectionHandler`].
     pub async fn new(
         id: ClientId,
-        mut stream: Framed<TcpStream, DaemonCodec>,
-        container_handle: Option<ContainerHandle>,
-        ephemeral: bool,
+        mut connection: ClientConnection,
         bg_tasks: BackgroundTasks,
-        env: HashMap<String, String>,
         protocol_version: semver::Version,
+        state: State,
     ) -> Result<Self> {
-        let pid = container_handle.as_ref().map(ContainerHandle::pid);
+        let pid = state.container_pid();
 
-        let file_manager = FileManager::new(pid.or_else(|| ephemeral.then_some(1)));
+        let file_manager = FileManager::new(pid.or_else(|| state.ephemeral.then_some(1)));
 
-        let tcp_sniffer_api = Self::ceate_sniffer_api(id, bg_tasks.sniffer, &mut stream).await;
+        let tcp_sniffer_api = Self::ceate_sniffer_api(id, bg_tasks.sniffer, &mut connection).await;
         let tcp_stealer_api =
-            Self::ceate_stealer_api(id, bg_tasks.stealer, protocol_version, &mut stream).await?;
+            Self::ceate_stealer_api(id, bg_tasks.stealer, protocol_version, &mut connection)
+                .await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
         let udp_outgoing_api = UdpOutgoingApi::new(pid);
 
-        let client_handler = ClientConnectionHandler {
+        let client_handler = Self {
             id,
             file_manager,
-            stream,
+            connection,
             tcp_sniffer_api,
             tcp_stealer_api,
             tcp_outgoing_api,
             udp_outgoing_api,
             dns_api,
-            env,
-            container_handle,
+            state,
         };
 
         Ok(client_handler)
@@ -307,7 +276,7 @@ impl ClientConnectionHandler {
     async fn ceate_sniffer_api(
         id: ClientId,
         task: BackgroundTask<SnifferCommand>,
-        stream: &mut Framed<TcpStream, DaemonCodec>,
+        connection: &mut ClientConnection,
     ) -> Option<TcpSnifferApi> {
         if let BackgroundTask::Running(sniffer_status, sniffer_sender) = task {
             match TcpSnifferApi::new(id, sniffer_sender, sniffer_status, CHANNEL_SIZE).await {
@@ -320,7 +289,7 @@ impl ClientConnectionHandler {
                     warn!(message);
 
                     // Ignore message send error.
-                    let _ = stream
+                    let _ = connection
                         .send(DaemonMessage::LogMessage(LogMessage::warn(message)))
                         .await;
 
@@ -336,7 +305,7 @@ impl ClientConnectionHandler {
         id: ClientId,
         task: BackgroundTask<StealerCommand>,
         protocol_version: semver::Version,
-        stream: &mut Framed<TcpStream, DaemonCodec>,
+        connection: &mut ClientConnection,
     ) -> Result<Option<TcpStealerApi>> {
         if let BackgroundTask::Running(stealer_status, stealer_sender) = task {
             match TcpStealerApi::new(
@@ -350,7 +319,7 @@ impl ClientConnectionHandler {
             {
                 Ok(api) => Ok(Some(api)),
                 Err(e) => {
-                    let _ = stream
+                    let _ = connection
                         .send(DaemonMessage::Close(format!(
                             "Failed to create TcpStealerApi: {e}."
                         )))
@@ -380,13 +349,13 @@ impl ClientConnectionHandler {
     async fn start(mut self, cancellation_token: CancellationToken) -> Result<()> {
         let error = loop {
             select! {
-                message = self.stream.next() => {
-                    let Some(message) = message else {
+                message = self.connection.receive() => {
+                    let Some(message) = message? else {
                         debug!("Client {} disconnected", self.id);
                         return Ok(());
                     };
 
-                    match self.handle_client_message(message?).await {
+                    match self.handle_client_message(message).await {
                         Ok(true) => {},
                         Ok(false) => return Ok(()),
                         Err(e) => {
@@ -444,7 +413,7 @@ impl ClientConnectionHandler {
     /// Sends a [`DaemonMessage`] response to the connected client (`mirrord-layer`).
     #[tracing::instrument(level = "trace", skip(self))]
     async fn respond(&mut self, response: DaemonMessage) -> Result<()> {
-        self.stream.send(response).await.map_err(Into::into)
+        self.connection.send(response).await.map_err(Into::into)
     }
 
     /// Handles incoming messages from the connected client (`mirrord-layer`).
@@ -481,7 +450,7 @@ impl ClientConnectionHandler {
                 );
 
                 let env_vars_result =
-                    env::select_env_vars(&self.env, env_vars_filter, env_vars_select);
+                    env::select_env_vars(&self.state.env, env_vars_filter, env_vars_select);
 
                 self.respond(DaemonMessage::GetEnvVarsResponse(env_vars_result))
                     .await?
@@ -511,7 +480,8 @@ impl ClientConnectionHandler {
             }
             ClientMessage::PauseTargetRequest(pause) => {
                 match self
-                    .container_handle
+                    .state
+                    .container
                     .as_ref()
                     .ok_or(AgentError::PauseAbsentTarget)?
                     .set_paused(pause)
@@ -554,7 +524,7 @@ impl ClientConnectionHandler {
 /// Initializes the agent's [`State`], channels, threads, and runs [`ClientConnectionHandler`]s.
 #[tracing::instrument(level = "trace", ret)]
 async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
-    trace!("Starting agent with args: {args:?}");
+    trace!("start_agent -> Starting agent with args: {args:?}");
 
     let listener = TcpListener::bind(SocketAddrV4::new(
         Ipv4Addr::UNSPECIFIED,
@@ -562,10 +532,11 @@ async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
     ))
     .await?;
 
-    let mut state = State::new(&args, watch).await?;
+    let state = State::new(&args, watch).await?;
 
     let cancellation_token = CancellationToken::new();
-    // Cancel all other tasks on exit
+
+    // To make sure that background tasks are cancelled when we exit early from this function.
     let cancel_guard = cancellation_token.clone().drop_guard();
 
     let (sniffer_command_tx, sniffer_command_rx) = mpsc::channel::<SnifferCommand>(1000);
@@ -659,37 +630,33 @@ async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
     // initialize.
     println!("agent ready - version {}", env!("CARGO_PKG_VERSION"));
 
-    let mut clients = FuturesUnordered::new();
+    let mut clients: JoinSet<ClientId> = JoinSet::new();
 
-    // For the first client, we use communication_timeout, then we exit when no more
-    // no connections.
-    match timeout(
+    // We wait for the first client until `communication_timeout` elapses.
+    let first_connection = timeout(
         Duration::from_secs(args.communication_timeout.into()),
         listener.accept(),
     )
-    .await
-    {
+    .await;
+    match first_connection {
         Ok(Ok((stream, addr))) => {
-            trace!("start -> Connection accepted from {:?}", addr);
-            if let Some(client) = state
-                .new_connection(
-                    stream,
-                    bg_tasks.clone(),
-                    cancellation_token.clone(),
-                    args.base_protocol_version.clone(),
-                )
-                .await?
-            {
-                clients.push(client)
-            };
+            trace!(peer = %addr, "start_agent -> First connection accepted");
+            clients.spawn(state.clone().serve_client_connection(
+                stream,
+                bg_tasks.clone(),
+                cancellation_token.clone(),
+                args.base_protocol_version.clone(),
+            ));
         }
-        Ok(Err(err)) => {
-            error!("start -> Failed to accept connection: {:?}", err);
-            Err(err)?
+
+        Ok(Err(error)) => {
+            error!(?error, "start_agent -> Failed to accept first connection");
+            Err(error)?
         }
-        Err(err) => {
-            error!("start -> Failed to accept first connection: timeout");
-            Err(err)?
+
+        Err(error) => {
+            error!("start_agent -> Failed to accept first connection: timeout");
+            Err(error)?
         }
     }
 
@@ -700,31 +667,40 @@ async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
     loop {
         select! {
             Ok((stream, addr)) = listener.accept() => {
-                trace!("start -> Connection accepted from {:?}", addr);
-                if let Some(client) = state.new_connection(
-                    stream,
-                    bg_tasks.clone(),
-                    cancellation_token.clone(),
-                    args.base_protocol_version.clone(),
-                ).await? {clients.push(client) };
+                trace!(peer = %addr, "start_agent -> Connection accepted");
+                clients.spawn(state
+                    .clone()
+                    .serve_client_connection(
+                        stream,
+                        bg_tasks.clone(),
+                        cancellation_token.clone(),
+                        args.base_protocol_version.clone(),
+                    )
+                );
             },
-            client = clients.next() => {
+
+            client = clients.join_next() => {
                 match client {
-                    Some(client) => {
-                        let client_id = client?;
-                        state.remove_client(client_id).await?;
+                    Some(Ok(client)) => {
+                        trace!(client, "start_agent -> Client finished");
                     }
+
+                    Some(Err(error)) => {
+                        error!(?error, "start_agent -> Failed to join client handler task");
+                        Err(error)?
+                    }
+
                     None => {
-                        trace!("Main thread timeout, no clients left.");
+                        trace!("start_agent -> All clients finished, exiting main agent loop");
                         break
                     }
                 }
-            },
+            }
         }
     }
 
-    trace!("Agent shutting down.");
-    drop(cancel_guard);
+    trace!("start_agent -> Agent shutting down, dropping cancellation token for background tasks");
+    mem::drop(cancel_guard);
 
     let BackgroundTasks {
         sniffer,
@@ -757,7 +733,8 @@ async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
         }
     }
 
-    trace!("Agent shutdown.");
+    trace!("start_agent -> Agent shutdown");
+
     Ok(())
 }
 

@@ -21,7 +21,7 @@ serde.workspace = true
 serde_json.workspace = true
 pnet = "0.33"
 nix = { workspace  = true, features = ["mount"] }
-clap.workspace = true
+clap = { workspace = true, features = ["env"] }
 mirrord-protocol = { path = "../protocol"}
 actix-codec.workspace = true
 futures.workspace = true
@@ -58,6 +58,8 @@ k8s-cri = "0.7"
 once_cell.workspace = true
 semver.workspace = true
 drain.workspace = true
+tokio-rustls = "0.25"
+webpki-roots = "0.26.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 iptables = {git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e66c7332e361df3c61a194f08eefe3f40763d624"}
