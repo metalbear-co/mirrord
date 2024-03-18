@@ -1,9 +1,9 @@
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use enum_dispatch::enum_dispatch;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde::Serialize;
-use serde_json::to_string;
+use serde_json::{to_string, Value};
 
 /// The environment variable name that is used
 /// to determine the mode of progress reporting
@@ -35,7 +35,7 @@ pub trait Progress: Sized {
     /// When you want to send a message to the IDE that doesn't need to be shown to the user.
     ///
     /// You may use this to pass additional context to the IDE through the `value` object.
-    fn internal(&self, value: serde_json::Value);
+    fn ide(&self, value: serde_json::Value);
 
     /// When you want to print a message, cli only.
     fn print(&self, msg: &str);
@@ -79,7 +79,7 @@ impl Progress for NullProgress {
 
     fn info(&self, _: &str) {}
 
-    fn internal(&self, _: serde_json::Value) {}
+    fn ide(&self, _: serde_json::Value) {}
 
     fn print(&self, _: &str) {}
 }
@@ -143,8 +143,8 @@ impl Progress for JsonProgress {
         message.print();
     }
 
-    fn internal(&self, value: serde_json::Value) {
-        let message = ProgressMessage::Internal { value };
+    fn ide(&self, value: serde_json::Value) {
+        let message = ProgressMessage::IdeMessage { message: value };
         message.print();
     }
 
@@ -210,7 +210,7 @@ impl Progress for SimpleProgress {
         println!("{msg}");
     }
 
-    fn internal(&self, _: serde_json::Value) {}
+    fn ide(&self, _: serde_json::Value) {}
 
     fn failure(&mut self, msg: Option<&str>) {
         println!("{msg:?}");
@@ -294,7 +294,7 @@ impl Progress for SpinnerProgress {
         self.progress.set_message(formatted_message);
     }
 
-    fn internal(&self, _: serde_json::Value) {}
+    fn ide(&self, _: serde_json::Value) {}
 
     fn failure(&mut self, msg: Option<&str>) {
         self.done = true;
@@ -380,6 +380,27 @@ struct WarningMessage {
     message: String,
 }
 
+#[derive(Serialize, Debug, Clone, Default)]
+pub enum NotificationLevel {
+    #[default]
+    Info,
+    Warning,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
+// #[serde(tag = "action")]
+pub enum IdeAction {
+    Link { label: String, link: String },
+}
+
+// TODO(alex) [mid]: Docs.
+#[derive(Serialize, Debug, Clone, Default)]
+pub struct IdeMessage {
+    pub level: NotificationLevel,
+    pub text: String,
+    pub actions: HashSet<IdeAction>,
+}
+
 /// The message types that we report on [`Progress`].
 ///
 /// These are used by the extensions (vscode and intellij) to show nice notifications.
@@ -389,8 +410,13 @@ enum ProgressMessage {
     NewTask(NewTaskMessage),
     Warning(WarningMessage),
     FinishedTask(FinishedTaskMessage),
-    Info { message: String },
-    Internal { value: serde_json::Value },
+    Info {
+        message: String,
+    },
+    /// Messages that are passed to the IDE and are not meant to be shown to the user.
+    IdeMessage {
+        message: Value,
+    },
 }
 
 impl ProgressMessage {

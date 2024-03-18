@@ -1,11 +1,11 @@
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use mirrord_analytics::AnalyticsReporter;
 use mirrord_config::{feature::network::outgoing::OutgoingFilterConfig, LayerConfig};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
 use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorOperation};
-use mirrord_progress::Progress;
+use mirrord_progress::{IdeAction, IdeMessage, NotificationLevel, Progress};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
 
@@ -73,14 +73,29 @@ where
         }
     }
 
+    progress.ide(
+        serde_json::to_value(IdeMessage {
+            level: NotificationLevel::Info,
+            text: "Sample test".to_string(),
+            actions: {
+                let mut actions = HashSet::new();
+                actions.insert(IdeAction::Link {
+                    label: "Try it now".to_string(),
+                    link: "https://app.metalbear.co/".to_string(),
+                });
+
+                actions
+            },
+        })
+        .inspect_err(|fail| progress.warning(&format!("{fail}")))
+        .expect("EXPLODED"),
+    );
+
     if config.operator != Some(false) {
         let mut subtask = progress.subtask("checking operator");
 
         match OperatorApi::create_session(config, &subtask, analytics).await {
             Ok(session) => {
-                // Send to IDEs that we're using the operator.
-                progress.internal(serde_json::json!({ "operator": session.info }));
-
                 subtask.success(Some("connected to the operator"));
 
                 return Ok((
@@ -99,8 +114,30 @@ where
         }
     }
 
-    // Send to IDEs that no operator is being used.
-    progress.internal(serde_json::json!({ "operator": null }));
+    // Send to IDEs that we're in multi-pod without operator.
+    progress.ide(
+        serde_json::to_value(IdeMessage {
+            level: NotificationLevel::Info,
+            text: "When targeting multi-pod deployments, mirrord impersonates the \
+                        first pod in the deployment.\n\
+                    Support for multi-pod impersonation requires the mirrord operator, \
+                        which is part of mirrord for Teams.\n\
+                    You can get started with mirrord for Teams at this link: \
+                        https://mirrord.dev/docs/overview/teams/"
+                .to_string(),
+            actions: {
+                let mut actions = HashSet::new();
+                actions.insert(IdeAction::Link {
+                    label: "Try it now".to_string(),
+                    link: "https://app.metalbear.co/".to_string(),
+                });
+
+                actions
+            },
+        })
+        .inspect_err(|fail| progress.warning(&format!("{fail}")))
+        .expect("EXPLODED"),
+    );
 
     if config.feature.copy_target.enabled {
         return Err(CliError::FeatureRequiresOperatorError("copy target".into()));
