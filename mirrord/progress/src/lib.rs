@@ -382,25 +382,40 @@ struct WarningMessage {
     message: String,
 }
 
+/// Indicates what type of notification should appear in the IDEs.
 #[derive(Serialize, Debug, Clone, Default)]
 pub enum NotificationLevel {
+    /// Normal info box.
     #[default]
     Info,
+
+    /// Warning box.
     Warning,
 }
 
+/// Action/button type that appears in the pop-up notifications.
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(tag = "kind")]
 pub enum IdeAction {
+    /// A link action, where `label` is the text, and `link` is the _href_.
     Link { label: String, link: String },
 }
 
-// TODO(alex) [mid]: Docs.
+/// Messages sent to the IDEs with full context.
 #[derive(Serialize, Debug, Clone, Default)]
 pub struct IdeMessage {
+    /// Allows us to identify this message and map it to something meaningful in the IDEs.
+    ///
+    /// In vscode, this should map to a `configEntry` defined in `package.json`.
     pub id: String,
+
+    /// The level of the notification, the type of pop-up it'll be displayed in the IDEs.
     pub level: NotificationLevel,
+
+    /// Message content.
     pub text: String,
+
+    /// Actions/buttons that appears in the pop-up notification.
     pub actions: HashSet<IdeAction>,
 }
 
@@ -418,6 +433,9 @@ enum ProgressMessage {
     },
     /// Messages that are passed to the IDE and are not meant to be shown to the user.
     IdeMessage {
+        /// It's a generic json [`Value`].
+        ///
+        /// Should be an [`IdeMessage`] converted to [`Value`].
         message: Value,
     },
 }

@@ -3,7 +3,7 @@
 
 /// Warning when user selects a multi-pod deployment without MfT.
 pub const MULTIPOD_WARNING: (&str, &str) = (
-    "multipod-warning",
+    "multipod_warning",
     "When targeting multi-pod deployments, mirrord impersonates the \
         first pod in the deployment.\n\n\
         Support for multi-pod impersonation requires the mirrord operator, \
