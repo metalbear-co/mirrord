@@ -5,6 +5,8 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde::Serialize;
 use serde_json::{to_string, Value};
 
+pub mod messages;
+
 /// The environment variable name that is used
 /// to determine the mode of progress reporting
 pub const MIRRORD_PROGRESS_ENV: &str = "MIRRORD_PROGRESS_MODE";
@@ -388,7 +390,7 @@ pub enum NotificationLevel {
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
-// #[serde(tag = "action")]
+#[serde(tag = "kind")]
 pub enum IdeAction {
     Link { label: String, link: String },
 }
@@ -396,6 +398,7 @@ pub enum IdeAction {
 // TODO(alex) [mid]: Docs.
 #[derive(Serialize, Debug, Clone, Default)]
 pub struct IdeMessage {
+    pub id: String,
     pub level: NotificationLevel,
     pub text: String,
     pub actions: HashSet<IdeAction>,
