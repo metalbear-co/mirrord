@@ -136,6 +136,7 @@ pub struct AgentKubernetesConnectInfo {
     pub pod_name: String,
     pub agent_port: u16,
     pub namespace: Option<String>,
+    pub agent_version: Option<String>,
 }
 
 impl AgentManagment for KubernetesAPI {
@@ -150,6 +151,7 @@ impl AgentManagment for KubernetesAPI {
             pod_name,
             agent_port,
             namespace,
+            ..
         }: Self::AgentRef,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
         let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, namespace.as_deref());

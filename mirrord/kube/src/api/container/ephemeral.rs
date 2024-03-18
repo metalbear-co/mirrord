@@ -130,7 +130,7 @@ where
 
     let version =
         wait_for_agent_startup(&pod_api, &runtime_data.pod_name, params.name.clone()).await?;
-    match version {
+    match version.as_ref() {
         Some(version) if version != env!("CARGO_PKG_VERSION") => {
             let message = format!(
                 "Agent version {version} does not match the local mirrord version {}. This may lead to unexpected errors.",
@@ -148,6 +148,7 @@ where
         pod_name: runtime_data.pod_name.to_string(),
         agent_port: params.port,
         namespace: runtime_data.pod_namespace.clone(),
+        agent_version: version,
     })
 }
 

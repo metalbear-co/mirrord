@@ -87,7 +87,7 @@ where
         .ok_or(KubeApiError::JobPodNotFound(params.name.clone()))?;
 
     let version = wait_for_agent_startup(&pod_api, &pod_name, "mirrord-agent".to_string()).await?;
-    match version {
+    match version.as_ref() {
         Some(version) if version != env!("CARGO_PKG_VERSION") => {
             let message = format!(
                     "Agent version {version} does not match the local mirrord version {}. This may lead to unexpected errors.",
@@ -104,6 +104,7 @@ where
         pod_name,
         agent_port: params.port,
         namespace: agent.namespace.clone(),
+        agent_version: version,
     })
 }
 
