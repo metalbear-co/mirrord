@@ -40,13 +40,27 @@ impl BackgroundTask for Interceptor {
                         continue;
                     },
                     Err(e) => break Err(e),
-                    Ok(bytes) if bytes.is_empty() => break Ok(()),
+                    Ok(bytes) if bytes.is_empty() => {
+                        tracing::trace!(
+                            connection_id = connected_socket.connection_id(),
+                            "layer stopped stopped writing, outgoing interceptor task exits",
+                        );
+
+                        break Ok(())
+                    },
                     Ok(bytes) => message_bus.send(bytes).await,
                 },
 
                 bytes = message_bus.recv() => match bytes {
                     Some(bytes) => connected_socket.send(&bytes).await?,
-                    None => break Ok(()),
+                    None => {
+                        tracing::trace!(
+                            connection_id = connected_socket.connection_id(),
+                            "message bus closed, outgoing interceptor task exits",
+                        );
+
+                        break Ok(())
+                    },
                 },
             }
         }

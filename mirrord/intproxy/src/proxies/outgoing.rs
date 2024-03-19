@@ -164,7 +164,9 @@ impl OutgoingProxy {
             local_address,
         } = connect;
 
-        let prepared_socket = protocol.prepare_socket(remote_address).await?;
+        let prepared_socket = protocol
+            .prepare_socket(remote_address, connection_id)
+            .await?;
         let layer_address = prepared_socket.local_address()?;
 
         let id = InterceptorId {

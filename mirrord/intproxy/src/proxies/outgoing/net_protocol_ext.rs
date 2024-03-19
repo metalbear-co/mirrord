@@ -2,7 +2,7 @@
 //! [`OutgoingProxy`](super::OutgoingProxy).
 
 use std::{
-    env, io,
+    env, fmt, io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
 };
@@ -39,7 +39,11 @@ pub trait NetProtocolExt: Sized {
     fn wrap_agent_connect(self, remote_address: SocketAddress) -> ClientMessage;
 
     /// Opens a new socket for intercepting a connection to the given remote address.
-    async fn prepare_socket(self, for_remote_address: SocketAddress) -> io::Result<PreparedSocket>;
+    async fn prepare_socket(
+        self,
+        for_remote_address: SocketAddress,
+        connection_id: ConnectionId,
+    ) -> io::Result<PreparedSocket>;
 }
 
 impl NetProtocolExt for NetProtocol {
@@ -80,8 +84,12 @@ impl NetProtocolExt for NetProtocol {
         }
     }
 
-    async fn prepare_socket(self, for_remote_address: SocketAddress) -> io::Result<PreparedSocket> {
-        let socket = match for_remote_address {
+    async fn prepare_socket(
+        self,
+        for_remote_address: SocketAddress,
+        connection_id: ConnectionId,
+    ) -> io::Result<PreparedSocket> {
+        let inner = match for_remote_address {
             SocketAddress::Ip(addr) => {
                 let ip_addr = match addr.ip() {
                     IpAddr::V4(..) => IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -90,14 +98,18 @@ impl NetProtocolExt for NetProtocol {
                 let bind_at = SocketAddr::new(ip_addr, 0);
 
                 match self {
-                    Self::Datagrams => PreparedSocket::UdpSocket(UdpSocket::bind(bind_at).await?),
-                    Self::Stream => PreparedSocket::TcpListener(TcpListener::bind(bind_at).await?),
+                    Self::Datagrams => {
+                        InnerPreparedSocket::UdpSocket(UdpSocket::bind(bind_at).await?)
+                    }
+                    Self::Stream => {
+                        InnerPreparedSocket::TcpListener(TcpListener::bind(bind_at).await?)
+                    }
                 }
             }
             SocketAddress::Unix(..) => match self {
                 Self::Stream => {
                     let path = PreparedSocket::generate_uds_path().await?;
-                    PreparedSocket::UnixListener(UnixListener::bind(path)?)
+                    InnerPreparedSocket::UnixListener(UnixListener::bind(path)?)
                 }
                 Self::Datagrams => {
                     tracing::error!("layer requested intercepting outgoing datagrams over unix socket, this is not supported");
@@ -106,16 +118,26 @@ impl NetProtocolExt for NetProtocol {
             },
         };
 
-        Ok(socket)
+        Ok(PreparedSocket {
+            inner,
+            connection_id,
+        })
     }
 }
 
-/// A socket prepared to accept an intercepted connection.
-pub enum PreparedSocket {
+#[derive(Debug)]
+enum InnerPreparedSocket {
     /// There is no real listening/accepting here, see [`NetProtocol::Datagrams`] for more info.
     UdpSocket(UdpSocket),
     TcpListener(TcpListener),
     UnixListener(UnixListener),
+}
+
+/// A socket prepared to accept an intercepted connection.
+#[derive(Debug)]
+pub struct PreparedSocket {
+    inner: InnerPreparedSocket,
+    connection_id: ConnectionId,
 }
 
 impl PreparedSocket {
@@ -139,10 +161,10 @@ impl PreparedSocket {
 
     /// Returns the address of this socket.
     pub fn local_address(&self) -> io::Result<SocketAddress> {
-        let address = match self {
-            Self::TcpListener(listener) => listener.local_addr()?.into(),
-            Self::UdpSocket(socket) => socket.local_addr()?.into(),
-            Self::UnixListener(listener) => {
+        let address = match &self.inner {
+            InnerPreparedSocket::TcpListener(listener) => listener.local_addr()?.into(),
+            InnerPreparedSocket::UdpSocket(socket) => socket.local_addr()?.into(),
+            InnerPreparedSocket::UnixListener(listener) => {
                 let addr = listener.local_addr()?;
                 let pathname = addr.as_pathname().unwrap().to_path_buf();
                 SocketAddress::Unix(UnixAddr::Pathname(pathname))
@@ -154,27 +176,34 @@ impl PreparedSocket {
 
     /// Accepts one connection on this socket and returns a new socket for sending and receiving
     /// data.
+    #[tracing::instrument(level = "trace", name = "outgoing_listener_accept", ret, err(Debug))]
     pub async fn accept(self) -> io::Result<ConnectedSocket> {
-        let (inner, is_really_connected) = match self {
-            Self::TcpListener(listener) => {
-                let (stream, _) = listener.accept().await?;
+        let (inner, is_really_connected) = match self.inner {
+            InnerPreparedSocket::TcpListener(listener) => {
+                let (stream, peer) = listener.accept().await?;
+                tracing::trace!(?peer, "accepted connection");
                 (InnerConnectedSocket::TcpStream(stream), true)
             }
-            Self::UdpSocket(socket) => (InnerConnectedSocket::UdpSocket(socket), false),
-            Self::UnixListener(listener) => {
-                let (stream, _) = listener.accept().await?;
+            InnerPreparedSocket::UdpSocket(socket) => {
+                (InnerConnectedSocket::UdpSocket(socket), false)
+            }
+            InnerPreparedSocket::UnixListener(listener) => {
+                let (stream, peer) = listener.accept().await?;
+                tracing::trace!(?peer, "accepted connection");
                 (InnerConnectedSocket::UnixStream(stream), true)
             }
         };
 
         Ok(ConnectedSocket {
             inner,
+            connection_id: self.connection_id,
             is_really_connected,
             buffer: BytesMut::with_capacity(64 * 1024),
         })
     }
 }
 
+#[derive(Debug)]
 enum InnerConnectedSocket {
     UdpSocket(UdpSocket),
     TcpStream(TcpStream),
@@ -184,13 +213,29 @@ enum InnerConnectedSocket {
 /// A socket for intercepted connection with the layer.
 pub struct ConnectedSocket {
     inner: InnerConnectedSocket,
+    connection_id: ConnectionId,
     /// Meaningful only when `inner` is [`InnerConnectedSocket::UdpSocket`].
     is_really_connected: bool,
     buffer: BytesMut,
 }
 
+impl fmt::Debug for ConnectedSocket {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConnectedSocket")
+            .field("inner", &self.inner)
+            .field("connection_id", &self.connection_id)
+            .field("is_really_connected", &self.is_really_connected)
+            .finish()
+    }
+}
+
 impl ConnectedSocket {
+    pub fn connection_id(&self) -> ConnectionId {
+        self.connection_id
+    }
+
     /// Sends all given data to the layer.
+    #[tracing::instrument(level = "trace", name = "outgoing_socket_send", fields(bytes_len = bytes.len()), err(Debug))]
     pub async fn send(&mut self, bytes: &[u8]) -> io::Result<()> {
         match &mut self.inner {
             InnerConnectedSocket::UdpSocket(socket) => {
@@ -215,6 +260,7 @@ impl ConnectedSocket {
     }
 
     /// Receives some data from the layer.
+    #[tracing::instrument(level = "trace", name = "outgoing_socket_receive", err(Debug))]
     pub async fn receive(&mut self) -> io::Result<Vec<u8>> {
         match &mut self.inner {
             InnerConnectedSocket::UdpSocket(socket) => {

@@ -55,11 +55,19 @@ impl BackgroundTask for LayerConnection {
             tokio::select! {
                 res = self.layer_codec_rx.receive() => match res {
                     Err(e) => {
-                        tracing::error!("layer connection failed with {e:?} when receiving");
+                        tracing::error!(
+                            layer_id = ?self.layer_id,
+                            "layer connection failed with {e:?} when receiving",
+                        );
+
                         break Err(e);
                     },
                     Ok(None) => {
-                        tracing::trace!("message bus closed, exiting");
+                        tracing::trace!(
+                            layer_id = ?self.layer_id,
+                            "message bus closed, exiting",
+                        );
+
                         break Ok(());
                     }
                     Ok(Some(msg)) => message_bus.send(FromLayer { message: msg.inner, message_id: msg.message_id, layer_id: self.layer_id }).await,
@@ -68,12 +76,20 @@ impl BackgroundTask for LayerConnection {
                 msg = message_bus.recv() => match msg {
                     Some(msg) => {
                         if let Err(e) = self.send_and_flush(&msg).await {
-                            tracing::error!("layer connection failed with {e:?} when sending {msg:?}");
+                            tracing::error!(
+                                layer_id = ?self.layer_id,
+                                "layer connection failed with {e:?} when sending {msg:?}",
+                            );
+
                             break Err(e);
                         }
                     },
                     None => {
-                        tracing::trace!("no more messages from the proxy, exiting");
+                        tracing::trace!(
+                            layer_id = ?self.layer_id,
+                            "no more messages from the proxy, exiting",
+                        );
+
                         break Ok(());
                     },
                 },
