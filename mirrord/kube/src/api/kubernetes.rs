@@ -1,6 +1,4 @@
 use std::ops::Deref;
-#[cfg(feature = "incluster")]
-use std::time::Duration;
 
 use k8s_openapi::{
     api::core::v1::{Namespace, Pod},
@@ -12,23 +10,15 @@ use kube::{
     Api, Client, Config, Discovery,
 };
 use mirrord_config::{
-    agent::AgentConfig, feature::network::incoming::IncomingMode, target::TargetConfig, LayerConfig,
+    agent::AgentConfig,
+    feature::network::incoming::IncomingMode,
+    target::{Target, TargetConfig},
+    LayerConfig,
 };
 use mirrord_progress::Progress;
-use mirrord_protocol::{ClientMessage, DaemonMessage};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
-#[cfg(not(feature = "incluster"))]
-use tokio_retry::{
-    strategy::{jitter, ExponentialBackoff},
-    Retry,
-};
 use tracing::{debug, info, trace};
 
-#[cfg(feature = "incluster")]
-use super::connector::AgentInclusterConnector;
-#[cfg(not(feature = "incluster"))]
-use super::wrap_raw_connection;
 use crate::{
     api::{
         container::{
@@ -49,10 +39,6 @@ pub mod rollout;
 pub struct KubernetesAPI {
     client: Client,
     agent: AgentConfig,
-    target: TargetConfig,
-    /// Used to create a connection with the agent once it's created.
-    #[cfg(feature = "incluster")]
-    connector: AgentInclusterConnector,
 }
 
 impl KubernetesAPI {
@@ -64,28 +50,11 @@ impl KubernetesAPI {
         )
         .await?;
 
-        Ok(KubernetesAPI::new(
-            client,
-            config.agent.clone(),
-            config.target.clone(),
-        ))
+        Ok(KubernetesAPI::new(client, config.agent.clone()))
     }
 
-    pub fn new(client: Client, agent: AgentConfig, target: TargetConfig) -> Self {
-        KubernetesAPI {
-            client,
-            agent,
-            target,
-            #[cfg(feature = "incluster")]
-            connector: AgentInclusterConnector::Tcp,
-        }
-    }
-
-    /// Replaces [`Self::connector`].
-    #[cfg(feature = "incluster")]
-    pub fn with_connector(&mut self, connector: AgentInclusterConnector) -> &mut Self {
-        self.connector = connector;
-        self
+    pub fn new(client: Client, agent: AgentConfig) -> Self {
+        KubernetesAPI { client, agent }
     }
 
     pub async fn detect_openshift<P>(&self, progress: &P) -> Result<()>
@@ -105,30 +74,18 @@ impl KubernetesAPI {
         }
         Ok(())
     }
+}
 
-    /// Checks if any `ContainerStatus` matches a mesh/sidecar name from our `MESH_LIST`, and the
-    /// user is running incoming traffic in `IncomigMode::Mirror` mode, printing a warning if it
-    /// does.
-    #[tracing::instrument(level = "trace", ret, skip(self, progress))]
-    pub async fn detect_mesh_mirror_mode<P>(
-        &self,
-        progress: &mut P,
-        incoming_mode: IncomingMode,
-        is_mesh: bool,
-    ) -> Result<()>
-    where
-        P: Progress + Send + Sync,
-    {
-        if matches!(incoming_mode, IncomingMode::Mirror) && is_mesh {
-            progress.warning(
-                "mirrord has detected that you might be running on a cluster with a \
-                 service mesh and `network.incoming.mode = \"mirror\"`, which is currently \
-                 unsupported. You can set `network.incoming.mode` to \"steal\" (check out the\
-                 `http_filter` configuration value if you only want to steal some of the traffic).",
-            );
-        }
-        Ok(())
-    }
+#[cfg(not(feature = "incluster"))]
+pub trait UnpinStream:
+    tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static
+{
+}
+
+#[cfg(not(feature = "incluster"))]
+impl<T> UnpinStream for T where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static
+{
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
@@ -142,8 +99,12 @@ pub struct AgentKubernetesConnectInfo {
 impl AgentManagment for KubernetesAPI {
     type AgentRef = AgentKubernetesConnectInfo;
     type Err = KubeApiError;
+    #[cfg(feature = "incluster")]
+    type Connection = tokio::net::TcpStream;
+    #[cfg(not(feature = "incluster"))]
+    type Connection = Box<dyn UnpinStream>;
 
-    /// Connect to the agent using [`Self::connector`].
+    /// Connect to the agent using plain TCP connection.
     #[cfg(feature = "incluster")]
     async fn create_connection(
         &self,
@@ -153,7 +114,11 @@ impl AgentManagment for KubernetesAPI {
             namespace,
             ..
         }: Self::AgentRef,
-    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+    ) -> Result<Self::Connection> {
+        use std::{net::IpAddr, time::Duration};
+
+        use tokio::net::TcpStream;
+
         let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, namespace.as_deref());
 
         let pod = pod_api.get(&pod_name).await?;
@@ -161,12 +126,12 @@ impl AgentManagment for KubernetesAPI {
         let conn = if let Some(pod_ip) = pod.status.and_then(|status| status.pod_ip) {
             // When pod_ip is available we directly create it as SocketAddr to prevent tokio from
             // performing a DNS lookup.
-            let ip = pod_ip.parse()?;
+            let ip = pod_ip.parse::<IpAddr>()?;
             trace!("connecting to pod {pod_ip}:{agent_port}");
 
             tokio::time::timeout(
                 Duration::from_secs(self.agent.startup_timeout),
-                self.connector.connect_ip(ip, agent_port),
+                TcpStream::connect((ip, agent_port)),
             )
             .await
             .map_err(|_| KubeApiError::AgentReadyTimeout)??
@@ -179,8 +144,7 @@ impl AgentManagment for KubernetesAPI {
 
             tokio::time::timeout(
                 Duration::from_secs(self.agent.startup_timeout),
-                self.connector
-                    .connect_hostname(hostname.as_str(), agent_port),
+                TcpStream::connect((hostname.as_str(), agent_port)),
             )
             .await
             .map_err(|_| KubeApiError::AgentReadyTimeout)??
@@ -191,10 +155,12 @@ impl AgentManagment for KubernetesAPI {
 
     /// Connects to the agent using kube's [`Api::portforward`].
     #[cfg(not(feature = "incluster"))]
-    async fn create_connection(
-        &self,
-        connect_info: Self::AgentRef,
-    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
+    async fn create_connection(&self, connect_info: Self::AgentRef) -> Result<Self::Connection> {
+        use tokio_retry::{
+            strategy::{jitter, ExponentialBackoff},
+            Retry,
+        };
+
         let pod_api: Api<Pod> =
             get_k8s_resource_api(&self.client, connect_info.namespace.as_deref());
         let retry_strategy = ExponentialBackoff::from_millis(10).map(jitter).take(3);
@@ -205,65 +171,55 @@ impl AgentManagment for KubernetesAPI {
         })
         .await?;
 
-        Ok(wrap_raw_connection(
-            port_forwarder
-                .take_stream(connect_info.agent_port)
-                .ok_or(KubeApiError::PortForwardFailed)?,
-        ))
+        let stream = port_forwarder
+            .take_stream(connect_info.agent_port)
+            .ok_or(KubeApiError::PortForwardFailed)?;
+
+        let stream: Box<dyn UnpinStream> = Box::new(stream);
+
+        Ok(stream)
     }
 
     #[tracing::instrument(level = "trace", skip(self, progress))]
     async fn create_agent<P>(
         &self,
         progress: &mut P,
+        target: &TargetConfig,
         config: Option<&LayerConfig>,
+        extra_env: Vec<(String, String)>,
     ) -> Result<Self::AgentRef, Self::Err>
     where
         P: Progress + Send + Sync,
     {
-        let runtime_data = if let Some(ref path) = self.target.path
-            && !matches!(path, mirrord_config::target::Target::Targetless)
-        {
-            let runtime_data = path
-                .runtime_data(&self.client, self.target.namespace.as_deref())
-                .await?;
-
-            Some(runtime_data)
-        } else {
-            None
+        let runtime_data = match target.path.as_ref().unwrap_or(&Target::Targetless) {
+            Target::Targetless => None,
+            path => path
+                .runtime_data(&self.client, target.namespace.as_deref())
+                .await?
+                .into(),
         };
 
-        let incoming_mode = config
-            .map(|config| config.feature.network.incoming.mode)
-            .unwrap_or_default();
-
+        let incoming_mode = config.map(|config| config.feature.network.incoming.mode);
         let is_mesh = runtime_data
             .as_ref()
-            .map(|runtime| runtime.mesh.is_some())
+            .map(|data| data.mesh.is_some())
             .unwrap_or_default();
-
-        if self
-            .detect_mesh_mirror_mode(progress, incoming_mode, is_mesh)
-            .await
-            .is_err()
-        {
-            progress.warning("couldn't determine mesh / sidecar with mirror mode");
+        if matches!(incoming_mode, Some(IncomingMode::Mirror)) && is_mesh {
+            progress.warning(
+                "mirrord has detected that you might be running on a cluster with a \
+                 service mesh and `network.incoming.mode = \"mirror\"`, which is currently \
+                 unsupported. You can set `network.incoming.mode` to \"steal\" (check out the\
+                 `http_filter` configuration value if you only want to steal some of the traffic).",
+            );
         }
 
-        #[cfg(not(feature = "incluster"))]
-        let params = ContainerParams::new();
-        #[cfg(feature = "incluster")]
         let params = {
             let mut params = ContainerParams::new();
-            params.extra_env.extend(self.connector.agent_extra_env());
+            params.extra_env.extend(extra_env);
             params
         };
 
-        info!("Spawning new agent.");
-
-        info!("Using port `{:?}` for communication", params.port);
-        info!("Using group-id `{:?}`", params.gid);
-        info!("Using extra env `{:?}", params.extra_env);
+        info!(?params, "Spawning new agent");
 
         let agent_connect_info = match (runtime_data, self.agent.ephemeral) {
             (None, false) => {
@@ -290,7 +246,8 @@ impl AgentManagment for KubernetesAPI {
             (None, true) => return Err(KubeApiError::MissingRuntimeData),
         };
 
-        info!("Created agent pod {agent_connect_info:?}");
+        info!(?agent_connect_info, "Created agent pod");
+
         Ok(agent_connect_info)
     }
 }

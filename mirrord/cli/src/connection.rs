@@ -3,7 +3,7 @@ use std::time::Duration;
 use mirrord_analytics::AnalyticsReporter;
 use mirrord_config::{feature::network::outgoing::OutgoingFilterConfig, LayerConfig};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
-use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
+use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
 use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorOperation};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
@@ -122,16 +122,18 @@ where
 
     let agent_connect_info = tokio::time::timeout(
         Duration::from_secs(config.agent.startup_timeout),
-        k8s_api.create_agent(progress, Some(config)),
+        k8s_api.create_agent(progress, &config.target, Some(config), Default::default()),
     )
     .await
     .map_err(|_| CliError::AgentReadyTimeout)?
     .map_err(CliError::CreateAgentFailed)?;
 
-    let (sender, receiver) = k8s_api
-        .create_connection(agent_connect_info.clone())
-        .await
-        .map_err(CliError::AgentConnectionFailed)?;
+    let (sender, receiver) = wrap_raw_connection(
+        k8s_api
+            .create_connection(agent_connect_info.clone())
+            .await
+            .map_err(CliError::AgentConnectionFailed)?,
+    );
 
     Ok((
         AgentConnectInfo::DirectKubernetes(agent_connect_info),
