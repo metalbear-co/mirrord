@@ -3520,7 +3520,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-retry",
- "tokio-rustls 0.25.0",
  "tower",
  "tracing",
 ]

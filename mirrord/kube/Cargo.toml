@@ -15,7 +15,7 @@ edition.workspace = true
 
 [features]
 default = []
-incluster = ["dep:tokio-rustls"]
+incluster = []
 
 [dependencies]
 mirrord-config = { path = "../config"}
@@ -35,7 +35,6 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tokio-retry = "0.3"
-tokio-rustls = { version = "0.25", optional = true }
 
 [dev-dependencies]
 base64 = "0.21"
