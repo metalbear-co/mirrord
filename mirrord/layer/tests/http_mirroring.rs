@@ -21,7 +21,6 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-#[flaky_test::flaky_test]
 async fn mirroring_with_http(
     #[values(
         Application::PythonFlaskHTTP,
@@ -38,7 +37,7 @@ async fn mirroring_with_http(
         .start_process_with_layer_and_port(
             dylib_path,
             vec![
-                ("RUST_LOG", "mirrord=trace"),
+                ("RUST_LOG", "mirrord=error"),
                 ("MIRRORD_FILE_MODE", "local"),
                 ("MIRRORD_UDP_OUTGOING", "false"),
                 ("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES"),
@@ -49,27 +48,37 @@ async fn mirroring_with_http(
 
     println!("Application subscribed to port, sending HTTP requests.");
 
+    fn prepare_request_body(method: &str, content: &str) -> String {
+        let content_headers = if content.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "content-type: text/plain; charset=utf-8\r\ncontent-length: {}\r\n",
+                content.len()
+            )
+        };
+
+        format!("{method} / HTTP/1.1\r\nhost: localhost\r\n{content_headers}\r\n{content}",)
+    }
+
+    intproxy
+        .send_connection_then_data(&prepare_request_body("GET", ""), application.get_app_port())
+        .await;
     intproxy
         .send_connection_then_data(
-            "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            &prepare_request_body("POST", "post-data"),
             application.get_app_port(),
         )
         .await;
     intproxy
         .send_connection_then_data(
-            "POST / HTTP/1.1\r\nHost: localhost\r\n\r\npost-data",
+            &prepare_request_body("PUT", "put-data"),
             application.get_app_port(),
         )
         .await;
     intproxy
         .send_connection_then_data(
-            "PUT / HTTP/1.1\r\nHost: localhost\r\n\r\nput-data",
-            application.get_app_port(),
-        )
-        .await;
-    intproxy
-        .send_connection_then_data(
-            "DELETE / HTTP/1.1\r\nHost: localhost\r\n\r\ndelete-data",
+            &prepare_request_body("DELETE", "delete-data"),
             application.get_app_port(),
         )
         .await;
