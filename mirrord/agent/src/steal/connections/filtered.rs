@@ -118,13 +118,10 @@ impl FilteringService {
     async fn send_request(
         to: SocketAddr,
         request: Request<Incoming>,
-    ) -> Option<Response<Incoming>> {
-        let tcp_stream = TcpStream::connect(to)
-            .await
-            .inspect_err(|error| {
-                tracing::error!(?error, "Failed connecting to request destination");
-            })
-            .ok()?;
+    ) -> Result<Response<Incoming>, Box<dyn std::error::Error>> {
+        let tcp_stream = TcpStream::connect(to).await.inspect_err(|error| {
+            tracing::error!(?error, address = %to, "Failed connecting to request destination");
+        })?;
 
         match request.version() {
             Version::HTTP_2 => {
@@ -136,8 +133,7 @@ impl FilteringService {
                                 ?error,
                                 "HTTP2 handshake with original destination failed"
                             )
-                        })
-                        .ok()?;
+                        })?;
 
                 // We need this to progress the connection forward (hyper thing).
                 tokio::spawn(async move {
@@ -146,7 +142,10 @@ impl FilteringService {
                     }
                 });
 
-                request_sender.send_request(request).await.ok()
+                request_sender
+                    .send_request(request)
+                    .await
+                    .map_err(Into::into)
             }
 
             _ => {
@@ -154,8 +153,7 @@ impl FilteringService {
                     .await
                     .inspect_err(|error| {
                         tracing::error!(?error, "HTTP1 handshake with original destination failed")
-                    })
-                    .ok()?;
+                    })?;
 
                 // We need this to progress the connection forward (hyper thing).
                 tokio::spawn(async move {
@@ -164,7 +162,10 @@ impl FilteringService {
                     }
                 });
 
-                request_sender.send_request(request).await.ok()
+                request_sender
+                    .send_request(request)
+                    .await
+                    .map_err(Into::into)
             }
         }
     }
@@ -172,6 +173,15 @@ impl FilteringService {
     /// Sends the given [`Request`] to the destination given as `to`. If the [`Response`] is
     /// [`StatusCode::SWITCHING_PROTOCOLS`], spawns a new [`tokio::task`] to await for the given
     /// [`OnUpgrade`].
+    #[tracing::instrument(
+        level = "trace",
+        name = "let_http_request_through",
+        skip(self, request, on_upgrade),
+        fields(
+            request_path = request.uri().path(),
+            request_headers = ?request.headers(),
+        )
+    )]
     async fn let_through(
         &self,
         request: Request<Incoming>,
@@ -182,7 +192,7 @@ impl FilteringService {
         let mut response = Self::send_request(to, request)
             .await
             .map(|response| response.map(BoxBody::new))
-            .unwrap_or_else(|| {
+            .unwrap_or_else(|_| {
                 Self::bad_gateway(
                     version,
                     "failed to pass the request to its original destination",
