@@ -225,7 +225,7 @@ impl HttpConnection {
             }
 
             Ok(mut res) => {
-                let mut upgrade = if res.status() == StatusCode::SWITCHING_PROTOCOLS {
+                let upgrade = if res.status() == StatusCode::SWITCHING_PROTOCOLS {
                     Some(hyper::upgrade::on(&mut res))
                 } else {
                     None
@@ -254,22 +254,25 @@ impl HttpConnection {
                     }
                 };
 
-                let response = result
+                Ok(result
+                    .map(|response| (response, upgrade))
                     .unwrap_or_else(|e| {
                         tracing::error!(
                             "Failed to read response to filtered http request: {e:?}. \
                             Please consider reporting this issue on \
                             https://github.com/metalbear-co/mirrord/issues/new?labels=bug&template=bug_report.yml"
                         );
-                        upgrade = None;
-                        HttpResponseFallback::response_from_request(
-                            request,
-                            StatusCode::BAD_GATEWAY,
-                            "mirrord",
-                        )
-                    });
 
-                Ok((response, upgrade))
+                        (
+                            HttpResponseFallback::response_from_request(
+                                request,
+                                StatusCode::BAD_GATEWAY,
+                                "mirrord",
+                            ),
+                            None,
+                        )
+                    })
+                )
             }
         }
     }
