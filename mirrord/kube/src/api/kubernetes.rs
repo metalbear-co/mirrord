@@ -117,13 +117,6 @@ impl KubernetesAPI {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
-pub struct AgentKubernetesConnectInfo {
-    pub pod_name: String,
-    pub agent_port: u16,
-    pub namespace: Option<String>,
-}
-
 impl AgentManagment for KubernetesAPI {
     type AgentRef = AgentKubernetesConnectInfo;
     type Err = KubeApiError;
@@ -264,6 +257,13 @@ impl AgentManagment for KubernetesAPI {
         info!("Created agent pod {agent_connect_info:?}");
         Ok(agent_connect_info)
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
+pub struct AgentKubernetesConnectInfo {
+    pub pod_name: String,
+    pub agent_port: u16,
+    pub namespace: Option<String>,
 }
 
 pub async fn create_kube_api<P>(
