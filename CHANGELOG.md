@@ -8,6 +8,30 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.92.1](https://github.com/metalbear-co/mirrord/tree/3.92.1) - 2024-03-17
+
+
+### Removed
+
+- Removed problematic DNS cache from internal proxy.
+
+
+### Fixed
+
+- Fixed a bug with handling hints passed to `getaddrinfo` function.
+
+
+### Internal
+
+- stealer to steal in incoming mode typo
+  [#docs-incoming-stealer](https://github.com/metalbear-co/mirrord/issues/docs-incoming-stealer)
+- Add `kuma-sidecar` `kuma-init` to default list of skipped containers. (no
+  need to target these containers)
+  [#skip-kuma-containers](https://github.com/metalbear-co/mirrord/issues/skip-kuma-containers)
+- Added a unit test to internal proxy DNS cache. Added more tracing to internal
+  proxy.
+
+
 ## [3.92.0](https://github.com/metalbear-co/mirrord/tree/3.92.0) - 2024-03-13
 
 
