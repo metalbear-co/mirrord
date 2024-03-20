@@ -688,11 +688,6 @@ mod steal {
     /// connection should be handled by the local app.
     ///
     /// We verify that the traffic is handled by the local app.
-    ///
-    /// # TODO
-    ///
-    /// Unignore when stealing upgraded connections is implemented
-    #[ignore]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
