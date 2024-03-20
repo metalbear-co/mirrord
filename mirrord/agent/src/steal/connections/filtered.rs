@@ -340,6 +340,9 @@ pub struct FilteredStealTask<T> {
     /// 1. `true` -> client is subscribed
     /// 2. `false` -> client has unsubscribed or we sent [`ConnectionMessageOut::Closed`].
     /// 3. `None` -> client does not know about this connection at all
+    ///
+    /// Used to send [`ConnectionMessageOut::Closed`] in [`Self::run`] when
+    /// [`Self::run_until_upgrade`] and [`Self::run_after_upgrade`] have finished.
     subscribed: HashMap<ClientId, bool>,
 
     /// For receiving [`Request`]s extracted by the [`FilteringService`].
@@ -587,38 +590,39 @@ where
         Ok(())
     }
 
-    /// Runs this task until the connection is closed.
-    /// Handles HTTP upgrades by transforming into an [`UnfilteredStealTask`].
+    /// Runs this task until the HTTP connection is closed or upgraded.
     ///
-    /// # Note
+    /// # Returns
     ///
-    /// Does not send [`ConnectionMessageOut::Closed`], leaving this up to wrapper method
-    /// [`Self::run`]. [`Self::run`] calls this method and then sends
-    /// [`ConnectionMessageOut::Closed`] based on state in [`Self::subscribed`].
-    async fn run_inner(
+    /// Returns raw data sent by stealer clients after all their HTTP responses (to catch the case
+    /// when the client starts sending data immediately after the `101 SWITCHING PROTOCOLS`).
+    async fn run_until_http_ends(
         &mut self,
         tx: Sender<ConnectionMessageOut>,
         rx: &mut Receiver<ConnectionMessageIn>,
-    ) -> Result<(), ConnectionTaskError> {
+    ) -> Result<HashMap<ClientId, Vec<Vec<u8>>>, ConnectionTaskError> {
         // Raw data that was received before we moved to the after-upgrade phase.
         // The stealer client might start sending raw bytes immediately after the `101 SWITCHING
         // PROTOCOLS` response.
-        let mut queued_raw_data: Vec<(Vec<u8>, ClientId)> = vec![];
+        let mut queued_raw_data: HashMap<ClientId, Vec<Vec<u8>>> = Default::default();
 
         loop {
             tokio::select! {
                 message = rx.recv() => match message.ok_or(ConnectionTaskError::RecvError)? {
                     ConnectionMessageIn::Raw { data, client_id } => {
                         tracing::trace!(client_id, connection_id = self.connection_id, "Received raw data");
-                        queued_raw_data.push((data, client_id));
+                        queued_raw_data.entry(client_id).or_default().push(data);
                     },
                     ConnectionMessageIn::Response { response, request_id, client_id } => {
+                        queued_raw_data.remove(&client_id);
                         self.handle_response(client_id, request_id, response);
                     },
                     ConnectionMessageIn::ResponseFailed { request_id, client_id } => {
+                        queued_raw_data.remove(&client_id);
                         self.handle_response_failure(client_id, request_id);
                     },
                     ConnectionMessageIn::Unsubscribed { client_id } => {
+                        queued_raw_data.remove(&client_id);
                         self.subscribed.insert(client_id, false);
                         self.blocked_requests.retain(|key, _| key.0 != client_id);
                     },
@@ -634,10 +638,21 @@ where
             }
         }
 
+        Ok(queued_raw_data)
+    }
+
+    /// Runs this task after the HTTP connection was closed or upgraded.
+    async fn run_after_http_ends(
+        &mut self,
+        mut queued_raw_data: HashMap<ClientId, Vec<Vec<u8>>>,
+        tx: Sender<ConnectionMessageOut>,
+        rx: &mut Receiver<ConnectionMessageIn>,
+    ) -> Result<(), ConnectionTaskError> {
         let (task_handle, _drop_guard) = self
             .hyper_conn_task
             .take()
             .expect("task handle is consumed only here");
+
         let Some(upgraded) = task_handle
             .await
             .map_err(|_| ConnectionTaskError::HttpConnectionTaskPanicked)?
@@ -661,10 +676,7 @@ where
                     "HTTP connection upgraded for client",
                 );
 
-                for (data, _) in queued_raw_data
-                    .into_iter()
-                    .filter(|(_, id)| *id == client_id)
-                {
+                for data in queued_raw_data.remove(&client_id).unwrap_or_default() {
                     http_client_io.write_all(&data).await?;
                 }
 
@@ -757,7 +769,12 @@ where
         tx: Sender<ConnectionMessageOut>,
         rx: &mut Receiver<ConnectionMessageIn>,
     ) -> Result<(), ConnectionTaskError> {
-        let res = self.run_inner(tx.clone(), rx).await;
+        let res = self.run_until_http_ends(tx.clone(), rx).await;
+
+        let res = match res {
+            Ok(data) => self.run_after_http_ends(data, tx.clone(), rx).await,
+            Err(e) => Err(e),
+        };
 
         for (client_id, subscribed) in self.subscribed {
             if subscribed {
