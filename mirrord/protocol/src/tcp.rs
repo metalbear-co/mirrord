@@ -446,10 +446,7 @@ impl HttpResponseFallback {
         }
     }
 
-    pub fn into_hyper<E>(self) -> Result<Response<BoxBody<Bytes, E>>, http::Error>
-    where
-        E: From<Infallible>,
-    {
+    pub fn into_hyper<E>(self) -> Result<Response<BoxBody<Bytes, E>>, http::Error> {
         match self {
             HttpResponseFallback::Framed(req) => req.internal_response.try_into(),
             HttpResponseFallback::Fallback(req) => req.internal_response.try_into(),
@@ -678,10 +675,7 @@ impl HttpResponse<Vec<u8>> {
     }
 }
 
-impl<E> TryFrom<InternalHttpResponse<InternalHttpBody>> for Response<BoxBody<Bytes, E>>
-where
-    E: From<Infallible>,
-{
+impl<E> TryFrom<InternalHttpResponse<InternalHttpBody>> for Response<BoxBody<Bytes, E>> {
     type Error = http::Error;
 
     fn try_from(value: InternalHttpResponse<InternalHttpBody>) -> Result<Self, Self::Error> {
@@ -697,14 +691,11 @@ where
             *h = headers;
         }
 
-        builder.body(BoxBody::new(body.map_err(|e| e.into())))
+        builder.body(BoxBody::new(body.map_err(|_| unreachable!())))
     }
 }
 
-impl<E> TryFrom<InternalHttpResponse<Vec<u8>>> for Response<BoxBody<Bytes, E>>
-where
-    E: From<Infallible>,
-{
+impl<E> TryFrom<InternalHttpResponse<Vec<u8>>> for Response<BoxBody<Bytes, E>> {
     type Error = http::Error;
 
     fn try_from(value: InternalHttpResponse<Vec<u8>>) -> Result<Self, Self::Error> {
@@ -721,7 +712,7 @@ where
         }
 
         builder.body(BoxBody::new(
-            Full::new(Bytes::from(body)).map_err(|e| e.into()),
+            Full::new(Bytes::from(body)).map_err(|_| unreachable!()),
         ))
     }
 }
