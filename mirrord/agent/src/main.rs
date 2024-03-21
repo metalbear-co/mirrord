@@ -28,7 +28,7 @@ use tokio::{
     task::JoinSet,
     time::{timeout, Duration},
 };
-use tokio_rustls::{rustls, TlsConnector};
+use tokio_rustls::{rustls::ClientConfig, TlsConnector};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
@@ -69,6 +69,7 @@ mod outgoing;
 mod runtime;
 mod sniffer;
 mod steal;
+mod tls_verifier;
 mod util;
 mod watched_task;
 
@@ -95,17 +96,16 @@ struct State {
 impl State {
     /// Return [`Err`] if container runtime operations failed.
     pub async fn new(args: &Args, watch: drain::Watch) -> Result<State> {
-        let tls_connector = if args.use_tls {
-            let mut root_store = rustls::RootCertStore::empty();
-            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-            let config = rustls::ClientConfig::builder()
-                .with_root_certificates(root_store)
-                .with_no_client_auth();
-
-            Some(TlsConnector::from(Arc::new(config)))
-        } else {
-            None
-        };
+        let tls_connector = args.use_tls.then(|| {
+            TlsConnector::from(Arc::new(
+                ClientConfig::builder()
+                    .dangerous()
+                    .with_custom_certificate_verifier(Arc::new(
+                        tls_verifier::NoopVerifier::default(),
+                    ))
+                    .with_no_client_auth(),
+            ))
+        });
 
         let mut env: HashMap<String, String> = HashMap::new();
 
