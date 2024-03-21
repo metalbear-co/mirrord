@@ -100,9 +100,7 @@ impl State {
             TlsConnector::from(Arc::new(
                 ClientConfig::builder()
                     .dangerous()
-                    .with_custom_certificate_verifier(Arc::new(
-                        tls_verifier::NoopVerifier::default(),
-                    ))
+                    .with_custom_certificate_verifier(Arc::new(tls_verifier::NoopVerifier))
                     .with_no_client_auth(),
             ))
         });
