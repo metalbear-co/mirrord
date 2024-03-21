@@ -146,7 +146,7 @@ pub(crate) enum CliError {
 
     #[error("Initial communication with the agent failed. {0}")]
     #[diagnostic(help(
-        "Please make sure the agent is running and the logs are not showing any errors.{GENERAL_HELP}"
+        "Please check agent status and logs.{GENERAL_HELP}"
     ))]
     InitialCommFailed(String),
 
