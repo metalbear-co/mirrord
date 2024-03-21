@@ -36,7 +36,7 @@ use crate::{
             targetless::Targetless,
             ContainerApi, ContainerParams,
         },
-        runtime::RuntimeDataProvider,
+        runtime::{RuntimeData, RuntimeDataProvider},
         wrap_raw_connection, AgentManagment,
     },
     error::{KubeApiError, Result},
@@ -114,6 +114,46 @@ impl KubernetesAPI {
             );
         }
         Ok(())
+    }
+
+    pub async fn create_agent_params<P>(
+        &self,
+        progress: &mut P,
+        config: Option<&LayerConfig>,
+    ) -> Result<(Option<RuntimeData>, ContainerParams)>
+    where
+        P: Progress + Send + Sync,
+    {
+        let runtime_data = if let Some(ref path) = self.target.path
+            && !matches!(path, mirrord_config::target::Target::Targetless)
+        {
+            let runtime_data = path
+                .runtime_data(&self.client, self.target.namespace.as_deref())
+                .await?;
+
+            Some(runtime_data)
+        } else {
+            None
+        };
+
+        let incoming_mode = config
+            .map(|config| config.feature.network.incoming.mode)
+            .unwrap_or_default();
+
+        let is_mesh = runtime_data
+            .as_ref()
+            .map(|runtime| runtime.mesh.is_some())
+            .unwrap_or_default();
+
+        if self
+            .detect_mesh_mirror_mode(progress, incoming_mode, is_mesh)
+            .await
+            .is_err()
+        {
+            progress.warning("couldn't determine mesh / sidecar with mirror mode");
+        }
+
+        Ok((runtime_data, ContainerParams::new()))
     }
 }
 
@@ -193,36 +233,7 @@ impl AgentManagment for KubernetesAPI {
     where
         P: Progress + Send + Sync,
     {
-        let runtime_data = if let Some(ref path) = self.target.path
-            && !matches!(path, mirrord_config::target::Target::Targetless)
-        {
-            let runtime_data = path
-                .runtime_data(&self.client, self.target.namespace.as_deref())
-                .await?;
-
-            Some(runtime_data)
-        } else {
-            None
-        };
-
-        let incoming_mode = config
-            .map(|config| config.feature.network.incoming.mode)
-            .unwrap_or_default();
-
-        let is_mesh = runtime_data
-            .as_ref()
-            .map(|runtime| runtime.mesh.is_some())
-            .unwrap_or_default();
-
-        if self
-            .detect_mesh_mirror_mode(progress, incoming_mode, is_mesh)
-            .await
-            .is_err()
-        {
-            progress.warning("couldn't determine mesh / sidecar with mirror mode");
-        }
-
-        let params = ContainerParams::new();
+        let (runtime_data, params) = self.create_agent_params(progress, config).await?;
 
         info!("Spawning new agent.");
 
