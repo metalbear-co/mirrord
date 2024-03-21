@@ -12,7 +12,7 @@ use crate::error::Result;
 
 pub mod container;
 pub mod kubernetes;
-mod runtime;
+pub mod runtime;
 
 const CONNECTION_CHANNEL_SIZE: usize = 1000;
 
