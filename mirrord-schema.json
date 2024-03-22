@@ -541,6 +541,18 @@
               "type": "null"
             }
           ]
+        },
+        "split_queues": {
+          "title": "feature.split_queues {#feature-split_queues}",
+          "description": "Define filters to split queues by, and make your local application consume only messages that match those filters.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SplitQueuesConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -1002,6 +1014,32 @@
         }
       ]
     },
+    "QueueFilter": {
+      "description": "More queue types might be added in the future.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "message_filter",
+            "queue_type"
+          ],
+          "properties": {
+            "message_filter": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "enum": [
+                "SQS"
+              ]
+            }
+          }
+        }
+      ]
+    },
     "RolloutTarget": {
       "description": "<!--${internal}--> Mirror the rollout specified by [`RolloutTarget::rollout`].",
       "type": "object",
@@ -1021,6 +1059,13 @@
         }
       },
       "additionalProperties": false
+    },
+    "SplitQueuesConfig": {
+      "description": "```json { \"feature\": { \"split_queues\": { \"first-queue\": { \"queue_type\": \"SQS\", \"message_filter\": { \"wows\": \"so wows\", \"coolz\": \"^very .*\" } }, \"second-queue\": { \"queue_type\": \"SomeFutureQueueType\", \"message_filter\": { \"wows\": \"so wows\", \"coolz\": \"^very .*\" } }, } } } ```",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/QueueFilter"
+      }
     },
     "Target": {
       "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `podname/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`.",

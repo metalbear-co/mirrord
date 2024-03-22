@@ -1,10 +1,22 @@
+use std::{
+    collections::HashMap,
+    fmt::{Display, Formatter},
+};
+
 use chrono::NaiveDate;
+use k8s_openapi::api::core::v1::PodTemplateSpec;
 use kube::CustomResource;
-use mirrord_config::target::{Target, TargetConfig};
+pub use mirrord_config::feature::split_queues::QueueId;
+use mirrord_config::{
+    feature::split_queues::SqsMessageFilter,
+    target::{Target, TargetConfig},
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use mirrord_config::target::{DeploymentTarget, RolloutTarget};
 
 use self::label_selector::LabelSelector;
+use crate::client::OperatorApiError;
 
 pub mod label_selector;
 
@@ -12,11 +24,11 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-    group = "operator.metalbear.co",
-    version = "v1",
-    kind = "Target",
-    root = "TargetCrd",
-    namespaced
+group = "operator.metalbear.co",
+version = "v1",
+kind = "Target",
+root = "TargetCrd",
+namespaced
 )]
 pub struct TargetSpec {
     /// None when targetless.
@@ -80,19 +92,108 @@ pub static OPERATOR_STATUS_NAME: &str = "operator";
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-    group = "operator.metalbear.co",
-    version = "v1",
-    kind = "MirrordOperator",
-    root = "MirrordOperatorCrd",
-    status = "MirrordOperatorStatus"
+group = "operator.metalbear.co",
+version = "v1",
+kind = "MirrordOperator",
+root = "MirrordOperatorCrd",
+status = "MirrordOperatorStatus"
 )]
 pub struct MirrordOperatorSpec {
     pub operator_version: String,
     pub default_namespace: String,
-    pub features: Option<Vec<OperatorFeatures>>,
+    /// Should be removed when we can stop supporting compatibility with versions from before the
+    /// `supported_features` field was added.
+    /// "Breaking" that compatibility by removing this field and then running with one old (from
+    /// before the `supported_features` field) side (client or operator) would make the client
+    /// think `ProxyApi` is not supported even if it is.
+    #[deprecated(note = "use supported_features instead")]
+    features: Option<Vec<OperatorFeatures>>,
+    /// Replaces both `features` and `copy_target_enabled`. Operator versions that use a version
+    /// of this code that has both this and the old fields are expected to populate this field with
+    /// the full set of features they support, and the old fields with their limited info they
+    /// support, for old clients.
+    ///
+    /// Access this info only via `supported_features()`.
+    /// Optional for backwards compatibility (new clients can talk to old operators that don't send
+    /// this field).
+    supported_features: Option<Vec<NewOperatorFeature>>,
     pub license: LicenseInfoOwned,
     pub protocol_version: Option<String>,
-    pub copy_target_enabled: Option<bool>,
+    /// Should be removed when we can stop supporting compatibility with versions from before the
+    /// `supported_features` field was added.
+    /// "Breaking" that compatibility by removing this field and then running with one old (from
+    /// before the `supported_features` field) side (client or operator) would make the client
+    /// think copy target is not enabled even if it is.
+    /// Optional for backwards compatibility (new clients can talk to old operators that don't send
+    /// this field).
+    #[deprecated(note = "use supported_features instead")]
+    copy_target_enabled: Option<bool>,
+}
+
+impl MirrordOperatorSpec {
+    pub fn new(
+        operator_version: String,
+        default_namespace: String,
+        supported_features: Vec<NewOperatorFeature>,
+        license: LicenseInfoOwned,
+        protocol_version: Option<String>,
+    ) -> Self {
+        let features = supported_features
+            .contains(&NewOperatorFeature::ProxyApi)
+            .then(|| vec![OperatorFeatures::ProxyApi]);
+        let copy_target_enabled =
+            Some(supported_features.contains(&NewOperatorFeature::CopyTarget));
+        #[allow(deprecated)] // deprecated objects must still be included in construction.
+        Self {
+            operator_version,
+            default_namespace,
+            supported_features: Some(supported_features),
+            license,
+            protocol_version,
+            features,
+            copy_target_enabled,
+        }
+    }
+
+    /// Get a vector with the features the operator supports.
+    /// Handles objects sent from old and new operators.
+    // When the deprecated fields are removed, this can be changed to just return
+    // `self.supported_features.unwrap_or_default()`.
+    pub fn supported_features(&self) -> Vec<NewOperatorFeature> {
+        self.supported_features
+            .clone()
+            // if supported_features was sent, just use that. If not we are dealing with an older
+            // operator, so we build a vector of new features from the old fields.
+            .or_else(|| {
+                // object was sent by an old operator that still uses fields that are now deprecated
+                #[allow(deprecated)]
+                self.features.as_ref().map(|features| {
+                    features
+                        .iter()
+                        .map(From::from)
+                        .chain(
+                            self.copy_target_enabled.and_then(|enabled| {
+                                enabled.then_some(NewOperatorFeature::CopyTarget)
+                            }),
+                        )
+                        .collect()
+                })
+            })
+            // Convert `None` to empty vector since we don't expect this to often be
+            // `None` (although it's ok if it is) and that way the return type is simpler.
+            .unwrap_or_default()
+    }
+
+    pub fn require_feature(&self, feature: NewOperatorFeature) -> Result<(), OperatorApiError> {
+        if self.supported_features().contains(&feature) {
+            Ok(())
+        } else {
+            Err(OperatorApiError::UnsupportedFeature {
+                feature,
+                operator_version: self.operator_version.clone(),
+            })
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -133,10 +234,10 @@ pub struct Session {
 /// the operator.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-    group = "operator.metalbear.co",
-    version = "v1",
-    kind = "Session",
-    root = "SessionCrd"
+group = "operator.metalbear.co",
+version = "v1",
+kind = "Session",
+root = "SessionCrd"
 )]
 pub struct SessionSpec;
 
@@ -151,20 +252,59 @@ pub struct LicenseInfoOwned {
     pub subscription_id: Option<String>,
 }
 
+/// Since this enum does not have a variant marked with `#[serde(other)]`, and is present like that
+/// in released clients, existing clients would fail to parse any new variant. This means the
+/// operator can never send anything but the one existing variant, otherwise the client will error
+/// out.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub enum OperatorFeatures {
     ProxyApi,
+    // DON'T ADD VARIANTS - old clients won't be able to deserialize them.
+    // Add new features in NewOperatorFeature
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub enum NewOperatorFeature {
+    ProxyApi,
+    CopyTarget,
+    Sqs,
+    SessionManagement,
+    /// This variant is what a client sees when the operator includes a feature the client is not
+    /// yet aware of, because it was introduced in a version newer than the client's.
+    #[serde(other)]
+    FeatureFromTheFuture,
+}
+
+impl Display for NewOperatorFeature {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            NewOperatorFeature::ProxyApi => "proxy API",
+            NewOperatorFeature::CopyTarget => "copy target",
+            NewOperatorFeature::Sqs => "SQS queue splitting",
+            NewOperatorFeature::FeatureFromTheFuture => "unknown feature",
+            NewOperatorFeature::SessionManagement => "session management",
+        };
+        f.write_str(name)
+    }
+}
+
+impl From<&OperatorFeatures> for NewOperatorFeature {
+    fn from(old_feature: &OperatorFeatures) -> Self {
+        match old_feature {
+            OperatorFeatures::ProxyApi => NewOperatorFeature::ProxyApi,
+        }
+    }
 }
 
 /// This [`Resource`](kube::Resource) represents a copy pod created from an existing [`Target`]
 /// (operator's copy pod feature).
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-    group = "operator.metalbear.co",
-    version = "v1",
-    kind = "CopyTarget",
-    root = "CopyTargetCrd",
-    namespaced
+group = "operator.metalbear.co",
+version = "v1",
+kind = "CopyTarget",
+root = "CopyTargetCrd",
+namespaced
 )]
 pub struct CopyTargetSpec {
     /// Original target. Only [`Target::Pod`] and [`Target::Deployment`] are accepted.
@@ -175,6 +315,8 @@ pub struct CopyTargetSpec {
     /// Should the operator scale down target deployment to 0 while this pod is alive.
     /// Ignored if [`Target`] is not [`Target::Deployment`].
     pub scale_down: bool,
+    /// queue id -> (attribute name -> regex)
+    pub sqs_filter: Option<HashMap<QueueId, SqsMessageFilter>>,
 }
 
 /// Features and operations that can be blocked by a `MirrordPolicy`.
@@ -191,11 +333,11 @@ pub enum BlockedFeature {
 /// Custom resource for policies that limit what mirrord features users can use.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-    // The operator group is handled by the operator, we want policies to be handled by k8s.
-    group = "policies.mirrord.metalbear.co",
-    version = "v1alpha",
-    kind = "MirrordPolicy",
-    namespaced
+// The operator group is handled by the operator, we want policies to be handled by k8s.
+group = "policies.mirrord.metalbear.co",
+version = "v1alpha",
+kind = "MirrordPolicy",
+namespaced
 )]
 #[serde(rename_all = "camelCase")] // target_path -> targetPath in yaml.
 pub struct MirrordPolicySpec {
@@ -212,4 +354,98 @@ pub struct MirrordPolicySpec {
     // TODO: make the k8s list type be set/map to prevent duplicates.
     /// List of features and operations blocked by this policy.
     pub block: Vec<BlockedFeature>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")] // queue_name_key -> queueNameKey in yaml.
+pub struct ConfigMapQueueNameSource {
+    /// The name of the config map that holds the name of the queue we want to split.
+    pub name: String,
+
+    /// The name of the key in the config map that holds the name of the queue we want to
+    /// split.
+    pub queue_name_key: String,
+}
+
+/// Set where the application reads the name of the queue from, so that mirrord can find that queue,
+/// split it, and temporarily change the name there to the name of the branch queue when splitting.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")] // ConfigMap -> configMap in yaml.
+pub enum QueueNameSource {
+    ConfigMap(ConfigMapQueueNameSource),
+    EnvVar(String),
+}
+
+pub type OutputQueueName = String;
+
+/// The details of a queue that should be split.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(tag = "queueType")]
+pub enum SplitQueue {
+    /// Amazon SQS
+    ///
+    /// Where the application gets the queue name from. Will be used to read messages from that
+    /// queue and distribute them to the output queues. When running with mirrord and splitting
+    /// this queue, applications will get a modified name from that source.
+    #[serde(rename = "SQS")]
+    Sqs(QueueNameSource),
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")] // Deployment -> deployment in yaml.
+pub enum QueueConsumer {
+    Deployment(String),
+    Rollout(String),
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct QueueSplitterStatus {
+    // TODO: ?
+    pub active: bool,
+}
+
+/// Defines a Custom Resource that holds a central configuration for splitting a queue. mirrord
+/// users specify a splitter by name in their configuration. mirrord then starts splitting according
+/// to the spec and the user's filter.
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+group = "splitters.mirrord.metalbear.co",
+version = "v1alpha",
+kind = "MirrordQueueSplitter",
+shortname = "qs",
+status = "QueueSplitterStatus",
+namespaced
+)]
+pub struct MirrordQueueSplitterSpec {
+    /// A map of the queues that should be split.
+    /// The key is used by users to associate filters to the right queues.
+    pub queues: HashMap<QueueId, SplitQueue>,
+
+    /// The resource (deployment or Argo rollout) that reads from the queues.
+    pub consumer: QueueConsumer,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename = "SQSFilterStatus")]
+pub enum SqsSessionStatus {
+    #[serde(default)]
+    Requested,
+    Started(PodTemplateSpec),
+}
+
+// TODO: docs
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+group = "splitters.mirrord.metalbear.co",
+version = "v1alpha",
+kind = "MirrordSQSSession",
+root = "MirrordSqsSession", // for Rust naming conventions (Sqs, not SQS)
+status = "SqsSessionStatus",
+namespaced
+)]
+#[serde(rename_all = "camelCase")] // queue_filters -> queueFilters
+pub struct MirrordSqsSessionSpec {
+    pub queue_filters: HashMap<QueueId, SqsMessageFilter>,
+    pub queue_consumer: QueueConsumer,
+    pub session_id: u64,
 }
