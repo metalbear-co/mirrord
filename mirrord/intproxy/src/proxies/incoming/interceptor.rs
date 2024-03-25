@@ -392,6 +392,9 @@ impl RawConnection {
                         tracing::trace!("message bus closed, waiting 1 second before exiting");
                         remote_closed = true;
                     },
+                    Some(MessageIn::Raw(data)) if data.is_empty() => {
+                        self.stream.shutdown().await?;
+                    },
                     Some(MessageIn::Raw(data)) => {
                         self.stream.write_all(&data).await?;
                     }

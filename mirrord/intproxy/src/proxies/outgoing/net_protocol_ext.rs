@@ -243,4 +243,12 @@ impl ConnectedSocket {
             }
         }
     }
+
+    pub async fn shutdown(&mut self) -> io::Result<()> {
+        match &mut self.inner {
+            InnerConnectedSocket::TcpStream(stream) => stream.shutdown().await,
+            InnerConnectedSocket::UnixStream(stream) => stream.shutdown().await,
+            InnerConnectedSocket::UdpSocket(..) => Ok(()),
+        }
+    }
 }

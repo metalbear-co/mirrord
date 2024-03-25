@@ -59,6 +59,9 @@ impl BackgroundTask for Interceptor {
                 },
 
                 bytes = message_bus.recv() => match bytes {
+                    Some(bytes) if bytes.is_empty() => {
+                        connected_socket.shutdown().await?;
+                    },
                     Some(bytes) => connected_socket.send(&bytes).await?,
                     None => break Ok(()),
                 },
