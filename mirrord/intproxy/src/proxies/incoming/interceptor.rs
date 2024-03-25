@@ -359,6 +359,11 @@ struct RawConnection {
 
 impl RawConnection {
     /// Proxies raw TCP data until the [`MessageBus`] closes.
+    ///
+    /// # Note
+    ///
+    /// When the peer shuts down writing, a single 0-sized read is sent through
+    /// the [`MessageBus`]. This is to notify the agent about the shutdown condition.
     async fn run(mut self, message_bus: &mut MessageBus<Interceptor>) -> InterceptorResult<()> {
         let mut buf = BytesMut::with_capacity(64 * 1024);
         let mut remote_closed = false;
@@ -372,6 +377,8 @@ impl RawConnection {
                     Err(e) if e.kind() == ErrorKind::WouldBlock => {},
                     Err(e) => break Err(e.into()),
                     Ok(0) => {
+                        tracing::trace!("layer shut down writing, sending a 0-sized read to inform the agent");
+                        message_bus.send(MessageOut::Raw(vec![])).await;
                         reading_closed = true;
                     }
                     Ok(..) => {
