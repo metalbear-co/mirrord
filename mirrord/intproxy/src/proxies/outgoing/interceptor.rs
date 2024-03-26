@@ -62,18 +62,20 @@ impl BackgroundTask for Interceptor {
                     },
                 },
 
-                Some(bytes) = message_bus.recv() => {
-                    if bytes.is_empty() {
-                        tracing::trace!("outgoing interceptor -> agent shutdown, shutting down connection with layer");
-                        connected_socket.shutdown().await?;
-                    } else {
-                        connected_socket.send(&bytes).await?;
+                msg = message_bus.recv() => match msg {
+                    Some(bytes) => {
+                        if bytes.is_empty() {
+                            tracing::trace!("outgoing interceptor -> agent shutdown, shutting down connection with layer");
+                            connected_socket.shutdown().await?;
+                        } else {
+                            connected_socket.send(&bytes).await?;
+                        }
                     }
-                },
 
-                else => {
-                    tracing::trace!("outgoing interceptor -> no more messages from the agent, exiting");
-                    break Ok(())
+                    None => {
+                        tracing::trace!("outgoing interceptor -> no more messages from the agent, exiting");
+                        break Ok(())
+                    }
                 },
             }
         }
