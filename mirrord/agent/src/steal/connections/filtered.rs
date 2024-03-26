@@ -1455,6 +1455,17 @@ mod test {
                     }
                     other => unreachable!("unexpected message: {other:?}"),
                 }
+
+                match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::Raw {
+                        client_id: 1,
+                        connection_id: TestSetup::CONNECTION_ID,
+                        data,
+                    } => {
+                        assert!(data.is_empty());
+                    }
+                    other => unreachable!("unexpected message: {other:?}"),
+                }
             }
         );
 
