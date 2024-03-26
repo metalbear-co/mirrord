@@ -280,7 +280,7 @@ impl<R: PortRedirector> PortSubscriptions<R> {
 }
 
 /// Steal subscription for a port.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PortSubscription {
     /// No filter, incoming connections are stolen whole on behalf of the client.
     ///
@@ -405,7 +405,7 @@ mod test {
     }
 
     fn dummy_filter() -> HttpFilter {
-        HttpFilter::new_header_filter(".*".parse().unwrap())
+        HttpFilter::Header(".*".parse().unwrap())
     }
 
     #[tokio::test]

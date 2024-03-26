@@ -14,14 +14,9 @@ pub use common::*;
 /// the layer, send HTTP requests and verify in the server output that the application received
 /// them. Tests the layer's communication with the agent, the bind hook, and the forwarding of
 /// mirrored traffic to the application.
-///
-/// NOTE: Flask, FastAPI mirroring tests are flaky and have been decorated with the flaky_test
-/// macro. Some speculation is that it is because of lack of mid session mirroring. flaky_test can
-/// be removed once https://github.com/metalbear-co/mirrord/pull/1887 is merged.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-#[flaky_test::flaky_test]
 async fn mirroring_with_http(
     #[values(
         Application::PythonFlaskHTTP,
@@ -49,27 +44,37 @@ async fn mirroring_with_http(
 
     println!("Application subscribed to port, sending HTTP requests.");
 
+    fn prepare_request_body(method: &str, content: &str) -> String {
+        let content_headers = if content.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "content-type: text/plain; charset=utf-8\r\ncontent-length: {}\r\n",
+                content.len()
+            )
+        };
+
+        format!("{method} / HTTP/1.1\r\nhost: localhost\r\n{content_headers}\r\n{content}",)
+    }
+
+    intproxy
+        .send_connection_then_data(&prepare_request_body("GET", ""), application.get_app_port())
+        .await;
     intproxy
         .send_connection_then_data(
-            "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            &prepare_request_body("POST", "post-data"),
             application.get_app_port(),
         )
         .await;
     intproxy
         .send_connection_then_data(
-            "POST / HTTP/1.1\r\nHost: localhost\r\n\r\npost-data",
+            &prepare_request_body("PUT", "put-data"),
             application.get_app_port(),
         )
         .await;
     intproxy
         .send_connection_then_data(
-            "PUT / HTTP/1.1\r\nHost: localhost\r\n\r\nput-data",
-            application.get_app_port(),
-        )
-        .await;
-    intproxy
-        .send_connection_then_data(
-            "DELETE / HTTP/1.1\r\nHost: localhost\r\n\r\ndelete-data",
+            &prepare_request_body("DELETE", "delete-data"),
             application.get_app_port(),
         )
         .await;

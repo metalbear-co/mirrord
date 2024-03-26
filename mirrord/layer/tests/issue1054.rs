@@ -34,10 +34,9 @@ async fn test_issue1054(
 
     println!("Application subscribed to port, sending tcp messages.");
 
-    let new_connection_id = intproxy
-        .send_new_connection(application.get_app_port())
+    intproxy
+        .send_connection_then_data("hello", application.get_app_port())
         .await;
-    intproxy.send_close(new_connection_id).await;
 
     test_process.wait_assert_success().await;
     test_process

@@ -48,7 +48,6 @@ hyper-util.workspace = true
 httparse = "1"
 fancy-regex = { workspace = true }
 dashmap = { version = "5" }
-pin-project = "1"
 oci-spec = "0.6.0"
 async-trait = "0.1"
 tonic = "0.9"
