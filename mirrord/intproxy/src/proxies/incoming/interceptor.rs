@@ -116,7 +116,13 @@ impl BackgroundTask for Interceptor {
         let request = tokio::select! {
             message = message_bus.recv() => match message {
                 Some(MessageIn::Raw(data)) => {
-                    stream.write_all(&data).await?;
+                    if data.is_empty() {
+                        tracing::trace!("incoming interceptor -> agent shutdown, shutting down connection with layer");
+                        stream.shutdown().await?;
+                    } else {
+                        stream.write_all(&data).await?;
+                    }
+
                     return RawConnection { stream }.run(message_bus).await;
                 }
                 Some(MessageIn::Http(request)) => request,
@@ -360,14 +366,20 @@ struct RawConnection {
 impl RawConnection {
     /// Proxies raw TCP data until the [`MessageBus`] closes.
     ///
-    /// # Note
+    /// # Notes
     ///
-    /// When the peer shuts down writing, a single 0-sized read is sent through
-    /// the [`MessageBus`]. This is to notify the agent about the shutdown condition.
+    /// 1. When the peer shuts down writing, a single 0-sized read is sent through the
+    ///    [`MessageBus`]. This is to notify the agent about the shutdown condition.
+    ///
+    /// 2. A 0-sized read received from the [`MessageBus`] is treated as a shutdown on the agent
+    ///    side. Connection with the peer is shut down as well.
+    ///
+    /// 3. This implementation exits only when an error is encountered or the [`MessageBus`] is
+    ///    closed.
     async fn run(mut self, message_bus: &mut MessageBus<Interceptor>) -> InterceptorResult<()> {
         let mut buf = BytesMut::with_capacity(64 * 1024);
-        let mut remote_closed = false;
         let mut reading_closed = false;
+        let mut remote_closed = false;
 
         loop {
             tokio::select! {
@@ -376,12 +388,11 @@ impl RawConnection {
                 res = self.stream.read_buf(&mut buf), if !reading_closed => match res {
                     Err(e) if e.kind() == ErrorKind::WouldBlock => {},
                     Err(e) => break Err(e.into()),
-                    Ok(0) => {
-                        tracing::trace!("layer shut down writing, sending a 0-sized read to inform the agent");
-                        message_bus.send(MessageOut::Raw(vec![])).await;
-                        reading_closed = true;
-                    }
                     Ok(..) => {
+                        if buf.is_empty() {
+                            tracing::trace!("incoming interceptor -> layer shutdown, sending a 0-sized read to inform the agent");
+                            reading_closed = true;
+                        }
                         message_bus.send(MessageOut::Raw(buf.to_vec())).await;
                         buf.clear();
                     }
@@ -389,20 +400,22 @@ impl RawConnection {
 
                 msg = message_bus.recv(), if !remote_closed => match msg {
                     None => {
-                        tracing::trace!("message bus closed, waiting 1 second before exiting");
+                        tracing::trace!("incoming interceptor -> message bus closed, waiting 1 second before exiting");
                         remote_closed = true;
                     },
-                    Some(MessageIn::Raw(data)) if data.is_empty() => {
-                        self.stream.shutdown().await?;
-                    },
                     Some(MessageIn::Raw(data)) => {
-                        self.stream.write_all(&data).await?;
-                    }
+                        if data.is_empty() {
+                            tracing::trace!("incoming interceptor -> agent shutdown, shutting down connection with layer");
+                            self.stream.shutdown().await?;
+                        } else {
+                            self.stream.write_all(&data).await?;
+                        }
+                    },
                     Some(MessageIn::Http(..)) => break Err(InterceptorError::UnexpectedHttpRequest),
                 },
 
                 _ = time::sleep(Duration::from_secs(1)), if remote_closed => {
-                    tracing::trace!("layer silent for 1 second and message bus is closed, exiting");
+                    tracing::trace!("incoming interceptor -> layer silent for 1 second and message bus is closed, exiting");
 
                     break Ok(());
                 },

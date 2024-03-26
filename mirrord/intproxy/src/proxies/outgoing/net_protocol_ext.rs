@@ -244,6 +244,11 @@ impl ConnectedSocket {
         }
     }
 
+    /// Shuts the connection down. See [`AsyncWriteExt::shutdown`].
+    ///
+    /// # Note
+    ///
+    /// This is a no-op for UDP sockets.
     pub async fn shutdown(&mut self) -> io::Result<()> {
         match &mut self.inner {
             InnerConnectedSocket::TcpStream(stream) => stream.shutdown().await,
