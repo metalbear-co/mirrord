@@ -677,7 +677,11 @@ where
                 );
 
                 for data in queued_raw_data.remove(&client_id).unwrap_or_default() {
-                    http_client_io.write_all(&data).await?;
+                    if data.is_empty() {
+                        http_client_io.shutdown().await?;
+                    } else {
+                        http_client_io.write_all(&data).await?;
+                    }
                 }
 
                 for (id, subscribed) in self.subscribed.iter_mut() {
