@@ -433,7 +433,7 @@ enum ProgressMessage {
     Info {
         message: String,
     },
-    /// Messages that are passed to the IDE and are not meant to be shown to the user.
+    /// Messages that are passed to the IDE and shown to the user in notification boxes.
     IdeMessage {
         /// It's a generic json [`Value`].
         ///
