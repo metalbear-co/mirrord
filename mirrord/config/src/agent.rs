@@ -6,7 +6,10 @@ use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::config::{source::MirrordConfigSource, ConfigError};
+use crate::config::{
+    self, from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError,
+    FromMirrordConfig, MirrordConfig,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -97,8 +100,8 @@ pub struct AgentConfig {
     ///   }
     /// }
     /// ```
-    #[config(env = "MIRRORD_AGENT_IMAGE")]
-    pub image: Option<String>,
+    #[config(nested)]
+    pub image: AgentImageConfig,
 
     /// ### agent.image_pull_policy {#agent-image_pull_policy}
     ///
@@ -270,9 +273,88 @@ pub struct AgentConfig {
     pub test_error: bool,
 }
 
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct AgentImageConfig(pub String);
+
+impl Default for AgentImageConfig {
+    fn default() -> Self {
+        Self(format!(
+            "{DEFAULT_AGENT_IMAGE_REGISTRY}:{}",
+            env!("CARGO_PKG_VERSION")
+        ))
+    }
+}
+
+#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
+#[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
+pub enum AgentImageFileConfig {
+    Simple(Option<String>),
+    Advanced {
+        registry: Option<String>,
+        tag: Option<String>,
+    },
+}
+
+impl Default for AgentImageFileConfig {
+    fn default() -> Self {
+        Self::Simple(None)
+    }
+}
+
+impl FromMirrordConfig for AgentImageConfig {
+    type Generator = AgentImageFileConfig;
+}
+
+const DEFAULT_AGENT_IMAGE_REGISTRY: &str = "ghcr.io/metalbear-co/mirrord";
+
+impl AgentImageFileConfig {
+    fn get_image_from_env(context: &mut ConfigContext) -> config::Result<Option<String>> {
+        FromEnv::new("MIRRORD_AGENT_IMAGE")
+            .source_value(context)
+            .transpose()
+    }
+}
+
+impl MirrordConfig for AgentImageFileConfig {
+    type Generated = AgentImageConfig;
+
+    fn generate_config(self, context: &mut ConfigContext) -> config::Result<Self::Generated> {
+        let agent_image = match self {
+            AgentImageFileConfig::Simple(registry_and_tag) => {
+                registry_and_tag.unwrap_or_else(|| {
+                    format!(
+                        "{DEFAULT_AGENT_IMAGE_REGISTRY}:{}",
+                        env!("CARGO_PKG_VERSION")
+                    )
+                })
+            }
+            AgentImageFileConfig::Advanced { registry, tag } => {
+                format!(
+                    "{}:{}",
+                    registry.unwrap_or_else(|| DEFAULT_AGENT_IMAGE_REGISTRY.to_string()),
+                    tag.unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string()),
+                )
+            }
+        };
+
+        // Env overrides configuration if both there.
+        let agent_image = Self::get_image_from_env(context)?.unwrap_or(agent_image);
+
+        Ok(AgentImageConfig(agent_image))
+    }
+}
+
 impl CollectAnalytics for &AgentConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("ephemeral", self.ephemeral);
+    }
+}
+
+impl AgentConfig {
+    pub fn image(&self) -> &str {
+        &self.image.0
     }
 }
 
@@ -307,7 +389,8 @@ mod tests {
     fn default(
         #[values((None, "info"), (Some("trace"), "trace"))] log_level: (Option<&str>, &str),
         #[values((None, None), (Some("app"), Some("app")))] namespace: (Option<&str>, Option<&str>),
-        #[values((None, None), (Some("test"), Some("test")))] image: (Option<&str>, Option<&str>),
+        #[values((None, None), (Some(AgentImageConfig("test".to_string())), Some(AgentImageConfig("test".to_string()))))]
+        image: (Option<AgentImageConfig>, Option<AgentImageConfig>),
         #[values((None, "IfNotPresent"), (Some("Always"), "Always"))] image_pull_policy: (
             Option<&str>,
             &str,
@@ -320,11 +403,16 @@ mod tests {
         ),
         #[values((None, 60), (Some("30"), 30))] startup_timeout: (Option<&str>, u64),
     ) {
+        let (left_image, right_image) = image;
+        let right_image = right_image.unwrap_or_default();
+        let agent_image = left_image.map(|i| i.0);
+        let image_str = agent_image.as_deref();
+
         with_env_vars(
             vec![
                 ("MIRRORD_AGENT_RUST_LOG", log_level.0),
                 ("MIRRORD_AGENT_NAMESPACE", namespace.0),
-                ("MIRRORD_AGENT_IMAGE", image.0),
+                ("MIRRORD_AGENT_IMAGE", image_str),
                 ("MIRRORD_AGENT_IMAGE_PULL_POLICY", image_pull_policy.0),
                 ("MIRRORD_AGENT_TTL", ttl.0),
                 ("MIRRORD_EPHEMERAL_CONTAINER", ephemeral.0),
@@ -342,7 +430,8 @@ mod tests {
 
                 assert_eq!(agent.log_level, log_level.1);
                 assert_eq!(agent.namespace.as_deref(), namespace.1);
-                assert_eq!(agent.image.as_deref(), image.1);
+                // TODO(alex) [mid]: Fix this.
+                assert_eq!(agent.image, right_image);
                 assert_eq!(agent.image_pull_policy, image_pull_policy.1);
                 assert_eq!(agent.ttl, ttl.1);
                 assert_eq!(agent.ephemeral, ephemeral.1);

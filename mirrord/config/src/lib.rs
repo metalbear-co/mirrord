@@ -656,6 +656,8 @@ mod tests {
     fn full(
         #[values(ConfigType::Json, ConfigType::Toml, ConfigType::Yaml)] config_type: ConfigType,
     ) {
+        use crate::agent::{AgentImageConfig, AgentImageFileConfig};
+
         let input = config_type.full();
 
         let config = config_type.parse(input);
@@ -678,7 +680,7 @@ mod tests {
                 privileged: None,
                 log_level: Some("info".to_owned()),
                 namespace: Some("default".to_owned()),
-                image: Some("".to_owned()),
+                image: Some(AgentImageFileConfig::Simple(Some("".to_owned()))),
                 image_pull_policy: Some("".to_owned()),
                 image_pull_secrets: Some(vec![HashMap::from([(
                     "name".to_owned(),
