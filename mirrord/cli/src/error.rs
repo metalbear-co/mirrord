@@ -308,6 +308,18 @@ pub(crate) enum CliError {
         operation: String,
         status: Box<kube::core::Status>,
     },
+
+    #[error("Agent returned invalid response to ping")]
+    #[diagnostic(help(
+        r#"This usually means that connectivity was lost while pinging. {GENERAL_HELP}"#
+    ))]
+    InvalidPingResponse,
+
+    #[error("Couldn't send ping to agent")]
+    #[diagnostic(help(
+        r#"This usually means that connectivity was lost while pinging. {GENERAL_HELP}"#
+    ))]
+    CantSendPing,
 }
 
 impl From<OperatorApiError> for CliError {
