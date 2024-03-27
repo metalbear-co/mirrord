@@ -1,4 +1,4 @@
-use mirrord_analytics::AnalyticsReporter;
+use mirrord_analytics::NullReporter;
 use mirrord_config::{config::{ConfigContext, MirrordConfig}, LayerConfig, LayerFileConfig};
 use mirrord_progress::ProgressTracker;
 
@@ -22,10 +22,8 @@ async fn diagnose_latency(config: Option<String>) -> Result<()> {
         remove_proxy_env();
     }
 
-    let analytics = AnalyticsReporter::new(false, )
-    let (connect_info, mut connection) = create_and_connect(config, progress, analytics)
-        .await
-        .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+    let mut analytics = NullReporter::default();
+    let (connect_info, mut connection) = create_and_connect(config, progress, &mut analytics).await?;
     
     Ok(())
 
