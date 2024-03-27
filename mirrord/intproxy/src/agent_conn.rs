@@ -3,7 +3,7 @@
 
 use std::{io, net::SocketAddr};
 
-use mirrord_analytics::{AnalyticsReporter, Reporter};
+use mirrord_analytics::Reporter;
 use mirrord_config::LayerConfig;
 use mirrord_kube::{
     api::{
