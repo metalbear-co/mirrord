@@ -49,6 +49,7 @@ mod operator;
 mod teams;
 mod util;
 mod verify_config;
+mod diagnose;
 
 pub(crate) use error::{CliError, Result};
 use verify_config::verify_config;
@@ -433,6 +434,7 @@ fn main() -> miette::Result<()> {
                 generate(args.shell, &mut cmd, "mirrord", &mut std::io::stdout());
             }
             Commands::Teams => teams::navigate_to_intro().await,
+            Commands::Diagnose(args) => diagnose_command(*args).await?,
         };
         Ok(())
     });

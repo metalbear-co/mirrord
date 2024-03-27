@@ -53,6 +53,9 @@ pub(super) enum Commands {
 
     /// Try out mirrord for Teams.
     Teams,
+
+    /// Diagnostic commands
+    Diagnose(Box<DiagnoseArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -322,4 +325,20 @@ pub(super) struct VerifyConfigArgs {
 #[derive(Args, Debug)]
 pub(super) struct CompletionsArgs {
     pub(super) shell: Shell,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct DiagnoseArgs {
+    #[command(subcommand)]
+    pub command: DiagnoseCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(super) enum DiagnoseCommand {
+    /// Check network connectivity and provide RTT (latency) statistics.
+    Latency {
+        /// Specify config file to use
+        #[arg(short = 'f')]
+        config_file: Option<String>,
+    },
 }
