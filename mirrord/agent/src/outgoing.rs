@@ -100,8 +100,11 @@ impl TcpOutgoingApi {
 /// Handles outgoing connections for one client (layer).
 struct TcpOutgoingTask {
     next_connection_id: ConnectionId,
+    /// Writing halves of peer connections made on layer's requests.
     writers: HashMap<ConnectionId, WriteHalf<SocketStream>>,
+    /// Reading halves of peer connections made on layer's requests.
     readers: StreamMap<ConnectionId, ReaderStream<ReadHalf<SocketStream>>>,
+    /// Optional pid of agent's target. Used in [`SocketStream::connect`].
     pid: Option<u64>,
     layer_rx: Receiver<LayerTcpOutgoing>,
     daemon_tx: Sender<DaemonTcpOutgoing>,
@@ -181,11 +184,8 @@ impl TcpOutgoingTask {
         read: Option<io::Result<Bytes>>,
     ) -> Result<(), SendError<DaemonTcpOutgoing>> {
         match read {
-            // TODO(alex): PROTOCOL
-            // We shouldn't return it as a `Result<T, ResponseError>` since we lose track of
-            // connection id and it doesn't really make sense to do it, but we don't
-            // want to break the protocol so we'll still wrap it with Ok() and if we
-            // error we just close the connection.
+            // New bytes came in from a peer connection.
+            // We pass them to the layer.
             Some(Ok(read)) => {
                 let message = DaemonTcpOutgoing::Read(Ok(DaemonRead {
                     connection_id,
@@ -195,6 +195,10 @@ impl TcpOutgoingTask {
                 self.daemon_tx.send(message).await?;
             }
 
+            // An error occurred when reading from a peer connection.
+            // We remove both io halves and inform the layer that the connection is closed.
+            // We remove the reader, because otherwise the `StreamMap` will produce an extra `None`
+            // item from the related stream.
             Some(Err(error)) => {
                 tracing::trace!(
                     ?error,
@@ -209,6 +213,9 @@ impl TcpOutgoingTask {
                 self.daemon_tx.send(daemon_message).await?;
             }
 
+            // EOF occurred in one of peer connections.
+            // We send 0-sized read to the layer to inform about the shutdown condition.
+            // Reader removal is handled internally by the `StreamMap`.
             None => {
                 tracing::trace!(
                     connection_id,
@@ -222,6 +229,9 @@ impl TcpOutgoingTask {
 
                 self.daemon_tx.send(daemon_message).await?;
 
+                // If the writing half is not found, it means that the layer has already shut down
+                // its side of the connection. We send a closing message to clean
+                // everything up.
                 if !self.writers.contains_key(&connection_id) {
                     tracing::trace!(
                         connection_id,
@@ -244,6 +254,8 @@ impl TcpOutgoingTask {
         message: LayerTcpOutgoing,
     ) -> Result<(), SendError<DaemonTcpOutgoing>> {
         match message {
+            // We make connection to the requested address, split the stream into halves with
+            // `io::split`, and put them into respective maps.
             LayerTcpOutgoing::Connect(LayerConnect { remote_address }) => {
                 let daemon_connect = time::timeout(
                     Self::CONNECT_TIMEOUT,
@@ -285,6 +297,13 @@ impl TcpOutgoingTask {
                     .await?
             }
 
+            // This message handles two cases:
+            // 1. 0-sized writes mean shutdown condition on the layer side. We call shutdown on this
+            //    connection's writer and remove it. If we don't find the reader, it means that the
+            //    peer has already shut down the connection. In this case we send a closing message
+            //    to the layer.
+            // 2. all other writes mean that the layer sent some data through the connection. We
+            //    pass it to this connection's writer.
             LayerTcpOutgoing::Write(LayerWrite {
                 connection_id,
                 bytes,
@@ -335,6 +354,8 @@ impl TcpOutgoingTask {
                 }
             }
 
+            // Layer closed a connection entirely.
+            // We remove io halves and forget about it.
             LayerTcpOutgoing::Close(LayerClose { connection_id }) => {
                 self.writers.remove(&connection_id);
                 self.readers.remove(&connection_id);
