@@ -85,21 +85,6 @@ pub struct AgentConfig {
     pub namespace: Option<String>,
 
     /// ### agent.image {#agent-image}
-    ///
-    /// Name of the agent's docker image.
-    ///
-    /// Useful when a custom build of mirrord-agent is required, or when using an internal
-    /// registry.
-    ///
-    /// Defaults to the latest stable image `"ghcr.io/metalbear-co/mirrord:latest"`.
-    ///
-    /// ```json
-    /// {
-    ///   "agent": {
-    ///     "image": "internal.repo/images/mirrord:latest"
-    ///   }
-    /// }
-    /// ```
     #[config(nested)]
     pub image: AgentImageConfig,
 
@@ -273,6 +258,29 @@ pub struct AgentConfig {
     pub test_error: bool,
 }
 
+/// Name of the agent's docker image.
+///
+/// Useful when a custom build of mirrord-agent is required, or when using an internal
+/// registry.
+///
+/// Defaults to the latest stable image `"ghcr.io/metalbear-co/mirrord:latest"`.
+///
+/// ```json
+/// {
+///   "image": "internal.repo/images/mirrord:latest"
+/// }
+/// ```
+///
+/// Complete setup:
+///
+/// ```json
+/// {
+///   "image": {
+///     "registry": "internal.repo/images/mirrord",
+///     "tag": "latest",
+///   }
+/// }
+/// ```
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
@@ -287,10 +295,16 @@ impl Default for AgentImageConfig {
     }
 }
 
+/// <!--${internal}-->
+/// Allows us to support the dual configuration for the agent image.
+///
+/// Whatever values missing are replaced with our defaults.
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
 pub enum AgentImageFileConfig {
+    /// The shortened version of: `image: "repo/mirrord:latest"`.
     Simple(Option<String>),
+    /// Expanded version: `image: { registry: "repo/mirrord", tag: "latest" }`.
     Advanced {
         registry: Option<String>,
         tag: Option<String>,
@@ -307,6 +321,8 @@ impl FromMirrordConfig for AgentImageConfig {
     type Generator = AgentImageFileConfig;
 }
 
+/// <!--${internal}-->
+/// The default agent image we use together with [`env!`] `CARGO_PKG_VERSION`.
 const DEFAULT_AGENT_IMAGE_REGISTRY: &str = "ghcr.io/metalbear-co/mirrord";
 
 impl AgentImageFileConfig {
@@ -320,6 +336,8 @@ impl AgentImageFileConfig {
 impl MirrordConfig for AgentImageFileConfig {
     type Generated = AgentImageConfig;
 
+    /// Generates the [`AgentImageConfig`] from the `agent.image` config, or the
+    /// `MIRRORD_AGENT_IMAGE` env var.
     fn generate_config(self, context: &mut ConfigContext) -> config::Result<Self::Generated> {
         let agent_image = match self {
             AgentImageFileConfig::Simple(registry_and_tag) => {
