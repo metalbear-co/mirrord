@@ -38,11 +38,17 @@ impl<T: AsyncRead + AsyncWrite + Unpin> UnfilteredStealTask<T> {
         loop {
             tokio::select! {
                 read = self.stream.read_buf(&mut buf), if !reading_closed => match read {
-                    Ok(..) if buf.is_empty() => {
-                        reading_closed = true;
-                    }
-
                     Ok(..) => {
+                        if buf.is_empty() {
+                            tracing::trace!(
+                                client_id = self.client_id,
+                                connection_id = self.connection_id,
+                                "Connection shutdown, sending 0-sized read to the client",
+                            );
+
+                            reading_closed = true;
+                        }
+
                         let message = ConnectionMessageOut::Raw {
                             client_id: self.client_id,
                             connection_id: self.connection_id,
@@ -77,9 +83,20 @@ impl<T: AsyncRead + AsyncWrite + Unpin> UnfilteredStealTask<T> {
                         );
                     }
 
-                    ConnectionMessageIn::Raw { data, .. } => match self.stream.write_all(&data).await {
-                        Ok(..) => {},
-                        Err(e) => {
+                    ConnectionMessageIn::Raw { data, .. } => {
+                        let res = if data.is_empty() {
+                            tracing::trace!(
+                                client_id = self.client_id,
+                                connection_id = self.connection_id,
+                                "Received a 0-sized write from the client, shutting down connection",
+                            );
+
+                            self.stream.shutdown().await
+                        } else {
+                            self.stream.write_all(&data).await
+                        };
+
+                        if let Err(e) = res {
                             tx.send(ConnectionMessageOut::Closed {
                                 client_id: self.client_id,
                                 connection_id: self.connection_id
