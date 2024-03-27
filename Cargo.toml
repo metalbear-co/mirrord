@@ -18,6 +18,7 @@ members = [
     "tests/rust-unix-socket-client",
     "tests/rust-bypassed-unix-socket",
     "tests/issue1317",
+    "tests/rust-websockets",
 ]
 resolver = "2"
 

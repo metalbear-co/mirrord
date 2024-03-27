@@ -7,11 +7,15 @@ mod steal {
         time::Duration,
     };
 
+    use futures_util::{SinkExt, StreamExt};
     use kube::Client;
     use reqwest::{header::HeaderMap, Url};
     use rstest::*;
     use tokio::time::sleep;
-    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::{
+        connect_async,
+        tungstenite::{client::IntoClientRequest, Message},
+    };
 
     use crate::utils::{
         config_dir, get_service_host_and_port, get_service_url, http2_service, kube_client,
@@ -596,16 +600,17 @@ mod steal {
         application.assert(&mirrorded_process).await;
     }
 
-    /// Test the case where running with `steal` set and an http header filter, we get an HTTP
-    /// upgrade request, and this should not reach the local app.
+    /// Test the case where we're running with `steal` set and an http header filter, the target
+    /// gets an HTTP upgrade request, but the request does not match the filter and should not
+    /// reach the local app.
     ///
-    /// We verify that the traffic is forwarded to- and handled by the deployed app, and the local
+    /// We verify that the traffic is handled by the deployed app, and the local
     /// app does not see the traffic.
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
-    async fn websocket_upgrade(
+    async fn websocket_upgrade_no_filter_match(
         #[future] websocket_service: KubeService,
         #[future] kube_client: Client,
         #[values(Application::PythonFastApiHTTP, Application::NodeHTTP)] application: Application,
@@ -615,8 +620,6 @@ mod steal {
         )]
         write_data: String,
     ) {
-        use futures_util::{SinkExt, StreamExt};
-
         let service = websocket_service.await;
         let kube_client = kube_client.await;
         let (host, port) = get_service_host_and_port(kube_client.clone(), &service).await;
@@ -678,5 +681,82 @@ mod steal {
             .unwrap();
 
         application.assert(&mirrorded_process).await;
+    }
+
+    /// Test the case where we're running with `steal` set and an http header filter, the target
+    /// gets an HTTP upgrade request, the request matches the filter and the whole websocket
+    /// connection should be handled by the local app.
+    ///
+    /// We verify that the traffic is handled by the local app.
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(60))]
+    async fn websocket_upgrade_filter_match(
+        #[future] websocket_service: KubeService,
+        #[future] kube_client: Client,
+        #[values(Application::RustWebsockets)] application: Application,
+    ) {
+        let service = websocket_service.await;
+        let kube_client = kube_client.await;
+        let (host, port) = get_service_host_and_port(kube_client.clone(), &service).await;
+
+        let mut mirrorded_process = application
+            .run(
+                &service.target,
+                Some(&service.namespace),
+                Some(vec!["--steal"]),
+                Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
+            )
+            .await;
+
+        mirrorded_process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
+
+        // Create a websocket connection to test the HTTP upgrade steal.
+        // Add a header so that the request matches the filter.
+        let mut request = format!("ws://{}:{port}", host.trim())
+            .into_client_request()
+            .unwrap();
+        request
+            .headers_mut()
+            .append("x-filter", "yes".try_into().unwrap());
+        let (mut stream, _) = connect_async(request)
+            .await
+            .expect("failed to create connection");
+
+        let messages = [
+            Message::Text("local: hello_1".to_string()),
+            Message::Binary("local: hello_2".as_bytes().to_vec()),
+        ];
+        for message in &messages {
+            stream
+                .send(message.clone())
+                .await
+                .expect("failed to send message");
+            loop {
+                let response = stream
+                    .next()
+                    .await
+                    .expect("connection broke")
+                    .expect("failed to read message");
+                match response {
+                    Message::Ping(data) => stream
+                        .send(Message::Pong(data))
+                        .await
+                        .expect("failed to send message"),
+                    response if &response == message => break,
+                    other => panic!("unexpected message received: {other:?}"),
+                }
+            }
+        }
+
+        stream
+            .close(None)
+            .await
+            .expect("failed to close connection");
+
+        let status = mirrorded_process.wait().await;
+        assert!(status.success(), "test process failed");
     }
 }

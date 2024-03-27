@@ -96,6 +96,7 @@ pub enum Application {
     CurlToKubeApi,
     PythonCloseSocket,
     PythonCloseSocketKeepConnection,
+    RustWebsockets,
 }
 
 #[derive(Debug)]
@@ -333,6 +334,7 @@ impl Application {
             Application::CurlToKubeApi => {
                 vec!["curl", "https://kubernetes/api", "--insecure"]
             }
+            Application::RustWebsockets => vec!["../target/debug/rust-websockets"],
         }
     }
 
