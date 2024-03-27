@@ -1,6 +1,6 @@
 use std::{collections::HashSet, time::Duration};
 
-use mirrord_analytics::AnalyticsReporter;
+use mirrord_analytics::Reporter;
 use mirrord_config::{feature::network::outgoing::OutgoingFilterConfig, LayerConfig};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::api::{kubernetes::KubernetesAPI, AgentManagment};
@@ -55,10 +55,10 @@ impl OperatorApiErrorExt for OperatorApiError {
 ///
 /// Here is where we start interactions with the kubernetes API.
 #[tracing::instrument(level = "trace", skip_all)]
-pub(crate) async fn create_and_connect<P>(
+pub(crate) async fn create_and_connect<P, R: Reporter>(
     config: &LayerConfig,
     progress: &mut P,
-    analytics: &mut AnalyticsReporter,
+    analytics: &mut R,
 ) -> Result<(AgentConnectInfo, AgentConnection)>
 where
     P: Progress + Send + Sync,

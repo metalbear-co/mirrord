@@ -7,6 +7,7 @@ use std::{collections::HashMap, time::Duration};
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use config::*;
+use diagnose::diagnose_command;
 use exec::execvp;
 use execution::MirrordExecution;
 use extension::extension_exec;
@@ -40,6 +41,7 @@ use which::which;
 
 mod config;
 mod connection;
+mod diagnose;
 mod error;
 mod execution;
 mod extension;
@@ -49,7 +51,6 @@ mod operator;
 mod teams;
 mod util;
 mod verify_config;
-mod diagnose;
 
 pub(crate) use error::{CliError, Result};
 use verify_config::verify_config;
