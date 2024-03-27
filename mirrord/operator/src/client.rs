@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
 use kube::{api::PostParams, Api, Client, Resource};
-use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, AnalyticsReporter, Reporter};
+use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
 use mirrord_auth::{
     certificate::Certificate,
     credential_store::{CredentialStoreSync, UserIdentity},
