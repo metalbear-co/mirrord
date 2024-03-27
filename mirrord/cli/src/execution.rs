@@ -317,7 +317,7 @@ impl MirrordExecution {
                 Ok(remote_env)
             }
             Some(DaemonMessage::Close(msg)) => Err(CliError::InitialCommFailed(format!(
-                "Connection closed with message: {msg}"
+                "Connection closed with message: `{msg}`"
             ))),
             msg => Err(CliError::InvalidMessage(format!("{msg:#?}"))),
         }
