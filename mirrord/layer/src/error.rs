@@ -111,7 +111,7 @@ pub(crate) enum HookError {
 /// Errors internal to mirrord-layer.
 ///
 /// You'll encounter these when the layer is performing some of its internal operations, mostly when
-/// handling [`ProxyToLayerMessage`](mirrord_intproxy::protocol::ProxyToLayerMessage).
+/// handling [`ProxyToLayerMessage`](mirrord_intproxy_protocol::ProxyToLayerMessage).
 #[derive(Error, Debug)]
 pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed while getting a response!")]

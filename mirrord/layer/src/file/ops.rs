@@ -26,7 +26,7 @@ use crate::{
 const MAX_READ_SIZE: u64 = 1024 * 1024;
 
 /// Helper macro for checking if the given path should be handled remotely.
-/// Uses global [`crate::setup`].
+/// Uses global [`crate::setup()`].
 ///
 /// Should the file be ignored, this macro exists current context with [`Bypass::IgnoredFile`].
 ///
@@ -55,7 +55,7 @@ impl RemoteFile {
         Self { fd, path }
     }
 
-    /// Sends a [`FileOperation::Open`] message, opening the file in the agent.
+    /// Sends a [`OpenFileRequest`] message, opening the file in the agent.
     #[tracing::instrument(level = "trace")]
     pub(crate) fn remote_open(
         path: PathBuf,
@@ -68,7 +68,7 @@ impl RemoteFile {
         Detour::Success(response)
     }
 
-    /// Sends a [`FileOperation::Read`] message, reading the file in the agent.
+    /// Sends a [`ReadFileRequest`] message, reading the file in the agent.
     ///
     /// Blocking request and wait on already found remote_fd
     #[tracing::instrument(level = "trace")]
@@ -86,7 +86,7 @@ impl RemoteFile {
         Detour::Success(response)
     }
 
-    /// Sends a [`FileOperation::Close`] message, closing the file in the agent.
+    /// Sends a [`CloseFileRequest`] message, closing the file in the agent.
     #[tracing::instrument(level = "trace")]
     pub(crate) fn remote_close(fd: u64) -> Result<()> {
         common::make_proxy_request_no_response(CloseFileRequest { fd })?;
