@@ -202,7 +202,9 @@ impl TcpOutgoingTask {
                     "Reading from peer connection failed, sending close message.",
                 );
 
+                self.readers.remove(&connection_id);
                 self.writers.remove(&connection_id);
+
                 let daemon_message = DaemonTcpOutgoing::Close(connection_id);
                 self.daemon_tx.send(daemon_message).await?;
             }
