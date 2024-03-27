@@ -17,7 +17,7 @@ use k8s_openapi::{
 };
 use kube::api::ListParams;
 use miette::JSONReportHandler;
-use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics};
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     LayerConfig, LayerFileConfig,

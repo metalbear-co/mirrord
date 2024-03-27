@@ -17,7 +17,7 @@ use std::{
     time::Duration,
 };
 
-use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics};
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_intproxy::{
     agent_conn::{AgentConnectInfo, AgentConnection},
@@ -231,7 +231,7 @@ async fn connect_and_ping(
     let AgentConnection {
         agent_tx,
         mut agent_rx,
-    } = AgentConnection::new(config, agent_connect_info, Some(analytics)).await?;
+    } = AgentConnection::new(config, agent_connect_info, analytics).await?;
     ping(&agent_tx, &mut agent_rx).await?;
     Ok((agent_tx, agent_rx))
 }
