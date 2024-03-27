@@ -1058,14 +1058,7 @@
     "TargetFileConfig": {
       "anyOf": [
         {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Target"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "type": "string"
         },
         {
           "type": "object",
