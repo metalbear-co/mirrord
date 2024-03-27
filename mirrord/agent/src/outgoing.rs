@@ -97,6 +97,7 @@ impl TcpOutgoingApi {
     }
 }
 
+/// Handles outgoing connections for one client (layer).
 struct TcpOutgoingTask {
     next_connection_id: ConnectionId,
     writers: HashMap<ConnectionId, WriteHalf<SocketStream>>,
