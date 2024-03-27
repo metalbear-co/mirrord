@@ -334,6 +334,7 @@ pub(super) struct DiagnoseArgs {
 }
 
 #[derive(Subcommand, Debug)]
+/// Commands for diagnosing potential issues introduced by mirrord.
 pub(super) enum DiagnoseCommand {
     /// Check network connectivity and provide RTT (latency) statistics.
     Latency {
