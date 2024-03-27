@@ -1,0 +1,10 @@
+[package]
+name = "rust-websockets"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+axum = { version = "0.6", features = ["ws"] }
+tokio = { version = "1", features = ["rt", "macros"]}
