@@ -656,7 +656,7 @@ mod tests {
     fn full(
         #[values(ConfigType::Json, ConfigType::Toml, ConfigType::Yaml)] config_type: ConfigType,
     ) {
-        use crate::agent::{AgentImageConfig, AgentImageFileConfig};
+        use crate::agent::AgentImageFileConfig;
 
         let input = config_type.full();
 
