@@ -93,9 +93,6 @@ pub(crate) enum AgentError {
     #[error("Failed to fetch container info with `{0}`")]
     MissingContainerInfo(String),
 
-    #[error("Ran out of connections, dropping new connection")]
-    ConnectionLimitReached,
-
     #[error(r#"Failed to set socket flag PACKET_IGNORE_OUTGOING, this might be due to kernel version before 4.20.
     Original error `{0}`"#)]
     PacketIgnoreOutgoing(#[source] std::io::Error),

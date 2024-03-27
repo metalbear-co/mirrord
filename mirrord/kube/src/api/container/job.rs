@@ -87,7 +87,7 @@ where
         .ok_or(KubeApiError::JobPodNotFound(params.name.clone()))?;
 
     let version = wait_for_agent_startup(&pod_api, &pod_name, "mirrord-agent".to_string()).await?;
-    match version {
+    match version.as_ref() {
         Some(version) if version != env!("CARGO_PKG_VERSION") => {
             let message = format!(
                     "Agent version {version} does not match the local mirrord version {}. This may lead to unexpected errors.",
@@ -104,6 +104,7 @@ where
         pod_name,
         agent_port: params.port,
         namespace: agent.namespace.clone(),
+        agent_version: version,
     })
 }
 
@@ -171,6 +172,22 @@ impl ContainerVariant for JobVariant<'_> {
             .expect("Should be valid ResourceRequirements json")
         });
 
+        let env = [
+            ("RUST_LOG".to_string(), agent.log_level.clone()),
+            (
+                "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS".to_string(),
+                agent.flush_connections.to_string(),
+            ),
+            (
+                "MIRRORD_AGENT_NFTABLES".to_string(),
+                agent.nftables.to_string(),
+            ),
+        ]
+        .into_iter()
+        .chain(params.extra_env.iter().cloned())
+        .map(|(name, value)| json!({ "name": name, "value": value }))
+        .collect::<Vec<_>>();
+
         serde_json::from_value(json!({
             "metadata": {
                 "name": params.name,
@@ -208,11 +225,7 @@ impl ContainerVariant for JobVariant<'_> {
                                 "image": get_agent_image(agent),
                                 "imagePullPolicy": agent.image_pull_policy,
                                 "command": command_line,
-                                "env": [
-                                    { "name": "RUST_LOG", "value": agent.log_level },
-                                    { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() },
-                                    { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() }
-                                ],
+                                "env": env,
                                 // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                                 "resources": resources
                             }
@@ -220,7 +233,8 @@ impl ContainerVariant for JobVariant<'_> {
                     }
                 }
             }
-        })).map_err(KubeApiError::from)
+        }))
+        .map_err(KubeApiError::from)
     }
 }
 
@@ -350,6 +364,7 @@ mod test {
             name: "foobar".to_string(),
             port: 3000,
             gid: 13,
+            extra_env: Default::default(),
         };
 
         let update = JobVariant::new(&agent, &params).as_update()?;
@@ -429,6 +444,7 @@ mod test {
             name: "foobar".to_string(),
             port: 3000,
             gid: 13,
+            extra_env: Default::default(),
         };
 
         let update = JobTargetedVariant::new(
