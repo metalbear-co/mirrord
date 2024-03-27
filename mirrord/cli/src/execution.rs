@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use mirrord_analytics::{AnalyticsError, AnalyticsReporter};
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
