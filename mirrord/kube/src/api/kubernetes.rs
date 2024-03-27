@@ -37,7 +37,7 @@ use crate::{
             ContainerApi, ContainerParams,
         },
         runtime::{RuntimeData, RuntimeDataProvider},
-        wrap_raw_connection, AgentManagment,
+        wrap_raw_connection,
     },
     error::{KubeApiError, Result},
 };
@@ -116,14 +116,7 @@ impl KubernetesAPI {
         Ok(())
     }
 
-    pub async fn create_agent_params<P>(
-        &self,
-        progress: &mut P,
-        config: Option<&LayerConfig>,
-    ) -> Result<(Option<RuntimeData>, ContainerParams)>
-    where
-        P: Progress + Send + Sync,
-    {
+    pub async fn create_agent_params(&self) -> Result<(Option<RuntimeData>, ContainerParams)> {
         let runtime_data = if let Some(ref path) = self.target.path
             && !matches!(path, mirrord_config::target::Target::Targetless)
         {
@@ -136,39 +129,17 @@ impl KubernetesAPI {
             None
         };
 
-        let incoming_mode = config
-            .map(|config| config.feature.network.incoming.mode)
-            .unwrap_or_default();
-
-        let is_mesh = runtime_data
-            .as_ref()
-            .map(|runtime| runtime.mesh.is_some())
-            .unwrap_or_default();
-
-        if self
-            .detect_mesh_mirror_mode(progress, incoming_mode, is_mesh)
-            .await
-            .is_err()
-        {
-            progress.warning("couldn't determine mesh / sidecar with mirror mode");
-        }
-
         Ok((runtime_data, ContainerParams::new()))
     }
-}
-
-impl AgentManagment for KubernetesAPI {
-    type AgentRef = AgentKubernetesConnectInfo;
-    type Err = KubeApiError;
 
     #[cfg(feature = "incluster")]
-    async fn create_connection(
+    pub async fn create_connection(
         &self,
         AgentKubernetesConnectInfo {
             pod_name,
             agent_port,
             namespace,
-        }: Self::AgentRef,
+        }: AgentKubernetesConnectInfo,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
         let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, namespace.as_deref());
 
@@ -203,9 +174,9 @@ impl AgentManagment for KubernetesAPI {
     }
 
     #[cfg(not(feature = "incluster"))]
-    async fn create_connection(
+    pub async fn create_connection(
         &self,
-        connect_info: Self::AgentRef,
+        connect_info: AgentKubernetesConnectInfo,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
         let pod_api: Api<Pod> =
             get_k8s_resource_api(&self.client, connect_info.namespace.as_deref());
@@ -225,15 +196,32 @@ impl AgentManagment for KubernetesAPI {
     }
 
     #[tracing::instrument(level = "trace", skip(self, progress))]
-    async fn create_agent<P>(
+    pub async fn create_agent<P>(
         &self,
         progress: &mut P,
         config: Option<&LayerConfig>,
-    ) -> Result<Self::AgentRef, Self::Err>
+    ) -> Result<AgentKubernetesConnectInfo>
     where
         P: Progress + Send + Sync,
     {
-        let (runtime_data, params) = self.create_agent_params(progress, config).await?;
+        let (runtime_data, params) = self.create_agent_params().await?;
+
+        let incoming_mode = config
+            .map(|config| config.feature.network.incoming.mode)
+            .unwrap_or_default();
+
+        let is_mesh = runtime_data
+            .as_ref()
+            .map(|runtime| runtime.mesh.is_some())
+            .unwrap_or_default();
+
+        if self
+            .detect_mesh_mirror_mode(progress, incoming_mode, is_mesh)
+            .await
+            .is_err()
+        {
+            progress.warning("couldn't determine mesh / sidecar with mirror mode");
+        }
 
         info!("Spawning new agent.");
 

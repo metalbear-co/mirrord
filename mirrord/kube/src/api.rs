@@ -1,14 +1,8 @@
-use std::hash::Hash;
-
 use actix_codec::{AsyncRead, AsyncWrite};
 use futures::{SinkExt, StreamExt};
-use mirrord_config::LayerConfig;
-use mirrord_progress::Progress;
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage, LogLevel};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
-
-use crate::error::Result;
 
 pub mod container;
 pub mod kubernetes;
@@ -79,38 +73,4 @@ pub fn wrap_raw_connection(
     });
 
     (in_tx, out_rx)
-}
-
-pub trait AgentManagment {
-    type AgentRef: Hash + Eq;
-    type Err;
-
-    #[allow(async_fn_in_trait)]
-    async fn connect<P>(
-        &self,
-        progress: &mut P,
-    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), Self::Err>
-    where
-        P: Progress + Send + Sync,
-        Self::AgentRef: Send + Sync,
-        Self::Err: Send + Sync,
-    {
-        self.create_connection(self.create_agent(progress, None).await?)
-            .await
-    }
-
-    #[allow(async_fn_in_trait)]
-    async fn create_connection(
-        &self,
-        agent_ref: Self::AgentRef,
-    ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), Self::Err>;
-
-    #[allow(async_fn_in_trait)]
-    async fn create_agent<P>(
-        &self,
-        progress: &mut P,
-        config: Option<&LayerConfig>,
-    ) -> Result<Self::AgentRef, Self::Err>
-    where
-        P: Progress + Send + Sync;
 }
