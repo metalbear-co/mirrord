@@ -72,7 +72,7 @@ pub trait ContainerVariant {
 
 impl<T> ContainerVariant for Box<T>
 where
-    T: ContainerVariant,
+    T: ContainerVariant + ?Sized,
 {
     type Update = T::Update;
 
