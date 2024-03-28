@@ -212,6 +212,12 @@ impl From<HookError> for i64 {
             HookError::SocketUnsuportedIpv6 => {
                 info!("{fail}")
             }
+            HookError::ProxyError(err) => {
+                graceful_exit!(
+                    "Proxy error, connectivity issue or a bug. \n\
+                    You may report it to us on https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml \n{err}"
+                )
+            }
             _ => error!("Error occured in Layer >> {fail:?}"),
         };
 
