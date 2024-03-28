@@ -448,7 +448,6 @@ mod tests {
 
                 assert_eq!(agent.log_level, log_level.1);
                 assert_eq!(agent.namespace.as_deref(), namespace.1);
-                // TODO(alex) [mid]: Fix this.
                 assert_eq!(agent.image, right_image);
                 assert_eq!(agent.image_pull_policy, image_pull_policy.1);
                 assert_eq!(agent.ttl, ttl.1);
