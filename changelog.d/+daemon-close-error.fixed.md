@@ -1,0 +1,1 @@
+Fixed the display of agent startup errors to the user.

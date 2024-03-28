@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use mirrord_analytics::{AnalyticsError, AnalyticsReporter};
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 

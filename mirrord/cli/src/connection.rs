@@ -1,11 +1,13 @@
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
-use mirrord_analytics::AnalyticsReporter;
+use mirrord_analytics::Reporter;
 use mirrord_config::{feature::network::outgoing::OutgoingFilterConfig, LayerConfig};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::api::kubernetes::KubernetesAPI;
 use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorOperation};
-use mirrord_progress::Progress;
+use mirrord_progress::{
+    messages::MULTIPOD_WARNING, IdeAction, IdeMessage, NotificationLevel, Progress,
+};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
 
@@ -53,10 +55,10 @@ impl OperatorApiErrorExt for OperatorApiError {
 ///
 /// Here is where we start interactions with the kubernetes API.
 #[tracing::instrument(level = "trace", skip_all)]
-pub(crate) async fn create_and_connect<P>(
+pub(crate) async fn create_and_connect<P, R: Reporter>(
     config: &LayerConfig,
     progress: &mut P,
-    analytics: &mut AnalyticsReporter,
+    analytics: &mut R,
 ) -> Result<(AgentConnectInfo, AgentConnection)>
 where
     P: Progress + Send + Sync,
@@ -79,6 +81,7 @@ where
         match OperatorApi::create_session(config, &subtask, analytics).await {
             Ok(session) => {
                 subtask.success(Some("connected to the operator"));
+
                 return Ok((
                     AgentConnectInfo::Operator(session.info),
                     AgentConnection {
@@ -94,6 +97,22 @@ where
             }
         }
     }
+
+    // Send to IDEs that we're in multi-pod without operator.
+    progress.ide(serde_json::to_value(IdeMessage {
+        id: MULTIPOD_WARNING.0.to_string(),
+        level: NotificationLevel::Warning,
+        text: MULTIPOD_WARNING.1.to_string(),
+        actions: {
+            let mut actions = HashSet::new();
+            actions.insert(IdeAction::Link {
+                label: "Try it now".to_string(),
+                link: "https://app.metalbear.co/".to_string(),
+            });
+
+            actions
+        },
+    })?);
 
     if config.feature.copy_target.enabled {
         return Err(CliError::FeatureRequiresOperatorError("copy target".into()));

@@ -677,7 +677,11 @@ where
                 );
 
                 for data in queued_raw_data.remove(&client_id).unwrap_or_default() {
-                    http_client_io.write_all(&data).await?;
+                    if data.is_empty() {
+                        http_client_io.shutdown().await?;
+                    } else {
+                        http_client_io.write_all(&data).await?;
+                    }
                 }
 
                 for (id, subscribed) in self.subscribed.iter_mut() {
@@ -1448,6 +1452,17 @@ mod test {
                         data,
                     } => {
                         assert_eq!(&data, b"hello from client");
+                    }
+                    other => unreachable!("unexpected message: {other:?}"),
+                }
+
+                match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::Raw {
+                        client_id: 1,
+                        connection_id: TestSetup::CONNECTION_ID,
+                        data,
+                    } => {
+                        assert!(data.is_empty());
                     }
                     other => unreachable!("unexpected message: {other:?}"),
                 }

@@ -38,7 +38,7 @@ use crate::{
     dns::DnsApi,
     error::{AgentError, Result},
     file::FileManager,
-    outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi},
+    outgoing::{TcpOutgoingApi, UdpOutgoingApi},
     runtime::get_container,
     sniffer::{SnifferCommand, TcpConnectionSniffer, TcpSnifferApi},
     steal::{

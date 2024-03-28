@@ -7,6 +7,7 @@ use std::{collections::HashMap, time::Duration};
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use config::*;
+use diagnose::diagnose_command;
 use exec::execvp;
 use execution::MirrordExecution;
 use extension::extension_exec;
@@ -17,7 +18,7 @@ use k8s_openapi::{
 };
 use kube::api::ListParams;
 use miette::JSONReportHandler;
-use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics};
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     LayerConfig, LayerFileConfig,
@@ -40,6 +41,7 @@ use which::which;
 
 mod config;
 mod connection;
+mod diagnose;
 mod error;
 mod execution;
 mod extension;
@@ -433,6 +435,7 @@ fn main() -> miette::Result<()> {
                 generate(args.shell, &mut cmd, "mirrord", &mut std::io::stdout());
             }
             Commands::Teams => teams::navigate_to_intro().await,
+            Commands::Diagnose(args) => diagnose_command(*args).await?,
         };
         Ok(())
     });

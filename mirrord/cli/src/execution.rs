@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use mirrord_analytics::{AnalyticsError, AnalyticsReporter};
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
@@ -279,7 +279,9 @@ impl MirrordExecution {
             )
             .await
             .map_err(|_| {
-                CliError::InitialCommFailed("Timeout waiting for remote environment variables.")
+                CliError::InitialCommFailed(
+                    "Timeout waiting for remote environment variables.".to_string(),
+                )
             })??;
             env_vars.extend(remote_env);
             if let Some(overrides) = &config.feature.env.r#override {
@@ -304,7 +306,9 @@ impl MirrordExecution {
             }))
             .await
             .map_err(|_| {
-                CliError::InitialCommFailed("Failed to request remote environment variables.")
+                CliError::InitialCommFailed(
+                    "Failed to request remote environment variables.".to_string(),
+                )
             })?;
 
         match connection.receiver.recv().await {
@@ -312,6 +316,9 @@ impl MirrordExecution {
                 trace!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env.len());
                 Ok(remote_env)
             }
+            Some(DaemonMessage::Close(msg)) => Err(CliError::InitialCommFailed(format!(
+                "Connection closed with message: `{msg}`"
+            ))),
             msg => Err(CliError::InvalidMessage(format!("{msg:#?}"))),
         }
     }
