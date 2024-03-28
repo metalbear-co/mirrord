@@ -36,8 +36,8 @@ use crate::{
             targetless::Targetless,
             ContainerApi, ContainerParams,
         },
-        runtime::RuntimeDataProvider,
-        wrap_raw_connection, AgentManagment,
+        runtime::{RuntimeData, RuntimeDataProvider},
+        wrap_raw_connection,
     },
     error::{KubeApiError, Result},
 };
@@ -115,27 +115,31 @@ impl KubernetesAPI {
         }
         Ok(())
     }
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
-pub struct AgentKubernetesConnectInfo {
-    pub pod_name: String,
-    pub agent_port: u16,
-    pub namespace: Option<String>,
-}
+    pub async fn create_agent_params(&self) -> Result<(Option<RuntimeData>, ContainerParams)> {
+        let runtime_data = if let Some(ref path) = self.target.path
+            && !matches!(path, mirrord_config::target::Target::Targetless)
+        {
+            let runtime_data = path
+                .runtime_data(&self.client, self.target.namespace.as_deref())
+                .await?;
 
-impl AgentManagment for KubernetesAPI {
-    type AgentRef = AgentKubernetesConnectInfo;
-    type Err = KubeApiError;
+            Some(runtime_data)
+        } else {
+            None
+        };
+
+        Ok((runtime_data, ContainerParams::new()))
+    }
 
     #[cfg(feature = "incluster")]
-    async fn create_connection(
+    pub async fn create_connection(
         &self,
         AgentKubernetesConnectInfo {
             pod_name,
             agent_port,
             namespace,
-        }: Self::AgentRef,
+        }: AgentKubernetesConnectInfo,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
         let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, namespace.as_deref());
 
@@ -170,9 +174,9 @@ impl AgentManagment for KubernetesAPI {
     }
 
     #[cfg(not(feature = "incluster"))]
-    async fn create_connection(
+    pub async fn create_connection(
         &self,
-        connect_info: Self::AgentRef,
+        connect_info: AgentKubernetesConnectInfo,
     ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
         let pod_api: Api<Pod> =
             get_k8s_resource_api(&self.client, connect_info.namespace.as_deref());
@@ -192,25 +196,15 @@ impl AgentManagment for KubernetesAPI {
     }
 
     #[tracing::instrument(level = "trace", skip(self, progress))]
-    async fn create_agent<P>(
+    pub async fn create_agent<P>(
         &self,
         progress: &mut P,
         config: Option<&LayerConfig>,
-    ) -> Result<Self::AgentRef, Self::Err>
+    ) -> Result<AgentKubernetesConnectInfo>
     where
         P: Progress + Send + Sync,
     {
-        let runtime_data = if let Some(ref path) = self.target.path
-            && !matches!(path, mirrord_config::target::Target::Targetless)
-        {
-            let runtime_data = path
-                .runtime_data(&self.client, self.target.namespace.as_deref())
-                .await?;
-
-            Some(runtime_data)
-        } else {
-            None
-        };
+        let (runtime_data, params) = self.create_agent_params().await?;
 
         let incoming_mode = config
             .map(|config| config.feature.network.incoming.mode)
@@ -228,8 +222,6 @@ impl AgentManagment for KubernetesAPI {
         {
             progress.warning("couldn't determine mesh / sidecar with mirror mode");
         }
-
-        let params = ContainerParams::new();
 
         info!("Spawning new agent.");
 
@@ -264,6 +256,13 @@ impl AgentManagment for KubernetesAPI {
         info!("Created agent pod {agent_connect_info:?}");
         Ok(agent_connect_info)
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
+pub struct AgentKubernetesConnectInfo {
+    pub pod_name: String,
+    pub agent_port: u16,
+    pub namespace: Option<String>,
 }
 
 pub async fn create_kube_api<P>(

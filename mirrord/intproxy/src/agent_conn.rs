@@ -8,7 +8,7 @@ use mirrord_config::LayerConfig;
 use mirrord_kube::{
     api::{
         kubernetes::{AgentKubernetesConnectInfo, KubernetesAPI},
-        wrap_raw_connection, AgentManagment,
+        wrap_raw_connection,
     },
     error::KubeApiError,
 };
