@@ -70,6 +70,25 @@ pub trait ContainerVariant {
     fn as_update(&self) -> Result<Self::Update>;
 }
 
+impl<T> ContainerVariant for Box<T>
+where
+    T: ContainerVariant,
+{
+    type Update = T::Update;
+
+    fn agent_config(&self) -> &AgentConfig {
+        T::agent_config(self)
+    }
+
+    fn params(&self) -> &ContainerParams {
+        T::params(self)
+    }
+
+    fn as_update(&self) -> Result<Self::Update> {
+        T::as_update(self)
+    }
+}
+
 pub trait ContainerApi<V>
 where
     V: ContainerVariant,
