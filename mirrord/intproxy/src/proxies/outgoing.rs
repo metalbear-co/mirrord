@@ -202,6 +202,17 @@ impl OutgoingProxy {
         request: OutgoingConnectRequest,
         message_bus: &mut MessageBus<Self>,
     ) {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        message_bus
+            .send(ProxyMessage::ToLayer(ToLayer {
+                message_id,
+                layer_id: session_id,
+                message: ProxyToLayerMessage::OutgoingConnect(Err(ResponseError::Remote(
+                    mirrord_protocol::RemoteError::ConnectTimedOut(request.remote_address),
+                ))),
+            }))
+            .await;
+        return;
         self.queue(request.protocol).insert(message_id, session_id);
 
         let msg = request.protocol.wrap_agent_connect(request.remote_address);
