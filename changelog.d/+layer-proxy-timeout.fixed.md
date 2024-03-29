@@ -1,0 +1,1 @@
+Fixed timeout set on new internal proxy connection in `fork` detour.

@@ -586,7 +586,7 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
             let new_connection = ProxyConnection::new(
                 parent_connection.proxy_addr(),
                 NewSessionRequest::Forked(parent_connection.layer_id()),
-                Duration::from_secs(5),
+                PROXY_CONNECTION_TIMEOUT,
             )
             .expect("failed to establish proxy connection for child");
             PROXY_CONNECTION
