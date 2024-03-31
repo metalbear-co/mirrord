@@ -146,8 +146,14 @@ impl Progress for JsonProgress {
     }
 
     fn ide(&self, value: serde_json::Value) {
-        let message = ProgressMessage::IdeMessage { message: value };
-        message.print();
+        if std::env::var("MIRRORD_PROGRESS_SUPPORT_IDE")
+            .ok()
+            .and_then(|ide_support_enabled| ide_support_enabled.parse().ok())
+            .unwrap_or(false)
+        {
+            let message = ProgressMessage::IdeMessage { message: value };
+            message.print();
+        }
     }
 
     fn warning(&self, msg: &str) {
