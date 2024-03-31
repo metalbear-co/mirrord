@@ -8,6 +8,26 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.93.1](https://github.com/metalbear-co/mirrord/tree/3.93.1) - 2024-03-31
+
+
+### Fixed
+
+- Fix new IDE progress breaking older plugins.
+  Three issues fixed:
+  1. Show the new progress only when env var is set (to be set in newer IDE
+  versions).
+  2. Multi pod warning was showing everytime when no operator, not only when
+  targetting a deployment + no operator.
+  3. Show the message for rollouts as well.
+  [#2339](https://github.com/metalbear-co/mirrord/issues/2339)
+
+
+### Internal
+
+- Update Frida version to 16.2.1
+
+
 ## [3.93.0](https://github.com/metalbear-co/mirrord/tree/3.93.0) - 2024-03-31
 
 
