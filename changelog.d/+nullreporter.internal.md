@@ -1,1 +1,0 @@
-Change design around analyticsreporter to be more robust/clean

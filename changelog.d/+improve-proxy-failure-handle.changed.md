@@ -1,1 +1,0 @@
-Proxy errors now don't propagate back to libc but exit with a message

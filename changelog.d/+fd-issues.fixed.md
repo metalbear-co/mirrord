@@ -1,1 +1,0 @@
-Fix some open/fd potential issues

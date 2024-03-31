@@ -8,6 +8,46 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.93.0](https://github.com/metalbear-co/mirrord/tree/3.93.0) - 2024-03-31
+
+
+### Added
+
+- Added handling HTTP upgrades in filtered connections (`mirrord-agent`).
+  Refactored TCP stealer code.
+  [#2270](https://github.com/metalbear-co/mirrord/issues/2270)
+- Add a new diagnostic command to calculate mirrord session latency
+
+
+### Changed
+
+- Changed `agent.image` config to also accept an extended version where you may
+  specify both _registry_ and _tag_ with `agent.image.registry` and
+  `agent.image.tag`.
+- Proxy errors now don't propagate back to libc but exit with a message
+- `use_proxy` behavior is now setting the proxy env to empty value instead of
+  unsetting. This should help with cases where
+  we need it to propogate to the extensions.
+
+
+### Fixed
+
+- Internal proxy and agent now properly handle connection shutdowns.
+  [#2309](https://github.com/metalbear-co/mirrord/issues/2309)
+- Fix some open/fd potential issues
+- Fixed the display of agent startup errors to the user.
+- Fixed timeout set on new internal proxy connection in `fork` detour.
+
+
+### Internal
+
+- Adds new message type `IdeMessage`. Allows us to send messages to the IDE
+  that should be shown in notification boxes, with buttons/actions.
+- Change design around analyticsreporter to be more robust/clean
+- Prepared an e2e test for stealing WebSockets connections with an HTTP filter
+  set.
+
+
 ## [3.92.1](https://github.com/metalbear-co/mirrord/tree/3.92.1) - 2024-03-17
 
 
