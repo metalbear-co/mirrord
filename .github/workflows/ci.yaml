@@ -153,6 +153,8 @@ jobs:
   # which is then used by `build_mirrord_on_release_branch`
   check_if_release_branch:
     runs-on: ubuntu-latest
+    # requires test_agent to have image to download
+    needs: [test_agent]
     outputs:
       release_branch: ${{ steps.release-branch.outputs.branch }}
     steps:
