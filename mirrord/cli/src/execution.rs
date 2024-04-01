@@ -45,6 +45,8 @@ pub(crate) struct MirrordExecution {
 
     /// The path to the patched binary, if patched for SIP sidestepping.
     pub patched_path: Option<String>,
+
+    pub env_to_unset: Vec<String>,
 }
 
 /// Struct that when dropped will cancel the token and wait on the join handle
@@ -236,6 +238,13 @@ impl MirrordExecution {
             environment: env_vars,
             child: proxy_process,
             patched_path,
+            env_to_unset: config
+                .feature
+                .env
+                .unset
+                .clone()
+                .map(|unset| unset.to_vec())
+                .unwrap_or_default(),
         })
     }
 

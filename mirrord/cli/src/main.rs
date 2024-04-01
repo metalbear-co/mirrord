@@ -91,6 +91,10 @@ where
         std::env::set_var(key, value);
     }
 
+    for key in &execution_info.env_to_unset {
+        std::env::remove_var(key);
+    }
+
     let mut binary_args = args.binary_args.clone();
     // Put original executable in argv[0] even if actually running patched version.
     binary_args.insert(0, args.binary.clone());
