@@ -523,6 +523,18 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "unset": {
+          "title": "feature.env.unset {#feature-env-unset}",
+          "description": "Allows unsetting environment variables in the executed process.\n\nThis is useful for when some system/user-defined environment like `AWS_PROFILE` make the application behave as if it's running locally, instead of using the remote settings.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
