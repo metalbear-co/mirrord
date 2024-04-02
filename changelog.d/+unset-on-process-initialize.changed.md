@@ -1,1 +1,0 @@
-mirrord now unsets the env from within the process aswell
