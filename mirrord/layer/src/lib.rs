@@ -378,6 +378,12 @@ fn layer_start(mut config: LayerConfig) {
 
         std::env::set_var(REMOTE_ENV_FETCHED, "true");
     }
+
+    if let Some(unset) = setup().env_config().unset.as_ref() {
+        unset.as_slice().iter().for_each(|var| {
+            std::env::remove_var(var);
+        })
+    }
 }
 
 /// Name of environment variable used to mark whether remote environment has already been fetched.
