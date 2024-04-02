@@ -8,6 +8,14 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.95.0](https://github.com/metalbear-co/mirrord/tree/3.95.0) - 2024-04-02
+
+
+### Changed
+
+- mirrord now unsets the env from within the process aswell
+
+
 ## [3.94.0](https://github.com/metalbear-co/mirrord/tree/3.94.0) - 2024-04-01
 
 
