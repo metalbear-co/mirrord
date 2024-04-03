@@ -153,8 +153,6 @@ jobs:
   # which is then used by `build_mirrord_on_release_branch`
   check_if_release_branch:
     runs-on: ubuntu-latest
-    # requires test_agent to have image to download
-    needs: [test_agent]
     outputs:
       release_branch: ${{ steps.release-branch.outputs.branch }}
     steps:
@@ -514,13 +512,15 @@ jobs:
   # `build_mirrord_on_release_branch` depends on `check_if_release_branch`
   # which checks if the branch is a release branch
   intellij_e2e_on_release_branch:
-    needs: build_mirrord_on_release_branch
+    # requires test_agent to have image to download
+    needs: [build_mirrord_on_release_branch, test_agent]
     uses: metalbear-co/mirrord-intellij/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
 
   vscode_e2e_on_release_branch:
-    needs: build_mirrord_on_release_branch
+    # requires test_agent to have image to download
+    needs: [build_mirrord_on_release_branch, test_agent]
     uses: metalbear-co/mirrord-vscode/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
