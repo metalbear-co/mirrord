@@ -111,7 +111,7 @@ pub(crate) enum HookError {
 /// Errors internal to mirrord-layer.
 ///
 /// You'll encounter these when the layer is performing some of its internal operations, mostly when
-/// handling [`ProxyToLayerMessage`](mirrord_intproxy::protocol::ProxyToLayerMessage).
+/// handling [`ProxyToLayerMessage`](mirrord_intproxy_protocol::ProxyToLayerMessage).
 #[derive(Error, Debug)]
 pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed while getting a response!")]
@@ -211,6 +211,12 @@ impl From<HookError> for i64 {
             }
             HookError::SocketUnsuportedIpv6 => {
                 info!("{fail}")
+            }
+            HookError::ProxyError(err) => {
+                graceful_exit!(
+                    "Proxy error, connectivity issue or a bug. \n\
+                    You may report it to us on https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml \n{err}"
+                )
             }
             _ => error!("Error occured in Layer >> {fail:?}"),
         };

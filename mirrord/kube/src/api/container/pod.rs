@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::{
     api::{
         container::{
-            util::{base_command_line, get_agent_image, get_capabilities, DEFAULT_TOLERATIONS},
+            util::{base_command_line, get_capabilities, DEFAULT_TOLERATIONS},
             ContainerParams, ContainerVariant,
         },
         runtime::RuntimeData,
@@ -95,7 +95,7 @@ impl ContainerVariant for PodVariant<'_> {
                 "containers": [
                     {
                         "name": "mirrord-agent",
-                        "image": get_agent_image(agent),
+                        "image": agent.image(),
                         "imagePullPolicy": agent.image_pull_policy,
                         "command": command_line,
                         "env": [

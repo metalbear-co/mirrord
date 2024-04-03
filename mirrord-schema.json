@@ -264,10 +264,13 @@
         },
         "image": {
           "title": "agent.image {#agent-image}",
-          "description": "Name of the agent's docker image.\n\nUseful when a custom build of mirrord-agent is required, or when using an internal registry.\n\nDefaults to the latest stable image `\"ghcr.io/metalbear-co/mirrord:latest\"`.\n\n```json { \"agent\": { \"image\": \"internal.repo/images/mirrord:latest\" } } ```",
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentImageFileConfig"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "image_pull_policy": {
@@ -377,6 +380,37 @@
         }
       },
       "additionalProperties": false
+    },
+    "AgentImageFileConfig": {
+      "description": "<!--${internal}--> Allows us to support the dual configuration for the agent image.\n\nWhatever values missing are replaced with our defaults.",
+      "anyOf": [
+        {
+          "description": "The shortened version of: `image: \"repo/mirrord:latest\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        {
+          "description": "Expanded version: `image: { registry: \"repo/mirrord\", tag: \"latest\" }`.",
+          "type": "object",
+          "properties": {
+            "registry": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tag": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     },
     "ConcurrentSteal": {
       "description": "(Operator Only): Allows overriding port locks\n\nCan be set to either `\"continue\"` or `\"override\"`.\n\n- `\"continue\"`: Continue with normal execution - `\"override\"`: If port lock detected then override it with new lock and force close the original locking connection.",
@@ -489,6 +523,18 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "unset": {
+          "title": "feature.env.unset {#feature-env-unset}",
+          "description": "Allows unsetting environment variables in the executed process.\n\nThis is useful for when some system/user-defined environment like `AWS_PROFILE` make the application behave as if it's running locally, instead of using the remote settings. The unsetting happens from extension (if possible)/CLI and when process initializes. In some cases, such as Go the env might not be able to be modified from the process itself.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false

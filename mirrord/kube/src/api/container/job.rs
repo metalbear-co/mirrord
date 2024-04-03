@@ -198,7 +198,7 @@ mod test {
 
     use super::*;
     use crate::api::{
-        container::util::{get_agent_image, get_capabilities, DEFAULT_TOLERATIONS},
+        container::util::{get_capabilities, DEFAULT_TOLERATIONS},
         runtime::ContainerRuntime,
     };
 
@@ -248,7 +248,7 @@ mod test {
                                 "containers": [
                                     {
                                         "name": "mirrord-agent",
-                                        "image": get_agent_image(&agent),
+                                        "image": agent.image(),
                                         "imagePullPolicy": agent.image_pull_policy,
                                         "command": ["./mirrord-agent", "-l", "3000", "targetless"],
                                         "env": [
@@ -356,7 +356,7 @@ mod test {
                                 "containers": [
                                     {
                                         "name": "mirrord-agent",
-                                        "image": get_agent_image(&agent),
+                                        "image": agent.image(),
                                         "imagePullPolicy": agent.image_pull_policy,
                                         "securityContext": {
                                             "runAsGroup": 13,

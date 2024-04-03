@@ -20,13 +20,6 @@ pub(super) static DEFAULT_TOLERATIONS: LazyLock<Vec<Toleration>> = LazyLock::new
     }]
 });
 
-pub fn get_agent_image(agent: &AgentConfig) -> String {
-    match &agent.image {
-        Some(image) => image.clone(),
-        None => concat!("ghcr.io/metalbear-co/mirrord:", env!("CARGO_PKG_VERSION")).to_owned(),
-    }
-}
-
 /// Retrieve a list of Linux capabilities for the agent container.
 pub(super) fn get_capabilities(agent: &AgentConfig) -> Vec<LinuxCapability> {
     let disabled = agent.disabled_capabilities.clone().unwrap_or_default();

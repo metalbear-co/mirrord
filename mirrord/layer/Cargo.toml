@@ -27,7 +27,7 @@ nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 # can't change to upstream since it brings openssl dependency.
-frida-gum = { git = "https://github.com/metalbear-co/frida-rust", version = "0.13", features = ["auto-download"], branch="capstone_remove" }
+frida-gum = { git = "https://github.com/metalbear-co/frida-rust", version = "0.13", features = ["auto-download"], branch="upgrade_frida_capstone" }
 
 serde.workspace = true
 serde_json.workspace = true

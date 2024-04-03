@@ -683,24 +683,23 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.69.1"
+version = "0.63.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ffcebc3849946a7170a05992aac39da343a90676ab392c51a4280981d6379c2"
+checksum = "36d860121800b2a9a94f9b5604b332d5cffb234ce17609ea479d723dbc9d3885"
 dependencies = [
- "bitflags 2.4.1",
+ "bitflags 1.3.2",
  "cexpr",
  "clang-sys",
  "lazy_static",
  "lazycell",
  "log",
  "peeking_take_while",
- "prettyplease 0.2.15",
  "proc-macro2",
  "quote",
  "regex",
  "rustc-hash",
  "shlex",
- "syn 2.0.48",
+ "syn 1.0.109",
  "which",
 ]
 
@@ -1893,7 +1892,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "libc",
 ]
@@ -1970,7 +1969,7 @@ checksum = "6c2141d6d6c8512188a7891b4b01590a45f6dac67afb4f255c4124dbb86d4eaa"
 [[package]]
 name = "frida-build"
 version = "0.2.1"
-source = "git+https://github.com/metalbear-co/frida-rust?branch=capstone_remove#655e69f8b5154e2143ab38d6e7319e31472282b5"
+source = "git+https://github.com/metalbear-co/frida-rust?branch=upgrade_frida_capstone#f7a1e8038ada5cc56a949927b687831d99a508b5"
 dependencies = [
  "reqwest",
  "tar",
@@ -1979,8 +1978,8 @@ dependencies = [
 
 [[package]]
 name = "frida-gum"
-version = "0.13.4"
-source = "git+https://github.com/metalbear-co/frida-rust?branch=capstone_remove#655e69f8b5154e2143ab38d6e7319e31472282b5"
+version = "0.13.2"
+source = "git+https://github.com/metalbear-co/frida-rust?branch=upgrade_frida_capstone#f7a1e8038ada5cc56a949927b687831d99a508b5"
 dependencies = [
  "cstr_core",
  "frida-gum-sys",
@@ -1992,8 +1991,8 @@ dependencies = [
 
 [[package]]
 name = "frida-gum-sys"
-version = "0.8.3"
-source = "git+https://github.com/metalbear-co/frida-rust?branch=capstone_remove#655e69f8b5154e2143ab38d6e7319e31472282b5"
+version = "0.8.1"
+source = "git+https://github.com/metalbear-co/frida-rust?branch=upgrade_frida_capstone#f7a1e8038ada5cc56a949927b687831d99a508b5"
 dependencies = [
  "bindgen",
  "frida-build",
@@ -2740,7 +2739,7 @@ dependencies = [
 
 [[package]]
 name = "issue1317"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "actix-web",
  "env_logger",
@@ -2752,7 +2751,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "errno 0.3.8",
  "libc",
@@ -2761,7 +2760,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776portnot53"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "libc",
  "socket2 0.5.5",
@@ -2769,14 +2768,14 @@ dependencies = [
 
 [[package]]
 name = "issue1899"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "issue2001"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "libc",
 ]
@@ -3075,7 +3074,7 @@ checksum = "c4cd1a83af159aa67994778be9070f0ae1bd732942279cabb14f86f986a21456"
 
 [[package]]
 name = "listen_ports"
-version = "3.92.1"
+version = "3.95.0"
 
 [[package]]
 name = "local-channel"
@@ -3292,7 +3291,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -3337,7 +3336,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -3389,7 +3388,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "assert-json-diff",
  "base64 0.21.7",
@@ -3403,7 +3402,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "chrono",
  "fs4",
@@ -3423,7 +3422,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "bimap",
  "bitflags 2.4.1",
@@ -3445,7 +3444,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -3455,7 +3454,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "bincode",
  "drain",
@@ -3471,7 +3470,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "bytes",
  "http-body-util",
@@ -3493,7 +3492,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy-protocol"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "bincode",
  "mirrord-protocol",
@@ -3503,7 +3502,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "actix-codec",
  "base64 0.21.7",
@@ -3517,7 +3516,7 @@ dependencies = [
  "mirrord-protocol",
  "rand",
  "regex",
- "rstest 0.18.2",
+ "rstest 0.17.0",
  "serde",
  "serde_json",
  "shellexpand",
@@ -3530,7 +3529,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -3566,7 +3565,7 @@ dependencies = [
  "os_info",
  "rand",
  "regex",
- "rstest 0.18.2",
+ "rstest 0.17.0",
  "serde",
  "serde_json",
  "socket2 0.5.5",
@@ -3586,7 +3585,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3595,7 +3594,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -3605,7 +3604,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -3639,7 +3638,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "enum_dispatch",
  "indicatif",
@@ -3671,7 +3670,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "apple-codesign",
  "memchr",
@@ -3990,7 +3989,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.92.1"
+version = "3.95.0"
 
 [[package]]
 name = "overload"
@@ -4471,16 +4470,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prettyplease"
-version = "0.2.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae005bd773ab59b4725093fd7df83fd7892f7d8eafb48dbd7de6e024e4215f9d"
-dependencies = [
- "proc-macro2",
- "syn 2.0.48",
-]
-
-[[package]]
 name = "prettytable-rs"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4572,7 +4561,7 @@ dependencies = [
  "log",
  "multimap",
  "petgraph",
- "prettyplease 0.1.25",
+ "prettyplease",
  "prost",
  "prost-types",
  "regex",
@@ -4977,21 +4966,21 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.92.1"
+version = "3.95.0"
 dependencies = [
  "tokio",
 ]
@@ -6201,7 +6190,7 @@ version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5bf5e9b9c0f7e0a7c027dcfaba7b2c60816c7049171f679d99ee2ff65d0de8c4"
 dependencies = [
- "prettyplease 0.1.25",
+ "prettyplease",
  "proc-macro2",
  "prost-build",
  "quote",
@@ -6214,7 +6203,7 @@ version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6fdaae4c2c638bb70fe42803a26fbd6fc6ac8c72f5c59f67ecc2a2dcabf4b07"
 dependencies = [
- "prettyplease 0.1.25",
+ "prettyplease",
  "proc-macro2",
  "prost-build",
  "quote",

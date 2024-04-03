@@ -98,22 +98,6 @@ where
         }
     }
 
-    // Send to IDEs that we're in multi-pod without operator.
-    progress.ide(serde_json::to_value(IdeMessage {
-        id: MULTIPOD_WARNING.0.to_string(),
-        level: NotificationLevel::Warning,
-        text: MULTIPOD_WARNING.1.to_string(),
-        actions: {
-            let mut actions = HashSet::new();
-            actions.insert(IdeAction::Link {
-                label: "Try it now".to_string(),
-                link: "https://app.metalbear.co/".to_string(),
-            });
-
-            actions
-        },
-    })?);
-
     if config.feature.copy_target.enabled {
         return Err(CliError::FeatureRequiresOperatorError("copy target".into()));
     }
@@ -121,10 +105,28 @@ where
     if matches!(
         config.target,
         mirrord_config::target::TargetConfig {
-            path: Some(mirrord_config::target::Target::Deployment { .. }),
+            path: Some(
+                mirrord_config::target::Target::Deployment { .. }
+                    | mirrord_config::target::Target::Rollout(..)
+            ),
             ..
         }
     ) {
+        // Send to IDEs that we're in multi-pod without operator.
+        progress.ide(serde_json::to_value(IdeMessage {
+            id: MULTIPOD_WARNING.0.to_string(),
+            level: NotificationLevel::Warning,
+            text: MULTIPOD_WARNING.1.to_string(),
+            actions: {
+                let mut actions = HashSet::new();
+                actions.insert(IdeAction::Link {
+                    label: "Try it now".to_string(),
+                    link: "https://app.metalbear.co/".to_string(),
+                });
+
+                actions
+            },
+        })?);
         // This is CLI Only because the extensions also implement this check with better messaging.
         progress.print( "When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
         progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
