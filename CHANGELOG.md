@@ -8,6 +8,27 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.95.0](https://github.com/metalbear-co/mirrord/tree/3.95.0) - 2024-04-02
+
+
+### Changed
+
+- mirrord now unsets the env from within the process aswell
+
+
+## [3.94.0](https://github.com/metalbear-co/mirrord/tree/3.94.0) - 2024-04-01
+
+
+### Added
+
+- New config `env.unset` that allows user to unset environment variables in the
+  executed process.
+  This is useful for unsetting env like `HTTP_PROXY`, `AWS_PROFILE` that come
+  from the local environment
+  and cause undesired behavior (because those aren't needed for deployed apps).
+  [#2260](https://github.com/metalbear-co/mirrord/issues/2260)
+
+
 ## [3.93.1](https://github.com/metalbear-co/mirrord/tree/3.93.1) - 2024-03-31
 
 

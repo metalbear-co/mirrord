@@ -78,6 +78,16 @@ pub struct EnvConfig {
     /// This setting is meant to resolve issues when using mirrord via the IntelliJ plugin on WSL
     /// and the remote environment contains a lot of variables.
     pub load_from_process: Option<bool>,
+
+    /// ### feature.env.unset {#feature-env-unset}
+    ///
+    /// Allows unsetting environment variables in the executed process.
+    ///
+    /// This is useful for when some system/user-defined environment like `AWS_PROFILE` make the
+    /// application behave as if it's running locally, instead of using the remote settings.
+    /// The unsetting happens from extension (if possible)/CLI and when process initializes.
+    /// In some cases, such as Go the env might not be able to be modified from the process itself.
+    pub unset: Option<VecOrSingle<String>>,
 }
 
 impl MirrordToggleableConfig for EnvFileConfig {
@@ -92,6 +102,7 @@ impl MirrordToggleableConfig for EnvFileConfig {
                 .or_else(|| Some(VecOrSingle::Single("*".to_owned()))),
             load_from_process: None,
             r#override: None,
+            unset: None,
         })
     }
 }
@@ -115,6 +126,13 @@ impl CollectAnalytics for &EnvConfig {
         analytics.add(
             "overrides_count",
             self.r#override
+                .as_ref()
+                .map(|v| v.len() as u32)
+                .unwrap_or_default(),
+        );
+        analytics.add(
+            "unset_count",
+            self.unset
                 .as_ref()
                 .map(|v| v.len() as u32)
                 .unwrap_or_default(),
