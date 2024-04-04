@@ -234,6 +234,10 @@ pub(super) fn bind(
         .get_by_left(&requested_address.port())
         .cloned();
 
+    if socket.domain != libc::AF_INET && socket.domain != libc::AF_INET6 {
+        Err(Bypass::Domain(socket.domain))?
+    }
+
     // Listen port was specified
     if let Some(port) = listen_port {
         let address = SocketAddr::new(requested_address.ip(), port);
