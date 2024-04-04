@@ -233,18 +233,12 @@ pub(super) fn bind(
         let address = SocketAddr::new(requested_address.ip(), port);
         bind_address(sockfd, socket.domain, &address)
     } else {
-        bind_address(sockfd, socket.domain, &requested_address).or_else(|err| {
-            info!(
-                ?err,
-                port = requested_address.port(),
-                "bind -> first `bind` failed, trying to bind to a random port"
-            );
-            bind_address(
-                sockfd,
-                socket.domain,
-                &SocketAddr::new(requested_address.ip(), 0),
-            )
-        })
+        bind_address(sockfd, socket.domain, &requested_address)
+            .or_else(|e| {
+                info!("bind -> first `bind` failed on port {:?} with {e:?}, trying to bind to a random port", requested_address.port());
+                bind_address(sockfd, socket.domain, &SocketAddr::new(requested_address.ip(), 0))
+            }
+        )
     }?;
 
     // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
