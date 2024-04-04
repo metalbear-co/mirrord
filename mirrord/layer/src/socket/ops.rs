@@ -142,7 +142,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
     Detour::Success(socket_fd)
 }
 
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "debug", ret)]
 fn bind_address(sockfd: c_int, domain: c_int, addr: &SocketAddr) -> Detour<()> {
     let port = addr.port();
     let address = {

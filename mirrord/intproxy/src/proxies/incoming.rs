@@ -96,6 +96,14 @@ struct MetadataStore {
 
 impl MetadataStore {
     fn get(&mut self, req: ConnMetadataRequest) -> ConnMetadataResponse {
+        eprintln!("get {req:?}");
+        self.prepared_responses
+            .iter()
+            .inspect(|(request, response)| {
+                eprintln!("request {request:?}\nresponse {response:?}");
+            })
+            .count();
+
         self.prepared_responses
             .remove(&req)
             .unwrap_or_else(|| ConnMetadataResponse {

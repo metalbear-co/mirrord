@@ -188,10 +188,18 @@ mod traffic {
         )
         .await;
         let res = process.wait().await;
-        assert!(!res.success()); // Should fail because local process cannot reach service.
+        // Should fail because local process cannot reach service.
+        assert!(
+            !res.success(),
+            "Local process cannot reach service by name: {res:?}!"
+        );
         let stripped_target = internal_service.target.split('/').collect::<Vec<&str>>()[1];
         let logs = pod_api.logs(stripped_target, &lp).await;
-        assert_eq!(logs.unwrap(), "");
+        assert_eq!(
+            logs.unwrap(),
+            "",
+            "No logs should be present for the local validation part!"
+        );
 
         // Run mirrord with outgoing enabled.
         let mut process = run_exec_with_target(
@@ -203,7 +211,10 @@ mod traffic {
         )
         .await;
         let res = process.wait().await;
-        assert!(res.success());
+        assert!(
+            res.success(),
+            "Local process should be able to reach remote service: {res:?}!"
+        );
 
         // Verify that the UDP message sent by the application reached the internal service.
         lp.follow = true; // Follow log stream.
