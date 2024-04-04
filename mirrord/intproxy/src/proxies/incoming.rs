@@ -95,12 +95,12 @@ struct MetadataStore {
 }
 
 impl MetadataStore {
+    #[tracing::instrument(level = "debug", skip(self), ret)]
     fn get(&mut self, req: ConnMetadataRequest) -> ConnMetadataResponse {
-        eprintln!("get {req:?}");
         self.prepared_responses
             .iter()
             .inspect(|(request, response)| {
-                eprintln!("request {request:?}\nresponse {response:?}");
+                tracing::debug!("request {request:?}\nresponse {response:?}");
             })
             .count();
 
