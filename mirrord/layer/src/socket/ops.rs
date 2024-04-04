@@ -237,7 +237,7 @@ pub(super) fn bind(
     // Listen port was specified
     if let Some(port) = listen_port {
         let address = SocketAddr::new(requested_address.ip(), port);
-        bind_address(sockfd, socket.domain, &ddress)
+        bind_address(sockfd, socket.domain, &address)
     } else {
         bind_address(sockfd, socket.domain, &requested_address)
             .or_else(|e| {
