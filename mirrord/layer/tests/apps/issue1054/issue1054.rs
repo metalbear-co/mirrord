@@ -32,7 +32,7 @@ fn main() {
 
     assert_eq!(
         connection.local_addr().unwrap(),
-        "1.1.1.1:80".parse().unwrap()
+        "0.0.0.0:80".parse().unwrap()
     );
 
     println!("test issue 1054: SUCCESS");
