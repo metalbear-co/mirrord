@@ -159,7 +159,7 @@ fn bind_address(sockfd: c_int, domain: c_int, addr: &SocketAddr) -> Detour<()> {
                 invalid => Err(Bypass::Domain(invalid))?,
             }
         } else {
-            SockAddr::from(addr.clone())
+            SockAddr::from(*addr)
         }
     };
 
