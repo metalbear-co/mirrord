@@ -145,16 +145,22 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
 #[tracing::instrument(level = "trace", ret)]
 fn bind_address(sockfd: c_int, domain: c_int, addr: &SocketAddr) -> Detour<()> {
     let port = addr.port();
-    let overwrite_address = !(addr.ip().is_unspecified() || addr.ip().is_loopback());
-    let address = match (domain, overwrite_address) {
-        (libc::AF_INET, true) => {
-            SockAddr::from(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
+    let address = {
+        // if it's loopback or unspecified, use whatever user provided
+        // if it's a specific ip, change it to localhost
+        if addr.ip().is_unspecified() || addr.ip().is_loopback() {
+            SockAddr::from(*addr)
+        } else {
+            match domain {
+                libc::AF_INET => {
+                    SockAddr::from(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
+                }
+                libc::AF_INET6 => {
+                    SockAddr::from(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port))
+                }
+                invalid => Err(Bypass::Domain(invalid))?,
+            }
         }
-        (libc::AF_INET6, true) => {
-            SockAddr::from(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port))
-        }
-        (libc::AF_INET6 | libc::AF_INET, false) => SockAddr::from(*addr),
-        (invalid, _) => Err(Bypass::Domain(invalid))?,
     };
 
     let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
@@ -227,6 +233,10 @@ pub(super) fn bind(
         .listen_ports
         .get_by_left(&requested_address.port())
         .cloned();
+
+    if socket.domain != libc::AF_INET && socket.domain != libc::AF_INET6 {
+        Err(Bypass::Domain(socket.domain))?
+    }
 
     // Listen port was specified
     if let Some(port) = listen_port {
