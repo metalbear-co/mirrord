@@ -351,7 +351,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
 /// interception procedure.
 /// This returns errno so we can restore the correct errno in case result is -1 (until we get
 /// back to the hook we might call functions that will corrupt errno)
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "debug", ret)]
 fn connect_outgoing<const CALL_CONNECT: bool>(
     sockfd: RawFd,
     remote_address: SockAddr,
@@ -440,7 +440,7 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
 /// trying to connect to - then don't forward this connection to the agent, and instead of
 /// connecting to the requested address, connect to the actual address where the application
 /// is locally listening.
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "debug", ret)]
 fn connect_to_local_address(
     sockfd: RawFd,
     user_socket_info: &UserSocket,
@@ -489,7 +489,7 @@ fn connect_to_local_address(
 /// that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request interception procedure.
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
-#[tracing::instrument(level = "trace", ret, skip(raw_address))]
+#[tracing::instrument(level = "debug", ret, skip(raw_address))]
 pub(super) fn connect(
     sockfd: RawFd,
     raw_address: *const sockaddr,
@@ -926,7 +926,7 @@ fn remote_hostname_string() -> Detour<CString> {
 /// **Safety**:
 /// See the [`GETHOSTBYNAME_ALIASES_PTR`] docs. If you see this function being called and some weird
 /// issue is going on, assume that you might've triggered the UB.
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = "debug", ret)]
 pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
     let name: String = raw_name
         .bypass(Bypass::NullNode)?
@@ -1002,7 +1002,7 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
 }
 
 /// Resolve hostname from remote host with caching for the result
-#[tracing::instrument(level = "trace")]
+#[tracing::instrument(level = "debug")]
 pub(super) fn gethostname() -> Detour<&'static CString> {
     HOSTNAME.get_or_detour_init(remote_hostname_string)
 }
