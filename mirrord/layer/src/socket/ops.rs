@@ -143,18 +143,25 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
 }
 
 #[tracing::instrument(level = "trace", ret)]
-fn bind_port(sockfd: c_int, domain: c_int, port: u16) -> Detour<()> {
-    let address = match domain {
-        libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::LOCALHOST),
-            port,
-        ))),
-        libc::AF_INET6 => Ok(SockAddr::from(SocketAddr::new(
-            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            port,
-        ))),
-        invalid => Err(Bypass::Domain(invalid)),
-    }?;
+fn bind_address(sockfd: c_int, domain: c_int, addr: &SocketAddr) -> Detour<()> {
+    let port = addr.port();
+    let address = {
+        // if it's loopback or unspecified, use whatever user provided
+        // if it's a specific ip, change it to localhost
+        if !addr.ip().is_unspecified() && !addr.ip().is_loopback() {
+            match domain {
+                libc::AF_INET => {
+                    SockAddr::from(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
+                }
+                libc::AF_INET6 => {
+                    SockAddr::from(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port))
+                }
+                invalid => Err(Bypass::Domain(invalid))?,
+            }
+        } else {
+            SockAddr::from(addr.clone())
+        }
+    };
 
     let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
     if bind_result != 0 {
@@ -229,12 +236,13 @@ pub(super) fn bind(
 
     // Listen port was specified
     if let Some(port) = listen_port {
-        bind_port(sockfd, socket.domain, port)
+        let address = SocketAddr::new(requested_address.ip(), port);
+        bind_address(sockfd, socket.domain, &ddress)
     } else {
-        bind_port(sockfd, socket.domain, requested_address.port())
+        bind_address(sockfd, socket.domain, &requested_address)
             .or_else(|e| {
                 info!("bind -> first `bind` failed on port {:?} with {e:?}, trying to bind to a random port", requested_address.port());
-                bind_port(sockfd, socket.domain, 0)
+                bind_address(sockfd, socket.domain, &SocketAddr::new(requested_address.ip(), 0))
             }
         )
     }?;
