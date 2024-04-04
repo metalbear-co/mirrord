@@ -148,9 +148,7 @@ fn bind_address(sockfd: c_int, domain: c_int, addr: &SocketAddr) -> Detour<()> {
     let address = {
         // if it's loopback or unspecified, use whatever user provided
         // if it's a specific ip, change it to localhost
-        if addr.ip().is_unspecified() || addr.ip().is_loopback() {
-            SockAddr::from(*addr)
-        } else {
+        if !addr.ip().is_unspecified() && !addr.ip().is_loopback() {
             match domain {
                 libc::AF_INET => {
                     SockAddr::from(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
@@ -160,6 +158,8 @@ fn bind_address(sockfd: c_int, domain: c_int, addr: &SocketAddr) -> Detour<()> {
                 }
                 invalid => Err(Bypass::Domain(invalid))?,
             }
+        } else {
+            SockAddr::from(*addr)
         }
     };
 
