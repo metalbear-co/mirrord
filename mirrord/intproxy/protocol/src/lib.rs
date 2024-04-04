@@ -5,6 +5,7 @@
 use std::{
     collections::HashMap,
     fmt,
+    hash::Hash,
     net::{IpAddr, SocketAddr},
 };
 
@@ -135,12 +136,28 @@ pub enum IncomingRequest {
 /// A request for additional metadata for accepted connection.
 /// The layer should use this each time it accepts a connection on a socket that is listening for
 /// mirrored connections ([`PortSubscribe`]).
-#[derive(Encode, Decode, Debug, Eq, PartialEq, Hash, Clone)]
+#[derive(Encode, Decode, Debug, Eq, Clone)]
 pub struct ConnMetadataRequest {
     /// Address of the listener that accepted the connection.
     pub listener_address: SocketAddr,
     /// Address of connection peer.
     pub peer_address: SocketAddr,
+}
+
+impl PartialEq for ConnMetadataRequest {
+    fn eq(&self, other: &Self) -> bool {
+        self.listener_address
+            .port()
+            .eq(&other.listener_address.port())
+            && self.peer_address.port().eq(&other.peer_address.port())
+    }
+}
+
+impl std::hash::Hash for ConnMetadataRequest {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.listener_address.port().hash(state);
+        self.peer_address.port().hash(state);
+    }
 }
 
 /// A response to layer's [`ConnMetadataRequest`].
