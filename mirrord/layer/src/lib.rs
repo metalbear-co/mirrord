@@ -467,7 +467,7 @@ fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
 /// - `enabled_remote_dns`: replaces [`libc::getaddrinfo`] and [`libc::freeaddrinfo`] when this is
 ///   `true`, see [`NetworkConfig`], and
 ///   [`hooks::enable_socket_hooks`](socket::hooks::enable_socket_hooks).
-#[tracing::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = "trace")]
 fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries: Vec<String>) {
     let mut hook_manager = HookManager::default();
 
@@ -540,7 +540,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
 ///
 /// Removes the `fd` key from either [`SOCKETS`] or [`OPEN_FILES`].
 /// **DON'T ADD LOGS HERE SINCE CALLER MIGHT CLOSE STDOUT/STDERR CAUSING THIS TO CRASH**
-#[tracing::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = "trace")]
 pub(crate) fn close_layer_fd(fd: c_int) {
     // Remove from sockets.
     if let Some((_, socket)) = SOCKETS.remove(&fd) {
