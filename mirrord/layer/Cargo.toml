@@ -24,7 +24,8 @@ mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"
 ctor = "0.2"
 libc.workspace = true
 nix.workspace = true
-tracing.workspace = true
+# careful with release_max_level_info! See issue #2351
+tracing = { workspace = true, features = ["release_max_level_info"]}
 tracing-subscriber.workspace = true
 # can't change to upstream since it brings openssl dependency.
 frida-gum = { git = "https://github.com/metalbear-co/frida-rust", version = "0.13", features = ["auto-download"], branch="upgrade_frida_capstone" }
