@@ -8,6 +8,111 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.95.0](https://github.com/metalbear-co/mirrord/tree/3.95.0) - 2024-04-02
+
+
+### Changed
+
+- mirrord now unsets the env from within the process aswell
+
+
+## [3.94.0](https://github.com/metalbear-co/mirrord/tree/3.94.0) - 2024-04-01
+
+
+### Added
+
+- New config `env.unset` that allows user to unset environment variables in the
+  executed process.
+  This is useful for unsetting env like `HTTP_PROXY`, `AWS_PROFILE` that come
+  from the local environment
+  and cause undesired behavior (because those aren't needed for deployed apps).
+  [#2260](https://github.com/metalbear-co/mirrord/issues/2260)
+
+
+## [3.93.1](https://github.com/metalbear-co/mirrord/tree/3.93.1) - 2024-03-31
+
+
+### Fixed
+
+- Fix new IDE progress breaking older plugins.
+  Three issues fixed:
+  1. Show the new progress only when env var is set (to be set in newer IDE
+  versions).
+  2. Multi pod warning was showing everytime when no operator, not only when
+  targetting a deployment + no operator.
+  3. Show the message for rollouts as well.
+  [#2339](https://github.com/metalbear-co/mirrord/issues/2339)
+
+
+### Internal
+
+- Update Frida version to 16.2.1
+
+
+## [3.93.0](https://github.com/metalbear-co/mirrord/tree/3.93.0) - 2024-03-31
+
+
+### Added
+
+- Added handling HTTP upgrades in filtered connections (`mirrord-agent`).
+  Refactored TCP stealer code.
+  [#2270](https://github.com/metalbear-co/mirrord/issues/2270)
+- Add a new diagnostic command to calculate mirrord session latency
+
+
+### Changed
+
+- Changed `agent.image` config to also accept an extended version where you may
+  specify both _registry_ and _tag_ with `agent.image.registry` and
+  `agent.image.tag`.
+- Proxy errors now don't propagate back to libc but exit with a message
+- `use_proxy` behavior is now setting the proxy env to empty value instead of
+  unsetting. This should help with cases where
+  we need it to propogate to the extensions.
+
+
+### Fixed
+
+- Internal proxy and agent now properly handle connection shutdowns.
+  [#2309](https://github.com/metalbear-co/mirrord/issues/2309)
+- Fix some open/fd potential issues
+- Fixed the display of agent startup errors to the user.
+- Fixed timeout set on new internal proxy connection in `fork` detour.
+
+
+### Internal
+
+- Adds new message type `IdeMessage`. Allows us to send messages to the IDE
+  that should be shown in notification boxes, with buttons/actions.
+- Change design around analyticsreporter to be more robust/clean
+- Prepared an e2e test for stealing WebSockets connections with an HTTP filter
+  set.
+
+
+## [3.92.1](https://github.com/metalbear-co/mirrord/tree/3.92.1) - 2024-03-17
+
+
+### Removed
+
+- Removed problematic DNS cache from internal proxy.
+
+
+### Fixed
+
+- Fixed a bug with handling hints passed to `getaddrinfo` function.
+
+
+### Internal
+
+- stealer to steal in incoming mode typo
+  [#docs-incoming-stealer](https://github.com/metalbear-co/mirrord/issues/docs-incoming-stealer)
+- Add `kuma-sidecar` `kuma-init` to default list of skipped containers. (no
+  need to target these containers)
+  [#skip-kuma-containers](https://github.com/metalbear-co/mirrord/issues/skip-kuma-containers)
+- Added a unit test to internal proxy DNS cache. Added more tracing to internal
+  proxy.
+
+
 ## [3.92.0](https://github.com/metalbear-co/mirrord/tree/3.92.0) - 2024-03-13
 
 

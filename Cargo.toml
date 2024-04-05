@@ -18,12 +18,13 @@ members = [
     "tests/rust-unix-socket-client",
     "tests/rust-bypassed-unix-socket",
     "tests/issue1317",
+    "tests/rust-websockets",
 ]
 resolver = "2"
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.92.0"
+version = "3.95.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -78,10 +79,6 @@ semver = "1"
 once_cell = "1"
 exec = "0.3"
 drain = "0.1"
-
-[patch.crates-io]
-tracing = { git = "https://github.com/metalbear-co/tracing", package = "tracing", branch = "worker_options_non_blocking_v1" }
-tracing-subscriber = { git = "https://github.com/metalbear-co/tracing", package = "tracing-subscriber", branch = "worker_options_non_blocking_v1" }
 
 [profile.release]
 strip = "debuginfo"

@@ -64,7 +64,7 @@ fn update_ptr_from_bypass(ptr: *const c_char, bypass: Bypass) -> *const c_char {
 
 /// Implementation of open_detour, used in open_detour and openat_detour
 /// We ignore mode in case we don't bypass the call.
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, mode: c_int) -> Detour<RawFd> {
     let path = raw_path.checked_into();
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
@@ -149,7 +149,11 @@ pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> u
     open_logic(raw_filename, O_RDONLY, O_DIRECTORY)
         .and_then(|fd| match fdopendir(fd) {
             Detour::Success(success) => Detour::Success(success),
-            Detour::Bypass(bypass) => Detour::Bypass(bypass),
+            Detour::Bypass(bypass) => {
+                // this shouldn't happen, but if it does we shouldn't leak fd
+                close_layer_fd(fd);
+                Detour::Bypass(bypass)
+            }
             Detour::Error(fail) => {
                 close_layer_fd(fd);
                 Detour::Error(fail)
@@ -169,12 +173,7 @@ unsafe fn opendir_bypass(raw_filename: *const c_char) -> usize {
 /// inspired by https://github.com/apple-oss-distributions/Libc/blob/c5a3293354e22262702a3add5b2dfc9bb0b93b85/gen/FreeBSD/opendir.c#L118
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 unsafe fn opendir_bypass(raw_filename: *const c_char) -> usize {
-    use libc::{O_CLOEXEC, O_NONBLOCK};
-    let fd = libc::open(
-        raw_filename,
-        O_RDONLY | O_DIRECTORY | O_NONBLOCK | O_CLOEXEC,
-        0,
-    );
+    let fd = libc::open(raw_filename, O_RDONLY | O_DIRECTORY);
     if fd == -1 {
         // null
         return 0;

@@ -14,7 +14,7 @@ use tracing::debug;
 use crate::{
     api::{
         container::{
-            util::{base_command_line, get_agent_image, get_capabilities, wait_for_agent_startup},
+            util::{base_command_line, get_capabilities, wait_for_agent_startup},
             ContainerParams, ContainerVariant,
         },
         kubernetes::{get_k8s_resource_api, AgentKubernetesConnectInfo},
@@ -201,7 +201,7 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
 
         serde_json::from_value(json!({
             "name": params.name,
-            "image": get_agent_image(agent),
+            "image": agent.image(),
             "securityContext": {
                 "runAsGroup": params.gid,
                 "capabilities": {

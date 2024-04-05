@@ -8,7 +8,8 @@ use std::{
 };
 
 use bytes::BytesMut;
-use hyper::{StatusCode, Version};
+use hyper::{upgrade::OnUpgrade, StatusCode, Version};
+use hyper_util::rt::TokioIo;
 use mirrord_protocol::tcp::{
     HttpRequestFallback, HttpResponse, HttpResponseFallback, InternalHttpBody,
 };
@@ -19,7 +20,7 @@ use tokio::{
     time,
 };
 
-use super::http::{HttpSender, TransportHandle};
+use super::http::HttpSender;
 use crate::background_tasks::{BackgroundTask, MessageBus};
 
 /// Messages consumed by the [`Interceptor`] when it runs as a [`BackgroundTask`].
@@ -66,14 +67,13 @@ pub enum InterceptorError {
     /// Received a request with an unsupported HTTP version.
     #[error("{0:?} is not supported")]
     UnsupportedHttpVersion(Version),
-    /// Occurs when the [`Interceptor`] is acting as an HTTP gateway and receives
-    /// [`MessageIn::Raw`], but the HTTP version used does not support upgrading connections.
-    #[error("upgrading connections not supported in {0:?}")]
-    UpgradeNotSupported(Version),
-    /// Occurs when reclaiming [`TcpStream`] from the HTTP connection is not possible, because a
-    /// background [`tokio::task`] panicked.
-    #[error("task for keeping http connection alive panicked")]
-    HttpConnectionTaskPanicked,
+    /// Occurs when [`Interceptor`] receives [`MessageIn::Raw`], but it acts as an HTTP gateway and
+    /// there was no HTTP upgrade.
+    #[error("received raw bytes, but expected an HTTP request")]
+    UnexpectedRawData,
+    /// Occurs when [`Interceptor`] receives [`MessageIn::Http`], but it acts as a TCP proxy.
+    #[error("received an HTTP request, but expected raw bytes")]
+    UnexpectedHttpRequest,
 }
 
 pub type InterceptorResult<T, E = InterceptorError> = core::result::Result<T, E>;
@@ -108,31 +108,63 @@ impl BackgroundTask for Interceptor {
     type MessageOut = MessageOut;
 
     async fn run(self, message_bus: &mut MessageBus<Self>) -> InterceptorResult<(), Self::Error> {
-        /// Just to allow having one variable in the loop.
-        enum GenericConnection {
-            Raw(RawConnection),
-            Http(HttpConnection),
-        }
+        let mut stream = self.socket.connect(self.peer).await?;
 
-        let stream = self.socket.connect(self.peer).await?;
-        let mut conn = GenericConnection::Raw(RawConnection { stream });
+        // First, we determine whether this is a raw TCP connection or an HTTP connection.
+        // If we receive an HTTP request from our parent task, this must be an HTTP connection.
+        // If we receive raw bytes or our peer starts sending some data, this must be raw TCP.
+        let request = tokio::select! {
+            message = message_bus.recv() => match message {
+                Some(MessageIn::Raw(data)) => {
+                    if data.is_empty() {
+                        tracing::trace!("incoming interceptor -> agent shutdown, shutting down connection with layer");
+                        stream.shutdown().await?;
+                    } else {
+                        stream.write_all(&data).await?;
+                    }
 
-        loop {
-            let new_conn = match conn {
-                GenericConnection::Raw(raw_conn) => raw_conn
-                    .run(message_bus)
-                    .await?
-                    .map(GenericConnection::Http),
-                GenericConnection::Http(http_conn) => http_conn
-                    .run(message_bus)
-                    .await?
-                    .map(GenericConnection::Raw),
-            };
+                    return RawConnection { stream }.run(message_bus).await;
+                }
+                Some(MessageIn::Http(request)) => request,
+                None => return Ok(()),
+            },
 
-            match new_conn {
-                Some(new_conn) => conn = new_conn,
-                None => break Ok(()),
+            result = stream.readable() => {
+                result?;
+                return RawConnection { stream }.run(message_bus).await;
             }
+        };
+
+        let sender = super::http::handshake(request.version(), stream).await?;
+        let mut http_conn = HttpConnection {
+            sender,
+            peer: self.peer,
+        };
+        let (response, on_upgrade) = http_conn.send(request).await?;
+        message_bus.send(MessageOut::Http(response)).await;
+
+        let raw = if let Some(on_upgrade) = on_upgrade {
+            let upgraded = on_upgrade.await?;
+            let parts = upgraded
+                .downcast::<TokioIo<TcpStream>>()
+                .expect("IO type is known");
+            if !parts.read_buf.is_empty() {
+                message_bus
+                    .send(MessageOut::Raw(parts.read_buf.into()))
+                    .await;
+            }
+
+            Some(RawConnection {
+                stream: parts.io.into_inner(),
+            })
+        } else {
+            http_conn.run(message_bus).await?
+        };
+
+        if let Some(raw) = raw {
+            raw.run(message_bus).await
+        } else {
+            Ok(())
         }
     }
 }
@@ -144,9 +176,6 @@ struct HttpConnection {
     peer: SocketAddr,
     /// Handle to the HTTP connection between the [`Interceptor`] the server.
     sender: HttpSender,
-    /// Allows for reclaiming the TCP connection when the HTTP connection ends (and HTTP version
-    /// supports upgrades).
-    transport: TransportHandle,
 }
 
 impl HttpConnection {
@@ -156,84 +185,102 @@ impl HttpConnection {
         &self,
         request: HttpRequestFallback,
         response: InterceptorResult<hyper::Response<hyper::body::Incoming>>,
-    ) -> InterceptorResult<HttpResponseFallback> {
+    ) -> InterceptorResult<(HttpResponseFallback, Option<OnUpgrade>)> {
         match response {
-                Err(InterceptorError::Hyper(e)) if e.is_closed() => {
-                    tracing::warn!(
-                        "Sending request to local application failed with: {e:?}. \
+            Err(InterceptorError::Hyper(e)) if e.is_closed() => {
+                tracing::warn!(
+                    "Sending request to local application failed with: {e:?}. \
                         Seems like the local application closed the connection too early, so \
                         creating a new connection and trying again."
-                    );
-                    tracing::trace!("The request to be retried: {request:?}.");
+                );
+                tracing::trace!("The request to be retried: {request:?}.");
 
-                    Err(InterceptorError::ConnectionClosedTooSoon(request))
-                }
+                Err(InterceptorError::ConnectionClosedTooSoon(request))
+            }
 
-                Err(InterceptorError::Hyper(e)) if e.is_parse() => {
-                    tracing::warn!("Could not parse HTTP response to filtered HTTP request, got error: {e:?}.");
-                    let body_message = format!("mirrord: could not parse HTTP response from local application - {e:?}");
-                    Ok(HttpResponseFallback::response_from_request(
+            Err(InterceptorError::Hyper(e)) if e.is_parse() => {
+                tracing::warn!(
+                    "Could not parse HTTP response to filtered HTTP request, got error: {e:?}."
+                );
+                let body_message = format!(
+                    "mirrord: could not parse HTTP response from local application - {e:?}"
+                );
+                Ok((
+                    HttpResponseFallback::response_from_request(
                         request,
                         StatusCode::BAD_GATEWAY,
                         &body_message,
-                    ))
-                }
+                    ),
+                    None,
+                ))
+            }
 
-                Err(err) => {
-                    tracing::warn!("Request to local application failed with: {err:?}.");
-                    let body_message = format!("mirrord tried to forward the request to the local application and got {err:?}");
-                    Ok(HttpResponseFallback::response_from_request(
+            Err(err) => {
+                tracing::warn!("Request to local application failed with: {err:?}.");
+                let body_message = format!(
+                    "mirrord tried to forward the request to the local application and got {err:?}"
+                );
+                Ok((
+                    HttpResponseFallback::response_from_request(
                         request,
                         StatusCode::BAD_GATEWAY,
                         &body_message,
-                    ))
-                }
+                    ),
+                    None,
+                ))
+            }
 
-                Ok(res) if matches!(request, HttpRequestFallback::Framed(_)) => Ok(
-                    HttpResponse::<InternalHttpBody>::from_hyper_response(
-                        res,
-                        self.peer.port(),
-                        request.connection_id(),
-                        request.request_id()
-                    )
+            Ok(mut res) => {
+                let upgrade = if res.status() == StatusCode::SWITCHING_PROTOCOLS {
+                    Some(hyper::upgrade::on(&mut res))
+                } else {
+                    None
+                };
+
+                let result = match &request {
+                    HttpRequestFallback::Framed(..) => {
+                        HttpResponse::<InternalHttpBody>::from_hyper_response(
+                            res,
+                            self.peer.port(),
+                            request.connection_id(),
+                            request.request_id(),
+                        )
                         .await
                         .map(HttpResponseFallback::Framed)
-                        .unwrap_or_else(|e| {
-                            tracing::error!(
-                                "Failed to read response to filtered http request: {e:?}. \
-                                Please consider reporting this issue on \
-                                https://github.com/metalbear-co/mirrord/issues/new?labels=bug&template=bug_report.yml"
-                            );
-                            HttpResponseFallback::response_from_request(
-                                request,
-                                StatusCode::BAD_GATEWAY,
-                                "mirrord",
-                            )
-                        }),
-                ),
-
-                Ok(res) => Ok(
-                    HttpResponse::<Vec<u8>>::from_hyper_response(
-                        res, self.peer.port(),
-                        request.connection_id(),
-                        request.request_id()
-                    )
+                    }
+                    HttpRequestFallback::Fallback(..) => {
+                        HttpResponse::<Vec<u8>>::from_hyper_response(
+                            res,
+                            self.peer.port(),
+                            request.connection_id(),
+                            request.request_id(),
+                        )
                         .await
                         .map(HttpResponseFallback::Fallback)
-                        .unwrap_or_else(|e| {
-                            tracing::error!(
-                                "Failed to read response to filtered http request: {e:?}. \
-                                Please consider reporting this issue on \
-                                https://github.com/metalbear-co/mirrord/issues/new?labels=bug&template=bug_report.yml"
-                            );
+                    }
+                };
+
+                Ok(result
+                    .map(|response| (response, upgrade))
+                    .unwrap_or_else(|e| {
+                        tracing::error!(
+                            "Failed to read response to filtered http request: {e:?}. \
+                            Please consider reporting this issue on \
+                            https://github.com/metalbear-co/mirrord/issues/new?labels=bug&template=bug_report.yml"
+                        );
+
+                        (
                             HttpResponseFallback::response_from_request(
                                 request,
                                 StatusCode::BAD_GATEWAY,
                                 "mirrord",
-                            )
-                        }),
-                ),
+                            ),
+                            None,
+                        )
+                    })
+                )
             }
+        }
     }
 
     /// Sends the given [`HttpRequestFallback`] to the server.
@@ -242,7 +289,7 @@ impl HttpConnection {
     async fn send(
         &mut self,
         request: HttpRequestFallback,
-    ) -> InterceptorResult<HttpResponseFallback> {
+    ) -> InterceptorResult<(HttpResponseFallback, Option<OnUpgrade>)> {
         let response = self.sender.send(request.clone()).await;
         let response = self.handle_response(request, response).await;
 
@@ -255,51 +302,57 @@ impl HttpConnection {
         // Create a new connection for this second attempt.
         let socket = super::bind_similar(self.peer)?;
         let stream = socket.connect(self.peer).await?;
-        let (new_sender, new_transport) = super::http::handshake(request.version(), stream).await?;
+        let new_sender = super::http::handshake(request.version(), stream).await?;
         self.sender = new_sender;
-        self.transport = new_transport;
 
         let response = self.sender.send(request.clone()).await;
         self.handle_response(request, response).await
     }
 
-    /// Proxies HTTP messages until [`MessageIn::Raw`] is encountered or the [`MessageBus`] closes.
+    /// Proxies HTTP messages until an HTTP upgrade happens or the [`MessageBus`] closes.
     /// Support retries (with reconnecting to the HTTP server).
     ///
-    /// When [`MessageIn::Raw`] is encountered, the underlying [`TcpStream`] is reclaimed, wrapped
+    /// When an HTTP upgrade happens, the underlying [`TcpStream`] is reclaimed, wrapped
     /// in a [`RawConnection`] and returned. When [`MessageBus`] closes, [`None`] is returned.
     async fn run(
         mut self,
         message_bus: &mut MessageBus<Interceptor>,
     ) -> InterceptorResult<Option<RawConnection>> {
-        while let Some(msg) = message_bus.recv().await {
+        let upgrade = loop {
+            let Some(msg) = message_bus.recv().await else {
+                return Ok(None);
+            };
+
             match msg {
-                MessageIn::Raw(data) => {
-                    let (mut stream, unprocessed_bytes) = self
-                        .transport
-                        .reclaim()
-                        .await
-                        .map_err(|_| InterceptorError::HttpConnectionTaskPanicked)?;
-
-                    if !unprocessed_bytes.is_empty() {
-                        message_bus
-                            .send(MessageOut::Raw(unprocessed_bytes.to_vec()))
-                            .await;
-                    }
-
-                    stream.write_all(&data).await?;
-
-                    return Ok(Some(RawConnection { stream }));
+                MessageIn::Raw(..) => {
+                    // We should not receive any raw data from the agent before sending a
+                    //`101 SWITCHING PROTOCOLS` response.
+                    return Err(InterceptorError::UnexpectedRawData);
                 }
 
                 MessageIn::Http(req) => {
-                    let res = self.send(req).await?;
+                    let (res, on_upgrade) = self.send(req).await?;
+                    println!("{} has upgrade: {}", res.request_id(), on_upgrade.is_some());
                     message_bus.send(MessageOut::Http(res)).await;
+
+                    if let Some(on_upgrade) = on_upgrade {
+                        break on_upgrade.await?;
+                    }
                 }
             }
+        };
+
+        let parts = upgrade
+            .downcast::<TokioIo<TcpStream>>()
+            .expect("IO type is known");
+        let stream = parts.io.into_inner();
+        let read_buf = parts.read_buf;
+
+        if !read_buf.is_empty() {
+            message_bus.send(MessageOut::Raw(read_buf.into())).await;
         }
 
-        Ok(None)
+        Ok(Some(RawConnection { stream }))
     }
 }
 
@@ -311,18 +364,22 @@ struct RawConnection {
 }
 
 impl RawConnection {
-    /// Proxies raw TCP data until [`MessageIn::Http`] is encountered or the [`MessageBus`] closes.
+    /// Proxies raw TCP data until the [`MessageBus`] closes.
     ///
-    /// When [`MessageIn::Http`] is encountered, the underlying [`TcpStream`] is converted into an
-    /// HTTP connection, wrapped in a [`HttpConnection`] and returned. When [`MessageBus`]
-    /// closes, [`None`] is returned.
-    async fn run(
-        mut self,
-        message_bus: &mut MessageBus<Interceptor>,
-    ) -> InterceptorResult<Option<HttpConnection>> {
+    /// # Notes
+    ///
+    /// 1. When the peer shuts down writing, a single 0-sized read is sent through the
+    ///    [`MessageBus`]. This is to notify the agent about the shutdown condition.
+    ///
+    /// 2. A 0-sized read received from the [`MessageBus`] is treated as a shutdown on the agent
+    ///    side. Connection with the peer is shut down as well.
+    ///
+    /// 3. This implementation exits only when an error is encountered or the [`MessageBus`] is
+    ///    closed.
+    async fn run(mut self, message_bus: &mut MessageBus<Interceptor>) -> InterceptorResult<()> {
         let mut buf = BytesMut::with_capacity(64 * 1024);
-        let mut remote_closed = false;
         let mut reading_closed = false;
+        let mut remote_closed = false;
 
         loop {
             tokio::select! {
@@ -331,10 +388,11 @@ impl RawConnection {
                 res = self.stream.read_buf(&mut buf), if !reading_closed => match res {
                     Err(e) if e.kind() == ErrorKind::WouldBlock => {},
                     Err(e) => break Err(e.into()),
-                    Ok(0) => {
-                        reading_closed = true;
-                    }
                     Ok(..) => {
+                        if buf.is_empty() {
+                            tracing::trace!("incoming interceptor -> layer shutdown, sending a 0-sized read to inform the agent");
+                            reading_closed = true;
+                        }
                         message_bus.send(MessageOut::Raw(buf.to_vec())).await;
                         buf.clear();
                     }
@@ -342,32 +400,24 @@ impl RawConnection {
 
                 msg = message_bus.recv(), if !remote_closed => match msg {
                     None => {
-                        tracing::trace!("message bus closed, waiting 1 second before exiting");
+                        tracing::trace!("incoming interceptor -> message bus closed, waiting 1 second before exiting");
                         remote_closed = true;
                     },
                     Some(MessageIn::Raw(data)) => {
-                        self.stream.write_all(&data).await?;
-                    }
-                    Some(MessageIn::Http(req)) => {
-                        let mut conn = {
-                            let peer = self.stream.peer_addr()?;
-                            let (sender, transport) = super::http::handshake(req.version(), self.stream).await?;
-
-                            HttpConnection { peer, sender, transport }
-                        };
-
-                        let res = conn.send(req).await?;
-
-                        message_bus.send(MessageOut::Http(res)).await;
-
-                        break Ok(Some(conn))
-                    }
+                        if data.is_empty() {
+                            tracing::trace!("incoming interceptor -> agent shutdown, shutting down connection with layer");
+                            self.stream.shutdown().await?;
+                        } else {
+                            self.stream.write_all(&data).await?;
+                        }
+                    },
+                    Some(MessageIn::Http(..)) => break Err(InterceptorError::UnexpectedHttpRequest),
                 },
 
                 _ = time::sleep(Duration::from_secs(1)), if remote_closed => {
-                    tracing::trace!("layer silent for 1 second and message bus is closed, exiting");
+                    tracing::trace!("incoming interceptor -> layer silent for 1 second and message bus is closed, exiting");
 
-                    break Ok(None);
+                    break Ok(());
                 },
             }
         }
@@ -525,8 +575,6 @@ mod test {
             }))
             .await;
 
-        interceptor.send(b"test test test".to_vec()).await;
-
         let (_, update) = tasks.next().await.expect("no task result");
         match update {
             TaskUpdate::Message(MessageOut::Http(res)) => {
@@ -548,6 +596,8 @@ mod test {
             }
             _ => panic!("unexpected task update: {update:?}"),
         }
+
+        interceptor.send(b"test test test".to_vec()).await;
 
         let (_, update) = tasks.next().await.expect("no task result");
         match update {

@@ -1,33 +1,21 @@
-use std::collections::HashMap;
-
-use http_body_util::BodyExt;
-use hyper::{body::Incoming, http::request, Request};
 use mirrord_protocol::{
-    tcp::{
-        DaemonTcp, HttpRequest, HttpResponseFallback, InternalHttpBody, InternalHttpRequest,
-        StealType, TcpData,
-    },
-    ConnectionId, Port, RequestId,
+    tcp::{DaemonTcp, HttpResponseFallback, StealType, TcpData},
+    ConnectionId, Port,
 };
-use tokio::{
-    select,
-    sync::{mpsc::Sender, oneshot},
-};
-use tokio_util::sync::CancellationToken;
-use tracing::warn;
+use tokio::sync::mpsc::Sender;
 
-use crate::{
-    error::{AgentError, Result},
-    steal::http::Response,
-    util::{ClientId, IndexAllocator},
-};
+use crate::util::ClientId;
 
-pub(super) mod api;
-pub(super) mod connection;
-pub(super) mod http;
-pub(super) mod ip_tables;
+mod api;
+mod connection;
+mod connections;
+mod http;
+pub mod ip_tables;
 mod orig_dst;
 mod subscriptions;
+
+pub(crate) use api::TcpStealerApi;
+pub(crate) use connection::TcpConnectionStealer;
 
 /// Commands from the agent that are passed down to the stealer worker, through [`TcpStealerApi`].
 ///
@@ -51,11 +39,12 @@ enum Command {
 
     /// Part of the [`Drop`] implementation of [`TcpStealerApi`].
     ///
-    /// Closes a layer connection, and unsubscribe its ports.
+    /// Closes a layer connection, and unsubscribes its ports.
     ClientClose,
 
-    /// A connection here is a pair of ([`ReadHalf`], [`WriteHalf`]) streams that are used to
-    /// capture a remote connection (the connection we're stealing data from).
+    /// Unsubscribes the layer from the connection.
+    ///
+    /// The agent stops sending incoming traffic.
     ConnectionUnsubscribe(ConnectionId),
 
     /// There is new data in the direction going from the local process to the end-user (Going
@@ -82,89 +71,4 @@ pub struct StealerCommand {
 
     /// The command message sent from (layer -> agent) to be handled by the stealer worker.
     command: Command,
-}
-
-/// A struct that the [`HyperHandler::call`] sends [`TcpConnectionStealer::start`], with a request
-/// that matched a filter and should be forwarded to a layer, and sender in which the response to
-/// that request can be sent back.
-#[derive(Debug)]
-pub struct HandlerHttpRequest {
-    pub request: MatchedHttpRequest,
-
-    /// For sending the response from the stealer task back to the hyper service.
-    /// [`TcpConnectionStealer::start`] -----response to this request-----> [`HyperHandler::call`]
-    pub response_tx: oneshot::Sender<Response>,
-}
-
-/// A stolen HTTP request that matched a client's filter. To be sent from the filter code to the
-/// connection task to be forwarded to the matching client.
-#[derive(Debug)]
-pub struct MatchedHttpRequest {
-    pub port: Port,
-    pub connection_id: ConnectionId,
-    pub client_id: ClientId,
-    pub request_id: RequestId,
-    pub request: Request<Incoming>,
-}
-
-impl MatchedHttpRequest {
-    async fn into_serializable(self) -> Result<HttpRequest<InternalHttpBody>, hyper::Error> {
-        let (
-            request::Parts {
-                method,
-                uri,
-                version,
-                headers,
-                ..
-            },
-            body,
-        ) = self.request.into_parts();
-
-        let body = InternalHttpBody::from_body(body).await?;
-
-        let internal_request = InternalHttpRequest {
-            method,
-            uri,
-            headers,
-            version,
-            body,
-        };
-
-        Ok(HttpRequest {
-            port: self.port,
-            connection_id: self.connection_id,
-            request_id: self.request_id,
-            internal_request,
-        })
-    }
-
-    async fn into_serializable_fallback(self) -> Result<HttpRequest<Vec<u8>>, hyper::Error> {
-        let (
-            request::Parts {
-                method,
-                uri,
-                version,
-                headers,
-                ..
-            },
-            body,
-        ) = self.request.into_parts();
-
-        let body = body.collect().await?.to_bytes().to_vec();
-
-        let internal_request = InternalHttpRequest {
-            method,
-            uri,
-            headers,
-            version,
-            body,
-        };
-
-        Ok(HttpRequest {
-            port: self.port,
-            connection_id: self.connection_id,
-            request_id: self.request_id,
-            internal_request,
-        })
-    }
 }

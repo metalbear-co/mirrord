@@ -3,7 +3,7 @@
 #![warn(clippy::indexing_slicing)]
 //! <!--${internal}-->
 //! To generate the `mirrord-schema.json` file see
-//! [`tests::check_schema_file_exists_and_is_valid_or_create_it`].
+//! `tests::check_schema_file_exists_and_is_valid_or_create_it`.
 //!
 //! Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
 //! including if you only made documentation changes.
@@ -656,6 +656,8 @@ mod tests {
     fn full(
         #[values(ConfigType::Json, ConfigType::Toml, ConfigType::Yaml)] config_type: ConfigType,
     ) {
+        use crate::agent::AgentImageFileConfig;
+
         let input = config_type.full();
 
         let config = config_type.parse(input);
@@ -678,7 +680,7 @@ mod tests {
                 privileged: None,
                 log_level: Some("info".to_owned()),
                 namespace: Some("default".to_owned()),
-                image: Some("".to_owned()),
+                image: Some(AgentImageFileConfig::Simple(Some("".to_owned()))),
                 image_pull_policy: Some("".to_owned()),
                 image_pull_secrets: Some(vec![HashMap::from([(
                     "name".to_owned(),

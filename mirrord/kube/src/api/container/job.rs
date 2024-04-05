@@ -18,8 +18,7 @@ use crate::{
     api::{
         container::{
             util::{
-                base_command_line, get_agent_image, get_capabilities, wait_for_agent_startup,
-                DEFAULT_TOLERATIONS,
+                base_command_line, get_capabilities, wait_for_agent_startup, DEFAULT_TOLERATIONS,
             },
             ContainerParams, ContainerVariant,
         },
@@ -205,7 +204,7 @@ impl ContainerVariant for JobVariant<'_> {
                         "containers": [
                             {
                                 "name": "mirrord-agent",
-                                "image": get_agent_image(agent),
+                                "image": agent.image(),
                                 "imagePullPolicy": agent.image_pull_policy,
                                 "command": command_line,
                                 "env": [
@@ -388,7 +387,7 @@ mod test {
                         "containers": [
                             {
                                 "name": "mirrord-agent",
-                                "image": get_agent_image(&agent),
+                                "image": agent.image(),
                                 "imagePullPolicy": agent.image_pull_policy,
                                 "command": ["./mirrord-agent", "-l", "3000", "targetless"],
                                 "env": [
@@ -496,7 +495,7 @@ mod test {
                         "containers": [
                             {
                                 "name": "mirrord-agent",
-                                "image": get_agent_image(&agent),
+                                "image": agent.image(),
                                 "imagePullPolicy": agent.image_pull_policy,
                                 "securityContext": {
                                     "runAsGroup": 13,

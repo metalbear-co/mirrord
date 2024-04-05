@@ -1,5 +1,5 @@
 use mirrord_protocol::tcp::{DaemonTcp, HttpResponseFallback, LayerTcpSteal, TcpData};
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::mpsc::{self, OwnedPermit, Receiver, Sender};
 
 use super::*;
 use crate::{
@@ -20,6 +20,9 @@ pub(crate) struct TcpStealerApi {
     ///
     /// The agent controls the stealer task through this.
     command_tx: Sender<StealerCommand>,
+
+    /// Permit used to send the final [`Command::ClientClose`] in [`Drop::drop`].
+    close_permit: Option<OwnedPermit<StealerCommand>>,
 
     /// Channel that receives [`DaemonTcp`] messages from the stealer worker thread.
     ///
@@ -50,9 +53,16 @@ impl TcpStealerApi {
             })
             .await?;
 
+        let close_permit = command_tx
+            .clone()
+            .reserve_owned()
+            .await
+            .map_err(|_| AgentError::ReserveStealerCommand)?;
+
         Ok(Self {
             client_id,
             command_tx,
+            close_permit: Some(close_permit),
             daemon_rx,
             task_status,
         })
@@ -70,17 +80,6 @@ impl TcpStealerApi {
         } else {
             Err(self.task_status.unwrap_err().await)
         }
-    }
-
-    /// Send `command` synchronously to stealer with `try_send`, with the client id of the client
-    /// that is using this API instance.
-    fn try_send_command(&self, command: Command) -> Result<()> {
-        self.command_tx
-            .try_send(StealerCommand {
-                client_id: self.client_id,
-                command,
-            })
-            .map_err(AgentError::from)
     }
 
     /// Helper function that passes the [`DaemonTcp`] messages we generated in the
@@ -150,16 +149,6 @@ impl TcpStealerApi {
             .await
     }
 
-    /// Handles the conversion of [`LayerTcpSteal::ClientClose`], that is passed from the
-    /// agent, to an internal stealer command [`Command::ClientClose`].
-    ///
-    /// The actual handling of this message is done in [`TcpConnectionStealer`].
-    ///
-    /// Called by the [`Drop`] implementation of [`TcpStealerApi`].
-    pub(crate) fn close_client(&mut self) -> Result<(), AgentError> {
-        self.try_send_command(Command::ClientClose)
-    }
-
     pub(crate) async fn handle_client_message(&mut self, message: LayerTcpSteal) -> Result<()> {
         match message {
             LayerTcpSteal::PortSubscribe(port_steal) => self.port_subscribe(port_steal).await,
@@ -182,7 +171,12 @@ impl TcpStealerApi {
 
 impl Drop for TcpStealerApi {
     fn drop(&mut self) {
-        self.close_client()
-            .expect("Failed while dropping TcpStealerApi!")
+        self.close_permit
+            .take()
+            .expect("permit is consumed only here")
+            .send(StealerCommand {
+                client_id: self.client_id,
+                command: Command::ClientClose,
+            });
     }
 }

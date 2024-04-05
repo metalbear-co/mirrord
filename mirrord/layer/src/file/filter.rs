@@ -90,7 +90,7 @@ impl FileFilter {
     /// removed) If path matches include, it continues to check if the path has specific
     /// behavior, if not, it checks if the path matches the default exclude list.
     /// If not, it does the default behavior set by user (default is read only remote).
-    #[tracing::instrument(level = "trace")]
+    #[mirrord_layer_macro::instrument(level = "trace")]
     pub fn new(fs_config: FsConfig) -> Self {
         let FsConfig {
             read_write,
