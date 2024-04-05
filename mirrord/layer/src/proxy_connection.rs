@@ -105,7 +105,7 @@ impl ProxyConnection {
         self.responses.lock()?.receive(response_id)
     }
 
-    #[tracing::instrument(level = "trace", skip(self), ret)]
+    #[mirrord_layer_macro::instrument(level = "trace", skip(self), ret)]
     pub fn make_request_with_response<T>(&self, request: T) -> Result<T::Response>
     where
         T: IsLayerRequestWithResponse + Debug,
@@ -116,7 +116,7 @@ impl ProxyConnection {
         T::try_unwrap_response(response).map_err(ProxyError::UnexpectedResponse)
     }
 
-    #[tracing::instrument(level = "trace", skip(self), ret)]
+    #[mirrord_layer_macro::instrument(level = "trace", skip(self), ret)]
     pub fn make_request_no_response<T: IsLayerRequest + Debug>(
         &self,
         request: T,

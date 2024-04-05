@@ -167,7 +167,7 @@ impl UserSocket {
     }
 
     /// Inform internal proxy about closing a listening port.
-    #[tracing::instrument(level = "trace", ret)]
+    #[mirrord_layer_macro::instrument(level = "trace", ret)]
     pub(crate) fn close(&self) {
         if let Self {
             state: SocketState::Listening(bound),
@@ -275,7 +275,7 @@ impl OutgoingSelector {
     ///
     /// So if the user specified a selector with `0.0.0.0:0`, we're going to be always matching on
     /// it.
-    #[tracing::instrument(level = "trace", ret)]
+    #[mirrord_layer_macro::instrument(level = "trace", ret)]
     fn get_connection_through(
         &self,
         address: SocketAddr,
@@ -319,7 +319,7 @@ impl OutgoingSelector {
     /// 1. `address` is in [`REMOTE_DNS_REVERSE_MAPPING`]: resolves the hostname locally, then
     /// return the first result
     /// 2. `address` is **NOT** in [`REMOTE_DNS_REVERSE_MAPPING`]: return the `address` as is;
-    #[tracing::instrument(level = "trace", ret)]
+    #[mirrord_layer_macro::instrument(level = "trace", ret)]
     fn get_local_address_to_connect(address: SocketAddr) -> HookResult<SocketAddr> {
         let cached = REMOTE_DNS_REVERSE_MAPPING
             .get(&address.ip())

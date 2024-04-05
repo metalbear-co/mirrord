@@ -56,7 +56,7 @@ impl RemoteFile {
     }
 
     /// Sends a [`OpenFileRequest`] message, opening the file in the agent.
-    #[tracing::instrument(level = "trace")]
+    #[mirrord_layer_macro::instrument(level = "trace")]
     pub(crate) fn remote_open(
         path: PathBuf,
         open_options: OpenOptionsInternal,
@@ -71,7 +71,7 @@ impl RemoteFile {
     /// Sends a [`ReadFileRequest`] message, reading the file in the agent.
     ///
     /// Blocking request and wait on already found remote_fd
-    #[tracing::instrument(level = "trace")]
+    #[mirrord_layer_macro::instrument(level = "trace")]
     pub(crate) fn remote_read(remote_fd: u64, read_amount: u64) -> Detour<ReadFileResponse> {
         // Limit read size because if we read too much it can lead to a timeout
         // Seems also that bincode doesn't do well with large buffers
@@ -87,7 +87,7 @@ impl RemoteFile {
     }
 
     /// Sends a [`CloseFileRequest`] message, closing the file in the agent.
-    #[tracing::instrument(level = "trace")]
+    #[mirrord_layer_macro::instrument(level = "trace")]
     pub(crate) fn remote_close(fd: u64) -> Result<()> {
         common::make_proxy_request_no_response(CloseFileRequest { fd })?;
         Ok(())
@@ -122,7 +122,7 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<u64> {
 }
 
 /// Create temporary local file to get a valid local fd.
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
     let random_string = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
     let file_name = format!("{remote_fd}-{random_string}");
@@ -141,7 +141,7 @@ fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
 }
 
 /// Close the remote file if the call to [`libc::shm_open`] failed and we have an invalid local fd.
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 fn close_remote_file_on_failure(fd: u64) -> Result<()> {
     error!("Creating a temporary local file resulted in an error, closing the file remotely!");
     RemoteFile::remote_close(fd)
@@ -158,7 +158,7 @@ fn close_remote_file_on_failure(fd: u64) -> Result<()> {
 /// [`open`] is also used by other _open-ish_ functions, and it takes care of **creating** the
 /// _local_ and _remote_ file association, plus **inserting** it into the storage for
 /// [`OPEN_FILES`].
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
     let path = path?;
 
@@ -184,7 +184,7 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
     Detour::Success(local_file_fd)
 }
 
-#[tracing::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = "trace")]
 pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE> {
     let _open_options: OpenOptionsInternal = rawish_mode
         .map(CStr::to_str)
@@ -214,7 +214,7 @@ pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE>
 }
 
 /// creates a directory stream for the `remote_fd` in the agent
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
     // usize == ptr size
     // we don't return a pointer to an address that contains DIR
@@ -236,7 +236,7 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
     Detour::Success(local_dir_fd as usize)
 }
 
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(crate) fn openat(
     fd: RawFd,
     path: Detour<PathBuf>,
@@ -290,7 +290,7 @@ pub(crate) fn readv(iovs: Option<&[iovec]>) -> Detour<(&[iovec], u64)> {
     Detour::Success((iovs, read_size))
 }
 
-#[tracing::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = "trace")]
 pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<ReadFileResponse> {
     // We're only interested in files that are paired with mirrord-agent.
     let remote_fd = get_remote_fd(local_fd)?;
@@ -321,7 +321,7 @@ pub(crate) fn pwrite(local_fd: RawFd, buffer: &[u8], offset: u64) -> Detour<Writ
     Detour::Success(response)
 }
 
-#[tracing::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = "trace")]
 pub(crate) fn lseek(local_fd: RawFd, offset: i64, whence: i32) -> Detour<u64> {
     let remote_fd = get_remote_fd(local_fd)?;
 
@@ -363,7 +363,7 @@ pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isi
     Detour::Success(written_amount.try_into()?)
 }
 
-#[tracing::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = "trace")]
 pub(crate) fn access(path: Detour<PathBuf>, mode: u8) -> Detour<c_int> {
     let path = path?;
 
@@ -386,7 +386,7 @@ pub(crate) fn access(path: Detour<PathBuf>, mode: u8) -> Detour<c_int> {
 
 /// Original function _flushes_ data from `fd` to disk, but we don't really do any of this
 /// for our managed fds, so we just return `0` which means success.
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(crate) fn fsync(fd: RawFd) -> Detour<c_int> {
     get_remote_fd(fd)?;
     Detour::Success(0)
@@ -397,7 +397,7 @@ pub(crate) fn fsync(fd: RawFd) -> Detour<c_int> {
 /// that.
 /// rawish_path is Option<Option<&CStr>> because we need to differentiate between null pointer
 /// and non existing argument (For error handling)
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(crate) fn xstat(
     rawish_path: Option<Detour<PathBuf>>,
     fd: Option<RawFd>,
@@ -571,7 +571,7 @@ pub(crate) fn statx_logic(
     Detour::Success(0)
 }
 
-#[tracing::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = "trace")]
 pub(crate) fn xstatfs(fd: RawFd) -> Detour<XstatFsResponse> {
     let fd = get_remote_fd(fd)?;
 
@@ -583,7 +583,7 @@ pub(crate) fn xstatfs(fd: RawFd) -> Detour<XstatFsResponse> {
 }
 
 #[cfg(target_os = "linux")]
-#[tracing::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = "trace")]
 pub(crate) fn getdents64(fd: RawFd, buffer_size: u64) -> Detour<GetDEnts64Response> {
     // We're only interested in files that are paired with mirrord-agent.
     let remote_fd = get_remote_fd(fd)?;
@@ -617,7 +617,7 @@ fn absolute_path(path: PathBuf) -> PathBuf {
     temp_path
 }
 
-#[tracing::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = "trace")]
 pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
     let path = path?;
 
