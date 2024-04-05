@@ -4,7 +4,7 @@ use std::{
 };
 
 use mirrord_analytics::CollectAnalytics;
-use schemars::JsonSchema;
+use schemars::{gen::SchemaGenerator, schema::SchemaObject, JsonSchema};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -21,8 +21,11 @@ use crate::{
 pub enum TargetFileConfig {
     // Generated when the value of the `target` field is a string, or when there is no target.
     // we need default else target value will be required in some scenarios.
-    #[schemars(with = "String")]
-    Simple(#[serde(default, deserialize_with = "string_or_struct_option")] Option<Target>),
+    Simple(
+        #[serde(default, deserialize_with = "string_or_struct_option")]
+        #[schemars(schema_with = "make_simple_target_custom_schema")]
+        Option<Target>,
+    ),
     Advanced {
         /// <!--${internal}-->
         /// Path is optional so that it can also be specified via env var instead of via conf file,
@@ -32,6 +35,26 @@ pub enum TargetFileConfig {
         path: Option<Target>,
         namespace: Option<String>,
     },
+}
+
+fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::schema::Schema {
+    // generate the schema for the Option<Target> like usual, then just push a string type to the
+    // any_of.
+    let mut schema: SchemaObject = <Option<Target>>::json_schema(gen).into();
+    let subschema = schema.subschemas();
+
+    let mut any_ofs = subschema.any_of.clone().unwrap();
+    any_ofs.push(
+        // There's a small gap here for the string to be _anything_, not just k8s objects.
+        schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            ..Default::default()
+        }
+        .into(),
+    );
+    subschema.any_of = Some(any_ofs);
+
+    schema.into()
 }
 
 // - Only path is `Some` -> use current namespace.
