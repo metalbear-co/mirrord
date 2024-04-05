@@ -16,7 +16,7 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tokio-util",
- "tracing",
+ "tracing 0.1.40",
 ]
 
 [[package]]
@@ -54,7 +54,7 @@ dependencies = [
  "smallvec",
  "tokio",
  "tokio-util",
- "tracing",
+ "tracing 0.1.40",
  "zstd",
 ]
 
@@ -78,7 +78,7 @@ dependencies = [
  "http 0.2.11",
  "regex",
  "serde",
- "tracing",
+ "tracing 0.1.40",
 ]
 
 [[package]]
@@ -105,7 +105,7 @@ dependencies = [
  "mio",
  "socket2 0.5.5",
  "tokio",
- "tracing",
+ "tracing 0.1.40",
 ]
 
 [[package]]
@@ -2219,7 +2219,7 @@ dependencies = [
  "slab",
  "tokio",
  "tokio-util",
- "tracing",
+ "tracing 0.1.40",
 ]
 
 [[package]]
@@ -2437,7 +2437,7 @@ dependencies = [
  "socket2 0.5.5",
  "tokio",
  "tower-service",
- "tracing",
+ "tracing 0.1.40",
  "want",
 ]
 
@@ -2457,7 +2457,7 @@ dependencies = [
  "itoa",
  "pin-project-lite",
  "tokio",
- "tracing",
+ "tracing 0.1.40",
  "want",
 ]
 
@@ -2533,7 +2533,7 @@ dependencies = [
  "tokio",
  "tower",
  "tower-service",
- "tracing",
+ "tracing 0.1.40",
 ]
 
 [[package]]
@@ -2746,7 +2746,7 @@ dependencies = [
  "hyper 1.0.0-rc.4",
  "log",
  "tokio",
- "tracing",
+ "tracing 0.1.37",
 ]
 
 [[package]]
@@ -2940,7 +2940,7 @@ dependencies = [
  "tokio-util",
  "tower",
  "tower-http",
- "tracing",
+ "tracing 0.1.40",
 ]
 
 [[package]]
@@ -2994,7 +2994,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util",
- "tracing",
+ "tracing 0.1.40",
 ]
 
 [[package]]
@@ -3176,7 +3176,7 @@ dependencies = [
  "regex",
  "syn 2.0.48",
  "thiserror",
- "tracing",
+ "tracing 0.1.40",
  "tracing-subscriber",
 ]
 
@@ -3328,7 +3328,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util",
- "tracing",
+ "tracing 0.1.40",
  "tracing-appender",
  "tracing-subscriber",
  "which",
@@ -3380,7 +3380,7 @@ dependencies = [
  "tokio-util",
  "tonic",
  "tower",
- "tracing",
+ "tracing 0.1.40",
  "tracing-subscriber",
  "trust-dns-resolver",
  "wildmatch",
@@ -3397,7 +3397,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tracing",
+ "tracing 0.1.40",
 ]
 
 [[package]]
@@ -3415,7 +3415,7 @@ dependencies = [
  "serde_yaml",
  "thiserror",
  "tokio",
- "tracing",
+ "tracing 0.1.40",
  "whoami",
  "x509-certificate 0.19.0",
 ]
@@ -3439,7 +3439,7 @@ dependencies = [
  "tera",
  "thiserror",
  "toml 0.8.8",
- "tracing",
+ "tracing 0.1.40",
 ]
 
 [[package]]
@@ -3464,7 +3464,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util",
- "tracing",
+ "tracing 0.1.40",
  "tracing-subscriber",
 ]
 
@@ -3487,7 +3487,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "tracing",
+ "tracing 0.1.40",
 ]
 
 [[package]]
@@ -3524,7 +3524,7 @@ dependencies = [
  "tokio",
  "tokio-retry",
  "tower",
- "tracing",
+ "tracing 0.1.40",
 ]
 
 [[package]]
@@ -3577,7 +3577,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tower",
- "tracing",
+ "tracing 0.1.40",
  "tracing-subscriber",
  "trust-dns-resolver",
  "urlencoding",
@@ -3633,7 +3633,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-tungstenite 0.20.1",
- "tracing",
+ "tracing 0.1.40",
 ]
 
 [[package]]
@@ -3664,7 +3664,7 @@ dependencies = [
  "serde",
  "socket2 0.5.5",
  "thiserror",
- "tracing",
+ "tracing 0.1.40",
  "trust-dns-resolver",
 ]
 
@@ -3678,7 +3678,7 @@ dependencies = [
  "once_cell",
  "tempfile",
  "thiserror",
- "tracing",
+ "tracing 0.1.40",
  "which",
 ]
 
@@ -6110,7 +6110,7 @@ dependencies = [
  "pin-project-lite",
  "slab",
  "tokio",
- "tracing",
+ "tracing 0.1.40",
 ]
 
 [[package]]
@@ -6181,7 +6181,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
- "tracing",
+ "tracing 0.1.40",
 ]
 
 [[package]]
@@ -6227,7 +6227,7 @@ dependencies = [
  "tokio-util",
  "tower-layer",
  "tower-service",
- "tracing",
+ "tracing 0.1.40",
 ]
 
 [[package]]
@@ -6248,7 +6248,7 @@ dependencies = [
  "pin-project-lite",
  "tower-layer",
  "tower-service",
- "tracing",
+ "tracing 0.1.40",
 ]
 
 [[package]]
@@ -6269,10 +6269,21 @@ version = "0.1.37"
 source = "git+https://github.com/metalbear-co/tracing?branch=worker_options_non_blocking_v1#bf361d828cd8249290b6445f47963ea4025422bd"
 dependencies = [
  "cfg-if",
+ "pin-project-lite",
+ "tracing-attributes 0.1.23",
+ "tracing-core 0.1.30",
+]
+
+[[package]]
+name = "tracing"
+version = "0.1.40"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3523ab5a71916ccf420eebdf5521fcef02141234bbc0b8a49f2fdc4544364ef"
+dependencies = [
  "log",
  "pin-project-lite",
- "tracing-attributes",
- "tracing-core",
+ "tracing-attributes 0.1.27",
+ "tracing-core 0.1.32",
 ]
 
 [[package]]
@@ -6297,9 +6308,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-attributes"
+version = "0.1.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34704c8d6ebcbc939824180af020566b01a7c01f80641264eba0999f6c2b6be7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.48",
+]
+
+[[package]]
 name = "tracing-core"
 version = "0.1.30"
 source = "git+https://github.com/metalbear-co/tracing?branch=worker_options_non_blocking_v1#bf361d828cd8249290b6445f47963ea4025422bd"
+dependencies = [
+ "once_cell",
+]
+
+[[package]]
+name = "tracing-core"
+version = "0.1.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c06d3da6113f116aaee68e4d601191614c9053067f9ab7f6edbcb161237daa54"
 dependencies = [
  "once_cell",
  "valuable",
@@ -6307,27 +6338,30 @@ dependencies = [
 
 [[package]]
 name = "tracing-log"
-version = "0.1.3"
-source = "git+https://github.com/metalbear-co/tracing?branch=worker_options_non_blocking_v1#bf361d828cd8249290b6445f47963ea4025422bd"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3"
 dependencies = [
  "log",
  "once_cell",
- "tracing-core",
+ "tracing-core 0.1.32",
 ]
 
 [[package]]
 name = "tracing-serde"
 version = "0.1.3"
-source = "git+https://github.com/metalbear-co/tracing?branch=worker_options_non_blocking_v1#bf361d828cd8249290b6445f47963ea4025422bd"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc6b213177105856957181934e4920de57730fc69bf42c37ee5bb664d406d9e1"
 dependencies = [
  "serde",
- "tracing-core",
+ "tracing-core 0.1.32",
 ]
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.3.16"
-source = "git+https://github.com/metalbear-co/tracing?branch=worker_options_non_blocking_v1#bf361d828cd8249290b6445f47963ea4025422bd"
+version = "0.3.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad0f048c97dbd9faa9b7df56362b8ebcaa52adb06b498c050d2f4e32f90a7a8b"
 dependencies = [
  "matchers",
  "nu-ansi-term",
@@ -6338,8 +6372,8 @@ dependencies = [
  "sharded-slab",
  "smallvec",
  "thread_local",
- "tracing",
- "tracing-core",
+ "tracing 0.1.40",
+ "tracing-core 0.1.32",
  "tracing-log",
  "tracing-serde",
 ]
@@ -6375,7 +6409,7 @@ dependencies = [
  "thiserror",
  "tinyvec",
  "tokio",
- "tracing",
+ "tracing 0.1.40",
  "url",
 ]
 
@@ -6396,7 +6430,7 @@ dependencies = [
  "smallvec",
  "thiserror",
  "tokio",
- "tracing",
+ "tracing 0.1.40",
  "trust-dns-proto",
 ]
 
