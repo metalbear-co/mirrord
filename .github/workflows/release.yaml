@@ -13,6 +13,8 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rustflags: false
       - uses: taiki-e/install-action@v2
         with:
           tool: cross
@@ -35,6 +37,8 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rustflags: false
       - uses: taiki-e/install-action@v2
         with:
           tool: cross
@@ -56,6 +60,7 @@ jobs:
         with:
           target: x86_64-apple-darwin,aarch64-apple-darwin
           toolchain: nightly-2023-12-07
+          rustflags: false
       - name: Import Code-Signing Certificates
         uses: Apple-Actions/import-codesign-certs@8f3fb608891dd2244cdab3d69cd68c0d37a7fe93
         with:

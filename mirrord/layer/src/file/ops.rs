@@ -1,11 +1,10 @@
-use core::ffi::CStr;
 #[cfg(target_os = "linux")]
 use std::time::Duration;
 use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 #[cfg(target_os = "linux")]
 use libc::{c_char, statx, statx_timestamp};
-use libc::{c_int, iovec, unlink, AT_FDCWD, FILE};
+use libc::{c_int, iovec, unlink, AT_FDCWD};
 use mirrord_protocol::file::{
     OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
     WriteFileResponse, XstatFsResponse, XstatResponse,
@@ -182,35 +181,6 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
     );
 
     Detour::Success(local_file_fd)
-}
-
-#[mirrord_layer_macro::instrument(level = "trace")]
-pub(crate) fn fdopen(fd: RawFd, rawish_mode: Option<&CStr>) -> Detour<*mut FILE> {
-    let _open_options: OpenOptionsInternal = rawish_mode
-        .map(CStr::to_str)
-        .transpose()
-        .map_err(|fail| {
-            tracing::warn!(
-                "Failed converting `rawish_mode` from `CStr` with {:#?}",
-                fail
-            );
-
-            Bypass::CStrConversion
-        })?
-        .map(String::from)
-        .map(OpenOptionsInternalExt::from_mode)
-        .unwrap_or_default();
-
-    trace!("fdopen -> open_options {_open_options:#?}");
-
-    // TODO: Check that the constraint: remote file must have the same mode stuff that is passed
-    // here.
-    let result = OPEN_FILES
-        .get(&fd)
-        .ok_or(Bypass::LocalFdNotFound(fd))
-        .map(|_| fd as *const RawFd as *mut _)?;
-
-    Detour::Success(result)
 }
 
 /// creates a directory stream for the `remote_fd` in the agent
