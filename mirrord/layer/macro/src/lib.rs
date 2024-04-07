@@ -192,3 +192,26 @@ pub fn hook_guard_fn(
     // function we received as `input`.
     proc_macro::TokenStream::from(output)
 }
+
+/// Wrapper for `tracing::instrument` that applies the tracing macro only if the debug assertions
+/// are enabled. This is to reduce stack consumption in the layer and prevent segmentation faults.
+///
+/// Related issue: [Segmentation fault with microsocks](https://github.com/metalbear-co/mirrord/issues/2351).
+///
+/// **Warning**: `tracing` crate must be visible under name `tracing` at the call site of this
+/// macro.
+#[proc_macro_attribute]
+pub fn instrument(
+    args: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let attr: proc_macro2::TokenStream = args.into();
+    let item: proc_macro2::TokenStream = item.into();
+
+    let output = quote! {
+        #[cfg_attr(debug_assertions, tracing::instrument(#attr))]
+        #item
+    };
+
+    proc_macro::TokenStream::from(output)
+}

@@ -113,7 +113,7 @@ impl From<ConnectResult> for i32 {
 }
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", name = "twoja_stara", ret)]
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
     let socket_kind = type_.try_into()?;
 
@@ -142,7 +142,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
     Detour::Success(socket_fd)
 }
 
-#[tracing::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "debug", ret)]
 fn bind_address(sockfd: c_int, domain: c_int, addr: &SocketAddr) -> Detour<()> {
     let port = addr.port();
     let address = {
@@ -173,7 +173,7 @@ fn bind_address(sockfd: c_int, domain: c_int, addr: &SocketAddr) -> Detour<()> {
 
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state.
-#[tracing::instrument(level = "trace", ret, skip(raw_address))]
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(raw_address))]
 pub(super) fn bind(
     sockfd: c_int,
     raw_address: *const sockaddr,
@@ -279,7 +279,7 @@ pub(super) fn bind(
 
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
 /// later be routed to the fake local port.
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
     let mut socket = {
         SOCKETS
@@ -351,7 +351,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
 /// interception procedure.
 /// This returns errno so we can restore the correct errno in case result is -1 (until we get
 /// back to the hook we might call functions that will corrupt errno)
-#[tracing::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "debug", ret)]
 fn connect_outgoing<const CALL_CONNECT: bool>(
     sockfd: RawFd,
     remote_address: SockAddr,
@@ -440,7 +440,7 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
 /// trying to connect to - then don't forward this connection to the agent, and instead of
 /// connecting to the requested address, connect to the actual address where the application
 /// is locally listening.
-#[tracing::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 fn connect_to_local_address(
     sockfd: RawFd,
     user_socket_info: &UserSocket,
@@ -489,7 +489,7 @@ fn connect_to_local_address(
 /// that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request interception procedure.
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
-#[tracing::instrument(level = "debug", ret, skip(raw_address))]
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(raw_address))]
 pub(super) fn connect(
     sockfd: RawFd,
     raw_address: *const sockaddr,
@@ -593,7 +593,7 @@ pub(super) fn connect(
 
 /// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
 /// cluster)
-#[tracing::instrument(level = "trace", skip(address, address_len))]
+#[mirrord_layer_macro::instrument(level = "trace", skip(address, address_len))]
 pub(super) fn getpeername(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -622,7 +622,7 @@ pub(super) fn getpeername(
 ///
 /// When [`libc::bind`]ing on port `0`, we change the port to be the actual bound port, as this is
 /// consistent behavior with libc.
-#[tracing::instrument(level = "trace", ret, skip(address, address_len))]
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(address, address_len))]
 pub(super) fn getsockname(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -662,7 +662,7 @@ pub(super) fn getsockname(
 /// connection to be set in our lock.
 ///
 /// This enables us to have a safe way to get "remote" information (remote ip, port, etc).
-#[tracing::instrument(level = "trace", ret, skip(address, address_len))]
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(address, address_len))]
 pub(super) fn accept(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -718,7 +718,7 @@ pub(super) fn accept(
     Detour::Success(new_fd)
 }
 
-#[tracing::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), HookError> {
     match cmd {
         libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => dup::<true>(orig_fd, fcntl_fd),
@@ -735,7 +735,7 @@ pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), Hoo
 ///
 /// We need this to properly handle some cases in [`fcntl`], [`dup2_detour`], and [`dup3_detour`].
 /// Extra relevant for node on macos.
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
     if let Some(socket) = SOCKETS.get(&fd).map(|entry| entry.value().clone()) {
         SOCKETS.insert(dup_fd as RawFd, socket);
@@ -764,7 +764,7 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
 /// # Note
 ///
 /// This function updates the mapping in [`REMOTE_DNS_REVERSE_MAPPING`].
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn remote_getaddrinfo(node: String) -> HookResult<Vec<(String, IpAddr)>> {
     let addr_info_list = common::make_proxy_request_with_response(GetAddrInfoRequest { node })?.0?;
 
@@ -789,7 +789,7 @@ pub(super) fn remote_getaddrinfo(node: String) -> HookResult<Vec<(String, IpAddr
 ///
 /// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
 /// for the equivalent of this function).
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn getaddrinfo(
     rawish_node: Option<&CStr>,
     rawish_service: Option<&CStr>,
@@ -926,7 +926,7 @@ fn remote_hostname_string() -> Detour<CString> {
 /// **Safety**:
 /// See the [`GETHOSTBYNAME_ALIASES_PTR`] docs. If you see this function being called and some weird
 /// issue is going on, assume that you might've triggered the UB.
-#[tracing::instrument(level = "debug", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
     let name: String = raw_name
         .bypass(Bypass::NullNode)?
@@ -1002,7 +1002,7 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
 }
 
 /// Resolve hostname from remote host with caching for the result
-#[tracing::instrument(level = "debug")]
+#[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) fn gethostname() -> Detour<&'static CString> {
     HOSTNAME.get_or_detour_init(remote_hostname_string)
 }
@@ -1033,7 +1033,7 @@ pub(super) fn gethostname() -> Detour<&'static CString> {
 /// instead of letting whatever came in `raw_source` through.
 ///
 /// See [`send_to`] for more information.
-#[tracing::instrument(level = "trace", ret, skip(raw_source, source_length))]
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(raw_source, source_length))]
 pub(super) fn recv_from(
     sockfd: i32,
     recv_from_result: isize,
@@ -1056,7 +1056,7 @@ pub(super) fn recv_from(
 }
 
 /// Helps manually resolving DNS on port `53` with UDP, see [`send_to`] and [`sendmsg`].
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 fn send_dns_patch(
     sockfd: RawFd,
     user_socket_info: Arc<UserSocket>,
@@ -1126,7 +1126,7 @@ fn send_dns_patch(
 /// mirrord, which is: destination becomes `127.0.0.1:{not 53}`.
 ///
 /// See [`recv_from`] for more information.
-#[tracing::instrument(
+#[mirrord_layer_macro::instrument(
     level = "trace",
     ret,
     skip(raw_message, raw_destination, destination_length)
@@ -1213,7 +1213,7 @@ pub(super) fn send_to(
 
 /// Same behavior as [`send_to`], the only difference is that here we deal with [`libc::msghdr`],
 /// instead of directly with socket addresses.
-#[tracing::instrument(level = "trace", ret, skip(raw_message_header))]
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(raw_message_header))]
 pub(super) fn sendmsg(
     sockfd: RawFd,
     raw_message_header: *const libc::msghdr,

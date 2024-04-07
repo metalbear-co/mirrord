@@ -64,7 +64,7 @@ pub(crate) unsafe fn enable_execve_hook(
 }
 
 /// Check if the file that is to be executed has SIP and patch it if it does.
-#[tracing::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
     let patch_binaries = PATCH_BINARIES.get().expect("patch binaries not set");
     match sip_patch(path, patch_binaries) {
