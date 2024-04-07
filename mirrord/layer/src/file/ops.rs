@@ -1,11 +1,10 @@
-use core::ffi::CStr;
 #[cfg(target_os = "linux")]
 use std::time::Duration;
 use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 #[cfg(target_os = "linux")]
 use libc::{c_char, statx, statx_timestamp};
-use libc::{c_int, iovec, unlink, AT_FDCWD, FILE};
+use libc::{c_int, iovec, unlink, AT_FDCWD};
 use mirrord_protocol::file::{
     OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
     WriteFileResponse, XstatFsResponse, XstatResponse,
