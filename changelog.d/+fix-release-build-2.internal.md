@@ -1,0 +1,1 @@
+Fix release compilation CI
