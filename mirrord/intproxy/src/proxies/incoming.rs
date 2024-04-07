@@ -3,7 +3,7 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt, io,
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
 use mirrord_intproxy_protocol::{
@@ -34,17 +34,17 @@ mod port_subscription_ext;
 mod subscriptions;
 
 /// Creates and binds a new [`TcpSocket`].
-/// The socket has the same IP version and address as the given `addr`.
+/// The socket has the same IP version as the given `addr`.
 fn bind_similar(addr: SocketAddr) -> io::Result<TcpSocket> {
     match addr.ip() {
-        addr @ IpAddr::V4(..) => {
+        IpAddr::V4(_) => {
             let socket = TcpSocket::new_v4()?;
-            socket.bind(SocketAddr::new(addr, 0))?;
+            socket.bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))?;
             Ok(socket)
         }
-        addr @ IpAddr::V6(..) => {
+        IpAddr::V6(_) => {
             let socket = TcpSocket::new_v6()?;
-            socket.bind(SocketAddr::new(addr, 0))?;
+            socket.bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 0))?;
             Ok(socket)
         }
     }

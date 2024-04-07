@@ -25,14 +25,20 @@ client_socket.on('error', (err) => {
 console.log(`using port ${server_port} and host ${server_address}`);
 client_socket.bind('31413'); // Currently mirrord will ignore binding to port 0.
 client_socket.connect(server_port, server_address, (connect_err) => {
+    console.log("here");
     if (connect_err) {
+        console.log("here2");
         throw connect_err
     }
+    console.log("here3");
     client_socket.send('Can I pass the test please?\n', (send_err) => {
+        console.log("here4");
         if (send_err) {
+            console.log("here5");
             throw send_err
         }
     });
+    console.log("here6");
     client_socket.close();
 });
 
