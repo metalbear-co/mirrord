@@ -1,1 +1,0 @@
-Fixed excessive stack consumption in the `mirrord-layer` by reducing tracing in release profile.

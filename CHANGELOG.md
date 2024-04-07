@@ -8,6 +8,23 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.95.1](https://github.com/metalbear-co/mirrord/tree/3.95.1) - 2024-04-07
+
+
+### Fixed
+
+- Allow `target` be a `string` in the JSON Schema
+  [#2188](https://github.com/metalbear-co/mirrord/issues/2188)
+- Fixed excessive stack consumption in the `mirrord-layer` by reducing tracing
+  in release profile.
+
+
+### Internal
+
+- Fix e2e failing on release because image doesn't exist
+- Use upstream tracing
+
+
 ## [3.95.0](https://github.com/metalbear-co/mirrord/tree/3.95.0) - 2024-04-02
 
 
