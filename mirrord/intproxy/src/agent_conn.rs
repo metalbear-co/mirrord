@@ -86,10 +86,13 @@ impl AgentConnection {
                 let k8s_api = KubernetesAPI::create(config)
                     .await
                     .map_err(AgentConnectionError::Kube)?;
-                k8s_api
+
+                let stream = k8s_api
                     .create_connection(connect_info.clone())
                     .await
-                    .map_err(AgentConnectionError::Kube)?
+                    .map_err(AgentConnectionError::Kube)?;
+
+                wrap_raw_connection(stream)
             }
 
             None => {

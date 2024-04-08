@@ -88,3 +88,12 @@ impl FromStr for MeshVendor {
         }
     }
 }
+
+/// Name of environment variable that can be used to instruct the agent to use TLS when accepting
+/// client connections. Should store only values that parse into [`bool`].
+///
+/// # Note
+///
+/// This may not be the best place to put this name, but this is the only crate shared by
+/// `mirrord-kube` and `mirrord-agent`.
+pub const AGENT_TLS_ENV: &str = "MIRRORD_AGENT_USE_TLS";
