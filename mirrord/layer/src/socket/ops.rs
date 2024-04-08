@@ -113,7 +113,7 @@ impl From<ConnectResult> for i32 {
 }
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-#[mirrord_layer_macro::instrument(level = "trace", name = "twoja_stara", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
     let socket_kind = type_.try_into()?;
 
