@@ -144,11 +144,9 @@ pub(crate) enum CliError {
     ))]
     InvalidMessage(String),
 
-    #[error("Initial communication with the agent failed. {0:#?}")]
-    #[diagnostic(help(
-        "Please make sure the agent is running and the logs are not showing any errors.{GENERAL_HELP}"
-    ))]
-    InitialCommFailed(&'static str),
+    #[error("Initial communication with the agent failed. {0}")]
+    #[diagnostic(help("Please check agent status and logs.{GENERAL_HELP}"))]
+    InitialCommFailed(String),
 
     #[error("Failed to execute binary `{0:#?}` with args `{1:#?}`")]
     #[diagnostic(help(
@@ -310,6 +308,18 @@ pub(crate) enum CliError {
         operation: String,
         status: Box<kube::core::Status>,
     },
+
+    #[error("Agent returned invalid response to ping")]
+    #[diagnostic(help(
+        r#"This usually means that connectivity was lost while pinging. {GENERAL_HELP}"#
+    ))]
+    InvalidPingResponse,
+
+    #[error("Couldn't send ping to agent")]
+    #[diagnostic(help(
+        r#"This usually means that connectivity was lost while pinging. {GENERAL_HELP}"#
+    ))]
+    CantSendPing,
 }
 
 impl From<OperatorApiError> for CliError {

@@ -3,7 +3,7 @@
 
 use std::{io, net::SocketAddr};
 
-use mirrord_analytics::AnalyticsReporter;
+use mirrord_analytics::Reporter;
 use mirrord_config::LayerConfig;
 use mirrord_kube::{
     api::{
@@ -68,10 +68,10 @@ pub struct AgentConnection {
 impl AgentConnection {
     /// Creates a new agent connection based on the provided [`LayerConfig`] and optional
     /// [`AgentConnectInfo`].
-    pub async fn new(
+    pub async fn new<R: Reporter>(
         config: &LayerConfig,
         connect_info: Option<AgentConnectInfo>,
-        analytics: Option<&mut AnalyticsReporter>,
+        analytics: &mut R,
     ) -> Result<Self, AgentConnectionError> {
         let (agent_tx, agent_rx) = match connect_info {
             Some(AgentConnectInfo::Operator(operator_session_information)) => {

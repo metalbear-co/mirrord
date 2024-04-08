@@ -40,17 +40,15 @@ use crate::{
     dns::DnsApi,
     error::{AgentError, Result},
     file::FileManager,
-    outgoing::{udp::UdpOutgoingApi, TcpOutgoingApi},
+    outgoing::{TcpOutgoingApi, UdpOutgoingApi},
     runtime::get_container,
     sniffer::{SnifferCommand, TcpConnectionSniffer, TcpSnifferApi},
     steal::{
-        api::TcpStealerApi,
-        connection::TcpConnectionStealer,
         ip_tables::{
             new_iptables, IPTablesWrapper, SafeIpTables, IPTABLE_MESH, IPTABLE_MESH_ENV,
             IPTABLE_PREROUTING, IPTABLE_PREROUTING_ENV, IPTABLE_STANDARD, IPTABLE_STANDARD_ENV,
         },
-        StealerCommand,
+        StealerCommand, TcpConnectionStealer, TcpStealerApi,
     },
     util::{run_thread_in_namespace, ClientId},
     watched_task::{TaskStatus, WatchedTask},
@@ -64,6 +62,7 @@ mod dns;
 mod env;
 mod error;
 mod file;
+mod http;
 mod namespace;
 mod outgoing;
 mod runtime;

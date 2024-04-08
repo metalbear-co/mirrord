@@ -1,9 +1,11 @@
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use enum_dispatch::enum_dispatch;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde::Serialize;
-use serde_json::to_string;
+use serde_json::{to_string, Value};
+
+pub mod messages;
 
 /// The environment variable name that is used
 /// to determine the mode of progress reporting
@@ -31,6 +33,11 @@ pub trait Progress: Sized {
 
     /// When you want to print a message, IDE support.
     fn info(&self, msg: &str);
+
+    /// When you want to send a message to the IDE that doesn't need to be shown to the user.
+    ///
+    /// You may use this to pass additional context to the IDE through the `value` object.
+    fn ide(&self, value: serde_json::Value);
 
     /// When you want to print a message, cli only.
     fn print(&self, msg: &str);
@@ -73,6 +80,8 @@ impl Progress for NullProgress {
     fn warning(&self, _: &str) {}
 
     fn info(&self, _: &str) {}
+
+    fn ide(&self, _: serde_json::Value) {}
 
     fn print(&self, _: &str) {}
 }
@@ -136,6 +145,17 @@ impl Progress for JsonProgress {
         message.print();
     }
 
+    fn ide(&self, value: serde_json::Value) {
+        if std::env::var("MIRRORD_PROGRESS_SUPPORT_IDE")
+            .ok()
+            .and_then(|ide_support_enabled| ide_support_enabled.parse().ok())
+            .unwrap_or(false)
+        {
+            let message = ProgressMessage::IdeMessage { message: value };
+            message.print();
+        }
+    }
+
     fn warning(&self, msg: &str) {
         let message = ProgressMessage::Warning(WarningMessage {
             message: msg.to_string(),
@@ -197,6 +217,8 @@ impl Progress for SimpleProgress {
     fn info(&self, msg: &str) {
         println!("{msg}");
     }
+
+    fn ide(&self, _: serde_json::Value) {}
 
     fn failure(&mut self, msg: Option<&str>) {
         println!("{msg:?}");
@@ -279,6 +301,8 @@ impl Progress for SpinnerProgress {
         self.print(&formatted_message);
         self.progress.set_message(formatted_message);
     }
+
+    fn ide(&self, _: serde_json::Value) {}
 
     fn failure(&mut self, msg: Option<&str>) {
         self.done = true;
@@ -364,6 +388,45 @@ struct WarningMessage {
     message: String,
 }
 
+/// Indicates what type of notification should appear in the IDEs.
+#[derive(Serialize, Debug, Clone, Default)]
+pub enum NotificationLevel {
+    /// Normal info box.
+    #[default]
+    Info,
+
+    /// Warning box.
+    Warning,
+}
+
+/// Action/button type that appears in the pop-up notifications.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
+#[serde(tag = "kind")]
+pub enum IdeAction {
+    /// A link action, where `label` is the text, and `link` is the _href_.
+    Link { label: String, link: String },
+}
+
+/// Messages sent to the IDEs with full context.
+#[derive(Serialize, Debug, Clone, Default)]
+pub struct IdeMessage {
+    /// Allows us to identify this message and map it to something meaningful in the IDEs.
+    ///
+    /// Not shown to the user.
+    ///
+    /// In vscode, this should map to a `configEntry` defined in `package.json`.
+    pub id: String,
+
+    /// The level of the notification, the type of pop-up it'll be displayed in the IDEs.
+    pub level: NotificationLevel,
+
+    /// Message content.
+    pub text: String,
+
+    /// Actions/buttons that appears in the pop-up notification.
+    pub actions: HashSet<IdeAction>,
+}
+
 /// The message types that we report on [`Progress`].
 ///
 /// These are used by the extensions (vscode and intellij) to show nice notifications.
@@ -373,7 +436,16 @@ enum ProgressMessage {
     NewTask(NewTaskMessage),
     Warning(WarningMessage),
     FinishedTask(FinishedTaskMessage),
-    Info { message: String },
+    Info {
+        message: String,
+    },
+    /// Messages that are passed to the IDE and shown to the user in notification boxes.
+    IdeMessage {
+        /// It's a generic json [`Value`].
+        ///
+        /// Should be an [`IdeMessage`] converted to [`Value`].
+        message: Value,
+    },
 }
 
 impl ProgressMessage {

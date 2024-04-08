@@ -6,6 +6,7 @@ use background_tasks::{BackgroundTasks, TaskSender, TaskUpdate};
 use layer_conn::LayerConnection;
 use layer_initializer::LayerInitializer;
 use main_tasks::{FromLayer, LayerForked, MainTaskId, ProxyMessage, ToLayer};
+use mirrord_analytics::NullReporter;
 use mirrord_config::LayerConfig;
 use mirrord_intproxy_protocol::{LayerId, LayerToProxyMessage, LocalMessage};
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, CLIENT_READY_FOR_LOGS};
@@ -71,7 +72,8 @@ impl IntProxy {
         agent_connect_info: Option<AgentConnectInfo>,
         listener: TcpListener,
     ) -> Result<Self, IntProxyError> {
-        let agent_conn = AgentConnection::new(config, agent_connect_info, None).await?;
+        let mut reporter = NullReporter::default();
+        let agent_conn = AgentConnection::new(config, agent_connect_info, &mut reporter).await?;
         Ok(Self::new_with_connection(agent_conn, listener))
     }
 
