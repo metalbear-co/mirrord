@@ -16,6 +16,7 @@ use std::{
     },
 };
 
+use client_connection::AgentTlsConnector;
 use dns::{DnsCommand, DnsWorker};
 use futures::TryFutureExt;
 use mirrord_protocol::{
@@ -28,7 +29,6 @@ use tokio::{
     task::JoinSet,
     time::{timeout, Duration},
 };
-use tokio_rustls::{rustls::ClientConfig, TlsConnector};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
@@ -89,20 +89,18 @@ struct State {
     container: Option<ContainerHandle>,
     env: Arc<HashMap<String, String>>,
     ephemeral: bool,
-    tls_connector: Option<TlsConnector>,
+    /// When present, it is used to secure incoming TCP connections.
+    tls_connector: Option<AgentTlsConnector>,
 }
 
 impl State {
     /// Return [`Err`] if container runtime operations failed.
     pub async fn new(args: &Args, watch: drain::Watch) -> Result<State> {
-        let tls_connector = args.use_tls.then(|| {
-            TlsConnector::from(Arc::new(
-                ClientConfig::builder()
-                    .dangerous()
-                    .with_custom_certificate_verifier(Arc::new(tls_verifier::NoopVerifier))
-                    .with_no_client_auth(),
-            ))
-        });
+        let tls_connector = args
+            .operator_tls_cert_pem
+            .clone()
+            .map(|cert_pem| AgentTlsConnector::new(cert_pem))
+            .transpose()?;
 
         let mut env: HashMap<String, String> = HashMap::new();
 
