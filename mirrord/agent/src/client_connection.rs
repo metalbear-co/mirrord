@@ -16,7 +16,7 @@ pub struct ClientConnection {
 
 impl ClientConnection {
     /// Wraps the given [`TcpStream`] into this struct.
-    /// If a [`TlsConnector`] is given, it is used to first build a make a TLS connection using the
+    /// If a [`TlsConnector`] is given, it is used to first make a TLS connection using the
     /// given [`TcpStream`].
     #[tracing::instrument(level = "trace", skip(tls), fields(use_tls = tls.is_some()), err)]
     pub async fn new(

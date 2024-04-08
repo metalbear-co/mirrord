@@ -89,7 +89,7 @@ impl FromStr for MeshVendor {
     }
 }
 
-/// Name of environment variable that can be used to instruct the agent to use TLS when acception
+/// Name of environment variable that can be used to instruct the agent to use TLS when accepting
 /// client connections. Should store only values that parse into [`bool`].
 ///
 /// # Note
