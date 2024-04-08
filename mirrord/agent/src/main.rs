@@ -68,7 +68,6 @@ mod outgoing;
 mod runtime;
 mod sniffer;
 mod steal;
-mod tls_verifier;
 mod util;
 mod watched_task;
 
