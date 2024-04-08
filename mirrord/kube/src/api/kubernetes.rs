@@ -76,12 +76,16 @@ impl KubernetesAPI {
     }
 }
 
+/// Trait for IO streams returned from [`KubernetesAPI::create_connection`].
+/// It's here only to group the exisiting traits we actually need and return a `Box<dyn ...>`
 #[cfg(not(feature = "incluster"))]
 pub trait UnpinStream:
     tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static
 {
 }
 
+/// Any type that implements bidirectional IO and can be sent to a different [`tokio::task`] is good
+/// enough.
 #[cfg(not(feature = "incluster"))]
 impl<T> UnpinStream for T where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static
