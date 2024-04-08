@@ -10,6 +10,7 @@ use kube::{
 };
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
+use mirrord_protocol::AGENT_OPERATOR_CERT_ENV;
 use serde_json::json;
 use tokio::pin;
 use tracing::debug;
@@ -183,7 +184,12 @@ impl ContainerVariant for JobVariant<'_> {
             ),
         ]
         .into_iter()
-        .chain(params.extra_env.iter().cloned())
+        .chain(
+            params
+                .tls_cert
+                .clone()
+                .map(|cert| (AGENT_OPERATOR_CERT_ENV.to_string(), cert)),
+        )
         .map(|(name, value)| json!({ "name": name, "value": value }))
         .collect::<Vec<_>>();
 
@@ -363,7 +369,7 @@ mod test {
             name: "foobar".to_string(),
             port: 3000,
             gid: 13,
-            extra_env: Default::default(),
+            tls_cert: None,
         };
 
         let update = JobVariant::new(&agent, &params).as_update()?;
@@ -443,7 +449,7 @@ mod test {
             name: "foobar".to_string(),
             port: 3000,
             gid: 13,
-            extra_env: Default::default(),
+            tls_cert: None,
         };
 
         let update = JobTargetedVariant::new(
