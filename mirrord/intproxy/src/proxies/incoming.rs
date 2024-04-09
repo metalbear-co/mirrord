@@ -102,7 +102,7 @@ struct InterceptorHandle {
 }
 
 /// Store for mapping [`Interceptor`] socket addresses to addresses of the original peers.
-#[derive(Default, Debug)]
+#[derive(Default)]
 struct MetadataStore {
     prepared_responses: HashMap<ConnMetadataRequest, ConnMetadataResponse>,
     expected_requests: HashMap<InterceptorId, ConnMetadataRequest>,
@@ -110,13 +110,12 @@ struct MetadataStore {
 
 impl MetadataStore {
     fn get(&mut self, req: ConnMetadataRequest) -> ConnMetadataResponse {
-        self.prepared_responses.remove(&req).unwrap_or_else(|| {
-            tracing::info!("not found");
-            ConnMetadataResponse {
+        self.prepared_responses
+            .remove(&req)
+            .unwrap_or_else(|| ConnMetadataResponse {
                 remote_source: req.peer_address,
                 local_address: req.listener_address.ip(),
-            }
-        })
+            })
     }
 
     fn expect(&mut self, req: ConnMetadataRequest, from: InterceptorId, res: ConnMetadataResponse) {
