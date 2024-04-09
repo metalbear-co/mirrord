@@ -14,25 +14,29 @@ if (argv.length >= 3) {
     }
 }
 
+console.log(`trying to talk over UDP with ${server_address}:${server_port}`)
+
 const client_socket = dgram.createSocket('udp4');
+client_socket.connect(server_port, server_address);
 
 client_socket.on('error', (err) => {
-        if (err) {
-            throw err
-        }
-    }
-);
-console.log(`using port ${server_port} and host ${server_address}`);
-client_socket.bind('31413'); // Currently mirrord will ignore binding to port 0.
-client_socket.connect(server_port, server_address, (connect_err) => {
-    if (connect_err) {
-        throw connect_err
-    }
-    client_socket.send('Can I pass the test please?\n', (send_err) => {
-        if (send_err) {
-            throw send_err
-        }
-    });
-    client_socket.close();
+    console.error(err);
+    process.exit(-1);
 });
 
+client_socket.on('connect', () => {
+    client_socket.send('Can I pass the test please?\n', (err) => {
+        if (err) {
+            console.log(err);
+            process.exit(-1);
+        }
+
+        console.log('message sent, closing socket');
+        client_socket.close();
+    });
+});
+
+client_socket.on('close', () => {
+    console.log('socket closed, exiting');
+    process.exit(0);
+});
