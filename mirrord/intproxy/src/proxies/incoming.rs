@@ -3,7 +3,7 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt, io,
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
 use mirrord_intproxy_protocol::{
@@ -35,8 +35,22 @@ mod subscriptions;
 
 /// Creates and binds a new [`TcpSocket`].
 /// The socket has the same IP version and address as the given `addr`.
+///
+/// # Exception
+///
+/// If the given `addr` is unspecified, this function binds to localhost.
 fn bind_similar(addr: SocketAddr) -> io::Result<TcpSocket> {
     match addr.ip() {
+        IpAddr::V4(Ipv4Addr::UNSPECIFIED) => {
+            let socket = TcpSocket::new_v4()?;
+            socket.bind(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))?;
+            Ok(socket)
+        }
+        IpAddr::V6(Ipv6Addr::UNSPECIFIED) => {
+            let socket = TcpSocket::new_v6()?;
+            socket.bind(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0))?;
+            Ok(socket)
+        }
         addr @ IpAddr::V4(..) => {
             let socket = TcpSocket::new_v4()?;
             socket.bind(SocketAddr::new(addr, 0))?;
