@@ -8,6 +8,24 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.96.0](https://github.com/metalbear-co/mirrord/tree/3.96.0) - 2024-04-09
+
+
+### Changed
+
+- mirrord now listens on 0.0.0.0 when requested and changes address to
+  localhost only when needed.
+  [#2319](https://github.com/metalbear-co/mirrord/issues/2319)
+
+
+### Internal
+
+- Adjusted `mirrord-kube` and `mirrord-agent` crates to allow wrapping
+  client-agent connections in TLS.
+  [#2299](https://github.com/metalbear-co/mirrord/issues/2299)
+- Removed dummy span name from logs.
+
+
 ## [3.95.2](https://github.com/metalbear-co/mirrord/tree/3.95.2) - 2024-04-07
 
 
