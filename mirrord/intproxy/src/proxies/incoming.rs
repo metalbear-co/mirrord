@@ -109,7 +109,6 @@ struct MetadataStore {
 }
 
 impl MetadataStore {
-    #[tracing::instrument(level = "info")]
     fn get(&mut self, req: ConnMetadataRequest) -> ConnMetadataResponse {
         self.prepared_responses.remove(&req).unwrap_or_else(|| {
             tracing::info!("not found");
@@ -120,13 +119,11 @@ impl MetadataStore {
         })
     }
 
-    #[tracing::instrument(level = "info")]
     fn expect(&mut self, req: ConnMetadataRequest, from: InterceptorId, res: ConnMetadataResponse) {
         self.expected_requests.insert(from, req.clone());
         self.prepared_responses.insert(req, res);
     }
 
-    #[tracing::instrument(level = "info")]
     fn no_longer_expect(&mut self, from: InterceptorId) {
         let Some(req) = self.expected_requests.remove(&from) else {
             return;
