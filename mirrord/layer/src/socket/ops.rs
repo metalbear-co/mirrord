@@ -24,7 +24,7 @@ use mirrord_protocol::{
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
 use socket2::SockAddr;
-use tracing::{error, info, trace};
+use tracing::{error, trace};
 
 use super::{hooks::*, *};
 use crate::{
@@ -142,19 +142,25 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
     Detour::Success(socket_fd)
 }
 
+/// Tries to bind the given socket to a loopback or an unspecified address similar to the given
+/// `requested_address`.
+///
+/// If the given `requested_address` is not a loopback and is specified, binds to either
+/// [`Ipv4Addr::LOCALHOST`] or [`Ipv6Addr::UNSPECIFIED`].
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
-fn bind_port(sockfd: c_int, domain: c_int, port: u16) -> Detour<()> {
-    let address = match domain {
-        libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::LOCALHOST),
-            port,
-        ))),
-        libc::AF_INET6 => Ok(SockAddr::from(SocketAddr::new(
-            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            port,
-        ))),
-        invalid => Err(Bypass::Domain(invalid)),
-    }?;
+fn bind_similar_address(sockfd: c_int, requested_address: &SocketAddr) -> Detour<()> {
+    let addr = requested_address.ip();
+    let port = requested_address.port();
+
+    let address = if addr.is_loopback() || addr.is_unspecified() {
+        *requested_address
+    } else if addr.is_ipv4() {
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port)
+    } else {
+        SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port)
+    };
+
+    let address = SockAddr::from(address);
 
     let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
     if bind_result != 0 {
@@ -205,6 +211,16 @@ pub(super) fn bind(
         Err(Bypass::Port(requested_address.port()))?;
     }
 
+    // Check that the domain matches the requested address.
+    let domain_valid = match socket.domain {
+        libc::AF_INET => requested_address.is_ipv4(),
+        libc::AF_INET6 => requested_address.is_ipv6(),
+        _ => false,
+    };
+    if !domain_valid {
+        Err(HookError::InvalidBindAddressForDomain)?;
+    }
+
     // Check if the user's requested address isn't already in use, even though it's not actually
     // bound, as we bind to a different address, but if we don't check for this then we're
     // changing normal socket behavior (see issue #1123).
@@ -221,22 +237,19 @@ pub(super) fn bind(
     // try to bind the requested port, if not available get a random port
     // if there's configuration and binding fails with the requested port
     // we return address not available and not fallback to a random port.
-    let listen_port = crate::setup()
-        .incoming_config()
+    let listen_port = incoming_config
         .listen_ports
         .get_by_left(&requested_address.port())
-        .cloned();
-
-    // Listen port was specified
+        .copied();
     if let Some(port) = listen_port {
-        bind_port(sockfd, socket.domain, port)
+        // Listen port was specified. If we fail to bind, we should fail the whole operation.
+        bind_similar_address(sockfd, &SocketAddr::new(requested_address.ip(), port))
     } else {
-        bind_port(sockfd, socket.domain, requested_address.port())
-            .or_else(|e| {
-                info!("bind -> first `bind` failed on port {:?} with {e:?}, trying to bind to a random port", requested_address.port());
-                bind_port(sockfd, socket.domain, 0)
-            }
-        )
+        // Listen port was not specified. If we fail to bind, it's ok to fall back to a random port.
+        bind_similar_address(sockfd, &requested_address).or_else(|error| {
+            trace!(%error, %requested_address, "bind failed, trying to bind to on a random port");
+            bind_similar_address(sockfd, &SocketAddr::new(requested_address.ip(), 0))
+        })
     }?;
 
     // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
@@ -244,9 +257,9 @@ pub(super) fn bind(
     let address = unsafe {
         SockAddr::try_init(|storage, len| {
             if FN_GETSOCKNAME(sockfd, storage.cast(), len) == -1 {
-                error!("bind -> Failed `getsockname` sockfd {:#?}", sockfd);
-
-                Err(io::Error::last_os_error())?
+                let error = io::Error::last_os_error();
+                error!(%error, sockfd, "`getsockname` failed to get address of a socket after bind");
+                Err(error)
             } else {
                 Ok(())
             }
@@ -650,10 +663,8 @@ pub(super) fn getsockname(
     fill_address(address, address_len, local_address.try_into()?)
 }
 
-/// When the fd is "ours", we accept and recv the first bytes that contain metadata on the
-/// connection to be set in our lock.
-///
-/// This enables us to have a safe way to get "remote" information (remote ip, port, etc).
+/// When the fd is "ours", we accept and use [`ConnMetadataRequest`] to retrieve peer address from
+/// the internal proxy.
 #[mirrord_layer_macro::instrument(level = "trace", ret, skip(address, address_len))]
 pub(super) fn accept(
     sockfd: RawFd,
