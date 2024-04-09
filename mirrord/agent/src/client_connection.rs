@@ -70,7 +70,7 @@ impl AgentTlsConnector {
     /// Retrieves [`ServerName`] from the given certificate.
     /// If the certificate does not contain exactly one SAN extension or the extension does not
     /// contain any SAN that is a DNS name or an IP address, this method returns [`None`].
-    fn get_san<'a>(cert: &X509Certificate<'a>) -> Option<ServerName<'static>> {
+    fn get_san(cert: &X509Certificate<'_>) -> Option<ServerName<'static>> {
         let extension = match cert.subject_alternative_name() {
             Ok(Some(extension)) => extension,
             Ok(None) => {

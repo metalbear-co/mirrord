@@ -98,7 +98,7 @@ impl State {
         let tls_connector = args
             .operator_tls_cert_pem
             .clone()
-            .map(|cert_pem| AgentTlsConnector::new(cert_pem))
+            .map(AgentTlsConnector::new)
             .transpose()?;
 
         let mut env: HashMap<String, String> = HashMap::new();
