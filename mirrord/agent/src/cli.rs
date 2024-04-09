@@ -44,7 +44,7 @@ pub struct Args {
 
     /// PEM-encoded X509 certificate that this agent will use to secure incoming TCP connections
     /// from the clients.
-    /// 
+    ///
     /// If not given, the agent will not use TLS.
     #[arg(long, env = AGENT_OPERATOR_CERT_ENV)]
     pub operator_tls_cert_pem: Option<String>,
