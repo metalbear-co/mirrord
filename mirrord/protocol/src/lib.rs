@@ -92,7 +92,8 @@ impl FromStr for MeshVendor {
 /// Name of environment variable that can be used to provide the agent with a PEM-encoded X509
 /// certificate. Given the certificate, the agent will secure the incoming connections with TLS.
 /// The agent will act as TLS client and will make successful connections only with TLS servers
-/// using the given certificate. The agent will still be the side accepting TCP connections.
+/// using the given certificate. Regardless of this setting, the agent will still be the side that
+/// accepts the initial TCP connection.
 ///
 /// # Note
 ///
