@@ -24,7 +24,10 @@ use mirrord_intproxy::{
     IntProxy,
 };
 use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonMessage};
-use nix::sys::resource::{setrlimit, Resource};
+use nix::{
+    libc,
+    sys::resource::{setrlimit, Resource},
+};
 use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, log::trace, warn};
