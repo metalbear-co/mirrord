@@ -24,10 +24,10 @@ use mirrord_intproxy::{
     IntProxy,
 };
 use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonMessage};
-use nix::libc;
+use nix::sys::resource::{setrlimit, Resource};
 use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, log::trace};
+use tracing::{error, info, log::trace, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::{
@@ -161,6 +161,13 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
             tracing_registry.init();
         }
     }
+
+    // According to https://wilsonmar.github.io/maximum-limits/ this is the limit on macOS
+    // so we assume Linux can be higher and set to that.
+    if let Err(err) = setrlimit(Resource::RLIMIT_NOFILE, 12288, 12288) {
+        warn!(?err, "Failed to set the file descriptor limit");
+    }
+
     let agent_connect_info = get_agent_connect_info()?;
 
     let mut analytics = AnalyticsReporter::new(config.telemetry, watch);
