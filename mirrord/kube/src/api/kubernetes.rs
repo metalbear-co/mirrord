@@ -28,7 +28,7 @@ use crate::{
             targetless::Targetless,
             ContainerApi, ContainerParams,
         },
-        runtime::RuntimeDataProvider,
+        runtime::{RuntimeData, RuntimeDataProvider},
     },
     error::{KubeApiError, Result},
 };
@@ -155,6 +155,26 @@ impl KubernetesAPI {
         Ok(stream)
     }
 
+    #[tracing::instrument(level = "trace", skip(self), ret, err)]
+    pub async fn create_agent_params(
+        &self,
+        target: &TargetConfig,
+        extra_env: Vec<(String, String)>,
+    ) -> Result<(ContainerParams, Option<RuntimeData>), KubeApiError> {
+        let runtime_data = match target.path.as_ref().unwrap_or(&Target::Targetless) {
+            Target::Targetless => None,
+            path => path
+                .runtime_data(&self.client, target.namespace.as_deref())
+                .await?
+                .into(),
+        };
+
+        let mut params = ContainerParams::new();
+        params.extra_env.extend(extra_env);
+
+        Ok((params, runtime_data))
+    }
+
     #[tracing::instrument(level = "trace", skip(self, progress))]
     pub async fn create_agent<P>(
         &self,
@@ -166,13 +186,7 @@ impl KubernetesAPI {
     where
         P: Progress + Send + Sync,
     {
-        let runtime_data = match target.path.as_ref().unwrap_or(&Target::Targetless) {
-            Target::Targetless => None,
-            path => path
-                .runtime_data(&self.client, target.namespace.as_deref())
-                .await?
-                .into(),
-        };
+        let (params, runtime_data) = self.create_agent_params(target, extra_env).await?;
 
         let incoming_mode = config.map(|config| config.feature.network.incoming.mode);
         let is_mesh = runtime_data
@@ -187,12 +201,6 @@ impl KubernetesAPI {
                  `http_filter` configuration value if you only want to steal some of the traffic).",
             );
         }
-
-        let params = {
-            let mut params = ContainerParams::new();
-            params.extra_env.extend(extra_env);
-            params
-        };
 
         info!(?params, "Spawning new agent");
 
