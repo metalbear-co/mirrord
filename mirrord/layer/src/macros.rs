@@ -183,7 +183,7 @@ macro_rules! graceful_exit {
     () => {{
         nix::sys::signal::kill(
             nix::unistd::Pid::from_raw(std::process::id() as i32),
-            nix::sys::signal::Signal::SIGTERM,
+            nix::sys::signal::Signal::SIGKILL,
         )
         .expect("unable to graceful exit")
     }};
