@@ -106,6 +106,9 @@ pub(crate) enum HookError {
     #[cfg(target_os = "linux")]
     #[error("mirrord-layer: Empty file path passed in argument")]
     EmptyPath,
+
+    #[error("mirrord-layer: address passed to `bind` is not valid for the socket domain")]
+    InvalidBindAddressForDomain,
 }
 
 /// Errors internal to mirrord-layer.
@@ -280,6 +283,7 @@ impl From<HookError> for i64 {
             HookError::BadFlag => libc::EINVAL,
             #[cfg(target_os = "linux")]
             HookError::EmptyPath => libc::ENOENT,
+            HookError::InvalidBindAddressForDomain => libc::EINVAL,
         };
 
         set_errno(errno::Errno(libc_error));

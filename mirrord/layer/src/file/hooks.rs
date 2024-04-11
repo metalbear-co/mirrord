@@ -64,8 +64,8 @@ fn update_ptr_from_bypass(ptr: *const c_char, bypass: Bypass) -> *const c_char {
 
 /// Implementation of open_detour, used in open_detour and openat_detour
 /// We ignore mode in case we don't bypass the call.
-#[tracing::instrument(level = "trace", ret)]
-unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, mode: c_int) -> Detour<RawFd> {
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe fn open_logic(raw_path: *const c_char, open_flags: c_int, _mode: c_int) -> Detour<RawFd> {
     let path = raw_path.checked_into();
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 

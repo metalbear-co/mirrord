@@ -36,6 +36,7 @@ pub struct ContainerParams {
     pub name: String,
     pub gid: u16,
     pub port: u16,
+    pub extra_env: Vec<(String, String)>,
 }
 
 impl ContainerParams {
@@ -50,7 +51,12 @@ impl ContainerParams {
                 .to_lowercase()
         );
 
-        ContainerParams { name, gid, port }
+        ContainerParams {
+            name,
+            gid,
+            port,
+            extra_env: Default::default(),
+        }
     }
 }
 
