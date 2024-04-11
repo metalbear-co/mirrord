@@ -135,6 +135,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
+                ports: advanced.ports.into_iter().flatten().collect(),
             },
         };
 
@@ -201,6 +202,8 @@ pub struct IncomingAdvancedFileConfig {
     ///
     /// Ports to ignore when mirroring/stealing traffic. Useful if you want specific ports to be
     /// used locally only.
+    ///
+    /// Mutually exclusive with [`ports`](###ports).
     pub ignore_ports: Option<Vec<u16>>,
 
     /// ### listen_ports
@@ -218,11 +221,19 @@ pub struct IncomingAdvancedFileConfig {
     /// then access it on `4480` while getting traffic from remote `80`.
     /// The value of `port_mapping` doesn't affect this.
     pub listen_ports: Option<Vec<(u16, u16)>>,
+
     /// ### on_concurrent_steal
     ///
     /// (Operator Only): if value of override will force close any other connections on requested
     /// target
     pub on_concurrent_steal: Option<ConcurrentSteal>,
+
+    /// ### ports
+    ///
+    /// List of ports to mirror/steal traffic from. Other ports will remain local.
+    ///
+    /// Mutually exclusive with [`ignore_ports`](###ignore_ports).
+    pub ports: Option<Vec<u16>>,
 }
 
 /// Controls the incoming TCP traffic feature.
@@ -315,6 +326,8 @@ pub struct IncomingConfig {
     /// [`feature.network.incoming.mode`](#feature-network-incoming-mode) is set to `"steal"`,
     /// and you want to avoid redirecting traffic from some ports (for example, traffic from
     /// a health probe, or other heartbeat-like traffic).
+    ///
+    /// Mutually exclusive with [`feature.network.incoming.ports`](#feature-network-ports).
     pub ignore_ports: HashSet<u16>,
 
     /// #### feature.network.incoming.mode {#feature-network-incoming-mode}
@@ -338,8 +351,17 @@ pub struct IncomingConfig {
     /// then access it on `4480` while getting traffic from remote `80`.
     /// The value of `port_mapping` doesn't affect this.
     pub listen_ports: BiMap<u16, u16>,
+
     /// #### feature.network.incoming.on_concurrent_steal {#feature-network-incoming-on_concurrent_steal}
     pub on_concurrent_steal: ConcurrentSteal,
+
+    /// #### feature.network.incoming.ports {#feature-network-incoming-ports}
+    ///
+    /// List of ports to mirror/steal traffic from. Other ports will remain local.
+    ///
+    /// Mutually exclusive with
+    /// [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
+    pub ports: HashSet<u16>,
 }
 
 impl IncomingConfig {

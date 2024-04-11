@@ -61,8 +61,8 @@ pub struct HttpFilterConfig {
     ///
     /// Activate the HTTP traffic filter only for these ports.
     ///
-    /// Other ports will still be stolen (when `"steal`" is being used), they're just not checked
-    /// for HTTP filtering.
+    /// Other ports will *not* be stolen, unless listed in
+    /// [`feature.network.incoming.ports`](#feature-network-incoming-ports).
     #[config(env = "MIRRORD_HTTP_FILTER_PORTS", default)]
     pub ports: PortList,
 }
