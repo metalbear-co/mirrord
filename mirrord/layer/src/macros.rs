@@ -185,8 +185,7 @@ macro_rules! graceful_exit {
             nix::unistd::Pid::from_raw(std::process::id() as i32),
             nix::sys::signal::Signal::SIGTERM,
         )
-        .expect("unable to graceful exit");
-        panic!()
+        .expect("unable to graceful exit")
     }};
 }
 
