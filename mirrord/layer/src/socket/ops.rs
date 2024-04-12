@@ -210,7 +210,11 @@ pub(super) fn bind(
     }
 
     {
-        let not_stolen_with_filter = incoming_config.mode != IncomingMode::Steal
+        let http_filter_used = incoming_config.mode == IncomingMode::Steal
+            && (incoming_config.http_filter.header_filter.is_some()
+                || incoming_config.http_filter.path_filter.is_some());
+
+        let not_stolen_with_filter = !http_filter_used
             || incoming_config
                 .http_filter
                 .ports
@@ -222,7 +226,7 @@ pub(super) fn bind(
             .ports
             .as_ref()
             .map(|ports| !ports.contains(&requested_port))
-            .unwrap_or(false);
+            .unwrap_or(http_filter_used);
 
         if not_stolen_with_filter && not_whitelisted {
             Err(Bypass::Port(requested_address.port()))?;
