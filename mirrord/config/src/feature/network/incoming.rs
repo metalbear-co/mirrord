@@ -135,7 +135,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
-                ports: advanced.ports.into_iter().flatten().collect(),
+                ports: advanced.ports.map(|ports| ports.into_iter().collect()),
             },
         };
 
@@ -361,7 +361,7 @@ pub struct IncomingConfig {
     ///
     /// Mutually exclusive with
     /// [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
-    pub ports: HashSet<u16>,
+    pub ports: Option<HashSet<u16>>,
 }
 
 impl IncomingConfig {

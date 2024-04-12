@@ -383,12 +383,8 @@ impl LayerConfig {
             ))?
         }
 
-        if !self
-            .feature
-            .network
-            .incoming
-            .ignore_ports
-            .is_disjoint(&self.feature.network.incoming.ports)
+        if !self.feature.network.incoming.ignore_ports.is_empty()
+            && self.feature.network.incoming.ports.is_some()
         {
             Err(ConfigError::Conflict(
                 "Cannot use both `incoming.ignore_ports` and `incoming.ports` at the same time"
