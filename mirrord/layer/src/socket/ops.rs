@@ -182,8 +182,6 @@ pub(super) fn bind(
     let requested_port = requested_address.port();
     let incoming_config = crate::setup().incoming_config();
 
-    let ignore_localhost = incoming_config.ignore_localhost;
-
     let mut socket = {
         SOCKETS
             .remove(&sockfd)
@@ -199,7 +197,7 @@ pub(super) fn bind(
 
     // we don't use `is_localhost` here since unspecified means to listen
     // on all IPs.
-    if ignore_localhost && requested_address.ip().is_loopback() {
+    if incoming_config.ignore_localhost && requested_address.ip().is_loopback() {
         return Detour::Bypass(Bypass::IgnoreLocalhost(requested_port));
     }
 
@@ -209,6 +207,26 @@ pub(super) fn bind(
         || incoming_config.ignore_ports.contains(&requested_port)
     {
         Err(Bypass::Port(requested_address.port()))?;
+    }
+
+    {
+        let not_stolen_with_filter = incoming_config.mode != IncomingMode::Steal
+            || incoming_config
+                .http_filter
+                .ports
+                .as_slice()
+                .iter()
+                .all(|port| *port != requested_port);
+
+        let not_whitelisted = incoming_config
+            .ports
+            .as_ref()
+            .map(|ports| !ports.contains(&requested_port))
+            .unwrap_or(false);
+
+        if not_stolen_with_filter && not_whitelisted {
+            Err(Bypass::Port(requested_address.port()))?;
+        }
     }
 
     // Check that the domain matches the requested address.
