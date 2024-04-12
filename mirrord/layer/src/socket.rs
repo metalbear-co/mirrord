@@ -21,7 +21,6 @@ use socket2::SockAddr;
 use tracing::warn;
 use trust_dns_resolver::config::Protocol;
 
-use self::id::SocketId;
 use crate::{
     common,
     detour::{Bypass, Detour, DetourGuard, OptionExt},
@@ -30,7 +29,6 @@ use crate::{
 };
 
 pub(super) mod hooks;
-pub(crate) mod id;
 pub(crate) mod ops;
 
 pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock::new(DashMap::new);
@@ -140,7 +138,6 @@ impl TryFrom<c_int> for SocketKind {
 #[derive(Debug)]
 #[allow(dead_code)]
 pub(crate) struct UserSocket {
-    pub(crate) id: SocketId,
     domain: c_int,
     type_: c_int,
     protocol: c_int,
@@ -157,7 +154,6 @@ impl UserSocket {
         kind: SocketKind,
     ) -> Self {
         Self {
-            id: Default::default(),
             domain,
             type_,
             protocol,
