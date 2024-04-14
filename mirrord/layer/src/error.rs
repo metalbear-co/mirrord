@@ -215,7 +215,7 @@ impl From<HookError> for i64 {
             HookError::SocketUnsuportedIpv6 => {
                 info!("{fail}")
             }
-            HookError::ProxyError(err) => {
+            HookError::ProxyError(ref err) => {
                 graceful_exit!(
                     "Proxy error, connectivity issue or a bug. \n\
                     You may report it to us on https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml \n{err}"
@@ -263,7 +263,8 @@ impl From<HookError> for i64 {
                 err @ ResponseError::Forbidden { .. } => {
                     graceful_exit!(
                         "Stopping mirrord run. Please adjust your mirrord configuration.\n{err}"
-                    )
+                    );
+                    libc::EINVAL
                 }
             },
             HookError::DNSNoName => libc::EFAULT,
