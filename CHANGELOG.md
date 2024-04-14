@@ -8,6 +8,20 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.96.1](https://github.com/metalbear-co/mirrord/tree/3.96.1) - 2024-04-14
+
+
+### Changed
+
+- Increase max fd in internal proxy to fix connection limit issues
+
+
+### Fixed
+
+- Fixed layer making process zombie by calling panic from hookerror, also use
+  `sigkill` instead of `sigterm`
+
+
 ## [3.96.0](https://github.com/metalbear-co/mirrord/tree/3.96.0) - 2024-04-09
 
 
