@@ -383,6 +383,15 @@ impl LayerConfig {
             ))?
         }
 
+        if !self.feature.network.incoming.ignore_ports.is_empty()
+            && self.feature.network.incoming.ports.is_some()
+        {
+            Err(ConfigError::Conflict(
+                "Cannot use both `incoming.ignore_ports` and `incoming.ports` at the same time"
+                    .to_string(),
+            ))?
+        }
+
         if self.target.path.is_none() && !context.ide {
             // In the IDE, a target may be selected after `mirrord verify-config` is run, so we
             // for this case we treat these as warnings. They'll become errors once mirrord proper
@@ -712,6 +721,7 @@ mod tests {
                             ignore_ports: None,
                             listen_ports: None,
                             on_concurrent_steal: None,
+                            ports: None,
                         }),
                     ))),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {

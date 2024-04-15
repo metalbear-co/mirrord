@@ -672,7 +672,7 @@
         },
         "ports": {
           "title": "feature.network.incoming.http_filter.ports {#feature-network-incoming-http_filter-ports}",
-          "description": "Activate the HTTP traffic filter only for these ports.\n\nOther ports will still be stolen (when `\"steal`\" is being used), they're just not checked for HTTP filtering.",
+          "description": "Activate the HTTP traffic filter only for these ports.\n\nOther ports will *not* be stolen, unless listed in [`feature.network.incoming.ports`](#feature-network-incoming-ports).",
           "anyOf": [
             {
               "$ref": "#/definitions/PortList"
@@ -712,7 +712,7 @@
         },
         "ignore_ports": {
           "title": "ignore_ports",
-          "description": "Ports to ignore when mirroring/stealing traffic. Useful if you want specific ports to be used locally only.",
+          "description": "Ports to ignore when mirroring/stealing traffic. Useful if you want specific ports to be used locally only.\n\nMutually exclusive with [`ports`](###ports).",
           "type": [
             "array",
             "null"
@@ -795,6 +795,19 @@
             ],
             "maxItems": 2,
             "minItems": 2
+          }
+        },
+        "ports": {
+          "title": "ports",
+          "description": "List of ports to mirror/steal traffic from. Other ports will remain local.\n\nMutually exclusive with [`ignore_ports`](###ignore_ports).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0.0
           }
         }
       },
