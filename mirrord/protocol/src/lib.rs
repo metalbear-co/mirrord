@@ -89,11 +89,14 @@ impl FromStr for MeshVendor {
     }
 }
 
-/// Name of environment variable that can be used to instruct the agent to use TLS when accepting
-/// client connections. Should store only values that parse into [`bool`].
+/// Name of environment variable that can be used to provide the agent with a PEM-encoded X509
+/// certificate. Given the certificate, the agent will secure the incoming connections with TLS.
+/// The agent will act as TLS client and will make successful connections only with TLS servers
+/// using the given certificate. Regardless of this setting, the agent will still be the side that
+/// accepts the initial TCP connection.
 ///
 /// # Note
 ///
 /// This may not be the best place to put this name, but this is the only crate shared by
 /// `mirrord-kube` and `mirrord-agent`.
-pub const AGENT_TLS_ENV: &str = "MIRRORD_AGENT_USE_TLS";
+pub const AGENT_OPERATOR_CERT_ENV: &str = "MIRRORD_AGENT_OPERATOR_CERT";

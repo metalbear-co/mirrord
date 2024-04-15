@@ -1,7 +1,7 @@
 #![deny(missing_docs)]
 
 use clap::{Parser, Subcommand};
-use mirrord_protocol::{MeshVendor, AGENT_TLS_ENV};
+use mirrord_protocol::{MeshVendor, AGENT_OPERATOR_CERT_ENV};
 
 const DEFAULT_RUNTIME: &str = "containerd";
 
@@ -42,9 +42,12 @@ pub struct Args {
     #[arg(long, default_value = "1.2.1")]
     pub base_protocol_version: semver::Version,
 
-    /// Whether TLS should be used to encrypt incoming client connections.
-    #[arg(long, default_value_t = false, env = AGENT_TLS_ENV)]
-    pub use_tls: bool,
+    /// PEM-encoded X509 certificate that this agent will use to secure incoming TCP connections
+    /// from the clients (proxied by the operator).
+    ///
+    /// If not given, the agent will not use TLS.
+    #[arg(long, env = AGENT_OPERATOR_CERT_ENV)]
+    pub operator_tls_cert_pem: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Subcommand)]

@@ -190,7 +190,7 @@ impl AgentManagment for KubernetesAPI {
         progress: &mut P,
         target: &TargetConfig,
         config: Option<&LayerConfig>,
-        extra_env: Vec<(String, String)>,
+        tls_cert: Option<String>,
     ) -> Result<Self::AgentRef, Self::Err>
     where
         P: Progress + Send + Sync,
@@ -219,7 +219,7 @@ impl AgentManagment for KubernetesAPI {
 
         let params = {
             let mut params = ContainerParams::new();
-            params.extra_env.extend(extra_env);
+            params.tls_cert = tls_cert;
             params
         };
 

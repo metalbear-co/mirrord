@@ -95,14 +95,16 @@ pub trait AgentManagment {
     /// # Params
     ///
     /// * `config` - if passed, will be checked against cluster setup
-    /// * `extra_env` - appended to agent container definition
+    /// * `tls_cert` - value for
+    ///   [`AGENT_OPERATOR_CERT_ENV`](mirrord_protocol::AGENT_OPERATOR_CERT_ENV), for creating an
+    ///   agent from the operator. In usage from this repo this is always `None`.
     #[allow(async_fn_in_trait)]
     async fn create_agent<P>(
         &self,
         progress: &mut P,
         target: &TargetConfig,
         config: Option<&LayerConfig>,
-        extra_env: Vec<(String, String)>,
+        tls_cert: Option<String>,
     ) -> Result<Self::AgentRef, Self::Err>
     where
         P: Progress + Send + Sync;

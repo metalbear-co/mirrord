@@ -35,7 +35,9 @@ pub struct ContainerParams {
     pub name: String,
     pub gid: u16,
     pub port: u16,
-    pub extra_env: Vec<(String, String)>,
+    /// Value for [`AGENT_OPERATOR_CERT_ENV`](mirrord_protocol::AGENT_OPERATOR_CERT_ENV) set in
+    /// the agent container.
+    pub tls_cert: Option<String>,
 }
 
 impl ContainerParams {
@@ -54,7 +56,7 @@ impl ContainerParams {
             name,
             gid,
             port,
-            extra_env: Default::default(),
+            tls_cert: None,
         }
     }
 }
