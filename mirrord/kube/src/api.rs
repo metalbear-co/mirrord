@@ -96,7 +96,8 @@ pub trait AgentManagment {
     ///
     /// * `config` - if passed, will be checked against cluster setup
     /// * `tls_cert` - value for
-    ///   [`AGENT_OPERATOR_CERT_ENV`](mirrord_protocol::AGENT_OPERATOR_CERT_ENV)
+    ///   [`AGENT_OPERATOR_CERT_ENV`](mirrord_protocol::AGENT_OPERATOR_CERT_ENV),
+    ///   for creating an agent from the operator. In usage from this repo this is always `None`.
     #[allow(async_fn_in_trait)]
     async fn create_agent<P>(
         &self,

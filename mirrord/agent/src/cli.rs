@@ -43,7 +43,7 @@ pub struct Args {
     pub base_protocol_version: semver::Version,
 
     /// PEM-encoded X509 certificate that this agent will use to secure incoming TCP connections
-    /// from the clients.
+    /// from the clients (proxied by the operator).
     ///
     /// If not given, the agent will not use TLS.
     #[arg(long, env = AGENT_OPERATOR_CERT_ENV)]
