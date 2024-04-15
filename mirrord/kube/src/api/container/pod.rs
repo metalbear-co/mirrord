@@ -1,5 +1,6 @@
 use k8s_openapi::{api::core::v1::Pod, DeepMerge};
 use mirrord_config::agent::AgentConfig;
+use mirrord_protocol::AGENT_OPERATOR_CERT_ENV;
 use serde_json::json;
 
 use crate::{
@@ -90,7 +91,12 @@ impl ContainerVariant for PodVariant<'_> {
             ),
         ]
         .into_iter()
-        .chain(params.extra_env.iter().cloned())
+        .chain(
+            params
+                .tls_cert
+                .clone()
+                .map(|cert| (AGENT_OPERATOR_CERT_ENV.to_string(), cert)),
+        )
         .map(|(name, value)| json!({ "name": name, "value": value }))
         .collect::<Vec<_>>();
 

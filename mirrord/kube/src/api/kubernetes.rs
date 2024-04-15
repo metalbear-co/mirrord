@@ -155,11 +155,17 @@ impl KubernetesAPI {
         Ok(stream)
     }
 
+    /// # Params
+    ///
+    /// * `config` - if passed, will be checked against cluster setup
+    /// * `tls_cert` - value for
+    ///   [`AGENT_OPERATOR_CERT_ENV`](mirrord_protocol::AGENT_OPERATOR_CERT_ENV), for creating an
+    ///   agent from the operator. In usage from this repo this is always `None`.
     #[tracing::instrument(level = "trace", skip(self), ret, err)]
     pub async fn create_agent_params(
         &self,
         target: &TargetConfig,
-        extra_env: Vec<(String, String)>,
+        tls_cert: Option<String>,
     ) -> Result<(ContainerParams, Option<RuntimeData>), KubeApiError> {
         let runtime_data = match target.path.as_ref().unwrap_or(&Target::Targetless) {
             Target::Targetless => None,
@@ -170,23 +176,29 @@ impl KubernetesAPI {
         };
 
         let mut params = ContainerParams::new();
-        params.extra_env.extend(extra_env);
+        params.tls_cert = tls_cert;
 
         Ok((params, runtime_data))
     }
 
+    /// # Params
+    ///
+    /// * `config` - if passed, will be checked against cluster setup
+    /// * `tls_cert` - value for
+    ///   [`AGENT_OPERATOR_CERT_ENV`](mirrord_protocol::AGENT_OPERATOR_CERT_ENV), for creating an
+    ///   agent from the operator. In usage from this repo this is always `None`.
     #[tracing::instrument(level = "trace", skip(self, progress))]
     pub async fn create_agent<P>(
         &self,
         progress: &mut P,
         target: &TargetConfig,
         config: Option<&LayerConfig>,
-        extra_env: Vec<(String, String)>,
+        tls_cert: Option<String>,
     ) -> Result<AgentKubernetesConnectInfo, KubeApiError>
     where
         P: Progress + Send + Sync,
     {
-        let (params, runtime_data) = self.create_agent_params(target, extra_env).await?;
+        let (params, runtime_data) = self.create_agent_params(target, tls_cert).await?;
 
         let incoming_mode = config.map(|config| config.feature.network.incoming.mode);
         let is_mesh = runtime_data

@@ -211,7 +211,7 @@ mod test {
             name: "foobar".to_string(),
             port: 3000,
             gid: 13,
-            extra_env: Default::default(),
+            tls_cert: None,
         };
 
         let update = JobVariant::new(&agent, &params).as_update()?;
@@ -291,7 +291,7 @@ mod test {
             name: "foobar".to_string(),
             port: 3000,
             gid: 13,
-            extra_env: Default::default(),
+            tls_cert: None,
         };
 
         let update = JobTargetedVariant::new(

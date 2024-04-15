@@ -10,7 +10,8 @@ use mirrord_protocol::{
 use thiserror::Error;
 
 use crate::{
-    cgroup::CgroupError, namespace::NamespaceError, sniffer::SnifferCommand, steal::StealerCommand,
+    cgroup::CgroupError, client_connection::TlsSetupError, namespace::NamespaceError,
+    sniffer::SnifferCommand, steal::StealerCommand,
 };
 
 #[derive(Debug, Error)]
@@ -134,6 +135,9 @@ pub(crate) enum AgentError {
 
     #[error(transparent)]
     FailedNamespaceEnter(#[from] NamespaceError),
+
+    #[error("TLS setup failed: {0}")]
+    TlsSetupError(#[from] TlsSetupError),
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;
