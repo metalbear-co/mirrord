@@ -454,12 +454,12 @@ fn fill_address(
                 new_address.as_ptr().is_aligned(),
                 new_address.as_ptr().is_null(),
             );
-            address.copy_from(new_address.as_ptr(), len);
-            // std::ptr::copy_nonoverlapping(
-            //     new_address.as_ptr() as *const u8,
-            //     address as *mut u8,
-            //     len,
-            // );
+            // address.copy_from(new_address.as_ptr(), len);
+            std::ptr::copy_nonoverlapping(
+                new_address.as_ptr() as *const u8,
+                address as *mut u8,
+                len,
+            );
             *address_len = new_address.len();
         }
 
