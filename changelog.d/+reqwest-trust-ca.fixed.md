@@ -1,1 +1,0 @@
-Change reqwest to use rustls with native certificates to work in more cases
