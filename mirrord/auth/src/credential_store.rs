@@ -13,6 +13,7 @@ use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt, SeekFrom},
 };
 use tracing::info;
+use whoami::fallible;
 
 use crate::{
     certificate::Certificate,
@@ -61,7 +62,7 @@ impl UserIdentity {
             // next release of whoami (v2) will have fallible types
             // so keep this Option for then :)
             name: Some(whoami::realname()),
-            hostname: Some(whoami::hostname()),
+            hostname: fallible::hostname().ok(),
         }
     }
 }
@@ -94,7 +95,10 @@ impl CredentialStore {
 
     /// Get hostname to be used as common name in a certification request.
     fn certificate_common_name() -> String {
-        whoami::hostname()
+        let mut hostname = fallible::hostname().unwrap_or_else(|_| "localhost".to_string());
+
+        hostname.make_ascii_lowercase();
+        hostname
     }
 
     /// Get or create and ready up a certificate for specific operator installation.
