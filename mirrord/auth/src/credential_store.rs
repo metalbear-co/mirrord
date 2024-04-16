@@ -184,6 +184,7 @@ impl CredentialStoreSync {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(&*CREDENTIALS_PATH)
             .await
             .map_err(CertificateStoreError::from)?;

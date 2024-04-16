@@ -214,9 +214,7 @@ impl SubscriptionsManager {
             return None;
         }
 
-        let Some(subscription) = self.subscriptions.remove(&request.port) else {
-            return None;
-        };
+        let subscription = self.subscriptions.remove(&request.port)?;
 
         match subscription.remove_source(request.listening_on) {
             Ok(subscription) => {
