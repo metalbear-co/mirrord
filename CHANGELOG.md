@@ -8,6 +8,31 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.97.0](https://github.com/metalbear-co/mirrord/tree/3.97.0) - 2024-04-16
+
+
+### Added
+
+- Agent now authenticates TLS connections, using a provided X509 certificate
+  (mirrord for Teams only).
+  [#2362](https://github.com/metalbear-co/mirrord/issues/2362)
+
+
+### Changed
+
+- Changed port stealing configuration:
+  1. Added new `ports` field to the `incoming` configuration. The field lists
+  ports that should be stolen/mirrored. Other ports remain local.
+  2. Changed the way `incoming.http_filter.ports` field is interpreted. Ports
+  not listed in this field are not stolen, unless listed in `incoming.ports`.
+  [#2366](https://github.com/metalbear-co/mirrord/issues/2366)
+
+
+### Fixed
+
+- Change reqwest to use rustls with native certificates to work in more cases
+
+
 ## [3.96.1](https://github.com/metalbear-co/mirrord/tree/3.96.1) - 2024-04-14
 
 
