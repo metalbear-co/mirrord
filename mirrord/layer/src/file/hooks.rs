@@ -935,8 +935,15 @@ unsafe fn realpath_logic(
             output_path
         };
 
-        output
-            .copy_from_nonoverlapping(path.as_ptr(), usize::min(libc::PATH_MAX as usize, path_len));
+        tracing::info!(
+            "[path is aligned? {:?} null? {:?}]\
+                    [new_address is aligned? {:?} null? {:?}]",
+            path.as_ptr().is_aligned(),
+            path.as_ptr().is_null(),
+            output.is_aligned(),
+            output.is_null(),
+        );
+        output.copy_from(path.as_ptr(), usize::min(libc::PATH_MAX as usize, path_len));
         output
     })
 }
