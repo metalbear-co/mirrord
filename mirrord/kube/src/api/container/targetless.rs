@@ -1,4 +1,4 @@
-use k8s_openapi::api::batch::v1::Job;
+use k8s_openapi::api::{batch::v1::Job, core::v1::Pod};
 use kube::Client;
 use mirrord_progress::Progress;
 
@@ -27,11 +27,14 @@ where
     }
 }
 
-impl<'c> ContainerApi<JobVariant<'c>> for Targetless<'c, JobVariant<'c>> {
+impl<'c, T> ContainerApi<JobVariant<T>> for Targetless<'c, JobVariant<T>>
+where
+    T: ContainerVariant<Update = Pod>,
+{
     async fn create_agent<P>(&self, progress: &mut P) -> Result<AgentKubernetesConnectInfo>
     where
         P: Progress + Send + Sync,
     {
-        create_job_agent::<P, JobVariant>(self.client, self.variant, progress).await
+        create_job_agent::<P, JobVariant<T>>(self.client, self.variant, progress).await
     }
 }

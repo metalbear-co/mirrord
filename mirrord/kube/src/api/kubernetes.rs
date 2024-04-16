@@ -28,8 +28,7 @@ use crate::{
             targetless::Targetless,
             ContainerApi, ContainerParams,
         },
-        runtime::RuntimeDataProvider,
-        AgentManagment,
+        runtime::{RuntimeData, RuntimeDataProvider},
     },
     error::{KubeApiError, Result},
 };
@@ -76,49 +75,18 @@ impl KubernetesAPI {
     }
 }
 
-/// Trait for IO streams returned from [`KubernetesAPI::create_connection`].
-/// It's here only to group the exisiting traits we actually need and return a `Box<dyn ...>`
-#[cfg(not(feature = "incluster"))]
-pub trait UnpinStream:
-    tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static
-{
-}
-
-/// Any type that implements bidirectional IO and can be sent to a different [`tokio::task`] is good
-/// enough.
-#[cfg(not(feature = "incluster"))]
-impl<T> UnpinStream for T where
-    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static
-{
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
-pub struct AgentKubernetesConnectInfo {
-    pub pod_name: String,
-    pub agent_port: u16,
-    pub namespace: Option<String>,
-    pub agent_version: Option<String>,
-}
-
-impl AgentManagment for KubernetesAPI {
-    type AgentRef = AgentKubernetesConnectInfo;
-    type Err = KubeApiError;
-    #[cfg(feature = "incluster")]
-    type Connection = tokio::net::TcpStream;
-    #[cfg(not(feature = "incluster"))]
-    type Connection = Box<dyn UnpinStream>;
-
+impl KubernetesAPI {
     /// Connect to the agent using plain TCP connection.
     #[cfg(feature = "incluster")]
-    async fn create_connection(
+    pub async fn create_connection(
         &self,
         AgentKubernetesConnectInfo {
             pod_name,
             agent_port,
             namespace,
             ..
-        }: Self::AgentRef,
-    ) -> Result<Self::Connection> {
+        }: AgentKubernetesConnectInfo,
+    ) -> Result<tokio::net::TcpStream> {
         use std::{net::IpAddr, time::Duration};
 
         use tokio::net::TcpStream;
@@ -159,7 +127,10 @@ impl AgentManagment for KubernetesAPI {
 
     /// Connects to the agent using kube's [`Api::portforward`].
     #[cfg(not(feature = "incluster"))]
-    async fn create_connection(&self, connect_info: Self::AgentRef) -> Result<Self::Connection> {
+    pub async fn create_connection(
+        &self,
+        connect_info: AgentKubernetesConnectInfo,
+    ) -> Result<Box<dyn UnpinStream>> {
         use tokio_retry::{
             strategy::{jitter, ExponentialBackoff},
             Retry,
@@ -184,17 +155,18 @@ impl AgentManagment for KubernetesAPI {
         Ok(stream)
     }
 
-    #[tracing::instrument(level = "trace", skip(self, progress))]
-    async fn create_agent<P>(
+    /// # Params
+    ///
+    /// * `config` - if passed, will be checked against cluster setup
+    /// * `tls_cert` - value for
+    ///   [`AGENT_OPERATOR_CERT_ENV`](mirrord_protocol::AGENT_OPERATOR_CERT_ENV), for creating an
+    ///   agent from the operator. In usage from this repo this is always `None`.
+    #[tracing::instrument(level = "trace", skip(self), ret, err)]
+    pub async fn create_agent_params(
         &self,
-        progress: &mut P,
         target: &TargetConfig,
-        config: Option<&LayerConfig>,
         tls_cert: Option<String>,
-    ) -> Result<Self::AgentRef, Self::Err>
-    where
-        P: Progress + Send + Sync,
-    {
+    ) -> Result<(ContainerParams, Option<RuntimeData>), KubeApiError> {
         let runtime_data = match target.path.as_ref().unwrap_or(&Target::Targetless) {
             Target::Targetless => None,
             path => path
@@ -202,6 +174,31 @@ impl AgentManagment for KubernetesAPI {
                 .await?
                 .into(),
         };
+
+        let mut params = ContainerParams::new();
+        params.tls_cert = tls_cert;
+
+        Ok((params, runtime_data))
+    }
+
+    /// # Params
+    ///
+    /// * `config` - if passed, will be checked against cluster setup
+    /// * `tls_cert` - value for
+    ///   [`AGENT_OPERATOR_CERT_ENV`](mirrord_protocol::AGENT_OPERATOR_CERT_ENV), for creating an
+    ///   agent from the operator. In usage from this repo this is always `None`.
+    #[tracing::instrument(level = "trace", skip(self, progress))]
+    pub async fn create_agent<P>(
+        &self,
+        progress: &mut P,
+        target: &TargetConfig,
+        config: Option<&LayerConfig>,
+        tls_cert: Option<String>,
+    ) -> Result<AgentKubernetesConnectInfo, KubeApiError>
+    where
+        P: Progress + Send + Sync,
+    {
+        let (params, runtime_data) = self.create_agent_params(target, tls_cert).await?;
 
         let incoming_mode = config.map(|config| config.feature.network.incoming.mode);
         let is_mesh = runtime_data
@@ -216,12 +213,6 @@ impl AgentManagment for KubernetesAPI {
                  `http_filter` configuration value if you only want to steal some of the traffic).",
             );
         }
-
-        let params = {
-            let mut params = ContainerParams::new();
-            params.tls_cert = tls_cert;
-            params
-        };
 
         info!(?params, "Spawning new agent");
 
@@ -254,6 +245,30 @@ impl AgentManagment for KubernetesAPI {
 
         Ok(agent_connect_info)
     }
+}
+
+/// Trait for IO streams returned from [`KubernetesAPI::create_connection`].
+/// It's here only to group the exisiting traits we actually need and return a `Box<dyn ...>`
+#[cfg(not(feature = "incluster"))]
+pub trait UnpinStream:
+    tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static
+{
+}
+
+/// Any type that implements bidirectional IO and can be sent to a different [`tokio::task`] is good
+/// enough.
+#[cfg(not(feature = "incluster"))]
+impl<T> UnpinStream for T where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static
+{
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
+pub struct AgentKubernetesConnectInfo {
+    pub pod_name: String,
+    pub agent_port: u16,
+    pub namespace: Option<String>,
+    pub agent_version: Option<String>,
 }
 
 pub async fn create_kube_api<P>(

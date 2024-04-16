@@ -1,8 +1,5 @@
 use futures::StreamExt;
-use k8s_openapi::{
-    api::{batch::v1::Job, core::v1::Pod},
-    DeepMerge,
-};
+use k8s_openapi::api::{batch::v1::Job, core::v1::Pod};
 use kube::{
     api::{ListParams, PostParams},
     runtime::{watcher, WatchStreamExt},
@@ -10,7 +7,6 @@ use kube::{
 };
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
-use mirrord_protocol::AGENT_OPERATOR_CERT_ENV;
 use serde_json::json;
 use tokio::pin;
 use tracing::debug;
@@ -18,9 +14,8 @@ use tracing::debug;
 use crate::{
     api::{
         container::{
-            util::{
-                base_command_line, get_capabilities, wait_for_agent_startup, DEFAULT_TOLERATIONS,
-            },
+            pod::{PodTargetedVariant, PodVariant},
+            util::wait_for_agent_startup,
             ContainerParams, ContainerVariant,
         },
         kubernetes::{get_k8s_resource_api, AgentKubernetesConnectInfo},
@@ -108,90 +103,35 @@ where
     })
 }
 
-pub struct JobVariant<'c> {
-    agent: &'c AgentConfig,
-    command_line: Vec<String>,
-    params: &'c ContainerParams,
+pub struct JobVariant<T> {
+    inner: T,
 }
 
-impl<'c> JobVariant<'c> {
+impl<'c> JobVariant<PodVariant<'c>> {
     pub fn new(agent: &'c AgentConfig, params: &'c ContainerParams) -> Self {
-        let mut command_line = base_command_line(agent, params);
-
-        command_line.push("targetless".to_owned());
-
-        JobVariant::with_command_line(agent, params, command_line)
-    }
-
-    fn with_command_line(
-        agent: &'c AgentConfig,
-        params: &'c ContainerParams,
-        command_line: Vec<String>,
-    ) -> Self {
         JobVariant {
-            agent,
-            command_line,
-            params,
+            inner: PodVariant::new(agent, params),
         }
     }
 }
 
-impl ContainerVariant for JobVariant<'_> {
+impl<T> ContainerVariant for JobVariant<T>
+where
+    T: ContainerVariant<Update = Pod>,
+{
     type Update = Job;
 
     fn agent_config(&self) -> &AgentConfig {
-        self.agent
+        self.inner.agent_config()
     }
 
     fn params(&self) -> &ContainerParams {
-        self.params
+        self.inner.params()
     }
 
-    fn as_update(&self) -> Result<Job> {
-        let JobVariant {
-            agent,
-            command_line,
-            params,
-        } = self;
-
-        let tolerations = agent.tolerations.as_ref().unwrap_or(&DEFAULT_TOLERATIONS);
-
-        let resources = agent.resources.clone().unwrap_or_else(|| {
-            serde_json::from_value(serde_json::json!({
-                "requests":
-                {
-                    "cpu": "1m",
-                    "memory": "1Mi"
-                },
-                "limits":
-                {
-                    "cpu": "100m",
-                    "memory": "100Mi"
-                },
-            }))
-            .expect("Should be valid ResourceRequirements json")
-        });
-
-        let env = [
-            ("RUST_LOG".to_string(), agent.log_level.clone()),
-            (
-                "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS".to_string(),
-                agent.flush_connections.to_string(),
-            ),
-            (
-                "MIRRORD_AGENT_NFTABLES".to_string(),
-                agent.nftables.to_string(),
-            ),
-        ]
-        .into_iter()
-        .chain(
-            params
-                .tls_cert
-                .clone()
-                .map(|cert| (AGENT_OPERATOR_CERT_ENV.to_string(), cert)),
-        )
-        .map(|(name, value)| json!({ "name": name, "value": value }))
-        .collect::<Vec<_>>();
+    fn as_update(&self) -> Result<Self::Update> {
+        let agent = self.agent_config();
+        let params = self.params();
 
         serde_json::from_value(json!({
             "metadata": {
@@ -208,35 +148,7 @@ impl ContainerVariant for JobVariant<'_> {
             },
             "spec": {
                 "ttlSecondsAfterFinished": agent.ttl,
-                "template": {
-                    "metadata": {
-                        "annotations": {
-                            "sidecar.istio.io/inject": "false",
-                            "linkerd.io/inject": "disabled"
-                        },
-                        "labels": {
-                            "kuma.io/sidecar-injection": "disabled",
-                            "app": "mirrord"
-                        }
-                    },
-
-                    "spec": {
-                        "restartPolicy": "Never",
-                        "imagePullSecrets": agent.image_pull_secrets,
-                        "tolerations": tolerations,
-                        "containers": [
-                            {
-                                "name": "mirrord-agent",
-                                "image": agent.image(),
-                                "imagePullPolicy": agent.image_pull_policy,
-                                "command": command_line,
-                                "env": env,
-                                // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
-                                "resources": resources
-                            }
-                        ]
-                    }
-                }
+                "template": self.inner.as_update()?
             }
         }))
         .map_err(KubeApiError::from)
@@ -244,8 +156,7 @@ impl ContainerVariant for JobVariant<'_> {
 }
 
 pub struct JobTargetedVariant<'c> {
-    inner: JobVariant<'c>,
-    runtime_data: &'c RuntimeData,
+    inner: JobVariant<PodTargetedVariant<'c>>,
 }
 
 impl<'c> JobTargetedVariant<'c> {
@@ -254,25 +165,10 @@ impl<'c> JobTargetedVariant<'c> {
         params: &'c ContainerParams,
         runtime_data: &'c RuntimeData,
     ) -> Self {
-        let mut command_line = base_command_line(agent, params);
-
-        command_line.extend([
-            "targeted".to_owned(),
-            "--container-id".to_owned(),
-            runtime_data.container_id.to_string(),
-            "--container-runtime".to_owned(),
-            runtime_data.container_runtime.to_string(),
-        ]);
-
-        if let Some(mesh) = runtime_data.mesh {
-            command_line.extend(["--mesh".to_string(), mesh.to_string()]);
-        }
-
-        let inner = JobVariant::with_command_line(agent, params, command_line);
+        let inner = PodTargetedVariant::new(agent, params, runtime_data);
 
         JobTargetedVariant {
-            inner,
-            runtime_data,
+            inner: JobVariant { inner },
         }
     }
 }
@@ -289,64 +185,7 @@ impl ContainerVariant for JobTargetedVariant<'_> {
     }
 
     fn as_update(&self) -> Result<Job> {
-        let JobTargetedVariant {
-            inner: JobVariant { agent, params, .. },
-            runtime_data,
-        } = self;
-
-        let update = serde_json::from_value(json!({
-            "metadata": {
-                "name": params.name,
-            },
-            "spec": {
-                "template": {
-                    "spec": {
-                        "hostPID": true,
-                        "nodeName": runtime_data.node_name,
-                        "volumes": [
-                            {
-                                "name": "hostrun",
-                                "hostPath": {
-                                    "path": "/run"
-                                }
-                            },
-                            {
-                                "name": "hostvar",
-                                "hostPath": {
-                                    "path": "/var"
-                                }
-                            }
-                        ],
-                        "containers": [
-                            {
-                                "name": "mirrord-agent",
-                                "securityContext": {
-                                    "runAsGroup": params.gid,
-                                    "privileged": agent.privileged,
-                                    "capabilities": {
-                                        "add": get_capabilities(agent),
-                                    }
-                                },
-                                "volumeMounts": [
-                                    {
-                                        "mountPath": "/host/run",
-                                        "name": "hostrun"
-                                    },
-                                    {
-                                        "mountPath": "/host/var",
-                                        "name": "hostvar"
-                                    }
-                                ],
-                            }
-                        ]
-                    }
-                }
-            }
-        }))?;
-
-        let mut job = self.inner.as_update()?;
-        job.merge_from(update);
-        Ok(job)
+        self.inner.as_update()
     }
 }
 
@@ -359,7 +198,10 @@ mod test {
     };
 
     use super::*;
-    use crate::api::runtime::ContainerRuntime;
+    use crate::api::{
+        container::util::{get_capabilities, DEFAULT_TOLERATIONS},
+        runtime::ContainerRuntime,
+    };
 
     #[test]
     fn targetless() -> Result<(), Box<dyn std::error::Error>> {

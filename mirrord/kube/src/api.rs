@@ -1,18 +1,12 @@
-use std::hash::Hash;
-
 use actix_codec::{AsyncRead, AsyncWrite};
 use futures::{SinkExt, StreamExt};
-use mirrord_config::{target::TargetConfig, LayerConfig};
-use mirrord_progress::Progress;
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage, LogLevel};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
-use crate::error::Result;
-
 pub mod container;
 pub mod kubernetes;
-mod runtime;
+pub mod runtime;
 
 const CONNECTION_CHANNEL_SIZE: usize = 1000;
 
@@ -79,33 +73,4 @@ pub fn wrap_raw_connection(
     });
 
     (in_tx, out_rx)
-}
-
-pub trait AgentManagment {
-    type AgentRef: Hash + Eq;
-    type Err;
-    type Connection;
-
-    #[allow(async_fn_in_trait)]
-    async fn create_connection(
-        &self,
-        agent_ref: Self::AgentRef,
-    ) -> Result<Self::Connection, Self::Err>;
-
-    /// # Params
-    ///
-    /// * `config` - if passed, will be checked against cluster setup
-    /// * `tls_cert` - value for
-    ///   [`AGENT_OPERATOR_CERT_ENV`](mirrord_protocol::AGENT_OPERATOR_CERT_ENV), for creating an
-    ///   agent from the operator. In usage from this repo this is always `None`.
-    #[allow(async_fn_in_trait)]
-    async fn create_agent<P>(
-        &self,
-        progress: &mut P,
-        target: &TargetConfig,
-        config: Option<&LayerConfig>,
-        tls_cert: Option<String>,
-    ) -> Result<Self::AgentRef, Self::Err>
-    where
-        P: Progress + Send + Sync;
 }

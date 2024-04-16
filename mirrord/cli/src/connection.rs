@@ -3,7 +3,7 @@ use std::{collections::HashSet, time::Duration};
 use mirrord_analytics::Reporter;
 use mirrord_config::{feature::network::outgoing::OutgoingFilterConfig, LayerConfig};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
-use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection, AgentManagment};
+use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection};
 use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorOperation};
 use mirrord_progress::{
     messages::MULTIPOD_WARNING, IdeAction, IdeMessage, NotificationLevel, Progress,
