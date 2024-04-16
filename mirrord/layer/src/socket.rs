@@ -471,6 +471,17 @@ impl SocketAddrExt for SockAddr {
     fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<SockAddr> {
         unsafe {
             SockAddr::try_init(|storage, len| {
+                tracing::info!(
+                    "[storage is aligned? {:?} null? {:?}]\
+                    [raw_address is aligned? {:?} null? {:?}]\
+                    [len is aligned {:?} null? {:?}]",
+                    storage.is_aligned(),
+                    storage.is_null(),
+                    raw_address.is_aligned(),
+                    raw_address.is_null(),
+                    len.is_aligned(),
+                    len.is_null(),
+                );
                 storage.copy_from(raw_address.cast(), 1);
                 len.copy_from(&address_length, 1);
 
