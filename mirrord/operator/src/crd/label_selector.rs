@@ -165,7 +165,7 @@ mod tests {
             operator,
             values: Some(
                 values
-                    .into_iter()
+                    .iter()
                     .map(ToOwned::to_owned)
                     .map(From::from)
                     .collect(),

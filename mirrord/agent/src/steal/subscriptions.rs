@@ -469,7 +469,7 @@ mod test {
         check_redirector!(subscriptions.redirector);
         assert!(!subscriptions.redirector.dirty);
         let sub = subscriptions.get(80);
-        assert!(matches!(sub, None), "{sub:?}");
+        assert!(sub.is_none(), "{sub:?}");
 
         // Adding filtered subscription.
         subscriptions
@@ -554,7 +554,7 @@ mod test {
         check_redirector!(subscriptions.redirector);
         assert!(!subscriptions.redirector.dirty);
         let sub = subscriptions.get(80);
-        assert!(matches!(sub, None), "{sub:?}");
+        assert!(sub.is_none(), "{sub:?}");
     }
 
     #[tokio::test]
@@ -593,9 +593,9 @@ mod test {
         check_redirector!(subscriptions.redirector);
         assert!(!subscriptions.redirector.dirty);
         let sub = subscriptions.get(80);
-        assert!(matches!(sub, None), "{sub:?}");
+        assert!(sub.is_none(), "{sub:?}");
         let sub = subscriptions.get(81);
-        assert!(matches!(sub, None), "{sub:?}");
+        assert!(sub.is_none(), "{sub:?}");
     }
 
     #[tokio::test]
@@ -633,8 +633,8 @@ mod test {
         check_redirector!(subscriptions.redirector);
         assert!(!subscriptions.redirector.dirty);
         let sub = subscriptions.get(80);
-        assert!(matches!(sub, None), "{sub:?}");
+        assert!(sub.is_none(), "{sub:?}");
         let sub = subscriptions.get(81);
-        assert!(matches!(sub, None), "{sub:?}");
+        assert!(sub.is_none(), "{sub:?}");
     }
 }

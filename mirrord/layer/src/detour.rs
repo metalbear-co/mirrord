@@ -37,7 +37,7 @@ thread_local!(
     ///
     /// We set this to `true` whenever an operation may require calling other [`libc`] functions,
     /// and back to `false` after it's done.
-    static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false)
+    static DETOUR_BYPASS: RefCell<bool> = const { RefCell::new(false) }
 );
 
 /// Sets [`DETOUR_BYPASS`] to `false`.
