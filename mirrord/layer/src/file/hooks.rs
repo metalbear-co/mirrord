@@ -936,10 +936,9 @@ unsafe fn realpath_logic(
         };
 
         tracing::info!(
-            "[path is aligned? {:?} null? {:?}]\
+            "[path is aligned? {:?}]\
                     [new_address is aligned? {:?} null? {:?}]",
             path.as_ptr().is_aligned(),
-            path.as_ptr().is_null(),
             output.is_aligned(),
             output.is_null(),
         );

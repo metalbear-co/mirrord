@@ -96,10 +96,9 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
             let host_len = host.as_bytes_with_nul().len();
 
             tracing::info!(
-                "[host is aligned? {:?} null? {:?}]\
+                "[host is aligned? {:?}]\
                     [new_address is aligned? {:?} null? {:?}]",
                 host.as_ptr().is_aligned(),
-                host.as_ptr().is_null(),
                 raw_name.is_aligned(),
                 raw_name.is_null(),
             );
