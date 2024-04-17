@@ -94,15 +94,7 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
     gethostname()
         .map(|host| {
             let host_len = host.as_bytes_with_nul().len();
-
-            tracing::info!(
-                "[host is aligned? {:?}]\
-                    [new_address is aligned? {:?} null? {:?}]",
-                host.as_ptr().is_aligned(),
-                raw_name.is_aligned(),
-                raw_name.is_null(),
-            );
-            raw_name.copy_from(host.as_ptr(), cmp::min(name_length, host_len));
+            raw_name.copy_from_nonoverlapping(host.as_ptr(), cmp::min(name_length, host_len));
 
             if host_len > name_length {
                 set_errno(Errno(EINVAL));
@@ -274,15 +266,7 @@ unsafe extern "C" fn getaddrinfo_detour(
 
     getaddrinfo(rawish_node, rawish_service, rawish_hints)
         .map(|c_addr_info_ptr| {
-            tracing::info!(
-                "[c_addr_info is aligned? {:?} null? {:?}]\
-                    [new_address is aligned? {:?} null? {:?}]",
-                c_addr_info_ptr.is_aligned(),
-                c_addr_info_ptr.is_null(),
-                out_addr_info.is_aligned(),
-                out_addr_info.is_null(),
-            );
-            out_addr_info.copy_from(&c_addr_info_ptr, 1);
+            out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
             MANAGED_ADDRINFO.insert(c_addr_info_ptr as usize);
             0
         })
