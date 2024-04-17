@@ -499,9 +499,10 @@ impl SocketAddrExt for SockAddr {
     fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<SockAddr> {
         unsafe {
             SockAddr::try_init(|storage, len| {
-                storage.copy_from_nonoverlapping(raw_address.cast(), 1);
-                len.copy_from_nonoverlapping(&address_length, 1);
-
+                // storage and raw_address size is dynamic.
+                (storage as *mut u8)
+                    .copy_from_nonoverlapping(raw_address as *const u8, address_length as usize);
+                *len = address_length;
                 Ok(())
             })
         }
