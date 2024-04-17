@@ -500,10 +500,8 @@ impl SocketAddrExt for SockAddr {
         unsafe {
             SockAddr::try_init(|storage, len| {
                 // storage and raw_address size is dynamic.
-                storage.cast::<*mut u8>().copy_from_nonoverlapping(
-                    raw_address.cast::<*const u8>(),
-                    address_length as usize,
-                );
+                (storage as *mut u8)
+                    .copy_from_nonoverlapping(raw_address as *const u8, address_length as usize);
                 *len = address_length;
                 Ok(())
             })
