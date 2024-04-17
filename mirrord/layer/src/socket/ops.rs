@@ -1281,10 +1281,13 @@ pub(super) fn sendmsg(
         let mut true_message_header = Box::new(unsafe { *raw_message_header });
 
         unsafe {
-            true_message_header.as_mut().msg_name.copy_from_nonoverlapping(
-                rawish_true_destination.as_ptr() as *const _,
-                rawish_true_destination.len() as usize,
-            )
+            true_message_header
+                .as_mut()
+                .msg_name
+                .copy_from_nonoverlapping(
+                    rawish_true_destination.as_ptr() as *const _,
+                    rawish_true_destination.len() as usize,
+                )
         };
         true_message_header.as_mut().msg_namelen = rawish_true_destination.len();
 
