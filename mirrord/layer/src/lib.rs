@@ -540,7 +540,7 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
 ///
 /// Removes the `fd` key from either [`SOCKETS`] or [`OPEN_FILES`].
 /// **DON'T ADD LOGS HERE SINCE CALLER MIGHT CLOSE STDOUT/STDERR CAUSING THIS TO CRASH**
-// #[mirrord_layer_macro::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = "trace")]
 pub(crate) fn close_layer_fd(fd: c_int) {
     // Remove from sockets.
     if let Some((_, socket)) = SOCKETS.remove(&fd) {
