@@ -292,7 +292,7 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
             // - can read `stripped_len` bytes from `path_cstring` because it's its length.
             // - can write `stripped_len` bytes to `path`, because the length of the path after
             //   stripping a prefix will always be shorter than before.
-            path.copy_from_nonoverlapping(later_ptr, stripped_len as _);
+            path.copy_from(later_ptr, stripped_len as _);
 
             // SAFETY:
             // - We call the original function before this, so if it's not a valid pointer we should
