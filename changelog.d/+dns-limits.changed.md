@@ -1,0 +1,1 @@
+Set timeout of dns request to 1s and only attempt once

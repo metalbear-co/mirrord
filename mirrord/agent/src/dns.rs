@@ -74,6 +74,8 @@ impl DnsWorker {
         let (config, mut options) = parse_resolv_conf(resolv_conf)?;
         options.server_ordering_strategy =
             trust_dns_resolver::config::ServerOrderingStrategy::UserProvidedOrder;
+        options.timeout = Duration::from_secs(1);
+        options.attempts = 1;
 
         let mut resolver = AsyncResolver::tokio(config, options)?;
 
