@@ -345,6 +345,7 @@ mod tests {
         assert_eq!(target, expected)
     }
 
+    #[allow(clippy::duplicated_attributes)]
     #[rstest]
     #[should_panic(expected = "InvalidTarget")]
     #[case::panic("deployment/foobaz/blah")]

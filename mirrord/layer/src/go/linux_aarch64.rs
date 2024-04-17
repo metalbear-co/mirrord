@@ -83,7 +83,10 @@ unsafe extern "C" fn go_syscall_new_detour() {
 /// Hooks for when hooking a post go 1.19 binary
 fn post_go1_19(hook_manager: &mut HookManager) {
     unsafe {
-        FN_ASMCGOCALL = std::mem::transmute(
+        FN_ASMCGOCALL = std::mem::transmute::<
+            frida_gum::NativePointer,
+            std::option::Option<unsafe extern "C" fn()>,
+        >(
             hook_manager
                 .resolve_symbol_main_module("runtime.asmcgocall")
                 .expect("found go but couldn't find runtime.asmcgocall please file a bug"),

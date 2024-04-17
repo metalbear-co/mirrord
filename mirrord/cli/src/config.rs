@@ -1,6 +1,6 @@
 #![deny(missing_docs)]
 
-use std::path::PathBuf;
+use std::{fmt::Display, path::PathBuf};
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
@@ -71,14 +71,14 @@ pub enum FsMode {
     LocalWithOverrides,
 }
 
-impl ToString for FsMode {
-    fn to_string(&self) -> String {
-        match self {
-            FsMode::Local => "local".to_string(),
-            FsMode::LocalWithOverrides => "localwithoverrides".to_string(),
-            FsMode::Read => "read".to_string(),
-            FsMode::Write => "write".to_string(),
-        }
+impl Display for FsMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            FsMode::Local => "local",
+            FsMode::LocalWithOverrides => "localwithoverrides",
+            FsMode::Read => "read",
+            FsMode::Write => "write",
+        })
     }
 }
 

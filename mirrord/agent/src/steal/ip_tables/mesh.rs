@@ -119,7 +119,6 @@ where
 pub(super) trait MeshVendorExt: Sized {
     fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Option<Self>>;
     fn input_chain(&self) -> &str;
-    fn output_chain(&self) -> &str;
     fn skip_ports_regex(&self) -> &Regex;
 }
 
@@ -145,14 +144,6 @@ impl MeshVendorExt for MeshVendor {
             MeshVendor::Linkerd => "PROXY_INIT_REDIRECT",
             MeshVendor::Istio => "ISTIO_INBOUND",
             MeshVendor::Kuma => "KUMA_MESH_INBOUND",
-        }
-    }
-
-    fn output_chain(&self) -> &str {
-        match self {
-            MeshVendor::Linkerd => "PROXY_INIT_OUTPUT",
-            MeshVendor::Istio => "ISTIO_OUTPUT",
-            MeshVendor::Kuma => "KUMA_MESH_OUTBOUND",
         }
     }
 
