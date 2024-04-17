@@ -446,15 +446,6 @@ fn fill_address(
         unsafe {
             let len = std::cmp::min(*address_len as usize, new_address.len() as usize);
 
-            tracing::info!(
-                "[address is aligned? {:?} null? {:?}]\
-                    [new_address is aligned? {:?} null? {:?}]",
-                address.is_aligned(),
-                address.is_null(),
-                new_address.as_ptr().is_aligned(),
-                new_address.as_ptr().is_null(),
-            );
-            // address.copy_from(new_address.as_ptr(), len);
             std::ptr::copy_nonoverlapping(
                 new_address.as_ptr() as *const u8,
                 address as *mut u8,
