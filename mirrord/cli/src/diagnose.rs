@@ -22,9 +22,13 @@ async fn ping(
         .send(ClientMessage::Ping)
         .await
         .map_err(|_| crate::CliError::CantSendPing)?;
-    match receiver.recv().await {
-        Some(DaemonMessage::Pong) => Ok(()),
-        _ => Err(crate::CliError::InvalidPingResponse),
+
+    loop {
+        match receiver.recv().await {
+            Some(DaemonMessage::Pong) => break Ok(()),
+            Some(DaemonMessage::LogMessage(..)) => {}
+            _ => break Err(crate::CliError::InvalidPingResponse),
+        }
     }
 }
 
