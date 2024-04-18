@@ -2,6 +2,7 @@ use actix_codec::{AsyncRead, AsyncWrite};
 use futures::{SinkExt, StreamExt};
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
+use tracing::Instrument;
 
 pub mod container;
 pub mod kubernetes;
@@ -11,6 +12,7 @@ const CONNECTION_CHANNEL_SIZE: usize = 1000;
 
 /// Creates the task that handles the messaging between layer/agent.
 /// It does the encoding/decoding of protocol.
+#[tracing::instrument(level = "trace", skip_all)]
 pub fn wrap_raw_connection(
     stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
 ) -> (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>) {
@@ -27,12 +29,12 @@ pub fn wrap_raw_connection(
                 msg = in_rx.recv() => match msg {
                     Some(msg) => {
                         if let Err(error) = codec.send(msg).await {
-                            tracing::error!(?error, "wrap_raw_connection -> Failed to send client message");
+                            tracing::error!(?error, "Failed to send client message");
                             break;
                         }
                     }
                     None => {
-                        tracing::trace!("wrap_raw_connection -> No more client messages, disconnecting");
+                        tracing::trace!("No more client messages, disconnecting");
                         break;
                     }
                 },
@@ -40,16 +42,16 @@ pub fn wrap_raw_connection(
                 msg = codec.next() => match msg {
                     Some(Ok(msg)) => {
                         if let Err(error) = out_tx.send(msg).await {
-                            tracing::error!(?error, "wrap_raw_connection -> Failed to send agent message");
+                            tracing::error!(?error, "Failed to send agent message");
                             break;
                         }
                     }
                     Some(Err(error)) => {
-                        tracing::error!(?error, "wrap_raw_connection -> Failed to receive agent message");
+                        tracing::error!(?error, "Failed to receive agent message");
                         break;
                     }
                     None => {
-                        tracing::trace!("wrap_raw_connection -> No more agent messages, disconnecting");
+                        tracing::trace!("No more agent messages, disconnecting");
                         break;
                     }
                 },
@@ -57,7 +59,7 @@ pub fn wrap_raw_connection(
         }
 
         let _ = codec.close().await;
-    });
+    }.in_current_span());
 
     (in_tx, out_rx)
 }
