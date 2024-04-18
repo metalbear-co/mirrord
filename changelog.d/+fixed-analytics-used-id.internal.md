@@ -1,0 +1,1 @@
+Sending client certificate public key instead of fingerprint in the analytics to match operator's behavior.
