@@ -1,8 +1,8 @@
 use actix_codec::{AsyncRead, AsyncWrite};
 use futures::{SinkExt, StreamExt};
-use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage, LogLevel};
+use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::Instrument;
 
 pub mod container;
 pub mod kubernetes;
@@ -12,6 +12,7 @@ const CONNECTION_CHANNEL_SIZE: usize = 1000;
 
 /// Creates the task that handles the messaging between layer/agent.
 /// It does the encoding/decoding of protocol.
+#[tracing::instrument(level = "trace", skip_all)]
 pub fn wrap_raw_connection(
     stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
 ) -> (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>) {
@@ -20,57 +21,48 @@ pub fn wrap_raw_connection(
     let (in_tx, mut in_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
     let (out_tx, out_rx) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
 
-    tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                msg = in_rx.recv() => {
-                    match msg {
+    tokio::spawn(
+        async move {
+            // Generally, this loop should not be exited early with any `return` statement.
+            // We want the `close` below to happen.
+            loop {
+                tokio::select! {
+                    msg = in_rx.recv() => match msg {
                         Some(msg) => {
-                            if let Err(fail) = codec.send(msg).await {
-                                error!("Error sending client message: {:#?}", fail);
+                            if let Err(error) = codec.send(msg).await {
+                                tracing::error!(?error, "Failed to send client message");
                                 break;
                             }
                         }
                         None => {
-                            info!("mirrord-kube: initiated disconnect from agent");
-
+                            tracing::trace!("No more client messages, disconnecting");
                             break;
                         }
-                    }
-                }
-                daemon_message = codec.next() => {
-                    match daemon_message {
-                        Some(Ok(DaemonMessage::LogMessage(log_message))) => {
-                            match log_message.level {
-                                LogLevel::Warn => {
-                                    warn!(message = log_message.message, "Daemon sent log message")
-                                }
-                                LogLevel::Error => {
-                                    error!(message = log_message.message, "Daemon sent log message")
-                                }
-                            }
-                        }
+                    },
+
+                    msg = codec.next() => match msg {
                         Some(Ok(msg)) => {
-                            if let Err(fail) = out_tx.send(msg).await {
-                                error!("DaemonMessage dropped: {:#?}", fail);
-
+                            if let Err(error) = out_tx.send(msg).await {
+                                tracing::error!(?error, "Failed to send agent message");
                                 break;
                             }
                         }
-                        Some(Err(err)) => {
-                            error!("Error receiving daemon message: {:?}", err);
+                        Some(Err(error)) => {
+                            tracing::error!(?error, "Failed to receive agent message");
                             break;
                         }
                         None => {
-                            info!("agent disconnected");
-
+                            tracing::trace!("No more agent messages, disconnecting");
                             break;
                         }
-                    }
+                    },
                 }
             }
+
+            let _ = codec.close().await;
         }
-    });
+        .in_current_span(),
+    );
 
     (in_tx, out_rx)
 }

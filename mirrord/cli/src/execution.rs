@@ -7,7 +7,7 @@ use std::{
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_progress::Progress;
-use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest};
+use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
 use serde::Serialize;
@@ -18,7 +18,7 @@ use tokio::{
     sync::RwLock,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, trace, warn};
 
 use crate::{
     connection::{create_and_connect, AgentConnection, AGENT_CONNECT_INFO_ENV_KEY},
@@ -320,16 +320,27 @@ impl MirrordExecution {
                 )
             })?;
 
-        match connection.receiver.recv().await {
-            Some(DaemonMessage::GetEnvVarsResponse(Ok(remote_env))) => {
-                trace!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env.len());
-                Ok(remote_env)
+        let remote_env = loop {
+            match connection.receiver.recv().await {
+                Some(DaemonMessage::GetEnvVarsResponse(Ok(remote_env))) => {
+                    trace!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env.len());
+                    break remote_env;
+                }
+                Some(DaemonMessage::LogMessage(msg)) => match msg.level {
+                    LogLevel::Error => error!("Agent log: {}", msg.message),
+                    LogLevel::Warn => warn!("Agent log: {}", msg.message),
+                },
+                Some(DaemonMessage::Close(msg)) => Err(CliError::InitialCommFailed(format!(
+                    "Connection closed with message: `{msg}`"
+                )))?,
+                Some(msg) => Err(CliError::InvalidMessage(format!("{msg:#?}")))?,
+                None => Err(CliError::InitialCommFailed(
+                    "Agent connection unexpectedly closed".to_string(),
+                ))?,
             }
-            Some(DaemonMessage::Close(msg)) => Err(CliError::InitialCommFailed(format!(
-                "Connection closed with message: `{msg}`"
-            ))),
-            msg => Err(CliError::InvalidMessage(format!("{msg:#?}"))),
-        }
+        };
+
+        Ok(remote_env)
     }
 
     /// Wait for the internal proxy to exit.
