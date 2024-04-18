@@ -155,7 +155,7 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
             .append(true)
             .open(log_destination)
             .map_err(CliError::OpenIntProxyLogFile)?;
-        let tracing_registry = tracing_subscriber::fmt().with_writer(output_file);
+        let tracing_registry = tracing_subscriber::fmt().with_writer(output_file).compact();
         if let Some(ref log_level) = config.internal_proxy.log_level {
             tracing_registry
                 .with_env_filter(EnvFilter::builder().parse_lossy(log_level))
