@@ -261,7 +261,7 @@ impl Drop for AnalyticsReporter {
 /// Extra fields for `AnalyticsReport` when using mirrord with operator.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AnalyticsOperatorProperties {
-    /// sha256 fingerprint from client certificate
+    /// client certificate public key
     pub client_hash: Option<AnalyticsHash>,
 
     /// sha256 fingerprint from operator license
