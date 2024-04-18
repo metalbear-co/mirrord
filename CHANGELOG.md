@@ -8,6 +8,37 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.98.0](https://github.com/metalbear-co/mirrord/tree/3.98.0) - 2024-04-18
+
+
+### Added
+
+- Added `create` and `delete` verbs on `pods` resource in
+  `clusterrole/mirrord-operator` for operator setup.
+
+
+### Changed
+
+- Set timeout of dns request to 1s and only attempt once
+  [#2379](https://github.com/metalbear-co/mirrord/issues/2379)
+
+
+### Fixed
+
+- Fix memory issue when binding
+
+
+### Internal
+
+- Remove `AgentManagment` because only `KubernetesAPI` implements it now and
+  there is no need for this abstraction and moved the used functions straight
+  onto `KubernetesAPI`.
+- Split off pod template to a separate `ContainerVariant` implementation used
+  inside of `JobVariant` and `JobTargetedVariant`.
+- Updates to rust nightly-2024-04-15. Also fixes some pointer
+  copy_from_nonoverlapping issues.
+
+
 ## [3.97.0](https://github.com/metalbear-co/mirrord/tree/3.97.0) - 2024-04-16
 
 
