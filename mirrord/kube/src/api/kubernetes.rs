@@ -56,6 +56,16 @@ impl KubernetesAPI {
         KubernetesAPI { client, agent }
     }
 
+    /// Returns a reference to the [`Client`] used by this instance.
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
+
+    /// Returns a reference to the [`AgentConfig`] used by this instance.
+    pub fn agent_config(&self) -> &AgentConfig {
+        &self.agent
+    }
+
     pub async fn detect_openshift<P>(&self, progress: &P) -> Result<()>
     where
         P: Progress + Send + Sync,
@@ -73,9 +83,7 @@ impl KubernetesAPI {
         }
         Ok(())
     }
-}
 
-impl KubernetesAPI {
     /// Connect to the agent using plain TCP connection.
     #[cfg(feature = "incluster")]
     pub async fn create_connection(

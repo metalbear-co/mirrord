@@ -1,0 +1,1 @@
+Added getters to `KubernetesAPI`.
