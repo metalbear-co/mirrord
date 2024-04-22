@@ -35,6 +35,8 @@ impl OperatorApiErrorExt for OperatorApiError {
             // These should either never happen or can happen only if the operator is installed.
             Self::ConcurrentStealAbort
             | Self::ConnectRequestBuildError(..)
+            | Self::CopyTargetRequestBodyError(..)
+            | Self::CopyTargetRequestBuildError(..)
             | Self::CreateApiError(..)
             | Self::InvalidTarget { .. }
             | Self::UnsupportedFeature { .. }

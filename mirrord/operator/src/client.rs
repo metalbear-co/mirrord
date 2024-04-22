@@ -7,7 +7,7 @@ use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
-use kube::{api::PostParams, Api, Client, Resource};
+use kube::{Api, Client, Resource};
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
 use mirrord_auth::{
     certificate::Certificate,
@@ -75,6 +75,12 @@ pub enum OperatorApiError {
 
     #[error("failed to build a websocket connect request: {0}")]
     ConnectRequestBuildError(HttpError),
+
+    #[error("failed to build body for copy-target create request: {0}")]
+    CopyTargetRequestBodyError(serde_json::Error),
+
+    #[error("failed to build a copy-target create request: {0}")]
+    CopyTargetRequestBuildError(HttpError),
 
     #[error("failed to create mirrord operator API: {0}")]
     CreateApiError(KubeApiError),
@@ -600,8 +606,49 @@ impl OperatorApi {
             },
         );
 
-        self.copy_target_api
-            .create(&PostParams::default(), &requested)
+        let request = {
+            let UserIdentity { name, hostname } = UserIdentity::load();
+
+            let dt = &();
+            let namespace = self.namespace();
+            let api_version = CopyTargetCrd::api_version(dt);
+            let plural = CopyTargetCrd::plural(dt);
+
+            let url = format!("/apis/{api_version}/proxy/namespaces/{namespace}/{plural}",);
+
+            let mut builder = Request::builder()
+                .method("POST")
+                .uri(url)
+                .header("x-session-id", session_metadata.session_id.to_string());
+
+            if let Some(name) = name {
+                builder = builder.header("x-client-name", name);
+            };
+
+            if let Some(hostname) = hostname {
+                builder = builder.header("x-client-hostname", hostname);
+            };
+
+            match session_metadata.client_credentials() {
+                Ok(Some(credentials)) => {
+                    builder = builder.header("x-client-der", credentials);
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    debug!("CredentialStore error: {err}");
+                }
+            }
+
+            let body = serde_json::to_vec(&requested)
+                .map_err(OperatorApiError::CopyTargetRequestBodyError)?;
+
+            builder
+                .body(body)
+                .map_err(OperatorApiError::CopyTargetRequestBuildError)?
+        };
+
+        self.client
+            .request(request)
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,

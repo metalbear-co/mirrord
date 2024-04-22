@@ -295,6 +295,18 @@ pub(crate) enum CliError {
     ))]
     ConnectRequestBuildError(HttpError),
 
+    #[error("Failed to build body for a copy-target create request: {0:#?}")]
+    #[diagnostic(help(
+        r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
+    ))]
+    CopyTargetRequestBodyError(serde_json::Error),
+
+    #[error("Failed to build a copy-target create request: {0:#?}")]
+    #[diagnostic(help(
+        r#"This is a bug. Please report it in our Discord or GitHub repository. {GENERAL_HELP}"#
+    ))]
+    CopyTargetRequestBuildError(HttpError),
+
     #[error("Failed to open log file for writing: {0:#?}")]
     #[diagnostic(help(r#"Check that int proxy log file is in valid writable path"#))]
     OpenIntProxyLogFile(std::io::Error),
@@ -336,6 +348,10 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::CreateApiError(e) => Self::KubernetesApiFailed(e),
             OperatorApiError::InvalidTarget { reason } => Self::InvalidTargetError(reason),
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
+            OperatorApiError::CopyTargetRequestBodyError(e) => Self::CopyTargetRequestBodyError(e),
+            OperatorApiError::CopyTargetRequestBuildError(e) => {
+                Self::CopyTargetRequestBuildError(e)
+            }
             OperatorApiError::KubeError { error, operation } => {
                 Self::OperatorConnectionFailed(format!("{operation} failed: {error}"))
             }
