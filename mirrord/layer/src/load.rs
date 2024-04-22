@@ -32,6 +32,7 @@ static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         "cargo-watch",
         "debugserver",
         "jspawnhelper",
+        "JetBrains.Debugger.Worker",
     ])
 });
 
