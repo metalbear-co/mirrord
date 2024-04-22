@@ -316,6 +316,14 @@ impl OutgoingSelector {
     /// 2. `address` is **NOT** in [`REMOTE_DNS_REVERSE_MAPPING`]: return the `address` as is;
     #[mirrord_layer_macro::instrument(level = "trace", ret)]
     fn get_local_address_to_connect(address: SocketAddr) -> HookResult<SocketAddr> {
+        // Aviram: I think this whole function and logic is weird but I really need to get
+        // https://github.com/metalbear-co/mirrord/issues/2389 fixed and I don't have time to
+        // fully understand or refactor, and the logic is sound (if it's loopback, just connect to
+        // it)
+        if address.ip().is_loopback() {
+            return Ok(address);
+        }
+
         let cached = REMOTE_DNS_REVERSE_MAPPING
             .get(&address.ip())
             .map(|entry| entry.value().clone());
@@ -324,7 +332,6 @@ impl OutgoingSelector {
         };
 
         let _guard = DetourGuard::new();
-
         (hostname, address.port())
             .to_socket_addrs()?
             .next()
