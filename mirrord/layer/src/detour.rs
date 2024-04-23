@@ -37,7 +37,7 @@ thread_local!(
     ///
     /// We set this to `true` whenever an operation may require calling other [`libc`] functions,
     /// and back to `false` after it's done.
-    static DETOUR_BYPASS: RefCell<bool> = RefCell::new(false)
+    static DETOUR_BYPASS: RefCell<bool> = const { RefCell::new(false) }
 );
 
 /// Sets [`DETOUR_BYPASS`] to `false`.
@@ -131,7 +131,7 @@ pub(crate) enum Bypass {
     /// [`SOCKETS`](crate::socket::SOCKETS).
     LocalFdNotFound(RawFd),
 
-    /// Similar to `LocalFdNotFound`, but for [`OPEN_DIRS`](crate::file::OPEN_DIRS).
+    /// Similar to `LocalFdNotFound`, but for [`OPEN_DIRS`](crate::file::open_dirs::OPEN_DIRS).
     LocalDirStreamNotFound(usize),
 
     /// A conversion from [`SockAddr`](socket2::sockaddr::SockAddr) to
@@ -155,9 +155,9 @@ pub(crate) enum Bypass {
     /// Some operations only handle absolute [`PathBuf`]s.
     RelativePath(PathBuf),
 
-    /// Started mirrord with [`FsModeConfig`](mirrord_config::fs::mode::FsModeConfig) set to
-    /// [`FsModeConfig::Read`](mirrord_config::fs::mode::FsModeConfig::Read), but operation
-    /// requires more file permissions.
+    /// Started mirrord with [`FsModeConfig`](mirrord_config::feature::fs::mode::FsModeConfig) set
+    /// to [`FsModeConfig::Read`](mirrord_config::feature::fs::FsModeConfig::Read), but
+    /// operation requires more file permissions.
     ///
     /// The user will reach this case if they started mirrord with file operations as _read-only_,
     /// but tried to perform a file operation that requires _write_ permissions (for example).

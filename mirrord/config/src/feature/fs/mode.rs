@@ -141,6 +141,7 @@ mod tests {
         util::{testing::with_env_vars, ToggleableConfig},
     };
 
+    #[allow(clippy::duplicated_attributes)]
     #[rstest]
     #[case(None, None, FsModeConfig::Read)]
     #[case(Some("true"), None, FsModeConfig::Write)]
@@ -160,6 +161,7 @@ mod tests {
         );
     }
 
+    #[allow(clippy::duplicated_attributes)]
     #[rstest]
     #[case(None, None, FsModeConfig::Local)]
     #[case(Some("true"), None, FsModeConfig::Write)]

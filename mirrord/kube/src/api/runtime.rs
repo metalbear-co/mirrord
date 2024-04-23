@@ -191,6 +191,7 @@ where
 }
 
 pub trait RuntimeDataProvider {
+    #[allow(async_fn_in_trait)]
     async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData>;
 }
 
@@ -201,6 +202,7 @@ pub trait RuntimeTarget {
 }
 
 pub trait RuntimeDataFromLabels {
+    #[allow(async_fn_in_trait)]
     async fn get_labels(
         &self,
         client: &Client,
@@ -343,6 +345,7 @@ mod tests {
         assert_eq!(target, expected)
     }
 
+    #[allow(clippy::duplicated_attributes)]
     #[rstest]
     #[should_panic(expected = "InvalidTarget")]
     #[case::panic("deployment/foobaz/blah")]

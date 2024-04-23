@@ -21,23 +21,15 @@ app.put("/", (req, res) => {
 app.delete("/", (req, res) => {
   console.log("DELETE: Request completed");
   res.send("DELETE");
-  server.close();
-  process.kill(process.pid)
+  setTimeout(() => process.exit(0), 1000);
 });
 
 app.delete("/api/v1", (req, res) => {
   console.log("/api/v1/ DELETE: Request completed");
   res.send("DELETEV1");
-  server.close();
-  process.kill(process.pid)
+  setTimeout(() => process.exit(0), 1000);
 });
 
 var server = app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
-});
-
-// To exit gracefull
-process.on('SIGTERM', () => {
-  console.log("shutdown");
-  server.close();
 });

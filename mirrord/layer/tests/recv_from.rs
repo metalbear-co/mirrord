@@ -58,7 +58,7 @@ async fn recv_from(
         .send(DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Read(Ok(
             DaemonRead {
                 connection_id: 0,
-                bytes: bytes,
+                bytes,
             },
         ))))
         .await;

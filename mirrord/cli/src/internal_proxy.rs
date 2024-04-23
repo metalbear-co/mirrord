@@ -17,17 +17,20 @@ use std::{
     time::Duration,
 };
 
-use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics};
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_intproxy::{
     agent_conn::{AgentConnectInfo, AgentConnection},
     IntProxy,
 };
 use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonMessage};
-use nix::libc;
+use nix::{
+    libc,
+    sys::resource::{setrlimit, Resource},
+};
 use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, log::trace};
+use tracing::{error, info, log::trace, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::{
@@ -152,7 +155,9 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
             .append(true)
             .open(log_destination)
             .map_err(CliError::OpenIntProxyLogFile)?;
-        let tracing_registry = tracing_subscriber::fmt().with_writer(output_file);
+        let tracing_registry = tracing_subscriber::fmt()
+            .with_writer(output_file)
+            .with_ansi(false);
         if let Some(ref log_level) = config.internal_proxy.log_level {
             tracing_registry
                 .with_env_filter(EnvFilter::builder().parse_lossy(log_level))
@@ -161,6 +166,13 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
             tracing_registry.init();
         }
     }
+
+    // According to https://wilsonmar.github.io/maximum-limits/ this is the limit on macOS
+    // so we assume Linux can be higher and set to that.
+    if let Err(err) = setrlimit(Resource::RLIMIT_NOFILE, 12288, 12288) {
+        warn!(?err, "Failed to set the file descriptor limit");
+    }
+
     let agent_connect_info = get_agent_connect_info()?;
 
     let mut analytics = AnalyticsReporter::new(config.telemetry, watch);
@@ -231,7 +243,7 @@ async fn connect_and_ping(
     let AgentConnection {
         agent_tx,
         mut agent_rx,
-    } = AgentConnection::new(config, agent_connect_info, Some(analytics)).await?;
+    } = AgentConnection::new(config, agent_connect_info, analytics).await?;
     ping(&agent_tx, &mut agent_rx).await?;
     Ok((agent_tx, agent_rx))
 }

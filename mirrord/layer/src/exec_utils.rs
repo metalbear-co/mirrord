@@ -64,7 +64,7 @@ pub(crate) unsafe fn enable_execve_hook(
 }
 
 /// Check if the file that is to be executed has SIP and patch it if it does.
-#[tracing::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
     let patch_binaries = PATCH_BINARIES.get().expect("patch binaries not set");
     match sip_patch(path, patch_binaries) {
@@ -283,6 +283,7 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
             // - can read `stripped_len` bytes from `path_cstring` because it's its length.
             // - can write `stripped_len` bytes to `path`, because the length of the path after
             //   stripping a prefix will always be shorter than before.
+            // - cannot use `copy_from_nonoverlapping`.
             path.copy_from(later_ptr, stripped_len as _);
 
             // SAFETY:

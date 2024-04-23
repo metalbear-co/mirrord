@@ -6,9 +6,9 @@ use std::{
 use dashmap::DashMap;
 use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY};
 use mirrord_protocol::file::{
-    AccessFileRequest, CloseFileRequest, DirEntryInternal, FdOpenDirRequest, OpenDirResponse,
-    OpenOptionsInternal, OpenRelativeFileRequest, ReadFileRequest, ReadLimitedFileRequest,
-    SeekFileRequest, WriteFileRequest, WriteLimitedFileRequest, XstatFsRequest, XstatRequest,
+    AccessFileRequest, CloseFileRequest, FdOpenDirRequest, OpenDirResponse, OpenOptionsInternal,
+    OpenRelativeFileRequest, ReadFileRequest, ReadLimitedFileRequest, SeekFileRequest,
+    WriteFileRequest, WriteLimitedFileRequest, XstatFsRequest, XstatRequest,
 };
 /// File operations on remote pod.
 ///
@@ -30,11 +30,6 @@ pub(crate) mod ops;
 type RemoteFd = u64;
 type LocalFd = RawFd;
 type DirStreamFd = usize;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DirStream {
-    direntry: Box<DirEntryInternal>,
-}
 
 /// `OPEN_FILES` is used to track open files and their corrospending remote file descriptor.
 /// We use Arc so we can support dup more nicely, this means that if user

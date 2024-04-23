@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
 use kube::{api::PostParams, Api, Client, Resource};
-use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, AnalyticsReporter};
+use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
 use mirrord_auth::{
     certificate::Certificate,
     credential_store::{CredentialStoreSync, UserIdentity},
@@ -144,13 +144,16 @@ impl OperatorSessionMetadata {
             .transpose()
     }
 
-    fn set_operator_properties(&self, analytics: &mut AnalyticsReporter) {
+    fn set_operator_properties<R: Reporter>(&self, analytics: &mut R) {
+        let client_hash = self
+            .client_certificate
+            .as_ref()
+            .map(|cert| cert.public_key_data())
+            .as_deref()
+            .map(AnalyticsHash::from_bytes);
+
         analytics.set_operator_properties(AnalyticsOperatorProperties {
-            client_hash: self
-                .client_certificate
-                .as_ref()
-                .and_then(|certificate| certificate.sha256_fingerprint().ok())
-                .map(|fingerprint| AnalyticsHash::from_bytes(fingerprint.as_ref())),
+            client_hash,
             license_hash: self.fingerprint.as_deref().map(AnalyticsHash::from_base64),
         });
     }
@@ -241,10 +244,10 @@ impl OperatorApi {
     ///
     /// For a fuller documentation, see the docs in `operator/service/src/main.rs::listen`.
     #[tracing::instrument(level = "trace", skip_all)]
-    pub async fn create_session<P>(
+    pub async fn create_session<P, R: Reporter>(
         config: &LayerConfig,
         progress: &P,
-        analytics: &mut AnalyticsReporter,
+        analytics: &mut R,
     ) -> Result<OperatorSessionConnection>
     where
         P: Progress + Send + Sync,
@@ -353,16 +356,14 @@ impl OperatorApi {
 
     /// Connects to exisiting operator session based on the given [`LayerConfig`] and
     /// [`OperatorSessionInformation`].
-    pub async fn connect(
+    pub async fn connect<R: Reporter>(
         config: &LayerConfig,
         session_information: OperatorSessionInformation,
-        analytics: Option<&mut AnalyticsReporter>,
+        analytics: &mut R,
     ) -> Result<OperatorSessionConnection> {
-        if let Some(analytics) = analytics {
-            session_information
-                .metadata
-                .set_operator_properties(analytics);
-        }
+        session_information
+            .metadata
+            .set_operator_properties(analytics);
 
         let operator_api = OperatorApi::new(config).await?;
         operator_api.connect_target(session_information).await

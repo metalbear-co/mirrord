@@ -60,7 +60,7 @@ k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, features = ["derive", "ws"], optional = true }
 futures = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
-reqwest = { workspace = true, default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
+reqwest = { workspace = true, default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"], optional = true }
 schemars = { version = "0.8", features = ["chrono"] }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }

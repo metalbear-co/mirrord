@@ -3,7 +3,7 @@
 #![warn(clippy::indexing_slicing)]
 //! <!--${internal}-->
 //! To generate the `mirrord-schema.json` file see
-//! [`tests::check_schema_file_exists_and_is_valid_or_create_it`].
+//! `tests::check_schema_file_exists_and_is_valid_or_create_it`.
 //!
 //! Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
 //! including if you only made documentation changes.
@@ -383,6 +383,15 @@ impl LayerConfig {
             ))?
         }
 
+        if !self.feature.network.incoming.ignore_ports.is_empty()
+            && self.feature.network.incoming.ports.is_some()
+        {
+            Err(ConfigError::Conflict(
+                "Cannot use both `incoming.ignore_ports` and `incoming.ports` at the same time"
+                    .to_string(),
+            ))?
+        }
+
         if self.target.path.is_none() && !context.ide {
             // In the IDE, a target may be selected after `mirrord verify-config` is run, so we
             // for this case we treat these as warnings. They'll become errors once mirrord proper
@@ -656,6 +665,8 @@ mod tests {
     fn full(
         #[values(ConfigType::Json, ConfigType::Toml, ConfigType::Yaml)] config_type: ConfigType,
     ) {
+        use crate::agent::AgentImageFileConfig;
+
         let input = config_type.full();
 
         let config = config_type.parse(input);
@@ -678,7 +689,7 @@ mod tests {
                 privileged: None,
                 log_level: Some("info".to_owned()),
                 namespace: Some("default".to_owned()),
-                image: Some("".to_owned()),
+                image: Some(AgentImageFileConfig::Simple(Some("".to_owned()))),
                 image_pull_policy: Some("".to_owned()),
                 image_pull_secrets: Some(vec![HashMap::from([(
                     "name".to_owned(),
@@ -710,6 +721,7 @@ mod tests {
                             ignore_ports: None,
                             listen_ports: None,
                             on_concurrent_steal: None,
+                            ports: None,
                         }),
                     ))),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {

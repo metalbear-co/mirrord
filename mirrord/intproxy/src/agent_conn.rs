@@ -3,12 +3,12 @@
 
 use std::{io, net::SocketAddr};
 
-use mirrord_analytics::AnalyticsReporter;
+use mirrord_analytics::Reporter;
 use mirrord_config::LayerConfig;
 use mirrord_kube::{
     api::{
         kubernetes::{AgentKubernetesConnectInfo, KubernetesAPI},
-        wrap_raw_connection, AgentManagment,
+        wrap_raw_connection,
     },
     error::KubeApiError,
 };
@@ -68,10 +68,10 @@ pub struct AgentConnection {
 impl AgentConnection {
     /// Creates a new agent connection based on the provided [`LayerConfig`] and optional
     /// [`AgentConnectInfo`].
-    pub async fn new(
+    pub async fn new<R: Reporter>(
         config: &LayerConfig,
         connect_info: Option<AgentConnectInfo>,
-        analytics: Option<&mut AnalyticsReporter>,
+        analytics: &mut R,
     ) -> Result<Self, AgentConnectionError> {
         let (agent_tx, agent_rx) = match connect_info {
             Some(AgentConnectInfo::Operator(operator_session_information)) => {
@@ -86,10 +86,13 @@ impl AgentConnection {
                 let k8s_api = KubernetesAPI::create(config)
                     .await
                     .map_err(AgentConnectionError::Kube)?;
-                k8s_api
+
+                let stream = k8s_api
                     .create_connection(connect_info.clone())
                     .await
-                    .map_err(AgentConnectionError::Kube)?
+                    .map_err(AgentConnectionError::Kube)?;
+
+                wrap_raw_connection(stream)
             }
 
             None => {

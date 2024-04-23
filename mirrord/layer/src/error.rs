@@ -106,12 +106,15 @@ pub(crate) enum HookError {
     #[cfg(target_os = "linux")]
     #[error("mirrord-layer: Empty file path passed in argument")]
     EmptyPath,
+
+    #[error("mirrord-layer: address passed to `bind` is not valid for the socket domain")]
+    InvalidBindAddressForDomain,
 }
 
 /// Errors internal to mirrord-layer.
 ///
 /// You'll encounter these when the layer is performing some of its internal operations, mostly when
-/// handling [`ProxyToLayerMessage`](mirrord_intproxy::protocol::ProxyToLayerMessage).
+/// handling [`ProxyToLayerMessage`](mirrord_intproxy_protocol::ProxyToLayerMessage).
 #[derive(Error, Debug)]
 pub(crate) enum LayerError {
     #[error("mirrord-layer: Failed while getting a response!")]
@@ -212,6 +215,12 @@ impl From<HookError> for i64 {
             HookError::SocketUnsuportedIpv6 => {
                 info!("{fail}")
             }
+            HookError::ProxyError(ref err) => {
+                graceful_exit!(
+                    "Proxy error, connectivity issue or a bug. \n\
+                    You may report it to us on https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml \n{err}"
+                )
+            }
             _ => error!("Error occured in Layer >> {fail:?}"),
         };
 
@@ -254,7 +263,8 @@ impl From<HookError> for i64 {
                 err @ ResponseError::Forbidden { .. } => {
                     graceful_exit!(
                         "Stopping mirrord run. Please adjust your mirrord configuration.\n{err}"
-                    )
+                    );
+                    libc::EINVAL
                 }
             },
             HookError::DNSNoName => libc::EFAULT,
@@ -274,6 +284,7 @@ impl From<HookError> for i64 {
             HookError::BadFlag => libc::EINVAL,
             #[cfg(target_os = "linux")]
             HookError::EmptyPath => libc::ENOENT,
+            HookError::InvalidBindAddressForDomain => libc::EINVAL,
         };
 
         set_errno(errno::Errno(libc_error));

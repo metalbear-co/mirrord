@@ -13,6 +13,7 @@ fn pwrite() {
     let file = OpenOptions::new()
         .write(true)
         .create(true)
+        .truncate(false)
         .open(FILE_PATH)
         .expect("pwrite!");
 

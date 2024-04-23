@@ -136,6 +136,16 @@ impl<T: CollectAnalytics> From<T> for AnalyticValue {
     }
 }
 
+pub trait Reporter: Sized {
+    fn get_mut(&mut self) -> &mut Analytics;
+
+    fn set_operator_properties(&mut self, operator_properties: AnalyticsOperatorProperties);
+
+    fn set_error(&mut self, error: AnalyticsError);
+
+    fn has_error(&self) -> bool;
+}
+
 /// Due to the drop nature using tokio::spawn, runtime must be started.
 #[derive(Debug)]
 pub struct AnalyticsReporter {
@@ -173,22 +183,6 @@ impl AnalyticsReporter {
         }
     }
 
-    pub fn get_mut(&mut self) -> &mut Analytics {
-        &mut self.analytics
-    }
-
-    pub fn set_operator_properties(&mut self, operator_properties: AnalyticsOperatorProperties) {
-        self.operator_properties.replace(operator_properties);
-    }
-
-    pub fn set_error(&mut self, error: AnalyticsError) {
-        self.error.replace(error);
-    }
-
-    pub fn has_error(&self) -> bool {
-        self.error.is_some()
-    }
-
     fn as_report(&self) -> AnalyticsReport {
         let duration = self
             .start_instant
@@ -206,6 +200,43 @@ impl AnalyticsReporter {
             platform: std::env::consts::OS,
             version: CURRENT_VERSION,
         }
+    }
+}
+
+impl Reporter for AnalyticsReporter {
+    fn get_mut(&mut self) -> &mut Analytics {
+        &mut self.analytics
+    }
+
+    fn set_operator_properties(&mut self, operator_properties: AnalyticsOperatorProperties) {
+        self.operator_properties.replace(operator_properties);
+    }
+
+    fn set_error(&mut self, error: AnalyticsError) {
+        self.error.replace(error);
+    }
+
+    fn has_error(&self) -> bool {
+        self.error.is_some()
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct NullReporter {
+    analytics: Analytics,
+}
+
+impl Reporter for NullReporter {
+    fn get_mut(&mut self) -> &mut Analytics {
+        &mut self.analytics
+    }
+
+    fn set_operator_properties(&mut self, _operator_properties: AnalyticsOperatorProperties) {}
+
+    fn set_error(&mut self, _error: AnalyticsError) {}
+
+    fn has_error(&self) -> bool {
+        false
     }
 }
 
@@ -230,7 +261,7 @@ impl Drop for AnalyticsReporter {
 /// Extra fields for `AnalyticsReport` when using mirrord with operator.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AnalyticsOperatorProperties {
-    /// sha256 fingerprint from client certificate
+    /// client certificate public key
     pub client_hash: Option<AnalyticsHash>,
 
     /// sha256 fingerprint from operator license

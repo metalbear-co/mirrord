@@ -4,17 +4,15 @@ use syn::{Field, GenericArgument, Ident, PathArguments, Type, Visibility};
 
 use crate::config::flag::{ConfigFlags, ConfigFlagsType, EnvFlag};
 
+/// Representation of a single field
 ///
-//* Representation of a single field
-//*
-//* ```
-//* |---------flags---------|
-//*  #[config(env = "TEST")]
-//*             |-----ty-----|
-//* |vis||ident|      |option|
-//*  pub  flag:  Opton<Foobar>,
-//* ```
-///
+/// ```
+/// |---------flags---------|
+///  #[config(env = "TEST")]
+///             |-----ty-----|
+/// |vis||ident|      |option|
+///  pub  flag:  Opton<Foobar>,
+/// ```
 #[derive(Debug)]
 pub struct ConfigField {
     ident: Option<Ident>,
@@ -42,40 +40,38 @@ impl ConfigField {
         })?
     }
 
+    /// Will create the stuct definition part of the code
     ///
-    //* Will create the stuct definition part of the code
-    //*
-    //* #### 1
-    //* ```rust
-    //* #[config(env = "TEST")]
-    //* pub test: String,
-    //* ```
-    //* Will output
-    //* ```rust
-    //* pub test: Option<String>
-    //* ```
-    //*
-    //* #### 2
-    //* ```rust
-    //* #[config(nested)]
-    //* pub test: OtherConfig,
-    //* ```
-    //* Will output
-    //* ```rust
-    //* pub test: <OtherConfig as crate::config::FromMirrordConfig>::Generator
-    //* ```
-    //*
-    //* #### 3
-    //* ```rust
-    //* #[config(rename = "test2")]
-    //* pub test: OtherConfig,
-    //* ```
-    //* Will output
-    //* ```rust
-    //* #[serde(rename = "test2")]
-    //* pub test: Option<String>
-    //* ```
+    /// #### 1
+    /// ```rust
+    /// #[config(env = "TEST")]
+    /// pub test: String,
+    /// ```
+    /// Will output
+    /// ```rust
+    /// pub test: Option<String>
+    /// ```
     ///
+    /// #### 2
+    /// ```rust
+    /// #[config(nested)]
+    /// pub test: OtherConfig,
+    /// ```
+    /// Will output
+    /// ```rust
+    /// pub test: <OtherConfig as crate::config::FromMirrordConfig>::Generator
+    /// ```
+    ///
+    /// #### 3
+    /// ```rust
+    /// #[config(rename = "test2")]
+    /// pub test: OtherConfig,
+    /// ```
+    /// Will output
+    /// ```rust
+    /// #[serde(rename = "test2")]
+    /// pub test: Option<String>
+    /// ```
     pub fn definition(&self) -> impl ToTokens {
         let ConfigField {
             ident,
@@ -115,20 +111,19 @@ impl ConfigField {
     }
 
     ///
-    //* Will create the actual implementation of the
-    //*
-    //* #### 1
-    //* ```rust
-    //* #[config(env = "TEST")]
-    //* pub test: String,
-    //* ```
-    //* Will output
-    //* ```rust
-    //* test: crate::config::from_env::FromEnv::new("TEST").or(self.test)
-    //*           .source_value().transpose()?
-    //*           .ok_or(crate::config::ConfigError::ValueNotProvided("MyConfig", "test", Some("TEST")))?
-    //* ```
+    /// Will create the actual implementation of the
     ///
+    /// #### 1
+    /// ```rust
+    /// #[config(env = "TEST")]
+    /// pub test: String,
+    /// ```
+    /// Will output
+    /// ```rust
+    /// test: crate::config::from_env::FromEnv::new("TEST").or(self.test)
+    ///           .source_value().transpose()?
+    ///           .ok_or(crate::config::ConfigError::ValueNotProvided("MyConfig", "test", Some("TEST")))?
+    /// ```
     pub fn implmentation(&self, parent: &Ident) -> impl ToTokens {
         let ConfigField {
             ident,

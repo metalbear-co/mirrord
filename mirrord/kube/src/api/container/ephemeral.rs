@@ -7,6 +7,7 @@ use kube::{
 };
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
+use mirrord_protocol::AGENT_OPERATOR_CERT_ENV;
 use serde_json::json;
 use tokio::pin;
 use tracing::debug;
@@ -14,7 +15,7 @@ use tracing::debug;
 use crate::{
     api::{
         container::{
-            util::{base_command_line, get_agent_image, get_capabilities, wait_for_agent_startup},
+            util::{base_command_line, get_capabilities, wait_for_agent_startup},
             ContainerParams, ContainerVariant,
         },
         kubernetes::{get_k8s_resource_api, AgentKubernetesConnectInfo},
@@ -130,7 +131,7 @@ where
 
     let version =
         wait_for_agent_startup(&pod_api, &runtime_data.pod_name, params.name.clone()).await?;
-    match version {
+    match version.as_ref() {
         Some(version) if version != env!("CARGO_PKG_VERSION") => {
             let message = format!(
                 "Agent version {version} does not match the local mirrord version {}. This may lead to unexpected errors.",
@@ -148,6 +149,7 @@ where
         pod_name: runtime_data.pod_name.to_string(),
         agent_port: params.port,
         namespace: runtime_data.pod_namespace.clone(),
+        agent_version: version,
     })
 }
 
@@ -199,9 +201,30 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
             command_line,
         } = self;
 
+        let env = [
+            ("RUST_LOG".to_string(), agent.log_level.clone()),
+            (
+                "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS".to_string(),
+                agent.flush_connections.to_string(),
+            ),
+            (
+                "MIRRORD_AGENT_NFTABLES".to_string(),
+                agent.nftables.to_string(),
+            ),
+        ]
+        .into_iter()
+        .chain(
+            params
+                .tls_cert
+                .clone()
+                .map(|cert| (AGENT_OPERATOR_CERT_ENV.to_string(), cert)),
+        )
+        .map(|(name, value)| json!({ "name": name, "value": value }))
+        .collect::<Vec<_>>();
+
         serde_json::from_value(json!({
             "name": params.name,
-            "image": get_agent_image(agent),
+            "image": agent.image(),
             "securityContext": {
                 "runAsGroup": params.gid,
                 "capabilities": {
@@ -213,12 +236,9 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
             },
             "imagePullPolicy": agent.image_pull_policy,
             "targetContainerName": runtime_data.container_name,
-            "env": [
-                {"name": "RUST_LOG", "value": agent.log_level},
-                { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() },
-                { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() }
-            ],
+            "env": env,
             "command": command_line,
-        })).map_err(KubeApiError::from)
+        }))
+        .map_err(KubeApiError::from)
     }
 }

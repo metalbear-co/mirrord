@@ -19,9 +19,7 @@ use mirrord_protocol::{
 };
 use socket2::SockAddr;
 use tracing::warn;
-use trust_dns_resolver::config::Protocol;
 
-use self::id::SocketId;
 use crate::{
     common,
     detour::{Bypass, Detour, DetourGuard, OptionExt},
@@ -30,7 +28,6 @@ use crate::{
 };
 
 pub(super) mod hooks;
-pub(crate) mod id;
 pub(crate) mod ops;
 
 pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock::new(DashMap::new);
@@ -140,7 +137,6 @@ impl TryFrom<c_int> for SocketKind {
 #[derive(Debug)]
 #[allow(dead_code)]
 pub(crate) struct UserSocket {
-    pub(crate) id: SocketId,
     domain: c_int,
     type_: c_int,
     protocol: c_int,
@@ -157,7 +153,6 @@ impl UserSocket {
         kind: SocketKind,
     ) -> Self {
         Self {
-            id: Default::default(),
             domain,
             type_,
             protocol,
@@ -167,7 +162,7 @@ impl UserSocket {
     }
 
     /// Inform internal proxy about closing a listening port.
-    #[tracing::instrument(level = "trace", ret)]
+    #[mirrord_layer_macro::instrument(level = "trace", ret)]
     pub(crate) fn close(&self) {
         if let Self {
             state: SocketState::Listening(bound),
@@ -275,7 +270,7 @@ impl OutgoingSelector {
     ///
     /// So if the user specified a selector with `0.0.0.0:0`, we're going to be always matching on
     /// it.
-    #[tracing::instrument(level = "trace", ret)]
+    #[mirrord_layer_macro::instrument(level = "trace", ret)]
     fn get_connection_through(
         &self,
         address: SocketAddr,
@@ -319,8 +314,16 @@ impl OutgoingSelector {
     /// 1. `address` is in [`REMOTE_DNS_REVERSE_MAPPING`]: resolves the hostname locally, then
     /// return the first result
     /// 2. `address` is **NOT** in [`REMOTE_DNS_REVERSE_MAPPING`]: return the `address` as is;
-    #[tracing::instrument(level = "trace", ret)]
+    #[mirrord_layer_macro::instrument(level = "trace", ret)]
     fn get_local_address_to_connect(address: SocketAddr) -> HookResult<SocketAddr> {
+        // Aviram: I think this whole function and logic is weird but I really need to get
+        // https://github.com/metalbear-co/mirrord/issues/2389 fixed and I don't have time to
+        // fully understand or refactor, and the logic is sound (if it's loopback, just connect to
+        // it)
+        if address.ip().is_loopback() {
+            return Ok(address);
+        }
+
         let cached = REMOTE_DNS_REVERSE_MAPPING
             .get(&address.ip())
             .map(|entry| entry.value().clone());
@@ -329,7 +332,6 @@ impl OutgoingSelector {
         };
 
         let _guard = DetourGuard::new();
-
         (hostname, address.port())
             .to_socket_addrs()?
             .next()
@@ -465,33 +467,6 @@ fn fill_address(
     Detour::Success(result)
 }
 
-pub(crate) trait ProtocolExt {
-    fn try_from_raw(ai_protocol: i32) -> HookResult<Protocol>;
-    fn try_into_raw(self) -> HookResult<i32>;
-}
-
-impl ProtocolExt for Protocol {
-    fn try_from_raw(ai_protocol: i32) -> HookResult<Self> {
-        match ai_protocol {
-            libc::IPPROTO_UDP => Ok(Protocol::Udp),
-            libc::IPPROTO_TCP => Ok(Protocol::Tcp),
-            libc::IPPROTO_SCTP => todo!(),
-            other => {
-                warn!("Trying a protocol of {:#?}", other);
-                Ok(Protocol::Tcp)
-            }
-        }
-    }
-
-    fn try_into_raw(self) -> HookResult<i32> {
-        match self {
-            Protocol::Udp => Ok(libc::IPPROTO_UDP),
-            Protocol::Tcp => Ok(libc::IPPROTO_TCP),
-            _ => todo!(),
-        }
-    }
-}
-
 pub trait SocketAddrExt {
     /// Converts a raw [`sockaddr`] pointer into a more _Rusty_ type
     fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<Self>
@@ -503,9 +478,10 @@ impl SocketAddrExt for SockAddr {
     fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<SockAddr> {
         unsafe {
             SockAddr::try_init(|storage, len| {
-                storage.copy_from_nonoverlapping(raw_address.cast(), 1);
-                len.copy_from_nonoverlapping(&address_length, 1);
-
+                // storage and raw_address size is dynamic.
+                (storage as *mut u8)
+                    .copy_from_nonoverlapping(raw_address as *const u8, address_length as usize);
+                *len = address_length;
                 Ok(())
             })
         }

@@ -1,13 +1,15 @@
-use pin_project::pin_project;
+use std::{
+    io,
+    pin::Pin,
+    task::{Context, Poll},
+};
+
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite},
     net::TcpStream,
     time,
     time::{Duration, Instant},
 };
-use tracing::{trace, warn};
-
-use crate::steal::http::error::HttpTrafficError;
 
 /// Wraps a [`TcpStream`] to allow a sort of _peek_ functionality, by reading the first bytes, but
 /// then keeping them for later reads.
@@ -18,9 +20,7 @@ use crate::steal::http::error::HttpTrafficError;
 /// Thanks [finomnis](https://stackoverflow.com/users/2902833/finomnis) for the help!
 // impl deref with pin
 #[derive(Debug)]
-#[pin_project]
 pub(crate) struct ReversibleStream<const HEADER_SIZE: usize> {
-    #[pin]
     stream: TcpStream,
 
     header: [u8; HEADER_SIZE],
@@ -42,10 +42,7 @@ pub(crate) struct ReversibleStream<const HEADER_SIZE: usize> {
 impl<const HEADER_SIZE: usize> ReversibleStream<HEADER_SIZE> {
     /// Build a Reversible stream from a TcpStream, move on if not done within given timeout.
     /// Return an Error if there was an error while reading from the TCP Stream.
-    pub(crate) async fn read_header(
-        stream: TcpStream,
-        timeout: Duration,
-    ) -> Result<Self, HttpTrafficError> {
+    pub(crate) async fn read_header(stream: TcpStream, timeout: Duration) -> io::Result<Self> {
         let mut this = Self {
             stream,
             header: [0; HEADER_SIZE],
@@ -67,22 +64,22 @@ impl<const HEADER_SIZE: usize> ReversibleStream<HEADER_SIZE> {
             match time::timeout_at(deadline, this.stream.read_buf(&mut mut_buf)).await {
                 Ok(Ok(0)) => {
                     if this.header_len != HEADER_SIZE {
-                        warn!(
+                        tracing::trace!(
                             "Got early EOF after only {} bytes while creating reversible stream.",
                             this.header_len
                         );
                     } else {
-                        trace!("\"Peeking\" into TCP stream start completed.")
+                        tracing::trace!("\"Peeking\" into TCP stream start completed.")
                     }
                     break;
                 }
                 Ok(Ok(n)) => {
                     this.header_len += n;
-                    trace!("Read {n} header bytes, {} total.", this.header_len);
+                    tracing::trace!("Read {n} header bytes, {} total.", this.header_len);
                 }
                 Ok(Err(read_error)) => Err(read_error)?,
                 Err(_elapsed) => {
-                    warn!(
+                    tracing::trace!(
                         "Got timeout while trying to read first {HEADER_SIZE} bytes of TCP stream."
                     );
                     break;
@@ -90,7 +87,7 @@ impl<const HEADER_SIZE: usize> ReversibleStream<HEADER_SIZE> {
             }
         }
         debug_assert!(this.header_len <= HEADER_SIZE);
-        trace!(
+        tracing::trace!(
             "created reversible stream with header: {}",
             String::from_utf8_lossy(&this.header)
         );
@@ -104,47 +101,39 @@ impl<const HEADER_SIZE: usize> ReversibleStream<HEADER_SIZE> {
 
 impl<const HEADER_SIZE: usize> AsyncRead for ReversibleStream<HEADER_SIZE> {
     fn poll_read(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        let this = self.project();
+    ) -> Poll<io::Result<()>> {
+        if self.num_forwarded < self.header_len {
+            let leftover = &self.header[self.num_forwarded..self.header_len];
 
-        if this.num_forwarded < this.header_len {
-            let leftover = &this.header[*this.num_forwarded..*this.header_len];
-
-            let forward = leftover.get(..buf.remaining()).unwrap_or(leftover);
+            let forward: &[u8] = leftover.get(..buf.remaining()).unwrap_or(leftover);
             buf.put_slice(forward);
 
-            *this.num_forwarded += forward.len();
+            self.get_mut().num_forwarded += forward.len();
 
-            std::task::Poll::Ready(Ok(()))
+            Poll::Ready(Ok(()))
         } else {
-            this.stream.poll_read(cx, buf)
+            Pin::new(&mut self.get_mut().stream).poll_read(cx, buf)
         }
     }
 }
 
 impl<const HEADER_SIZE: usize> AsyncWrite for ReversibleStream<HEADER_SIZE> {
     fn poll_write(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
         buf: &[u8],
-    ) -> std::task::Poll<std::io::Result<usize>> {
-        self.project().stream.poll_write(cx, buf)
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.get_mut().stream).poll_write(cx, buf)
     }
 
-    fn poll_flush(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        self.project().stream.poll_flush(cx)
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().stream).poll_flush(cx)
     }
 
-    fn poll_shutdown(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        self.project().stream.poll_shutdown(cx)
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().stream).poll_shutdown(cx)
     }
 }

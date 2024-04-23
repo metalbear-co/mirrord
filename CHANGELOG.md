@@ -8,6 +8,226 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.98.1](https://github.com/metalbear-co/mirrord/tree/3.98.1) - 2024-04-23
+
+
+### Changed
+
+- Internal proxy now emits plain text instead of ANSI
+
+
+### Fixed
+
+- don't re-resolve when connecting to loopback on outgoing filter
+  [#2389](https://github.com/metalbear-co/mirrord/issues/2389)
+- Added `JetBrains.Debugger.Worker` to the list of known build tools, fixing
+  compatibility with Rider 2024.1.
+
+
+### Internal
+
+- Added getters to `KubernetesAPI`.
+- Improved tracing in the agent connection task.
+- Sending client certificate public key instead of fingerprint in the analytics
+  to match operator's behavior.
+
+
+## [3.98.0](https://github.com/metalbear-co/mirrord/tree/3.98.0) - 2024-04-18
+
+
+### Added
+
+- Added `create` and `delete` verbs on `pods` resource in
+  `clusterrole/mirrord-operator` for operator setup.
+
+
+### Changed
+
+- Set timeout of dns request to 1s and only attempt once
+  [#2379](https://github.com/metalbear-co/mirrord/issues/2379)
+
+
+### Fixed
+
+- Fix memory issue when binding
+
+
+### Internal
+
+- Remove `AgentManagment` because only `KubernetesAPI` implements it now and
+  there is no need for this abstraction and moved the used functions straight
+  onto `KubernetesAPI`.
+- Split off pod template to a separate `ContainerVariant` implementation used
+  inside of `JobVariant` and `JobTargetedVariant`.
+- Updates to rust nightly-2024-04-15. Also fixes some pointer
+  copy_from_nonoverlapping issues.
+
+
+## [3.97.0](https://github.com/metalbear-co/mirrord/tree/3.97.0) - 2024-04-16
+
+
+### Added
+
+- Agent now authenticates TLS connections, using a provided X509 certificate
+  (mirrord for Teams only).
+  [#2362](https://github.com/metalbear-co/mirrord/issues/2362)
+
+
+### Changed
+
+- Changed port stealing configuration:
+  1. Added new `ports` field to the `incoming` configuration. The field lists
+  ports that should be stolen/mirrored. Other ports remain local.
+  2. Changed the way `incoming.http_filter.ports` field is interpreted. Ports
+  not listed in this field are not stolen, unless listed in `incoming.ports`.
+  [#2366](https://github.com/metalbear-co/mirrord/issues/2366)
+
+
+### Fixed
+
+- Change reqwest to use rustls with native certificates to work in more cases
+
+
+## [3.96.1](https://github.com/metalbear-co/mirrord/tree/3.96.1) - 2024-04-14
+
+
+### Changed
+
+- Increase max fd in internal proxy to fix connection limit issues
+
+
+### Fixed
+
+- Fixed layer making process zombie by calling panic from hookerror, also use
+  `sigkill` instead of `sigterm`
+
+
+## [3.96.0](https://github.com/metalbear-co/mirrord/tree/3.96.0) - 2024-04-09
+
+
+### Changed
+
+- mirrord now listens on 0.0.0.0 when requested and changes address to
+  localhost only when needed.
+  [#2319](https://github.com/metalbear-co/mirrord/issues/2319)
+
+
+### Internal
+
+- Adjusted `mirrord-kube` and `mirrord-agent` crates to allow wrapping
+  client-agent connections in TLS.
+  [#2299](https://github.com/metalbear-co/mirrord/issues/2299)
+- Removed dummy span name from logs.
+
+
+## [3.95.2](https://github.com/metalbear-co/mirrord/tree/3.95.2) - 2024-04-07
+
+
+### Internal
+
+- Fix release build, don't fail release on warnings
+  Some lint warnings appear only on release build, ignore it.
+- Fix release compilation CI
+
+
+## [3.95.1](https://github.com/metalbear-co/mirrord/tree/3.95.1) - 2024-04-07
+
+
+### Fixed
+
+- Allow `target` be a `string` in the JSON Schema
+  [#2188](https://github.com/metalbear-co/mirrord/issues/2188)
+- Fixed excessive stack consumption in the `mirrord-layer` by reducing tracing
+  in release profile.
+
+
+### Internal
+
+- Fix e2e failing on release because image doesn't exist
+- Use upstream tracing
+
+
+## [3.95.0](https://github.com/metalbear-co/mirrord/tree/3.95.0) - 2024-04-02
+
+
+### Changed
+
+- mirrord now unsets the env from within the process aswell
+
+
+## [3.94.0](https://github.com/metalbear-co/mirrord/tree/3.94.0) - 2024-04-01
+
+
+### Added
+
+- New config `env.unset` that allows user to unset environment variables in the
+  executed process.
+  This is useful for unsetting env like `HTTP_PROXY`, `AWS_PROFILE` that come
+  from the local environment
+  and cause undesired behavior (because those aren't needed for deployed apps).
+  [#2260](https://github.com/metalbear-co/mirrord/issues/2260)
+
+
+## [3.93.1](https://github.com/metalbear-co/mirrord/tree/3.93.1) - 2024-03-31
+
+
+### Fixed
+
+- Fix new IDE progress breaking older plugins.
+  Three issues fixed:
+  1. Show the new progress only when env var is set (to be set in newer IDE
+  versions).
+  2. Multi pod warning was showing everytime when no operator, not only when
+  targetting a deployment + no operator.
+  3. Show the message for rollouts as well.
+  [#2339](https://github.com/metalbear-co/mirrord/issues/2339)
+
+
+### Internal
+
+- Update Frida version to 16.2.1
+
+
+## [3.93.0](https://github.com/metalbear-co/mirrord/tree/3.93.0) - 2024-03-31
+
+
+### Added
+
+- Added handling HTTP upgrades in filtered connections (`mirrord-agent`).
+  Refactored TCP stealer code.
+  [#2270](https://github.com/metalbear-co/mirrord/issues/2270)
+- Add a new diagnostic command to calculate mirrord session latency
+
+
+### Changed
+
+- Changed `agent.image` config to also accept an extended version where you may
+  specify both _registry_ and _tag_ with `agent.image.registry` and
+  `agent.image.tag`.
+- Proxy errors now don't propagate back to libc but exit with a message
+- `use_proxy` behavior is now setting the proxy env to empty value instead of
+  unsetting. This should help with cases where
+  we need it to propogate to the extensions.
+
+
+### Fixed
+
+- Internal proxy and agent now properly handle connection shutdowns.
+  [#2309](https://github.com/metalbear-co/mirrord/issues/2309)
+- Fix some open/fd potential issues
+- Fixed the display of agent startup errors to the user.
+- Fixed timeout set on new internal proxy connection in `fork` detour.
+
+
+### Internal
+
+- Adds new message type `IdeMessage`. Allows us to send messages to the IDE
+  that should be shown in notification boxes, with buttons/actions.
+- Change design around analyticsreporter to be more robust/clean
+- Prepared an e2e test for stealing WebSockets connections with an HTTP filter
+  set.
+
+
 ## [3.92.1](https://github.com/metalbear-co/mirrord/tree/3.92.1) - 2024-03-17
 
 

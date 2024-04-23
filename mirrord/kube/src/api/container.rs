@@ -13,6 +13,7 @@ use crate::{api::kubernetes::AgentKubernetesConnectInfo, error::Result};
 
 pub mod ephemeral;
 pub mod job;
+pub mod pod;
 pub mod targeted;
 pub mod targetless;
 pub mod util;
@@ -35,6 +36,9 @@ pub struct ContainerParams {
     pub name: String,
     pub gid: u16,
     pub port: u16,
+    /// Value for [`AGENT_OPERATOR_CERT_ENV`](mirrord_protocol::AGENT_OPERATOR_CERT_ENV) set in
+    /// the agent container.
+    pub tls_cert: Option<String>,
 }
 
 impl ContainerParams {
@@ -49,7 +53,12 @@ impl ContainerParams {
                 .to_lowercase()
         );
 
-        ContainerParams { name, gid, port }
+        ContainerParams {
+            name,
+            gid,
+            port,
+            tls_cert: None,
+        }
     }
 }
 
@@ -67,6 +76,25 @@ pub trait ContainerVariant {
     fn params(&self) -> &ContainerParams;
 
     fn as_update(&self) -> Result<Self::Update>;
+}
+
+impl<T> ContainerVariant for Box<T>
+where
+    T: ContainerVariant + ?Sized,
+{
+    type Update = T::Update;
+
+    fn agent_config(&self) -> &AgentConfig {
+        T::agent_config(self)
+    }
+
+    fn params(&self) -> &ContainerParams {
+        T::params(self)
+    }
+
+    fn as_update(&self) -> Result<Self::Update> {
+        T::as_update(self)
+    }
 }
 
 pub trait ContainerApi<V>

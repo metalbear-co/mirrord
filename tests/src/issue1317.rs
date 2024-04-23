@@ -51,7 +51,7 @@ mod issue1317 {
         let host = host.trim_end();
         let connection = TcpStream::connect(format!("{host}:{port}"))
             .await
-            .expect(&format!("Failed connecting to {host:?}:{port:?}!"));
+            .unwrap_or_else(|_| panic!("Failed connecting to {host:?}:{port:?}!"));
 
         let (mut request_sender, connection) =
             http1::handshake(TokioIo::new(connection)).await.unwrap();
@@ -64,7 +64,7 @@ mod issue1317 {
 
         // Test that we can reach the service, before mirrord is started.
         let request = Request::builder()
-            .body(Full::new(Bytes::from(format!("GET 1"))))
+            .body(Full::new(Bytes::from("GET 1".to_string())))
             .unwrap();
         let response = request_sender
             .send_request(request)
@@ -90,7 +90,7 @@ mod issue1317 {
         // Now this request should be mirrored back to us, even though mirrord started sniffing
         // mid-session.
         let request = Request::builder()
-            .body(Full::new(Bytes::from(format!("GET 2"))))
+            .body(Full::new(Bytes::from("GET 2".to_string())))
             .unwrap();
         let response = request_sender
             .send_request(request)
@@ -108,7 +108,7 @@ mod issue1317 {
         // The last request sends `"EXIT"` in the body, and this triggers a `process::exit(0)` on
         // the local process.
         let request = Request::builder()
-            .body(Full::new(Bytes::from(format!("EXIT"))))
+            .body(Full::new(Bytes::from("EXIT".to_string())))
             .unwrap();
         let response = request_sender
             .send_request(request)

@@ -23,6 +23,7 @@ fn main() -> Result<()> {
         .create(true)
         .write(true)
         .read(true)
+        .truncate(false)
         .open("/tmp/rust_sample.txt")
         .unwrap();
     println!(">>>>> created file with write permission {write_file:#?}");

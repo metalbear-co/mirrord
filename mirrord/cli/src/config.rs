@@ -1,6 +1,6 @@
 #![deny(missing_docs)]
 
-use std::path::PathBuf;
+use std::{fmt::Display, path::PathBuf};
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
@@ -53,6 +53,9 @@ pub(super) enum Commands {
 
     /// Try out mirrord for Teams.
     Teams,
+
+    /// Diagnostic commands
+    Diagnose(Box<DiagnoseArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -68,14 +71,14 @@ pub enum FsMode {
     LocalWithOverrides,
 }
 
-impl ToString for FsMode {
-    fn to_string(&self) -> String {
-        match self {
-            FsMode::Local => "local".to_string(),
-            FsMode::LocalWithOverrides => "localwithoverrides".to_string(),
-            FsMode::Read => "read".to_string(),
-            FsMode::Write => "write".to_string(),
-        }
+impl Display for FsMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            FsMode::Local => "local",
+            FsMode::LocalWithOverrides => "localwithoverrides",
+            FsMode::Read => "read",
+            FsMode::Write => "write",
+        })
     }
 }
 
@@ -322,4 +325,21 @@ pub(super) struct VerifyConfigArgs {
 #[derive(Args, Debug)]
 pub(super) struct CompletionsArgs {
     pub(super) shell: Shell,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct DiagnoseArgs {
+    #[command(subcommand)]
+    pub command: DiagnoseCommand,
+}
+
+#[derive(Subcommand, Debug)]
+/// Commands for diagnosing potential issues introduced by mirrord.
+pub(super) enum DiagnoseCommand {
+    /// Check network connectivity and provide RTT (latency) statistics.
+    Latency {
+        /// Specify config file to use
+        #[arg(short = 'f')]
+        config_file: Option<String>,
+    },
 }

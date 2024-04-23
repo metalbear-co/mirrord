@@ -24,7 +24,7 @@ use mirrord_protocol::{
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
 use socket2::SockAddr;
-use tracing::{error, info, trace};
+use tracing::{error, trace};
 
 use super::{hooks::*, *};
 use crate::{
@@ -113,7 +113,7 @@ impl From<ConnectResult> for i32 {
 }
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
     let socket_kind = type_.try_into()?;
 
@@ -142,19 +142,25 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
     Detour::Success(socket_fd)
 }
 
-#[tracing::instrument(level = "trace", ret)]
-fn bind_port(sockfd: c_int, domain: c_int, port: u16) -> Detour<()> {
-    let address = match domain {
-        libc::AF_INET => Ok(SockAddr::from(SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::LOCALHOST),
-            port,
-        ))),
-        libc::AF_INET6 => Ok(SockAddr::from(SocketAddr::new(
-            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            port,
-        ))),
-        invalid => Err(Bypass::Domain(invalid)),
-    }?;
+/// Tries to bind the given socket to a loopback or an unspecified address similar to the given
+/// `requested_address`.
+///
+/// If the given `requested_address` is not a loopback and is specified, binds to either
+/// [`Ipv4Addr::LOCALHOST`] or [`Ipv6Addr::UNSPECIFIED`].
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+fn bind_similar_address(sockfd: c_int, requested_address: &SocketAddr) -> Detour<()> {
+    let addr = requested_address.ip();
+    let port = requested_address.port();
+
+    let address = if addr.is_loopback() || addr.is_unspecified() {
+        *requested_address
+    } else if addr.is_ipv4() {
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port)
+    } else {
+        SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port)
+    };
+
+    let address = SockAddr::from(address);
 
     let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
     if bind_result != 0 {
@@ -166,7 +172,7 @@ fn bind_port(sockfd: c_int, domain: c_int, port: u16) -> Detour<()> {
 
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state.
-#[tracing::instrument(level = "trace", ret, skip(raw_address))]
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(raw_address))]
 pub(super) fn bind(
     sockfd: c_int,
     raw_address: *const sockaddr,
@@ -175,8 +181,6 @@ pub(super) fn bind(
     let requested_address = SocketAddr::try_from_raw(raw_address, address_length)?;
     let requested_port = requested_address.port();
     let incoming_config = crate::setup().incoming_config();
-
-    let ignore_localhost = incoming_config.ignore_localhost;
 
     let mut socket = {
         SOCKETS
@@ -193,7 +197,7 @@ pub(super) fn bind(
 
     // we don't use `is_localhost` here since unspecified means to listen
     // on all IPs.
-    if ignore_localhost && requested_address.ip().is_loopback() {
+    if incoming_config.ignore_localhost && requested_address.ip().is_loopback() {
         return Detour::Bypass(Bypass::IgnoreLocalhost(requested_port));
     }
 
@@ -203,6 +207,40 @@ pub(super) fn bind(
         || incoming_config.ignore_ports.contains(&requested_port)
     {
         Err(Bypass::Port(requested_address.port()))?;
+    }
+
+    {
+        let http_filter_used = incoming_config.mode == IncomingMode::Steal
+            && (incoming_config.http_filter.header_filter.is_some()
+                || incoming_config.http_filter.path_filter.is_some());
+
+        let not_stolen_with_filter = !http_filter_used
+            || incoming_config
+                .http_filter
+                .ports
+                .as_slice()
+                .iter()
+                .all(|port| *port != requested_port);
+
+        let not_whitelisted = incoming_config
+            .ports
+            .as_ref()
+            .map(|ports| !ports.contains(&requested_port))
+            .unwrap_or(http_filter_used);
+
+        if not_stolen_with_filter && not_whitelisted {
+            Err(Bypass::Port(requested_address.port()))?;
+        }
+    }
+
+    // Check that the domain matches the requested address.
+    let domain_valid = match socket.domain {
+        libc::AF_INET => requested_address.is_ipv4(),
+        libc::AF_INET6 => requested_address.is_ipv6(),
+        _ => false,
+    };
+    if !domain_valid {
+        Err(HookError::InvalidBindAddressForDomain)?;
     }
 
     // Check if the user's requested address isn't already in use, even though it's not actually
@@ -221,22 +259,19 @@ pub(super) fn bind(
     // try to bind the requested port, if not available get a random port
     // if there's configuration and binding fails with the requested port
     // we return address not available and not fallback to a random port.
-    let listen_port = crate::setup()
-        .incoming_config()
+    let listen_port = incoming_config
         .listen_ports
         .get_by_left(&requested_address.port())
-        .cloned();
-
-    // Listen port was specified
+        .copied();
     if let Some(port) = listen_port {
-        bind_port(sockfd, socket.domain, port)
+        // Listen port was specified. If we fail to bind, we should fail the whole operation.
+        bind_similar_address(sockfd, &SocketAddr::new(requested_address.ip(), port))
     } else {
-        bind_port(sockfd, socket.domain, requested_address.port())
-            .or_else(|e| {
-                info!("bind -> first `bind` failed on port {:?} with {e:?}, trying to bind to a random port", requested_address.port());
-                bind_port(sockfd, socket.domain, 0)
-            }
-        )
+        // Listen port was not specified. If we fail to bind, it's ok to fall back to a random port.
+        bind_similar_address(sockfd, &requested_address).or_else(|error| {
+            trace!(%error, %requested_address, "bind failed, trying to bind to on a random port");
+            bind_similar_address(sockfd, &SocketAddr::new(requested_address.ip(), 0))
+        })
     }?;
 
     // We need to find out what's the port we bound to, that'll be used by `poll_agent` to
@@ -244,9 +279,9 @@ pub(super) fn bind(
     let address = unsafe {
         SockAddr::try_init(|storage, len| {
             if FN_GETSOCKNAME(sockfd, storage.cast(), len) == -1 {
-                error!("bind -> Failed `getsockname` sockfd {:#?}", sockfd);
-
-                Err(io::Error::last_os_error())?
+                let error = io::Error::last_os_error();
+                error!(%error, sockfd, "`getsockname` failed to get address of a socket after bind");
+                Err(error)
             } else {
                 Ok(())
             }
@@ -271,7 +306,7 @@ pub(super) fn bind(
 
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
 /// later be routed to the fake local port.
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
     let mut socket = {
         SOCKETS
@@ -343,7 +378,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
 /// interception procedure.
 /// This returns errno so we can restore the correct errno in case result is -1 (until we get
 /// back to the hook we might call functions that will corrupt errno)
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 fn connect_outgoing<const CALL_CONNECT: bool>(
     sockfd: RawFd,
     remote_address: SockAddr,
@@ -432,7 +467,7 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
 /// trying to connect to - then don't forward this connection to the agent, and instead of
 /// connecting to the requested address, connect to the actual address where the application
 /// is locally listening.
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 fn connect_to_local_address(
     sockfd: RawFd,
     user_socket_info: &UserSocket,
@@ -481,7 +516,7 @@ fn connect_to_local_address(
 /// that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request interception procedure.
 ///
 /// 3. `sockt.state` is `Bound`: part of the tcp mirror feature.
-#[tracing::instrument(level = "trace", ret, skip(raw_address))]
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(raw_address))]
 pub(super) fn connect(
     sockfd: RawFd,
     raw_address: *const sockaddr,
@@ -585,7 +620,7 @@ pub(super) fn connect(
 
 /// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
 /// cluster)
-#[tracing::instrument(level = "trace", skip(address, address_len))]
+#[mirrord_layer_macro::instrument(level = "trace", skip(address, address_len))]
 pub(super) fn getpeername(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -614,7 +649,7 @@ pub(super) fn getpeername(
 ///
 /// When [`libc::bind`]ing on port `0`, we change the port to be the actual bound port, as this is
 /// consistent behavior with libc.
-#[tracing::instrument(level = "trace", ret, skip(address, address_len))]
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(address, address_len))]
 pub(super) fn getsockname(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -650,11 +685,9 @@ pub(super) fn getsockname(
     fill_address(address, address_len, local_address.try_into()?)
 }
 
-/// When the fd is "ours", we accept and recv the first bytes that contain metadata on the
-/// connection to be set in our lock.
-///
-/// This enables us to have a safe way to get "remote" information (remote ip, port, etc).
-#[tracing::instrument(level = "trace", ret, skip(address, address_len))]
+/// When the fd is "ours", we accept and use [`ConnMetadataRequest`] to retrieve peer address from
+/// the internal proxy.
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(address, address_len))]
 pub(super) fn accept(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -710,7 +743,7 @@ pub(super) fn accept(
     Detour::Success(new_fd)
 }
 
-#[tracing::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), HookError> {
     match cmd {
         libc::F_DUPFD | libc::F_DUPFD_CLOEXEC => dup::<true>(orig_fd, fcntl_fd),
@@ -727,7 +760,7 @@ pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), Hoo
 ///
 /// We need this to properly handle some cases in [`fcntl`], [`dup2_detour`], and [`dup3_detour`].
 /// Extra relevant for node on macos.
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
     if let Some(socket) = SOCKETS.get(&fd).map(|entry| entry.value().clone()) {
         SOCKETS.insert(dup_fd as RawFd, socket);
@@ -756,7 +789,7 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
 /// # Note
 ///
 /// This function updates the mapping in [`REMOTE_DNS_REVERSE_MAPPING`].
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn remote_getaddrinfo(node: String) -> HookResult<Vec<(String, IpAddr)>> {
     let addr_info_list = common::make_proxy_request_with_response(GetAddrInfoRequest { node })?.0?;
 
@@ -781,7 +814,7 @@ pub(super) fn remote_getaddrinfo(node: String) -> HookResult<Vec<(String, IpAddr
 ///
 /// `-layer` sends a request to `-agent` asking for the `-agent`'s list of `addrinfo`s (remote call
 /// for the equivalent of this function).
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn getaddrinfo(
     rawish_node: Option<&CStr>,
     rawish_service: Option<&CStr>,
@@ -918,7 +951,7 @@ fn remote_hostname_string() -> Detour<CString> {
 /// **Safety**:
 /// See the [`GETHOSTBYNAME_ALIASES_PTR`] docs. If you see this function being called and some weird
 /// issue is going on, assume that you might've triggered the UB.
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
     let name: String = raw_name
         .bypass(Bypass::NullNode)?
@@ -994,7 +1027,7 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
 }
 
 /// Resolve hostname from remote host with caching for the result
-#[tracing::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) fn gethostname() -> Detour<&'static CString> {
     HOSTNAME.get_or_detour_init(remote_hostname_string)
 }
@@ -1025,7 +1058,7 @@ pub(super) fn gethostname() -> Detour<&'static CString> {
 /// instead of letting whatever came in `raw_source` through.
 ///
 /// See [`send_to`] for more information.
-#[tracing::instrument(level = "trace", ret, skip(raw_source, source_length))]
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(raw_source, source_length))]
 pub(super) fn recv_from(
     sockfd: i32,
     recv_from_result: isize,
@@ -1048,7 +1081,7 @@ pub(super) fn recv_from(
 }
 
 /// Helps manually resolving DNS on port `53` with UDP, see [`send_to`] and [`sendmsg`].
-#[tracing::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 fn send_dns_patch(
     sockfd: RawFd,
     user_socket_info: Arc<UserSocket>,
@@ -1118,7 +1151,7 @@ fn send_dns_patch(
 /// mirrord, which is: destination becomes `127.0.0.1:{not 53}`.
 ///
 /// See [`recv_from`] for more information.
-#[tracing::instrument(
+#[mirrord_layer_macro::instrument(
     level = "trace",
     ret,
     skip(raw_message, raw_destination, destination_length)
@@ -1205,7 +1238,7 @@ pub(super) fn send_to(
 
 /// Same behavior as [`send_to`], the only difference is that here we deal with [`libc::msghdr`],
 /// instead of directly with socket addresses.
-#[tracing::instrument(level = "trace", ret, skip(raw_message_header))]
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(raw_message_header))]
 pub(super) fn sendmsg(
     sockfd: RawFd,
     raw_message_header: *const libc::msghdr,
@@ -1248,10 +1281,13 @@ pub(super) fn sendmsg(
         let mut true_message_header = Box::new(unsafe { *raw_message_header });
 
         unsafe {
-            true_message_header.as_mut().msg_name.copy_from(
-                rawish_true_destination.as_ptr() as *const _,
-                rawish_true_destination.len() as usize,
-            )
+            true_message_header
+                .as_mut()
+                .msg_name
+                .copy_from_nonoverlapping(
+                    rawish_true_destination.as_ptr() as *const _,
+                    rawish_true_destination.len() as usize,
+                )
         };
         true_message_header.as_mut().msg_namelen = rawish_true_destination.len();
 
@@ -1280,7 +1316,7 @@ pub(super) fn sendmsg(
             true_message_header
                 .as_mut()
                 .msg_name
-                .copy_from(raw_interceptor_address, raw_interceptor_length as usize)
+                .copy_from_nonoverlapping(raw_interceptor_address, raw_interceptor_length as usize)
         };
         true_message_header.as_mut().msg_namelen = raw_interceptor_length;
 
