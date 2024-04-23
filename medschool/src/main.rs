@@ -384,7 +384,6 @@ fn parse_docs_into_tree(files: Vec<syn::File>) -> Result<BTreeSet<PartialType>, 
                             .fields
                             .into_iter()
                             .filter_map(PartialField::new)
-                            .into_iter()
                             .collect::<Vec<_>>();
 
                         let thing_docs_untreated = docs_from_attributes(item.attrs);
