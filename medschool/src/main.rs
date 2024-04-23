@@ -14,7 +14,7 @@
 #![deny(clippy::missing_docs_in_private_items)]
 #![deny(missing_docs)]
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::BTreeSet,
     fmt::Display,
     fs::{self, File},
     hash::Hash,
@@ -374,12 +374,16 @@ fn parse_docs_into_tree(files: Vec<syn::File>) -> Result<BTreeSet<PartialType>, 
                         })
                     }
                     syn::Item::Struct(item) => {
+                        // we used to remove any duplicate fields such as two fields with the same
+                        // type by converting them to a HashSet
+                        // for example, struct {a : B, b: B} would duplicate docs for B
+                        // for our use case this is not necessary, and somehow ends up dropping
+                        // fields so we're just going to keep the fields as
+                        // they are and consider this again later
                         let fields = item
                             .fields
                             .into_iter()
                             .filter_map(PartialField::new)
-                            .collect::<HashSet<_>>()
-                            .into_iter()
                             .collect::<Vec<_>>();
 
                         let thing_docs_untreated = docs_from_attributes(item.attrs);
