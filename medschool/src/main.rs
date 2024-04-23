@@ -14,7 +14,7 @@
 #![deny(clippy::missing_docs_in_private_items)]
 #![deny(missing_docs)]
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::BTreeSet,
     fmt::Display,
     fs::{self, File},
     hash::Hash,
@@ -378,7 +378,6 @@ fn parse_docs_into_tree(files: Vec<syn::File>) -> Result<BTreeSet<PartialType>, 
                             .fields
                             .into_iter()
                             .filter_map(PartialField::new)
-                            .collect::<HashSet<_>>()
                             .into_iter()
                             .collect::<Vec<_>>();
 
