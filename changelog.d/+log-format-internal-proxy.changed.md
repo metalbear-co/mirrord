@@ -1,1 +1,0 @@
-Internal proxy now emits plain text instead of ANSI

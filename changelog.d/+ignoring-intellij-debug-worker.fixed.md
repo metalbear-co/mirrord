@@ -1,1 +1,0 @@
-Added `JetBrains.Debugger.Worker` to the list of known build tools, fixing compatibility with Rider 2024.1.

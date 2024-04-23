@@ -8,6 +8,30 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.98.1](https://github.com/metalbear-co/mirrord/tree/3.98.1) - 2024-04-23
+
+
+### Changed
+
+- Internal proxy now emits plain text instead of ANSI
+
+
+### Fixed
+
+- don't re-resolve when connecting to loopback on outgoing filter
+  [#2389](https://github.com/metalbear-co/mirrord/issues/2389)
+- Added `JetBrains.Debugger.Worker` to the list of known build tools, fixing
+  compatibility with Rider 2024.1.
+
+
+### Internal
+
+- Added getters to `KubernetesAPI`.
+- Improved tracing in the agent connection task.
+- Sending client certificate public key instead of fingerprint in the analytics
+  to match operator's behavior.
+
+
 ## [3.98.0](https://github.com/metalbear-co/mirrord/tree/3.98.0) - 2024-04-18
 
 
