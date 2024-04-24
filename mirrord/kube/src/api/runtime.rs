@@ -6,23 +6,22 @@ use std::{
 };
 
 use k8s_openapi::{
-    api::{
-        apps::v1::Deployment,
-        core::v1::{Node, Pod},
-    },
+    api::core::v1::{Node, Pod},
     apimachinery::pkg::api::resource::Quantity,
 };
 use kube::{api::ListParams, Api, Client};
-use mirrord_config::target::{DeploymentTarget, PodTarget, RolloutTarget, Target};
+use mirrord_config::target::Target;
 use mirrord_protocol::MeshVendor;
 
 use crate::{
-    api::{
-        container::choose_container,
-        kubernetes::{get_k8s_resource_api, rollout::Rollout},
-    },
+    api::{container::choose_container, kubernetes::get_k8s_resource_api},
     error::{KubeApiError, Result},
 };
+
+pub mod deployment;
+pub mod job;
+pub mod pod;
+pub mod rollout;
 
 #[derive(Debug)]
 pub enum ContainerRuntime {
@@ -247,6 +246,7 @@ impl RuntimeDataProvider for Target {
             Target::Deployment(deployment) => deployment.runtime_data(client, namespace).await,
             Target::Pod(pod) => pod.runtime_data(client, namespace).await,
             Target::Rollout(rollout) => rollout.runtime_data(client, namespace).await,
+            Target::Job(job) => job.runtime_data(client, namespace).await,
             Target::Targetless => {
                 unreachable!("runtime_data can't be called on Targetless")
             }
@@ -254,82 +254,9 @@ impl RuntimeDataProvider for Target {
     }
 }
 
-impl RuntimeTarget for DeploymentTarget {
-    fn target(&self) -> &str {
-        &self.deployment
-    }
-
-    fn container(&self) -> &Option<String> {
-        &self.container
-    }
-}
-
-impl RuntimeDataFromLabels for DeploymentTarget {
-    async fn get_labels(
-        &self,
-        client: &Client,
-        namespace: Option<&str>,
-    ) -> Result<BTreeMap<String, String>> {
-        let deployment_api: Api<Deployment> = get_k8s_resource_api(client, namespace);
-        let deployment = deployment_api
-            .get(&self.deployment)
-            .await
-            .map_err(KubeApiError::KubeError)?;
-
-        deployment
-            .spec
-            .and_then(|spec| spec.selector.match_labels)
-            .ok_or_else(|| {
-                KubeApiError::DeploymentNotFound(format!(
-                    "Label for deployment: {}, not found!",
-                    self.deployment.clone()
-                ))
-            })
-    }
-}
-
-impl RuntimeTarget for RolloutTarget {
-    fn target(&self) -> &str {
-        &self.rollout
-    }
-
-    fn container(&self) -> &Option<String> {
-        &self.container
-    }
-}
-
-impl RuntimeDataFromLabels for RolloutTarget {
-    async fn get_labels(
-        &self,
-        client: &Client,
-        namespace: Option<&str>,
-    ) -> Result<BTreeMap<String, String>> {
-        let rollout_api: Api<Rollout> = get_k8s_resource_api(client, namespace);
-        let rollout = rollout_api
-            .get(&self.rollout)
-            .await
-            .map_err(KubeApiError::KubeError)?;
-
-        rollout.match_labels().ok_or_else(|| {
-            KubeApiError::DeploymentNotFound(format!(
-                "Label for rollout: {}, not found!",
-                self.rollout.clone()
-            ))
-        })
-    }
-}
-
-impl RuntimeDataProvider for PodTarget {
-    async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
-        let pod_api: Api<Pod> = get_k8s_resource_api(client, namespace);
-        let pod = pod_api.get(&self.pod).await?;
-
-        RuntimeData::from_pod(&pod, &self.container)
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use mirrord_config::target::{deployment::DeploymentTarget, pod::PodTarget};
     use rstest::rstest;
 
     use super::*;

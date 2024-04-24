@@ -243,6 +243,8 @@ impl OperatorApi {
     /// and working, it'll just work without the operator.
     ///
     /// For a fuller documentation, see the docs in `operator/service/src/main.rs::listen`.
+    ///
+    /// - `copy_target`: When this feature is enabled, `target` validation is done in the operator.
     #[tracing::instrument(level = "trace", skip_all)]
     pub async fn create_session<P, R: Reporter>(
         config: &LayerConfig,
@@ -329,6 +331,7 @@ impl OperatorApi {
         version_progress.success(None);
 
         let target_to_connect = if config.feature.copy_target.enabled {
+            // We do not validate the `target` here, it's up to the operator.
             let mut copy_progress = progress.subtask("copying target");
             let copied = operator_api
                 .copy_target(

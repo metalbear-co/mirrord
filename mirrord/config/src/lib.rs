@@ -511,7 +511,7 @@ mod tests {
             },
             FeatureFileConfig,
         },
-        target::{PodTarget, Target, TargetFileConfig},
+        target::{Target, TargetFileConfig},
         util::ToggleableConfig,
     };
 
@@ -665,7 +665,7 @@ mod tests {
     fn full(
         #[values(ConfigType::Json, ConfigType::Toml, ConfigType::Yaml)] config_type: ConfigType,
     ) {
-        use crate::agent::AgentImageFileConfig;
+        use crate::{agent::AgentImageFileConfig, target::pod::PodTarget};
 
         let input = config_type.full();
 

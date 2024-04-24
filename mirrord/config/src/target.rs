@@ -1,5 +1,5 @@
 use std::{
-    fmt::{self, Display},
+    fmt::{self},
     str::FromStr,
 };
 
@@ -7,6 +7,7 @@ use mirrord_analytics::CollectAnalytics;
 use schemars::{gen::SchemaGenerator, schema::SchemaObject, JsonSchema};
 use serde::{Deserialize, Serialize};
 
+use self::{deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, rollout::RolloutTarget};
 use crate::{
     config::{
         from_env::{FromEnv, FromEnvWithError},
@@ -15,6 +16,11 @@ use crate::{
     },
     util::string_or_struct_option,
 };
+
+pub mod deployment;
+pub mod job;
+pub mod pod;
+pub mod rollout;
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
@@ -203,15 +209,17 @@ mirrord-layer failed to parse the provided target!
 pub enum Target {
     /// <!--${internal}-->
     /// Mirror a deployment.
-    Deployment(DeploymentTarget),
+    Deployment(deployment::DeploymentTarget),
 
     /// <!--${internal}-->
     /// Mirror a pod.
-    Pod(PodTarget),
+    Pod(pod::PodTarget),
 
     /// <!--${internal}-->
     /// Mirror a rollout.
-    Rollout(RolloutTarget),
+    Rollout(rollout::RolloutTarget),
+
+    Job(job::JobTarget),
 
     /// <!--${internal}-->
     /// Spawn a new pod.
@@ -228,10 +236,10 @@ impl FromStr for Target {
         let mut split = target.split('/');
         match split.next() {
             Some("deployment") | Some("deploy") => {
-                DeploymentTarget::from_split(&mut split).map(Target::Deployment)
+                deployment::DeploymentTarget::from_split(&mut split).map(Target::Deployment)
             }
-            Some("rollout") => RolloutTarget::from_split(&mut split).map(Target::Rollout),
-            Some("pod") => PodTarget::from_split(&mut split).map(Target::Pod),
+            Some("rollout") => rollout::RolloutTarget::from_split(&mut split).map(Target::Rollout),
+            Some("pod") => pod::PodTarget::from_split(&mut split).map(Target::Pod),
             _ => Err(ConfigError::InvalidTarget(format!(
                 "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
             ))),
@@ -246,6 +254,7 @@ impl Target {
             Target::Deployment(deployment) => deployment.deployment.clone(),
             Target::Pod(pod) => pod.pod.clone(),
             Target::Rollout(rollout) => rollout.rollout.clone(),
+            Target::Job(job) => job.job.clone(),
             Target::Targetless => {
                 unreachable!("this shouldn't happen - called from operator on a flow where it's not targetless.")
             }
@@ -294,6 +303,7 @@ macro_rules! impl_target_display {
 impl_target_display!(PodTarget, pod);
 impl_target_display!(DeploymentTarget, deployment);
 impl_target_display!(RolloutTarget, rollout);
+impl_target_display!(JobTarget, job);
 
 impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -302,116 +312,7 @@ impl fmt::Display for Target {
             Target::Pod(pod) => pod.fmt_display(f),
             Target::Deployment(dep) => dep.fmt_display(f),
             Target::Rollout(roll) => roll.fmt_display(f),
-        }
-    }
-}
-
-/// <!--${internal}-->
-/// Mirror the pod specified by [`PodTarget::pod`].
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct PodTarget {
-    /// <!--${internal}-->
-    /// Pod to mirror.
-    pub pod: String,
-    pub container: Option<String>,
-}
-
-impl Display for PodTarget {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}{}",
-            self.container
-                .as_ref()
-                .map(|c| format!("{c}/"))
-                .unwrap_or_default(),
-            self.pod.clone()
-        )
-    }
-}
-
-impl FromSplit for PodTarget {
-    fn from_split(split: &mut std::str::Split<char>) -> Result<Self> {
-        let pod = split
-            .next()
-            .ok_or_else(|| ConfigError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_string()))?;
-        match (split.next(), split.next()) {
-            (Some("container"), Some(container)) => Ok(Self {
-                pod: pod.to_string(),
-                container: Some(container.to_string()),
-            }),
-            (None, None) => Ok(Self {
-                pod: pod.to_string(),
-                container: None,
-            }),
-            _ => Err(ConfigError::InvalidTarget(
-                FAIL_PARSE_DEPLOYMENT_OR_POD.to_string(),
-            )),
-        }
-    }
-}
-
-/// <!--${internal}-->
-/// Mirror the deployment specified by [`DeploymentTarget::deployment`].
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct DeploymentTarget {
-    /// <!--${internal}-->
-    /// Deployment to mirror.
-    pub deployment: String,
-    pub container: Option<String>,
-}
-
-impl FromSplit for DeploymentTarget {
-    fn from_split(split: &mut std::str::Split<char>) -> Result<Self> {
-        let deployment = split
-            .next()
-            .ok_or_else(|| ConfigError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_string()))?;
-        match (split.next(), split.next()) {
-            (Some("container"), Some(container)) => Ok(Self {
-                deployment: deployment.to_string(),
-                container: Some(container.to_string()),
-            }),
-            (None, None) => Ok(Self {
-                deployment: deployment.to_string(),
-                container: None,
-            }),
-            _ => Err(ConfigError::InvalidTarget(
-                FAIL_PARSE_DEPLOYMENT_OR_POD.to_string(),
-            )),
-        }
-    }
-}
-
-/// <!--${internal}-->
-/// Mirror the rollout specified by [`RolloutTarget::rollout`].
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct RolloutTarget {
-    /// <!--${internal}-->
-    /// Rollout to mirror.
-    pub rollout: String,
-    pub container: Option<String>,
-}
-
-impl FromSplit for RolloutTarget {
-    fn from_split(split: &mut std::str::Split<char>) -> Result<Self> {
-        let rollout = split
-            .next()
-            .ok_or_else(|| ConfigError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_string()))?;
-        match (split.next(), split.next()) {
-            (Some("container"), Some(container)) => Ok(Self {
-                rollout: rollout.to_string(),
-                container: Some(container.to_string()),
-            }),
-            (None, None) => Ok(Self {
-                rollout: rollout.to_string(),
-                container: None,
-            }),
-            _ => Err(ConfigError::InvalidTarget(
-                FAIL_PARSE_DEPLOYMENT_OR_POD.to_string(),
-            )),
+            Target::Job(job) => job.fmt_display(f),
         }
     }
 }
@@ -425,6 +326,7 @@ bitflags::bitflags! {
         const DEPLOYMENT = 4;
         const CONTAINER = 8;
         const ROLLOUT = 16;
+        const JOB = 32;
     }
 }
 
@@ -451,6 +353,12 @@ impl CollectAnalytics for &TargetConfig {
                 Target::Rollout(rollout) => {
                     flags |= TargetAnalyticFlags::ROLLOUT;
                     if rollout.container.is_some() {
+                        flags |= TargetAnalyticFlags::CONTAINER;
+                    }
+                }
+                Target::Job(job) => {
+                    flags |= TargetAnalyticFlags::JOB;
+                    if job.container.is_some() {
                         flags |= TargetAnalyticFlags::CONTAINER;
                     }
                 }
