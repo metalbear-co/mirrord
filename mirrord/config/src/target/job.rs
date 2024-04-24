@@ -33,6 +33,7 @@ impl FromSplit for JobTarget {
         let job = split
             .next()
             .ok_or_else(|| ConfigError::InvalidTarget("Not job 1!".to_string()))?;
+
         match (split.next(), split.next()) {
             (Some("container"), Some(container)) => Ok(Self {
                 job: job.to_string(),
