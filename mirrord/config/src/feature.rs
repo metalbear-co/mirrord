@@ -3,6 +3,7 @@ use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
 use self::{copy_target::CopyTargetConfig, env::EnvConfig, fs::FsConfig, network::NetworkConfig};
+use crate::config::source::MirrordConfigSource;
 
 pub mod copy_target;
 pub mod env;
@@ -56,7 +57,8 @@ pub mod network;
 ///       },
 ///       "dns": false
 ///     },
-///     "copy_target": false
+///     "copy_target": false,
+///     "hostname": true
 ///   }
 /// }
 /// ```
@@ -87,6 +89,12 @@ pub struct FeatureConfig {
     /// (`targetless` mode).
     #[config(nested)]
     pub copy_target: CopyTargetConfig,
+
+    /// ## feature.hostname {#feature-hostname}
+    ///
+    /// Should mirrord return the hostname of the target pod when calling `gethostname`
+    #[config(default = true)]
+    pub hostname: bool,
 }
 
 impl CollectAnalytics for &FeatureConfig {
@@ -95,5 +103,6 @@ impl CollectAnalytics for &FeatureConfig {
         analytics.add("fs", &self.fs);
         analytics.add("network", &self.network);
         analytics.add("copy_target", &self.copy_target);
+        analytics.add("hostname", self.hostname);
     }
 }

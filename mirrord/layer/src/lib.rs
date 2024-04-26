@@ -327,7 +327,8 @@ fn layer_start(mut config: LayerConfig) {
     init_tracing();
 
     let debugger_ports = DebuggerPorts::from_env();
-    let state = LayerSetup::new(config, debugger_ports, trace_only);
+    let local_hostname = trace_only || !config.feature.hostname;
+    let state = LayerSetup::new(config, debugger_ports, local_hostname);
     SETUP.set(state).unwrap();
 
     let state = setup();
