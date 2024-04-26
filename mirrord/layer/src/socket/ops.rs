@@ -210,22 +210,31 @@ pub(super) fn bind(
     }
 
     {
+        let mapped_port = crate::setup()
+            .incoming_config()
+            .port_mapping
+            .get_by_left(&requested_address.port())
+            .copied()
+            .unwrap_or_else(|| requested_address.port());
         let http_filter_used = incoming_config.mode == IncomingMode::Steal
             && (incoming_config.http_filter.header_filter.is_some()
                 || incoming_config.http_filter.path_filter.is_some());
 
+        // this is a bit weird but it makes more sense configured ports are the remote port
+        // and not the local, so the check is done on the mapped port
+        // see https://github.com/metalbear-co/mirrord/issues/2397
         let not_stolen_with_filter = !http_filter_used
             || incoming_config
                 .http_filter
                 .ports
                 .as_slice()
                 .iter()
-                .all(|port| *port != requested_port);
+                .all(|port| *port != mapped_port);
 
         let not_whitelisted = incoming_config
             .ports
             .as_ref()
-            .map(|ports| !ports.contains(&requested_port))
+            .map(|ports| !ports.contains(&mapped_port))
             .unwrap_or(http_filter_used);
 
         if not_stolen_with_filter && not_whitelisted {
