@@ -56,9 +56,8 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &&ContainerParams) -> Vec<V
     if let Some(timeout) = agent.dns.timeout {
         env.push(("MIRRORD_AGENT_DNS_TIMEOUT".to_string(), timeout.to_string()));
     };
-    
-    env
-        .into_iter()
+
+    env.into_iter()
         .chain(
             params
                 .tls_cert

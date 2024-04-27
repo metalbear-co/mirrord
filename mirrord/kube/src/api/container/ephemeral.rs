@@ -11,6 +11,7 @@ use serde_json::json;
 use tokio::pin;
 use tracing::debug;
 
+use super::util::agent_env;
 use crate::{
     api::{
         container::{
@@ -22,8 +23,6 @@ use crate::{
     },
     error::{KubeApiError, Result},
 };
-
-use super::util::agent_env;
 
 fn is_ephemeral_container_running(pod: Pod, container_name: &str) -> bool {
     debug!("pod status: {:?}", &pod.status);
