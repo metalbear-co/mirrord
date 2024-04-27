@@ -9,7 +9,6 @@ use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 
 use super::ops::*;
 use crate::{detour::DetourGuard, hooks::HookManager, replace};
-
 /// Here we keep addr infos that we allocated so we'll know when to use the original
 /// freeaddrinfo function and when to use our implementation
 pub(crate) static MANAGED_ADDRINFO: LazyLock<DashSet<usize>> = LazyLock::new(DashSet::new);
@@ -437,6 +436,70 @@ pub(super) unsafe extern "C" fn sendmsg_detour(
     }
 }
 
+#[cfg(target_os = "macos")]
+#[allow(non_camel_case_types)]
+mod macos {
+    #[repr(C, align(4))]
+    pub struct dns_sortaddr_t {
+        pub address: libc::in_addr,
+        pub mask: libc::in_addr,
+    }
+
+    #[repr(C, align(4))]
+    pub struct dns_resolver_t {
+        pub domain: *mut libc::c_char,
+        pub n_nameserver: i32,
+        pub nameserver: *mut *mut libc::sockaddr,
+        pub port: u16,
+        pub n_search: i32,
+        pub search: *mut *mut libc::c_char,
+        pub n_sortaddr: i32,
+        pub sortaddr: *mut *mut dns_sortaddr_t,
+        pub options: *mut libc::c_char,
+        pub timeout: u32,
+        pub search_order: u32,
+        pub if_index: u32,
+        pub flags: u32,
+        pub reach_flags: u32,
+        pub reserved: [u32; 5],
+    }
+
+    #[repr(C, align(4))]
+    pub struct dns_config_t {
+        pub n_resolver: i32,
+        pub resolver: *mut *mut dns_resolver_t,
+        pub n_scoped_resolver: i32,
+        pub scoped_resolver: *mut *mut dns_resolver_t,
+        pub reserved: [u32; 5],
+    }
+}
+
+#[cfg(target_os = "macos")]
+use macos::*;
+
+/// This implementation is actually enough for Netty case, since it seems to use the "standard"
+/// approach if resolver returned here is null TODO: return a real resolver based on remote
+/// resolv.conf
+#[cfg(target_os = "macos")]
+#[hook_guard_fn]
+unsafe extern "C" fn dns_configuration_copy_detour() -> *mut dns_config_t {
+    tracing::debug!("dns copy");
+    Box::into_raw(Box::new(dns_config_t {
+        n_resolver: 0,
+        resolver: std::ptr::null_mut(),
+        n_scoped_resolver: 0,
+        scoped_resolver: std::ptr::null_mut(),
+        reserved: [0; 5],
+    }))
+}
+
+#[cfg(target_os = "macos")]
+#[hook_guard_fn]
+unsafe extern "C" fn dns_configuration_free_detour(config: *mut dns_config_t) {
+    let _config = Box::from_raw(config);
+    // It should drop it automatically
+}
+
 pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled_remote_dns: bool) {
     replace!(hook_manager, "socket", socket_detour, FnSocket, FN_SOCKET);
 
@@ -570,5 +633,22 @@ pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled
             FnFreeaddrinfo,
             FN_FREEADDRINFO
         );
+        #[cfg(target_os = "macos")]
+        {
+            replace!(
+                hook_manager,
+                "dns_configuration_copy",
+                dns_configuration_copy_detour,
+                FnDns_configuration_copy,
+                FN_DNS_CONFIGURATION_COPY
+            );
+            replace!(
+                hook_manager,
+                "dns_configuration_free",
+                dns_configuration_free_detour,
+                FnDns_configuration_free,
+                FN_DNS_CONFIGURATION_FREE
+            );
+        }
     }
 }
