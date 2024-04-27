@@ -7,7 +7,6 @@ use kube::{
 };
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
-use mirrord_protocol::AGENT_OPERATOR_CERT_ENV;
 use serde_json::json;
 use tokio::pin;
 use tracing::debug;
@@ -23,6 +22,8 @@ use crate::{
     },
     error::{KubeApiError, Result},
 };
+
+use super::util::agent_env;
 
 fn is_ephemeral_container_running(pod: Pod, container_name: &str) -> bool {
     debug!("pod status: {:?}", &pod.status);
@@ -200,27 +201,7 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
             runtime_data,
             command_line,
         } = self;
-
-        let env = [
-            ("RUST_LOG".to_string(), agent.log_level.clone()),
-            (
-                "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS".to_string(),
-                agent.flush_connections.to_string(),
-            ),
-            (
-                "MIRRORD_AGENT_NFTABLES".to_string(),
-                agent.nftables.to_string(),
-            ),
-        ]
-        .into_iter()
-        .chain(
-            params
-                .tls_cert
-                .clone()
-                .map(|cert| (AGENT_OPERATOR_CERT_ENV.to_string(), cert)),
-        )
-        .map(|(name, value)| json!({ "name": name, "value": value }))
-        .collect::<Vec<_>>();
+        let env = agent_env(agent, params);
 
         serde_json::from_value(json!({
             "name": params.name,

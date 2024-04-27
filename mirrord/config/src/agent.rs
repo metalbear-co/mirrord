@@ -250,6 +250,10 @@ pub struct AgentConfig {
     #[config(default = false)]
     pub nftables: bool,
 
+    /// ### agent.dns {#agent-dns}
+    #[config(nested)]
+    pub dns: AgentDnsConfig,
+
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).
@@ -390,6 +394,24 @@ impl AgentFileConfig {
             _ => Err(ConfigError::UnsupportedFormat),
         }
     }
+}
+
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
+#[config(derive = "JsonSchema")]
+#[cfg_attr(test, config(derive = "PartialEq, Eq"))]
+pub struct AgentDnsConfig {
+    /// ### agent.dns.timeout {#agent-dns-timeout}
+    ///
+    /// When agent resolves DNS, how long to wait for a response before timeout
+    /// By default this is set to 1 (in the agent).
+    /// If the value is too high, it might cause internal proxy to timeout and exit.
+    pub timeout: Option<u32>,
+
+    /// ### agent.dns.attempts {#agent-dns-attempts}
+    ///
+    /// When agent resolves DNS, how many attempts before failing.
+    /// If the value is too high, it might cause internal proxy to timeout and exit.
+    pub attempts: Option<u32>,
 }
 
 #[cfg(test)]

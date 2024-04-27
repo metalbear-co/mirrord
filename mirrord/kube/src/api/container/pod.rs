@@ -1,8 +1,8 @@
 use k8s_openapi::{api::core::v1::Pod, DeepMerge};
 use mirrord_config::agent::AgentConfig;
-use mirrord_protocol::AGENT_OPERATOR_CERT_ENV;
 use serde_json::json;
 
+use super::util::agent_env;
 use crate::{
     api::{
         container::{
@@ -79,26 +79,7 @@ impl ContainerVariant for PodVariant<'_> {
             .expect("Should be valid ResourceRequirements json")
         });
 
-        let env = [
-            ("RUST_LOG".to_string(), agent.log_level.clone()),
-            (
-                "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS".to_string(),
-                agent.flush_connections.to_string(),
-            ),
-            (
-                "MIRRORD_AGENT_NFTABLES".to_string(),
-                agent.nftables.to_string(),
-            ),
-        ]
-        .into_iter()
-        .chain(
-            params
-                .tls_cert
-                .clone()
-                .map(|cert| (AGENT_OPERATOR_CERT_ENV.to_string(), cert)),
-        )
-        .map(|(name, value)| json!({ "name": name, "value": value }))
-        .collect::<Vec<_>>();
+        let env = agent_env(agent, params);
 
         serde_json::from_value(json!({
             "metadata": {

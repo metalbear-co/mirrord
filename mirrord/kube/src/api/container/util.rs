@@ -4,7 +4,9 @@ use futures::{AsyncBufReadExt, TryStreamExt};
 use k8s_openapi::api::core::v1::{Pod, Toleration};
 use kube::{api::LogParams, Api};
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
+use mirrord_protocol::AGENT_OPERATOR_CERT_ENV;
 use regex::Regex;
+use serde_json::{json, Value};
 use tracing::warn;
 
 use crate::{api::container::ContainerParams, error::Result};
@@ -29,6 +31,42 @@ pub(super) fn get_capabilities(agent: &AgentConfig) -> Vec<LinuxCapability> {
         .copied()
         .filter(|c| !disabled.contains(c))
         .collect()
+}
+
+/// Builds mirrord agent environment variables.
+pub(super) fn agent_env(agent: &AgentConfig, params: &&ContainerParams) -> Vec<Value> {
+    let mut env = vec![
+        ("RUST_LOG".to_string(), agent.log_level.clone()),
+        (
+            "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS".to_string(),
+            agent.flush_connections.to_string(),
+        ),
+        (
+            "MIRRORD_AGENT_NFTABLES".to_string(),
+            agent.nftables.to_string(),
+        ),
+    ];
+    if let Some(attempts) = agent.dns.attempts {
+        env.push((
+            "MIRRORD_AGENT_DNS_ATTEMPTS".to_string(),
+            attempts.to_string(),
+        ));
+    }
+
+    if let Some(timeout) = agent.dns.timeout {
+        env.push(("MIRRORD_AGENT_DNS_TIMEOUT".to_string(), timeout.to_string()));
+    };
+    
+    env
+        .into_iter()
+        .chain(
+            params
+                .tls_cert
+                .clone()
+                .map(|cert| (AGENT_OPERATOR_CERT_ENV.to_string(), cert)),
+        )
+        .map(|(name, value)| json!({ "name": name, "value": value }))
+        .collect::<Vec<_>>()
 }
 
 pub(super) fn base_command_line(agent: &AgentConfig, params: &ContainerParams) -> Vec<String> {
