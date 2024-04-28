@@ -31,6 +31,8 @@ pub(crate) struct DnsCommand {
 pub(crate) struct DnsWorker {
     etc_path: PathBuf,
     request_rx: Receiver<DnsCommand>,
+    attempts: usize,
+    timeout: Duration,
 }
 
 impl DnsWorker {
@@ -54,6 +56,15 @@ impl DnsWorker {
         Self {
             etc_path,
             request_rx,
+            timeout: std::env::var("MIRRORD_AGENT_DNS_TIMEOUT")
+                .ok()
+                .and_then(|timeout| timeout.parse().ok())
+                .map(Duration::from_secs)
+                .unwrap_or_else(|| Duration::from_secs(1)),
+            attempts: std::env::var("MIRRORD_AGENT_DNS_ATTEMPTS")
+                .ok()
+                .and_then(|attempts| attempts.parse().ok())
+                .unwrap_or(1),
         }
     }
 
@@ -64,7 +75,13 @@ impl DnsWorker {
     ///
     /// We could probably cache results here.
     /// We cannot cache the [`AsyncResolver`] itself, becaues the configuration in `etc` may change.
-    async fn do_lookup(etc_path: PathBuf, host: String) -> RemoteResult<DnsLookup> {
+    #[tracing::instrument(level = "trace")]
+    async fn do_lookup(
+        etc_path: PathBuf,
+        host: String,
+        attempts: usize,
+        timeout: Duration,
+    ) -> RemoteResult<DnsLookup> {
         let resolv_conf_path = etc_path.join("resolv.conf");
         let hosts_path = etc_path.join("hosts");
 
@@ -74,8 +91,8 @@ impl DnsWorker {
         let (config, mut options) = parse_resolv_conf(resolv_conf)?;
         options.server_ordering_strategy =
             trust_dns_resolver::config::ServerOrderingStrategy::UserProvidedOrder;
-        options.timeout = Duration::from_secs(1);
-        options.attempts = 1;
+        options.timeout = timeout;
+        options.attempts = attempts;
 
         let mut resolver = AsyncResolver::tokio(config, options)?;
 
@@ -94,9 +111,10 @@ impl DnsWorker {
     /// Handles the given [`DnsCommand`] in a separate [`tokio::task`].
     fn handle_message(&self, message: DnsCommand) {
         let etc_path = self.etc_path.clone();
-
+        let timeout = self.timeout;
+        let attempts = self.attempts;
         let lookup_future = async move {
-            let result = Self::do_lookup(etc_path, message.request.node).await;
+            let result = Self::do_lookup(etc_path, message.request.node, attempts, timeout).await;
             if let Err(result) = message.response_tx.send(result) {
                 tracing::error!(?result, "Failed to send query response");
             }

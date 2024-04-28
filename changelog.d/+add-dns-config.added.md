@@ -1,0 +1,1 @@
+Add ability to configure DNS params for agent (timeout, attempts)

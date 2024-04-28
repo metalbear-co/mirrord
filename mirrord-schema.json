@@ -246,6 +246,17 @@
             "$ref": "#/definitions/LinuxCapability"
           }
         },
+        "dns": {
+          "title": "agent.dns {#agent-dns}",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FileAgentDnsConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "ephemeral": {
           "title": "agent.ephemeral {#agent-ephemeral}",
           "description": "Runs the agent as an [ephemeral container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)\n\nDefaults to `false`.",
@@ -595,6 +606,32 @@
               "type": "null"
             }
           ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "FileAgentDnsConfig": {
+      "type": "object",
+      "properties": {
+        "attempts": {
+          "title": "agent.dns.attempts {#agent-dns-attempts}",
+          "description": "When agent resolves DNS, how many attempts before failing. If the value is too high, it might cause internal proxy to timeout and exit.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "timeout": {
+          "title": "agent.dns.timeout {#agent-dns-timeout}",
+          "description": "When agent resolves DNS, how long to wait for a response before timeout By default this is set to 1 (in the agent). If the value is too high, it might cause internal proxy to timeout and exit.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
         }
       },
       "additionalProperties": false
