@@ -8,6 +8,32 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.99.0](https://github.com/metalbear-co/mirrord/tree/3.99.0) - 2024-04-28
+
+
+### Added
+
+- added configuration option to control (local) hostname resolving
+  [#2395](https://github.com/metalbear-co/mirrord/issues/2395)
+- Add ability to configure DNS params for agent (timeout, attempts)
+
+
+### Changed
+
+- Change ports and http_ports in incoming configuration to be checked upon
+  mapped port instead of local
+  [#2371](https://github.com/metalbear-co/mirrord/issues/2371)
+- Read /Network locally by default on macOS
+
+
+### Fixed
+
+- Fix medschool dropping fields sometimes
+  [#1580](https://github.com/metalbear-co/mirrord/issues/1580)
+- Fix DNS resolving case on macOS + Java Netty
+  [#2400](https://github.com/metalbear-co/mirrord/issues/2400)
+
+
 ## [3.98.1](https://github.com/metalbear-co/mirrord/tree/3.98.1) - 2024-04-23
 
 
