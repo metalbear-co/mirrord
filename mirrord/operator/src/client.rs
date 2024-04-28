@@ -614,7 +614,7 @@ impl OperatorApi {
             let api_version = CopyTargetCrd::api_version(dt);
             let plural = CopyTargetCrd::plural(dt);
 
-            let url = format!("/apis/{api_version}/proxy/namespaces/{namespace}/{plural}",);
+            let url = format!("/apis/{api_version}/namespaces/{namespace}/{plural}",);
 
             let mut builder = Request::builder()
                 .method("POST")
