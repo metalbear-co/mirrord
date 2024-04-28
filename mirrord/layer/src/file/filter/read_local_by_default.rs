@@ -69,6 +69,8 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         r"^/System",
         #[cfg(target_os = "macos")]
         r"^/var/run/com.apple",
+        #[cfg(target_os = "macos")]
+        r"^/Network",
         // Any path under the standard temp directory.
         &format!("^{}", env::temp_dir().to_string_lossy()),
         // Any path with the current dir's whole path as a substring of its path.
