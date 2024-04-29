@@ -342,6 +342,9 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::StatusFailure { operation, status } => {
                 Self::StatusFailure { operation, status }
             }
+            OperatorApiError::NoLicense => {
+                Self::OperatorConnectionFailed("No license found, falling back to OSS".to_string())
+            }
         }
     }
 }
