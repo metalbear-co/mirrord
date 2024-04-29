@@ -102,6 +102,9 @@ pub enum OperatorApiError {
         operation: String,
         status: Box<kube::core::Status>,
     },
+
+    #[error("Operator has expired license, falling back to OSS usage.")]
+    NoLicense,
 }
 
 type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
@@ -256,12 +259,7 @@ impl OperatorApi {
 
         let operator = operator_api.fetch_operator().await?;
 
-        // Warns the user if their license is close to expiring.
-        //
-        // I(alex) considered doing a check for validity also here for expired licenses,
-        // but maybe the time of the local user and of the operator are out of sync, so we
-        // could end up blocking a valid license (or even just warning on it could be
-        // confusing).
+        // Warns the user if their license is close to expiring or fallback to OSS if expired
         if let Some(days_until_expiration) =
             DateTime::from_naive_date(operator.spec.license.expire_at).days_until_expiration()
         {
@@ -287,6 +285,13 @@ impl OperatorApi {
                 progress.info(&good_validity_message);
                 info!(good_validity_message);
             }
+        } else {
+            let no_license_message = "No valid license found for mirrord for Teams, falling back to OSS usage. Visit https://app.metalbear.co to purchase or renew your license.";
+
+            progress.warning(no_license_message);
+            warn!(no_license_message);
+
+            return Err(OperatorApiError::NoLicense);
         }
 
         Self::check_config(config, &operator)?;
