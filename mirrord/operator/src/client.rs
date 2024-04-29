@@ -286,7 +286,7 @@ impl OperatorApi {
                 info!(good_validity_message);
             }
         } else {
-            let no_license_message = "Operator has no valid license, falling back to OSS usage.";
+            let no_license_message = "No valid license found for mirrord for Teams, falling back to OSS usage. Visit https://app.metalbear.co to purchase or renew your license.";
 
             progress.warning(no_license_message);
             warn!(no_license_message);
