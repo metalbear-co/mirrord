@@ -46,6 +46,9 @@ pub(crate) enum InternalProxySetupError {
 
     #[error("Failed pausing target container {0:#?}")]
     PauseError(String),
+
+    #[error("No pong received from agent. {0:#?}")]
+    NoPong(String),
 }
 
 #[derive(Debug, Error, Diagnostic)]

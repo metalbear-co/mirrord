@@ -243,9 +243,9 @@ impl ClientConnectionHandler {
 
         let file_manager = FileManager::new(pid.or_else(|| state.ephemeral.then_some(1)));
 
-        let tcp_sniffer_api = Self::ceate_sniffer_api(id, bg_tasks.sniffer, &mut connection).await;
+        let tcp_sniffer_api = Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection).await;
         let tcp_stealer_api =
-            Self::ceate_stealer_api(id, bg_tasks.stealer, protocol_version, &mut connection)
+            Self::create_stealer_api(id, bg_tasks.stealer, protocol_version, &mut connection)
                 .await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
 
@@ -267,7 +267,7 @@ impl ClientConnectionHandler {
         Ok(client_handler)
     }
 
-    async fn ceate_sniffer_api(
+    async fn create_sniffer_api(
         id: ClientId,
         task: BackgroundTask<SnifferCommand>,
         connection: &mut ClientConnection,
@@ -295,7 +295,7 @@ impl ClientConnectionHandler {
         }
     }
 
-    async fn ceate_stealer_api(
+    async fn create_stealer_api(
         id: ClientId,
         task: BackgroundTask<StealerCommand>,
         protocol_version: semver::Version,
