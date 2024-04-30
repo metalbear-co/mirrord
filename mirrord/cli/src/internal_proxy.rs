@@ -265,14 +265,14 @@ async fn ping(
                 },
                 other => {
                     error!(?other, "Invalid ping response");
-                    return Err(InternalProxySetupError::AgentClosedConnection);
+                    return Err(InternalProxySetupError::NoPong(format!("{other:?}")));
                 }
             }
         }
         Ok(())
     })
     .await
-    .map_err(|_| InternalProxySetupError::AgentClosedConnection)?
+    .map_err(|_| InternalProxySetupError::NoPong("Timeout in pong".to_string()))?
 }
 
 fn create_ping_loop(
