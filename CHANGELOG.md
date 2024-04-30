@@ -8,6 +8,15 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.99.2](https://github.com/metalbear-co/mirrord/tree/3.99.2) - 2024-04-30
+
+
+### Fixed
+
+- Fixed case where resolving DNS failed when setting HTTP filter
+  [#2411](https://github.com/metalbear-co/mirrord/issues/2411)
+
+
 ## [3.99.1](https://github.com/metalbear-co/mirrord/tree/3.99.1) - 2024-04-30
 
 
