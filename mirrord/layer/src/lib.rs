@@ -150,7 +150,7 @@ fn setup() -> &'static LayerSetup {
 // The following statics are to avoid using CoreFoundation or high level macOS APIs
 // that aren't safe to use after fork.
 
-/// Executable informatio (name, args)
+/// Executable information (name, args)
 static EXECUTABLE_ARGS: OnceLock<ExecuteArgs> = OnceLock::new();
 
 /// Executable path we're loaded to
