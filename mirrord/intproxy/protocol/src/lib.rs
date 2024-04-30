@@ -60,6 +60,20 @@ pub enum LayerToProxyMessage {
     GetEnv(GetEnvVarsRequest),
 }
 
+
+/// Layer process information
+#[derive(Encode, Decode, Debug)]
+pub struct ProcessInfo {
+    /// Process ID.
+    pub pid: u32,
+    /// Process name.
+    pub name: String,
+    /// Command line
+    pub cmdline: Vec<String>,
+    /// Is layer loaded?
+    pub loaded: bool
+}
+
 /// Unique `layer <-> proxy` session identifier.
 /// New connection is established when the layer initializes or forks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Encode, Decode)]
@@ -78,7 +92,7 @@ pub struct LayerId(pub u64);
 #[derive(Encode, Decode, Debug)]
 pub enum NewSessionRequest {
     /// Layer initialized from its constructor, has a fresh state.
-    New,
+    New(ProcessInfo),
     /// Layer re-initialized from a [`fork`](https://man7.org/linux/man-pages/man2/fork.2.html) detour.
     /// It inherits state from its parent.
     Forked(LayerId),
