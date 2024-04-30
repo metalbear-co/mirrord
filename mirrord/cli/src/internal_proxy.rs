@@ -17,7 +17,6 @@ use std::{
     time::Duration,
 };
 
-use clap::error;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_intproxy::{
