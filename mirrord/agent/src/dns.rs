@@ -93,6 +93,7 @@ impl DnsWorker {
             trust_dns_resolver::config::ServerOrderingStrategy::UserProvidedOrder;
         options.timeout = timeout;
         options.attempts = attempts;
+        options.ip_strategy = trust_dns_resolver::config::LookupIpStrategy::Ipv4Only;
 
         let mut resolver = AsyncResolver::tokio(config, options)?;
 
