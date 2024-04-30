@@ -60,7 +60,6 @@ pub enum LayerToProxyMessage {
     GetEnv(GetEnvVarsRequest),
 }
 
-
 /// Layer process information
 #[derive(Encode, Decode, Debug)]
 pub struct ProcessInfo {
@@ -71,7 +70,7 @@ pub struct ProcessInfo {
     /// Command line
     pub cmdline: Vec<String>,
     /// Is layer loaded?
-    pub loaded: bool
+    pub loaded: bool,
 }
 
 /// Unique `layer <-> proxy` session identifier.
