@@ -214,6 +214,7 @@ mod tests {
         let executable_name = ExecuteArgs {
             exec_name: exec_name.to_string(),
             invoked_as: invoked_as.to_string(),
+            args: Vec::new(),
         };
 
         assert!(executable_name.should_load(skip_processes, skip_build_tools));
@@ -235,6 +236,7 @@ mod tests {
         let executable_name = ExecuteArgs {
             exec_name: exec_name.to_string(),
             invoked_as: invoked_as.to_string(),
+            args: Vec::new(),
         };
 
         assert!(!executable_name.should_load(skip_processes, skip_build_tools));
