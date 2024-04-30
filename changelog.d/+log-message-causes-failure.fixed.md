@@ -1,1 +1,0 @@
-Fix case were agent log message causes startup failure

@@ -8,6 +8,22 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.99.1](https://github.com/metalbear-co/mirrord/tree/3.99.1) - 2024-04-30
+
+
+### Changed
+
+- Change agent resolver to only resolve IPv4
+- Fallback to OSS when operator license expired
+
+
+### Fixed
+
+- Fix IntelliJ Rider newest version stuck on macOS
+  [#2408](https://github.com/metalbear-co/mirrord/issues/2408)
+- Fix case were agent log message causes startup failure
+
+
 ## [3.99.0](https://github.com/metalbear-co/mirrord/tree/3.99.0) - 2024-04-28
 
 
