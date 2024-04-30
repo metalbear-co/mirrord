@@ -232,7 +232,7 @@ fn load_only_layer_start(config: &LayerConfig) {
             EXECUTABLE_ARGS
                 .get()
                 .expect("EXECUTABLE_ARGS MUST BE SET")
-                .into_process_info(config),
+                .to_process_info(config),
         ),
         PROXY_CONNECTION_TIMEOUT,
     )
@@ -336,7 +336,7 @@ fn layer_start(mut config: LayerConfig) {
     let process_info = EXECUTABLE_ARGS
         .get()
         .expect("EXECUTABLE_ARGS MUST BE SET")
-        .into_process_info(&config);
+        .to_process_info(&config);
     let state = LayerSetup::new(config, debugger_ports, local_hostname);
     SETUP.set(state).unwrap();
 

@@ -141,7 +141,7 @@ impl ExecuteArgs {
         }
     }
 
-    pub(crate) fn into_process_info(&self, config: &LayerConfig) -> ProcessInfo {
+    pub(crate) fn to_process_info(&self, config: &LayerConfig) -> ProcessInfo {
         ProcessInfo {
             pid: std::process::id(),
             name: self.exec_name.clone(),
