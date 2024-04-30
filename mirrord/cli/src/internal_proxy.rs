@@ -17,13 +17,14 @@ use std::{
     time::Duration,
 };
 
+use clap::error;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_intproxy::{
     agent_conn::{AgentConnectInfo, AgentConnection},
     IntProxy,
 };
-use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonMessage};
+use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonMessage, LogLevel};
 use nix::{
     libc,
     sys::resource::{setrlimit, Resource},
@@ -254,10 +255,20 @@ async fn ping(
     receiver: &mut mpsc::Receiver<DaemonMessage>,
 ) -> Result<(), InternalProxySetupError> {
     sender.send(ClientMessage::Ping).await?;
-    match receiver.recv().await {
-        Some(DaemonMessage::Pong) => Ok(()),
-        _ => Err(InternalProxySetupError::AgentClosedConnection),
+    loop {
+        match tokio::time::timeout(Duration::from_secs(5), receiver.recv()).await {
+            Ok(Some(DaemonMessage::Pong)) => break,
+            Ok(Some(DaemonMessage::LogMessage(msg))) => match msg.level {
+                LogLevel::Error => error!("Agent log: {}", msg.message),
+                LogLevel::Warn => warn!("Agent log: {}", msg.message),
+            },
+            other => {
+                error!(?other, "Invalid ping response");
+                return Err(InternalProxySetupError::AgentClosedConnection);
+            }
+        }
     }
+    Ok(())
 }
 
 fn create_ping_loop(
