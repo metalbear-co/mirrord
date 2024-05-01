@@ -49,6 +49,14 @@ pub enum ConfigError {
     )]
     TargetNamespaceWithoutTarget,
 
+    #[error(
+        "A Job target has been specified, but the feature `copy_target` has not been enabled!
+
+        If you want to target a job, please set `copy_target: true`.
+        "
+    )]
+    TargetJobWithoutCopyTarget,
+
     #[error("Template rendering failed, check your config file `{0}`.")]
     TemplateRenderingFailed(#[from] tera::Error),
 }

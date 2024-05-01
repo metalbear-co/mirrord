@@ -392,6 +392,20 @@ impl LayerConfig {
             ))?
         }
 
+        if !self.feature.copy_target.enabled
+            && self
+                .target
+                .path
+                .as_ref()
+                .map(|target| match target {
+                    target::Target::Job(_) => true,
+                    _ => false,
+                })
+                .unwrap_or_default()
+        {
+            Err(ConfigError::TargetJobWithoutCopyTarget)?
+        }
+
         if self.target.path.is_none() && !context.ide {
             // In the IDE, a target may be selected after `mirrord verify-config` is run, so we
             // for this case we treat these as warnings. They'll become errors once mirrord proper
