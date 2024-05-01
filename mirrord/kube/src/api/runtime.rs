@@ -256,7 +256,7 @@ impl RuntimeDataProvider for Target {
 
 #[cfg(test)]
 mod tests {
-    use mirrord_config::target::{deployment::DeploymentTarget, pod::PodTarget};
+    use mirrord_config::target::{deployment::DeploymentTarget, job::JobTarget, pod::PodTarget};
     use rstest::rstest;
 
     use super::*;
@@ -267,6 +267,8 @@ mod tests {
     #[case("deployment/nginx-deployment", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_string(), container: None}))]
     #[case("pod/foo/container/baz", Target::Pod(PodTarget { pod: "foo".to_string(), container: Some("baz".to_string()) }))]
     #[case("deployment/nginx-deployment/container/container-name", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_string(), container: Some("container-name".to_string())}))]
+    #[case("job/foo", Target::Job(JobTarget { job: "foo".to_string(), container: None }))]
+    #[case("job/foo/container/baz", Target::Job(JobTarget { job: "foo".to_string(), container: Some("baz".to_string()) }))]
     fn target_parses(#[case] target: &str, #[case] expected: Target) {
         let target = target.parse::<Target>().unwrap();
         assert_eq!(target, expected)
