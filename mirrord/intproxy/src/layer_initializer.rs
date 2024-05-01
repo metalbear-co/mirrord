@@ -6,6 +6,7 @@ use mirrord_intproxy_protocol::{
 };
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
+use tracing::info;
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
@@ -58,7 +59,10 @@ impl LayerInitializer {
         self.next_layer_id.0 += 1;
 
         let parent_id = match msg.inner {
-            LayerToProxyMessage::NewSession(NewSessionRequest::New) => None,
+            LayerToProxyMessage::NewSession(NewSessionRequest::New(process_info)) => {
+                info!(?process_info, "new session");
+                None
+            }
             LayerToProxyMessage::NewSession(NewSessionRequest::Forked(parent)) => Some(parent),
             other => return Err(LayerInitializerError::UnexpectedMessage(other)),
         };
