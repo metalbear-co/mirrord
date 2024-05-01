@@ -71,18 +71,27 @@ enum TargetType {
     Targetless,
     Pod,
     Deployment,
+    Job,
     Rollout,
 }
 
 impl TargetType {
     fn all() -> impl Iterator<Item = Self> {
-        [Self::Targetless, Self::Pod, Self::Deployment, Self::Rollout].into_iter()
+        [
+            Self::Targetless,
+            Self::Pod,
+            Self::Deployment,
+            Self::Job,
+            Self::Rollout,
+        ]
+        .into_iter()
     }
 
     fn compatible_with(&self, config: &FeatureConfig) -> bool {
         match self {
             Self::Targetless | Self::Rollout => !config.copy_target.enabled,
             Self::Pod => !(config.copy_target.enabled && config.copy_target.scale_down),
+            Self::Job => config.copy_target.enabled,
             Self::Deployment => true,
         }
     }
