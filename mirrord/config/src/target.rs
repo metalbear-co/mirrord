@@ -219,6 +219,10 @@ pub enum Target {
     /// Mirror a rollout.
     Rollout(rollout::RolloutTarget),
 
+    /// <!--${internal}-->
+    /// Mirror a Job.
+    ///
+    /// Only supported when `copy_target` is enabled.
     Job(job::JobTarget),
 
     /// <!--${internal}-->
