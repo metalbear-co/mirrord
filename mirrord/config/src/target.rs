@@ -115,6 +115,7 @@ pub struct TargetConfig {
     /// - `deployment/{sample-deployment}`;
     /// - `container/{sample-container}`;
     /// - `containername/{sample-container}`.
+    /// - `job/{sample-job}` (only when [`copy_target`](#feature-copy_target) is enabled).
     pub path: Option<Target>,
 
     /// ### target.namespace {#target-namespace}
@@ -204,6 +205,7 @@ mirrord-layer failed to parse the provided target!
 /// - `deployment/{sample-deployment}`;
 /// - `container/{sample-container}`;
 /// - `containername/{sample-container}`.
+/// - `job/{sample-job}`;
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum Target {
