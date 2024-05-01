@@ -183,6 +183,7 @@ mirrord-layer failed to parse the provided target!
     >> deployment/<deployment-name>[/container/container-name]
     >> deploy/<deployment-name>[/container/container-name]
     >> pod/<pod-name>[/container/container-name]
+    >> job/<job-name>[/container/container-name]
 
 - Note:
     >> specifying container name is optional, defaults to the first container in the provided pod/deployment target.

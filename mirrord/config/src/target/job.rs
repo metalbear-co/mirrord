@@ -4,7 +4,7 @@ use std::fmt::Display;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::FromSplit;
+use super::{FromSplit, FAIL_PARSE_DEPLOYMENT_OR_POD};
 use crate::config::{self, ConfigError};
 
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
@@ -32,7 +32,7 @@ impl FromSplit for JobTarget {
     fn from_split(split: &mut std::str::Split<char>) -> config::Result<Self> {
         let job = split
             .next()
-            .ok_or_else(|| ConfigError::InvalidTarget("Not job 1!".to_string()))?;
+            .ok_or_else(|| ConfigError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_string()))?;
 
         match (split.next(), split.next()) {
             (Some("container"), Some(container)) => Ok(Self {
@@ -43,7 +43,9 @@ impl FromSplit for JobTarget {
                 job: job.to_string(),
                 container: None,
             }),
-            _ => Err(ConfigError::InvalidTarget("Not job!".to_string())),
+            _ => Err(ConfigError::InvalidTarget(
+                FAIL_PARSE_DEPLOYMENT_OR_POD.to_string(),
+            )),
         }
     }
 }
