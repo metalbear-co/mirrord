@@ -397,10 +397,7 @@ impl LayerConfig {
                 .target
                 .path
                 .as_ref()
-                .map(|target| match target {
-                    target::Target::Job(_) => true,
-                    _ => false,
-                })
+                .map(|target| matches!(target, target::Target::Job(_)))
                 .unwrap_or_default()
         {
             Err(ConfigError::TargetJobWithoutCopyTarget)?
