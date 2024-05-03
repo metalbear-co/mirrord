@@ -545,6 +545,16 @@ pub(super) fn connect(
     };
 
     if let Some(ip_address) = optional_ip_address {
+        if crate::setup().experimental().tcp_ping4_mock {
+            if ip_address.port() == 7 {
+                let connect_result = ConnectResult {
+                    result: 0,
+                    error: None,
+                };
+                return Detour::Success(connect_result);
+            }
+        }
+
         let ip = ip_address.ip();
         if ip.is_loopback() || ip.is_unspecified() {
             if let Some(result) = connect_to_local_address(sockfd, &user_socket_info, ip_address)? {
