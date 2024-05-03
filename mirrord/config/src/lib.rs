@@ -476,9 +476,7 @@ impl LayerFileConfig {
     {
         let mut template_engine = Tera::default();
         template_engine.add_template_file(path.as_ref(), Some("main"))?;
-        let rendered = template_engine
-            .render("main", &tera::Context::new())
-            .inspect_err(|fail| eprintln!("{fail:?}"))?;
+        let rendered = template_engine.render("main", &tera::Context::new())?;
 
         match path.as_ref().extension().and_then(|os_val| os_val.to_str()) {
             Some("json") => Ok(serde_json::from_str::<Self>(&rendered)?),
