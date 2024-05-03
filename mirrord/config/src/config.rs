@@ -61,8 +61,7 @@ impl From<tera::Error> for ConfigError {
         let mut source = fail.source();
 
         while let Some(fail_source) = source {
-            fail_message.push_str(" -> ");
-            fail_message.push_str(&fail_source.to_string());
+            fail_message.push_str(&format!(" -> {fail_source}"));
             source = fail_source.source();
         }
 
