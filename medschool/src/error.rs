@@ -15,7 +15,7 @@ pub(crate) enum DocsError {
     #[error("IO error {0}")]
     IO(#[from] std::io::Error),
 
-    /// May happen (probably never) when [`parse_files`] is reading the source file into a `&str`.
-    #[error("Read past end of source!")]
-    ReadOutOfBounds,
+    /// Error when parsing the source files into `syn::File`.
+    #[error("Parsing error {0}")]
+    Parse(#[from] syn::Error),
 }

@@ -15,14 +15,15 @@
 #![deny(missing_docs)]
 use std::{fs, path::PathBuf};
 
-use convert::{files_to_string, parse_string_files};
+use file::parse_files;
+use parse::{parse_docs_into_tree, resolve_references};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
-use types::{parse_docs_into_tree, resolve_references};
 
 use crate::error::DocsError;
 
-mod convert;
 mod error;
+mod file;
+mod parse;
 mod types;
 
 /// Extracts the documentation from Rust source into a markdown file.
@@ -71,8 +72,7 @@ fn main() -> Result<(), DocsError> {
         input,
     } = <MedschoolArgs as clap::Parser>::parse();
 
-    let files = files_to_string(input.unwrap_or_else(|| PathBuf::from("./src")))?;
-    let files = parse_string_files(files);
+    let files = parse_files(input.unwrap_or_else(|| PathBuf::from("./src")))?;
 
     let type_docs = parse_docs_into_tree(files)?;
     let new_types = resolve_references(type_docs);

@@ -28,20 +28,17 @@ pub(crate) fn pretty_docs(mut docs: Vec<String>) -> String {
 /// All files are read in parallel to make the best of disk `reads` (assuming SSDs in this case)
 /// performance using a threadpool.
 #[tracing::instrument(level = "trace", ret)]
-pub(crate) fn files_to_string(path: PathBuf) -> Result<Vec<String>, DocsError> {
+pub(crate) fn parse_files(path: PathBuf) -> Result<Vec<syn::File>, DocsError> {
     let paths = glob::glob(&format!("{}/**/*.rs", path.to_string_lossy()))?;
 
     let pool = ThreadPool::new(4);
 
     let file_processor = |path: PathBuf| {
-        let mut file = File::open(&path)?;
-        let mut source = String::with_capacity(30 * 1024);
-        let read_amount = file.read_to_string(&mut source)?;
-        let file_read = source
-            .get(..read_amount)
-            .ok_or(DocsError::ReadOutOfBounds)?;
+        let mut file = File::open(path)?;
+        let mut source = String::new();
+        file.read_to_string(&mut source)?;
 
-        Ok::<_, DocsError>(String::from(file_read))
+        Ok::<_, DocsError>(source)
     };
 
     let (tx, rx) = channel();
@@ -58,18 +55,10 @@ pub(crate) fn files_to_string(path: PathBuf) -> Result<Vec<String>, DocsError> {
 
     let mut files = Vec::new();
     while let Ok(Ok(result)) = rx.recv() {
-        files.push(result);
+        // Parses the `files` into a collection of [`syn::File`].
+        let parsed_file = syn::parse_file(&result)?;
+        files.push(parsed_file);
     }
 
     Ok(files)
-}
-
-/// Parses the `files` into a collection of [`syn::File`].
-#[tracing::instrument(level = "trace", ret)]
-pub(crate) fn parse_string_files(files: Vec<String>) -> Vec<syn::File> {
-    files
-        .into_iter()
-        .map(|raw_contents| syn::parse_file(&raw_contents))
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>()
 }
