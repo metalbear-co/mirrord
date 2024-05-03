@@ -671,7 +671,7 @@ mod tests {
     fn full(
         #[values(ConfigType::Json, ConfigType::Toml, ConfigType::Yaml)] config_type: ConfigType,
     ) {
-        use crate::{agent::AgentImageFileConfig, experimental::ExperimentalFileConfig};
+        use crate::agent::AgentImageFileConfig;
 
         let input = config_type.full();
 
@@ -746,9 +746,7 @@ mod tests {
             kube_context: None,
             internal_proxy: None,
             use_proxy: None,
-            experimental: Some(ExperimentalFileConfig {
-                tcp_ping4_mock: None,
-            }),
+            experimental: None,
         };
 
         assert_eq!(config, expect);
