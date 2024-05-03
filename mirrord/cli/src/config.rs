@@ -2,7 +2,7 @@
 
 use std::{fmt::Display, path::PathBuf};
 
-use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 use mirrord_operator::setup::OperatorNamespace;
 
@@ -178,7 +178,7 @@ pub(super) struct ExecArgs {
     pub disable_version_check: bool,
 
     /// Load config from config file
-    #[arg(short = 'f', long)]
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
     pub config_file: Option<PathBuf>,
 
     /// Kube context to use from Kubeconfig
