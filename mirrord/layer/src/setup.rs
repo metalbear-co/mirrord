@@ -1,6 +1,7 @@
 use std::{collections::HashSet, net::SocketAddr};
 
 use mirrord_config::{
+    experimental::ExperimentalConfig,
     feature::{
         env::EnvConfig,
         fs::FsConfig,
@@ -91,6 +92,10 @@ impl LayerSetup {
 
     pub fn outgoing_config(&self) -> &OutgoingConfig {
         &self.config.feature.network.outgoing
+    }
+
+    pub fn experimental(&self) -> &ExperimentalConfig {
+        &self.config.experimental
     }
 
     pub fn remote_dns_enabled(&self) -> bool {
