@@ -1,10 +1,12 @@
 use std::{
     collections::HashSet,
+    ffi::OsString,
     fmt::{self, Display},
     sync::LazyLock,
 };
 
 use mirrord_config::{util::VecOrSingle, LayerConfig};
+use mirrord_intproxy_protocol::ProcessInfo;
 use tracing::trace;
 
 use crate::error::LayerError;
@@ -32,20 +34,22 @@ static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         "cargo-watch",
         "debugserver",
         "jspawnhelper",
-        "JetBrains.Debugger.Worker",
     ])
 });
 
 /// Credentials of the process the layer is injected into.
-pub struct ExecutableName {
+#[derive(Debug)]
+pub struct ExecuteArgs {
     /// Executable file name, for example `x86_64-linux-gnu-ld.bfd`.
     exec_name: String,
     /// Last part of the process name as seen in the arguments, for example `ld` extracted from
     /// `/usr/bin/ld`.
     invoked_as: String,
+    /// Executable arguments
+    pub(crate) args: Vec<OsString>,
 }
 
-impl ExecutableName {
+impl ExecuteArgs {
     /// Creates a new instance of this struct using [`std::env::current_exe`] and
     /// [`std::env::args`].
     pub(crate) fn from_env() -> Result<Self, LayerError> {
@@ -58,6 +62,7 @@ impl ExecutableName {
             })
             .ok_or(LayerError::NoProcessFound)?;
 
+        let args = std::env::args_os().collect();
         let invoked_as = std::env::args()
             .next()
             .as_ref()
@@ -68,6 +73,7 @@ impl ExecutableName {
         Ok(Self {
             exec_name,
             invoked_as,
+            args,
         })
     }
 
@@ -89,6 +95,21 @@ impl ExecutableName {
     /// and we don't want to hook mirrord-layer into those.
     fn should_load<S: AsRef<str>>(&self, skip_processes: &[S], skip_build_tools: bool) -> bool {
         if skip_build_tools && self.is_build_tool() {
+            return false;
+        }
+
+        // ignore intellij debugger https://github.com/metalbear-co/mirrord/issues/2408
+        // don't put it in build tools since we don't want to SIP load on macOS. (leads to above
+        // issue)
+        if self
+            .exec_name
+            .as_str()
+            .ends_with("JetBrains.Debugger.Worker")
+            || self
+                .invoked_as
+                .as_str()
+                .ends_with("JetBrains.Debugger.Worker")
+        {
             return false;
         }
 
@@ -119,9 +140,22 @@ impl ExecutableName {
             LoadType::Skip
         }
     }
+
+    pub(crate) fn to_process_info(&self, config: &LayerConfig) -> ProcessInfo {
+        ProcessInfo {
+            pid: std::process::id(),
+            name: self.exec_name.clone(),
+            cmdline: self
+                .args
+                .iter()
+                .map(|arg| arg.to_string_lossy().to_string())
+                .collect(),
+            loaded: matches!(self.load_type(config), LoadType::Full),
+        }
+    }
 }
 
-impl Display for ExecutableName {
+impl Display for ExecuteArgs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} invoked as {}", self.exec_name, self.invoked_as)
     }
@@ -137,7 +171,7 @@ mod sip {
     static SIP_ONLY_PROCESSES: LazyLock<HashSet<&str>> =
         LazyLock::new(|| HashSet::from(["sh", "bash", "env", "go", "dlv"]));
 
-    pub fn is_sip_only(given_process: &ExecutableName) -> bool {
+    pub fn is_sip_only(given_process: &ExecuteArgs) -> bool {
         given_process.is_build_tool()
             || SIP_ONLY_PROCESSES.contains(given_process.exec_name.as_str())
             || SIP_ONLY_PROCESSES.contains(given_process.invoked_as.as_str())
@@ -177,9 +211,10 @@ mod tests {
         #[case] skip_processes: &[&str],
         #[case] skip_build_tools: bool,
     ) {
-        let executable_name = ExecutableName {
+        let executable_name = ExecuteArgs {
             exec_name: exec_name.to_string(),
             invoked_as: invoked_as.to_string(),
+            args: Vec::new(),
         };
 
         assert!(executable_name.should_load(skip_processes, skip_build_tools));
@@ -198,9 +233,10 @@ mod tests {
         #[case] skip_processes: &[&str],
         #[case] skip_build_tools: bool,
     ) {
-        let executable_name = ExecutableName {
+        let executable_name = ExecuteArgs {
             exec_name: exec_name.to_string(),
             invoked_as: invoked_as.to_string(),
+            args: Vec::new(),
         };
 
         assert!(!executable_name.should_load(skip_processes, skip_build_tools));

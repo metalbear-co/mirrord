@@ -706,6 +706,7 @@ mod tests {
                 check_out_of_pods: None,
                 resources: None,
                 nftables: None,
+                ..Default::default()
             }),
             feature: Some(FeatureFileConfig {
                 env: ToggleableConfig::Enabled(true).into(),
@@ -731,6 +732,7 @@ mod tests {
                     })),
                 })),
                 copy_target: None,
+                hostname: None,
             }),
             connect_tcp: None,
             operator: None,

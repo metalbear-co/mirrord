@@ -14,7 +14,7 @@ use std::{
 
 use errno::set_errno;
 use libc::{c_int, c_void, hostent, sockaddr, socklen_t, AF_UNIX};
-use mirrord_config::feature::network::incoming::IncomingMode;
+use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
     OutgoingConnectResponse, PortSubscribe,
@@ -170,6 +170,38 @@ fn bind_similar_address(sockfd: c_int, requested_address: &SocketAddr) -> Detour
     }
 }
 
+/// Checks if given TCP port needs to be ignored
+/// based on http_filter/ports logic
+fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
+    let mapped_port = crate::setup()
+        .incoming_config()
+        .port_mapping
+        .get_by_left(&addr.port())
+        .copied()
+        .unwrap_or_else(|| addr.port());
+    let http_filter_used = config.mode == IncomingMode::Steal
+        && (config.http_filter.header_filter.is_some() || config.http_filter.path_filter.is_some());
+
+    // this is a bit weird but it makes more sense configured ports are the remote port
+    // and not the local, so the check is done on the mapped port
+    // see https://github.com/metalbear-co/mirrord/issues/2397
+    let not_stolen_with_filter = !http_filter_used
+        || config
+            .http_filter
+            .ports
+            .as_slice()
+            .iter()
+            .all(|port| *port != mapped_port);
+
+    let not_whitelisted = config
+        .ports
+        .as_ref()
+        .map(|ports| !ports.contains(&mapped_port))
+        .unwrap_or(http_filter_used);
+
+    is_ignored_port(addr) || (not_stolen_with_filter && not_whitelisted)
+}
+
 /// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
 /// update the socket state.
 #[mirrord_layer_macro::instrument(level = "trace", ret, skip(raw_address))]
@@ -202,35 +234,12 @@ pub(super) fn bind(
     }
 
     // To handle #1458, we don't ignore port `0` for UDP.
-    if (is_ignored_port(&requested_address) && matches!(socket.kind, SocketKind::Tcp(_)))
+    if (is_ignored_tcp_port(&requested_address, incoming_config)
+        && matches!(socket.kind, SocketKind::Tcp(_)))
         || crate::setup().is_debugger_port(&requested_address)
         || incoming_config.ignore_ports.contains(&requested_port)
     {
         Err(Bypass::Port(requested_address.port()))?;
-    }
-
-    {
-        let http_filter_used = incoming_config.mode == IncomingMode::Steal
-            && (incoming_config.http_filter.header_filter.is_some()
-                || incoming_config.http_filter.path_filter.is_some());
-
-        let not_stolen_with_filter = !http_filter_used
-            || incoming_config
-                .http_filter
-                .ports
-                .as_slice()
-                .iter()
-                .all(|port| *port != requested_port);
-
-        let not_whitelisted = incoming_config
-            .ports
-            .as_ref()
-            .map(|ports| !ports.contains(&requested_port))
-            .unwrap_or(http_filter_used);
-
-        if not_stolen_with_filter && not_whitelisted {
-            Err(Bypass::Port(requested_address.port()))?;
-        }
     }
 
     // Check that the domain matches the requested address.

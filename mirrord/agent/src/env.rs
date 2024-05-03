@@ -44,6 +44,7 @@ impl EnvFilter {
                 WildMatch::new("BUNDLE_GEMFILE"),
                 WildMatch::new("BUNDLE_GEM_PATH"),
                 WildMatch::new("BUNDLE_PATH"),
+                WildMatch::new("BUNDLE_WITHOUT"),
                 WildMatch::new("CLASSPATH"),
                 WildMatch::new("GEM_HOME"),
                 WildMatch::new("GEM_PATH"),

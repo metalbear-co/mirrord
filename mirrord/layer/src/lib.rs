@@ -68,7 +68,6 @@ extern crate core;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
-    ffi::OsString,
     net::SocketAddr,
     panic,
     sync::OnceLock,
@@ -80,7 +79,7 @@ use error::{LayerError, Result};
 use file::OPEN_FILES;
 use hooks::HookManager;
 use libc::{c_int, pid_t};
-use load::ExecutableName;
+use load::ExecuteArgs;
 #[cfg(target_os = "macos")]
 use mirrord_config::feature::fs::FsConfig;
 use mirrord_config::{
@@ -151,14 +150,11 @@ fn setup() -> &'static LayerSetup {
 // The following statics are to avoid using CoreFoundation or high level macOS APIs
 // that aren't safe to use after fork.
 
-/// Executable we're loaded to
-static EXECUTABLE_NAME: OnceLock<ExecutableName> = OnceLock::new();
+/// Executable information (name, args)
+static EXECUTABLE_ARGS: OnceLock<ExecuteArgs> = OnceLock::new();
 
 /// Executable path we're loaded to
 static EXECUTABLE_PATH: OnceLock<String> = OnceLock::new();
-
-/// Program arguments
-static EXECUTABLE_ARGS: OnceLock<Vec<OsString>> = OnceLock::new();
 
 /// Proxy Connection timeout
 /// Set to 10 seconds as most agent operations timeout after 5 seconds
@@ -166,12 +162,11 @@ const PROXY_CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
 fn layer_pre_initialization() -> Result<(), LayerError> {
-    let given_process = EXECUTABLE_NAME.get_or_try_init(ExecutableName::from_env)?;
+    let given_process = EXECUTABLE_ARGS.get_or_try_init(ExecuteArgs::from_env)?;
 
     EXECUTABLE_PATH.get_or_try_init(|| {
         std::env::current_exe().map(|arg| arg.to_string_lossy().into_owned())
     })?;
-    EXECUTABLE_ARGS.get_or_init(|| std::env::args_os().collect());
     let config = LayerConfig::from_env()?;
 
     #[cfg(target_os = "macos")]
@@ -193,7 +188,9 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
                 binary,
                 EXECUTABLE_ARGS
                     .get()
-                    .expect("EXECUTABLE_ARGS needs to be set!"),
+                    .expect("EXECUTABLE_ARGS needs to be set!")
+                    .args
+                    .clone(),
             );
             tracing::error!("Couldn't execute {:?}", err);
             return Err(LayerError::ExecFailed(err));
@@ -229,9 +226,17 @@ fn load_only_layer_start(config: &LayerConfig) {
         .parse()
         .expect("failed to parse internal proxy address");
 
-    let new_connection =
-        ProxyConnection::new(address, NewSessionRequest::New, PROXY_CONNECTION_TIMEOUT)
-            .expect("failed to initialize proxy connection");
+    let new_connection = ProxyConnection::new(
+        address,
+        NewSessionRequest::New(
+            EXECUTABLE_ARGS
+                .get()
+                .expect("EXECUTABLE_ARGS MUST BE SET")
+                .to_process_info(config),
+        ),
+        PROXY_CONNECTION_TIMEOUT,
+    )
+    .expect("failed to initialize proxy connection");
 
     unsafe {
         // SAFETY
@@ -327,7 +332,12 @@ fn layer_start(mut config: LayerConfig) {
     init_tracing();
 
     let debugger_ports = DebuggerPorts::from_env();
-    let state = LayerSetup::new(config, debugger_ports, trace_only);
+    let local_hostname = trace_only || !config.feature.hostname;
+    let process_info = EXECUTABLE_ARGS
+        .get()
+        .expect("EXECUTABLE_ARGS MUST BE SET")
+        .to_process_info(&config);
+    let state = LayerSetup::new(config, debugger_ports, local_hostname);
     SETUP.set(state).unwrap();
 
     let state = setup();
@@ -339,16 +349,7 @@ fn layer_start(mut config: LayerConfig) {
 
     let _detour_guard = DetourGuard::new();
     tracing::info!("Initializing mirrord-layer!");
-    tracing::trace!(
-        "Loaded into executable: {}, on pid {}, with args: {:?}",
-        EXECUTABLE_PATH
-            .get()
-            .expect("EXECUTABLE_PATH should be set!"),
-        std::process::id(),
-        EXECUTABLE_ARGS
-            .get()
-            .expect("EXECUTABLE_ARGS needs to be set!")
-    );
+    tracing::trace!(executable = ?EXECUTABLE_PATH.get(), args = ?EXECUTABLE_ARGS.get(), pid = std::process::id(), "Loaded into executable");
 
     if trace_only {
         tracing::debug!("Skipping new intproxy connection (trace only)");
@@ -357,9 +358,12 @@ fn layer_start(mut config: LayerConfig) {
 
     unsafe {
         let address = setup().proxy_address();
-        let new_connection =
-            ProxyConnection::new(address, NewSessionRequest::New, PROXY_CONNECTION_TIMEOUT)
-                .expect("failed to initialize proxy connection");
+        let new_connection = ProxyConnection::new(
+            address,
+            NewSessionRequest::New(process_info),
+            PROXY_CONNECTION_TIMEOUT,
+        )
+        .expect("failed to initialize proxy connection");
         PROXY_CONNECTION
             .set(new_connection)
             .expect("setting PROXY_CONNECTION singleton")

@@ -46,6 +46,9 @@ pub(crate) enum InternalProxySetupError {
 
     #[error("Failed pausing target container {0:#?}")]
     PauseError(String),
+
+    #[error("No pong received from agent. {0:#?}")]
+    NoPong(String),
 }
 
 #[derive(Debug, Error, Diagnostic)]
@@ -341,6 +344,9 @@ impl From<OperatorApiError> for CliError {
             }
             OperatorApiError::StatusFailure { operation, status } => {
                 Self::StatusFailure { operation, status }
+            }
+            OperatorApiError::NoLicense => {
+                Self::OperatorConnectionFailed("No license found, falling back to OSS".to_string())
             }
         }
     }
