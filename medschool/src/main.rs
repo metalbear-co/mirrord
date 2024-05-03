@@ -77,8 +77,6 @@ fn main() -> Result<(), DocsError> {
     let type_docs = parse_docs_into_tree(files)?;
     let new_types = resolve_references(type_docs);
 
-    // If all goes well, the first type should hold the root type.
-
     let mut final_docs = String::new();
 
     for type_doc in new_types.iter() {
@@ -87,8 +85,6 @@ fn main() -> Result<(), DocsError> {
             for field in type_doc.fields.iter() {
                 final_docs.push_str(&field.docs.concat());
             }
-
-            // final_docs.push_str(&type_docs);
         }
     }
 

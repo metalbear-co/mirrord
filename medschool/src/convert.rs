@@ -25,6 +25,8 @@ pub(crate) fn pretty_docs(mut docs: Vec<String>) -> String {
 // TODO(alex): Support specifying a path.
 /// Converts all files in the [`glob::glob`] pattern defined within, in the current directory,
 /// into a `Vec<String>`.
+/// All files are read in parallel to make the best of disk `reads` (assuming SSDs in this case)
+/// performance using a threadpool.
 #[tracing::instrument(level = "trace", ret)]
 pub(crate) fn files_to_string(path: PathBuf) -> Result<Vec<String>, DocsError> {
     let paths = glob::glob(&format!("{}/**/*.rs", path.to_string_lossy()))?;
