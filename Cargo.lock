@@ -3199,6 +3199,7 @@ dependencies = [
  "regex",
  "syn 2.0.59",
  "thiserror",
+ "threadpool",
  "tracing 0.1.40",
  "tracing-subscriber",
 ]
@@ -3542,7 +3543,7 @@ dependencies = [
  "mirrord-protocol",
  "rand",
  "regex",
- "rstest 0.17.0",
+ "rstest 0.18.2",
  "serde",
  "serde_json",
  "shellexpand",
@@ -3591,7 +3592,7 @@ dependencies = [
  "os_info",
  "rand",
  "regex",
- "rstest 0.17.0",
+ "rstest 0.18.2",
  "serde",
  "serde_json",
  "socket2 0.5.6",
@@ -6012,6 +6013,15 @@ checksum = "8b9ef9bad013ada3808854ceac7b46812a6465ba368859a37e2100283d2d719c"
 dependencies = [
  "cfg-if",
  "once_cell",
+]
+
+[[package]]
+name = "threadpool"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
+dependencies = [
+ "num_cpus",
 ]
 
 [[package]]
