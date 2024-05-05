@@ -8,6 +8,28 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.100.0](https://github.com/metalbear-co/mirrord/tree/3.100.0) - 2024-05-05
+
+
+### Added
+
+- Added experimental, temp feature for supporting hazelcast pings
+  [#2421](https://github.com/metalbear-co/mirrord/issues/2421)
+- Provide value hint to Clap for generating shell completions for config_file
+  to
+  only resolve to files, not just first match.
+
+
+### Changed
+
+- Changed default env exclude to have `BUNDLE_WITHOUT`
+  [#2417](https://github.com/metalbear-co/mirrord/issues/2417)
+- Append more permissions to operator clusterrole
+- Improve tera templating config error to dig into source and give out more
+  details.
+- env.unset feature is now case insensitive
+
+
 ## [3.99.2](https://github.com/metalbear-co/mirrord/tree/3.99.2) - 2024-04-30
 
 
