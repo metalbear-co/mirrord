@@ -87,6 +87,8 @@ pub struct EnvConfig {
     /// application behave as if it's running locally, instead of using the remote settings.
     /// The unsetting happens from extension (if possible)/CLI and when process initializes.
     /// In some cases, such as Go the env might not be able to be modified from the process itself.
+    /// This is case insensitive, meaning if you'd put `AWS_PROFILE` it'd unset both `AWS_PROFILE`
+    /// and `Aws_Profile` and other variations.
     pub unset: Option<VecOrSingle<String>>,
 }
 
