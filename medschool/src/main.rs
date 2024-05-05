@@ -16,7 +16,7 @@
 use std::{fs, path::PathBuf};
 
 use file::parse_files;
-use parse::{parse_docs_into_tree, resolve_references};
+use parse::{parse_docs_into_tree, produce_docs_from_root_type, resolve_references};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::error::DocsError;
@@ -79,12 +79,9 @@ fn main() -> Result<(), DocsError> {
 
     let mut final_docs = String::new();
 
-    for type_doc in new_types.iter() {
+    for type_doc in new_types.into_iter() {
         if type_doc.ident == "LayerConfig" {
-            final_docs.push_str(type_doc.docs.concat().as_str());
-            for field in type_doc.fields.iter() {
-                final_docs.push_str(&field.docs.concat());
-            }
+            final_docs = produce_docs_from_root_type(type_doc);
         }
     }
 

@@ -1,4 +1,4 @@
-use std::{fmt::Display, hash::Hash};
+use std::{collections::BTreeMap, fmt::Display, hash::Hash};
 
 use syn::{Ident, Type, TypePath};
 
@@ -18,7 +18,7 @@ pub struct PartialType {
     pub docs: Vec<String>,
 
     /// Only useful when [`syn::ItemStruct`], we don't look into variants of enums.
-    pub fields: Vec<PartialField>,
+    pub fields: BTreeMap<String, PartialField>,
 }
 
 /// The fields when the item we're looking is [`syn::ItemStruct`].
@@ -124,7 +124,7 @@ impl PartialOrd for PartialField {
 
 impl Ord for PartialType {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        if other.fields.iter().any(|field| field.ty == self.ident) {
+        if other.fields.iter().any(|field| field.0.clone() == self.ident) {
             // `other` has a field that is of type `self`, so it "belongs" to `self`
             std::cmp::Ordering::Greater
         } else {
@@ -189,7 +189,7 @@ impl Display for PartialType {
         f.write_str(&docs)?;
 
         self.fields.iter().fold(f, |accum, s| {
-            accum.write_str(&s.to_string()).expect("writing failed");
+            accum.write_str(&s.0.to_string()).expect("writing failed");
             accum
         });
         Ok(())
