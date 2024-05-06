@@ -8,6 +8,17 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.100.1](https://github.com/metalbear-co/mirrord/tree/3.100.1) - 2024-05-06
+
+
+### Fixed
+
+- mirrord-agent now catches SIGTERM signal and cleans iptables during graceful
+  deletion. [#2427](https://github.com/metalbear-co/mirrord/issues/2427)
+- Fixed ping pong logic for intproxy-agent communication. Intproxy now sends
+  pings on a fixed schedule, regardless of any other messages.
+
+
 ## [3.100.0](https://github.com/metalbear-co/mirrord/tree/3.100.0) - 2024-05-05
 
 
