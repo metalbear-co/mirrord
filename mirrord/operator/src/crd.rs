@@ -1,10 +1,10 @@
-use chrono::NaiveDate;
 use kube::CustomResource;
 use mirrord_config::target::{Target, TargetConfig};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use self::label_selector::LabelSelector;
+use crate::types::LicenseInfoOwned;
 
 pub mod label_selector;
 
@@ -139,17 +139,6 @@ pub struct Session {
     root = "SessionCrd"
 )]
 pub struct SessionSpec;
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct LicenseInfoOwned {
-    pub name: String,
-    pub organization: String,
-    pub expire_at: NaiveDate,
-    /// Fingerprint of the operator license.
-    pub fingerprint: Option<String>,
-    /// Subscription id encoded in the operator license extension.
-    pub subscription_id: Option<String>,
-}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub enum OperatorFeatures {

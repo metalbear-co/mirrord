@@ -1,0 +1,1 @@
+Move LicenseInfoOwned to another module

@@ -8,6 +8,9 @@ pub mod client;
 #[cfg(feature = "crd")]
 pub mod crd;
 
-/// Operator Setup functinality
+/// Operator Setup functionality
 #[cfg(feature = "setup")]
 pub mod setup;
+
+/// Types used in the operator that don't require any special dependencies
+pub mod types;
