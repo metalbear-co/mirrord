@@ -24,7 +24,9 @@ use mirrord_protocol::{
 };
 use tokio::{
     net::{TcpListener, TcpStream},
+    process::Command,
     select,
+    signal::unix::SignalKind,
     sync::mpsc::{self, Sender},
     task::JoinSet,
     time::{timeout, Duration},
@@ -743,19 +745,30 @@ async fn clear_iptable_chain() -> Result<()> {
     Ok(())
 }
 
-fn spawn_child_agent() -> Result<()> {
+async fn run_child_agent() -> Result<()> {
     let command_args = std::env::args().collect::<Vec<_>>();
     let (command, args) = command_args
         .split_first()
         .expect("cannot spawn child agent: command missing from program arguments");
 
-    let mut child_agent = std::process::Command::new(command).args(args).spawn()?;
+    let mut child_agent = Command::new(command)
+        .args(args)
+        .kill_on_drop(true)
+        .spawn()?;
 
-    let _ = child_agent.wait();
-
-    Ok(())
+    let status = child_agent.wait().await?;
+    if !status.success() {
+        Err(AgentError::AgentFailed(status))
+    } else {
+        Ok(())
+    }
 }
 
+/// Sets iptable chains' names in env (e.g. [`IPTABLE_PREROUTING_ENV`]) and spawns the main agent
+/// routine in the child process. When the child process exits, cleans the iptables.
+///
+/// Captures SIGTERM signals sent by Kubernetes when the pod is gracefully deleted.
+/// When a signal is captured, the child process is killed and the iptables are cleaned.
 async fn start_iptable_guard(args: Args, watch: drain::Watch) -> Result<()> {
     debug!("start_iptable_guard -> Initializing iptable-guard.");
 
@@ -766,7 +779,16 @@ async fn start_iptable_guard(args: Args, watch: drain::Watch) -> Result<()> {
     std::env::set_var(IPTABLE_MESH_ENV, IPTABLE_MESH.as_str());
     std::env::set_var(IPTABLE_STANDARD_ENV, IPTABLE_STANDARD.as_str());
 
-    let result = spawn_child_agent();
+    let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())?;
+
+    let result = tokio::select! {
+        _ = sigterm.recv() => {
+            debug!("start_iptable_guard -> SIGTERM received, killing agent process");
+            Ok(())
+        }
+
+        result = run_child_agent() => result,
+    };
 
     let _ = run_thread_in_namespace(
         clear_iptable_chain(),
