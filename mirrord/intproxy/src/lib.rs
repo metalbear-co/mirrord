@@ -10,7 +10,7 @@ use mirrord_analytics::NullReporter;
 use mirrord_config::LayerConfig;
 use mirrord_intproxy_protocol::{LayerId, LayerToProxyMessage, LocalMessage};
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, CLIENT_READY_FOR_LOGS};
-use ping_pong::{AgentMessageNotification, PingPong};
+use ping_pong::{AgentSentPong, PingPong};
 use proxies::{
     incoming::{IncomingProxy, IncomingProxyMessage},
     outgoing::{OutgoingProxy, OutgoingProxyMessage},
@@ -273,15 +273,8 @@ impl IntProxy {
     /// Some messages are handled here.
     #[tracing::instrument(level = "trace", skip(self), ret)]
     async fn handle_agent_message(&mut self, message: DaemonMessage) -> Result<(), IntProxyError> {
-        self.task_txs
-            .ping_pong
-            .send(AgentMessageNotification {
-                pong: matches!(message, DaemonMessage::Pong),
-            })
-            .await;
-
         match message {
-            DaemonMessage::Pong => {}
+            DaemonMessage::Pong => self.task_txs.ping_pong.send(AgentSentPong).await,
             DaemonMessage::Close(reason) => return Err(IntProxyError::AgentFailed(reason)),
             DaemonMessage::TcpOutgoing(msg) => {
                 self.task_txs
