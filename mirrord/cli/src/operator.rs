@@ -9,8 +9,9 @@ use mirrord_config::{
 use mirrord_kube::api::kubernetes::create_kube_api;
 use mirrord_operator::{
     client::{OperatorApiError, OperatorOperation},
-    crd::{LicenseInfoOwned, MirrordOperatorCrd, MirrordOperatorSpec, OPERATOR_STATUS_NAME},
+    crd::{MirrordOperatorCrd, MirrordOperatorSpec, OPERATOR_STATUS_NAME},
     setup::{LicenseType, Operator, OperatorNamespace, OperatorSetup, SetupOptions},
+    types::LicenseInfoOwned,
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{row, Table};
