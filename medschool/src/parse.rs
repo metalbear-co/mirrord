@@ -78,7 +78,6 @@ fn parse_item_struct(item: syn::ItemStruct) -> Option<PartialType> {
     let is_internal = thing_docs_untreated
         .iter()
         .any(|doc| doc.contains(r"<!--${internal}-->"));
-    
 
     // We only care about types that have docs.
     (!thing_docs_untreated.is_empty() && !fields.is_empty() && !is_internal).then(|| PartialType {
@@ -159,35 +158,43 @@ pub fn parse_docs_into_tree(
 
 /// Resolves the references of the types, so we can inline the docs of the types that are fields of
 fn dfs_fields(
-    field: &PartialField, 
+    field: &PartialField,
     type_map: &HashMap<String, PartialType>,
+    cache: &mut HashMap<String, String>,
 ) -> String {
     let field_type = type_map.get(&field.ty);
 
     match field_type {
         Some(t) => {
+            if let Some(resolved) = cache.get(&t.ident) {
+                return resolved.clone();
+            }
             let mut new_type_docs = t.docs.clone();
             for field in t.fields.iter() {
-                let mut field_docs = field.1.docs.clone();
-                let resolved_type_docs = dfs_fields(field.1, type_map);
-                let pretty_field_docs = pretty_docs(field_docs);
-
-                field_docs = vec![pretty_field_docs, resolved_type_docs];
-                new_type_docs.push(field_docs.concat());
+                let resolved_type_docs = dfs_fields(field.1, type_map, cache);
+                let pretty_field_docs = pretty_docs(field.1.docs.clone());
+                cache.insert(field.1.ident.clone(), resolved_type_docs.clone());
+                new_type_docs.push(format!("{} {}", pretty_field_docs, resolved_type_docs));
             }
-            pretty_docs(new_type_docs)
+            let final_docs = pretty_docs(new_type_docs);
+            cache.insert(t.ident.clone(), final_docs.clone());
+            final_docs
         }
         None => "".to_string(),
     }
 }
 
 #[tracing::instrument(level = "trace", ret)]
-pub fn resolve_references(mut type_map: HashMap<String, PartialType>) -> Vec<PartialType> {    
+pub fn resolve_references(mut type_map: HashMap<String, PartialType>) -> Vec<PartialType> {
     let cloned_type_map = type_map.clone();
+    let mut cache = HashMap::new();
 
     for type_ in type_map.values_mut() {
+        if cache.contains_key(&type_.ident) {
+            continue;
+        }
         for (_, field) in type_.fields.iter_mut() {
-            let resolved_type = dfs_fields(field, &cloned_type_map);
+            let resolved_type = dfs_fields(field, &cloned_type_map, &mut cache);
             let pretty_field_docs = pretty_docs(field.docs.clone());
             field.docs = vec![pretty_field_docs, resolved_type];
         }

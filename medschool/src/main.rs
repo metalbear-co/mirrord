@@ -75,7 +75,13 @@ fn main() -> Result<(), DocsError> {
     let files = parse_files(input.unwrap_or_else(|| PathBuf::from("./src")))?;
 
     let type_docs = parse_docs_into_tree(files)?;
+    use std::time::Instant;
+    let now = Instant::now();
+
     let new_types = resolve_references(type_docs);
+
+    let elapsed = now.elapsed();
+    println!("Elapsed: {:.2?}", elapsed);
 
     let mut final_docs = String::new();
 

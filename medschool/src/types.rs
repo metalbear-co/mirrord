@@ -124,7 +124,11 @@ impl PartialOrd for PartialField {
 
 impl Ord for PartialType {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        if other.fields.iter().any(|field| field.0.clone() == self.ident) {
+        if other
+            .fields
+            .iter()
+            .any(|field| field.0.clone() == self.ident)
+        {
             // `other` has a field that is of type `self`, so it "belongs" to `self`
             std::cmp::Ordering::Greater
         } else {
