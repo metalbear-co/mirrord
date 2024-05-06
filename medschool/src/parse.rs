@@ -1,5 +1,9 @@
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::{Arc, Mutex},
+};
 
+use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
 use syn::{Attribute, Expr, Ident, Meta};
 
 use crate::{
@@ -160,24 +164,41 @@ pub fn parse_docs_into_tree(
 fn dfs_fields(
     field: &PartialField,
     type_map: &HashMap<String, PartialType>,
-    cache: &mut HashMap<String, String>,
+    cache: &Arc<Mutex<HashMap<String, String>>>,
 ) -> String {
     let field_type = type_map.get(&field.ty);
 
     match field_type {
         Some(t) => {
-            if let Some(resolved) = cache.get(&t.ident) {
+            let cache = Arc::clone(cache);
+            if let Some(resolved) = cache.lock().unwrap().get(&t.ident) {
                 return resolved.clone();
             }
+            drop(cache.clone());
             let mut new_type_docs = t.docs.clone();
-            for field in t.fields.iter() {
-                let resolved_type_docs = dfs_fields(field.1, type_map, cache);
-                let pretty_field_docs = pretty_docs(field.1.docs.clone());
-                cache.insert(field.1.ident.clone(), resolved_type_docs.clone());
-                new_type_docs.push(format!("{} {}", pretty_field_docs, resolved_type_docs));
-            }
+
+            // Use par_iter() for parallel iteration
+            let results: Vec<_> = t
+                .fields
+                .par_iter()
+                .map(|field| {
+                    let resolved_type_docs = dfs_fields(field.1, type_map, &cache);
+                    let pretty_field_docs = pretty_docs(field.1.docs.clone());
+                    cache
+                        .lock()
+                        .unwrap()
+                        .insert(field.1.ident.clone(), resolved_type_docs.clone());
+                    drop(cache.clone());
+                    format!("{} {}", pretty_field_docs, resolved_type_docs)
+                })
+                .collect();
+
+            new_type_docs.extend(results);
             let final_docs = pretty_docs(new_type_docs);
-            cache.insert(t.ident.clone(), final_docs.clone());
+            cache
+                .lock()
+                .unwrap()
+                .insert(t.ident.clone(), final_docs.clone());
             final_docs
         }
         None => "".to_string(),
@@ -187,17 +208,17 @@ fn dfs_fields(
 #[tracing::instrument(level = "trace", ret)]
 pub fn resolve_references(mut type_map: HashMap<String, PartialType>) -> Vec<PartialType> {
     let cloned_type_map = type_map.clone();
-    let mut cache = HashMap::new();
+    let cache = Arc::new(Mutex::new(HashMap::new()));
 
     for type_ in type_map.values_mut() {
-        if cache.contains_key(&type_.ident) {
+        if cache.lock().unwrap().contains_key(&type_.ident) {
             continue;
         }
-        for (_, field) in type_.fields.iter_mut() {
-            let resolved_type = dfs_fields(field, &cloned_type_map, &mut cache);
+        type_.fields.par_iter_mut().for_each(|(_, field)| {
+            let resolved_type = dfs_fields(field, &cloned_type_map, &cache);
             let pretty_field_docs = pretty_docs(field.docs.clone());
             field.docs = vec![pretty_field_docs, resolved_type];
-        }
+        });
     }
 
     type_map.into_values().collect()
