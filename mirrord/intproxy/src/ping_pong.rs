@@ -27,17 +27,14 @@ pub enum PingPongError {
     PongTimeout,
 }
 
-/// Notification about a message received from the agent.
-pub struct AgentMessageNotification {
-    /// Whether the message was
-    /// [`DaemonMessage::Pong`](mirrord_protocol::codec::DaemonMessage::Pong).
-    pub pong: bool,
-}
+/// Notification about a [`DeamonMessage::Pong`](mirrord_protocol::DaemonMessage::Pong) received
+/// from the agent.
+pub struct AgentSentPong;
 
 /// Encapsulates logic of the ping pong mechanism on the proxy side.
 /// Run as a [`BackgroundTask`].
 pub struct PingPong {
-    /// How long can the `proxy <-> agent` connection remain silent.
+    /// How often the task should send pings.
     ticker: Interval,
     /// Whether this struct awaits for a pong from the agent.
     awaiting_pong: bool,
@@ -48,7 +45,7 @@ impl PingPong {
     ///
     /// # Arguments
     ///
-    /// * frequency - how long can the `proxy <-> agent` connection remain silent
+    /// * frequency - how often the task should send pings
     pub fn new(frequency: Duration) -> Self {
         let mut ticker = time::interval(frequency);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -62,9 +59,13 @@ impl PingPong {
 
 impl BackgroundTask for PingPong {
     type Error = PingPongError;
-    type MessageIn = AgentMessageNotification;
+    type MessageIn = AgentSentPong;
     type MessageOut = ProxyMessage;
 
+    /// Pings the agent with a frequency configured in [`PingPong::new`].
+    ///
+    /// When the time comes to ping the agent and the previous ping was not answered, this task
+    /// exits with an error.
     async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         loop {
             tokio::select! {
@@ -75,7 +76,6 @@ impl BackgroundTask for PingPong {
                     } else {
                         tracing::trace!("sending ping");
                         let _ = message_bus.send(ProxyMessage::ToAgent(ClientMessage::Ping)).await;
-                        self.ticker.reset();
                         self.awaiting_pong = true;
                     }
                 },
@@ -85,21 +85,14 @@ impl BackgroundTask for PingPong {
                         tracing::trace!("message bus closed, exiting");
                         break Ok(())
                     },
-                    (Some(AgentMessageNotification { pong: true }), true) => {
+                    (Some(AgentSentPong), true) => {
                         tracing::trace!("agent responded to ping");
                         self.awaiting_pong = false;
-                        self.ticker.reset();
                     },
-                    (Some(AgentMessageNotification { pong: false }), true) => {
-                        tracing::trace!("agent sent message, still waiting for pong")
-                    },
-                    (Some(AgentMessageNotification { pong: true }), false) => {
+                    (Some(AgentSentPong), false) => {
                         tracing::error!("agent sent an unexpected pong");
                         break Err(PingPongError::UnmatchedPong)
                     },
-                    (Some(AgentMessageNotification { pong: false }), false) => {
-                        self.ticker.reset();
-                    }
                 },
             }
         }
