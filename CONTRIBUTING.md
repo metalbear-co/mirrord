@@ -21,6 +21,7 @@ The following guide details the steps to setup a local development environment f
 
 ### Prerequisites
 
+- [GCC](https://gcc.gnu.org/) - only on Linux, GCC is needed for Go dynamic linking
 - [Rust](https://www.rust-lang.org/)
 - [NodeJS](https://nodejs.org/en/), [ExpressJS](https://expressjs.com/)
 - [Python](https://www.python.org/), [Flask](https://flask.palletsprojects.com/en/2.1.x/), [FastAPI](https://fastapi.tiangolo.com/)
@@ -108,6 +109,8 @@ MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord cargo te
 If new tests are added, decorate them with `cfg_attr` attribute macro to define what the tests target.
 For example, a test which only tests sanity of the ephemeral container feature should be decorated with
 `#[cfg_attr(not(feature = "ephemeral"), ignore)]`
+
+On Linux, running tests may exhaust a large amount of RAM and crash the machine. To prevent this, limit the number of concurrent jobs by running the command with e.g. `-j 4`
 
 ### Cleanup
 
@@ -394,7 +397,7 @@ Debugging mirrord can get hard since we're running from another app flow, so the
 The recommended way to do it is to use `mirrord-console`. It is a small application that receives log information from different mirrord instances and prints it, controlled via `RUST_LOG` environment variable.
 
 To use mirrord console, run it:
-`cargo run --bin mirrord-console`
+`cargo run --bin mirrord-console --features binary`
 
 Then run mirrord with the environment variable:
 `MIRRORD_CONSOLE_ADDR=127.0.0.1:11233`
