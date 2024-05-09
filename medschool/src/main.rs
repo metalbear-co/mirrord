@@ -73,21 +73,14 @@ fn main() -> Result<(), DocsError> {
     } = <MedschoolArgs as clap::Parser>::parse();
 
     let files = parse_files(input.unwrap_or_else(|| PathBuf::from("./src")))?;
-
     let type_docs = parse_docs_into_tree(files)?;
-    use std::time::Instant;
-    let now = Instant::now();
-
     let new_types = resolve_references(type_docs);
-
-    let elapsed = now.elapsed();
-    println!("Elapsed: {:.2?}", elapsed);
 
     let mut final_docs = String::new();
 
-    for type_doc in new_types.into_iter() {
+    for type_doc in new_types.iter() {
         if type_doc.ident == "LayerConfig" {
-            final_docs = produce_docs_from_root_type(type_doc);
+            final_docs = produce_docs_from_root_type(type_doc.clone());
         }
     }
 

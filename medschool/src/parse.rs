@@ -1,14 +1,9 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::{Arc, Mutex},
-};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
-use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
 use syn::{Attribute, Expr, Ident, Meta};
 
-use crate::{
-    file::pretty_docs,
-    types::{PartialField, PartialType},
+use crate::{    
+    types::{PartialField, PartialType, PrettyDocs},
     DocsError,
 };
 
@@ -75,8 +70,12 @@ fn parse_item_struct(item: syn::ItemStruct) -> Option<PartialType> {
         // filter_map -> convert to new PartialField and remove internal fields
         .filter_map(PartialField::new)
         .filter(|field| !field.docs.contains(&r"<!--${internal}-->".into()))
-        .map(|field| (field.ident.clone(), field))
-        .collect::<BTreeMap<_, _>>();
+        .map(|mut field| {
+            // println!("field: {:?}", field.ident);
+            field.pretty_docs();
+            field
+        })
+        .collect::<BTreeSet<_>>();    
 
     let thing_docs_untreated = docs_from_attributes(item.attrs);
     let is_internal = thing_docs_untreated
@@ -93,23 +92,24 @@ fn parse_item_struct(item: syn::ItemStruct) -> Option<PartialType> {
 
 /// Converts a [`syn::Item`] into a [`PartialType`], if possible.
 #[tracing::instrument(level = "trace", ret)]
-fn parse_syn_item_into_partial_type(item: syn::Item) -> Option<(String, PartialType)> {
-    let partial_type = match item {
+fn parse_syn_item_into_partial_type(item: syn::Item) -> Option<PartialType> {
+    let parsed_item = match item {
         syn::Item::Mod(item_mod) => parse_item_mod(item_mod),
         syn::Item::Enum(item_enum) => parse_item_enum(item_enum),
         syn::Item::Struct(item_struct) => parse_item_struct(item_struct),
         _ => return None,
     };
 
-    partial_type.map(|partial_type| (partial_type.ident.clone(), partial_type))
+    parsed_item.map(|mut item| {
+        item.pretty_docs();
+        item
+    })
 }
 
 /// Converts a list of [`syn::File`] into a [`BTreeSet`] of our own [`PartialType`] types, so we can
 /// get a root node (see the [`Ord`] implementation of `PartialType`).
 #[tracing::instrument(level = "trace", ret)]
-pub fn parse_docs_into_tree(
-    files: Vec<syn::File>,
-) -> Result<HashMap<String, PartialType>, DocsError> {
+pub fn parse_docs_into_tree(files: Vec<syn::File>) -> Result<HashSet<PartialType>, DocsError> {
     let type_docs = files
         .into_iter()
         // go through each `File` extracting the types into a hierarchical tree based on which types
@@ -121,12 +121,44 @@ pub fn parse_docs_into_tree(
                 // convert an `Item` into a `PartialType`
                 .filter_map(parse_syn_item_into_partial_type)
         })
-        .collect::<HashMap<_, _>>();
+        .collect::<HashSet<_>>();
 
     Ok(type_docs)
 }
 
-/// Digs into the [`PartialTypes`] building new types that inline the types of their
+/// DFS helper function to resolve the references of the types. Returns the docs of the fields of
+/// the field we're currently looking at search till its leaf nodes. The leaf here means a primitive
+/// type for which we don't have a `PartialType`.
+fn dfs_fields(
+    field: &PartialField,
+    type_map: &HashSet<PartialType>,
+    cache: &mut HashMap<String, Vec<String>>,
+) -> Vec<String> {
+    type_map
+        .get(&field.ty)
+        .map(|type_| {
+            cache
+                .get(&type_.ident)
+                .cloned()
+                .unwrap_or_else(|| {
+                    let mut new_type_docs = type_.docs.clone();
+                    type_.fields.iter().for_each(|field| {
+                        let resolved_type_docs = dfs_fields(field, type_map, cache);
+                        let pretty_field_docs = field.docs.clone();
+                        cache.insert(field.ident.clone(), resolved_type_docs.clone());
+                        new_type_docs.extend(pretty_field_docs);
+                        new_type_docs.extend(resolved_type_docs);
+                    });
+                    cache.insert(type_.ident.clone(), new_type_docs.clone());
+                    new_type_docs
+                })                        
+        })
+        .unwrap_or_default()
+}
+
+/// Resolves the references of the types, so we can inline the docs of the types that are fields of
+/// other types. Following a DFS approach to resolve the references with memoization it
+/// digs into the [`PartialTypes`] building new types that inline the types of their
 /// [`PartialField`]s, turning something like:
 ///
 /// ```no_run
@@ -159,87 +191,40 @@ pub fn parse_docs_into_tree(
 ///     y: i32,
 /// }
 /// ```
-
-/// Resolves the references of the types, so we can inline the docs of the types that are fields of
-fn dfs_fields(
-    field: &PartialField,
-    type_map: &HashMap<String, PartialType>,
-    cache: &Arc<Mutex<HashMap<String, String>>>,
-) -> String {
-    let field_type = type_map.get(&field.ty);
-
-    match field_type {
-        Some(t) => {
-            let cache = Arc::clone(cache);
-            if let Some(resolved) = cache.lock().unwrap().get(&t.ident) {
-                return resolved.clone();
-            }
-            drop(cache.clone());
-            let mut new_type_docs = t.docs.clone();
-
-            // Use par_iter() for parallel iteration
-            let results: Vec<_> = t
-                .fields
-                .par_iter()
-                .map(|field| {
-                    let resolved_type_docs = dfs_fields(field.1, type_map, &cache);
-                    let pretty_field_docs = pretty_docs(field.1.docs.clone());
-                    cache
-                        .lock()
-                        .unwrap()
-                        .insert(field.1.ident.clone(), resolved_type_docs.clone());
-                    drop(cache.clone());
-                    format!("{} {}", pretty_field_docs, resolved_type_docs)
-                })
-                .collect();
-
-            new_type_docs.extend(results);
-            let final_docs = pretty_docs(new_type_docs);
-            cache
-                .lock()
-                .unwrap()
-                .insert(t.ident.clone(), final_docs.clone());
-            final_docs
-        }
-        None => "".to_string(),
-    }
-}
-
 #[tracing::instrument(level = "trace", ret)]
-pub fn resolve_references(mut type_map: HashMap<String, PartialType>) -> Vec<PartialType> {
-    let cloned_type_map = type_map.clone();
-    let cache = Arc::new(Mutex::new(HashMap::new()));
+pub fn resolve_references(type_map: HashSet<PartialType>) -> HashSet<PartialType> {
+    let mut cache = HashMap::with_capacity(type_map.len());
 
-    for type_ in type_map.values_mut() {
-        if cache.lock().unwrap().contains_key(&type_.ident) {
-            continue;
-        }
-        type_.fields.par_iter_mut().for_each(|(_, field)| {
-            let resolved_type = dfs_fields(field, &cloned_type_map, &cache);
-            let pretty_field_docs = pretty_docs(field.docs.clone());
-            field.docs = vec![pretty_field_docs, resolved_type];
-        });
-    }
-
-    type_map.into_values().collect()
+    type_map
+        .clone()
+        .drain()
+        .filter_map(|mut type_| {
+            (!cache.contains_key(&type_.ident)).then(|| {
+                type_.fields = type_
+                    .fields
+                    .into_iter()
+                    .map(|mut field| {
+                        let resolved_type_docs = dfs_fields(&field, &type_map, &mut cache);
+                        field.docs.extend(resolved_type_docs);
+                        field
+                    })
+                    .collect::<BTreeSet<_>>();
+                type_
+            })
+        })
+        .collect()
 }
 
 /// Turns the `root` [`PartialType`] documentation into one big `String`.
 #[tracing::instrument(level = "trace", ret)]
 pub fn produce_docs_from_root_type(root: PartialType) -> String {
-    let type_docs = pretty_docs(root.docs);
-
-    // Concat all the docs!
-    [
-        type_docs,
-        root.fields
-            .into_iter()
-            .map(|field| field.1.docs.concat())
-            .collect::<Vec<_>>()
-            .concat(),
-    ]
-    .concat()
+    root.docs
+        .into_iter()
+        .chain(root.fields.into_iter().flat_map(|field| field.docs.into_iter()))
+        .collect()
 }
+
+
 
 /// Gets the element with the most number of [`PartialField`], which at this point should be our
 /// root [`PartialType`].

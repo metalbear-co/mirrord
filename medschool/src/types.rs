@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt::Display, hash::Hash};
+use std::{borrow::Borrow, cmp::Ordering, collections::BTreeSet, fmt::Display, hash::Hash};
 
 use syn::{Ident, Type, TypePath};
 
@@ -18,7 +18,7 @@ pub struct PartialType {
     pub docs: Vec<String>,
 
     /// Only useful when [`syn::ItemStruct`], we don't look into variants of enums.
-    pub fields: BTreeMap<String, PartialField>,
+    pub fields: BTreeSet<PartialField>,
 }
 
 /// The fields when the item we're looking is [`syn::ItemStruct`].
@@ -110,41 +110,23 @@ impl PartialField {
     }
 }
 
-impl PartialOrd for PartialType {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
+impl PartialEq for PartialField {
+    fn eq(&self, other: &Self) -> bool {
+        self.ident == other.ident
     }
 }
+
+impl Eq for PartialField {}
 
 impl PartialOrd for PartialField {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for PartialType {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        if other
-            .fields
-            .iter()
-            .any(|field| field.0.clone() == self.ident)
-        {
-            // `other` has a field that is of type `self`, so it "belongs" to `self`
-            std::cmp::Ordering::Greater
-        } else {
-            std::cmp::Ordering::Less
-        }
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.ident.cmp(&other.ident))
     }
 }
 
 impl Ord for PartialField {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // primitive types < custom types (usually)
-        self.ty
-            .len()
-            .cmp(&other.ty.len())
-            // both field types have the same length, so sort alphabetically
-            .then_with(|| self.ident.cmp(&other.ident))
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.ident.cmp(&other.ident)
     }
 }
 
@@ -164,15 +146,7 @@ impl PartialEq for PartialType {
     }
 }
 
-impl PartialEq for PartialField {
-    fn eq(&self, other: &Self) -> bool {
-        self.ty.eq(&other.ty)
-    }
-}
-
 impl Eq for PartialType {}
-
-impl Eq for PartialField {}
 
 impl Hash for PartialType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -186,6 +160,12 @@ impl Hash for PartialField {
     }
 }
 
+impl Borrow<String> for PartialType {
+    fn borrow(&self) -> &String {
+        &self.ident
+    }
+}
+
 impl Display for PartialType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Prevents crashing the tool if the type is not properly documented.
@@ -193,7 +173,9 @@ impl Display for PartialType {
         f.write_str(&docs)?;
 
         self.fields.iter().fold(f, |accum, s| {
-            accum.write_str(&s.0.to_string()).expect("writing failed");
+            accum
+                .write_str(&s.ident.to_string())
+                .expect("writing failed");
             accum
         });
         Ok(())
@@ -205,5 +187,42 @@ impl Display for PartialField {
         // Prevents crashing the tool if the field is not properly documented.
         let docs = self.docs.last().cloned().unwrap_or_default();
         f.write_str(&docs)
+    }
+}
+
+pub trait PrettyDocs {
+    /// The docs of the type or field.
+    fn docs(&mut self) -> &mut Vec<String>;
+
+    /// Glues all the `Vec<String>` docs into one big `String`.
+    /// It can also be used to filter out docs with meta comments, such as `${internal}`.
+    fn pretty_docs(&mut self) {
+        let docs = self.docs();
+        for doc in docs.iter_mut() {
+            // removes docs that we don't want in `configuration.md`
+            if doc.contains(r"<!--${internal}-->") {
+                self.docs().clear();
+                return;
+            }
+
+            // `trim` is too aggressive, we just want to remove 1 whitespace
+            if doc.starts_with(' ') {
+                doc.remove(0);
+            }
+        }
+
+        self.docs().push("\n".to_string());
+    }
+}
+
+impl PrettyDocs for PartialField {
+    fn docs(&mut self) -> &mut Vec<String> {
+        &mut self.docs
+    }
+}
+
+impl PrettyDocs for PartialType {
+    fn docs(&mut self) -> &mut Vec<String> {
+        &mut self.docs
     }
 }
