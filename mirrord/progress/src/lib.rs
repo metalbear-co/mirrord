@@ -46,8 +46,8 @@ pub trait Progress: Sized {
     fn set_fail_on_drop(&mut self, fail: bool);
 }
 
-/// `ProgressMode` specifies the way progress is reported
-/// by [`TaskProgress`].
+/// `ProgressMode` specifies the way progress is reported by `TaskProgress`.
+// TODO: update outdated comment
 #[derive(Debug)]
 #[enum_dispatch(Progress)]
 pub enum ProgressTracker {

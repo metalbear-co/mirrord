@@ -658,8 +658,9 @@ impl Drop for KubeService {
 
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
-/// This behavior can be changed, see [`FORCE_CLEANUP_ENV_NAME`].
+/// This behavior can be changed, see `FORCE_CLEANUP_ENV_NAME`.
 /// * `randomize_name` - whether a random suffix should be added to the end of the resource names
+// TODO: update outdated comment, FORCE_CLEANUP_ENV_NAME does not exist
 #[fixture]
 pub async fn service(
     #[default("default")] namespace: &str,
@@ -904,7 +905,7 @@ pub async fn pause_services(#[future] kube_client: Client) -> (KubeService, Kube
     (requester, logger)
 }
 
-/// Service that listens on port 80 and returns "remote: <DATA>" when getting "<DATA>" directly
+/// Service that listens on port 80 and returns `remote: <DATA>` when getting `<DATA>` directly
 /// over TCP, not HTTP.
 #[fixture]
 pub async fn tcp_echo_service(#[future] kube_client: Client) -> KubeService {
@@ -920,7 +921,7 @@ pub async fn tcp_echo_service(#[future] kube_client: Client) -> KubeService {
 }
 
 /// [Service](https://github.com/metalbear-co/test-images/blob/main/websocket/app.mjs)
-/// that listens on port 80 and returns "remote: <DATA>" when getting "<DATA>" over a websocket
+/// that listens on port 80 and returns `remote: <DATA>` when getting `<DATA>` over a websocket
 /// connection, allowing us to test HTTP upgrade requests.
 #[fixture]
 pub async fn websocket_service(#[future] kube_client: Client) -> KubeService {
@@ -948,7 +949,7 @@ pub async fn http2_service(#[future] kube_client: Client) -> KubeService {
     .await
 }
 
-/// Service that listens on port 80 and returns "remote: <DATA>" when getting "<DATA>" directly
+/// Service that listens on port 80 and returns `remote: <DATA>` when getting `<DATA>` directly
 /// over TCP, not HTTP.
 #[fixture]
 pub async fn hostname_service(#[future] kube_client: Client) -> KubeService {

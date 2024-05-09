@@ -12,8 +12,9 @@ use tracing::{error, info};
 
 use crate::{graceful_exit, proxy_connection::ProxyError};
 
-/// Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
 mod ignore_codes {
+    //! Private module for preventing access to the [`IGNORE_ERROR_CODES`] constant.
+
     /// Error codes from [`libc`] that are **not** hard errors, meaning the operation may progress.
     ///
     /// Prefer using [`is_ignored_code`] instead of relying on this constant.

@@ -207,7 +207,7 @@ impl MirrordExecution {
             format!("127.0.0.1:{port}"),
         );
 
-        // Fix https://github.com/metalbear-co/mirrord/issues/1745
+        // Fix <https://github.com/metalbear-co/mirrord/issues/1745>
         // by disabling the fork safety check in the Objective-C runtime.
         #[cfg(target_os = "macos")]
         env_vars.insert(
@@ -347,7 +347,7 @@ impl MirrordExecution {
     /// Required when called from extension since sometimes the extension
     /// cleans up the process when the parent process exits, so we need the parent to stay alive
     /// while the internal proxy is running.
-    /// See https://github.com/metalbear-co/mirrord/issues/1211
+    /// See <https://github.com/metalbear-co/mirrord/issues/1211>
     pub(crate) async fn wait(mut self) -> Result<()> {
         self.child
             .wait()
