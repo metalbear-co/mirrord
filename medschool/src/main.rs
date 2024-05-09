@@ -16,7 +16,7 @@
 use std::{fs, path::PathBuf};
 
 use file::parse_files;
-use parse::{parse_docs_into_tree, produce_docs_from_root_type, resolve_references};
+use parse::parse_docs_into_tree;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::error::DocsError;
@@ -74,13 +74,14 @@ fn main() -> Result<(), DocsError> {
 
     let files = parse_files(input.unwrap_or_else(|| PathBuf::from("./src")))?;
     let type_docs = parse_docs_into_tree(files)?;
-    let new_types = resolve_references(type_docs);
 
     let mut final_docs = String::new();
 
-    for type_doc in new_types.iter() {
+    for type_doc in type_docs.iter() {
         if type_doc.ident == "LayerConfig" {
-            final_docs = produce_docs_from_root_type(type_doc.clone());
+            let mut type_doc = type_doc.clone();
+            type_doc.resolve_references(&type_docs);
+            final_docs = type_doc.produce_docs();
         }
     }
 

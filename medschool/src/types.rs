@@ -1,4 +1,10 @@
-use std::{borrow::Borrow, cmp::Ordering, collections::BTreeSet, fmt::Display, hash::Hash};
+use std::{
+    borrow::Borrow,
+    cmp::Ordering,
+    collections::{BTreeSet, HashMap, HashSet},
+    fmt::Display,
+    hash::Hash,
+};
 
 use syn::{Ident, Type, TypePath};
 
@@ -107,6 +113,101 @@ impl PartialField {
         }
 
         inner_type
+    }
+}
+
+impl PartialType {
+    /// DFS helper function to resolve the references of the types. Returns the docs of the fields
+    /// of the field we're currently looking at search till its leaf nodes. The leaf here means
+    /// a primitive type for which we don't have a `PartialType`.
+    fn dfs_fields(
+        field: &PartialField,
+        type_map: &HashSet<PartialType>,
+        cache: &mut HashMap<String, Vec<String>>,
+    ) -> Vec<String> {
+        type_map
+            .get(&field.ty)
+            .map(|type_| {
+                cache.get(&type_.ident).cloned().unwrap_or_else(|| {
+                    let new_type_docs =
+                        type_
+                            .fields
+                            .iter()
+                            .fold(type_.docs.clone(), |mut acc, field| {
+                                let resolved_type_docs = Self::dfs_fields(field, type_map, cache);
+                                let mut field_docs = field.docs.clone();
+                                field_docs.extend(resolved_type_docs.clone());
+                                cache.insert(field.ident.clone(), field_docs.clone());
+                                acc.extend(field_docs);
+                                acc
+                            });
+                    cache.insert(type_.ident.clone(), new_type_docs.clone());
+                    new_type_docs
+                })
+            })
+            .unwrap_or_default()
+    }
+
+    /// Resolves the references of the types, so we can inline the docs of the types that are fields
+    /// of other types. Following a DFS approach to resolve the references with memoization it
+    /// digs into the [`PartialTypes`] building new types that inline the types of their
+    /// [`PartialField`]s, turning something like:
+    ///
+    /// ```no_run
+    /// /// A struct
+    /// struct A {
+    ///     /// x field
+    ///     x: i32,
+    ///     /// b field
+    ///     b: B,
+    /// }
+    ///
+    /// /// B struct
+    /// struct B {
+    ///     /// y field
+    ///     y: i32,
+    /// }
+    /// ```
+    ///
+    /// Into:
+    ///
+    /// ```no_run
+    /// /// A struct
+    /// struct A {
+    ///     /// x field
+    ///     x: i32,
+    ///
+    ///     /// b field
+    ///     /// B struct
+    ///     /// y field
+    ///     y: i32,
+    /// }
+    /// ```
+    pub fn resolve_references(&mut self, type_map: &HashSet<PartialType>) {
+        let mut cache = HashMap::with_capacity(type_map.len());
+
+        self.fields = self
+            .fields
+            .clone()
+            .into_iter()
+            .map(|mut field| {
+                let resolved_type_docs = Self::dfs_fields(&field, type_map, &mut cache);
+                field.docs.extend(resolved_type_docs);
+                field
+            })
+            .collect();
+    }
+
+    /// Turns the `root` [`PartialType`] documentation into one big `String`.
+    pub fn produce_docs(self) -> String {
+        self.docs
+            .into_iter()
+            .chain(
+                self.fields
+                    .into_iter()
+                    .flat_map(|field| field.docs.into_iter()),
+            )
+            .collect()
     }
 }
 

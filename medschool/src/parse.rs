@@ -1,8 +1,8 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 
 use syn::{Attribute, Expr, Ident, Meta};
 
-use crate::{    
+use crate::{
     types::{PartialField, PartialType, PrettyDocs},
     DocsError,
 };
@@ -75,7 +75,7 @@ fn parse_item_struct(item: syn::ItemStruct) -> Option<PartialType> {
             field.pretty_docs();
             field
         })
-        .collect::<BTreeSet<_>>();    
+        .collect::<BTreeSet<_>>();
 
     let thing_docs_untreated = docs_from_attributes(item.attrs);
     let is_internal = thing_docs_untreated
@@ -125,106 +125,6 @@ pub fn parse_docs_into_tree(files: Vec<syn::File>) -> Result<HashSet<PartialType
 
     Ok(type_docs)
 }
-
-/// DFS helper function to resolve the references of the types. Returns the docs of the fields of
-/// the field we're currently looking at search till its leaf nodes. The leaf here means a primitive
-/// type for which we don't have a `PartialType`.
-fn dfs_fields(
-    field: &PartialField,
-    type_map: &HashSet<PartialType>,
-    cache: &mut HashMap<String, Vec<String>>,
-) -> Vec<String> {
-    type_map
-        .get(&field.ty)
-        .map(|type_| {
-            cache
-                .get(&type_.ident)
-                .cloned()
-                .unwrap_or_else(|| {
-                    let mut new_type_docs = type_.docs.clone();
-                    type_.fields.iter().for_each(|field| {
-                        let resolved_type_docs = dfs_fields(field, type_map, cache);
-                        let pretty_field_docs = field.docs.clone();
-                        cache.insert(field.ident.clone(), resolved_type_docs.clone());
-                        new_type_docs.extend(pretty_field_docs);
-                        new_type_docs.extend(resolved_type_docs);
-                    });
-                    cache.insert(type_.ident.clone(), new_type_docs.clone());
-                    new_type_docs
-                })                        
-        })
-        .unwrap_or_default()
-}
-
-/// Resolves the references of the types, so we can inline the docs of the types that are fields of
-/// other types. Following a DFS approach to resolve the references with memoization it
-/// digs into the [`PartialTypes`] building new types that inline the types of their
-/// [`PartialField`]s, turning something like:
-///
-/// ```no_run
-/// /// A struct
-/// struct A {
-///     /// x field
-///     x: i32,
-///     /// b field
-///     b: B,
-/// }
-///
-/// /// B struct
-/// struct B {
-///     /// y field
-///     y: i32,
-/// }
-/// ```
-///
-/// Into:
-///
-/// ```no_run
-/// /// A struct
-/// struct A {
-///     /// x field
-///     x: i32,
-///
-///     /// b field
-///     /// B struct
-///     /// y field
-///     y: i32,
-/// }
-/// ```
-#[tracing::instrument(level = "trace", ret)]
-pub fn resolve_references(type_map: HashSet<PartialType>) -> HashSet<PartialType> {
-    let mut cache = HashMap::with_capacity(type_map.len());
-
-    type_map
-        .clone()
-        .drain()
-        .filter_map(|mut type_| {
-            (!cache.contains_key(&type_.ident)).then(|| {
-                type_.fields = type_
-                    .fields
-                    .into_iter()
-                    .map(|mut field| {
-                        let resolved_type_docs = dfs_fields(&field, &type_map, &mut cache);
-                        field.docs.extend(resolved_type_docs);
-                        field
-                    })
-                    .collect::<BTreeSet<_>>();
-                type_
-            })
-        })
-        .collect()
-}
-
-/// Turns the `root` [`PartialType`] documentation into one big `String`.
-#[tracing::instrument(level = "trace", ret)]
-pub fn produce_docs_from_root_type(root: PartialType) -> String {
-    root.docs
-        .into_iter()
-        .chain(root.fields.into_iter().flat_map(|field| field.docs.into_iter()))
-        .collect()
-}
-
-
 
 /// Gets the element with the most number of [`PartialField`], which at this point should be our
 /// root [`PartialType`].
