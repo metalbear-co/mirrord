@@ -215,6 +215,9 @@ impl From<HookError> for i64 {
             HookError::SocketUnsuportedIpv6 => {
                 info!("{fail}")
             }
+            HookError::IO(e) if (e.kind() == std::io::ErrorKind::PermissionDenied) => {
+                info!(?fail, "libc error (doesn't indicate a problem)")
+            }
             HookError::ProxyError(ref err) => {
                 graceful_exit!(
                     "Proxy error, connectivity issue or a bug. \n\
