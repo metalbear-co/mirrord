@@ -17,7 +17,12 @@ mod ignore_codes {
     /// Error codes from [`libc`] that are **not** hard errors, meaning the operation may progress.
     ///
     /// Prefer using [`is_ignored_code`] instead of relying on this constant.
-    const IGNORE_ERROR_CODES: [i32; 3] = [libc::EINPROGRESS, libc::EAFNOSUPPORT, libc::EADDRINUSE];
+    const IGNORE_ERROR_CODES: [i32; 4] = [
+        libc::EINPROGRESS,
+        libc::EAFNOSUPPORT,
+        libc::EADDRINUSE,
+        libc::EPERM,
+    ];
 
     /// Checks if an error code from some [`libc`] function should be treated as a hard error, or
     /// not.
@@ -214,9 +219,6 @@ impl From<HookError> for i64 {
             }
             HookError::SocketUnsuportedIpv6 => {
                 info!("{fail}")
-            }
-            HookError::IO(e) if (e.kind() == std::io::ErrorKind::PermissionDenied) => {
-                info!(?fail, "libc error (doesn't indicate a problem)")
             }
             HookError::ProxyError(ref err) => {
                 graceful_exit!(
