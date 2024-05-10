@@ -22,6 +22,7 @@ use miette::JSONReportHandler;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
+    feature::{fs::FsModeConfig, network::incoming::IncomingMode},
     target::TargetDisplay,
     LayerConfig, LayerFileConfig,
 };
@@ -101,6 +102,85 @@ where
     let mut binary_args = args.binary_args.clone();
     // Put original executable in argv[0] even if actually running patched version.
     binary_args.insert(0, args.binary.clone());
+
+    // Print config details for the user
+    sub_progress.info(
+        &format!(
+            "Running binary \"{}\" with arguments: {:?}.",
+            binary, args.binary_args
+        )[..],
+    );
+
+    let target_info = if let Some(target) = &config.target.path {
+        &format!("mirrord will target: {}", target)[..]
+    } else {
+        // TODO: check accuracy of statement
+        "mirrord will run without a target"
+    };
+    let config_info = if let Ok(path) = std::env::var("MIRRORD_CONFIG_FILE") {
+        &format!("a configuration file was loaded from: {}. ", path)[..]
+    } else {
+        "no configuration file was loaded"
+    };
+    sub_progress.info(&format!("{}, {}", target_info, config_info)[..]);
+
+    let operator_info = match config.operator {
+        Some(true) => "be used",
+        Some(false) => "not be used",
+        None => "be used if possible",
+    };
+    sub_progress.info(&format!("operator: the operator will {}", operator_info)[..]);
+
+    let exclude = config.feature.env.exclude.as_ref();
+    let include = config.feature.env.include.as_ref();
+    let env_info = if exclude.is_some() {
+        if exclude
+            .unwrap()
+            .clone()
+            .to_vec()
+            .contains(&String::from("*"))
+        {
+            "no"
+        } else {
+            "not all"
+        }
+    } else if include.is_some() {
+        "not all"
+    } else {
+        "all"
+    };
+    sub_progress.info(&format!("env: {} environment variables will be fetched", env_info)[..]);
+
+    let fs_info = match config.feature.fs.mode {
+        FsModeConfig::Read => "read only from the remote",
+        FsModeConfig::Write => "read and write from the remote",
+        _ => "read and write locally",
+    };
+    sub_progress.info(&format!("fs: file operations will default to {}", fs_info)[..]);
+
+    let incoming_info = match config.feature.network.incoming.mode {
+        IncomingMode::Mirror => "mirrored",
+        IncomingMode::Steal => "stolen",
+        IncomingMode::Off => "ignored",
+    };
+    sub_progress.info(&format!("incoming: incoming traffic will be {}", incoming_info)[..]);
+
+    let outgoing_info = match (
+        config.feature.network.outgoing.tcp,
+        config.feature.network.outgoing.udp,
+    ) {
+        (true, true) => "enabled on TCP and UDP",
+        (true, false) => "enabled on TCP",
+        (false, true) => "enabled on UDP",
+        (false, false) => "disabled on TCP and UDP",
+    };
+    sub_progress.info(&format!("outgoing: forwarding is {}", outgoing_info)[..]);
+
+    let dns_info = match config.feature.network.dns {
+        true => "remotely",
+        false => "locally",
+    };
+    sub_progress.info(&format!("dns: DNS will be resolved {}", dns_info)[..]);
 
     sub_progress.success(Some("ready to launch process"));
     // The execve hook is not yet active and does not hijack this call.
