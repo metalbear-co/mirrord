@@ -80,6 +80,9 @@ once_cell = "1"
 exec = "0.3"
 drain = "0.1"
 
+[workspace.lints.rustdoc]
+private_intra_doc_links = "allow"
+
 [profile.release]
 strip = "debuginfo"
 # Enabling LTO causes this issue https://github.com/metalbear-co/mirrord/issues/906
