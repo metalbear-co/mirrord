@@ -169,7 +169,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       # enables the creation of a workspace index.html page.
-      RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
+      RUSTDOCFLAGS: "--enable-index-page -Zunstable-options -Dwarnings"
     steps:
       - uses: actions/checkout@v3
       - uses: arduino/setup-protoc@v1
@@ -545,6 +545,7 @@ jobs:
         test_agent,
         lint,
         lint_markdown,
+        check-rust-docs,
       ]
     runs-on: ubuntu-latest
     steps:
@@ -562,5 +563,6 @@ jobs:
             (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
             (needs.lint_markdown.result == 'success' || needs.lint_markdown.result == 'skipped') &&
             (needs.intellij_e2e_on_release_branch.result == 'success' || needs.intellij_e2e_on_release_branch.result == 'skipped') &&
-            (needs.vscode_e2e_on_release_branch.result == 'success' || needs.vscode_e2e_on_release_branch.result == 'skipped') }}
+            (needs.vscode_e2e_on_release_branch.result == 'success' || needs.vscode_e2e_on_release_branch.result == 'skipped') &&
+            (needs.check-rust-docs.result == 'success' || needs.check-rust-docs.result == 'skipped') }}
         run: echo $CI_SUCCESS && if [ "$CI_SUCCESS" == "true" ]; then echo "SUCCESS" && exit 0; else echo "Failure" && exit 1; fi
