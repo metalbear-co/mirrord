@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use syn::{Attribute, Expr, Ident, Meta};
 
@@ -126,12 +126,113 @@ pub fn parse_docs_into_tree(files: Vec<syn::File>) -> Result<HashSet<PartialType
     Ok(type_docs)
 }
 
-/// Gets the element with the most number of [`PartialField`], which at this point should be our
-/// root [`PartialType`].
+/// DFS helper function to resolve the references of the types. Returns the docs of the fields of
+/// the field we're currently looking at search till its leaf nodes. The leaf here means a primitive
+/// type for which we don't have a [`PartialType`].
+fn dfs_fields(
+    field: &PartialField,
+    types: &HashSet<PartialType>,
+    cache: &mut HashMap<String, Vec<String>>,
+    recursion_level: &mut usize,
+) -> Vec<String> {
+    // increment the recursion level as we're going deeper into the tree
+    *recursion_level += 1;
+    types // get the type of the field from the types set to recurse into it's fields
+        .get(&field.ty)
+        .map(|type_| {
+            cache.get(&type_.ident).cloned().unwrap_or_else(|| {
+                // check if we've already resolved the type
+                let mut new_type_docs = type_.docs.clone();
+                type_.fields.iter().for_each(|field| {
+                    let resolved_type_docs = dfs_fields(field, types, cache, recursion_level);                    
+                    cache.insert(field.ty.clone(), resolved_type_docs.clone());
+                    // append the docs of the field to the resolved type docs
+                    new_type_docs.extend(field.docs.clone());
+                    new_type_docs.extend(resolved_type_docs);
+                });                
+                cache.insert(type_.ident.clone(), new_type_docs.clone());
+                new_type_docs
+            })
+        })
+        .unwrap_or_default()
+}
+
+/// Resolves the references of the types, so we can inline the docs of the types that are fields of
+/// other types. Following a DFS approach to resolve the references with memoization it
+/// digs into the [`PartialTypes`] building new types that inline the types of their
+/// [`PartialField`]s, turning something like:
+///
+/// ```no_run
+/// /// A struct
+/// struct A {
+///     /// x field
+///     x: i32,
+///     /// b field
+///     b: B,
+/// }
+///
+/// /// B struct
+/// struct B {
+///     /// y field
+///     y: i32,
+/// }
+/// ```
+///
+/// Into:
+///
+/// ```no_run
+/// /// A struct
+/// struct A {
+///     /// x field
+///     x: i32,
+///
+///     /// b field
+///     /// B struct
+///     /// y field
+///     y: i32,
+/// }
+/// ```
+/// Returns the element with the maximum recursion, which at this point should be our
+/// root [`PartialType`]. This is just an assumption and an alternate implementation could
+/// be where we resolve all references and return the same HashSet and let the caller
+/// decide what the root should be.
 #[tracing::instrument(level = "trace", ret)]
-fn get_root_type(types: Vec<PartialType>) -> PartialType {
+pub fn resolve_references(types: HashSet<PartialType>) -> Option<PartialType> {
+    // Cache to perform memoization between recursive calls so we don't have to resolve the same
+    // type multiple times. Mapping between `ident` -> `resolved_docs`.
+    // For example, if we have a types [`A`, `B`, `C`] and A has a field of type `B` and `B` has a
+    // field of type `C`, and `C` has already been resolved, we don't want to resolve `C` again
+    // as we iterate over the types. A -> (B -> C), (B -> C), (C)
+    let mut cache = HashMap::with_capacity(types.len());
+
     types
-        .into_iter()
-        .max_by(|a, b| a.fields.len().cmp(&b.fields.len()))
-        .expect("If we have no elements here, the tool failed!")
+        .clone()
+        .drain()
+        .filter_map(|mut type_| {
+            // Check if the type has already been resolved.
+            (!cache.contains_key(&type_.ident)).then(|| {
+                // We need to calculate the recursion level for the type, so we can get the root
+                // type later on.
+                let mut recursion_level = 0;
+                // Resolve the references of the fields of the type and modify the type.
+                type_.fields = type_
+                    .fields
+                    .into_iter()
+                    .map(|mut field| {
+                        // Depth first search to resolve the references of the fields with the types
+                        // as our lookup table.
+                        let resolved_type_docs =
+                            dfs_fields(&field, &types, &mut cache, &mut recursion_level);
+                        // append the docs of the field to the resolved type docs
+                        field.docs.extend(resolved_type_docs);
+                        field
+                    })
+                    .collect::<BTreeSet<_>>();
+
+                (recursion_level, type_)
+            })
+        })
+        // Get the type with the maximum recursion level, which should be our root type.
+        .max_by_key(|(recursion_level, _)| *recursion_level)
+        .map(|(_, type_)| type_)
 }

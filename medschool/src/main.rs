@@ -13,18 +13,38 @@
 #![feature(const_trait_impl)]
 #![deny(clippy::missing_docs_in_private_items)]
 #![deny(missing_docs)]
-use std::{fs, path::PathBuf};
+use std::{fs, fs::File, io::Read, path::PathBuf};
 
-use file::parse_files;
 use parse::parse_docs_into_tree;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
-use crate::error::DocsError;
+use crate::{error::DocsError, parse::resolve_references};
 
 mod error;
-mod file;
 mod parse;
 mod types;
+
+// TODO(alex): Support specifying a path.
+/// Converts all files in the [`glob::glob`] pattern defined within, in the current directory,
+/// into a `Vec<String>`.
+/// All files are read in parallel to make the best of disk `reads` (assuming SSDs in this case)
+/// performance using a threadpool.
+#[tracing::instrument(level = "trace", ret)]
+pub(crate) fn parse_files(path: PathBuf) -> Result<Vec<syn::File>, DocsError> {
+    let paths = glob::glob(&format!("{}/**/*.rs", path.to_string_lossy()))?;
+
+    paths
+        .into_iter()
+        .filter_map(Result::ok)
+        .map(|path| {
+            let mut file = File::open(path)?;
+            let mut source = String::new();
+            file.read_to_string(&mut source)?;
+
+            syn::parse_file(&source).map_err(Into::into)
+        })
+        .collect()
+}
 
 /// Extracts the documentation from Rust source into a markdown file.
 #[derive(clap::Parser, Debug)]
@@ -74,27 +94,20 @@ fn main() -> Result<(), DocsError> {
 
     let files = parse_files(input.unwrap_or_else(|| PathBuf::from("./src")))?;
     let type_docs = parse_docs_into_tree(files)?;
+    let resolved = resolve_references(type_docs.clone());
 
-    let mut final_docs = String::new();
+    if let Some(produced) = resolved {
+        let mut final_docs = produced.produce_docs();
+        match prepend {
+            Some(header) => {
+                let header = std::fs::read_to_string(header)?;
+                final_docs.insert_str(0, &(header + "\n"));
+            }
+            None => {}
+        };
 
-    for type_doc in type_docs.iter() {
-        if type_doc.ident == "LayerConfig" {
-            let mut type_doc = type_doc.clone();
-            type_doc.resolve_references(&type_docs);
-            final_docs = type_doc.produce_docs();
-        }
+        let output = output.unwrap_or_else(|| PathBuf::from("./configuration.md"));
+        fs::write(output, final_docs).unwrap();
     }
-
-    let final_docs = match prepend {
-        Some(header) => {
-            let header = std::fs::read_to_string(header)?;
-            format!("{header}\n{final_docs}")
-        }
-        None => final_docs,
-    };
-
-    let output = output.unwrap_or_else(|| PathBuf::from("./configuration.md"));
-    fs::write(output, final_docs).unwrap();
-
     Ok(())
 }
