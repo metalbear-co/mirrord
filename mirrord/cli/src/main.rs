@@ -1,5 +1,6 @@
 #![feature(let_chains)]
 #![feature(lazy_cell)]
+#![feature(try_blocks)]
 #![warn(clippy::indexing_slicing)]
 
 use std::{collections::HashMap, time::Duration};
@@ -30,6 +31,7 @@ use mirrord_kube::{
     },
     error::KubeApiError,
 };
+use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
 use operator::operator_command;
 use semver::Version;
@@ -336,36 +338,19 @@ where
         .unwrap_or_else(|_| Vec::new().into_iter())
 }
 
-/// Lists all possible target paths for pods.
-/// Example: ```[
-///  "pod/metalbear-deployment-85c754c75f-982p5",
-///  "pod/nginx-deployment-66b6c48dd5-dc9wk",
-///  "pod/py-serv-deployment-5c57fbdc98-pdbn4/container/py-serv",
-/// ]```
-async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
-    let (accept_invalid_certificates, kubeconfig, namespace, kube_context) = if let Some(config) =
-        &args.config_file
-    {
-        let mut cfg_context = ConfigContext::default();
-        let layer_config = LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?;
-        if !layer_config.use_proxy {
-            remove_proxy_env();
-        }
-        (
-            layer_config.accept_invalid_certificates,
-            layer_config.kubeconfig,
-            layer_config.target.namespace,
-            layer_config.kube_context,
-        )
-    } else {
-        (false, None, None, None)
-    };
+async fn list_pods(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<Vec<String>> {
+    let client = create_kube_api(
+        layer_config.accept_invalid_certificates,
+        layer_config.kubeconfig.clone(),
+        layer_config.kube_context.clone(),
+    )
+    .await
+    .map_err(CliError::KubernetesApiFailed)?;
 
-    let client = create_kube_api(accept_invalid_certificates, kubeconfig, kube_context)
-        .await
-        .map_err(CliError::KubernetesApiFailed)?;
-
-    let namespace = args.namespace.as_deref().or(namespace.as_deref());
+    let namespace = args
+        .namespace
+        .as_deref()
+        .or(layer_config.target.namespace.as_deref());
 
     let (pods, deployments, rollouts) = futures::try_join!(
         get_kube_pods(namespace, &client),
@@ -373,7 +358,7 @@ async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
         get_kube_rollouts(namespace, &client)
     )?;
 
-    let mut target_vector = pods
+    Ok(pods
         .iter()
         .flat_map(|(pod, containers)| {
             if containers.len() == 1 {
@@ -387,11 +372,71 @@ async fn print_pod_targets(args: &ListTargetArgs) -> Result<()> {
         })
         .chain(deployments.map(|deployment| format!("deployment/{deployment}")))
         .chain(rollouts.map(|rollout| format!("rollout/{rollout}")))
-        .collect::<Vec<String>>();
+        .collect::<Vec<String>>())
+}
 
-    target_vector.sort();
+/// Lists all possible target paths.
+/// Tries to use operator if available, otherwise falls back to k8s API (if operator isn't
+/// explicitly true). Example: ```[
+///  "pod/metalbear-deployment-85c754c75f-982p5",
+///  "pod/nginx-deployment-66b6c48dd5-dc9wk",
+///  "pod/py-serv-deployment-5c57fbdc98-pdbn4/container/py-serv",
+///  "deployment/nginx-deployment"
+///  "deployment/nginx-deployment/container/nginx"
+///  "rollout/nginx-rollout"
+/// ]```
+async fn print_targets(args: &ListTargetArgs) -> Result<()> {
+    let mut layer_config = if let Some(config) = &args.config_file {
+        let mut cfg_context = ConfigContext::default();
+        LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?
+    } else {
+        LayerConfig::from_env()?
+    };
 
-    let json_obj = json!(target_vector);
+    if let Some(namespace) = &args.namespace {
+        layer_config.target.namespace = Some(namespace.clone());
+    };
+
+    if !layer_config.use_proxy {
+        remove_proxy_env();
+    }
+
+    // Try operator first if relevant
+    let mut targets = match &layer_config.operator {
+        Some(true) | None => {
+            let operator_targets = try {
+                let operator_api = OperatorApi::new(&layer_config).await?;
+                operator_api.list_targets().await?
+            };
+            match operator_targets {
+                Ok(targets) => {
+                    // adjust format to match non-operator output
+                    println!("HERE");
+                    targets
+                        .iter()
+                        .map(|target| {
+                            target
+                                .name()
+                                .replace("deploy.", "deployment")
+                                .replace(".", "/")
+                        })
+                        .collect::<Vec<String>>()
+                }
+                Err(e) => {
+                    if layer_config.operator.is_some() {
+                        error!(?e, "Operator is enabled but failed to list targets");
+                        return Err(e);
+                    }
+                    list_pods(&layer_config, args).await?
+                }
+            }
+        }
+        Some(false) => list_pods(&layer_config, args).await?,
+    };
+
+    targets.sort();
+
+    let json_obj = json!(targets);
     println!("{json_obj}");
     Ok(())
 }
@@ -427,7 +472,7 @@ fn main() -> miette::Result<()> {
                     false,
                 )?;
             }
-            Commands::ListTargets(args) => print_pod_targets(&args).await?,
+            Commands::ListTargets(args) => print_targets(&args).await?,
             Commands::Operator(args) => operator_command(*args).await?,
             Commands::ExtensionExec(args) => {
                 extension_exec(*args, watch).await?;
