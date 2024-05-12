@@ -22,6 +22,7 @@ use miette::JSONReportHandler;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
+    target::TargetDisplay,
     LayerConfig, LayerFileConfig,
 };
 use mirrord_kube::{
@@ -411,14 +412,16 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
             match operator_targets {
                 Ok(targets) => {
                     // adjust format to match non-operator output
-                    println!("HERE");
                     targets
                         .iter()
-                        .map(|target| {
-                            target
-                                .name()
-                                .replace("deploy.", "deployment")
-                                .replace(".", "/")
+                        .filter_map(|target_crd| {
+                            let target = target_crd.spec.target.as_ref()?;
+                            if let Some(container) = target.container_name() {
+                                if !SKIP_NAMES.contains(container.as_str()) {
+                                    return None;
+                                }
+                            }
+                            Some(format!("{target}"))
                         })
                         .collect::<Vec<String>>()
                 }
