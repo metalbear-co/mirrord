@@ -427,8 +427,8 @@ pub(crate) fn xstat(
 ///
 /// Due to backwards compatibility on the [`mirrord_protocol`] level, we use [`XstatRequest`] to get
 /// the remote file metadata.
-/// Because of this, we're not able to fill all field of the [`statx`] structure. Missing fields
-/// are:
+/// Because of this, we're not able to fill all field of the [`struct@statx`] structure. Missing
+/// fields are:
 /// 1. [`statx::stx_attributes`]
 /// 2. [`statx::stx_ctime`]
 /// 3. [`statx::stx_mnt_id`]

@@ -6,7 +6,7 @@ use proc_macro2_diagnostics::SpanDiagnosticExt;
 use semver::Version;
 use syn::{parse_macro_input, spanned::Spanned};
 
-/// Use [`protocol_break`] to mark code that should be revised when the major version is bumped.
+/// Use [`protocol_break()`] to mark code that should be revised when the major version is bumped.
 /// For example:
 /// #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 /// pub enum StealType {

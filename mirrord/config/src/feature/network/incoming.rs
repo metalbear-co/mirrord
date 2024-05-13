@@ -195,7 +195,7 @@ pub struct IncomingAdvancedFileConfig {
 
     /// ### ignore_localhost
     ///
-    /// Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702
+    /// Consider removing when adding <https://github.com/metalbear-co/mirrord/issues/702>
     pub ignore_localhost: Option<bool>,
 
     /// ### ignore_ports

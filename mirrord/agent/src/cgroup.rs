@@ -323,8 +323,8 @@ impl CgroupV2 {
     }
 }
 
-/// V1 Docs: https://docs.kernel.org/admin-guide/cgroup-v1/index.html
-/// V2 Docs: https://docs.kernel.org/admin-guide/cgroup-v2.html
+/// V1 Docs: <https://docs.kernel.org/admin-guide/cgroup-v1/index.html>
+/// V2 Docs: <https://docs.kernel.org/admin-guide/cgroup-v2.html>
 #[derive(Debug)]
 pub(crate) enum Cgroup {
     V1(CgroupV1),

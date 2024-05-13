@@ -13,6 +13,9 @@ categories.workspace = true
 publish.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 mirrord-config-derive = { path = "./derive"}
 mirrord-analytics = { path = "../analytics"}

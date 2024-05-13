@@ -342,7 +342,7 @@ pub struct FilteredStealTask<T> {
     /// 3. `None` -> client does not know about this connection at all
     ///
     /// Used to send [`ConnectionMessageOut::Closed`] in [`Self::run`] when
-    /// [`Self::run_until_upgrade`] and [`Self::run_after_upgrade`] have finished.
+    /// [`Self::run_until_http_ends`] and [`Self::run_after_http_ends`] have finished.
     subscribed: HashMap<ClientId, bool>,
 
     /// For receiving [`Request`]s extracted by the [`FilteringService`].

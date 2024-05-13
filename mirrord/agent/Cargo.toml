@@ -12,6 +12,10 @@ keywords.workspace = true
 categories.workspace = true
 publish.workspace = true
 edition.workspace = true
+
+[lints]
+workspace = true
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]

@@ -48,11 +48,11 @@ pub(crate) struct TcpSessionIdentifier {
     ///
     /// You can get this IP by checking `kubectl get pod -o wide`.
     ///
-    /// ```sh`
+    /// ```sh
     /// $ kubectl get pod -o wide
     /// NAME        READY   STATUS    IP
     /// happy-pod   1/1     Running   1.2.3.4   
-    /// ````
+    /// ```
     dest_addr: Ipv4Addr,
     source_port: u16,
     dest_port: u16,

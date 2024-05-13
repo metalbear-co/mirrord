@@ -8,7 +8,7 @@
 //! (previously was solved using envguard which wasn't good enough)
 //!
 //! The proxy will either directly connect to an existing agent (currently only used for tests),
-//! or let the [`OperatorApi`] handle the connection.
+//! or let the [`OperatorApi`](mirrord_operator::client::OperatorApi) handle the connection.
 
 use std::{
     env,
@@ -108,7 +108,7 @@ async fn request_pause(
 /// Creates a listening socket using socket2
 /// to control the backlog and manage scenarios where
 /// the proxy is under heavy load.
-/// https://github.com/metalbear-co/mirrord/issues/1716#issuecomment-1663736500
+/// <https://github.com/metalbear-co/mirrord/issues/1716#issuecomment-1663736500>
 /// in macOS backlog is documented to be hardcoded limited to 128.
 fn create_listen_socket() -> Result<TcpListener, InternalProxySetupError> {
     let socket = socket2::Socket::new(

@@ -109,9 +109,9 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
 /// Hook for `libc::gethostbyname` (you won't find this in rust's `libc` as it's been deprecated and
 /// removed).
 ///
-/// Resolves DNS `raw_name` and allocates a `static` [`libc::hostent`] that we change the inner
-/// values whenever this function is called. The address itself of `*mut hostent` has to remain the
-/// same (thus why it's a `static`).
+/// Resolves DNS `raw_name` and allocates a `static` [`libc::hostent`] that we change the
+/// inner values whenever this function is called. The address itself of `*mut hostent` has to
+/// remain the same (thus why it's a `static`).
 #[hook_guard_fn]
 unsafe extern "C" fn gethostbyname_detour(raw_name: *const c_char) -> *mut hostent {
     let rawish_name = (!raw_name.is_null()).then(|| CStr::from_ptr(raw_name));
@@ -319,7 +319,7 @@ unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
         })
 }
 
-/// Not a faithful reproduction of what [`libc::recv_from`] is supposed to do, see [`recv_from`].
+/// Not a faithful reproduction of what [`libc::recvmsg`] is supposed to do, see [`recv_from`].
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn recv_from_detour(
     sockfd: i32,
@@ -353,7 +353,7 @@ pub(super) unsafe extern "C" fn recv_from_detour(
     }
 }
 
-/// Not a faithful reproduction of what [`libc::send_to`] is supposed to do, see [`send_to`].
+/// Not a faithful reproduction of what [`libc::sendto`] is supposed to do, see [`send_to`].
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn send_to_detour(
     sockfd: RawFd,
@@ -414,8 +414,8 @@ pub(super) unsafe extern "C" fn recvmsg_detour(
 }
 
 /// Not a faithful reproduction of what [`libc::sendmsg`] is supposed to do, see [`sendmsg`].
-///
-/// TODO(alex): We are ignoring the control message header [`libc::cmgshdr`].
+//
+// TODO(alex): We are ignoring the control message header `libc::cmsghdr`.
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn sendmsg_detour(
     sockfd: RawFd,

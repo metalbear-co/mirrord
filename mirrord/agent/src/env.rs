@@ -78,7 +78,7 @@ impl EnvFilter {
     }
 }
 
-/// Translate ToIter<AsRef<str>> of "K=V" to HashMap.
+/// Translate `ToIter<AsRef<str>>` of "K=V" to HashMap.
 pub(crate) fn parse_raw_env<'a, S: AsRef<str> + 'a + ?Sized, T: IntoIterator<Item = &'a S>>(
     raw: T,
 ) -> HashMap<String, String> {

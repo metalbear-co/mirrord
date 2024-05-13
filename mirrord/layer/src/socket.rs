@@ -56,7 +56,7 @@ pub struct Connected {
     /// impersonated-pod 0/1     Running   1.2.3.4
     /// ```
     ///
-    /// We would set this ip as `1.2.3.4:{port}` in [`bind`], where `{port}` is the user requested
+    /// We would set this ip as `1.2.3.4:{port}` in `bind`, where `{port}` is the user requested
     /// port.
     local_address: SocketAddress,
 
@@ -78,7 +78,7 @@ pub struct Connected {
 /// bound address.
 #[derive(Debug, Clone, Copy)]
 pub struct Bound {
-    /// Address originally requested by the user for [`bind`].
+    /// Address originally requested by the user for `bind`.
     requested_address: SocketAddr,
 
     /// Actual bound address that we use to communicate between the user's listener socket and our
@@ -181,7 +181,7 @@ impl UserSocket {
 /// Holds valid address that we should use to `connect_outgoing`.
 #[derive(Debug, Clone, Copy)]
 enum ConnectionThrough {
-    /// Connect locally, this means just call `FN_CONNECT` on the inner [`SokcetAddr`].
+    /// Connect locally, this means just call `FN_CONNECT` on the inner [`SocketAddr`].
     Local(SocketAddr),
 
     /// Connect through the agent.

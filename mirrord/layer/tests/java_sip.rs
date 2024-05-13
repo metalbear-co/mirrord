@@ -9,7 +9,7 @@ use tokio::net::TcpListener;
 mod common;
 pub use common::*;
 
-/// Regression test for https://github.com/metalbear-co/mirrord/issues/1459
+/// Regression test for <https://github.com/metalbear-co/mirrord/issues/1459>
 /// Test that Java Termulin installed via SDKMan can run with mirrord.
 ///
 /// This test requires there to be a java binary at ~/.sdkman/candidates/java/17.0.6-tem/bin/java to
